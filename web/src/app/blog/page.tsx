@@ -73,9 +73,9 @@ export default function BlogIndexPage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
 
-      <section className="grid gap-8 border-b border-brand-ink/10 pb-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
+      <section className="grid gap-8 border-b border-brand-line pb-10 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="max-w-4xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Blog
           </p>
           <h1 className="mt-4 text-balance text-4xl font-semibold tracking-tight text-brand-ink sm:text-6xl">
@@ -91,7 +91,7 @@ export default function BlogIndexPage() {
               (topic) => (
                 <span
                   key={topic}
-                  className="rounded-md border border-brand-ink/10 bg-brand-ink/[0.035] px-2.5 py-1.5 font-mono text-xs text-brand-muted"
+                  className="rounded-md border border-brand-line bg-brand-surface px-2.5 py-1.5 font-mono text-xs text-brand-muted"
                 >
                   {topic}
                 </span>
@@ -100,7 +100,7 @@ export default function BlogIndexPage() {
           </div>
         </div>
 
-        <aside className="self-start rounded-lg border border-brand-ink/10 bg-brand-ink/[0.035] p-4">
+        <aside className="self-start rounded-lg border border-brand-line bg-brand-surface p-4">
           <h2 className="text-sm font-semibold tracking-tight text-brand-ink">
             Reading order
           </h2>
@@ -124,10 +124,10 @@ export default function BlogIndexPage() {
 
       {featuredPost ? (
         <section className="mt-10">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-800/70">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Start here
           </p>
-          <article className="mt-4 grid gap-6 rounded-lg border border-sky-300/15 bg-sky-300/[0.045] p-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:p-6">
+          <article className="mt-4 grid gap-6 rounded-lg border border-brand-line-strong bg-brand-surface p-5 lg:grid-cols-[minmax(0,1fr)_18rem] lg:p-6">
             <div>
               <PostMeta post={featuredPost} />
               <h2 className="mt-4 max-w-3xl text-balance text-3xl font-semibold tracking-tight text-brand-ink sm:text-4xl">
@@ -149,15 +149,15 @@ export default function BlogIndexPage() {
               </Link>
             </div>
 
-            <div className="border-t border-brand-ink/10 pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
+            <div className="border-t border-brand-line pt-5 lg:border-l lg:border-t-0 lg:pl-5 lg:pt-0">
               <img
                 src={featuredPost.imagePath}
                 alt={featuredPost.imageAlt}
                 width="1200"
                 height="630"
-                className="aspect-[1200/630] w-full rounded-lg border border-brand-ink/10 bg-brand-raised object-cover"
+                className="aspect-[1200/630] w-full rounded-lg border border-brand-line bg-brand-raised object-cover"
               />
-              <h3 className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-brand-muted">
+              <h3 className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-brand-accent-text">
                 Short version
               </h3>
               <ul className="mt-4 space-y-3 text-sm leading-6 text-brand-muted">
@@ -165,7 +165,7 @@ export default function BlogIndexPage() {
                   <li key={takeaway} className="flex gap-3">
                     <span
                       aria-hidden="true"
-                      className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-200/80"
+                      className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent"
                     />
                     <span>{takeaway}</span>
                   </li>
@@ -177,9 +177,9 @@ export default function BlogIndexPage() {
       ) : null}
 
       <section className="mt-12">
-        <div className="flex flex-col justify-between gap-3 border-t border-brand-ink/10 pt-10 sm:flex-row sm:items-end">
+        <div className="flex flex-col justify-between gap-3 border-t border-brand-line pt-10 sm:flex-row sm:items-end">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
               Guides
             </p>
             <h2 className="mt-2 text-2xl font-semibold tracking-tight text-brand-ink">
@@ -196,14 +196,14 @@ export default function BlogIndexPage() {
           {posts.map((post) => (
             <article
               key={post.slug}
-              className="flex min-h-[20rem] flex-col rounded-lg border border-brand-ink/10 bg-brand-ink/[0.035] p-5 transition hover:border-brand-ink/18 hover:bg-brand-ink/[0.05]"
+              className="flex min-h-[20rem] flex-col rounded-lg border border-brand-line bg-brand-surface p-5 transition hover:border-brand-line-strong hover:bg-brand-raised"
             >
               <img
                 src={post.imagePath}
                 alt={post.imageAlt}
                 width="1200"
                 height="630"
-                className="aspect-[1200/630] w-full rounded-lg border border-brand-ink/10 bg-brand-raised object-cover"
+                className="aspect-[1200/630] w-full rounded-lg border border-brand-line bg-brand-raised object-cover"
                 loading="lazy"
               />
               <div className="mt-5">
@@ -224,7 +224,7 @@ export default function BlogIndexPage() {
                 {post.keywords.slice(0, 3).map((keyword) => (
                   <span
                     key={keyword}
-                    className="rounded-md border border-brand-ink/10 bg-brand-raised px-2 py-1 font-mono text-[11px] text-brand-muted"
+                    className="rounded-md border border-brand-line bg-brand-raised px-2 py-1 font-mono text-[11px] text-brand-muted"
                   >
                     {keyword}
                   </span>
@@ -232,7 +232,7 @@ export default function BlogIndexPage() {
               </div>
               <Link
                 href={blogPostPath(post)}
-                className="mt-auto pt-6 text-sm font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+                className="mt-auto pt-6 text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
               >
                 Read article
               </Link>
@@ -247,7 +247,7 @@ export default function BlogIndexPage() {
 function PostMeta({ post }: { post: (typeof BLOG_POSTS)[number] }) {
   return (
     <div className="flex flex-wrap items-center gap-2 text-xs text-brand-muted">
-      <span className="rounded-full border border-brand-ink/10 bg-brand-ink/[0.035] px-2 py-1 font-medium text-brand-muted">
+      <span className="rounded-full border border-brand-line bg-brand-surface px-2 py-1 font-medium text-brand-muted">
         {post.category}
       </span>
       <time dateTime={post.publishedAt}>{formatDate(post.publishedAt)}</time>

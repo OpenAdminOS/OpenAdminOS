@@ -56,7 +56,7 @@ export function TradeoffChart({
             x2={LEFT + PLOT_W}
             y1={y(value)}
             y2={y(value)}
-            stroke="rgba(23,25,29,0.07)"
+            stroke="var(--color-brand-line)"
             strokeWidth={1}
             shapeRendering="crispEdges"
           />
@@ -80,7 +80,7 @@ export function TradeoffChart({
               x2={x(value)}
               y1={TOP}
               y2={TOP + PLOT_H}
-              stroke="rgba(23,25,29,0.07)"
+              stroke="var(--color-brand-line)"
               strokeWidth={1}
               shapeRendering="crispEdges"
             />

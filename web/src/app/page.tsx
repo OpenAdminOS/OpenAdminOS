@@ -168,15 +168,15 @@ export default async function HomePage() {
       <JsonLd data={structuredData} />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(23,25,29,0.035)_1px,transparent_1px),linear-gradient(90deg,rgba(23,25,29,0.035)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_78%)]"
+        className="brand-grid pointer-events-none absolute inset-0"
       />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-ink/30 to-transparent"
+        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-accent/50 to-transparent"
       />
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg focus:outline-none focus:ring-2 focus:ring-brand-accent"
       >
         Skip to content
       </a>
@@ -203,8 +203,8 @@ export default async function HomePage() {
               rel={item.external ? "noreferrer" : undefined}
               className={
                 item.primary
-                  ? "rounded-md bg-brand-ink px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-brand-ink/90"
-                  : "transition hover:text-brand-ink"
+                  ? "rounded-md bg-brand-ink px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
+                  : "transition hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               }
             >
               {item.label}
@@ -224,10 +224,10 @@ export default async function HomePage() {
             href={latestRelease.releaseNotesUrl}
             target="_blank"
             rel="noreferrer"
-            className="mb-5 inline-flex items-center gap-2 rounded-full border border-brand-ink/10 bg-brand-ink/5 px-3 py-1 text-xs font-medium uppercase tracking-wider text-brand-muted transition hover:border-brand-ink/20 hover:text-brand-ink"
+            className="mb-5 inline-flex items-center gap-2 rounded-full border border-brand-line-strong bg-brand-surface px-3 py-1 text-xs font-medium uppercase tracking-wider text-brand-accent-text transition hover:border-brand-accent hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-            {latestRelease.version} — release notes
+            <span className="h-1.5 w-1.5 rounded-full bg-brand-accent" />
+            {latestRelease.version} · release notes
           </Link>
 
           <h1 className="max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
@@ -245,7 +245,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.macosDmgUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(23,25,29,0.25)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(0,0,0,0.45)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               >
                 <svg
                   aria-hidden
@@ -258,7 +258,7 @@ export default async function HomePage() {
               </a>
               <Link
                 href="/download#macos-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-accent-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               >
                 Downloads the DMG. PKG is available for managed rollout.
               </Link>
@@ -266,7 +266,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.linuxAppImageUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(23,25,29,0.25)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(0,0,0,0.45)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               >
                 <img
                   src="/linux.svg"
@@ -274,13 +274,13 @@ export default async function HomePage() {
                   aria-hidden
                   width={16}
                   height={16}
-                  className="h-4 w-4 invert"
+                  className="h-4 w-4"
                 />
                 Download for Linux
               </a>
               <Link
                 href="/download#linux-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-accent-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               >
                 AppImage direct. DEB/RPM available.
               </Link>
@@ -288,7 +288,7 @@ export default async function HomePage() {
             <div className="flex min-w-0 flex-col items-stretch gap-1.5">
               <a
                 href={latestRelease.windowsExeUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(23,25,29,0.25)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(0,0,0,0.45)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               >
                 <svg
                   aria-hidden
@@ -301,7 +301,7 @@ export default async function HomePage() {
               </a>
               <Link
                 href="/download#windows-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-accent-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               >
                 Signed per-user installer. No admin rights needed.
               </Link>
@@ -314,23 +314,37 @@ export default async function HomePage() {
               href={GITHUB_URL}
               target="_blank"
               rel="noreferrer"
-              className="underline-offset-4 hover:text-brand-muted hover:underline"
+              className="text-brand-accent-text underline-offset-4 hover:text-brand-ink hover:underline"
             >
               github.com/OpenAdminOS/OpenAdminOS
             </Link>
           </p>
         </section>
 
-        <section className="mt-12 w-full max-w-[88rem] sm:mt-16">
-          <ProductDemo />
-          <noscript>
-            <style>{`#product-demo { display: none; }`}</style>
-            <img src="/product-demo/chat.png" width={1600} height={1000} alt="OpenAdminOS desktop with Chat, tenant scope, and local provider" className="h-auto w-full rounded-xl" />
-            <p className="mt-4 text-center text-sm text-brand-muted">Enable JavaScript to explore the app, or download the desktop app.</p>
-          </noscript>
+        <section className="relative isolate mt-12 w-full max-w-[88rem] sm:mt-16">
+          <div
+            aria-hidden
+            className="brand-product-glow pointer-events-none absolute -inset-x-12 -inset-y-16 -z-10"
+          />
+          <div className="rounded-2xl border border-brand-line-strong bg-brand-surface p-2 shadow-[0_28px_90px_-32px_rgba(0,0,0,0.9)] sm:p-3">
+            <ProductDemo />
+            <noscript>
+              <style>{`#product-demo { display: none; }`}</style>
+              <img
+                src="/product-demo/chat-answer.png"
+                width={1600}
+                height={1000}
+                alt="OpenAdminOS desktop with a populated Chat answer, tenant scope, and local provider"
+                className="h-auto w-full rounded-xl border border-brand-line"
+              />
+              <p className="mt-4 text-center text-sm text-brand-muted">
+                Enable JavaScript to explore the app, or download the desktop app.
+              </p>
+            </noscript>
+          </div>
         </section>
 
-        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-brand-ink/10 bg-brand-bg/75 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
+        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-brand-line bg-brand-surface/80 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
           <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-x-6 gap-y-5 px-6 py-5 text-left sm:grid-cols-4 sm:px-10">
             {tractionItems.map((item) => (
               <div key={item.label} className="min-w-0">
@@ -352,7 +366,7 @@ export default async function HomePage() {
           {testimonials.map((item) => (
             <figure
               key={item.name}
-              className="flex flex-col justify-between rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-6 sm:p-8"
+              className="flex flex-col justify-between rounded-lg border border-brand-line bg-brand-card p-6 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-8"
             >
               <blockquote className="text-lg leading-8 text-brand-ink/85 sm:text-xl sm:leading-9">
                 &ldquo;{item.quote}&rdquo;
@@ -364,14 +378,14 @@ export default async function HomePage() {
                   width="56"
                   height="56"
                   loading="lazy"
-                  className="h-14 w-14 rounded-full border border-brand-ink/10 object-cover"
+                  className="h-14 w-14 rounded-full border border-brand-line-strong object-cover"
                 />
                 <div className="min-w-0">
                   <Link
                     href={item.href}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-base font-semibold text-brand-ink transition hover:text-sky-800"
+                    className="text-base font-semibold text-brand-ink transition hover:text-brand-accent-text"
                   >
                     {item.name}
                   </Link>
@@ -384,7 +398,7 @@ export default async function HomePage() {
 
         <section className="w-full max-w-7xl py-20">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
               How it works
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -393,7 +407,7 @@ export default async function HomePage() {
           </div>
 
           <div className="mt-8 grid gap-3 lg:grid-cols-3">
-            <div className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4 sm:p-6">
+            <div className="rounded-lg border border-brand-line bg-brand-card p-4 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-6">
               <p className="font-mono text-2xl text-brand-muted">01</p>
               <h3 className="mt-5 text-base font-semibold">
                 Install from an open registry.
@@ -406,19 +420,19 @@ export default async function HomePage() {
               </p>
               <Link
                 href="/registry"
-                className="mt-4 inline-flex text-sm font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+                className="mt-4 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
               >
                 Browse the registry
               </Link>
             </div>
 
-            <div className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4 sm:p-6">
+            <div className="rounded-lg border border-brand-line bg-brand-card p-4 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-6">
               <p className="font-mono text-2xl text-brand-muted">02</p>
               <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <h3 className="text-base font-semibold">
                   Run it against your tenant.
                 </h3>
-                <code className="w-fit rounded border border-brand-ink/10 bg-brand-raised px-2 py-1 font-mono text-[11px] text-brand-muted">
+                <code className="w-fit rounded border border-brand-line-strong bg-brand-raised px-2 py-1 font-mono text-[11px] text-brand-muted">
                   ollama serve
                 </code>
               </div>
@@ -433,13 +447,13 @@ export default async function HomePage() {
               </p>
               <Link
                 href="/llm-providers"
-                className="mt-4 inline-flex text-sm font-medium text-emerald-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+                className="mt-4 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
               >
                 Compare model providers
               </Link>
             </div>
 
-            <div className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4 sm:p-6">
+            <div className="rounded-lg border border-brand-line bg-brand-card p-4 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-6">
               <p className="font-mono text-2xl text-brand-muted">03</p>
               <h3 className="mt-5 text-base font-semibold">
                 Approve every change.
@@ -455,12 +469,12 @@ export default async function HomePage() {
 
         <section
           id="safety"
-          className="grid w-full max-w-7xl gap-8 border-t border-brand-ink/10 py-20 lg:grid-cols-[1fr_1fr] lg:items-center"
+          className="grid w-full max-w-7xl gap-8 rounded-2xl border border-brand-line bg-brand-surface px-5 py-10 shadow-[0_20px_70px_-42px_rgba(0,0,0,0.9)] sm:px-8 sm:py-14 lg:grid-cols-[1fr_1fr] lg:items-center lg:px-10"
         >
           <DiffConfirmationDemo />
 
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-800/80">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
               Human in the loop
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -473,17 +487,17 @@ export default async function HomePage() {
             </p>
             <Link
               href="/trust-model"
-              className="mt-5 inline-flex text-sm font-medium text-amber-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+              className="mt-5 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
             >
               Review the trust model
             </Link>
           </div>
         </section>
 
-        <section className="w-full max-w-7xl border-t border-brand-ink/10 py-20">
+        <section className="w-full max-w-7xl border-t border-brand-line py-20">
           <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-800/80">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
                 Benchmarks
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -499,7 +513,7 @@ export default async function HomePage() {
               </p>
               <Link
                 href="/benchmarks"
-                className="mt-5 inline-flex text-sm font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+                className="mt-5 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
               >
                 See the full benchmark
               </Link>
@@ -508,7 +522,7 @@ export default async function HomePage() {
               {benchmarkTiles.map((model) => (
                 <div
                   key={model.id}
-                  className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4"
+                  className="rounded-lg border border-brand-line bg-brand-card p-4"
                 >
                   <p className="text-xs text-brand-muted">{model.name}</p>
                   <p className="mt-2 text-2xl font-semibold tabular-nums">
@@ -523,9 +537,9 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <section className="w-full max-w-7xl border-t border-brand-ink/10 py-20">
+        <section className="w-full max-w-7xl border-t border-brand-line py-20">
           <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
               Open source
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -541,7 +555,7 @@ export default async function HomePage() {
             {PROOF_ITEMS.map(([label, detail]) => (
               <div
                 key={label}
-                className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4"
+                className="rounded-lg border border-brand-line bg-brand-card p-4"
               >
                 <p className="text-sm font-semibold">{label}</p>
                 <p className="mt-2 text-sm leading-5 text-brand-muted">{detail}</p>
@@ -550,10 +564,10 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <section className="w-full max-w-7xl border-t border-brand-ink/10 py-20">
+        <section className="w-full max-w-7xl border-t border-brand-line py-20">
           <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
                 Common questions
               </p>
               <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -570,7 +584,7 @@ export default async function HomePage() {
                 <details
                   key={item.question}
                   open={index === 0}
-                  className="group rounded-lg border border-brand-ink/10 bg-brand-ink/[0.035] transition hover:border-brand-ink/18"
+                  className="group rounded-lg border border-brand-line bg-brand-card transition hover:border-brand-line-strong hover:bg-brand-raised"
                 >
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 text-left [&::-webkit-details-marker]:hidden">
                     <span className="text-base font-semibold tracking-tight text-brand-ink/92">
@@ -578,7 +592,7 @@ export default async function HomePage() {
                     </span>
                     <span
                       aria-hidden="true"
-                      className="grid size-7 shrink-0 place-items-center rounded-md border border-brand-ink/10 text-lg leading-none text-brand-muted transition group-open:rotate-45 group-open:border-brand-ink/20 group-open:text-brand-muted"
+                      className="grid size-7 shrink-0 place-items-center rounded-md border border-brand-line-strong text-lg leading-none text-brand-muted transition group-open:rotate-45 group-open:border-brand-accent group-open:text-brand-accent-text"
                     >
                       +
                     </span>
@@ -592,7 +606,7 @@ export default async function HomePage() {
           </div>
         </section>
 
-        <section className="w-full max-w-4xl pb-20 pt-4 text-center">
+        <section className="mb-20 w-full max-w-4xl rounded-2xl border border-brand-line bg-brand-surface px-6 py-12 text-center sm:px-10">
           <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl">
             Run tenant agents on your terms.
           </h2>
@@ -603,7 +617,7 @@ export default async function HomePage() {
           <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/download"
-              className="rounded-lg bg-brand-ink px-5 py-2.5 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90"
+              className="rounded-lg bg-brand-ink px-5 py-2.5 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
             >
               View downloads
             </Link>
@@ -611,7 +625,7 @@ export default async function HomePage() {
               href={GITHUB_URL}
               target="_blank"
               rel="noreferrer"
-              className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] px-5 py-2.5 text-sm font-medium text-brand-muted transition hover:border-brand-ink/20 hover:text-brand-ink"
+              className="rounded-lg border border-brand-line-strong bg-transparent px-5 py-2.5 text-sm font-medium text-brand-muted transition hover:border-brand-accent hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
             >
               {githubRepoStats
                 ? `Star on GitHub · ${formatStat(githubRepoStats.stars)}`
@@ -621,55 +635,55 @@ export default async function HomePage() {
         </section>
       </main>
 
-      <footer className="relative z-10 flex flex-col items-center gap-2 px-6 py-8 text-center sm:px-10">
+      <footer className="relative z-10 flex flex-col items-center gap-2 border-t border-brand-line bg-brand-surface/60 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-brand-muted">
           © {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Privacy
           </Link>
           {" · "}
           <Link
             href="/terms"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Terms
           </Link>
           {" · "}
           <Link
             href="/legal-notice"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Legal notice
           </Link>
           {" · "}
           <Link
             href="/examples"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Examples
           </Link>
           {" · "}
           <Link
             href="/registry"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Registry
           </Link>
           {" · "}
           <Link
             href="/trust-model"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Trust model
           </Link>
           {" · "}
           <Link
             href="/download"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Download
           </Link>

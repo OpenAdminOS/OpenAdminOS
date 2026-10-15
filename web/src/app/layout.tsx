@@ -1,7 +1,6 @@
 import "~/styles/globals.css";
 
-import { type Metadata } from "next";
-import { Geist } from "next/font/google";
+import { type Metadata, type Viewport } from "next";
 import Script from "next/script";
 
 import {
@@ -78,14 +77,10 @@ export const metadata: Metadata = {
   },
 };
 
-export const viewport = {
-  themeColor: "#f4f5f7",
+export const viewport: Viewport = {
+  colorScheme: "dark",
+  themeColor: "#0B1018",
 };
-
-const geist = Geist({
-  subsets: ["latin"],
-  variable: "--font-geist-sans",
-});
 
 const PLAUSIBLE_SCRIPT_URL =
   "https://plausible.io/js/pa-XFfGfDtFtmyoJlLIYR5dv.js";
@@ -96,7 +91,7 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={`${geist.variable}`}>
+    <html lang="en">
       <body className="font-sans antialiased">
         {children}
         <Script id="plausible-init" strategy="afterInteractive">

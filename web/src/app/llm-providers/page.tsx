@@ -74,9 +74,9 @@ export default function LlmProvidersPage() {
         ))}
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-line pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Provider trust
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
@@ -96,7 +96,7 @@ export default function LlmProvidersPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-brand-ink underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="inline-flex font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             Read the full trust model
           </Link>

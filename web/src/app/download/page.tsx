@@ -121,10 +121,10 @@ export default async function DownloadPage() {
         description={DESCRIPTION}
       />
 
-      <section className="mt-10 border-y border-brand-ink/10">
-        <div className="flex flex-col gap-3 border-b border-brand-ink/10 py-4 md:flex-row md:items-center md:justify-between">
+      <section className="mt-10 border-y border-brand-line">
+        <div className="flex flex-col gap-3 border-b border-brand-line py-4 md:flex-row md:items-center md:justify-between">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-muted">
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-accent-text">
               Current release
             </p>
             <p className="mt-1 font-mono text-sm text-brand-muted">
@@ -136,7 +136,7 @@ export default async function DownloadPage() {
               href={latestRelease.releaseNotesUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center rounded-md border border-brand-ink/10 px-3 font-medium text-brand-muted transition hover:border-brand-ink/25 hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+              className="inline-flex min-h-11 items-center rounded-md border border-brand-line-strong px-3 font-medium text-brand-muted transition hover:border-brand-accent hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
             >
               Release notes
             </Link>
@@ -144,7 +144,7 @@ export default async function DownloadPage() {
               href={latestRelease.checksumUrl}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-11 items-center rounded-md border border-brand-ink/10 px-3 font-medium text-brand-muted transition hover:border-brand-ink/25 hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+              className="inline-flex min-h-11 items-center rounded-md border border-brand-line-strong px-3 font-medium text-brand-muted transition hover:border-brand-accent hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
             >
               SHA256SUMS.txt
             </Link>
@@ -171,9 +171,9 @@ export default async function DownloadPage() {
         />
       </section>
 
-      <section className="mt-12 grid gap-8 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
+      <section className="mt-12 grid gap-8 border-t border-brand-line pt-12 md:grid-cols-[0.8fr_1.2fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Source
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
@@ -189,16 +189,16 @@ export default async function DownloadPage() {
             href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"
-            className="mt-5 inline-flex text-sm font-medium text-brand-ink underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+            className="mt-5 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
           >
             Inspect the repository
           </Link>
         </div>
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-line pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Before first run
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
@@ -218,7 +218,7 @@ export default async function DownloadPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-brand-ink underline-offset-4 transition hover:text-brand-muted hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+            className="inline-flex font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
           >
             Read the trust model
           </Link>
@@ -253,13 +253,13 @@ function DownloadGroup({
   return (
     <section
       id={id}
-      className="grid gap-4 border-b border-brand-ink/10 py-6 last:border-b-0 md:grid-cols-[180px_1fr]"
+      className="grid gap-4 border-b border-brand-line py-6 last:border-b-0 md:grid-cols-[180px_1fr]"
     >
       <div>
         <h2 className="text-base font-semibold text-brand-ink">{title}</h2>
         <p className="mt-2 text-sm leading-5 text-brand-muted">{description}</p>
       </div>
-      <div className="divide-y divide-brand-ink/10 border-y border-brand-ink/10">
+      <div className="divide-y divide-brand-line border-y border-brand-line">
         {items.map((item) => (
           <DownloadRow item={item} key={item.label} />
         ))}
@@ -275,7 +275,7 @@ function DownloadRow({ item }: { item: DownloadItem }) {
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-sm font-semibold text-brand-ink">{item.label}</h3>
           {item.badge ? (
-            <span className="rounded border border-brand-ink/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-muted">
+            <span className="rounded border border-brand-line-strong px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-brand-muted">
               {item.badge}
             </span>
           ) : null}
@@ -290,8 +290,8 @@ function DownloadRow({ item }: { item: DownloadItem }) {
         rel="noreferrer"
         className={
           item.primary
-            ? "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md bg-brand-ink px-3 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35 md:w-44"
-            : "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md border border-brand-ink/10 px-3 text-sm font-semibold text-brand-muted transition hover:border-brand-ink/25 hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35 md:w-44"
+            ? "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md bg-brand-ink px-3 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent md:w-44"
+            : "inline-flex min-h-11 w-full items-center justify-center whitespace-nowrap rounded-md border border-brand-line-strong px-3 text-sm font-semibold text-brand-muted transition hover:border-brand-accent hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent md:w-44"
         }
       >
         {item.actionLabel}

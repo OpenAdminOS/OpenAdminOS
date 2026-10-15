@@ -1,14 +1,53 @@
 @import "tailwindcss";
 
 @theme {
-  --color-brand-bg: #f4f5f7;
-  --color-brand-surface: #ffffff;
-  --color-brand-raised: #e4e7ec;
-  --color-brand-ink: #17191d;
-  --color-brand-muted: #535e6c;
-  --color-white: #ffffff;
-  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif,
-    "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
+  --color-brand-bg: #0b1018;
+  --color-brand-surface: #111826;
+  --color-brand-raised: #151e2d;
+  --color-brand-card: #111826;
+  --color-brand-line: #222c3b;
+  --color-brand-line-strong: #33425a;
+  --color-brand-ink: #e8eef7;
+  --color-brand-muted: #9aa8bd;
+  --color-brand-accent: #7aa2ff;
+  --color-brand-accent-text: #9dbbff;
+  --color-brand-danger: #ff9da3;
+  --color-brand-danger-surface: #30151d;
+  --color-brand-danger-line: #71313d;
+  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    "Segoe UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
+    "Segoe UI Symbol", "Noto Color Emoji";
+}
+
+.brand-grid {
+  background-image:
+    linear-gradient(
+      color-mix(in srgb, var(--color-brand-accent) 5%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--color-brand-accent) 5%, transparent) 1px,
+      transparent 1px
+    );
+  background-size: 72px 72px;
+  mask-image: linear-gradient(to bottom, black, transparent 76%);
+}
+
+.brand-page-glow {
+  background: radial-gradient(
+    ellipse at top,
+    color-mix(in srgb, var(--color-brand-accent) 11%, transparent),
+    transparent 70%
+  );
+}
+
+.brand-product-glow {
+  background: radial-gradient(
+    ellipse at center,
+    color-mix(in srgb, var(--color-brand-accent) 17%, transparent),
+    transparent 68%
+  );
 }
 
 @keyframes diff-row-in {
@@ -26,11 +65,12 @@
 @keyframes diff-badge-attention {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0);
+    box-shadow: 0 0 0 0 transparent;
   }
 
   45% {
-    box-shadow: 0 0 0 4px rgba(251, 191, 36, 0.08);
+    box-shadow: 0 0 0 4px
+      color-mix(in srgb, var(--color-brand-danger) 14%, transparent);
   }
 }
 
@@ -171,7 +211,7 @@
 }
 
 .diff-click-ripple {
-  background: rgba(254, 243, 199, 0.36);
+  background: color-mix(in srgb, var(--color-brand-danger) 38%, transparent);
   border-radius: 999px;
   height: 2.4rem;
   left: 38%;
@@ -234,4 +274,8 @@
   }
 }
 
-html { color-scheme: light; background: var(--color-brand-bg); color: var(--color-brand-ink); }
+html {
+  color-scheme: dark;
+  background: var(--color-brand-bg);
+  color: var(--color-brand-ink);
+}
