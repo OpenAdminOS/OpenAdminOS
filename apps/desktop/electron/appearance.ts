@@ -15,6 +15,8 @@ export const NATIVE_THEME_COLORS = {
   sand: { mode: "light", background: "#f6f1ea", textMuted: "#6b5a4b" },
 } as const satisfies Record<NativeThemeId, NativeThemeColors>;
 
+export const DEFAULT_NATIVE_THEME_ID: NativeThemeId = "midnight";
+
 export function parseNativeTheme(value: unknown): NativeThemeId {
   if (value === "dark") return "graphite";
   if (value === "light") return "off-white";

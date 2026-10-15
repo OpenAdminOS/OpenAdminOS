@@ -8,6 +8,9 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Restyle the public website with the Midnight dark palette, one blue accent, dark content surfaces, and a populated Chat answer in the product demo.
+- Use Midnight as the desktop theme for new installs while preserving Graphite and all existing saved appearance values.
+
 ### Removed
 
 ### Fixed

@@ -72,7 +72,7 @@ export function DivergenceChart({
               x2={LEFT + PLOT_W}
               y1={y(value)}
               y2={y(value)}
-              stroke="rgba(23,25,29,0.07)"
+              stroke="var(--color-brand-line)"
               strokeWidth={1}
               shapeRendering="crispEdges"
             />
@@ -93,7 +93,7 @@ export function DivergenceChart({
           y1={y(1)}
           x2={x(n - 1)}
           y2={y(n)}
-          stroke="rgba(23,25,29,0.25)"
+          stroke="var(--color-brand-line-strong)"
           strokeWidth={1}
           strokeDasharray="3 5"
         />
@@ -142,7 +142,7 @@ export function DivergenceChart({
             x2={x(hover)}
             y1={TOP}
             y2={TOP + PLOT_H}
-            stroke="rgba(23,25,29,0.4)"
+            stroke="var(--color-brand-accent-text)"
             strokeWidth={1}
             shapeRendering="crispEdges"
           />

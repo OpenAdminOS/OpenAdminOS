@@ -50,7 +50,7 @@ export default function TermsPage() {
       <JsonLd data={structuredData} />
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-[600px] bg-[radial-gradient(ellipse_at_top,rgba(140,140,255,0.10),transparent_70%)]"
+        className="brand-page-glow pointer-events-none absolute inset-x-0 top-0 h-[600px]"
       />
 
       <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
@@ -99,7 +99,7 @@ export default function TermsPage() {
                 href="https://github.com/OpenAdminOS/OpenAdminOS/blob/main/LICENSE"
                 target="_blank"
                 rel="noreferrer"
-                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
+                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
@@ -173,7 +173,7 @@ export default function TermsPage() {
               Use of the desktop app and website is also governed by the{" "}
               <Link
                 href="/privacy"
-                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
+                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
               >
                 privacy policy
               </Link>
@@ -213,7 +213,7 @@ export default function TermsPage() {
               Questions about these terms or the website:{" "}
               <Link
                 href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
+                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
               >
                 {SUPPORT_EMAIL}
               </Link>
@@ -230,7 +230,7 @@ export default function TermsPage() {
               Provider details are listed in the{" "}
               <Link
                 href="/legal-notice"
-                className="text-brand-ink underline underline-offset-4 transition hover:text-brand-muted"
+                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
               >
                 legal notice
               </Link>
@@ -239,17 +239,17 @@ export default function TermsPage() {
           </section>
         </div>
 
-        <div className="mt-16 border-t border-brand-ink/10 pt-8 text-xs text-brand-muted">
+        <div className="mt-16 border-t border-brand-line pt-8 text-xs text-brand-muted">
           <Link
             href="/"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             &larr; Back to OpenAdminOS
           </Link>
         </div>
       </main>
 
-      <footer className="relative z-10 px-6 py-8 text-center sm:px-10">
+      <footer className="relative z-10 border-t border-brand-line bg-brand-surface/60 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-brand-muted">
           &copy; {new Date().getFullYear()} OpenAdminOS
           {" · "}

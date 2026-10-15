@@ -70,11 +70,12 @@ export const THEMES = [
 
 export type Appearance = ThemeId;
 export type AppearanceInput = ThemeId | LegacyAppearance;
+export const DEFAULT_THEME_ID: ThemeId = "midnight";
 
 const key = "openadminos:appearance:v1";
 const changed = "openadminos:appearance-changed";
 const themeById = new Map(THEMES.map((theme) => [theme.id, theme]));
-let current: ThemeId = "graphite";
+let current: ThemeId = DEFAULT_THEME_ID;
 let error: string | null = null;
 
 export function normalizeThemeId(value: unknown): ThemeId {
@@ -82,11 +83,11 @@ export function normalizeThemeId(value: unknown): ThemeId {
   if (value === "light") return "off-white";
   return typeof value === "string" && themeById.has(value as ThemeId)
     ? (value as ThemeId)
-    : "graphite";
+    : DEFAULT_THEME_ID;
 }
 
 export function getTheme(themeId: ThemeId): ThemeDefinition {
-  return themeById.get(themeId) ?? THEMES[0];
+  return themeById.get(themeId) ?? themeById.get(DEFAULT_THEME_ID)!;
 }
 
 export function readAppearance(): ThemeId {
@@ -96,7 +97,7 @@ export function readAppearance(): ThemeId {
     if (stored !== null && stored !== themeId) localStorage.setItem(key, themeId);
     return themeId;
   } catch {
-    return "graphite";
+    return DEFAULT_THEME_ID;
   }
 }
 
@@ -140,7 +141,7 @@ function subscribe(listener: () => void) {
 }
 
 export function useAppearance() {
-  const theme = useSyncExternalStore(subscribe, () => current, () => "graphite" as const);
+  const theme = useSyncExternalStore(subscribe, () => current, () => DEFAULT_THEME_ID);
   const saveError = useSyncExternalStore(subscribe, () => error, () => null);
   return { theme, setAppearance, error: saveError };
 }

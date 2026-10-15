@@ -21,7 +21,7 @@ export function CopyPromptButton({ prompt }: { prompt: string }) {
       type="button"
       aria-live="polite"
       onClick={copyPrompt}
-      className="inline-flex min-h-10 items-center justify-center rounded-md border border-brand-ink/10 bg-brand-ink/[0.04] px-3 text-xs font-semibold text-brand-muted transition hover:border-brand-ink/20 hover:bg-brand-ink/[0.07] hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-300/45"
+      className="inline-flex min-h-10 items-center justify-center rounded-md border border-brand-line-strong bg-brand-surface px-3 text-xs font-semibold text-brand-muted transition hover:border-brand-accent hover:bg-brand-raised hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
     >
       {state === "copied"
         ? "Copied"

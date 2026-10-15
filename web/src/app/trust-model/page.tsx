@@ -78,9 +78,9 @@ export default function TrustModelPage() {
         ))}
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.9fr_1.1fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-line pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-amber-800/80">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Write safety
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
@@ -101,7 +101,7 @@ export default function TrustModelPage() {
           </p>
           <Link
             href="/registry"
-            className="inline-flex font-medium text-amber-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+            className="inline-flex font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             Review the agent registry contract
           </Link>

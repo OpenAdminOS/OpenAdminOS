@@ -94,9 +94,9 @@ export default function RegistryPage() {
         ))}
       </section>
 
-      <section className="mt-12 grid gap-5 border-t border-brand-ink/10 pt-12 md:grid-cols-[0.8fr_1.2fr]">
+      <section className="mt-12 grid gap-5 border-t border-brand-line pt-12 md:grid-cols-[0.8fr_1.2fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-800/80">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Manifest contract
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
@@ -117,7 +117,7 @@ export default function RegistryPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+            className="inline-flex font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             See how registry trust is enforced
           </Link>

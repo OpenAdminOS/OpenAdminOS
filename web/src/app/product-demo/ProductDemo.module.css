@@ -1,21 +1,23 @@
 .demo {
   width: 100%;
   scroll-margin-top: 24px;
-  color: #17191d;
+  color: var(--color-brand-ink);
 }
 .viewport {
   width: 100%;
   overflow: auto;
+  border: 1px solid var(--color-brand-line-strong);
   border-radius: 12px;
-  box-shadow: 0 16px 48px -16px #17191d2e;
+  background: var(--color-brand-bg);
+  box-shadow: 0 18px 56px -24px rgb(0 0 0 / 88%);
   scrollbar-width: thin;
-  scrollbar-color: #b9c0ca #f4f5f7;
+  scrollbar-color: var(--color-brand-line-strong) var(--color-brand-bg);
 }
 .stage {
   position: relative;
   width: 100%;
   min-width: 960px;
-  background: #f4f5f7;
+  background: var(--color-brand-bg);
 }
 .screenshot {
   display: block;
@@ -38,27 +40,28 @@
   touch-action: manipulation;
 }
 .hotspot:hover:not(:disabled) {
-  background: #17191d08;
-  box-shadow: inset 0 0 0 1px #17191d40;
+  background: color-mix(in srgb, var(--color-brand-accent) 8%, transparent);
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--color-brand-accent) 48%, transparent);
 }
 .hotspot:focus-visible {
-  outline: 2px solid #17191d;
+  outline: 2px solid var(--color-brand-accent);
   outline-offset: 1px;
-  background: #17191d0d;
+  background: color-mix(in srgb, var(--color-brand-accent) 12%, transparent);
 }
 .hotspot:disabled {
   cursor: default;
 }
 .viewport:focus-visible {
-  outline: 2px solid #535e6c;
+  outline: 2px solid var(--color-brand-accent);
   outline-offset: 4px;
 }
 .loading {
   position: absolute;
   bottom: 28px;
   right: 20px;
-  background: #17191d;
-  color: #fff;
+  background: var(--color-brand-ink);
+  color: var(--color-brand-bg);
   padding: 8px 12px;
   border-radius: 6px;
   font-size: 12px;
@@ -71,16 +74,16 @@
   width: min(420px, calc(100vw - 32px));
   max-height: 80dvh;
   overflow: auto;
-  border: 1px solid #cfd5de;
+  border: 1px solid var(--color-brand-line-strong);
   border-radius: 12px;
   padding: 28px;
-  background: #f4f5f7;
-  color: #17191d;
-  box-shadow: 0 24px 80px #0003;
+  background: var(--color-brand-surface);
+  color: var(--color-brand-ink);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 65%);
   overscroll-behavior: contain;
 }
 .dialog::backdrop {
-  background: #17191d55;
+  background: rgb(0 0 0 / 66%);
 }
 .dialog h3 {
   font-size: 19px;
@@ -91,13 +94,13 @@
 .dialog p {
   font-size: 14px;
   line-height: 1.7;
-  color: #535e6c;
+  color: var(--color-brand-muted);
   margin: 16px 0 24px;
 }
 .dialog a {
   display: inline-block;
-  background: #17191d;
-  color: #fff;
+  background: var(--color-brand-ink);
+  color: var(--color-brand-bg);
   padding: 10px 16px;
   border-radius: 7px;
   font-size: 13px;
@@ -114,13 +117,13 @@
 }
 .dialog :is(a, button):focus-visible,
 .error button:focus-visible {
-  outline: 2px solid #17191d;
+  outline: 2px solid var(--color-brand-accent);
   outline-offset: 3px;
 }
 .error {
   font-size: 13px;
   margin: 14px 0;
-  color: #a42525;
+  color: var(--color-brand-danger);
 }
 .error button {
   text-decoration: underline;

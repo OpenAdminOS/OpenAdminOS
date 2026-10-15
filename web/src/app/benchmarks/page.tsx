@@ -30,12 +30,12 @@ export const metadata: Metadata = pageMetadata({
   path: "/benchmarks",
 });
 
-// One categorical colour per model, checked against the near-black page
-// background for contrast and for deuteranopia separation.
+// The local model uses the site accent. Hosted models use neutral grays so
+// charts stay legible without introducing additional brand accents.
 const COLOURS: Record<string, string> = {
-  "openadmin-8b": "#0369a1",
-  "claude-opus-5": "#9a3412",
-  "gpt-5-6-sol": "#047857",
+  "openadmin-8b": "var(--color-brand-accent)",
+  "claude-opus-5": "#c5cedd",
+  "gpt-5-6-sol": "#8190a7",
 };
 
 const data = benchmarkData;
@@ -54,7 +54,7 @@ function Bar({
   const percent = Math.round((100 * passed) / tasks);
   return (
     <div className="flex items-center gap-3">
-      <div className="h-1.5 w-full overflow-hidden rounded-full bg-brand-ink/10">
+      <div className="h-1.5 w-full overflow-hidden rounded-full bg-brand-line">
         <div
           className="h-full rounded-full"
           style={{ width: `${percent}%`, background: colour }}
@@ -87,7 +87,7 @@ export default function BenchmarksPage() {
       />
 
       <section className="w-full max-w-7xl pt-10 sm:pt-16">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-800/80">
+        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
           Measured, not claimed
         </p>
         <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">
@@ -104,12 +104,11 @@ export default function BenchmarksPage() {
           {ranked.map((model) => (
             <div
               key={model.id}
-              className="rounded-xl border border-brand-ink/10 bg-brand-ink/[0.03] p-5"
-              style={
+              className={`rounded-xl border bg-brand-surface p-5 ${
                 model.kind === "own"
-                  ? { borderColor: "rgba(56,189,248,0.35)" }
-                  : undefined
-              }
+                  ? "border-brand-accent/45"
+                  : "border-brand-line"
+              }`}
             >
               <div className="flex items-center gap-2">
                 <span
@@ -135,9 +134,9 @@ export default function BenchmarksPage() {
         </div>
       </section>
 
-      <section className="w-full max-w-7xl border-t border-brand-ink/10 py-16">
+      <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             The index
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -158,7 +157,7 @@ export default function BenchmarksPage() {
             return (
               <div
                 key={category.key}
-                className="grid gap-4 border-t border-brand-ink/10 pt-6 lg:grid-cols-[minmax(0,22rem)_1fr]"
+                className="grid gap-4 border-t border-brand-line pt-6 lg:grid-cols-[minmax(0,22rem)_1fr]"
               >
                 <div>
                   <h3 className="text-base font-semibold">{category.name}</h3>
@@ -201,9 +200,9 @@ export default function BenchmarksPage() {
         </div>
       </section>
 
-      <section className="w-full max-w-7xl border-t border-brand-ink/10 py-16">
+      <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             The trade-off
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -220,7 +219,7 @@ export default function BenchmarksPage() {
         </div>
 
         <div className="mt-10 grid gap-10 lg:grid-cols-2">
-          <div className="rounded-xl border border-brand-ink/10 bg-brand-ink/[0.02] p-5">
+          <div className="rounded-xl border border-brand-line bg-brand-surface p-5">
             <TradeoffChart
               data={data}
               colours={COLOURS}
@@ -231,7 +230,7 @@ export default function BenchmarksPage() {
               title="Benchmark score against median seconds per task"
             />
           </div>
-          <div className="rounded-xl border border-brand-ink/10 bg-brand-ink/[0.02] p-5">
+          <div className="rounded-xl border border-brand-line bg-brand-surface p-5">
             <TradeoffChart
               data={data}
               colours={COLOURS}
@@ -245,9 +244,9 @@ export default function BenchmarksPage() {
         </div>
       </section>
 
-      <section className="w-full max-w-7xl border-t border-brand-ink/10 py-16">
+      <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Where they diverge
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -258,14 +257,14 @@ export default function BenchmarksPage() {
             exactly where a lead was won rather than taking a total on trust.
           </p>
         </div>
-        <div className="mt-8 rounded-xl border border-brand-ink/10 bg-brand-ink/[0.02] p-5">
+        <div className="mt-8 rounded-xl border border-brand-line bg-brand-surface p-5">
           <DivergenceChart data={data} colours={COLOURS} />
         </div>
       </section>
 
-      <section className="w-full max-w-7xl border-t border-brand-ink/10 py-16">
+      <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Specifications
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -281,13 +280,13 @@ export default function BenchmarksPage() {
           <table className="w-full min-w-[42rem] border-collapse text-sm">
             <thead>
               <tr>
-                <th className="border-b border-brand-ink/10 py-3 pr-4 text-left font-medium text-brand-muted">
+                <th className="border-b border-brand-line py-3 pr-4 text-left font-medium text-brand-muted">
                   <span className="sr-only">Property</span>
                 </th>
                 {data.models.map((model) => (
                   <th
                     key={model.id}
-                    className="border-b border-brand-ink/10 py-3 pr-4 text-left font-semibold"
+                    className="border-b border-brand-line py-3 pr-4 text-left font-semibold"
                   >
                     <span className="flex items-center gap-2">
                       <span
@@ -320,13 +319,13 @@ export default function BenchmarksPage() {
                 ] as [string, (model: (typeof data.models)[number]) => string][]
               ).map(([label, render]) => (
                 <tr key={label}>
-                  <td className="border-b border-brand-ink/5 py-3 pr-4 text-brand-muted">
+                  <td className="border-b border-brand-line py-3 pr-4 text-brand-muted">
                     {label}
                   </td>
                   {data.models.map((model) => (
                     <td
                       key={model.id}
-                      className="border-b border-brand-ink/5 py-3 pr-4 text-brand-ink/75"
+                      className="border-b border-brand-line py-3 pr-4 text-brand-ink/75"
                     >
                       {render(model)}
                     </td>
@@ -338,10 +337,10 @@ export default function BenchmarksPage() {
         </div>
       </section>
 
-      <section className="w-full max-w-7xl border-t border-brand-ink/10 py-16">
+      <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
               Reading this honestly
             </p>
             <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -364,7 +363,7 @@ export default function BenchmarksPage() {
           </div>
 
           <ul className="space-y-4 text-sm leading-6 text-brand-muted">
-            <li className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4">
+            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 The task set is ours.
               </span>{" "}
@@ -373,7 +372,7 @@ export default function BenchmarksPage() {
               behaviour we trained for, and another admin would weight these
               categories differently.
             </li>
-            <li className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4">
+            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 The hosted models were reached through their CLIs.
               </span>{" "}
@@ -381,7 +380,7 @@ export default function BenchmarksPage() {
               their own system prompts. This measures what an admin would
               experience rather than base weights.
             </li>
-            <li className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4">
+            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 Scorers are mechanical, and imperfect.
               </span>{" "}
@@ -390,7 +389,7 @@ export default function BenchmarksPage() {
               vocabulary; that work raised the hosted models&rsquo; scores, not
               ours.
             </li>
-            <li className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.03] p-4">
+            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 Timing used {data.timedTaskCount} tasks, not {data.taskCount}.
               </span>{" "}
@@ -401,9 +400,9 @@ export default function BenchmarksPage() {
         </div>
       </section>
 
-      <section className="w-full max-w-7xl border-t border-brand-ink/10 py-16">
+      <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Reproduce it
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
@@ -414,7 +413,7 @@ export default function BenchmarksPage() {
             repository. Measured {generated}.
           </p>
         </div>
-        <pre className="mt-6 overflow-x-auto rounded-xl border border-brand-ink/10 bg-brand-raised p-5 text-xs leading-6 text-brand-muted">
+        <pre className="mt-6 overflow-x-auto rounded-xl border border-brand-line-strong bg-brand-raised p-5 text-xs leading-6 text-brand-muted">
           <code>{`ollama run openadminos/openadmin-8b
 
 node eval/run-external.mjs --label mine --cmd claude --model opus --limit ${data.taskCount}
@@ -424,7 +423,7 @@ node site-benchmarks/export-benchmark-data.mjs`}</code>
           href={`${GITHUB_URL}/tree/main/model`}
           target="_blank"
           rel="noreferrer"
-          className="mt-5 inline-flex text-sm font-medium text-sky-800 underline-offset-4 transition hover:text-brand-ink hover:underline"
+          className="mt-5 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
         >
           Browse the evaluation pipeline on GitHub
         </Link>

@@ -11,6 +11,7 @@ for (const screen of captures) {
   if (!routes.has(screen.route)) routes.set(screen.route, screen.id);
 }
 routes.set("/settings/providers", "settings");
+routes.set("/chat", "chat-answer");
 const agentTargets: Record<string, string> = {
   "Find inactive devices": "agent-details",
   "Compliance overview": "compliance-details",
@@ -23,7 +24,7 @@ function destination(hotspot: Hotspot, current: string): string | undefined {
   const { label, href } = hotspot;
   if (href?.startsWith("#")) return routes.get(href.slice(1));
   const commands: Record<string, string> = {
-    "Go to Chat": "chat",
+    "Go to Chat": "chat-answer",
     "Go to Agents": "agents",
     "Go to Hub": "hub",
     "Go to Schedules Review active agent schedules": "schedules",
@@ -53,6 +54,7 @@ function destination(hotspot: Hotspot, current: string): string | undefined {
   if (
     [
       "chat",
+      "chat-answer",
       "chat-users",
       "chat-apps",
       "chat-policies",
@@ -110,7 +112,7 @@ function destination(hotspot: Hotspot, current: string): string | undefined {
 
 /** Actual Electron captures with DOM-measured hit areas. No re-created app chrome. */
 export function ProductDemo() {
-  const [active, setActive] = useState("chat");
+  const [active, setActive] = useState("chat-answer");
   const [tenantMenu, setTenantMenu] = useState(false);
   const [pending, setPending] = useState<string | null>(null);
   const [action, setAction] = useState<string | null>(null);
@@ -157,7 +159,7 @@ export function ProductDemo() {
       setTenantMenu(false);
       return;
     }
-    show(history.current.pop() ?? "chat", false, "contoso");
+    show(history.current.pop() ?? "chat-answer", false, "contoso");
   }
   function activate(hotspot: Hotspot) {
     if (/admin@(contoso|dev|customer)\.invalid/.test(hotspot.label)) {

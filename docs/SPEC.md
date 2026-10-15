@@ -150,7 +150,7 @@ items, because they target durable admin search and product-evaluation topics.
 The examples gallery at `/examples` is also a secondary marketing page, with
 copyable Build your own Agent prompts grouped by read investigations, confirmed
 write plans, and connector-backed delivery examples.
-The marketing homepage retains its light-mode hero, traction, testimonials,
+The marketing homepage retains its hero, traction, testimonials,
 how-it-works, write-gate, benchmarks, open-source, FAQ, and download sections.
 The hero product area uses unedited screenshots captured from the built Electron
 app with an isolated synthetic-data profile. Invisible, keyboard-accessible
@@ -169,7 +169,8 @@ motion. Agent Team opens in the expanded office with Chief of Staff, Policy Watc
 and Device Investigator. Its room animation is a muted recording of the built app,
 positioned over the matching room capture. The pause control switches to an actual
 paused capture; reduced-motion users see the static office. Playback stops when
-the preview is offscreen or the browser tab is hidden. The current Contoso Chat capture is also the no-JavaScript fallback.
+the preview is offscreen or the browser tab is hidden. The current Contoso
+populated Chat answer capture is also the no-JavaScript fallback.
 The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API and total release
 asset downloads across all releases (both revalidated hourly), plus the community
@@ -181,7 +182,7 @@ agent display metadata (names, descriptions, mode, scopes) is curated in
 available inside the `web/` Vercel build. Historical demo video assets are rendered offline from the top-level `remotion/`
 project (not part of the npm workspace, never installed on Vercel) and retained
 under `web/public/videos/`. The current homepage uses the clickable screenshot viewer
-instead. Its styling follows the graphite/off-white desktop tokens and preserves
+instead. Its styling follows the Midnight desktop tokens and preserves
 the sidebar, tenant context, provider disclosure, and status-strip conventions.
 See `docs/brand/interactive-product-demo.md` for the interaction contract and
 verification notes.
@@ -1720,12 +1721,18 @@ The approved identity uses the OA monogram in graphite `#17191D` and off-white
 public website branding. `docs/brand/oa-mark.svg` is the vector reference;
 `docs/mockups/22-monochrome-brand.html` records the original interactive study.
 
-Desktop appearance defaults to the Graphite theme. Settings > Appearance offers
-four built-in themes: Graphite and Midnight are dark, while Off-white and Sand
-are light. The preference stays on the device, is synchronized across renderer
-windows, and emits no telemetry. Saved legacy `dark` and `light` values map to
-Graphite and Off-white. Native window controls use the selected theme colors and
-follow its dark or light mode. The public website uses the off-white light theme with graphite actions, slate secondary text, and a matching light desktop screenshot. The screenshot has no visible border or padded frame, using only rounded corners and a soft shadow for separation; the animated change-review demo uses stronger panel/input borders and solid confirmation states so it remains legible on light backgrounds.
+Desktop appearance defaults to the Midnight theme for new installs. Settings >
+Appearance offers four built-in themes: Graphite and Midnight are dark, while
+Off-white and Sand are light. Graphite remains available. The preference stays
+on the device, is synchronized across renderer windows, and emits no telemetry.
+Saved legacy `dark` and `light` values continue to map to Graphite and Off-white.
+Native window controls use the selected theme colors and follow its dark or light
+mode. The public website uses the Midnight dark theme with one blue accent. Its
+base is `#0B1018`, cards use `#111826`, primary actions use light text-colored
+surfaces, and `#7AA2FF` is the only non-semantic accent. The hero shows a matching
+Midnight desktop capture inside a bordered, raised stage with a restrained blue
+glow. The animated change-review demo uses dark surfaces and reserves red for its
+destructive operation and typed confirmation state.
 Semantic success, warning, danger, information, and reasoning colors remain
 separate from the brand accent. Destructive approval uses danger; typed
 confirmation and tenant/provider trust behavior are unchanged.
@@ -1737,8 +1744,14 @@ four themes. All shared controls, navigation, dialogs, page layouts, and custom 
 and companion surfaces consume these tokens. The Agent Team illustration is
 neutral, while activity and attention indicators retain semantic color.
 
-- Graphite: neutral charcoal base with off-white actions.
-- Midnight: cool navy surfaces with a pale blue action color.
+`web/src/styles/globals.css` is the production source of truth for the public
+website Midnight palette. The website uses `#0B1018` for the page, `#111826` and
+`#151E2D` for surfaces, `#222C3B` and `#33425A` for borders, `#E8EEF7` and
+`#9AA8BD` for text, and `#7AA2FF` as its single brand accent. Small accent text
+may use `#9DBBFF` for contrast. Semantic colors are limited to status meaning.
+
+- Graphite: neutral charcoal base with off-white actions; available but not the new-install default.
+- Midnight: cool navy surfaces with a pale blue action color; the default for new installs.
 - Off-white: neutral light surfaces with graphite actions.
 - Sand: warm light surfaces with a rust action color.
 - Body, metadata, placeholder, and semantic text meet 4.5:1 contrast against

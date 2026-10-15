@@ -17,11 +17,11 @@ export function MarketingShell({ children }: { children: ReactNode }) {
     <div className="relative flex min-h-screen flex-col overflow-hidden bg-brand-bg text-brand-ink">
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-0 bg-[linear-gradient(rgba(23,25,29,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(23,25,29,0.03)_1px,transparent_1px)] bg-[size:72px_72px] [mask-image:linear-gradient(to_bottom,black,transparent_72%)]"
+        className="brand-grid pointer-events-none absolute inset-0"
       />
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg focus:outline-none focus:ring-2 focus:ring-brand-accent"
       >
         Skip to content
       </a>
@@ -47,8 +47,8 @@ export function MarketingShell({ children }: { children: ReactNode }) {
               rel={item.external ? "noreferrer" : undefined}
               className={
                 item.primary
-                  ? "rounded-md bg-brand-ink px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-brand-ink/90"
-                  : "transition hover:text-brand-ink"
+                  ? "rounded-md bg-brand-ink px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
+                  : "transition hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
               }
             >
               {item.label}
@@ -66,34 +66,34 @@ export function MarketingShell({ children }: { children: ReactNode }) {
         {children}
       </main>
 
-      <footer className="relative z-10 flex flex-col items-center gap-2 px-6 py-8 text-center sm:px-10">
+      <footer className="relative z-10 flex flex-col items-center gap-2 border-t border-brand-line bg-brand-surface/60 px-6 py-8 text-center sm:px-10">
         <span className="text-xs text-brand-muted">
           © {new Date().getFullYear()} OpenAdminOS
           {" · "}
           <Link
             href="/privacy"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Privacy
           </Link>
           {" · "}
           <Link
             href="/terms"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Terms
           </Link>
           {" · "}
           <Link
             href="/legal-notice"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Legal notice
           </Link>
           {" · "}
           <Link
             href="/examples"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             Examples
           </Link>
@@ -102,7 +102,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             href={GITHUB_URL}
             target="_blank"
             rel="noreferrer"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             GitHub
           </Link>
@@ -111,7 +111,7 @@ export function MarketingShell({ children }: { children: ReactNode }) {
             href={LINKEDIN_URL}
             target="_blank"
             rel="noreferrer"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
+            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
           >
             LinkedIn
           </Link>
@@ -137,7 +137,7 @@ export function PageIntro({
 }) {
   return (
     <section className="max-w-3xl">
-      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
         {eyebrow}
       </p>
       <h1 className="mt-3 text-balance text-4xl font-semibold tracking-tight sm:text-6xl">
@@ -162,7 +162,7 @@ export function TextCard({
   return (
     <section
       id={id}
-      className="rounded-lg border border-brand-ink/10 bg-brand-ink/[0.035] p-5"
+      className="rounded-lg border border-brand-line bg-brand-card p-5 transition-colors hover:border-brand-line-strong hover:bg-brand-raised"
     >
       <h2 className="text-lg font-semibold tracking-tight text-brand-ink">
         {title}

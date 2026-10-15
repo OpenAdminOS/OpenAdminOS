@@ -247,7 +247,7 @@ const FLOW_STEPS = [
 function ModeBadge({ mode }: { mode: ExampleMode }) {
   if (mode === "write") {
     return (
-      <span className="inline-flex rounded-md border border-amber-300/25 bg-amber-300/10 px-2 py-1 text-xs font-medium text-amber-800">
+      <span className="inline-flex rounded-md border border-brand-accent/30 bg-brand-accent/10 px-2 py-1 text-xs font-medium text-brand-accent-text">
         Write
       </span>
     );
@@ -255,14 +255,14 @@ function ModeBadge({ mode }: { mode: ExampleMode }) {
 
   if (mode === "notify") {
     return (
-      <span className="inline-flex rounded-md border border-sky-300/25 bg-sky-300/10 px-2 py-1 text-xs font-medium text-sky-800">
+      <span className="inline-flex rounded-md border border-brand-accent/30 bg-brand-accent/10 px-2 py-1 text-xs font-medium text-brand-accent-text">
         Read + notify
       </span>
     );
   }
 
   return (
-    <span className="inline-flex rounded-md border border-emerald-300/20 bg-emerald-300/10 px-2 py-1 text-xs font-medium text-emerald-800">
+    <span className="inline-flex rounded-md border border-brand-accent/30 bg-brand-accent/10 px-2 py-1 text-xs font-medium text-brand-accent-text">
       Read
     </span>
   );
@@ -273,7 +273,7 @@ function ScopeList({ scopes }: { scopes: readonly string[] }) {
     <ul className="mt-2 flex flex-wrap gap-2">
       {scopes.map((scope) => (
         <li key={scope} className="min-w-0">
-          <code className="block rounded border border-brand-ink/10 bg-brand-raised px-2 py-1 font-mono text-[11px] leading-5 text-brand-muted break-all">
+          <code className="block rounded border border-brand-line-strong bg-brand-raised px-2 py-1 font-mono text-[11px] leading-5 text-brand-muted break-all">
             {scope}
           </code>
         </li>
@@ -284,7 +284,7 @@ function ScopeList({ scopes }: { scopes: readonly string[] }) {
 
 function ExampleCard({ example }: { example: ExampleCard }) {
   return (
-    <article className="flex min-w-0 flex-col rounded-lg border border-brand-ink/10 bg-brand-ink/[0.035] p-4 transition hover:border-brand-ink/18 hover:bg-brand-ink/[0.05]">
+    <article className="flex min-w-0 flex-col rounded-lg border border-brand-line bg-brand-surface p-4 transition hover:border-brand-line-strong hover:bg-brand-raised">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-mono text-[10px] uppercase tracking-wider text-brand-muted">
@@ -297,7 +297,7 @@ function ExampleCard({ example }: { example: ExampleCard }) {
         <ModeBadge mode={example.mode} />
       </div>
 
-      <div className="mt-4 rounded-md border border-brand-ink/10 bg-brand-raised p-3">
+      <div className="mt-4 rounded-md border border-brand-line bg-brand-raised p-3">
         <p className="font-mono text-xs leading-6 text-brand-muted">
           {example.prompt}
         </p>
@@ -320,7 +320,7 @@ function ExampleCard({ example }: { example: ExampleCard }) {
           <p className="font-mono text-[10px] uppercase tracking-wider text-brand-muted">
             Connector egress
           </p>
-          <p className="mt-2 rounded border border-sky-300/15 bg-sky-300/[0.06] px-3 py-2 text-xs leading-5 text-sky-800/75">
+          <p className="mt-2 rounded border border-brand-accent/25 bg-brand-accent/[0.07] px-3 py-2 text-xs leading-5 text-brand-accent-text">
             {example.connector}
           </p>
         </div>
@@ -374,10 +374,10 @@ export default function ExamplesPage() {
         description={DESCRIPTION}
       />
 
-      <section className="mt-10 grid gap-4 border-y border-brand-ink/10 py-8 md:grid-cols-4">
+      <section className="mt-10 grid gap-4 border-y border-brand-line py-8 md:grid-cols-4">
         {FLOW_STEPS.map((step, index) => (
           <div key={step.label} className="min-w-0">
-            <p className="font-mono text-[11px] uppercase tracking-wider text-sky-800/70">
+            <p className="font-mono text-[11px] uppercase tracking-wider text-brand-accent-text">
               {String(index + 1).padStart(2, "0")} · {step.label}
             </p>
             <p className="mt-3 text-sm leading-6 text-brand-muted">{step.text}</p>
@@ -387,7 +387,7 @@ export default function ExamplesPage() {
 
       <section className="mt-10 grid gap-5 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
             Builder flow
           </p>
           <h2 className="mt-3 text-3xl font-semibold tracking-tight">
@@ -411,13 +411,13 @@ export default function ExamplesPage() {
               href={AGENT_SDK_DOCS_URL}
               target="_blank"
               rel="noreferrer"
-              className="inline-flex min-h-10 items-center justify-center rounded-md border border-brand-ink/10 bg-brand-ink/[0.04] px-4 text-sm font-medium text-brand-muted transition hover:border-brand-ink/20 hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/30"
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-brand-line-strong bg-transparent px-4 text-sm font-medium text-brand-muted transition hover:border-brand-accent hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
             >
               Read the agent SDK guide
             </Link>
             <Link
               href="/download"
-              className="inline-flex min-h-10 items-center justify-center rounded-md bg-brand-ink px-4 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-ink/35"
+              className="inline-flex min-h-10 items-center justify-center rounded-md bg-brand-ink px-4 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
             >
               Download OpenAdminOS
             </Link>
@@ -426,10 +426,10 @@ export default function ExamplesPage() {
       </section>
 
       {EXAMPLE_GROUPS.map((group) => (
-        <section key={group.name} className="mt-14 border-t border-brand-ink/10 pt-12">
+        <section key={group.name} className="mt-14 border-t border-brand-line pt-12">
           <div className="grid gap-5 md:grid-cols-[0.82fr_1.18fr]">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
                 {group.eyebrow}
               </p>
               <h2 className="mt-3 text-3xl font-semibold tracking-tight">
