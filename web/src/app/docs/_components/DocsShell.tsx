@@ -7,6 +7,7 @@ import { DOCS_NAV, type DocsBase, docsHref } from "~/lib/docs/site";
 
 import { LogoMark, Wordmark } from "../../Logo";
 import { GITHUB_URL, SITE_URL } from "../../seo";
+import { ThemeToggle } from "../../ThemeToggle";
 import { DocsMobileNav } from "./DocsMobileNav";
 import { DocsSearch } from "./DocsSearch";
 import { DocsSidebarNav } from "./DocsSidebarNav";
@@ -49,8 +50,9 @@ export function DocsShell({
             <span aria-hidden className="h-4 w-px bg-brand-line-strong" />
             <span className="text-sm font-medium text-brand-muted">Docs</span>
           </Link>
-          <div className="flex flex-1 justify-end md:justify-center">
+          <div className="flex flex-1 items-center justify-end gap-1 md:justify-center">
             <DocsSearch base={base} />
+            <ThemeToggle className="md:hidden" />
           </div>
           <nav
             aria-label="Site"
@@ -65,6 +67,7 @@ export function DocsShell({
                 {link.label}
               </a>
             ))}
+            <ThemeToggle className="ml-1" />
             <a
               href={DOCS_DOWNLOAD_URL}
               className="ml-2 inline-flex h-9 items-center rounded-[10px] bg-brand-ink px-3.5 font-medium text-brand-on-ink transition-colors hover:bg-brand-ink-hover"
