@@ -384,6 +384,47 @@
   animation: fig-appear 520ms var(--ease-calm) var(--fig-delay, 0ms) forwards;
 }
 
+/* Works-with grid: a cell fills from the bottom with its company's color. */
+.brand-cell {
+  isolation: isolate;
+  overflow: hidden;
+  position: relative;
+  transition: color 300ms ease;
+}
+
+.brand-cell::before {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--brand) 26%, transparent),
+    color-mix(in srgb, var(--brand) 7%, transparent)
+  );
+  content: "";
+  inset: 0;
+  position: absolute;
+  transform: scaleY(0);
+  transform-origin: bottom;
+  transition: transform 450ms var(--ease-calm);
+  z-index: -1;
+}
+
+.brand-cell:hover {
+  color: var(--color-brand-ink);
+}
+
+.brand-cell:hover::before {
+  transform: scaleY(1);
+}
+
+@media (prefers-color-scheme: dark) {
+  .brand-cell::before {
+    background: linear-gradient(
+      to top,
+      color-mix(in srgb, var(--brand) 38%, transparent),
+      color-mix(in srgb, var(--brand) 10%, transparent)
+    );
+  }
+}
+
 /* Scroll reveal. Content stays visible without JavaScript. */
 .js-reveal [data-reveal] {
   opacity: 0;
@@ -408,5 +449,10 @@
   .figure-caret,
   .tour-progress {
     animation: none;
+  }
+
+  .brand-cell,
+  .brand-cell::before {
+    transition: none;
   }
 }

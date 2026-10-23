@@ -50,18 +50,20 @@ export const metadata: Metadata = pageMetadata({
 const benchmarkTiles = rankedModels();
 const benchmarkLead = leadOverHosted();
 
-const WORKS_WITH = [
-  "Microsoft Graph",
-  "Intune",
-  "Entra ID",
-  "Ollama",
-  "LM Studio",
-  "Apple Foundation",
-  "Claude Code",
-  "OpenAI Codex",
-  "GitHub Copilot",
-  "Azure OpenAI",
-] as const;
+// Hover tints use each company's brand color. Black-and-white brands use the
+// page ink so they tint neutrally in light and dark.
+const WORKS_WITH: readonly { name: string; color: string }[] = [
+  { name: "Microsoft Graph", color: "#0078D4" },
+  { name: "Intune", color: "#28A8EA" },
+  { name: "Entra ID", color: "#4F6BED" },
+  { name: "Ollama", color: "var(--color-brand-ink)" },
+  { name: "LM Studio", color: "var(--color-brand-ink)" },
+  { name: "Apple Foundation", color: "#8E8E93" },
+  { name: "Claude Code", color: "#D97757" },
+  { name: "OpenAI Codex", color: "#10A37F" },
+  { name: "GitHub Copilot", color: "#8534F3" },
+  { name: "Azure OpenAI", color: "#0089D6" },
+];
 
 const FIGURES = [
   {
@@ -347,12 +349,13 @@ export default async function HomePage() {
           Works with the tenant and the models you already use
         </p>
         <ul className="mt-6 grid grid-cols-2 border-l border-t border-brand-line sm:grid-cols-5">
-          {WORKS_WITH.map((name) => {
+          {WORKS_WITH.map(({ name, color }) => {
             const mark = BRAND_MARKS[name];
             return (
               <li
                 key={name}
-                className="flex h-16 items-center justify-center gap-2.5 border-b border-r border-brand-line px-3 text-center text-[15px] text-brand-muted"
+                style={{ ["--brand" as string]: color }}
+                className="brand-cell flex h-16 items-center justify-center gap-2.5 border-b border-r border-brand-line px-3 text-center text-[15px] text-brand-muted"
               >
                 {mark ? (
                   <svg
