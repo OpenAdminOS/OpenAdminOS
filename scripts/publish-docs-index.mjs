@@ -112,6 +112,10 @@ const args = [
   sumsPath,
   "--title", `Documentation index ${String(built).slice(0, 10)}`,
   "--notes", notes,
+  // Never take the "Latest" badge from the app release. Stable installs
+  // (electron-updater) and the website download page both resolve
+  // /releases/latest and expect latest*.yml and installers there.
+  "--latest=false",
 ];
 console.log(`\ngh ${args.slice(0, 3).join(" ")} ...`);
 const result = spawnSync("gh", args, { stdio: "inherit" });
