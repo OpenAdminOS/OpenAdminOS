@@ -274,6 +274,28 @@ html {
   color-scheme: dark;
 }
 
+.chat-answer {
+  font-family: var(--font-serif);
+  font-size: var(--text-answer);
+  line-height: var(--text-answer--line-height);
+}
+
+:root[data-answer-font="sans"] .chat-answer {
+  font-family: var(--font-sans);
+}
+
+.chat-answer table {
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: 1.45;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-answer pre,
+.chat-answer code {
+  font-family: var(--font-mono);
+}
+
 /* Subtle, unobtrusive scrollbars (Claude-style) */
 *::-webkit-scrollbar {
   width: 10px;
@@ -335,6 +357,19 @@ button:disabled {
   100% {
     background-position: 200% 0;
   }
+}
+
+.chat-scope-shimmer {
+  color: transparent;
+  background: linear-gradient(
+    90deg,
+    var(--color-text-muted) 30%,
+    var(--color-text) 50%,
+    var(--color-text-muted) 70%
+  );
+  background-size: 200% 100%;
+  background-clip: text;
+  animation: shimmer 1.4s linear infinite;
 }
 
 @keyframes fade-in {

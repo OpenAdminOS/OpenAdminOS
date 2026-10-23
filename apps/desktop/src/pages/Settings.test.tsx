@@ -14,6 +14,7 @@ import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
+import { setAnswerFont } from "../styles/answer-font";
 
 function provider(id: string) {
   const match = mockProviders.find((entry) => entry.id === id);
@@ -22,6 +23,22 @@ function provider(id: string) {
 }
 
 describe("Settings provider section", () => {
+  it("stores the Chat answer font as a device-local General preference", async () => {
+    const user = userEvent.setup();
+    setAnswerFont("serif");
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/general",
+      bridge: makeMockBridge(),
+    });
+
+    const picker = await screen.findByRole("radiogroup", { name: "Answer font" });
+    expect(within(picker).getByRole("radio", { name: "Serif" })).toBeChecked();
+    await user.click(within(picker).getByRole("radio", { name: "Sans" }));
+    expect(document.documentElement.dataset.answerFont).toBe("sans");
+    expect(localStorage.getItem("openadminos:answer-font:v1")).toBe("sans");
+  });
+
   it("saves audit exports in the host without resubmitting content through text-file IPC", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge();

@@ -10,8 +10,10 @@ import { SetupFlowProvider } from "./setup/SetupFlowContext";
 import { AppStateProvider } from "./state";
 import "./styles/globals.css";
 import { initializeAppearance } from "./styles/appearance";
+import { initializeAnswerFont } from "./styles/answer-font";
 
 initializeAppearance();
+initializeAnswerFont();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

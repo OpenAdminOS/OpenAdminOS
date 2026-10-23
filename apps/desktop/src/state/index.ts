@@ -5,8 +5,8 @@ export {
   useConversationsOptional,
   type ConversationPanelMode,
 } from "./conversations";
-export { DataBoundaryProvider, useDataBoundary, type DataBoundary } from "./data-boundary";
-export { UpdateStateProvider, useUpdateState } from "./update-state";
+export { DataBoundaryProvider, useDataBoundary, useDataBoundaryOptional, type DataBoundary } from "./data-boundary";
+export { UpdateStateProvider, useUpdateState, useUpdateStateOptional } from "./update-state";
 export {
   ShellChromeProvider,
   SIDEBAR_COLLAPSED_KEY,

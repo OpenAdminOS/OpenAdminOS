@@ -118,3 +118,7 @@ export function useDataBoundary(): DataBoundaryContextValue {
   if (!value) throw new Error("useDataBoundary must be used within DataBoundaryProvider.");
   return value;
 }
+
+export function useDataBoundaryOptional(): DataBoundaryContextValue | undefined {
+  return useContext(DataBoundaryContext);
+}

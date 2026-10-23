@@ -1,4 +1,5 @@
 import { THEMES, useAppearance, type ThemeId } from "../styles/appearance";
+import { useAnswerFont } from "../styles/answer-font";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageHeader } from "../components/AppShell";
@@ -2779,6 +2780,7 @@ function gatewayConfirmationCopy(
 
 function GeneralSection() {
   const { state, refresh } = useAppState();
+  const { answerFont, setAnswerFont } = useAnswerFont();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
   const [companionLaunch, setCompanionLaunch] =
@@ -3057,6 +3059,21 @@ function GeneralSection() {
   return (
     <div className="max-w-[720px]">
       <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+        <SettingRow
+          id="answer-font"
+          description="Used for Chat answers. This preference is stored on this device."
+          control={
+            <SegmentedControl
+              ariaLabel="Answer font"
+              value={answerFont}
+              options={[
+                { id: "serif", label: "Serif" },
+                { id: "sans", label: "Sans" },
+              ]}
+              onValueChange={(value) => setAnswerFont(value === "sans" ? "sans" : "serif")}
+            />
+          }
+        />
         <SettingRow
           id="menu-bar-companion"
           description={

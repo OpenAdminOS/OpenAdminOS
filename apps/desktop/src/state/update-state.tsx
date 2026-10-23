@@ -59,3 +59,7 @@ export function useUpdateState(): UpdateStateContextValue {
   if (!value) throw new Error("useUpdateState must be used within UpdateStateProvider.");
   return value;
 }
+
+export function useUpdateStateOptional(): UpdateStateContextValue | undefined {
+  return useContext(UpdateStateContext);
+}
