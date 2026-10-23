@@ -1,9 +1,10 @@
 # Desktop brand assets
 
-The OA monogram uses graphite (#17191D) and off-white (#F4F5F7). The vector
-reference is `docs/brand/oa-mark.svg`. `icon-source.svg` adds the rounded tile
-and transparent Dock margin. Electron Builder derives ICO and ICNS from the
-1024px `icon.png`. AppX square, wide, and splash assets are checked in.
+The oa ligature mark uses ink (#1F1D1A) and paper (#FAF9F6). The vector
+reference is `docs/brand/oa-mark.svg`. `icon-source.svg` places the paper mark
+on an ink rounded tile with a transparent Dock margin. Electron Builder derives
+ICO and ICNS from the 1024px `icon.png`. AppX square, wide, and splash assets
+are checked in.
 
 From the repository root, regenerate desktop, website favicon, and social PNGs:
 
