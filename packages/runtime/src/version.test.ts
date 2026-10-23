@@ -63,4 +63,14 @@ describe("compareSemver", () => {
     // semver-spec parity for prerelease ordering — only that the registry's
     // common `X.Y.Z` and `X.Y.Z-tag` forms don't loop with themselves.
   });
+
+  it("lets a nightly build satisfy the minAppVersion it previews and lower", () => {
+    // Nightlies are X.Y.Z-nightly.YYYYMMDDHHMMSS where X.Y.Z is the next patch.
+    // The extra timestamp segment sorts them at or above X.Y.Z for the
+    // minAppVersion check, and below the next patch.
+    const nightly = "0.7.1-nightly.20261023141500";
+    assert.ok(compareSemver(nightly, "0.7.1") >= 0);
+    assert.ok(compareSemver(nightly, "0.7.0") > 0);
+    assert.ok(compareSemver(nightly, "0.7.2") < 0);
+  });
 });

@@ -10,6 +10,8 @@ The release surface publishes Windows, macOS, and Linux binaries:
 
 A single tag push builds the Windows, macOS, and Linux platform jobs, publishes their release files, and refreshes the apt repository from the latest `.deb`.
 
+Every merge to `main` that changes the app also ships a signed **nightly** prerelease. Nightlies need no maintainer action; see [Nightly builds](#nightly-builds).
+
 The macOS job also verifies the two bundled native helpers inside the packaged
 app before uploading artifacts:
 
@@ -217,11 +219,12 @@ Run the **Release** workflow manually from the Actions tab, choose the feature
 branch, and leave `build_windows` off unless you also need AppX validation. The
 manual branch run uploads Windows, macOS, and Linux artifacts as workflow
 artifacts only; it does not create or publish a GitHub Release because
-publishing is still gated to `refs/tags/v*`. A manual run without the Azure
-settings configured produces an explicitly unsigned Windows installer and skips
-signature verification; a tagged run fails outright if any of them is missing.
+publishing is gated to `refs/tags/v*` and to nightly dispatches with
+`nightly_sha`. A manual run without the Azure settings configured produces an
+explicitly unsigned Windows installer and skips signature verification; a
+stable or nightly run fails outright if any of them is missing.
 
-Every CI and tagged release run also executes `npm run release:check`. The gate
+Every CI and stable release run also executes `npm run release:check`. The gate
 keeps the macOS application/update identity and Linux package/executable
 identity stable, requires every versioned workspace to match the release
 version, and requires matching release notes. The desktop host test suite opens
@@ -249,6 +252,65 @@ gh pr create --title "release: v0.1.X" --body "Manual release prep."
 #    passes, auto-tag.yml still picks it up. (If that also
 #    breaks, tag manually: git tag -a v0.1.X && git push origin v0.1.X.)
 ```
+
+## Nightly builds
+
+Nightlies let testers run every merged change within the hour, without a
+release-prep PR. They are fully automatic.
+
+| | Stable | Nightly |
+|---|---|---|
+| Trigger | Release-prep merge (untagged package version) | Any other green `main` commit that changes the app |
+| Version | `0.7.1` | `0.7.1-nightly.20261023141500` (next stable patch + UTC build time) |
+| GitHub release | Latest release, CHANGELOG notes | Prerelease, never latest, commit-list notes |
+| Update files | `latest.yml`, `latest-mac.yml`, `latest-linux.yml` | `nightly.yml`, `nightly-mac.yml`, `nightly-linux.yml` |
+| macOS | `.dmg`, `.pkg`, `.zip` | `.dmg`, `.zip` |
+| Linux | Release assets + apt repository | Release assets only |
+| Signing | Signed, notarized | Signed, notarized |
+| Release gate | Runs | Skipped; CI already passed on that commit |
+| Retention | Forever | Newest 20 |
+
+How it runs:
+
+1. After CI succeeds on the current `main` commit and the package version is
+   already tagged, `auto-tag.yml` runs `scripts/nightly-app-changes.sh`, which
+   diffs the commit against the newest `v*` tag of either channel. If anything outside `stats/`, `web/`, `docs/`,
+   `tasks/`, `model/`, `remotion/`, `.github/`, or root Markdown changed, it
+   dispatches `release.yml` on `main` with `nightly_sha`. Comparing with the
+   newest tag, not the parent commit, means a merge whose CI was cancelled by
+   the hourly install-stats commit still ships in the next nightly.
+2. The `meta` job checks that the commit is on `main` and computes the version
+   with `scripts/release-version.mjs`.
+3. Each platform job runs `scripts/prepare-nightly-build.mjs`, which sets the
+   desktop version and the `nightly` publish channel for that build only. It
+   is never committed.
+4. `publish-release` creates the tag and the prerelease in one step with
+   `gh release create --prerelease --latest=false`, writes notes with
+   `scripts/nightly-release-notes.mjs`, and deletes all but the newest 20
+   nightlies with their tags. A cancelled or failed nightly leaves no tag.
+
+Nightly runs share one concurrency group and queue rather than cancel: a
+running nightly always finishes, and GitHub keeps only the newest waiting run.
+A nightly has no tag until it publishes, so later green commits (the hourly
+install-stats commit, for example) dispatch again while it builds. When a
+queued run starts, `meta` re-runs `scripts/nightly-app-changes.sh` against the
+now-tagged previous nightly; with nothing new it resolves to the `skip` channel
+and builds nothing. Stable runs are never cancelled.
+
+Why the website and stable installs never see a nightly: `/releases/latest`
+ignores prereleases, and electron-updater on the stable channel reads
+`latest*.yml` from the latest release only. In the app, Settings > About >
+**Get nightly builds** switches an install between channels. A nightly install
+also receives a newer stable release. Turning nightlies off installs the
+current stable release even when it is older than the running nightly.
+
+To build a nightly by hand (for example after fixing a failed run):
+
+```bash
+gh workflow run release.yml --ref main -f nightly_sha="$(git rev-parse origin/main)"
+```
+
+Do not push `v*-nightly.*` tags yourself; `release.yml` refuses them.
 
 ## Manual steps after CI
 
@@ -335,6 +397,7 @@ actually pursued.
 - **App Store Connect API key, not Apple ID + app-specific password.** Apple is phasing out the app-specific password path; the API key flow is the modern equivalent and works headlessly in CI.
 - **DMG stays primary, PKG supports managed deployment.** The DMG is the normal user-facing macOS installer. The PKG exists for MDM/fleet tooling and needs a separate Developer ID Installer certificate.
 - **GitHub Pages is enough for apt.** The apt repository is static metadata plus the latest `.deb`. GitHub Actions can regenerate and sign it on every tag, and GitHub Pages can serve it over HTTPS under `repo.openadminos.com` without a package-hosting vendor.
+- **Nightlies from every merge, same signing as stable.** Testers get changes within the hour, and an unsigned nightly would teach admins to click through SmartScreen and Gatekeeper warnings. One install switches channels in place, so there is no second app identity to manage.
 - **Apple Silicon only for v0.1.** macOS x64 + the per-arch manifest merge land in a follow-up when there's demand. Apple Silicon is the right default for new buyers; legacy Intel Macs are a smaller share each quarter.
 
 ## When to update this doc

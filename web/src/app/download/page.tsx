@@ -148,6 +148,15 @@ export default async function DownloadPage() {
             >
               SHA256SUMS.txt
             </Link>
+            <Link
+              href={`${GITHUB_URL}/releases?q=nightly&expanded=true`}
+              target="_blank"
+              rel="noreferrer"
+              title="Signed prereleases built from every change to main. Less tested than the current release."
+              className="inline-flex min-h-11 items-center rounded-md border border-brand-line-strong px-3 font-medium text-brand-muted transition hover:border-brand-accent hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
+            >
+              Nightly builds
+            </Link>
           </div>
         </div>
 

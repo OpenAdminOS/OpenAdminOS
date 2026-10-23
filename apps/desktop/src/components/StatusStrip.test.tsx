@@ -60,4 +60,24 @@ describe("StatusStrip", () => {
       await screen.findByLabelText(/Nova voice.*audio and shared context sent to OpenAI/),
     ).toBeInTheDocument();
   });
+  it("marks a nightly build so admins see they run a prerelease against the tenant", async () => {
+    renderWithAppState(<StatusStrip />, {
+      bridge: makeMockBridge(
+        {},
+        createMockAppState({ appVersion: "0.7.1-nightly.20261023141500" }),
+      ),
+    });
+    expect(await screen.findByText("Nightly")).toHaveAttribute(
+      "title",
+      expect.stringContaining("0.7.1-nightly.20261023141500"),
+    );
+  });
+
+  it("shows no channel badge on a stable build", async () => {
+    renderWithAppState(<StatusStrip />, {
+      bridge: makeMockBridge({}, createMockAppState({ appVersion: "0.7.0" })),
+    });
+    expect(await screen.findByText("Contoso IT")).toBeInTheDocument();
+    expect(screen.queryByText("Nightly")).not.toBeInTheDocument();
+  });
 });

@@ -2281,7 +2281,7 @@ These must exist and work well before any public release.
 - Accessibility audit (WCAG AA contrast, keyboard nav, screen reader labels)
 - Opt-in product analytics (Posthog self-hosted or similar; aggregated, never per-tenant)
 - Opt-in crash reporting (Sentry-equivalent for app crashes only)
-- Auto-update channel (`electron-updater` against signed releases; needed for security patching)
+- Auto-update channel (`electron-updater` against signed releases; needed for security patching). Stable and Nightly channels shipped; see "Nightly update channel (2026-10-23)".
 - Offline / partial connectivity behavior (retry, cached state, resume on reconnect)
 
 ### v0.2.3 experimental sandbox stance
@@ -2599,3 +2599,15 @@ Pending incomplete questions now retain their continuation across longer replies
 while explicit Stop and new question/command openings remain separate. This is a
 bounded heuristic, not an authoritative speech-end signal. The status separation
 and continuation changes require repeated installed microphone acceptance.
+
+### Nightly update channel (2026-10-23)
+
+The maintainer approved a Nightly channel next to Stable, modelled on TenuVault:
+
+- **Trigger:** every green `main` commit that changes the app and is not a release-prep merge. Changes limited to `stats/`, `web/`, `docs/`, `tasks/`, `model/`, `remotion/`, `.github/`, or root Markdown do not build one.
+- **Version:** the next stable patch plus the UTC build time, for example `0.7.1-nightly.20261023141500`. A nightly therefore sorts below the stable release it previews, and the newest nightly sorts first on the GitHub releases page.
+- **Publishing:** a GitHub prerelease that is never marked latest, so the website download page, apt, and stable installs are unaffected. Builds are signed and notarized like stable releases. Linux packages are attached to the prerelease and never published to apt. macOS nightlies ship `.dmg` and `.zip` without `.pkg`. The newest 20 nightlies are kept.
+- **In the app:** Settings > About offers "Get nightly builds". The default follows the installed build. A nightly install is also offered newer stable releases, and turning nightlies off installs the current stable release even if it is older. A status-strip badge marks nightly builds, because admins run them against real tenants. Write-confirmation and every other hard constraint apply unchanged to nightly builds.
+- **Agent compatibility:** a nightly satisfies `minAppVersion` values up to its base version, so `0.7.1-nightly.*` runs agents that require 0.7.1.
+
+Runbook: `docs/RELEASING.md`, "Nightly builds".

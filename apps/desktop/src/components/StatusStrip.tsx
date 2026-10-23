@@ -5,7 +5,8 @@ import { IconCloud, IconHardDrive } from "./icons";
 import { deriveTrustCopy, SETUP_COPY } from "../copy";
 import { TruncatedText } from "./TruncatedText";
 import { useSetupFlow } from "../setup/SetupFlowContext";
-import { StatusDot } from "./ui";
+import { Badge, StatusDot } from "./ui";
+import { isNightlyVersion } from "../shared/update-channel";
 
 export function StatusStrip({ voiceHosted = false }: { voiceHosted?: boolean }) {
   const { state } = useAppState();
@@ -68,6 +69,15 @@ export function StatusStrip({ voiceHosted = false }: { voiceHosted?: boolean }) 
               ? "Entra Free"
               : `Entra ${activeTenant.entraTier.toUpperCase()}`}
           </span>
+        ) : null}
+        {isNightlyVersion(state.appVersion) ? (
+          <Badge
+            tone="warning"
+            className="shrink-0 py-0 font-mono font-normal"
+            title={`OpenAdminOS ${state.appVersion} is a nightly prerelease built from main. It is less tested than a stable release.`}
+          >
+            Nightly
+          </Badge>
         ) : null}
       </div>
 

@@ -33,7 +33,9 @@ export const SETTINGS_ITEMS = {
   "crash-reporting": { section: "privacy", title: "Crash reporting", description: "Review local error-reporting behavior.", keywords: ["errors", "logs"] },
   "tenant-data-residency": { section: "privacy", title: "Tenant data residency", description: "Review where the active provider sends tenant context.", keywords: ["local", "hosted", "provider"] },
   "graph-writes": { section: "privacy", title: "Graph writes", description: "Review the confirmation boundary for Microsoft Graph changes.", keywords: ["confirmation", "write", "diff"] },
-  "update-channel": { section: "privacy", title: "Update channel", description: "Review signed application update behavior.", keywords: ["stable", "release", "github"] },
+  "update-channel": { section: "privacy", title: "Update channel", description: "Review signed application update behavior.", keywords: ["stable", "nightly", "release", "github"] },
+  "nightly-builds": { section: "about", title: "Get nightly builds", description: "Follow signed prereleases built from every merge to main.", keywords: ["nightly", "prerelease", "preview", "channel", "update"] },
+  "app-updates": { section: "about", title: "Updates", description: "Check for a signed desktop update on the selected channel.", keywords: ["update", "check", "version", "release"] },
 } as const satisfies Record<string, { section: SettingsSectionId; title: string; description: string; keywords: readonly string[] }>;
 
 export type SettingsItemId = keyof typeof SETTINGS_ITEMS;

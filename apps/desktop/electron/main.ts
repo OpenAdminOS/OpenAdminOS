@@ -40,10 +40,13 @@ import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import {
   applyUpdateNow,
   checkForUpdatesNow,
+  getUpdateChannelSettings,
   getUpdateState,
+  setUpdateChannel,
   startAutoUpdater,
   subscribeToUpdateState,
 } from "./updates.js";
+import { UPDATE_UNAVAILABLE_DETAIL } from "../src/shared/update-channel.js";
 import {
   attachWindowStatePersistence,
   loadWindowState,
@@ -6331,6 +6334,23 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:get-update-state", handleTrusted(() => getUpdateState()));
   ipcMain.handle("openadminos:check-for-updates-now", handleTrusted(() => checkForUpdatesNow()));
   ipcMain.handle("openadminos:apply-update-now", handleTrusted(() => applyUpdateNow()));
+  ipcMain.handle(
+    "openadminos:get-update-channel",
+    handleTrusted(async () => getUpdateChannelSettings(await store.getUpdateChannel())),
+  );
+  ipcMain.handle(
+    "openadminos:set-update-channel",
+    handleTrusted(async (_event, channel: unknown) => {
+      if (channel !== "stable" && channel !== "nightly") {
+        throw new Error("Update channel must be stable or nightly.");
+      }
+      const unavailable = getUpdateChannelSettings(channel).unavailableReason;
+      if (unavailable) {
+        throw new Error(UPDATE_UNAVAILABLE_DETAIL[unavailable]);
+      }
+      return setUpdateChannel(channel, (next) => store.setUpdateChannel(next));
+    }),
+  );
   subscribeToUpdateState((state) => {
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send("openadminos:update-state", state);
@@ -6535,7 +6555,7 @@ if (!gotLock) {
     void store.pruneDriftHistory("startup").catch((error) => {
       console.warn("[drift-history] startup prune failed:", error);
     });
-    startAutoUpdater(() => mainWindow ?? undefined);
+    startAutoUpdater(() => mainWindow ?? undefined, await store.getUpdateChannel());
 
     // Agent scheduler: for normal visible launches, wait for the
     // regular minute tick instead of immediately catching up. Immediate

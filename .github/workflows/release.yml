@@ -3,9 +3,22 @@ name: Release
 # Builds platform-specific installers and uploads publishable assets to a
 # GitHub release.
 #
-# Triggers:
-#   - Tag push matching v*.*.* (the canonical "cut a release" gesture)
-#   - workflow_dispatch (one-time branch build without publishing)
+# Channels (resolved by the meta job):
+#   - Stable: a v*.*.* tag, pushed or dispatched by auto-tag.yml. Runs the
+#     release gate, publishes the release as latest with CHANGELOG notes, and
+#     deploys the apt repository.
+#   - Nightly: workflow_dispatch on main with nightly_sha, sent by
+#     auto-tag.yml after green CI on an app change. The version is the next
+#     stable patch plus the UTC build time (0.7.1-nightly.20261023141500).
+#     CI already verified that commit, so the release gate is skipped. Builds
+#     are signed and notarized like stable, write nightly*.yml update files,
+#     and are published as a prerelease that is never marked latest, so the
+#     website and stable installs keep seeing the stable release. Linux
+#     packages are attached to the prerelease only; apt stays stable-only.
+#     The newest 20 nightlies are kept. Nightly runs queue behind each other;
+#     a queued run whose app changes the previous nightly already shipped
+#     resolves to the "skip" channel and builds nothing.
+#   - None: any other workflow_dispatch builds without publishing.
 #
 # Outputs:
 #   - Windows x64: signed NSIS .exe installer, plus latest.yml for
@@ -53,6 +66,11 @@ on:
         required: false
         default: ""
         type: string
+      nightly_sha:
+        description: "Publish this main commit as a nightly prerelease (auto-tag.yml sets it after green CI)"
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: write
@@ -60,7 +78,12 @@ permissions:
   pages: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  # Nightlies share one group and queue: a running nightly always finishes,
+  # and GitHub keeps only the newest waiting run, which re-checks for app
+  # changes when it starts. Cancelling instead would let the hourly
+  # install-stats commit restart a nightly build over and over. Stable
+  # releases are grouped per tag and never cancelled.
+  group: release-${{ inputs.nightly_sha && 'nightly' || github.ref }}
   cancel-in-progress: false
 
 env:
@@ -69,9 +92,102 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
+  meta:
+    name: Resolve release channel
+    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      channel: ${{ steps.resolve.outputs.channel }}
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      sha: ${{ steps.resolve.outputs.sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.nightly_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Resolve channel, version, and commit
+        id: resolve
+        env:
+          NIGHTLY_SHA: ${{ inputs.nightly_sha }}
+          REF: ${{ github.ref }}
+          REF_NAME: ${{ github.ref_name }}
+          SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          if [ -n "$NIGHTLY_SHA" ]; then
+            if [ "$REF" != "refs/heads/main" ]; then
+              echo "::error::Nightly builds are dispatched on main, not $REF." >&2
+              exit 1
+            fi
+            if ! printf '%s' "$NIGHTLY_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+              echo "::error::nightly_sha must be a full 40-character commit SHA." >&2
+              exit 1
+            fi
+            git fetch origin refs/heads/main:refs/remotes/origin/main
+            if ! git merge-base --is-ancestor "$NIGHTLY_SHA" origin/main; then
+              echo "::error::$NIGHTLY_SHA is not on main; only main commits ship as nightlies." >&2
+              exit 1
+            fi
+            if [ -z "$(bash scripts/nightly-app-changes.sh "$NIGHTLY_SHA")" ]; then
+              # The nightly this run queued behind already shipped these changes.
+              echo "::notice::No app changes since the newest v* tag; nothing to build."
+              {
+                echo "channel=skip"
+                echo "version="
+                echo "tag="
+                echo "sha=$NIGHTLY_SHA"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            package_version="$(node -p "require('./package.json').version")"
+            mapfile -t tags < <(git tag --list 'v*')
+            result="$(node scripts/release-version.mjs nightly "$package_version" "$(date -u +%Y%m%d%H%M%S)" "${tags[@]}")"
+            version="$(node -p 'JSON.parse(process.argv[1]).version' "$result")"
+            tag="v$version"
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "::error::Tag $tag already exists." >&2
+              exit 1
+            fi
+            channel=nightly
+            sha="$NIGHTLY_SHA"
+          elif [[ "$REF" == refs/tags/v* ]]; then
+            if [[ "$REF_NAME" == *-nightly.* ]]; then
+              echo "::error::Nightly tags are created by this workflow when it publishes. Dispatch it on main with nightly_sha instead of pushing $REF_NAME." >&2
+              exit 1
+            fi
+            channel=stable
+            version="${REF_NAME#v}"
+            tag="$REF_NAME"
+            sha="$SHA"
+          else
+            channel=none
+            version="$(node -p "require('./apps/desktop/package.json').version")"
+            tag=""
+            sha="$SHA"
+          fi
+          echo "Channel: $channel, version: $version, commit: $sha"
+          {
+            echo "channel=$channel"
+            echo "version=$version"
+            echo "tag=$tag"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
+
   release-gate:
     name: Verify release source
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
+    # Nightlies skip this gate: auto-tag.yml only dispatches them after CI,
+    # which runs the same checks, passed on exactly this commit.
+    needs: meta
+    if: ${{ needs.meta.outputs.channel == 'stable' || needs.meta.outputs.channel == 'none' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -81,6 +197,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
         with:
+          ref: ${{ needs.meta.outputs.sha }}
           # Generated agent docs include path-specific commit metadata.
           fetch-depth: 0
 
@@ -162,11 +279,14 @@ jobs:
 
   windows-x64:
     name: Windows x64, signed NSIS installer
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
-    needs: release-gate
+    # The release gate is skipped for nightlies, so accept a skipped gate
+    # explicitly; a plain `needs` would skip this job too.
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.meta.outputs.channel != 'skip' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
+    needs: [meta, release-gate]
     runs-on: windows-latest
     timeout-minutes: 40
     env:
+      RELEASE_CHANNEL: ${{ needs.meta.outputs.channel }}
       # Azure Artifact Signing (renamed from Trusted Signing in Jan 2026;
       # same service, resource type, and endpoints): the certificate is
       # short-lived, issued and rotated by Microsoft, and the private key
@@ -183,6 +303,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -193,8 +315,15 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Apply nightly version and update channel
+        if: ${{ needs.meta.outputs.channel == 'nightly' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/prepare-nightly-build.mjs "$VERSION"
+
       - name: Verify Windows signing secrets
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ env.RELEASE_CHANNEL != 'none' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -211,16 +340,16 @@ jobs:
             fi
           done
           if [ "${#missing[@]}" -ne 0 ]; then
-            printf '::error::Tagged Windows releases require these Azure Trusted Signing settings: %s\n' "${missing[*]}"
+            printf '::error::Published Windows releases (stable and nightly) require these Azure Trusted Signing settings: %s\n' "${missing[*]}"
             exit 1
           fi
 
       - name: Allow unsigned build when credentials are absent
         # Lets the release workflow run end-to-end on a forked or secrets-less
         # repo for verification. The installer won't be publishable but the
-        # packaging path itself is exercised. Tag builds never reach this step
-        # because the secret check above already failed the job.
-        if: ${{ github.event_name == 'workflow_dispatch' && env.AZURE_CLIENT_SECRET == '' }}
+        # packaging path itself is exercised. Published builds never reach this
+        # step because the secret check above already failed the job.
+        if: ${{ env.RELEASE_CHANNEL == 'none' && env.AZURE_CLIENT_SECRET == '' }}
         shell: bash
         run: echo "OPENADMINOS_ALLOW_UNSIGNED_WINDOWS=1" >> "$GITHUB_ENV"
 
@@ -291,9 +420,10 @@ jobs:
           }
           $installer = $installers[0]
 
-          $latestYml = 'apps/desktop/release/latest.yml'
+          $updateFile = if ($env:RELEASE_CHANNEL -eq 'nightly') { 'nightly.yml' } else { 'latest.yml' }
+          $latestYml = "apps/desktop/release/$updateFile"
           if (-not (Test-Path -Path $latestYml -PathType Leaf)) {
-            Write-Output "::error::Windows build completed but apps/desktop/release/latest.yml is missing. electron-updater needs it for Windows auto-update."
+            Write-Output "::error::Windows build completed but $latestYml is missing. electron-updater needs it for Windows auto-update."
             exit 1
           }
 
@@ -362,16 +492,18 @@ jobs:
           path: |
             apps/desktop/release/*.exe
             apps/desktop/release/latest.yml
+            apps/desktop/release/nightly.yml
           if-no-files-found: error
           retention-days: 7
 
   macos-arm64:
     name: macOS (Apple Silicon) — signed + notarized
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
-    needs: release-gate
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.meta.outputs.channel != 'skip' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
+    needs: [meta, release-gate]
     runs-on: macos-26
     timeout-minutes: 30
     env:
+      RELEASE_CHANNEL: ${{ needs.meta.outputs.channel }}
       # electron-builder reads these to authenticate notarization +
       # certificate import. CSC_LINK can be a https URL or a base64
       # blob; we use the base64 path so no external storage is needed.
@@ -388,6 +520,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -398,8 +532,15 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Apply nightly version and update channel
+        if: ${{ needs.meta.outputs.channel == 'nightly' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/prepare-nightly-build.mjs "$VERSION"
+
       - name: Verify macOS release signing and notarization secrets
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        if: ${{ env.RELEASE_CHANNEL != 'none' }}
         env:
           APPLE_API_KEY_CONTENTS: ${{ secrets.APPLE_API_KEY }}
         shell: bash
@@ -419,7 +560,7 @@ jobs:
             fi
           done
           if [ "${#missing[@]}" -ne 0 ]; then
-            printf '::error::Tagged macOS releases require these signing/notarization secrets: %s\n' "${missing[*]}"
+            printf '::error::Published macOS releases (stable and nightly) require these signing/notarization secrets: %s\n' "${missing[*]}"
             exit 1
           fi
 
@@ -439,7 +580,7 @@ jobs:
         # Lets the release workflow run end-to-end on a forked or
         # secrets-less repo for verification. Artifacts won't be
         # publishable but the build path itself is exercised.
-        if: ${{ github.event_name == 'workflow_dispatch' && env.CSC_LINK == '' }}
+        if: ${{ env.RELEASE_CHANNEL == 'none' && env.CSC_LINK == '' }}
         run: |
           echo "CSC_LINK=" >> "$GITHUB_ENV"
           echo "CSC_KEY_PASSWORD=" >> "$GITHUB_ENV"
@@ -457,7 +598,8 @@ jobs:
         run: node scripts/patch-macos-signing.mjs
 
       - name: Build .dmg + .pkg + .zip (signed + notarized when secrets present)
-        # Arch is declared in package.json build.mac.target, so we only
+        # Nightlies build .dmg + .zip only; prepare-nightly-build.mjs drops
+        # the .pkg target. Arch is declared in package.json build.mac.target, so we only
         # pass --mac on the CLI; passing --arm64 here would be redundant
         # and (with some electron-builder versions) override the config.
         run: npm run dist -w @openadminos/desktop -- --mac --publish never
@@ -548,18 +690,21 @@ jobs:
             apps/desktop/release/*.pkg
             apps/desktop/release/*.zip
             apps/desktop/release/latest-mac.yml
+            apps/desktop/release/nightly-mac.yml
           if-no-files-found: error
           retention-days: 7
 
   linux-x64:
     name: Linux x64 — AppImage, deb, rpm
-    if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.backfill_apt_tag != '') }}
-    needs: release-gate
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.meta.outputs.channel != 'skip' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
+    needs: [meta, release-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -575,8 +720,16 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
+      - name: Apply nightly version and update channel
+        if: ${{ needs.meta.outputs.channel == 'nightly' }}
+        shell: bash
+        env:
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: node scripts/prepare-nightly-build.mjs "$VERSION"
+
       - name: Verify Linux repository signing secrets
-        if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+        # Only stable releases are published to the apt repository.
+        if: ${{ needs.meta.outputs.channel == 'stable' }}
         env:
           APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
         shell: bash
@@ -626,17 +779,29 @@ jobs:
             apps/desktop/release/*.deb
             apps/desktop/release/*.rpm
             apps/desktop/release/latest-linux.yml
+            apps/desktop/release/nightly-linux.yml
           if-no-files-found: error
           retention-days: 7
 
   publish-release:
     name: Publish release
-    needs: [windows-x64, macos-arm64, linux-x64]
+    needs: [meta, windows-x64, macos-arm64, linux-x64]
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    # !cancelled() plus explicit results, because the skipped release gate of
+    # a nightly would otherwise skip this job through its build jobs.
+    if: >-
+      ${{ !cancelled() &&
+          (needs.meta.outputs.channel == 'stable' || needs.meta.outputs.channel == 'nightly') &&
+          needs.windows-x64.result == 'success' &&
+          needs.macos-arm64.result == 'success' &&
+          needs.linux-x64.result == 'success' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.meta.outputs.sha }}
+          # Nightly notes list the commits since the previous release tag.
+          fetch-depth: 0
 
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -661,7 +826,10 @@ jobs:
             -name '*.rpm' -o \
             -name 'latest.yml' -o \
             -name 'latest-mac.yml' -o \
-            -name 'latest-linux.yml' \
+            -name 'latest-linux.yml' -o \
+            -name 'nightly.yml' -o \
+            -name 'nightly-mac.yml' -o \
+            -name 'nightly-linux.yml' \
           \) -print0 | while IFS= read -r -d '' file; do
             cp "$file" "release-assets/$(basename "$file")"
           done
@@ -687,6 +855,7 @@ jobs:
           cat release-assets/SHA256SUMS.txt
 
       - name: Extract release notes from CHANGELOG
+        if: ${{ needs.meta.outputs.channel == 'stable' }}
         id: notes
         shell: bash
         # TAG_NAME is sourced from github.ref_name via env so it's a
@@ -732,6 +901,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Publish release (with CHANGELOG body)
+        if: ${{ needs.meta.outputs.channel == 'stable' }}
         uses: softprops/action-gh-release@v2
         with:
           draft: false
@@ -743,11 +913,64 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Publish nightly prerelease
+        if: ${{ needs.meta.outputs.channel == 'nightly' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.meta.outputs.tag }}
+          SHA: ${{ needs.meta.outputs.sha }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          for file in nightly.yml nightly-mac.yml; do
+            if [ ! -f "release-assets/$file" ]; then
+              echo "::error::$file is missing, so installed nightlies could not update to this build." >&2
+              exit 1
+            fi
+          done
+          node scripts/nightly-release-notes.mjs "$TAG" "$SHA" release-assets > notes.md
+          {
+            printf '\n### SHA256 checksums\n\n```text\n'
+            cat release-assets/SHA256SUMS.txt
+            printf '```\n'
+          } >> notes.md
+          stamp="${VERSION##*-nightly.}"
+          title="Nightly ${stamp:0:4}-${stamp:4:2}-${stamp:6:2} ${stamp:8:2}:${stamp:10:2} UTC"
+          # --latest=false keeps /releases/latest (the website and stable
+          # installs) on the stable release. The tag is created here, at
+          # publish time, so a cancelled or failed nightly leaves no tag.
+          gh release create "$TAG" release-assets/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$SHA" \
+            --title "$title" \
+            --notes-file notes.md \
+            --prerelease \
+            --latest=false
+
+      - name: Prune old nightlies
+        if: ${{ needs.meta.outputs.channel == 'nightly' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Keep the newest 20. The newest nightly tag is also the baseline
+          # auto-tag.yml and the notes compare against, so it always survives.
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 \
+            --json tagName,isPrerelease,createdAt \
+            --jq '[.[] | select(.isPrerelease and (.tagName | test("-nightly\\.")))] | sort_by(.createdAt) | reverse | .[20:] | .[].tagName' |
+            while read -r tag; do
+              echo "Deleting old nightly $tag"
+              gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+            done
+
   publish-apt-repository:
     name: Publish apt repository
-    needs: [publish-release]
+    needs: [meta, publish-release]
     runs-on: ubuntu-latest
-    if: ${{ startsWith(github.ref, 'refs/tags/v') }}
+    # Stable only: apt users must never receive a nightly.
+    if: ${{ !cancelled() && needs.meta.outputs.channel == 'stable' && needs.publish-release.result == 'success' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -797,10 +1020,23 @@ jobs:
       - name: Validate backfill tag
         env:
           BACKFILL_TAG: ${{ inputs.backfill_apt_tag }}
+          NIGHTLY_SHA: ${{ inputs.nightly_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ -n "$NIGHTLY_SHA" ]; then
+            echo "::error::Run an apt backfill and a nightly build separately."
+            exit 1
+          fi
           if ! printf '%s' "$BACKFILL_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?$'; then
             echo "::error::Refusing apt backfill for invalid tag '$BACKFILL_TAG'."
+            exit 1
+          fi
+          # The apt repository is stable-only: never backfill a nightly or
+          # any other prerelease into it.
+          prerelease="$(gh release view "$BACKFILL_TAG" --repo OpenAdminOS/OpenAdminOS --json isPrerelease --jq .isPrerelease)"
+          if [[ "$BACKFILL_TAG" == *-nightly.* || "$prerelease" != "false" ]]; then
+            echo "::error::Refusing apt backfill for '$BACKFILL_TAG': only stable releases go into the apt repository."
             exit 1
           fi
 

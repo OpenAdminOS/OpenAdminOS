@@ -2853,6 +2853,18 @@ export interface OpenAdminOSApi {
   /** Retry the signed desktop update check immediately. */
   checkForUpdatesNow(): Promise<UpdateState>;
   /**
+   * The release channel the desktop updater follows, and why it cannot be
+   * changed on this install when it cannot.
+   */
+  getUpdateChannel(): Promise<UpdateChannelSettings>;
+  /**
+   * Switch between stable releases and nightly prereleases. Switching
+   * discards a downloaded update from the other channel and checks the new
+   * channel right away. Leaving nightly may install the current stable
+   * release even when it is older than the installed nightly.
+   */
+  setUpdateChannel(channel: UpdateChannel): Promise<UpdateChannelSettings>;
+  /**
    * Subscribe to auto-updater state changes. The supplied callback
    * fires whenever the main-process updater transitions states. The
    * returned function unsubscribes the listener.
@@ -2879,9 +2891,35 @@ export interface OpenAdminOSApi {
 }
 
 export interface UpdateState {
-  status: "idle" | "checking" | "available" | "downloading" | "ready" | "error";
+  status:
+    | "idle"
+    | "checking"
+    | "available"
+    | "not-available"
+    | "downloading"
+    | "ready"
+    | "error";
   version?: string;
   message?: string;
+}
+
+/** Stable releases, or nightly prereleases built from every merge to main. */
+export type UpdateChannel = "stable" | "nightly";
+
+/**
+ * Why the channel cannot be changed: Linux packages update through the apt
+ * repository or a manual download, Microsoft Store builds through the
+ * Store, and development runs do not update.
+ */
+export type UpdateUnavailableReason = "linux" | "windows-store" | "development";
+
+export interface UpdateChannelSettings {
+  /**
+   * The selected channel. Follows the installed build (a nightly build
+   * defaults to nightly) until the admin picks one.
+   */
+  channel: UpdateChannel;
+  unavailableReason?: UpdateUnavailableReason;
 }
 
 export interface SaveTextFileArgs {
