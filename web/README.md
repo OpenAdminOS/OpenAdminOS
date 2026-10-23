@@ -32,6 +32,14 @@ The optional stats routes use server-side variables documented in
 
 Vercel automatically deploys on every push to `main` that changes files under `web/`. Commits that only touch the desktop app or agents do not trigger a marketing rebuild.
 
+## Documentation site
+
+The same app serves the documentation at docs.openadminos.com. `next.config.js` rewrites requests for that host to `src/app/docs-host`, which renders the docs at the root of the domain. Previews and local dev serve the same pages under `/docs` (for example http://localhost:3000/docs).
+
+The pages come from `docs/gitbook` in the repository root. Vercel cannot read that folder, because the project's Root Directory is `web/`, so `npm run docs:generate` (run from the repository root) copies them into `content/docs` with a `manifest.json` of URLs and redirects. Do not edit `content/docs` by hand; edit `docs/gitbook` and regenerate. `npm run docs:check` fails CI when the copy is stale.
+
+Search runs in the browser against `/docs/search-index.json`, which is built with the site.
+
 ## Scripts
 
 | Script             | What it does                              |

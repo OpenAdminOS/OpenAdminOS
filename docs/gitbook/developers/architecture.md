@@ -15,9 +15,9 @@ OpenAdminOS is a TypeScript monorepo centered on an Electron desktop app.
 - `packages/qa-graph` validates agent manifests and Microsoft Graph usage.
 - `packages/connector-*` implement the outbound connectors (Teams, Outlook, Slack, Discord, WhatsApp Web, Signal).
 - `agents` contains the registry-backed agent manifests and documentation.
-- `web` is the Next.js marketing site deployed to openadminos.com.
+- `web` is the Next.js site deployed to openadminos.com and docs.openadminos.com.
 - `remotion` holds the pre-rendered marketing hero demo video project.
-- `docs/gitbook` contains public documentation synced to GitBook.
+- `docs/gitbook` contains the public documentation published at docs.openadminos.com.
 
 ## Boundaries
 

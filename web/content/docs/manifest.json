@@ -1,0 +1,505 @@
+{
+  "generatedBy": "scripts/generate-gitbook-docs.mjs",
+  "source": "docs/gitbook",
+  "sections": [
+    {
+      "title": "Basics",
+      "slug": "basics",
+      "pages": [
+        {
+          "title": "Overview",
+          "source": "README.md",
+          "route": "",
+          "path": "basics/readme",
+          "children": []
+        },
+        {
+          "title": "Installation",
+          "source": "getting-started/installation.md",
+          "route": "basics/installation",
+          "path": "basics/installation",
+          "children": []
+        },
+        {
+          "title": "First run",
+          "source": "getting-started/first-run.md",
+          "route": "basics/first-run",
+          "path": "basics/first-run",
+          "children": []
+        },
+        {
+          "title": "Connect a tenant",
+          "source": "getting-started/connect-tenant.md",
+          "route": "basics/connect-tenant",
+          "path": "basics/connect-tenant",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Features",
+      "slug": "features",
+      "pages": [
+        {
+          "title": "Intune Chat",
+          "source": "features/intune-chat.md",
+          "route": "features/intune-chat",
+          "path": "features/intune-chat",
+          "children": []
+        },
+        {
+          "title": "Cache and Nova",
+          "source": "features/cache-and-nova.md",
+          "route": "features/cache-and-nova",
+          "path": "features/cache-and-nova",
+          "children": []
+        },
+        {
+          "title": "Multi-tenant Intune Chat",
+          "source": "features/multi-tenant-intune-chat.md",
+          "route": "features/multi-tenant-intune-chat",
+          "path": "features/multi-tenant-intune-chat",
+          "children": []
+        },
+        {
+          "title": "Workspaces",
+          "source": "features/workspaces.md",
+          "route": "features/workspaces",
+          "path": "features/workspaces",
+          "children": []
+        },
+        {
+          "title": "Changes and drift",
+          "source": "features/changes.md",
+          "route": "features/changes",
+          "path": "features/changes",
+          "children": []
+        },
+        {
+          "title": "Agent Team",
+          "source": "features/office.md",
+          "route": "features/office",
+          "path": "features/office",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Trust model",
+      "slug": "trust-model",
+      "pages": [
+        {
+          "title": "Local-first guarantee",
+          "source": "trust/local-first.md",
+          "route": "trust-model/local-first",
+          "path": "trust-model/local-first",
+          "children": []
+        },
+        {
+          "title": "Hosted providers",
+          "source": "trust/hosted-providers.md",
+          "route": "trust-model/hosted-providers",
+          "path": "trust-model/hosted-providers",
+          "children": []
+        },
+        {
+          "title": "Write confirmation",
+          "source": "trust/write-confirmation.md",
+          "route": "trust-model/write-confirmation",
+          "path": "trust-model/write-confirmation",
+          "children": []
+        },
+        {
+          "title": "Registry trust",
+          "source": "trust/registry-trust.md",
+          "route": "trust-model/registry-trust",
+          "path": "trust-model/registry-trust",
+          "children": []
+        },
+        {
+          "title": "Sandboxed code",
+          "source": "trust/sandboxed-code.md",
+          "route": "trust-model/sandboxed-code",
+          "path": "trust-model/sandboxed-code",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Connectors",
+      "slug": "connectors",
+      "pages": [
+        {
+          "title": "Connector setup",
+          "source": "connectors/README.md",
+          "route": "connectors/connectors",
+          "path": "connectors/connectors",
+          "children": []
+        },
+        {
+          "title": "Delivery rules",
+          "source": "connectors/delivery-rules.md",
+          "route": "connectors/delivery-rules",
+          "path": "connectors/delivery-rules",
+          "children": []
+        },
+        {
+          "title": "Connector setup reference",
+          "source": "connectors/setup-reference.md",
+          "route": "connectors/setup-reference",
+          "path": "connectors/setup-reference",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Agents",
+      "slug": "agents",
+      "pages": [
+        {
+          "title": "Agent docs overview",
+          "source": "agents/README.md",
+          "route": "agents/agents",
+          "path": "agents/agents",
+          "children": []
+        },
+        {
+          "title": "Build your own Agent",
+          "source": "agents/build-your-own-agent.md",
+          "route": "agents/build-your-own-agent",
+          "path": "agents/build-your-own-agent",
+          "children": []
+        },
+        {
+          "title": "Share with community",
+          "source": "agents/share-with-community.md",
+          "route": "agents/share-with-community",
+          "path": "agents/share-with-community",
+          "children": []
+        },
+        {
+          "title": "Agent catalog",
+          "source": "generated/agent-catalog.md",
+          "route": "agents/agent-catalog",
+          "path": "agents/agent-catalog",
+          "children": []
+        },
+        {
+          "title": "Graph scope matrix",
+          "source": "generated/reference/graph-scope-matrix.md",
+          "route": "agents/graph-scope-matrix",
+          "path": "agents/graph-scope-matrix",
+          "children": []
+        },
+        {
+          "title": "Write safety matrix",
+          "source": "generated/reference/write-safety-matrix.md",
+          "route": "agents/write-safety-matrix",
+          "path": "agents/write-safety-matrix",
+          "children": []
+        },
+        {
+          "title": "Compliance overview",
+          "source": "generated/agents/compliance-overview.md",
+          "route": "agents/compliance-overview",
+          "path": "agents/compliance-overview",
+          "children": []
+        },
+        {
+          "title": "Conditional Access explainer",
+          "source": "generated/agents/conditional-access-explainer.md",
+          "route": "agents/conditional-access-explainer",
+          "path": "agents/conditional-access-explainer",
+          "children": []
+        },
+        {
+          "title": "Dormant app registrations",
+          "source": "generated/agents/dormant-app-registrations.md",
+          "route": "agents/dormant-app-registrations",
+          "path": "agents/dormant-app-registrations",
+          "children": []
+        },
+        {
+          "title": "Find inactive devices",
+          "source": "generated/agents/find-inactive-devices.md",
+          "route": "agents/find-inactive-devices",
+          "path": "agents/find-inactive-devices",
+          "children": []
+        },
+        {
+          "title": "Intune Device Posture Auditor",
+          "source": "generated/agents/intune-device-posture-auditor.md",
+          "route": "agents/intune-device-posture-auditor",
+          "path": "agents/intune-device-posture-auditor",
+          "children": []
+        },
+        {
+          "title": "Offboarding agent",
+          "source": "generated/agents/offboarding-agent.md",
+          "route": "agents/offboarding-agent",
+          "path": "agents/offboarding-agent",
+          "children": []
+        },
+        {
+          "title": "OS update posture",
+          "source": "generated/agents/os-update-posture.md",
+          "route": "agents/os-update-posture",
+          "path": "agents/os-update-posture",
+          "children": []
+        },
+        {
+          "title": "Risky user triage",
+          "source": "generated/agents/risky-sign-in-triage.md",
+          "route": "agents/risky-sign-in-triage",
+          "path": "agents/risky-sign-in-triage",
+          "children": []
+        },
+        {
+          "title": "Secure Score prioritizer",
+          "source": "generated/agents/secure-score-prioritizer.md",
+          "route": "agents/secure-score-prioritizer",
+          "path": "agents/secure-score-prioritizer",
+          "children": []
+        },
+        {
+          "title": "Sign-in failure explainer",
+          "source": "generated/agents/sign-in-failure-explainer.md",
+          "route": "agents/sign-in-failure-explainer",
+          "path": "agents/sign-in-failure-explainer",
+          "children": []
+        },
+        {
+          "title": "Stale guest cleanup",
+          "source": "generated/agents/stale-guest-cleanup.md",
+          "route": "agents/stale-guest-cleanup",
+          "path": "agents/stale-guest-cleanup",
+          "children": []
+        },
+        {
+          "title": "Team evidence review",
+          "source": "generated/agents/team-evidence-review.md",
+          "route": "agents/team-evidence-review",
+          "path": "agents/team-evidence-review",
+          "children": []
+        },
+        {
+          "title": "Team PowerShell draft",
+          "source": "generated/agents/team-script-draft.md",
+          "route": "agents/team-script-draft",
+          "path": "agents/team-script-draft",
+          "children": []
+        },
+        {
+          "title": "Tenant change audit",
+          "source": "generated/agents/tenant-change-audit.md",
+          "route": "agents/tenant-change-audit",
+          "path": "agents/tenant-change-audit",
+          "children": []
+        },
+        {
+          "title": "Tenant health report",
+          "source": "generated/agents/tenant-health-report.md",
+          "route": "agents/tenant-health-report",
+          "path": "agents/tenant-health-report",
+          "children": []
+        },
+        {
+          "title": "User license overview",
+          "source": "generated/agents/user-license-overview.md",
+          "route": "agents/user-license-overview",
+          "path": "agents/user-license-overview",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Developers",
+      "slug": "developers",
+      "pages": [
+        {
+          "title": "Architecture",
+          "source": "developers/architecture.md",
+          "route": "developers/architecture",
+          "path": "developers/architecture",
+          "children": []
+        },
+        {
+          "title": "Documentation automation",
+          "source": "developers/documentation-automation.md",
+          "route": "developers/documentation-automation",
+          "path": "developers/documentation-automation",
+          "children": []
+        },
+        {
+          "title": "LLM provider matrix",
+          "source": "generated/reference/llm-provider-matrix.md",
+          "route": "developers/llm-provider-matrix",
+          "path": "developers/llm-provider-matrix",
+          "children": []
+        }
+      ]
+    }
+  ],
+  "redirects": [
+    {
+      "source": "basics/readme",
+      "destination": ""
+    },
+    {
+      "source": "getting-started/installation",
+      "destination": "basics/installation"
+    },
+    {
+      "source": "getting-started/first-run",
+      "destination": "basics/first-run"
+    },
+    {
+      "source": "getting-started/connect-tenant",
+      "destination": "basics/connect-tenant"
+    },
+    {
+      "source": "trust/local-first",
+      "destination": "trust-model/local-first"
+    },
+    {
+      "source": "trust/hosted-providers",
+      "destination": "trust-model/hosted-providers"
+    },
+    {
+      "source": "trust/write-confirmation",
+      "destination": "trust-model/write-confirmation"
+    },
+    {
+      "source": "trust/registry-trust",
+      "destination": "trust-model/registry-trust"
+    },
+    {
+      "source": "trust/sandboxed-code",
+      "destination": "trust-model/sandboxed-code"
+    },
+    {
+      "source": "connectors",
+      "destination": "connectors/connectors"
+    },
+    {
+      "source": "agents",
+      "destination": "agents/agents"
+    },
+    {
+      "source": "generated/agent-catalog",
+      "destination": "agents/agent-catalog"
+    },
+    {
+      "source": "generated/reference/graph-scope-matrix",
+      "destination": "agents/graph-scope-matrix"
+    },
+    {
+      "source": "generated/reference/write-safety-matrix",
+      "destination": "agents/write-safety-matrix"
+    },
+    {
+      "source": "generated/agents/compliance-overview",
+      "destination": "agents/compliance-overview"
+    },
+    {
+      "source": "generated/agents/conditional-access-explainer",
+      "destination": "agents/conditional-access-explainer"
+    },
+    {
+      "source": "generated/agents/dormant-app-registrations",
+      "destination": "agents/dormant-app-registrations"
+    },
+    {
+      "source": "generated/agents/find-inactive-devices",
+      "destination": "agents/find-inactive-devices"
+    },
+    {
+      "source": "generated/agents/intune-device-posture-auditor",
+      "destination": "agents/intune-device-posture-auditor"
+    },
+    {
+      "source": "generated/agents/offboarding-agent",
+      "destination": "agents/offboarding-agent"
+    },
+    {
+      "source": "generated/agents/os-update-posture",
+      "destination": "agents/os-update-posture"
+    },
+    {
+      "source": "generated/agents/risky-sign-in-triage",
+      "destination": "agents/risky-sign-in-triage"
+    },
+    {
+      "source": "generated/agents/secure-score-prioritizer",
+      "destination": "agents/secure-score-prioritizer"
+    },
+    {
+      "source": "generated/agents/sign-in-failure-explainer",
+      "destination": "agents/sign-in-failure-explainer"
+    },
+    {
+      "source": "generated/agents/stale-guest-cleanup",
+      "destination": "agents/stale-guest-cleanup"
+    },
+    {
+      "source": "generated/agents/team-evidence-review",
+      "destination": "agents/team-evidence-review"
+    },
+    {
+      "source": "generated/agents/team-script-draft",
+      "destination": "agents/team-script-draft"
+    },
+    {
+      "source": "generated/agents/tenant-change-audit",
+      "destination": "agents/tenant-change-audit"
+    },
+    {
+      "source": "generated/agents/tenant-health-report",
+      "destination": "agents/tenant-health-report"
+    },
+    {
+      "source": "generated/agents/user-license-overview",
+      "destination": "agents/user-license-overview"
+    },
+    {
+      "source": "generated/reference/llm-provider-matrix",
+      "destination": "developers/llm-provider-matrix"
+    },
+    {
+      "source": "basics",
+      "destination": ""
+    },
+    {
+      "source": "features",
+      "destination": "features/intune-chat"
+    },
+    {
+      "source": "trust-model",
+      "destination": "trust-model/local-first"
+    },
+    {
+      "source": "developers",
+      "destination": "developers/architecture"
+    },
+    {
+      "source": "getting-started",
+      "destination": "basics/installation"
+    },
+    {
+      "source": "trust",
+      "destination": "trust-model/local-first"
+    },
+    {
+      "source": "generated",
+      "destination": "agents/agent-catalog"
+    },
+    {
+      "source": "generated/reference",
+      "destination": "agents/graph-scope-matrix"
+    },
+    {
+      "source": "generated/agents",
+      "destination": "agents/compliance-overview"
+    }
+  ]
+}

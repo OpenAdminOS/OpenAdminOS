@@ -4,7 +4,6 @@ import "@fontsource-variable/newsreader/opsz.css";
 import "~/styles/globals.css";
 
 import { type Metadata, type Viewport } from "next";
-import Script from "next/script";
 
 import { RevealObserver } from "./RevealObserver";
 import { THEME_INIT_SCRIPT } from "./theme";
@@ -17,6 +16,7 @@ import {
   TWITTER_IMAGE_PATH,
   absoluteUrl,
 } from "./seo";
+import { SiteAnalytics } from "./SiteAnalytics";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -90,11 +90,6 @@ export const viewport: Viewport = {
   ],
 };
 
-const PLAUSIBLE_SCRIPT_URL =
-  "https://plausible.io/js/pa-XFfGfDtFtmyoJlLIYR5dv.js";
-const PLAUSIBLE_INIT_SCRIPT = `window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};
-plausible.init()`;
-
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
@@ -106,14 +101,7 @@ export default function RootLayout({
       <body className="bg-brand-bg font-sans text-brand-ink antialiased">
         {children}
         <RevealObserver />
-        <Script id="plausible-init" strategy="afterInteractive">
-          {PLAUSIBLE_INIT_SCRIPT}
-        </Script>
-        <Script
-          async
-          src={PLAUSIBLE_SCRIPT_URL}
-          strategy="afterInteractive"
-        />
+        <SiteAnalytics />
       </body>
     </html>
   );
