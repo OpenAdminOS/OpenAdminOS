@@ -358,10 +358,10 @@ export default async function HomePage() {
                 {mark ? (
                   <svg
                     aria-hidden
-                    viewBox="0 0 24 24"
-                    className="h-5 w-5 shrink-0 fill-current text-brand-ink"
+                    viewBox={mark.viewBox}
+                    className={`h-5 w-5 shrink-0 fill-current ${mark.className ?? "text-brand-ink"}`}
                   >
-                    <path d={mark} />
+                    <path d={mark.d} />
                   </svg>
                 ) : null}
                 {name}
