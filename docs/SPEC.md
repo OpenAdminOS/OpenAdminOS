@@ -1745,8 +1745,12 @@ chrome when that preference changes. Midnight remains an explicit dark theme.
 The preference stays on the device, is synchronized across renderer windows,
 and emits no telemetry. Saved `graphite` and `dark` values map to Dark;
 `off-white`, `sand`, and `light` map to Light; `midnight` remains Midnight.
-Unknown old values safely fall back to System. The public website follows the
-visitor's `prefers-color-scheme` with the same warm paper Light and graphite
+Unknown old values safely fall back to System. The public website offers a
+header theme toggle that cycles System, Light, and Dark; the choice is stored
+in `localStorage` on the device (no cookie) and applied by an inline script
+before first paint, and without JavaScript the site follows
+`prefers-color-scheme`. Colors are `light-dark()` tokens keyed off
+`data-theme` on `<html>`. It uses the same warm paper Light and graphite
 Dark palettes, ink-colored primary actions, Newsreader for headlines and Geist
 for the interface (self-hosted through `@fontsource-variable`, no runtime font
 requests), sentence case, and the `oa` mark with a Newsreader "OpenAdminOS"
