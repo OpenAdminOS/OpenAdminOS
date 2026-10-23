@@ -4,10 +4,10 @@
 
 Decisions (Ugur, 2026-10-23): build after every merge to `main`, channel name "Nightly", Linux packages attached to the prerelease but never published to apt. Design ported from TenuVault (`origin/main`, including #219).
 
-- [ ] Pipeline: `auto-tag.yml` cuts a stable release when the package version is untagged, otherwise dispatches a nightly when app paths changed since the last `v*` tag.
-- [ ] Pipeline: `release.yml` resolves the channel in a `meta` job; nightlies skip the release gate (CI already passed on that commit), set `X.Y.Z-nightly.YYYYMMDDHHMMSS` and the `nightly` update channel at build time, publish a signed prerelease with `--latest=false`, prune to 20, and never touch apt.
-- [ ] App: channel-aware updater (ported from TenuVault), newer stable offered to nightly users, Settings > About toggle and "Check for updates", Nightly badge in the status strip.
-- [ ] Docs: `docs/RELEASING.md`, `docs/SPEC.md`, `CHANGELOG.md`.
+- [x] Pipeline: `auto-tag.yml` cuts a stable release when the package version is untagged, otherwise dispatches a nightly when app paths changed since the last `v*` tag.
+- [x] Pipeline: `release.yml` resolves the channel in a `meta` job; nightlies skip the release gate (CI already passed on that commit), set `X.Y.Z-nightly.YYYYMMDDHHMMSS` and the `nightly` update channel at build time, publish a signed prerelease with `--latest=false`, prune to 20, and never touch apt.
+- [x] App: channel-aware updater (ported from TenuVault), newer stable offered to nightly users, Settings > About toggle and "Check for updates", Nightly badge in the status strip.
+- [x] Docs: `docs/RELEASING.md`, `docs/SPEC.md`, `CHANGELOG.md`.
 
 Acceptance criteria:
 1. A green CI run on `main` whose diff since the last `v*` tag touches only `stats/`, `web/`, `docs/`, `tasks/`, `.github/` or root Markdown dispatches nothing.
@@ -17,6 +17,8 @@ Acceptance criteria:
 5. Nightly runs never deploy the apt repository and fail if signing secrets are missing.
 6. A stable install never offers a nightly. A nightly install offers newer nightlies and any newer stable. Turning nightly off on a nightly install offers the current stable even if older. Updates from a previous channel are cancelled or discarded.
 7. Version tooling, notes generation, and updater channel logic are covered by tests that run in CI.
+
+Review (2026-10-23): all seven criteria pass. Separate Claude reviewer plus three GPT-6.1-Sol rounds (approved in round 3). Fixed from review: macOS install-time channel lock, prerelease guard on apt backfill, pipefail-safe path listing, queued nightlies with a `skip` re-check so the hourly stats commit cannot restart a build, never publishing a commit an existing tag already contains, switch-before-save for the channel preference, Privacy/About channel sync. Declined: discovering nightlies beyond GitHub's Atom feed window (needs 10+ consecutive non-nightly releases; the paginated REST fallback would hit the 60 requests/hour unauthenticated limit). Verified locally: typecheck, 450 desktop, 214 renderer (Node 22), 8 script tests, actionlint, a nightly-versioned macOS package writing `nightly-mac.yml` and `channel: nightly`, and the Settings and status-strip UI in the dev app. Not verified locally: Windows NSIS packaging (needs Rosetta) and signed publication; the first nightly after merge is that check.
 
 - [ ] Prepare **0.6.4** after PR #91: fix issue #89 where a Windows provider-probe `spawn EINVAL` aborted tenant connection. Batch launchers are resolved or refused, synchronous spawn failures are contained, and provider checks are isolated. Verified on the Windows mini PC and macOS.
 - [ ] Close the known Chat, Nova and Agent Team demo blockers using the [0.6.3 live desktop readiness plan](./demo-readiness-063-plan.md), then verify the signed installed build against the configured tenant/providers.
