@@ -610,6 +610,20 @@ describe("Settings provider section", () => {
     expect(screen.queryByText("Stable releases only.", { exact: false })).not.toBeInTheDocument();
   });
 
+  it("updates the Privacy row when nightly builds are turned on in About", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({ platform: "macos" });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/about", bridge });
+
+    expect(await screen.findByText(/Stable releases only\./)).toBeInTheDocument();
+    const nightly = await screen.findByRole("switch", { name: "Get nightly builds" });
+    await waitFor(() => expect(nightly).toBeEnabled());
+    await user.click(nightly);
+
+    expect(await screen.findByText(/Nightly prereleases, plus any newer stable release\./)).toBeInTheDocument();
+    expect(screen.queryByText(/Stable releases only\./)).not.toBeInTheDocument();
+  });
+
   it("disables the update channel with an explanation on Linux", async () => {
     const bridge = makeMockBridge({
       getUpdateChannel: vi.fn(async () => ({

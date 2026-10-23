@@ -4532,24 +4532,38 @@ function updateChannelLoadErrorText(cause: string | null): string {
   return `The update channel could not be read.${reason ? ` ${reason}` : ""} Reopen Settings to try again.`;
 }
 
+// Privacy and About both show the channel; a change saved in About is
+// announced so every mounted section follows it without a remount.
+const UPDATE_CHANNEL_CHANGED_EVENT = "openadminos:update-channel-changed";
+
+function announceUpdateChannel(settings: UpdateChannelSettings): void {
+  window.dispatchEvent(new CustomEvent<UpdateChannelSettings>(UPDATE_CHANNEL_CHANGED_EVENT, { detail: settings }));
+}
+
 function useUpdateChannel() {
   const [settings, setSettings] = useState<UpdateChannelSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
+    const onChanged = (event: Event) => {
+      setSettings((event as CustomEvent<UpdateChannelSettings>).detail);
+      setLoadError(null);
+    };
+    window.addEventListener(UPDATE_CHANNEL_CHANGED_EVENT, onChanged);
     window.openAdminOS
       ?.getUpdateChannel()
       .then((next) => {
-        if (!cancelled) setSettings(next);
+        if (!cancelled) setSettings((current) => current ?? next);
       })
       .catch((error: unknown) => {
         if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
       });
     return () => {
       cancelled = true;
+      window.removeEventListener(UPDATE_CHANNEL_CHANGED_EVENT, onChanged);
     };
   }, []);
-  return { settings, setSettings, loadError };
+  return { settings, loadError };
 }
 
 function updateStatusText(state: UpdateState, channel: UpdateChannelSettings["channel"]): string {
@@ -4571,7 +4585,7 @@ function updateStatusText(state: UpdateState, channel: UpdateChannelSettings["ch
 }
 
 function AppUpdateRows() {
-  const { settings, setSettings, loadError } = useUpdateChannel();
+  const { settings, loadError } = useUpdateChannel();
   const [state, setState] = useState<UpdateState>({ status: "idle" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -4604,7 +4618,7 @@ function AppUpdateRows() {
     setSaving(true);
     setError(null);
     try {
-      setSettings(await api.setUpdateChannel(next ? "nightly" : "stable"));
+      announceUpdateChannel(await api.setUpdateChannel(next ? "nightly" : "stable"));
     } catch (cause) {
       const reason = userFacingErrorReason(cause instanceof Error ? cause.message : String(cause));
       setError(`The update channel was not changed.${reason ? ` ${reason}` : ""} Try again.`);
