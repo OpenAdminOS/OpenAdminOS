@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>28 · Logo explorations · OpenAdminOS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Newsreader:opsz,wght@6..72,500&display=swap" rel="stylesheet">
+  <!-- Proposal: alternatives to the current OA mark, shown at the sizes the app uses. -->
+  <style>
+    :root { --fg: var(--foreground, #1F1D1A); --muted-fg: var(--muted-foreground, #78736B); --bd: var(--border, rgba(31,29,26,.12)); }
+    body { margin: 0; font: 14px/1.5 "Geist", ui-sans-serif, system-ui, sans-serif; color: var(--fg); }
+    .wrap { display: flex; flex-direction: column; gap: 22px; padding: 4px 0 8px; }
+    .c-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 2px; }
+    .c-head b { font-weight: 600; }
+    .rec { font-size: 12px; font-weight: 500; padding: 1px 8px; border-radius: 6px; background: color-mix(in srgb, var(--fg) 9%, transparent); }
+    .c p { margin: 0 0 10px; color: var(--muted-fg); }
+    .panes { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .pane { display: flex; align-items: center; gap: 18px; padding: 16px; border-radius: 12px; }
+    .light { background: #FAF9F6; color: #1F1D1A; --cut: #FAF9F6; --ink: #1F1D1A; --paper: #FAF9F6; box-shadow: inset 0 0 0 1px rgba(31,29,26,.08); }
+    .dark { background: #17191D; color: #F4F5F7; --cut: #17191D; --ink: #F4F5F7; --paper: #17191D; }
+    .big { width: 56px; height: 56px; }
+    .tile { width: 44px; height: 44px; flex: none; display: grid; place-items: center; border-radius: 11px; background: var(--ink); color: var(--paper); --cut: var(--ink); }
+    .tile svg { width: 28px; height: 28px; }
+    .lockup { display: flex; align-items: center; gap: 8px; font-weight: 600; letter-spacing: -.01em; white-space: nowrap; }
+    .lockup svg { width: 20px; height: 20px; }
+    .lockup.serif { font-family: "Newsreader", Georgia, serif; font-weight: 500; font-size: 17px; letter-spacing: -.005em; }
+    .fav { width: 16px; height: 16px; }
+    .sizes { display: flex; flex-direction: column; gap: 2px; font-size: 11px; opacity: .55; }
+    svg { flex: none; }
+  </style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- Current OA mark (shipped) -->
+  <symbol id="m-current" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" fill="currentColor"/><path style="fill:var(--cut)" fill-rule="evenodd" d="M30 16H70Q84 16 84 30V70Q84 84 70 84L50 50L30 84Q16 84 16 70V30Q16 16 30 16Z M32 28H68Q72 28 72 32V69L50 31L28 69V32Q28 28 32 28Z M46 64H54L59 73H41Z"/></symbol>
+  <!-- A: lowercase "oa" ligature -->
+  <symbol id="m-oa" viewBox="0 0 64 64"><g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"><circle cx="17" cy="32" r="11.5"/><circle cx="46" cy="32" r="11.5"/><path d="M57.5 20.5v23"/></g></symbol>
+  <!-- B: open ring around a held square -->
+  <symbol id="m-ring" viewBox="0 0 64 64"><path d="M32 11A21 21 0 1 0 53 32" fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"/><rect x="25" y="25" width="14" height="14" rx="3.5" fill="currentColor"/></symbol>
+  <!-- C: scoped agent (brackets around a dot) -->
+  <symbol id="m-scope" viewBox="0 0 64 64"><g fill="none" stroke="currentColor" stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 13h-8v38h8"/><path d="M43 13h8v38h-8"/></g><circle cx="32" cy="32" r="8" fill="currentColor"/></symbol>
+  <!-- D: stacked tenants -->
+  <symbol id="m-stack" viewBox="0 0 64 64"><g fill="none" stroke="currentColor" stroke-width="5"><rect x="7.5" y="7.5" width="29" height="29" rx="7" opacity=".4"/><rect x="16.5" y="16.5" width="29" height="29" rx="7" opacity=".7"/></g><rect x="25" y="25" width="32" height="32" rx="8" fill="currentColor"/></symbol>
+</svg>
+
+<div class="wrap">
+
+  <section class="c">
+    <div class="c-head"><b>Current · OA tile</b></div>
+    <p>Monochrome and already shipped, but at sidebar and favicon size the frame and the inner A blur into one shape, and it reads as "A in a box" rather than OA.</p>
+    <div class="panes">
+      <div class="pane light"><svg class="big"><use href="#m-current"/></svg><svg style="width:44px;height:44px"><use href="#m-current"/></svg><span class="lockup"><svg><use href="#m-current"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-current"/></svg></div>
+      <div class="pane dark"><svg class="big"><use href="#m-current"/></svg><svg style="width:44px;height:44px"><use href="#m-current"/></svg><span class="lockup"><svg><use href="#m-current"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-current"/></svg></div>
+    </div>
+  </section>
+
+  <section class="c">
+    <div class="c-head"><b>A · oa ligature</b><span class="rec">Recommended</span></div>
+    <p>The initials as one continuous lowercase shape. Name-based like most OS brands, unlike any AI app's mark, and still clear at 16px. Pairs with the Newsreader wordmark.</p>
+    <div class="panes">
+      <div class="pane light"><svg class="big"><use href="#m-oa"/></svg><span class="tile"><svg><use href="#m-oa"/></svg></span><span class="lockup serif"><svg><use href="#m-oa"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-oa"/></svg></div>
+      <div class="pane dark"><svg class="big"><use href="#m-oa"/></svg><span class="tile"><svg><use href="#m-oa"/></svg></span><span class="lockup serif"><svg><use href="#m-oa"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-oa"/></svg></div>
+    </div>
+  </section>
+
+  <section class="c">
+    <div class="c-head"><b>B · Open ring</b></div>
+    <p>An open O holding a solid square: open source around a tenant that stays on your device. Explains local-first without words, but at small sizes it can read as a loading spinner.</p>
+    <div class="panes">
+      <div class="pane light"><svg class="big"><use href="#m-ring"/></svg><span class="tile"><svg><use href="#m-ring"/></svg></span><span class="lockup"><svg><use href="#m-ring"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-ring"/></svg></div>
+      <div class="pane dark"><svg class="big"><use href="#m-ring"/></svg><span class="tile"><svg><use href="#m-ring"/></svg></span><span class="lockup"><svg><use href="#m-ring"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-ring"/></svg></div>
+    </div>
+  </section>
+
+  <section class="c">
+    <div class="c-head"><b>C · Scoped agent</b></div>
+    <p>An agent (the dot) inside a scope (the brackets): nothing runs outside the tenant you chose. Technical and crisp, closest to the old terminal-adjacent tone.</p>
+    <div class="panes">
+      <div class="pane light"><svg class="big"><use href="#m-scope"/></svg><span class="tile"><svg><use href="#m-scope"/></svg></span><span class="lockup"><svg><use href="#m-scope"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-scope"/></svg></div>
+      <div class="pane dark"><svg class="big"><use href="#m-scope"/></svg><span class="tile"><svg><use href="#m-scope"/></svg></span><span class="lockup"><svg><use href="#m-scope"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-scope"/></svg></div>
+    </div>
+  </section>
+
+  <section class="c">
+    <div class="c-head"><b>D · Tenant stack</b></div>
+    <p>Several tenants, one in front. Says multi-tenant at a glance, but it sits close to generic "layers" icons, so it is the least ownable.</p>
+    <div class="panes">
+      <div class="pane light"><svg class="big"><use href="#m-stack"/></svg><span class="tile"><svg><use href="#m-stack"/></svg></span><span class="lockup"><svg><use href="#m-stack"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-stack"/></svg></div>
+      <div class="pane dark"><svg class="big"><use href="#m-stack"/></svg><span class="tile"><svg><use href="#m-stack"/></svg></span><span class="lockup"><svg><use href="#m-stack"/></svg>OpenAdminOS</span><svg class="fav"><use href="#m-stack"/></svg></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
