@@ -14,13 +14,14 @@ export const SHOT_WIDTH = 1920;
 export const SHOT_HEIGHT = 1012;
 
 /**
- * A real screenshot of the desktop app that follows the visitor's light or
- * dark preference. Only the matching file is downloaded.
+ * A real screenshot of the desktop app in the active theme. Both files are
+ * rendered; CSS shows the one that matches (see .theme-img-* in
+ * globals.css), and the hidden one is never fetched when it is lazy.
  */
 export function AppShot({
   screen,
   alt,
-  className,
+  className = "",
   style,
   priority = false,
 }: {
@@ -31,23 +32,22 @@ export function AppShot({
   priority?: boolean;
 }) {
   return (
-    <picture>
-      <source
-        media="(prefers-color-scheme: dark)"
-        srcSet={`/app/${screen}-dark.webp`}
-      />
-      <img
-        src={`/app/${screen}-light.webp`}
-        width={SHOT_WIDTH}
-        height={SHOT_HEIGHT}
-        alt={alt}
-        loading={priority ? "eager" : "lazy"}
-        decoding="async"
-        fetchPriority={priority ? "high" : undefined}
-        className={className}
-        style={style}
-      />
-    </picture>
+    <>
+      {(["light", "dark"] as const).map((theme) => (
+        <img
+          key={theme}
+          src={`/app/${screen}-${theme}.webp`}
+          width={SHOT_WIDTH}
+          height={SHOT_HEIGHT}
+          alt={alt}
+          loading={priority ? "eager" : "lazy"}
+          decoding="async"
+          fetchPriority={priority ? "high" : undefined}
+          className={`theme-img-${theme} ${className}`}
+          style={style}
+        />
+      ))}
+    </>
   );
 }
 

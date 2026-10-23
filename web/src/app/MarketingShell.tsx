@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import { Stage, type StageTone } from "./home/Stage";
 import { LogoMark, Wordmark } from "./Logo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
+import { ThemeToggle } from "./ThemeToggle";
 import { DOCS_URL, GITHUB_URL, LINKEDIN_URL } from "./seo";
 import { card, eyebrow } from "./ui";
 
@@ -92,23 +93,32 @@ export function MarketingShell({
             aria-label="Main"
             className="hidden items-center gap-1 text-sm text-brand-muted lg:flex"
           >
-            {MARKETING_NAV_ITEMS.map((item) => (
+            {MARKETING_NAV_ITEMS.filter((item) => !item.primary).map((item) => (
               <Link
                 key={item.href}
                 href={item.href}
                 target={item.external ? "_blank" : undefined}
                 rel={item.external ? "noreferrer" : undefined}
-                className={
-                  item.primary
-                    ? "ml-3 inline-flex h-9 items-center rounded-[10px] bg-brand-ink px-3.5 font-medium text-brand-on-ink transition-colors hover:bg-brand-ink-hover"
-                    : "rounded-lg px-3 py-1.5 transition-colors hover:bg-brand-hover hover:text-brand-ink"
-                }
+                className="rounded-lg px-3 py-1.5 transition-colors hover:bg-brand-hover hover:text-brand-ink"
+              >
+                {item.label}
+              </Link>
+            ))}
+            <ThemeToggle className="ml-2" />
+            {MARKETING_NAV_ITEMS.filter((item) => item.primary).map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="ml-2 inline-flex h-9 items-center rounded-[10px] bg-brand-ink px-3.5 font-medium text-brand-on-ink transition-colors hover:bg-brand-ink-hover"
               >
                 {item.label}
               </Link>
             ))}
           </nav>
-          <MobileNav items={MARKETING_NAV_ITEMS} />
+          <div className="flex items-center gap-2 lg:hidden">
+            <ThemeToggle />
+            <MobileNav items={MARKETING_NAV_ITEMS} />
+          </div>
         </div>
       </header>
 

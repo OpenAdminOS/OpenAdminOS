@@ -7,36 +7,36 @@
  * meaning: focus, local vs hosted, read vs write, destructive.
  */
 @theme {
-  --color-brand-bg: #faf9f6;
-  --color-brand-surface: #f2f0eb;
-  --color-brand-floor: #f2efe9;
-  --color-brand-bubble: #eeebe5;
-  --color-brand-raised: #ffffff;
-  --color-brand-card: #ffffff;
-  --color-brand-hover: rgba(31, 29, 26, 0.05);
-  --color-brand-line: rgba(31, 29, 26, 0.12);
-  --color-brand-line-soft: rgba(31, 29, 26, 0.065);
-  --color-brand-line-strong: rgba(31, 29, 26, 0.22);
-  --color-brand-ink: #1f1d1a;
-  --color-brand-ink-hover: #37342f;
-  --color-brand-on-ink: #faf9f6;
-  --color-brand-muted: #5c5852;
-  --color-brand-faint: #6f6a63;
-  --color-brand-dot: rgba(31, 29, 26, 0.11);
-  --color-brand-code: rgba(31, 29, 26, 0.045);
-  --color-brand-focus: #2f6feb;
+  --color-brand-bg: light-dark(#faf9f6, #17191d);
+  --color-brand-surface: light-dark(#f2f0eb, #121418);
+  --color-brand-floor: light-dark(#f2efe9, #1a1d22);
+  --color-brand-bubble: light-dark(#eeebe5, #262a31);
+  --color-brand-raised: light-dark(#ffffff, #22262c);
+  --color-brand-card: light-dark(#ffffff, #1e2126);
+  --color-brand-hover: light-dark(rgba(31, 29, 26, 0.05), rgba(255, 255, 255, 0.05));
+  --color-brand-line: light-dark(rgba(31, 29, 26, 0.12), rgba(255, 255, 255, 0.12));
+  --color-brand-line-soft: light-dark(rgba(31, 29, 26, 0.065), rgba(255, 255, 255, 0.065));
+  --color-brand-line-strong: light-dark(rgba(31, 29, 26, 0.22), rgba(255, 255, 255, 0.24));
+  --color-brand-ink: light-dark(#1f1d1a, #f4f5f7);
+  --color-brand-ink-hover: light-dark(#37342f, #ffffff);
+  --color-brand-on-ink: light-dark(#faf9f6, #17191d);
+  --color-brand-muted: light-dark(#5c5852, #c2c7ce);
+  --color-brand-faint: light-dark(#6f6a63, #98a0ab);
+  --color-brand-dot: light-dark(rgba(31, 29, 26, 0.11), rgba(255, 255, 255, 0.09));
+  --color-brand-code: light-dark(rgba(31, 29, 26, 0.045), rgba(255, 255, 255, 0.055));
+  --color-brand-focus: light-dark(#2f6feb, #8fb4ff);
   /* Legacy names kept so older markup resolves to the calm palette. */
-  --color-brand-accent: #1f1d1a;
-  --color-brand-accent-text: #1f1d1a;
-  --color-brand-ok: #3a7246;
-  --color-brand-ok-surface: rgba(58, 114, 70, 0.08);
-  --color-brand-warn: #895a05;
-  --color-brand-warn-surface: rgba(138, 91, 5, 0.08);
-  --color-brand-danger: #a8382b;
-  --color-brand-danger-surface: rgba(168, 56, 43, 0.07);
-  --color-brand-danger-line: rgba(168, 56, 43, 0.3);
-  --color-brand-on-danger: #ffffff;
-  --color-brand-info: #345d83;
+  --color-brand-accent: light-dark(#1f1d1a, #f4f5f7);
+  --color-brand-accent-text: light-dark(#1f1d1a, #f4f5f7);
+  --color-brand-ok: light-dark(#3a7246, #9cc88f);
+  --color-brand-ok-surface: light-dark(rgba(58, 114, 70, 0.08), rgba(156, 200, 143, 0.1));
+  --color-brand-warn: light-dark(#895a05, #e5c678);
+  --color-brand-warn-surface: light-dark(rgba(138, 91, 5, 0.08), rgba(229, 198, 120, 0.1));
+  --color-brand-danger: light-dark(#a8382b, #f1a0a0);
+  --color-brand-danger-surface: light-dark(rgba(168, 56, 43, 0.07), rgba(241, 160, 160, 0.1));
+  --color-brand-danger-line: light-dark(rgba(168, 56, 43, 0.3), rgba(241, 160, 160, 0.32));
+  --color-brand-on-danger: light-dark(#ffffff, #17191d);
+  --color-brand-info: light-dark(#345d83, #a3bfd9);
 
   --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui,
     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -45,51 +45,32 @@
   --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono",
     SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
 
-  --shadow-frame: 0 0 0 1px rgba(31, 29, 26, 0.08),
-    0 2px 6px rgba(31, 29, 26, 0.04), 0 30px 80px -24px rgba(31, 29, 26, 0.22);
-  --shadow-pop: 0 0 0 1px rgba(31, 29, 26, 0.07),
-    0 10px 32px rgba(31, 29, 26, 0.12);
+  --shadow-frame: 0 0 0 1px
+      light-dark(rgba(31, 29, 26, 0.08), rgba(255, 255, 255, 0.1)),
+    0 2px 6px light-dark(rgba(31, 29, 26, 0.04), transparent),
+    0 30px 80px -24px light-dark(rgba(31, 29, 26, 0.22), rgba(0, 0, 0, 0.7));
+  --shadow-pop: 0 0 0 1px
+      light-dark(rgba(31, 29, 26, 0.07), rgba(255, 255, 255, 0.09)),
+    0 10px 32px light-dark(rgba(31, 29, 26, 0.12), rgba(0, 0, 0, 0.45));
 
   --ease-calm: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-brand-bg: #17191d;
-    --color-brand-surface: #121418;
-    --color-brand-floor: #1a1d22;
-    --color-brand-bubble: #262a31;
-    --color-brand-raised: #22262c;
-    --color-brand-card: #1e2126;
-    --color-brand-hover: rgba(255, 255, 255, 0.05);
-    --color-brand-line: rgba(255, 255, 255, 0.12);
-    --color-brand-line-soft: rgba(255, 255, 255, 0.065);
-    --color-brand-line-strong: rgba(255, 255, 255, 0.24);
-    --color-brand-ink: #f4f5f7;
-    --color-brand-ink-hover: #ffffff;
-    --color-brand-on-ink: #17191d;
-    --color-brand-muted: #c2c7ce;
-    --color-brand-faint: #98a0ab;
-    --color-brand-dot: rgba(255, 255, 255, 0.09);
-    --color-brand-code: rgba(255, 255, 255, 0.055);
-    --color-brand-focus: #8fb4ff;
-    --color-brand-accent: #f4f5f7;
-    --color-brand-accent-text: #f4f5f7;
-    --color-brand-ok: #9cc88f;
-    --color-brand-ok-surface: rgba(156, 200, 143, 0.1);
-    --color-brand-warn: #e5c678;
-    --color-brand-warn-surface: rgba(229, 198, 120, 0.1);
-    --color-brand-danger: #f1a0a0;
-    --color-brand-danger-surface: rgba(241, 160, 160, 0.1);
-    --color-brand-danger-line: rgba(241, 160, 160, 0.32);
-    --color-brand-on-danger: #17191d;
-    --color-brand-info: #a3bfd9;
+/*
+ * Theme: light-dark() picks each color from the root color-scheme. The
+ * theme toggle sets data-theme on <html> before first paint; without it
+ * (no JavaScript) the site follows the system preference.
+ */
+:root {
+  color-scheme: light dark;
+}
 
-    --shadow-frame: 0 0 0 1px rgba(255, 255, 255, 0.1),
-      0 30px 80px -24px rgba(0, 0, 0, 0.7);
-    --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.09),
-      0 12px 36px rgba(0, 0, 0, 0.45);
-  }
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 /*
@@ -97,74 +78,41 @@
  * reverse in dark). Re-scopes the tokens so children keep using brand-*.
  */
 .band-ink {
-  --color-brand-bg: #1f1d1a;
-  --color-brand-surface: #2a2723;
-  --color-brand-card: #26231f;
-  --color-brand-raised: #2e2b26;
-  --color-brand-floor: #23201c;
-  --color-brand-bubble: #34302b;
-  --color-brand-hover: rgba(250, 249, 246, 0.06);
-  --color-brand-line: rgba(250, 249, 246, 0.14);
-  --color-brand-line-soft: rgba(250, 249, 246, 0.07);
-  --color-brand-line-strong: rgba(250, 249, 246, 0.26);
-  --color-brand-ink: #faf9f6;
-  --color-brand-ink-hover: #ffffff;
-  --color-brand-on-ink: #1f1d1a;
-  --color-brand-muted: #cfcac2;
-  --color-brand-faint: #a9a399;
-  --color-brand-dot: rgba(250, 249, 246, 0.1);
-  --color-brand-code: rgba(250, 249, 246, 0.07);
-  --color-brand-focus: #8fb4ff;
-  --color-brand-accent: #faf9f6;
-  --color-brand-accent-text: #faf9f6;
-  --color-brand-ok: #9cc88f;
-  --color-brand-ok-surface: rgba(156, 200, 143, 0.12);
-  --color-brand-warn: #e5c678;
-  --color-brand-warn-surface: rgba(229, 198, 120, 0.12);
-  --color-brand-danger: #f1a0a0;
-  --color-brand-danger-surface: rgba(241, 160, 160, 0.1);
-  --color-brand-danger-line: rgba(241, 160, 160, 0.32);
+  --color-brand-bg: light-dark(#1f1d1a, #f4f3ef);
+  --color-brand-surface: light-dark(#2a2723, #ebe8e2);
+  --color-brand-card: light-dark(#26231f, #ffffff);
+  --color-brand-raised: light-dark(#2e2b26, #ffffff);
+  --color-brand-floor: light-dark(#23201c, #ece9e3);
+  --color-brand-bubble: light-dark(#34302b, #e5e1da);
+  --color-brand-hover: light-dark(rgba(250, 249, 246, 0.06), rgba(31, 29, 26, 0.05));
+  --color-brand-line: light-dark(rgba(250, 249, 246, 0.14), rgba(31, 29, 26, 0.12));
+  --color-brand-line-soft: light-dark(rgba(250, 249, 246, 0.07), rgba(31, 29, 26, 0.065));
+  --color-brand-line-strong: light-dark(rgba(250, 249, 246, 0.26), rgba(31, 29, 26, 0.22));
+  --color-brand-ink: light-dark(#faf9f6, #1f1d1a);
+  --color-brand-ink-hover: light-dark(#ffffff, #37342f);
+  --color-brand-on-ink: light-dark(#1f1d1a, #faf9f6);
+  --color-brand-muted: light-dark(#cfcac2, #5c5852);
+  --color-brand-faint: light-dark(#a9a399, #6f6a63);
+  --color-brand-dot: light-dark(rgba(250, 249, 246, 0.1), rgba(31, 29, 26, 0.11));
+  --color-brand-code: light-dark(rgba(250, 249, 246, 0.07), rgba(31, 29, 26, 0.045));
+  --color-brand-focus: light-dark(#8fb4ff, #2f6feb);
+  --color-brand-accent: light-dark(#faf9f6, #1f1d1a);
+  --color-brand-accent-text: light-dark(#faf9f6, #1f1d1a);
+  --color-brand-ok: light-dark(#9cc88f, #3a7246);
+  --color-brand-ok-surface: light-dark(rgba(156, 200, 143, 0.12), rgba(58, 114, 70, 0.08));
+  --color-brand-warn: light-dark(#e5c678, #895a05);
+  --color-brand-warn-surface: light-dark(rgba(229, 198, 120, 0.12), rgba(138, 91, 5, 0.08));
+  --color-brand-danger: light-dark(#f1a0a0, #a8382b);
+  --color-brand-danger-surface: light-dark(rgba(241, 160, 160, 0.1), rgba(168, 56, 43, 0.07));
+  --color-brand-danger-line: light-dark(rgba(241, 160, 160, 0.32), rgba(168, 56, 43, 0.3));
   background: var(--color-brand-bg);
   color: var(--color-brand-ink);
-}
-
-@media (prefers-color-scheme: dark) {
-  .band-ink {
-    --color-brand-bg: #f4f3ef;
-    --color-brand-surface: #ebe8e2;
-    --color-brand-card: #ffffff;
-    --color-brand-raised: #ffffff;
-    --color-brand-floor: #ece9e3;
-    --color-brand-bubble: #e5e1da;
-    --color-brand-hover: rgba(31, 29, 26, 0.05);
-    --color-brand-line: rgba(31, 29, 26, 0.12);
-    --color-brand-line-soft: rgba(31, 29, 26, 0.065);
-    --color-brand-line-strong: rgba(31, 29, 26, 0.22);
-    --color-brand-ink: #1f1d1a;
-    --color-brand-ink-hover: #37342f;
-    --color-brand-on-ink: #faf9f6;
-    --color-brand-muted: #5c5852;
-    --color-brand-faint: #6f6a63;
-    --color-brand-dot: rgba(31, 29, 26, 0.11);
-    --color-brand-code: rgba(31, 29, 26, 0.045);
-    --color-brand-focus: #2f6feb;
-    --color-brand-accent: #1f1d1a;
-    --color-brand-accent-text: #1f1d1a;
-    --color-brand-ok: #3a7246;
-    --color-brand-ok-surface: rgba(58, 114, 70, 0.08);
-    --color-brand-warn: #895a05;
-    --color-brand-warn-surface: rgba(138, 91, 5, 0.08);
-    --color-brand-danger: #a8382b;
-    --color-brand-danger-surface: rgba(168, 56, 43, 0.07);
-    --color-brand-danger-line: rgba(168, 56, 43, 0.3);
-  }
 }
 
 @layer base {
   html {
     background: var(--color-brand-bg);
     color: var(--color-brand-ink);
-    color-scheme: light dark;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
@@ -222,7 +170,7 @@
 
 /*
  * Art stages: generated relief-map artwork (web/scripts/stage-art) behind
- * product windows. Only the file for the active color scheme is fetched.
+ * product windows. Only the file for the active theme is fetched.
  */
 .stage {
   background-color: var(--stage-fallback, var(--color-brand-floor));
@@ -247,51 +195,45 @@
 .stage-sand {
   --stage-light: url("/art/stage-sand-light.webp");
   --stage-dark: url("/art/stage-sand-dark.webp");
-  --stage-fallback: #e2dacb;
+  --stage-fallback: light-dark(#e2dacb, #24262b);
 }
 
 .stage-sage {
   --stage-light: url("/art/stage-sage-light.webp");
   --stage-dark: url("/art/stage-sage-dark.webp");
-  --stage-fallback: #c9d1c0;
+  --stage-fallback: light-dark(#c9d1c0, #202823);
 }
 
 .stage-slate {
   --stage-light: url("/art/stage-slate-light.webp");
   --stage-dark: url("/art/stage-slate-dark.webp");
-  --stage-fallback: #c4cdd6;
+  --stage-fallback: light-dark(#c4cdd6, #1e252e);
 }
 
 .stage-clay {
   --stage-light: url("/art/stage-clay-light.webp");
   --stage-dark: url("/art/stage-clay-dark.webp");
-  --stage-fallback: #dec4ae;
+  --stage-fallback: light-dark(#dec4ae, #2e231f);
+}
+
+/* Dark stage art, by explicit choice or, without JavaScript, by system preference. */
+:root[data-theme="dark"] .stage {
+  background-image: var(--stage-dark);
+}
+
+:root[data-theme="dark"] .stage::after {
+  mix-blend-mode: screen;
+  opacity: 0.06;
 }
 
 @media (prefers-color-scheme: dark) {
-  .stage {
+  :root:not([data-theme]) .stage {
     background-image: var(--stage-dark);
   }
 
-  .stage::after {
+  :root:not([data-theme]) .stage::after {
     mix-blend-mode: screen;
     opacity: 0.06;
-  }
-
-  .stage-sand {
-    --stage-fallback: #24262b;
-  }
-
-  .stage-sage {
-    --stage-fallback: #202823;
-  }
-
-  .stage-slate {
-    --stage-fallback: #1e252e;
-  }
-
-  .stage-clay {
-    --stage-fallback: #2e231f;
   }
 }
 
@@ -398,8 +340,8 @@
 .brand-cell::before {
   background: linear-gradient(
     to top,
-    color-mix(in srgb, var(--brand) 26%, transparent),
-    color-mix(in srgb, var(--brand) 7%, transparent)
+    color-mix(in srgb, var(--brand) 32%, transparent),
+    color-mix(in srgb, var(--brand) 8%, transparent)
   );
   content: "";
   inset: 0;
@@ -416,16 +358,6 @@
 
 .brand-cell:hover::before {
   transform: scaleY(1);
-}
-
-@media (prefers-color-scheme: dark) {
-  .brand-cell::before {
-    background: linear-gradient(
-      to top,
-      color-mix(in srgb, var(--brand) 38%, transparent),
-      color-mix(in srgb, var(--brand) 10%, transparent)
-    );
-  }
 }
 
 /* Scroll reveal. Content stays visible without JavaScript. */
@@ -458,4 +390,35 @@
   .brand-cell::before {
     transition: none;
   }
+}
+
+/*
+ * Screenshots ship as a light and a dark file. Only the one for the active
+ * theme is displayed, and lazy images that stay hidden are not fetched.
+ */
+.theme-img-dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .theme-img-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .theme-img-dark {
+  display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-img-light {
+    display: none;
+  }
+
+  :root:not([data-theme]) .theme-img-dark {
+    display: block;
+  }
+}
+
+/* The toggle needs JavaScript; without it the page follows the system. */
+:root:not([data-theme]) .theme-toggle {
+  display: none;
 }

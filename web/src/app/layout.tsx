@@ -7,6 +7,7 @@ import { type Metadata, type Viewport } from "next";
 import Script from "next/script";
 
 import { RevealObserver } from "./RevealObserver";
+import { THEME_INIT_SCRIPT } from "./theme";
 import {
   HOME_DESCRIPTION,
   HOME_TITLE,
@@ -98,7 +99,10 @@ export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en">
+    <html lang="en" suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_INIT_SCRIPT }} />
+      </head>
       <body className="bg-brand-bg font-sans text-brand-ink antialiased">
         {children}
         <RevealObserver />

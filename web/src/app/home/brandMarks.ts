@@ -35,7 +35,7 @@ export const BRAND_MARKS: Readonly<Record<string, BrandMark>> = {
   },
   Mistral: {
     viewBox: "11 21 140 120",
-    className: "text-[#151524] dark:text-white",
+    className: "text-[light-dark(#151524,#ffffff)]",
     d: "M31 31h20v20h-20zM111 31h20v20h-20zM71 91h20v20h-20zM31 91h20v20h-20zM111 91h20v20h-20zM31 51h40v20h-40zM11 111h60v20h-60zM91 111h60v20h-60zM31 71h100v20h-100zM91 51h40v20h-40z",
   },
 };
