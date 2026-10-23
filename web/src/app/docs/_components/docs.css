@@ -227,6 +227,11 @@
   white-space: nowrap;
 }
 
+/* Keep the label column (agent or setting names) from wrapping per word. */
+.docs-table td:first-child {
+  min-width: 10rem;
+}
+
 /* Mobile navigation drawer. */
 .docs-drawer {
   transition:
