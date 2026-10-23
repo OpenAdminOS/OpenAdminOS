@@ -124,29 +124,17 @@ jobs:
         if: ${{ steps.current.outputs.matches == 'true' && steps.existing.outputs.exists == 'true' }}
         run: |
           set -euo pipefail
-          base="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
-          if [ -z "$base" ]; then
-            echo "::warning::No v* tag is reachable from HEAD; skipping the nightly build."
-            echo "build=false" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          # Paths that never change the installed app. Everything else,
-          # including agents/, packages/, apps/ and build scripts, does.
-          changed="$(git diff --name-only "$base" HEAD -- . \
-            ':(exclude)stats' \
-            ':(exclude)web' \
-            ':(exclude)docs' \
-            ':(exclude)tasks' \
-            ':(exclude)model' \
-            ':(exclude)remotion' \
-            ':(exclude).github' \
-            ':(exclude,glob)*.md')"
+          changed="$(bash scripts/nightly-app-changes.sh HEAD)"
           if [ -z "$changed" ]; then
-            echo "::notice::No app changes since $base; skipping the nightly build."
+            echo "::notice::No app changes since the newest v* tag; skipping the nightly build."
             echo "build=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          echo "App changes since $base:"
+          # A nightly that is still building has not tagged its commit yet,
+          # so later green commits (the hourly install-stats commit, for
+          # example) dispatch again. release.yml queues those runs behind the
+          # running one and skips them when nothing is left to build.
+          echo "App changes:"
           # sed reads all of its input; head would close the pipe early and
           # fail this step under pipefail when many paths changed.
           printf '%s\n' "$changed" | sed -n '1,50p'

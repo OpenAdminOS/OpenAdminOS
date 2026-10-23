@@ -15,7 +15,9 @@ name: Release
 #     and are published as a prerelease that is never marked latest, so the
 #     website and stable installs keep seeing the stable release. Linux
 #     packages are attached to the prerelease only; apt stays stable-only.
-#     The newest 20 nightlies are kept.
+#     The newest 20 nightlies are kept. Nightly runs queue behind each other;
+#     a queued run whose app changes the previous nightly already shipped
+#     resolves to the "skip" channel and builds nothing.
 #   - None: any other workflow_dispatch builds without publishing.
 #
 # Outputs:
@@ -76,10 +78,13 @@ permissions:
   pages: write
 
 concurrency:
-  # Nightlies share one group, so a newer merge replaces a nightly that is
-  # still building. Stable releases are grouped per tag and never cancelled.
+  # Nightlies share one group and queue: a running nightly always finishes,
+  # and GitHub keeps only the newest waiting run, which re-checks for app
+  # changes when it starts. Cancelling instead would let the hourly
+  # install-stats commit restart a nightly build over and over. Stable
+  # releases are grouped per tag and never cancelled.
   group: release-${{ inputs.nightly_sha && 'nightly' || github.ref }}
-  cancel-in-progress: ${{ inputs.nightly_sha && true || false }}
+  cancel-in-progress: false
 
 env:
   # Opt into Node 24 for JavaScript actions ahead of GitHub's June 2026
@@ -132,6 +137,17 @@ jobs:
               echo "::error::$NIGHTLY_SHA is not on main; only main commits ship as nightlies." >&2
               exit 1
             fi
+            if [ -z "$(bash scripts/nightly-app-changes.sh "$NIGHTLY_SHA")" ]; then
+              # The nightly this run queued behind already shipped these changes.
+              echo "::notice::No app changes since the newest v* tag; nothing to build."
+              {
+                echo "channel=skip"
+                echo "version="
+                echo "tag="
+                echo "sha=$NIGHTLY_SHA"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
             package_version="$(node -p "require('./package.json').version")"
             mapfile -t tags < <(git tag --list 'v*')
             result="$(node scripts/release-version.mjs nightly "$package_version" "$(date -u +%Y%m%d%H%M%S)" "${tags[@]}")"
@@ -171,7 +187,7 @@ jobs:
     # Nightlies skip this gate: auto-tag.yml only dispatches them after CI,
     # which runs the same checks, passed on exactly this commit.
     needs: meta
-    if: ${{ needs.meta.outputs.channel != 'nightly' }}
+    if: ${{ needs.meta.outputs.channel == 'stable' || needs.meta.outputs.channel == 'none' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     env:
@@ -265,7 +281,7 @@ jobs:
     name: Windows x64, signed NSIS installer
     # The release gate is skipped for nightlies, so accept a skipped gate
     # explicitly; a plain `needs` would skip this job too.
-    if: ${{ !cancelled() && needs.meta.result == 'success' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.meta.outputs.channel != 'skip' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
     needs: [meta, release-gate]
     runs-on: windows-latest
     timeout-minutes: 40
@@ -482,7 +498,7 @@ jobs:
 
   macos-arm64:
     name: macOS (Apple Silicon) — signed + notarized
-    if: ${{ !cancelled() && needs.meta.result == 'success' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.meta.outputs.channel != 'skip' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
     needs: [meta, release-gate]
     runs-on: macos-26
     timeout-minutes: 30
@@ -680,7 +696,7 @@ jobs:
 
   linux-x64:
     name: Linux x64 — AppImage, deb, rpm
-    if: ${{ !cancelled() && needs.meta.result == 'success' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
+    if: ${{ !cancelled() && needs.meta.result == 'success' && needs.meta.outputs.channel != 'skip' && (needs.release-gate.result == 'success' || needs.release-gate.result == 'skipped') }}
     needs: [meta, release-gate]
     runs-on: ubuntu-latest
     timeout-minutes: 30

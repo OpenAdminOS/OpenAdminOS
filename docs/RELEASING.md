@@ -273,8 +273,8 @@ release-prep PR. They are fully automatic.
 How it runs:
 
 1. After CI succeeds on the current `main` commit and the package version is
-   already tagged, `auto-tag.yml` diffs the commit against the newest `v*`
-   tag of either channel. If anything outside `stats/`, `web/`, `docs/`,
+   already tagged, `auto-tag.yml` runs `scripts/nightly-app-changes.sh`, which
+   diffs the commit against the newest `v*` tag of either channel. If anything outside `stats/`, `web/`, `docs/`,
    `tasks/`, `model/`, `remotion/`, `.github/`, or root Markdown changed, it
    dispatches `release.yml` on `main` with `nightly_sha`. Comparing with the
    newest tag, not the parent commit, means a merge whose CI was cancelled by
@@ -289,8 +289,13 @@ How it runs:
    `scripts/nightly-release-notes.mjs`, and deletes all but the newest 20
    nightlies with their tags. A cancelled or failed nightly leaves no tag.
 
-Nightly runs share one concurrency group: a newer merge cancels a nightly that
-is still building. Stable runs are never cancelled.
+Nightly runs share one concurrency group and queue rather than cancel: a
+running nightly always finishes, and GitHub keeps only the newest waiting run.
+A nightly has no tag until it publishes, so later green commits (the hourly
+install-stats commit, for example) dispatch again while it builds. When a
+queued run starts, `meta` re-runs `scripts/nightly-app-changes.sh` against the
+now-tagged previous nightly; with nothing new it resolves to the `skip` channel
+and builds nothing. Stable runs are never cancelled.
 
 Why the website and stable installs never see a nightly: `/releases/latest`
 ignores prereleases, and electron-updater on the stable channel reads
