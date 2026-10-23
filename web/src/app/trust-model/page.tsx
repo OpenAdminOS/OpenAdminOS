@@ -65,6 +65,7 @@ export default function TrustModelPage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="slate"
         eyebrow="Trust model"
         title="Tenant data stays local unless you choose otherwise."
         description={DESCRIPTION}

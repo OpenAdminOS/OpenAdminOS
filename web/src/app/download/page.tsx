@@ -116,6 +116,7 @@ export default async function DownloadPage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="sand"
         eyebrow="Download"
         title="Download the local-first desktop app."
         description={DESCRIPTION}

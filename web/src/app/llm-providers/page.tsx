@@ -61,6 +61,7 @@ export default function LlmProvidersPage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="clay"
         eyebrow="Provider model"
         title="Local models by default, hosted models by choice."
         description={DESCRIPTION}

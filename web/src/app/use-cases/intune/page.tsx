@@ -66,6 +66,7 @@ export default function IntuneUseCasePage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="sage"
         eyebrow="Intune use cases"
         title="Tenant investigations that need more than a script."
         description={DESCRIPTION}

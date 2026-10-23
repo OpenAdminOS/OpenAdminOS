@@ -369,6 +369,7 @@ export default function ExamplesPage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="slate"
         eyebrow="Examples gallery"
         title="Prompts that draft useful Microsoft 365 agents."
         description={DESCRIPTION}

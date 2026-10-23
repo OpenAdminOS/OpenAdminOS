@@ -78,6 +78,7 @@ export default function RegistryPage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="sage"
         eyebrow="Agent registry"
         title="Community agents with declared tenant access."
         description={DESCRIPTION}
