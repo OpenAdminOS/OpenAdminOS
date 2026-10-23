@@ -3,14 +3,22 @@
  *
  * Hand-authored pages live under docs/gitbook. Generated pages live under
  * docs/gitbook/generated and should not be edited manually.
+ *
+ * The docs site in web/ cannot read docs/ during the Vercel build, because
+ * the Vercel project's Root Directory is web/. This script therefore also
+ * mirrors every page listed in SUMMARY.md into web/content/docs together with
+ * a manifest of routes and redirects. docs/gitbook stays the source; the
+ * mirror is checked by `npm run docs:check`.
  */
 
 import { execFileSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -18,6 +26,8 @@ import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { load as parseYaml } from "js-yaml";
+
+import { buildDocsSite, parseSummary } from "./docs-site-routes.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -27,6 +37,7 @@ const generatedAgentsRoot = join(generatedRoot, "agents");
 const generatedReferenceRoot = join(generatedRoot, "reference");
 const agentsRoot = join(repoRoot, "agents");
 const registryPath = join(agentsRoot, "index.json");
+const webDocsRoot = join(repoRoot, "web", "content", "docs");
 
 function ensureDir(path) {
   mkdirSync(path, { recursive: true });
@@ -417,7 +428,7 @@ function summaryPage(agents) {
 - [Changes and drift](features/changes.md)
 - [Agent Team](features/office.md)
 
-## Trust Model
+## Trust model
 
 - [Local-first guarantee](trust/local-first.md)
 - [Hosted providers](trust/hosted-providers.md)
@@ -455,6 +466,31 @@ function writeGeneratedFile(relativePath, content) {
   writeFileSync(path, content.endsWith("\n") ? content : `${content}\n`);
 }
 
+function writeWebDocsMirror() {
+  const summary = readFileSync(join(docsRoot, "SUMMARY.md"), "utf8");
+  const site = buildDocsSite(parseSummary(summary));
+
+  rmSync(webDocsRoot, { recursive: true, force: true });
+  for (const page of site.pages) {
+    const from = join(docsRoot, page.source);
+    if (!existsSync(from)) {
+      throw new Error(`SUMMARY.md links to a missing page: ${page.source}`);
+    }
+    const to = join(webDocsRoot, page.source);
+    ensureDir(dirname(to));
+    copyFileSync(from, to);
+  }
+
+  const manifest = {
+    generatedBy: "scripts/generate-gitbook-docs.mjs",
+    source: "docs/gitbook",
+    sections: site.sections,
+    redirects: site.redirects,
+  };
+  writeFileSync(join(webDocsRoot, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
+  return site;
+}
+
 function main() {
   ensureDir(generatedAgentsRoot);
   ensureDir(generatedReferenceRoot);
@@ -484,6 +520,11 @@ function main() {
 
   const generatedRelative = relative(repoRoot, generatedRoot);
   console.log(`Generated GitBook docs in ${generatedRelative} for ${agents.length} agent(s).`);
+
+  const site = writeWebDocsMirror();
+  console.log(
+    `Mirrored ${site.pages.length} page(s) and ${site.redirects.length} redirect(s) into ${relative(repoRoot, webDocsRoot)}.`,
+  );
 }
 
 main();
