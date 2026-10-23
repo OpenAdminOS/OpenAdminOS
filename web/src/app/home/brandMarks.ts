@@ -1,7 +1,8 @@
 // Brand marks for the homepage works-with grid, from Simple Icons v16.35.0
 // (CC0-1.0, https://simpleicons.org). The marks remain trademarks of their
-// owners and are used only to name compatible tools. Microsoft, Apple, and
-// OpenAI marks are deliberately not used; those entries render as names.
+// owners and are used only to name compatible tools. Microsoft, Apple,
+// OpenAI, Google, Meta, and Mistral marks are deliberately not used; those
+// entries render as names.
 // Each path is drawn on a 24 x 24 view box.
 
 export const BRAND_MARKS: Readonly<Record<string, string>> = {

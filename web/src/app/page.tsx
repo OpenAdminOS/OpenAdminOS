@@ -52,15 +52,15 @@ const benchmarkLead = leadOverHosted();
 // Hover tints use each company's brand color. Black-and-white brands use the
 // page ink so they tint neutrally in light and dark.
 const WORKS_WITH: readonly { name: string; color: string }[] = [
-  { name: "Microsoft Graph", color: "#0078D4" },
-  { name: "Intune", color: "#28A8EA" },
-  { name: "Entra ID", color: "#4F6BED" },
   { name: "Ollama", color: "var(--color-brand-ink)" },
   { name: "LM Studio", color: "var(--color-brand-ink)" },
   { name: "Apple Foundation", color: "#8E8E93" },
+  { name: "Mistral", color: "#FA520F" },
+  { name: "Muse by Meta", color: "#0866FF" },
   { name: "Claude Code", color: "#D97757" },
   { name: "OpenAI Codex", color: "#10A37F" },
   { name: "GitHub Copilot", color: "#8534F3" },
+  { name: "Google Gemini", color: "#8E75B2" },
   { name: "Azure OpenAI", color: "#0089D6" },
 ];
 
@@ -344,7 +344,7 @@ export default async function HomePage() {
       {/* Works with */}
       <section className="mx-auto w-full max-w-7xl px-6 pt-16 sm:px-10">
         <p className="text-center text-sm text-brand-faint">
-          Works with the tenant and the models you already use
+          Works with the models you already use
         </p>
         <ul className="mt-6 grid grid-cols-2 border-l border-t border-brand-line sm:grid-cols-5">
           {WORKS_WITH.map(({ name, color }) => {
