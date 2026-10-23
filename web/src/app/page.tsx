@@ -61,7 +61,9 @@ const WORKS_WITH: readonly { name: string; color: string }[] = [
   { name: "OpenAI Codex", color: "#10A37F" },
   { name: "GitHub Copilot", color: "#8534F3" },
   { name: "Google Gemini", color: "#8E75B2" },
+  { name: "Microsoft AI", color: "#0078D4" },
   { name: "Azure OpenAI", color: "#0089D6" },
+  { name: "Other local models", color: "var(--color-brand-ink)" },
 ];
 
 const FIGURES = [
@@ -346,7 +348,7 @@ export default async function HomePage() {
         <p className="text-center text-sm text-brand-faint">
           Works with the models you already use
         </p>
-        <ul className="mt-6 grid grid-cols-2 border-l border-t border-brand-line sm:grid-cols-5">
+        <ul className="mt-6 grid grid-cols-2 border-l border-t border-brand-line sm:grid-cols-4 lg:grid-cols-6">
           {WORKS_WITH.map(({ name, color }) => {
             const mark = BRAND_MARKS[name];
             return (
