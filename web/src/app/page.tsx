@@ -9,11 +9,15 @@ import {
 } from "~/lib/benchmarks/data";
 import { getAgentStatsSummary } from "~/lib/stats/summary";
 
-import { ProductDemo } from "./product-demo/ProductDemo";
 import { DiffConfirmationDemo } from "./DiffConfirmationDemo";
 import { getGitHubDownloadCount } from "./github-downloads";
 import { getGitHubRepoStats } from "./github-repo";
-import { MobileNav, type MobileNavItem } from "./MobileNav";
+import { AgentRun } from "./home/AgentRun";
+import { REGISTRY_AGENTS, type RegistryAgent } from "./home/agents";
+import { AppCrop, AppShot, type AppScreen } from "./home/AppShot";
+import { DownloadCta } from "./home/DownloadCta";
+import { LockIcon } from "./home/icons";
+import { MarketingShell } from "./MarketingShell";
 import { getLatestReleaseDownloads } from "./release-downloads";
 import {
   DOCS_URL,
@@ -28,6 +32,7 @@ import {
   webPageSchema,
   websiteSchema,
 } from "./seo";
+import { buttonSecondary, card, eyebrow, sectionTitle } from "./ui";
 
 export const revalidate = 900;
 
@@ -38,22 +43,126 @@ export const metadata: Metadata = pageMetadata({
   absoluteTitle: true,
 });
 
-const HOME_NAV_ITEMS: readonly MobileNavItem[] = [
-  { href: "/benchmarks", label: "Benchmarks" },
-  { href: "/blog", label: "Blog" },
-  { href: DOCS_URL, label: "Documentation", external: true },
-  { href: GITHUB_URL, label: "GitHub", external: true },
-  { href: "/download", label: "Download", primary: true },
-];
-
 const benchmarkTiles = rankedModels();
 const benchmarkLead = leadOverHosted();
 
-const PROOF_ITEMS = [
-  ["MIT", "Commercial-friendly license"],
-  ["Open runtime", "Agents, desktop app, registry, and SDK"],
-  ["Forkable registry", "Point enterprises at their own curated agents"],
-  ["No tenant telemetry", "Tenant content does not leave by default"],
+/** Numbered callouts on the hero screenshot, in screenshot pixels. */
+const HERO_CALLOUTS = [
+  {
+    x: 694,
+    y: 192,
+    title: "Scope and data age",
+    text: "Every answer opens with the tenant, the sources it read, and how old the data is.",
+  },
+  {
+    x: 694,
+    y: 294,
+    title: "Numbered sources",
+    text: "Claims point to the Microsoft Graph source and row count behind them.",
+  },
+  {
+    x: 1646,
+    y: 25,
+    title: "The active model",
+    text: "The provider and model in use sit in the title bar, all the time.",
+  },
+  {
+    x: 930,
+    y: 989,
+    title: "Where data goes",
+    text: "Said once, under the composer, in plain words.",
+  },
+] as const;
+
+const PRINCIPLES = [
+  {
+    title: "Local-first",
+    text: "With a local model, tenant data, prompts, and answers stay on this device.",
+  },
+  {
+    title: "Honest about egress",
+    text: "Choose a hosted model and the app says that tenant context will be sent to it.",
+  },
+  {
+    title: "Writes wait for you",
+    text: "Every write shows a diff first. Destructive ones need a typed phrase.",
+  },
+  {
+    title: "Open source",
+    text: "MIT licensed: the app, the agent runtime, the SDK, and the registry.",
+  },
+] as const;
+
+const RUN_STEPS = [
+  {
+    title: "Scope first.",
+    text: "No agent starts without an active tenant, and that tenant stays visible in the title bar.",
+  },
+  {
+    title: "Evidence second.",
+    text: "Reads go through Microsoft Graph with the scopes the agent declared. Answers carry their sources and data age.",
+  },
+  {
+    title: "Changes last.",
+    text: "A write agent prepares a plan and stops. You review each Graph call before anything is applied.",
+  },
+] as const;
+
+const LOCAL_PROVIDERS = ["Ollama", "LM Studio", "Apple Foundation"] as const;
+const HOSTED_PROVIDERS = [
+  "Anthropic via Claude Code",
+  "OpenAI Codex",
+  "GitHub Copilot",
+  "Google Gemini",
+  "Azure OpenAI",
+] as const;
+
+const WRITE_RULES = [
+  "No skip toggle and no “trust this agent” exception.",
+  "Destructive operations stay disabled until the exact phrase is typed.",
+  "The same rule applies to registry agents, private agents, and Agent Team.",
+] as const;
+
+const FEATURE_TILES: readonly {
+  title: string;
+  text: string;
+  screen: AppScreen;
+  alt: string;
+  crop: { x: number; y: number; width: number; aspect: string };
+  className: string;
+}[] = [
+  {
+    title: "Chat with sources and data age",
+    text: "Ask about the tenant in plain language. Answers open with their scope and data age, cite the Graph sources they used, and suggest an installed agent when one fits.",
+    screen: "chat-transcript",
+    alt: "Chat answer in OpenAdminOS with tenant scope, data age, and two numbered Microsoft Graph sources",
+    crop: { x: 700, y: 60, width: 790, aspect: "16 / 10" },
+    className: "lg:col-span-4",
+  },
+  {
+    title: "Your model, labeled",
+    text: "Local and hosted providers side by side, each marked for where it runs.",
+    screen: "settings",
+    alt: "Provider settings listing Ollama, Apple Foundation, and LM Studio as local, and hosted providers marked as hosted",
+    crop: { x: 846, y: 188, width: 470, aspect: "4 / 5" },
+    className: "lg:col-span-2",
+  },
+  {
+    title: "Scopes before you run",
+    text: "Each agent lists the Graph permissions it needs. Missing consent is requested before the first run.",
+    screen: "agent-drawer",
+    alt: "Agent details for Find inactive devices showing its Microsoft Graph permission and schedule settings",
+    crop: { x: 1364, y: 56, width: 440, aspect: "4 / 5" },
+    className: "lg:col-span-2",
+  },
+  {
+    title: "Agent Team",
+    text: "Give a teammate a role, a tenant, a provider, and up to eight installed agents. Run once or on a schedule. Every result stays linked to the run that produced it.",
+    screen: "agent-team",
+    alt: "Agent Team page in OpenAdminOS with the office view and assignment history",
+    crop: { x: 510, y: 60, width: 1150, aspect: "16 / 10" },
+    className: "lg:col-span-4",
+  },
 ];
 
 const COMMON_QUESTIONS = [
@@ -89,44 +198,34 @@ const COMMON_QUESTIONS = [
   },
 ];
 
+const TESTIMONIAL = {
+  name: "Merill Fernando",
+  role: "Founder at Jozra",
+  href: "https://www.linkedin.com/in/merill/",
+  image: "/testimonials/merill-fernando.jpg",
+  quote:
+    "I'm a huge fan of OpenAdminOS. It's the first tool that let me use local AI with 100% privacy to manage my tenants.",
+} as const;
+
 function formatStat(value: number) {
   return new Intl.NumberFormat("en-US").format(value);
 }
 
-const testimonials = [
-  {
-    name: "Merill Fernando",
-    role: "Founder at Jozra",
-    href: "https://www.linkedin.com/in/merill/",
-    image: "/testimonials/merill-fernando.jpg",
-    quote:
-      "I'm a huge fan of OpenAdminOS. It's the first tool that let me use local AI with 100% privacy to manage my tenants.",
-  },
-  {
-    name: "Ugur Koc",
-    role: "Founder of OpenAdminOS and UgurLabs",
-    href: "https://www.linkedin.com/in/ugurkocde/",
-    image: "/testimonials/ugur-koc.jpg",
-    quote:
-      "This just proves that you don't need any expensive licenses to run agents and that you don't have to compromise on privacy at all.",
-  },
-] as const;
-
 export default async function HomePage() {
-  const [latestRelease, githubRepoStats, agentStatsSummary, downloadCount] = await Promise.all([
-    getLatestReleaseDownloads(),
-    getGitHubRepoStats(),
-    getAgentStatsSummary(),
-    getGitHubDownloadCount(),
-  ]);
+  const [latestRelease, githubRepoStats, agentStatsSummary, downloadCount] =
+    await Promise.all([
+      getLatestReleaseDownloads(),
+      getGitHubRepoStats(),
+      getAgentStatsSummary(),
+      getGitHubDownloadCount(),
+    ]);
+  // Live numbers only. A source that is unavailable is left out, never faked.
   const tractionItems = [
     ...(githubRepoStats
-      ? [
-          {
-            value: formatStat(githubRepoStats.stars),
-            label: "GitHub stars",
-          },
-        ]
+      ? [{ value: formatStat(githubRepoStats.stars), label: "GitHub stars" }]
+      : []),
+    ...(downloadCount !== null
+      ? [{ value: formatStat(downloadCount), label: "Downloads" }]
       : []),
     ...(agentStatsSummary
       ? [
@@ -136,14 +235,13 @@ export default async function HomePage() {
           },
         ]
       : []),
-    ...(downloadCount !== null
-      ? [{ value: formatStat(downloadCount), label: "Downloads" }]
-      : []),
-    {
-      value: "MIT",
-      label: "Licensed, open source",
-    },
+    { value: "MIT", label: "License" },
   ];
+  const downloadUrls = {
+    macos: latestRelease.macosDmgUrl,
+    windows: latestRelease.windowsExeUrl,
+    linux: latestRelease.linuxAppImageUrl,
+  };
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -164,552 +262,629 @@ export default async function HomePage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-brand-bg text-brand-ink">
+    <MarketingShell bare>
       <JsonLd data={structuredData} />
-      <div
-        aria-hidden
-        className="brand-grid pointer-events-none absolute inset-0"
-      />
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-brand-accent/50 to-transparent"
-      />
-      <a
-        href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-50 focus:rounded-md focus:bg-brand-ink focus:px-3 focus:py-2 focus:text-sm focus:font-semibold focus:text-brand-bg focus:outline-none focus:ring-2 focus:ring-brand-accent"
-      >
-        Skip to content
-      </a>
 
-      <header className="relative z-30 mx-auto flex w-full max-w-7xl items-center justify-between px-6 py-6 sm:px-10">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
-        >
-          <img
-            src="/icon.svg"
-            alt=""
-            aria-hidden
-            className="h-5 w-5 rounded-[4px]"
-          />
-          OpenAdminOS
-        </Link>
-        <nav className="hidden items-center gap-6 text-sm text-brand-muted md:flex">
-          {HOME_NAV_ITEMS.map((item) => (
-            <Link
-              key={item.href}
-              href={item.href}
-              target={item.external ? "_blank" : undefined}
-              rel={item.external ? "noreferrer" : undefined}
-              className={
-                item.primary
-                  ? "rounded-md bg-brand-ink px-3 py-1.5 text-xs font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-                  : "transition hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              }
-            >
-              {item.label}
-            </Link>
-          ))}
-        </nav>
-        <MobileNav items={HOME_NAV_ITEMS} />
-      </header>
-
-      <main
-        id="main-content"
-        tabIndex={-1}
-        className="relative z-10 flex flex-1 flex-col items-center px-6 sm:px-10"
-      >
-        <section className="flex flex-col items-center pt-10 text-center sm:pt-14">
+      {/* Hero */}
+      <section className="relative isolate overflow-hidden">
+        <div
+          aria-hidden
+          className="brand-dots brand-dots-fade pointer-events-none absolute inset-0 -z-10"
+        />
+        <div className="mx-auto w-full max-w-7xl px-6 pb-10 pt-16 sm:px-10 sm:pt-24 lg:pt-28">
           <Link
             href={latestRelease.releaseNotesUrl}
             target="_blank"
             rel="noreferrer"
-            className="mb-5 inline-flex items-center gap-2 rounded-full border border-brand-line-strong bg-brand-surface px-3 py-1 text-xs font-medium uppercase tracking-wider text-brand-accent-text transition hover:border-brand-accent hover:text-brand-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
+            className="inline-flex items-center gap-2 rounded-full border border-brand-line bg-brand-raised py-1 pl-1 pr-3 text-sm text-brand-muted transition-colors hover:text-brand-ink"
           >
-            <span className="h-1.5 w-1.5 rounded-full bg-brand-accent" />
-            {latestRelease.version} · release notes
+            <span className="rounded-full bg-brand-ink px-2 py-0.5 text-xs font-medium text-brand-on-ink">
+              {latestRelease.version}
+            </span>
+            Release notes
+            <span aria-hidden>→</span>
           </Link>
 
-          <h1 className="max-w-4xl text-balance text-5xl font-semibold tracking-tight sm:text-7xl">
-            AI agents for your Microsoft 365 tenant.{" "}
-            <span className="block">Run locally, approved by you.</span>
+          <h1 className="font-display mt-8 max-w-[17ch] text-balance text-[3.1rem] leading-[0.98] sm:text-[5.25rem] lg:text-[6.75rem]">
+            Agents for your Microsoft 365 tenant.{" "}
+            <em className="text-brand-faint">On your own machine.</em>
           </h1>
 
-          <p className="mt-5 max-w-2xl text-balance text-base leading-7 text-brand-muted sm:text-lg">
-            OpenAdminOS is an open-source desktop app for Intune and Entra
-            admins. Agents investigate your tenant with local models, and every
-            Graph change waits for your confirmation.
-          </p>
-
-          <div className="mt-8 grid w-full max-w-3xl gap-3 md:grid-cols-3">
-            <div className="flex min-w-0 flex-col items-stretch gap-1.5">
-              <a
-                href={latestRelease.macosDmgUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(0,0,0,0.45)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              >
-                <svg
-                  aria-hidden
-                  viewBox="0 0 384 512"
-                  className="h-4 w-4 fill-current"
-                >
-                  <path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zM256.6 105.8c30.3-36 27.6-68.8 26.7-80.6-26.8 1.6-57.8 18.3-75.5 38.8-19.5 22-31 49.2-28.5 80 29 2.2 55.5-12.7 77.3-38.2z" />
-                </svg>
-                Download for macOS
-              </a>
-              <Link
-                href="/download#macos-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-accent-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              >
-                Downloads the DMG. PKG is available for managed rollout.
-              </Link>
-            </div>
-            <div className="flex min-w-0 flex-col items-stretch gap-1.5">
-              <a
-                href={latestRelease.linuxAppImageUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(0,0,0,0.45)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              >
-                <img
-                  src="/linux.svg"
-                  alt=""
-                  aria-hidden
-                  width={16}
-                  height={16}
-                  className="h-4 w-4"
-                />
-                Download for Linux
-              </a>
-              <Link
-                href="/download#linux-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-accent-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              >
-                AppImage direct. DEB/RPM available.
-              </Link>
-            </div>
-            <div className="flex min-w-0 flex-col items-stretch gap-1.5">
-              <a
-                href={latestRelease.windowsExeUrl}
-                className="inline-flex h-11 w-full items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-brand-ink px-4 text-sm font-semibold text-brand-bg shadow-[0_8px_30px_-4px_rgba(0,0,0,0.45)] transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              >
-                <svg
-                  aria-hidden
-                  viewBox="0 0 448 512"
-                  className="h-4 w-4 fill-current"
-                >
-                  <path d="M0 93.7l183.6-25.3v177.4H0V93.7zm0 324.6l183.6 25.3V268.4H0v149.9zm203.8 28L448 480V268.4H203.8v177.9zm0-380.6v180.1H448V32L203.8 65.7z" />
-                </svg>
-                Download for Windows
-              </a>
-              <Link
-                href="/download#windows-packages"
-                className="min-h-4 text-center text-[11px] leading-4 text-brand-muted underline-offset-4 transition hover:text-brand-accent-text hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-              >
-                Signed per-user installer. No admin rights needed.
-              </Link>
-            </div>
-          </div>
-
-          <p className="mt-3 text-[11.5px] text-brand-muted">
-            Free and open-source. MIT licensed.{" "}
-            <Link
-              href={GITHUB_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-brand-accent-text underline-offset-4 hover:text-brand-ink hover:underline"
-            >
-              github.com/OpenAdminOS/OpenAdminOS
-            </Link>
-          </p>
-        </section>
-
-        <section className="relative isolate mt-12 w-full max-w-[88rem] sm:mt-16">
-          <div
-            aria-hidden
-            className="brand-product-glow pointer-events-none absolute -inset-x-12 -inset-y-16 -z-10"
-          />
-          <div className="rounded-2xl border border-brand-line-strong bg-brand-surface p-2 shadow-[0_28px_90px_-32px_rgba(0,0,0,0.9)] sm:p-3">
-            <ProductDemo />
-            <noscript>
-              <style>{`#product-demo { display: none; }`}</style>
-              <img
-                src="/product-demo/chat-answer.png"
-                width={1600}
-                height={1000}
-                alt="OpenAdminOS desktop with a populated Chat answer, tenant scope, and local provider"
-                className="h-auto w-full rounded-xl border border-brand-line"
-              />
-              <p className="mt-4 text-center text-sm text-brand-muted">
-                Enable JavaScript to explore the app, or download the desktop app.
-              </p>
-            </noscript>
-          </div>
-        </section>
-
-        <section className="mx-[-1.5rem] mt-12 w-[calc(100%+3rem)] border-y border-brand-line bg-brand-surface/80 sm:mx-[-2.5rem] sm:w-[calc(100%+5rem)]">
-          <div className="mx-auto grid w-full max-w-7xl grid-cols-2 gap-x-6 gap-y-5 px-6 py-5 text-left sm:grid-cols-4 sm:px-10">
-            {tractionItems.map((item) => (
-              <div key={item.label} className="min-w-0">
-                <p className="font-mono text-2xl font-semibold tabular-nums text-brand-ink sm:text-3xl">
-                  {item.value}
-                </p>
-                <p className="mt-1 text-xs font-semibold uppercase tracking-[0.2em] text-brand-muted">
-                  {item.label}
-                </p>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section
-          aria-label="What admins say"
-          className="mt-12 grid w-full max-w-7xl gap-4 sm:mt-16 lg:grid-cols-2"
-        >
-          {testimonials.map((item) => (
-            <figure
-              key={item.name}
-              className="flex flex-col justify-between rounded-lg border border-brand-line bg-brand-card p-6 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-8"
-            >
-              <blockquote className="text-lg leading-8 text-brand-ink/85 sm:text-xl sm:leading-9">
-                &ldquo;{item.quote}&rdquo;
-              </blockquote>
-              <figcaption className="mt-7 flex items-center gap-4">
-                <img
-                  src={item.image}
-                  alt=""
-                  width="56"
-                  height="56"
-                  loading="lazy"
-                  className="h-14 w-14 rounded-full border border-brand-line-strong object-cover"
-                />
-                <div className="min-w-0">
-                  <Link
-                    href={item.href}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="text-base font-semibold text-brand-ink transition hover:text-brand-accent-text"
-                  >
-                    {item.name}
-                  </Link>
-                  <p className="text-sm text-brand-muted">{item.role}</p>
-                </div>
-              </figcaption>
-            </figure>
-          ))}
-        </section>
-
-        <section className="w-full max-w-7xl py-20">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
-              How it works
+          <div className="mt-10 grid gap-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+            <p className="max-w-2xl text-pretty text-lg leading-8 text-brand-muted sm:text-xl sm:leading-9">
+              OpenAdminOS is an open-source desktop app for Intune and Entra
+              admins. Ask your tenant questions, run agents from a community
+              registry, and approve every change before it reaches Microsoft
+              Graph.
             </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-              Install an agent, run it locally, approve what changes.
+            <div className="flex flex-col gap-3 lg:items-end">
+              <DownloadCta urls={downloadUrls} />
+              <p className="text-sm text-brand-faint">
+                macOS (Apple Silicon), Windows, and Linux. Free and MIT
+                licensed.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="mx-auto w-full max-w-[90rem] px-3 pb-6 sm:px-8">
+          <figure className="overflow-hidden rounded-[14px] bg-brand-raised shadow-(--shadow-frame) sm:hidden">
+            <AppCrop
+              screen="chat-transcript"
+              alt="OpenAdminOS Chat answer with tenant scope, data age, and two numbered Microsoft Graph sources"
+              x={700}
+              y={60}
+              width={790}
+              aspect="4 / 3.4"
+            />
+          </figure>
+          <figure className="relative hidden overflow-hidden rounded-[20px] bg-brand-raised shadow-(--shadow-frame) sm:block">
+            <AppShot
+              screen="chat-transcript"
+              alt="OpenAdminOS Chat answering which managed devices have not synced in the last 7 days, with tenant scope, data age, two Microsoft Graph sources, and a local Ollama model"
+              priority
+              className="block h-auto w-full"
+            />
+            {HERO_CALLOUTS.map((callout, index) => (
+              <span
+                key={callout.title}
+                aria-hidden
+                className="absolute grid h-6 w-6 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full bg-brand-ink text-xs font-medium text-brand-on-ink ring-4 ring-brand-ink/15"
+                style={{
+                  left: `${(callout.x / 1920) * 100}%`,
+                  top: `${(callout.y / 1012) * 100}%`,
+                }}
+              >
+                {index + 1}
+              </span>
+            ))}
+          </figure>
+          <ol className="mx-auto mt-8 grid max-w-7xl gap-x-8 gap-y-5 px-3 sm:grid-cols-2 sm:px-2 lg:grid-cols-4">
+            {HERO_CALLOUTS.map((callout, index) => (
+              <li key={callout.title} className="flex gap-3">
+                <span className="mt-0.5 hidden h-5 w-5 shrink-0 place-items-center rounded-full border border-brand-line-strong text-[11px] font-medium sm:grid">
+                  {index + 1}
+                </span>
+                <p className="text-sm leading-6 text-brand-muted">
+                  <span className="font-medium text-brand-ink">
+                    {callout.title}.
+                  </span>{" "}
+                  {callout.text}
+                </p>
+              </li>
+            ))}
+          </ol>
+        </div>
+      </section>
+
+      {/* Principles */}
+      <section className="border-y border-brand-line bg-brand-surface">
+        <div className="mx-auto grid w-full max-w-7xl sm:grid-cols-2 lg:grid-cols-4">
+          {PRINCIPLES.map((item) => (
+            <div
+              key={item.title}
+              className="border-brand-line px-6 py-8 sm:px-10 lg:border-l lg:first:border-l-0"
+            >
+              <p className="font-display text-[1.6rem] leading-tight">
+                {item.title}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-brand-muted">
+                {item.text}
+              </p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* How a run works */}
+      <section className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
+        <div className="grid gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,34rem)] lg:items-center lg:gap-20">
+          <div data-reveal>
+            <p className={eyebrow}>How a run works</p>
+            <h2 className={`${sectionTitle} mt-4 max-w-[16ch]`}>
+              Read freely. Change nothing without you.
             </h2>
+            <p className="mt-6 max-w-xl text-lg leading-8 text-brand-muted">
+              Ask a question in Chat or start an agent. OpenAdminOS reads from
+              Microsoft Graph inside the tenant you picked, answers with the
+              sources it used, and stops before anything changes.
+            </p>
+            <ol className="mt-10 space-y-6">
+              {RUN_STEPS.map((step, index) => (
+                <li
+                  key={step.title}
+                  className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-3 border-t border-brand-line pt-6"
+                >
+                  <span className="font-display text-2xl leading-none text-brand-faint">
+                    {index + 1}
+                  </span>
+                  <p className="max-w-lg text-base leading-7 text-brand-muted">
+                    <span className="font-medium text-brand-ink">
+                      {step.title}
+                    </span>{" "}
+                    {step.text}
+                  </p>
+                </li>
+              ))}
+            </ol>
+          </div>
+          <figure data-reveal>
+            <AgentRun />
+            <figcaption className="mt-4 text-center text-sm text-brand-faint">
+              Illustration using the app&apos;s demo tenant.
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      {/* Where data goes */}
+      <section className="band-ink">
+        <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
+          <div className="max-w-4xl" data-reveal>
+            <p className={eyebrow}>Where your data goes</p>
+            <h2 className="font-display mt-4 text-balance text-[2.5rem] leading-[1.02] sm:text-[4.25rem]">
+              With a local model, tenant data never leaves the device.
+            </h2>
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-brand-muted">
+              Choose a hosted model when you want one. The app says so before
+              tenant context is sent and names the provider it goes to. It
+              does not claim a processing region it cannot confirm.
+            </p>
           </div>
 
-          <div className="mt-8 grid gap-3 lg:grid-cols-3">
-            <div className="rounded-lg border border-brand-line bg-brand-card p-4 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-6">
-              <p className="font-mono text-2xl text-brand-muted">01</p>
-              <h3 className="mt-5 text-base font-semibold">
-                Install from an open registry.
-              </h3>
-              <p className="mt-3 text-sm leading-6 text-brand-muted">
-                Each agent&apos;s manifest lists its Microsoft Graph scopes,
-                read or write mode, and model requirements before you install
-                it. Enterprises can point the app at a private registry; the
-                rules do not change.
-              </p>
-              <Link
-                href="/registry"
-                className="mt-4 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
-              >
-                Browse the registry
-              </Link>
-            </div>
+          <div className="mt-14 grid gap-4 lg:grid-cols-2" data-reveal>
+            <ProviderCard
+              chip="Local · Ollama"
+              title="Local providers"
+              providers={LOCAL_PROVIDERS}
+              quote="Local model. Tenant data stays on this device."
+              tone="ok"
+            />
+            <ProviderCard
+              chip="Hosted, leaves this device"
+              title="Hosted providers"
+              providers={HOSTED_PROVIDERS}
+              quote="Retrieved tenant context is sent to the selected hosted provider."
+              tone="warn"
+            />
+          </div>
 
-            <div className="rounded-lg border border-brand-line bg-brand-card p-4 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-6">
-              <p className="font-mono text-2xl text-brand-muted">02</p>
-              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                <h3 className="text-base font-semibold">
-                  Run it against your tenant.
-                </h3>
-                <code className="w-fit rounded border border-brand-line-strong bg-brand-raised px-2 py-1 font-mono text-[11px] text-brand-muted">
-                  ollama serve
-                </code>
-              </div>
-              <p className="mt-3 text-sm leading-6 text-brand-muted">
-                The app signs in with MSAL and reads tenant data through
-                Microsoft Graph. With a local model like Ollama, prompts and
-                tenant data stay on this device. Hosted providers are optional
-                and labeled before anything leaves.
-              </p>
-              <p className="mt-3 font-mono text-[12px] leading-5 text-brand-muted">
-                Investigate · Explain · Prioritize · Prepare changes
-              </p>
-              <Link
-                href="/llm-providers"
-                className="mt-4 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
-              >
+          <div className="mt-10 flex flex-col gap-6 border-t border-brand-line pt-8 md:flex-row md:items-center md:justify-between">
+            <p className="max-w-2xl text-sm leading-6 text-brand-muted">
+              OpenAdminOS does not collect tenant data, prompts, run results,
+              or error reports. Installing a public registry agent sends an
+              anonymous install count, which you can turn off in Settings.
+            </p>
+            <div className="flex flex-wrap gap-3">
+              <Link href="/trust-model" className={buttonSecondary}>
+                Read the trust model
+              </Link>
+              <Link href="/llm-providers" className={buttonSecondary}>
                 Compare model providers
               </Link>
             </div>
-
-            <div className="rounded-lg border border-brand-line bg-brand-card p-4 transition-colors hover:border-brand-line-strong hover:bg-brand-raised sm:p-6">
-              <p className="font-mono text-2xl text-brand-muted">03</p>
-              <h3 className="mt-5 text-base font-semibold">
-                Approve every change.
-              </h3>
-              <p className="mt-3 text-sm leading-6 text-brand-muted">
-                Read-only agents run autonomously. Write agents stop at a diff
-                of the proposed Graph change, and destructive operations require
-                typed confirmation. There is no trust-this-agent bypass.
-              </p>
-            </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section
-          id="safety"
-          className="grid w-full max-w-7xl gap-8 rounded-2xl border border-brand-line bg-brand-surface px-5 py-10 shadow-[0_20px_70px_-42px_rgba(0,0,0,0.9)] sm:px-8 sm:py-14 lg:grid-cols-[1fr_1fr] lg:items-center lg:px-10"
-        >
-          <DiffConfirmationDemo />
-
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
-              Human in the loop
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-              Changes wait for your approval.
+      {/* Write confirmation */}
+      <section
+        id="safety"
+        className="mx-auto w-full max-w-7xl scroll-mt-20 px-6 py-24 sm:px-10 sm:py-32"
+      >
+        <div className="grid gap-14 lg:grid-cols-[minmax(0,32rem)_minmax(0,1fr)] lg:items-center lg:gap-20">
+          <figure className="order-2 lg:order-1" data-reveal>
+            <DiffConfirmationDemo />
+            <figcaption className="mt-4 text-center text-sm text-brand-faint">
+              Illustration of the desktop write confirmation. Nothing here
+              touches a tenant.
+            </figcaption>
+          </figure>
+          <div className="order-1 lg:order-2" data-reveal>
+            <p className={eyebrow}>Write confirmation</p>
+            <h2 className={`${sectionTitle} mt-4 max-w-[17ch]`}>
+              Every write stops at a diff. You type the phrase.
             </h2>
-            <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
-              Read-only agents can run autonomously. Any change shows a diff
-              first, and destructive actions require typed confirmation. There
-              is no trust-this-agent bypass.
+            <p className="mt-6 max-w-xl text-lg leading-8 text-brand-muted">
+              Read-only agents can run on their own. Write agents prepare a
+              plan and pause. You see each Microsoft Graph call, what it
+              touches, and what changes, then decide.
             </p>
-            <Link
-              href="/trust-model"
-              className="mt-5 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
-            >
-              Review the trust model
-            </Link>
-          </div>
-        </section>
-
-        <section className="w-full max-w-7xl border-t border-brand-line py-20">
-          <div className="grid gap-10 lg:grid-cols-[1.1fr_0.9fr] lg:items-center">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
-                Benchmarks
-              </p>
-              <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-                You do not need a frontier model for this work.
-              </h2>
-              <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
-                We put OpenAdmin 8B, Claude Opus 5 and GPT-5.6-sol through{" "}
-                {benchmarks.taskCount} identical Microsoft 365 administration
-                tasks and scored them mechanically. The {ownModel.sizeOnDisk}{" "}
-                local model came out {benchmarkLead} tasks ahead, and its lead
-                is concentrated in write-safety: refusing destructive requests
-                for the right reason.
-              </p>
-              <Link
-                href="/benchmarks"
-                className="mt-5 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
-              >
-                See the full benchmark
-              </Link>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-3">
-              {benchmarkTiles.map((model) => (
-                <div
-                  key={model.id}
-                  className="rounded-lg border border-brand-line bg-brand-card p-4"
+            <ul className="mt-8 space-y-3">
+              {WRITE_RULES.map((rule) => (
+                <li
+                  key={rule}
+                  className="flex gap-3 text-base leading-7 text-brand-muted"
                 >
-                  <p className="text-xs text-brand-muted">{model.name}</p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums">
-                    {model.score}
-                    <span className="text-sm font-normal text-brand-muted">
-                      /{benchmarks.taskCount}
-                    </span>
+                  <CheckIcon />
+                  {rule}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      {/* The app */}
+      <section className="border-t border-brand-line bg-brand-surface">
+        <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
+          <div className="max-w-3xl" data-reveal>
+            <p className={eyebrow}>The app</p>
+            <h2 className={`${sectionTitle} mt-4`}>
+              One window for questions, agents, and the team that runs them.
+            </h2>
+          </div>
+          <div className="mt-14 grid gap-4 lg:grid-cols-6">
+            {FEATURE_TILES.map((tile) => (
+              <article
+                key={tile.title}
+                data-reveal
+                className={`${card} flex flex-col overflow-hidden ${tile.className}`}
+              >
+                <div className="p-6 sm:p-8">
+                  <h3 className="font-display text-[1.65rem] leading-tight">
+                    {tile.title}
+                  </h3>
+                  <p className="mt-2 max-w-xl text-[15px] leading-7 text-brand-muted">
+                    {tile.text}
                   </p>
                 </div>
-              ))}
-            </div>
+                <div className="mt-auto px-6 sm:px-8">
+                  <AppCrop
+                    screen={tile.screen}
+                    alt={tile.alt}
+                    className="rounded-t-[12px] border border-b-0 border-brand-line bg-brand-bg"
+                    {...tile.crop}
+                  />
+                </div>
+              </article>
+            ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="w-full max-w-7xl border-t border-brand-line py-20">
-          <div className="max-w-3xl">
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
-              Open source
-            </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
-              No vendor-owned agent runtime.
+      {/* Registry */}
+      <section className="overflow-hidden py-24 sm:py-32">
+        <div className="mx-auto grid w-full max-w-7xl gap-10 px-6 sm:px-10 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+          <div className="max-w-3xl" data-reveal>
+            <p className={eyebrow}>Community registry</p>
+            <h2 className={`${sectionTitle} mt-4`}>
+              Agents you can read before they run.
             </h2>
-            <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
-              The app, runtime, agents, and registry contract are open from day
-              one. Audit them, change them, or point OpenAdminOS at your own
-              curated registry.
+            <p className="mt-6 max-w-2xl text-lg leading-8 text-brand-muted">
+              Each agent is a TypeScript module with a manifest: the Graph
+              scopes it needs, whether it reads or makes changes, and the
+              models it works with. Browse the public registry, contribute your
+              own, or point the app at a private registry for your
+              organization.
             </p>
           </div>
-          <div className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {PROOF_ITEMS.map(([label, detail]) => (
+          <div className="flex flex-wrap gap-3" data-reveal>
+            <Link href="/registry" className={buttonSecondary}>
+              How the registry works
+            </Link>
+            <Link
+              href={DOCS_URL}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonSecondary}
+            >
+              Write an agent
+            </Link>
+          </div>
+        </div>
+
+        <div className="mt-14 space-y-3" aria-label="Agents in the public registry">
+          <AgentMarquee agents={REGISTRY_AGENTS.slice(0, 8)} duration={70} />
+          <AgentMarquee agents={REGISTRY_AGENTS.slice(8)} duration={80} reverse />
+        </div>
+      </section>
+
+      {/* Benchmarks */}
+      <section className="border-t border-brand-line">
+        <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-24 sm:px-10 sm:py-32 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.1fr)] lg:items-center">
+          <div data-reveal>
+            <p className={eyebrow}>Benchmarks</p>
+            <h2 className={`${sectionTitle} mt-4 max-w-[18ch]`}>
+              You do not need a frontier model for this work.
+            </h2>
+            <p className="mt-6 max-w-xl text-lg leading-8 text-brand-muted">
+              We put {ownModel.name}, Claude Opus 5, and GPT-5.6-sol through{" "}
+              {benchmarks.taskCount} identical Microsoft 365 administration
+              tasks and scored them mechanically. The {ownModel.sizeOnDisk}{" "}
+              local model came out {benchmarkLead} tasks ahead, mostly on
+              write safety: refusing destructive requests for the right reason.
+            </p>
+            <Link href="/benchmarks" className="text-link mt-6 inline-flex text-base">
+              See the full benchmark
+            </Link>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3" data-reveal>
+            {benchmarkTiles.map((model) => (
               <div
-                key={label}
-                className="rounded-lg border border-brand-line bg-brand-card p-4"
+                key={model.id}
+                className={`rounded-[14px] p-6 ${
+                  model.kind === "own"
+                    ? "bg-brand-ink text-brand-on-ink"
+                    : "border border-brand-line bg-brand-card"
+                }`}
               >
-                <p className="text-sm font-semibold">{label}</p>
-                <p className="mt-2 text-sm leading-5 text-brand-muted">{detail}</p>
+                <p
+                  className={`text-sm ${
+                    model.kind === "own" ? "opacity-75" : "text-brand-muted"
+                  }`}
+                >
+                  {model.name}
+                </p>
+                <p className="font-display mt-6 text-[3.5rem] leading-none tabular-nums">
+                  {model.score}
+                </p>
+                <p
+                  className={`mt-2 text-sm ${
+                    model.kind === "own" ? "opacity-75" : "text-brand-muted"
+                  }`}
+                >
+                  of {benchmarks.taskCount} tasks ·{" "}
+                  {model.kind === "own" ? "runs locally" : "hosted"}
+                </p>
               </div>
             ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-        <section className="w-full max-w-7xl border-t border-brand-line py-20">
-          <div className="grid gap-8 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
-                Common questions
-              </p>
-              <h2 className="mt-3 max-w-xl text-3xl font-semibold tracking-tight sm:text-4xl">
-                Questions admins usually ask first.
+      {/* Open source */}
+      <section className="border-t border-brand-line bg-brand-surface">
+        <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
+          <div className="grid gap-14 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:gap-20">
+            <div data-reveal>
+              <p className={eyebrow}>Open source</p>
+              <h2 className={`${sectionTitle} mt-4`}>
+                Open from the first commit.
               </h2>
-              <p className="mt-4 max-w-xl text-sm leading-6 text-brand-muted sm:text-base">
-                These answers summarize the product boundary: desktop app,
-                Microsoft Graph, local-first model choice, declared agent
-                permissions, and write confirmation.
+              <p className="mt-6 max-w-xl text-lg leading-8 text-brand-muted">
+                The desktop app, agent runtime, SDK, and registry contract are
+                MIT licensed. Read the code before you connect a tenant, fork
+                it, or run your own registry.
               </p>
+              <dl className="mt-10 grid grid-cols-2 gap-x-8 gap-y-8 border-t border-brand-line pt-8 sm:grid-cols-4 lg:grid-cols-2">
+                {tractionItems.map((item) => (
+                  <div key={item.label}>
+                    <dd className="font-display text-[2.25rem] leading-none tabular-nums">
+                      {item.value}
+                    </dd>
+                    <dt className="mt-2 text-sm text-brand-muted">
+                      {item.label}
+                    </dt>
+                  </div>
+                ))}
+              </dl>
+              <Link
+                href={GITHUB_URL}
+                target="_blank"
+                rel="noreferrer"
+                className={`${buttonSecondary} mt-10`}
+              >
+                <GitHubIcon />
+                github.com/OpenAdminOS/OpenAdminOS
+              </Link>
             </div>
-            <div className="grid gap-3">
-              {COMMON_QUESTIONS.map((item, index) => (
-                <details
-                  key={item.question}
-                  open={index === 0}
-                  className="group rounded-lg border border-brand-line bg-brand-card transition hover:border-brand-line-strong hover:bg-brand-raised"
-                >
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 p-4 text-left [&::-webkit-details-marker]:hidden">
-                    <span className="text-base font-semibold tracking-tight text-brand-ink/92">
-                      {item.question}
-                    </span>
-                    <span
-                      aria-hidden="true"
-                      className="grid size-7 shrink-0 place-items-center rounded-md border border-brand-line-strong text-lg leading-none text-brand-muted transition group-open:rotate-45 group-open:border-brand-accent group-open:text-brand-accent-text"
-                    >
-                      +
-                    </span>
-                  </summary>
-                  <p className="px-4 pb-4 text-sm leading-6 text-brand-muted">
-                    {item.answer}
-                  </p>
-                </details>
-              ))}
-            </div>
-          </div>
-        </section>
 
-        <section className="mb-20 w-full max-w-4xl rounded-2xl border border-brand-line bg-brand-surface px-6 py-12 text-center sm:px-10">
-          <h2 className="text-balance text-3xl font-semibold tracking-tight sm:text-5xl">
-            Run tenant agents on your terms.
+            <figure
+              data-reveal
+              className="flex flex-col justify-between rounded-[18px] border border-brand-line bg-brand-card p-8 sm:p-10"
+            >
+              <blockquote className="font-display text-balance text-[1.75rem] leading-[1.3] sm:text-[2.1rem]">
+                &ldquo;{TESTIMONIAL.quote}&rdquo;
+              </blockquote>
+              <figcaption className="mt-10 flex items-center gap-4">
+                <img
+                  src={TESTIMONIAL.image}
+                  alt=""
+                  width="48"
+                  height="48"
+                  loading="lazy"
+                  className="h-12 w-12 rounded-full object-cover"
+                />
+                <div className="min-w-0 text-sm">
+                  <Link
+                    href={TESTIMONIAL.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="font-medium text-brand-ink hover:underline"
+                  >
+                    {TESTIMONIAL.name}
+                  </Link>
+                  <p className="text-brand-muted">{TESTIMONIAL.role}</p>
+                </div>
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      {/* Questions */}
+      <section className="border-t border-brand-line">
+        <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-24 sm:px-10 sm:py-32 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+          <div data-reveal>
+            <p className={eyebrow}>Common questions</p>
+            <h2 className={`${sectionTitle} mt-4 max-w-[14ch]`}>
+              What admins ask first.
+            </h2>
+          </div>
+          <div className="border-t border-brand-line" data-reveal>
+            {COMMON_QUESTIONS.map((item, index) => (
+              <details
+                key={item.question}
+                open={index === 0}
+                className="group border-b border-brand-line"
+              >
+                <summary className="flex cursor-pointer list-none items-center justify-between gap-6 py-5 text-left [&::-webkit-details-marker]:hidden">
+                  <span className="text-lg font-medium">{item.question}</span>
+                  <span
+                    aria-hidden
+                    className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-brand-line text-lg leading-none text-brand-muted transition-transform duration-200 group-open:rotate-45"
+                  >
+                    +
+                  </span>
+                </summary>
+                <p className="max-w-2xl pb-6 text-base leading-7 text-brand-muted">
+                  {item.answer}
+                </p>
+              </details>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Closing */}
+      <section className="band-ink relative isolate overflow-hidden">
+        <div
+          aria-hidden
+          className="brand-dots brand-dots-fade pointer-events-none absolute inset-0 -z-10"
+        />
+        <div className="mx-auto flex w-full max-w-7xl flex-col items-start px-6 py-24 sm:px-10 sm:py-32">
+          <h2 className="font-display max-w-[14ch] text-balance text-[3rem] leading-[0.98] sm:text-[5.5rem]">
+            Connect a tenant. Ask it something.
           </h2>
-          <p className="mx-auto mt-4 max-w-2xl text-sm leading-6 text-brand-muted sm:text-base">
-            Use local models by default, hosted models by choice, and approve
-            every Graph change.
+          <p className="mt-6 max-w-xl text-lg leading-8 text-brand-muted">
+            Install the app, sign in with Microsoft, and pick a model.
+            Read-only agents run once consent is granted. Changes wait for
+            you.
           </p>
-          <div className="mt-7 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link
-              href="/download"
-              className="rounded-lg bg-brand-ink px-5 py-2.5 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-            >
-              View downloads
-            </Link>
-            <Link
-              href={GITHUB_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="rounded-lg border border-brand-line-strong bg-transparent px-5 py-2.5 text-sm font-medium text-brand-muted transition hover:border-brand-accent hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-            >
-              {githubRepoStats
-                ? `Star on GitHub · ${formatStat(githubRepoStats.stars)}`
-                : "Star on GitHub"}
-            </Link>
-          </div>
-        </section>
-      </main>
+          <DownloadCta urls={downloadUrls} className="mt-10" />
+        </div>
+      </section>
+    </MarketingShell>
+  );
+}
 
-      <footer className="relative z-10 flex flex-col items-center gap-2 border-t border-brand-line bg-brand-surface/60 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-brand-muted">
-          © {new Date().getFullYear()} OpenAdminOS
-          {" · "}
-          <Link
-            href="/privacy"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
+function ProviderCard({
+  chip,
+  title,
+  providers,
+  quote,
+  tone,
+}: {
+  chip: string;
+  title: string;
+  providers: readonly string[];
+  quote: string;
+  tone: "ok" | "warn";
+}) {
+  return (
+    <div className="flex flex-col rounded-[18px] border border-brand-line bg-brand-card p-7 sm:p-9">
+      <span
+        className={`inline-flex w-fit items-center gap-1.5 rounded-full px-3 py-1 text-sm ${
+          tone === "ok"
+            ? "bg-brand-ok-surface text-brand-ok"
+            : "bg-brand-warn-surface text-brand-warn"
+        }`}
+      >
+        {tone === "ok" ? <LockIcon /> : <ArrowOutIcon />}
+        {chip}
+      </span>
+      <h3 className="font-display mt-6 text-[2rem] leading-tight">{title}</h3>
+      <ul className="mt-4 flex flex-wrap gap-2">
+        {providers.map((provider) => (
+          <li
+            key={provider}
+            className="rounded-full border border-brand-line px-3 py-1 text-sm text-brand-muted"
           >
-            Privacy
-          </Link>
-          {" · "}
-          <Link
-            href="/terms"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
-          >
-            Terms
-          </Link>
-          {" · "}
-          <Link
-            href="/legal-notice"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
-          >
-            Legal notice
-          </Link>
-          {" · "}
-          <Link
-            href="/examples"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
-          >
-            Examples
-          </Link>
-          {" · "}
-          <Link
-            href="/registry"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
-          >
-            Registry
-          </Link>
-          {" · "}
-          <Link
-            href="/trust-model"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
-          >
-            Trust model
-          </Link>
-          {" · "}
-          <Link
-            href="/download"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
-          >
-            Download
-          </Link>
-          {" · "}
-          <Link
-            href="https://www.linkedin.com/company/openadminos/"
-            target="_blank"
-            rel="noreferrer"
-            aria-label="OpenAdminOS on LinkedIn"
-            className="inline-flex align-[-2px] text-brand-muted transition hover:text-brand-ink/75"
-          >
-            <svg
-              aria-hidden
-              viewBox="0 0 24 24"
-              className="h-3.5 w-3.5 fill-current"
-            >
-              <path d="M20.45 20.45h-3.56v-5.57c0-1.33-.02-3.04-1.85-3.04-1.86 0-2.14 1.45-2.14 2.95v5.66H9.34V9h3.42v1.56h.05c.48-.9 1.64-1.85 3.37-1.85 3.6 0 4.27 2.37 4.27 5.46v6.28ZM5.32 7.43a2.07 2.07 0 1 1 0-4.14 2.07 2.07 0 0 1 0 4.14Zm1.78 13.02H3.53V9H7.1v11.45ZM22.23 0H1.77C.79 0 0 .77 0 1.72v20.56C0 23.23.79 24 1.77 24h20.46c.98 0 1.77-.77 1.77-1.72V1.72C24 .77 23.21 0 22.23 0Z" />
-            </svg>
-          </Link>
-        </span>
-        <p className="max-w-2xl text-balance text-[11px] leading-5 text-brand-muted">
-          Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks of
-          the Microsoft group of companies. OpenAdminOS is not affiliated with,
-          endorsed by, or sponsored by Microsoft.
-        </p>
-      </footer>
+            {provider}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-8 border-t border-brand-line pt-5 text-sm leading-6 text-brand-muted">
+        What the app says:{" "}
+        <span className="text-brand-ink">&ldquo;{quote}&rdquo;</span>
+      </p>
     </div>
+  );
+}
+
+function AgentMarquee({
+  agents,
+  duration,
+  reverse = false,
+}: {
+  agents: readonly RegistryAgent[];
+  duration: number;
+  reverse?: boolean;
+}) {
+  return (
+    <div className="marquee marquee-mask overflow-hidden">
+      <ul
+        className={`marquee-track flex w-max gap-3 ${reverse ? "marquee-reverse" : ""}`}
+        style={{ ["--marquee-duration" as string]: `${duration}s` }}
+      >
+        {[...agents, ...agents].map((agent, index) => (
+          <li
+            key={`${agent.name}-${index}`}
+            aria-hidden={index >= agents.length}
+            className="w-[19rem] shrink-0 rounded-[14px] border border-brand-line bg-brand-card px-5 py-4"
+          >
+            <div className="flex items-center justify-between gap-3">
+              <p className="truncate font-medium">{agent.name}</p>
+              <span
+                className={`inline-flex shrink-0 items-center gap-1.5 text-xs ${
+                  agent.mode === "write" ? "text-brand-warn" : "text-brand-ok"
+                }`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                {agent.mode === "write" ? "Makes changes" : "Read-only"}
+              </span>
+            </div>
+            <p className="mt-2 truncate font-mono text-xs text-brand-muted">
+              {agent.scopes.length > 0
+                ? agent.scopes.join(" · ")
+                : "No Graph scopes · works on supplied evidence"}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ArrowOutIcon() {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      className="h-3.5 w-3.5"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={1.8}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M7 17 17 7M9 7h8v8" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg
+      aria-hidden
+      viewBox="0 0 24 24"
+      className="mt-1.5 h-4 w-4 shrink-0 text-brand-ink"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m5 12.5 4.5 4.5L19 7.5" />
+    </svg>
+  );
+}
+
+function GitHubIcon() {
+  return (
+    <svg aria-hidden viewBox="0 0 24 24" className="h-4 w-4 fill-current">
+      <path d="M12 .5A11.5 11.5 0 0 0 .5 12a11.5 11.5 0 0 0 7.86 10.92c.58.1.79-.25.79-.56v-2c-3.2.7-3.88-1.37-3.88-1.37-.52-1.33-1.28-1.69-1.28-1.69-1.04-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.56-.29-5.25-1.28-5.25-5.68 0-1.26.45-2.28 1.19-3.09-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11 11 0 0 1 5.77 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.11 3.05.74.81 1.19 1.83 1.19 3.09 0 4.41-2.7 5.38-5.27 5.67.41.36.78 1.06.78 2.14v3.17c0 .31.21.67.8.56A11.5 11.5 0 0 0 23.5 12 11.5 11.5 0 0 0 12 .5Z" />
+    </svg>
   );
 }
