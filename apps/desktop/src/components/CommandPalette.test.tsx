@@ -198,6 +198,40 @@ it("lists recent conversations and Workspaces with their Chat routes", async () 
   ).toBeInTheDocument();
 });
 
+it("uses server conversation search for message-content matches", async () => {
+  const user = userEvent.setup();
+  const searchIntuneChatConversations = vi.fn(async () => [
+    {
+      id: "conversation-search-result",
+      title: "Enrollment investigation",
+      createdAt: "2026-10-10T08:00:00.000Z",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant" as const,
+    },
+  ]);
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => []),
+      searchIntuneChatConversations,
+    }),
+  });
+
+  await user.type(
+    screen.getByRole("combobox", { name: "Search commands, agents, or pages" }),
+    "autopilot failure",
+  );
+
+  await waitFor(() =>
+    expect(searchIntuneChatConversations).toHaveBeenLastCalledWith("autopilot failure"),
+  );
+  expect(
+    await screen.findByRole("option", { name: /Enrollment investigation/ }),
+  ).toBeInTheDocument();
+});
+
 it("lists all theme actions and applies the selected theme", async () => {
   const user = userEvent.setup();
   const setAppearance = vi.fn(async () => undefined);

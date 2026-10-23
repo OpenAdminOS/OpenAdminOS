@@ -95,7 +95,7 @@ export function Drawer({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[90] flex justify-end bg-black/60"
+      className="app-shell-scrim fixed inset-x-0 bottom-0 top-[52px] z-[90] flex justify-end bg-black/60"
       onMouseDown={(event) => {
         if (closeOnScrim && event.target === event.currentTarget) onClose();
       }}

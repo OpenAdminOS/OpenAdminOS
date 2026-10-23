@@ -202,3 +202,12 @@ describe("desktop type scale", () => {
     }
   });
 });
+
+describe("desktop shell geometry", () => {
+  it("keeps the conversation sidebar at 268 pixels and collapses it fully", () => {
+    expect(fullStylesheet).toMatch(/\.app-sidebar\s*\{\s*width:\s*268px;\s*\}/);
+    expect(fullStylesheet).toMatch(
+      /\.app-sidebar\[data-collapsed="true"\]\s*\{\s*width:\s*0;\s*\}/,
+    );
+  });
+});

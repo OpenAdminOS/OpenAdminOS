@@ -21,12 +21,19 @@ import {
   IconSearch,
   IconStar,
 } from "../components/icons";
-import { useAppState } from "../state";
+import {
+  TopBarActions,
+  TopBarTitle,
+  useAppState,
+  useConversations,
+  useConversationsOptional,
+  ConversationWorkspaceProvider,
+  useShellChromeOptional,
+} from "../state";
 import { suggestAgentForQuestion } from "../shared/agent-suggestions";
 import {
   type AgentSummary,
   resolveProviderDefaultModel,
-  type GraphCacheStatus,
   type GraphCacheResourceKind,
   type ImportMultiTenantResultToWorkspacesResult,
   type IntuneChatAgentSuggestion,
@@ -218,6 +225,16 @@ const focusRingClass =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
 
 export default function IntuneChat() {
+  const conversations = useConversationsOptional();
+  if (conversations) return <IntuneChatContent />;
+  return (
+    <ConversationWorkspaceProvider>
+      <IntuneChatContent />
+    </ConversationWorkspaceProvider>
+  );
+}
+
+function IntuneChatContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const {
@@ -226,33 +243,39 @@ export default function IntuneChat() {
   } = useParams<{ conversationId?: string; workspaceId?: string }>();
   const { state, startRun, refresh, loading } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
-  const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
-  /**
-   * The conversation the host reported creating for an in-flight send.
-   *
-   * The sidebar list is reloaded asynchronously and can legitimately not
-   * contain it yet, so the route must not depend on the list alone to
-   * decide whether the open conversation exists.
-   */
-  const [pendingConversation, setPendingConversation] =
-    useState<IntuneChatConversation | null>(null);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(
-    routeConversationId ?? null,
-  );
-  const lastConversationIdRef = useRef<string | null>(routeConversationId ?? null);
-  const [shellLoaded, setShellLoaded] = useState(false);
+  const shellChrome = useShellChromeOptional();
+  const {
+    conversations,
+    activeConversationId,
+    activeConversation,
+    shellLoaded,
+    conversationSearch,
+    workspaceSearch,
+    panelMode,
+    workspaceCreateRequest,
+    allWorkspaces,
+    tenantWorkspaces: workspaces,
+    pinnedSectionOpen,
+    setPendingConversation,
+    setCacheStatus,
+    setConversationSearch,
+    setWorkspaceSearch,
+    setPanelMode,
+    setPinnedSectionOpen,
+    requestWorkspaceCreate,
+    replaceWorkspaces: setAllWorkspaces,
+    openConversation,
+    upsertConversation,
+    reloadConversations: loadShell,
+    requestRename,
+    requestDelete,
+    togglePinned,
+    exportConversation,
+    moveToWorkspace,
+  } = useConversations();
   const [messages, setMessages] = useState<IntuneChatMessage[]>([]);
-  const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [conversationSearch, setConversationSearch] = useState("");
-  const [workspaceSearch, setWorkspaceSearch] = useState("");
-  const [panelMode, setPanelMode] = useState<"chats" | "workspaces">(
-    routeWorkspaceId || new URLSearchParams(location.search).get("panel") === "workspaces"
-      ? "workspaces"
-      : "chats",
-  );
-  const [workspaceCreateRequest, setWorkspaceCreateRequest] = useState(0);
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [sendState, dispatchSend] = useReducer(chatSendReducer, initialChatSendState);
@@ -269,7 +292,6 @@ export default function IntuneChat() {
   const [historyOpen, setHistoryOpen] = useState(true);
   const [historyIsOverlay, setHistoryIsOverlay] = useState(false);
   const historySearchRef = useRef<HTMLInputElement | null>(null);
-  const [pinnedSectionOpen, setPinnedSectionOpen] = useState(true);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [hostedConsentPrompt, setHostedConsentPrompt] =
     useState<HostedChatConsentPrompt | null>(null);
@@ -296,8 +318,6 @@ export default function IntuneChat() {
   const [splitJob, setSplitJob] = useState<MultiTenantChatJob | null>(null);
   const [splitResult, setSplitResult] =
     useState<ImportMultiTenantResultToWorkspacesResult | null>(null);
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [allWorkspaces, setAllWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [attachedWorkspaceId, setAttachedWorkspaceId] = useState("");
   const [attachedWorkspace, setAttachedWorkspace] = useState<WorkspaceDetail | null>(null);
   const [selectedWorkspaceEvidenceIds, setSelectedWorkspaceEvidenceIds] = useState<string[]>([]);
@@ -308,9 +328,6 @@ export default function IntuneChat() {
   const [selectedBatchAgentSlug, setSelectedBatchAgentSlug] = useState("");
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
   const [groupName, setGroupName] = useState("");
-  const [renameTarget, setRenameTarget] = useState<IntuneChatConversation | null>(null);
-  const [renameTitle, setRenameTitle] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<IntuneChatConversation | null>(null);
   const [conversationMenu, setConversationMenu] = useState<{
     conversation: IntuneChatConversation;
     x: number;
@@ -325,47 +342,12 @@ export default function IntuneChat() {
   const copiedClearTimerRef = useRef<number | null>(null);
   const draftConversationRef = useRef<string | null | undefined>(undefined);
   const skipDraftWriteRef = useRef(false);
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [dismissedSuggestionMessageIds, setDismissedSuggestionMessageIds] = useState<string[]>([]);
 
   const focusPanelToggle = () => {
     window.requestAnimationFrame(() => {
       document.querySelector<HTMLButtonElement>('[aria-label="Show chat panel"]')?.focus();
     });
-  };
-
-  /**
-   * Put a conversation into the sidebar list immediately.
-   *
-   * Sending the first message creates the conversation in the host and
-   * routes to /chat/<id> before the sidebar list has been reloaded. Without
-   * this the route points at an id the renderer has not seen yet, and the
-   * "Conversation not found" empty state flashes over a send that is in
-   * fact working.
-   */
-  const upsertConversation = (conversation: IntuneChatConversation) => {
-    setConversations((current) =>
-      current.some((entry) => entry.id === conversation.id)
-        ? current.map((entry) =>
-            entry.id === conversation.id ? conversation : entry,
-          )
-        : [conversation, ...current],
-    );
-  };
-
-  const openConversation = (
-    conversationId: string | null,
-    options: { replace?: boolean } = {},
-  ) => {
-    setPanelMode("chats");
-    setActiveConversationId(conversationId);
-    lastConversationIdRef.current = conversationId;
-    const destination = conversationId
-      ? `/chat/${encodeURIComponent(conversationId)}`
-      : "/chat";
-    if (`${location.pathname}${location.search}` !== destination) {
-      navigate(destination, { replace: options.replace });
-    }
   };
 
   const activeTenant = state.activeTenantId
@@ -445,34 +427,10 @@ export default function IntuneChat() {
   }, [historyIsOverlay, historyOpen]);
 
   useEffect(() => {
-    const api = window.openAdminOS;
-    if (!api) {
-      setWorkspaces([]);
-      setAllWorkspaces([]);
-      setAttachedWorkspaceId("");
-      setAttachedWorkspace(null);
-      return;
-    }
-    void api
-      .listWorkspaces()
-      .then((nextWorkspaces) => {
-        setAllWorkspaces(nextWorkspaces);
-        const tenantWorkspaces = state.activeTenantId
-          ? nextWorkspaces.filter(
-              (workspace) => workspace.tenantId === state.activeTenantId,
-            )
-          : [];
-        setWorkspaces(tenantWorkspaces);
-        setAttachedWorkspaceId((current) =>
-          current && tenantWorkspaces.some((workspace) => workspace.id === current)
-            ? current
-            : "",
-        );
-      })
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : String(caught)),
-      );
-  }, [state.activeTenantId]);
+    setAttachedWorkspaceId((current) =>
+      current && workspaces.some((workspace) => workspace.id === current) ? current : "",
+    );
+  }, [workspaces]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -519,91 +477,6 @@ export default function IntuneChat() {
     narrowWindow.addEventListener("change", onBreakpointChange);
     return () => narrowWindow.removeEventListener("change", onBreakpointChange);
   }, []);
-
-  useEffect(() => {
-    if (routeConversationId) {
-      setActiveConversationId(routeConversationId);
-      lastConversationIdRef.current = routeConversationId;
-      return;
-    }
-    const showingWorkspaces =
-      Boolean(routeWorkspaceId) ||
-      new URLSearchParams(location.search).get("panel") === "workspaces";
-    if (!showingWorkspaces) {
-      setActiveConversationId(null);
-      lastConversationIdRef.current = null;
-    }
-  }, [location.search, routeConversationId, routeWorkspaceId]);
-
-  useEffect(() => {
-    const nextPanelMode =
-      routeWorkspaceId || new URLSearchParams(location.search).get("panel") === "workspaces"
-        ? "workspaces"
-        : "chats";
-    setPanelMode(nextPanelMode);
-  }, [location.search, routeWorkspaceId]);
-
-  const loadShell = async (
-    preferredActiveConversationId?: string | null,
-    searchOverride = conversationSearch,
-  ) => {
-    const api = window.openAdminOS;
-    if (!api) return;
-    const query = searchOverride.trim();
-    const [nextConversations, nextCache] = await Promise.all([
-      query
-        ? api.searchIntuneChatConversations(query)
-        : api.listIntuneChatConversations(),
-      api.getGraphCacheStatus().catch(() => null),
-    ]);
-    setConversations((current) => {
-      if (!activeConversationId) return nextConversations;
-      // Keep the open conversation in the list when the reload does not
-      // return it. This was written for search (a filtered list hides the
-      // open conversation), but the same staleness happens right after a
-      // conversation is created: the route already points at it while the
-      // list still predates it, and dropping it here renders the
-      // "Conversation not found" state over a send that is working.
-      const activeConversation = current.find(
-        (conversation) => conversation.id === activeConversationId,
-      );
-      return activeConversation &&
-        !nextConversations.some((conversation) => conversation.id === activeConversationId)
-        ? [activeConversation, ...nextConversations]
-        : nextConversations;
-    });
-    setCacheStatus(nextCache);
-    setShellLoaded(true);
-    if (sendInFlightRef.current && preferredActiveConversationId === undefined) {
-      return;
-    }
-    if (preferredActiveConversationId !== undefined) {
-      const nextConversationId =
-        preferredActiveConversationId ?? nextConversations[0]?.id ?? null;
-      openConversation(nextConversationId, { replace: true });
-      return;
-    }
-    // Conversation selection is route-owned. Refreshing or filtering the rail
-    // must never switch the open transcript without updating the URL.
-  };
-
-  useEffect(() => {
-    setShellLoaded(false);
-    void loadShell().catch((caught) =>
-      setError(caught instanceof Error ? caught.message : String(caught)),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeTenantId]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadShell(undefined, conversationSearch).catch((caught) =>
-        setError(caught instanceof Error ? caught.message : String(caught)),
-      );
-    }, 180);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationSearch]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -1388,52 +1261,11 @@ export default function IntuneChat() {
     }
   };
 
-  const handleRenameConversation = async () => {
-    const api = window.openAdminOS;
-    const target = renameTarget;
-    const nextTitle = renameTitle.trim();
-    if (!api || !target || !nextTitle) return;
-    setError(null);
-    try {
-      const renamed = await api.renameIntuneChatConversation(target.id, nextTitle);
-      setRenameTarget(null);
-      setRenameTitle("");
-      await loadShell(renamed.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
   const handleTogglePinnedConversation = async (conversation: IntuneChatConversation) => {
-    const api = window.openAdminOS;
-    if (!api || sending) return;
+    if (sending) return;
     setError(null);
     try {
-      const updated = await api.setIntuneChatConversationPinned(
-        conversation.id,
-        !conversation.pinnedAt,
-      );
-      await loadShell(updated.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
-  const handleDeleteConversation = async () => {
-    const api = window.openAdminOS;
-    const target = deleteTarget;
-    if (!api || !target) return;
-    setError(null);
-    try {
-      await api.deleteIntuneChatConversation(target.id);
-      setDeleteTarget(null);
-      if (target.id === activeConversationId) {
-        setMessages([]);
-        openConversation(null, { replace: true });
-        await loadShell();
-      } else {
-        await loadShell(activeConversationId);
-      }
+      await togglePinned(conversation);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -1501,23 +1333,12 @@ export default function IntuneChat() {
   };
 
   const handleExportConversation = async () => {
-    const api = window.openAdminOS;
-    if (!api || !activeConversation || messages.length === 0) return;
+    if (!activeConversation) return;
     setError(null);
     setNotice(null);
     try {
-      const result = await api.saveTextFile({
-        suggestedName: `${safeFileName(activeConversation.title)}.md`,
-        content: buildConversationExportMarkdown({
-          conversation: activeConversation,
-          messages,
-          tenantName: activeTenant?.displayName,
-          providerName: provider?.name ?? state.activeProviderId,
-          cacheSummary,
-        }),
-        filters: [{ name: "Markdown", extensions: ["md"] }],
-      });
-      if (!result.canceled) {
+      const result = await exportConversation(activeConversation);
+      if (result && !result.canceled) {
         setNotice(
           result.filePath
             ? `Exported conversation to ${result.filePath}.`
@@ -1530,24 +1351,11 @@ export default function IntuneChat() {
   };
 
   const handleCreateWorkspaceFromConversation = async () => {
-    const api = window.openAdminOS;
-    if (!api || !activeConversation || activeConversation.scopeKind === "multi-tenant") return;
+    if (!activeConversation || activeConversation.scopeKind === "multi-tenant") return;
     setError(null);
     setNotice(null);
     try {
-      const workspace = await api.createWorkspace({
-        title: activeConversation.title,
-        ...(activeConversation.tenantId ? { tenantId: activeConversation.tenantId } : {}),
-        conversationId: activeConversation.id,
-      });
-      setNotice(`Created workspace ${workspace.title} and linked this conversation.`);
-      if (activeTenant) {
-        const nextWorkspaces = await api.listWorkspaces();
-        setAllWorkspaces(nextWorkspaces);
-        setWorkspaces(
-          nextWorkspaces.filter((entry) => entry.tenantId === activeTenant.id),
-        );
-      }
+      await moveToWorkspace(activeConversation);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -1613,33 +1421,11 @@ export default function IntuneChat() {
       setPinWorkspaceId("");
       const nextWorkspaces = await api.listWorkspaces();
       setAllWorkspaces(nextWorkspaces);
-      setWorkspaces(
-        nextWorkspaces.filter((entry) => entry.tenantId === activeTenant.id),
-      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
-  const cacheSummary = useMemo(() => {
-    if (!cacheStatus) return "No cache";
-    const refreshed = cacheStatus.resources.filter((resource) => resource.refreshedAt);
-    if (refreshed.length === 0) return "No cache";
-    const newest = refreshed
-      .map((resource) => resource.refreshedAt)
-      .filter((value): value is string => Boolean(value))
-      .sort()
-      .at(-1);
-    return newest ? `Updated ${formatDateTime(newest)}` : "Cache ready";
-  }, [cacheStatus]);
-
-  const activeConversation =
-    conversations.find(
-      (conversation) => conversation.id === activeConversationId,
-    ) ??
-    (pendingConversation && pendingConversation.id === activeConversationId
-      ? pendingConversation
-      : undefined);
   const workspaceView = panelMode === "workspaces";
   const filteredPanelWorkspaces = useMemo(() => {
     const needle = workspaceSearch.trim().toLowerCase();
@@ -1701,13 +1487,11 @@ export default function IntuneChat() {
     const onRenameShortcut = (event: KeyboardEvent) => {
       if (event.key !== "F2" || !activeConversation || workspaceView || sending) return;
       event.preventDefault();
-      setRenameTarget(activeConversation);
-      setRenameTitle(activeConversation.title);
-      window.requestAnimationFrame(() => renameInputRef.current?.select());
+      requestRename(activeConversation);
     };
     window.addEventListener("keydown", onRenameShortcut);
     return () => window.removeEventListener("keydown", onRenameShortcut);
-  }, [activeConversation, sending, workspaceView]);
+  }, [activeConversation, requestRename, sending, workspaceView]);
   const displayedMessages = mergeOptimisticMessages(messages, optimisticDraft);
   const progressMessageVisible =
     progressAssistantMessageId !== null &&
@@ -1761,7 +1545,41 @@ export default function IntuneChat() {
 
   return (
     <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
-      {historyIsOverlay && historyOpen && (
+      {shellChrome ? (
+        <>
+          <TopBarTitle>
+            <button
+              type="button"
+              disabled={!activeConversation || sending || workspaceView}
+              onClick={() => {
+                if (activeConversation) requestRename(activeConversation);
+              }}
+              className="block max-w-full truncate rounded-[5px] px-1 text-sm font-medium text-[var(--color-text-soft)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] disabled:cursor-default"
+            >
+              {workspaceView
+                ? "Workspaces"
+                : unknownConversation
+                  ? "Conversation not found"
+                  : activeConversation?.title ?? "New conversation"}
+            </button>
+          </TopBarTitle>
+          <TopBarActions>
+            {activeConversation && !workspaceView ? (
+              <ConversationActionsMenu
+                conversation={activeConversation}
+                sending={sending}
+                messagesAvailable={messages.length > 0}
+                onRename={() => requestRename(activeConversation)}
+                onTogglePin={() => void handleTogglePinnedConversation(activeConversation)}
+                onExport={() => void handleExportConversation()}
+                onMove={() => void handleCreateWorkspaceFromConversation()}
+                onDelete={() => requestDelete(activeConversation)}
+              />
+            ) : null}
+          </TopBarActions>
+        </>
+      ) : null}
+      {!shellChrome && historyIsOverlay && historyOpen && (
         <button
           type="button"
           aria-label="Close chat history"
@@ -1772,7 +1590,7 @@ export default function IntuneChat() {
           className="absolute inset-0 z-20 border-0 bg-black/55"
         />
       )}
-      <aside
+      {!shellChrome ? <aside
         aria-label="Chat navigation"
         aria-hidden={!historyOpen}
         inert={!historyOpen}
@@ -1798,13 +1616,6 @@ export default function IntuneChat() {
               onValueChange={(value) => {
                 const nextMode = value === "workspaces" ? "workspaces" : "chats";
                 setPanelMode(nextMode);
-                navigate(
-                  nextMode === "workspaces"
-                    ? "/chat?panel=workspaces"
-                    : (activeConversationId ?? lastConversationIdRef.current)
-                      ? `/chat/${encodeURIComponent((activeConversationId ?? lastConversationIdRef.current)!)}`
-                      : "/chat",
-                );
               }}
             />
             <div className="flex shrink-0 items-center gap-1">
@@ -1828,7 +1639,7 @@ export default function IntuneChat() {
                   if (panelMode === "chats") {
                     startNewConversation();
                   } else {
-                    setWorkspaceCreateRequest((value) => value + 1);
+                    requestWorkspaceCreate();
                   }
                   if (historyIsOverlay) setHistoryOpen(false);
                 }}
@@ -1959,7 +1770,7 @@ export default function IntuneChat() {
             </>
           )}
         </div>
-      </aside>
+      </aside> : null}
 
       {workspaceView ? (
         <Workspaces
@@ -1967,7 +1778,7 @@ export default function IntuneChat() {
           selectedWorkspaceId={routeWorkspaceId ?? null}
           createRequest={workspaceCreateRequest}
           leadingAction={
-            !historyOpen ? (
+            !shellChrome && !historyOpen ? (
               <IconButton
                 label="Show chat panel"
                 tooltip="Show chat panel"
@@ -1986,20 +1797,11 @@ export default function IntuneChat() {
                 : "/chat?panel=workspaces",
             )
           }
-          onWorkspacesChange={(nextWorkspaces) => {
-            setAllWorkspaces(nextWorkspaces);
-            setWorkspaces(
-              activeTenant
-                ? nextWorkspaces.filter(
-                    (workspace) => workspace.tenantId === activeTenant.id,
-                  )
-                : [],
-            );
-          }}
+          onWorkspacesChange={setAllWorkspaces}
         />
       ) : (
       <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] px-6">
+        {!shellChrome ? <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] px-6">
           <div className="flex min-w-0 items-center gap-3">
             {!historyOpen && (
               <IconButton
@@ -2019,39 +1821,11 @@ export default function IntuneChat() {
               className="min-w-0"
               title={activeConversation ? `Updated ${formatDateTime(activeConversation.updatedAt)}` : undefined}
             >
-              {renameTarget && renameTarget.id === activeConversation?.id ? (
-                <input
-                  ref={renameInputRef}
-                  name="conversation-title"
-                  value={renameTitle}
-                  autoFocus
-                  autoComplete="off"
-                  aria-label="Conversation title"
-                  onChange={(event) => setRenameTitle(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void handleRenameConversation();
-                    } else if (event.key === "Escape") {
-                      setRenameTarget(null);
-                      setRenameTitle("");
-                    }
-                  }}
-                  onBlur={() => {
-                    setRenameTarget(null);
-                    setRenameTitle("");
-                  }}
-                  className="h-8 min-w-0 max-w-96 rounded-md bg-[var(--color-bg-raised)] px-2 text-base font-medium text-[var(--color-text)] outline-none ring-1 ring-[var(--color-accent)]"
-                />
-              ) : (
               <button
                 type="button"
                 disabled={!activeConversation || sending}
                 onClick={() => {
-                  if (!activeConversation) return;
-                  setRenameTarget(activeConversation);
-                  setRenameTitle(activeConversation.title);
-                  window.requestAnimationFrame(() => renameInputRef.current?.select());
+                  if (activeConversation) requestRename(activeConversation);
                 }}
                 className={`block max-w-full truncate text-left text-base font-medium text-[var(--color-text)] disabled:cursor-default ${focusRingClass}`}
               >
@@ -2065,7 +1839,6 @@ export default function IntuneChat() {
                   ? "Conversation not found"
                   : activeConversation?.title ?? "New conversation"}
               </button>
-              )}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
@@ -2107,13 +1880,13 @@ export default function IntuneChat() {
                     label: "Delete",
                     danger: true,
                     disabled: sending,
-                    onSelect: () => setDeleteTarget(activeConversation),
+                    onSelect: () => requestDelete(activeConversation),
                   },
                 ]}
               />
             )}
           </div>
-        </header>
+        </header> : null}
 
         <div className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-6 py-8">
@@ -2462,23 +2235,89 @@ export default function IntuneChat() {
         }}
         onConfirm={() => void handlePinMessageToWorkspace()}
       />
-      <DeleteConversationModal
-        conversation={deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={() => void handleDeleteConversation()}
-      />
       {conversationMenu && (
         <ConversationContextMenu
           conversation={conversationMenu.conversation}
           x={conversationMenu.x}
           y={conversationMenu.y}
           onDelete={() => {
-            setDeleteTarget(conversationMenu.conversation);
+            requestDelete(conversationMenu.conversation);
             setConversationMenu(null);
           }}
         />
       )}
     </div>
+  );
+}
+
+function ConversationActionsMenu({
+  conversation,
+  sending,
+  messagesAvailable,
+  onRename,
+  onTogglePin,
+  onExport,
+  onMove,
+  onDelete,
+}: {
+  conversation: IntuneChatConversation;
+  sending: boolean;
+  messagesAvailable: boolean;
+  onRename: () => void;
+  onTogglePin: () => void;
+  onExport: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <Menu
+      ariaLabel="Conversation actions"
+      trigger={
+        <IconButton
+          label="Conversation actions"
+          tooltip="Conversation actions"
+          icon={<IconChevronDown size={14} />}
+        />
+      }
+      items={[
+        {
+          id: "pin",
+          label: conversation.pinnedAt ? "Unpin" : "Pin",
+          icon: <IconStar size={12} />,
+          disabled: sending,
+          onSelect: onTogglePin,
+        },
+        {
+          id: "rename",
+          label: "Rename",
+          icon: <IconChat size={12} />,
+          disabled: sending,
+          onSelect: onRename,
+        },
+        {
+          id: "workspace",
+          label: "Move to workspace",
+          icon: <IconHardDrive size={12} />,
+          disabled: sending || conversation.scopeKind === "multi-tenant",
+          onSelect: onMove,
+        },
+        {
+          id: "export",
+          label: "Export",
+          icon: <IconDownload size={12} />,
+          disabled: sending || !messagesAvailable,
+          onSelect: onExport,
+        },
+        { type: "separator", id: "delete-separator" },
+        {
+          id: "delete",
+          label: "Delete",
+          danger: true,
+          disabled: sending,
+          onSelect: onDelete,
+        },
+      ]}
+    />
   );
 }
 
@@ -3619,42 +3458,6 @@ function ConsentFact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DeleteConversationModal({
-  conversation,
-  onClose,
-  onConfirm,
-}: {
-  conversation: IntuneChatConversation | null;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal open={Boolean(conversation)} onClose={onClose} size="md">
-      <ModalHeader
-        title="Delete conversation"
-        subtitle={conversation?.title}
-        badge={<Badge tone="danger">Local deletion</Badge>}
-        onClose={onClose}
-      />
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          This removes the conversation, messages, and chat tool-call records
-          from the local SQLite store. It does not disconnect the tenant or
-          clear the Graph cache.
-        </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="danger" onClick={onConfirm}>
-            Delete
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
 function ConversationContextMenu({
   conversation,
   x,
@@ -4358,105 +4161,6 @@ function formatSourceQuery(query: Record<string, string>): string {
     .join("&");
 }
 
-function buildConversationExportMarkdown(input: {
-  conversation: IntuneChatConversation;
-  messages: IntuneChatMessage[];
-  tenantName?: string;
-  providerName?: string;
-  cacheSummary: string;
-}): string {
-  const lines = [
-    `# ${input.conversation.title}`,
-    "",
-    `Exported: ${new Date().toISOString()}`,
-    `Tenant: ${input.tenantName ?? input.conversation.tenantId ?? "Unknown"}`,
-    `Provider: ${input.providerName ?? "Unknown"}`,
-    `Cache: ${input.cacheSummary}`,
-    "",
-    "This export was generated locally by OpenAdminOS. It includes chat text and source metadata, not cached Graph row payloads.",
-    "",
-  ];
-
-  for (const message of input.messages) {
-    lines.push(`## ${message.role === "user" ? "Prompt" : "Response"} · ${formatDateTime(message.createdAt)}`);
-    if (message.providerId || message.model || message.status !== "completed") {
-      lines.push(
-        [
-          message.status !== "completed" ? `status=${message.status}` : undefined,
-          message.providerId ? `provider=${message.providerId}` : undefined,
-          message.model ? `model=${message.model}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-      );
-    }
-    lines.push("", message.content.trim() || "_No content._", "");
-
-    if (message.sources?.length) {
-      lines.push("### Sources", "");
-      for (const source of message.sources) {
-        lines.push(`- **${source.label}** (${source.source})`);
-        lines.push(`  - Resource: \`${source.resource}\``);
-        if (source.path) lines.push(`  - Path: \`${source.path}\``);
-        if (source.select?.length) {
-          lines.push(`  - Select: \`${source.select.join(", ")}\``);
-        }
-        if (source.query && Object.keys(source.query).length > 0) {
-          lines.push(`  - Query: \`${formatSourceQuery(source.query)}\``);
-        }
-        lines.push(`  - Rows: ${source.rows}`);
-        lines.push(`  - Pages: ${source.pages ?? "unknown"}`);
-        lines.push(`  - Capped: ${source.pageLimitReached ? "yes" : "no"}`);
-        lines.push(`  - Refreshed: ${source.refreshedAt ?? "not refreshed"}`);
-        if (source.error) lines.push(`  - Error: ${source.error}`);
-      }
-      lines.push("");
-    }
-
-    if (message.toolTrace?.length) {
-      lines.push("### What Ran", "");
-      for (const entry of message.toolTrace) {
-        lines.push(`- \`${entry.tool}\` · ${entry.resultSummary} · ${entry.durationMs} ms`);
-        lines.push(`  - Params: \`${summarizeToolParams(entry.params)}\``);
-        if (entry.error) lines.push(`  - Error: ${entry.error}`);
-      }
-      lines.push("");
-    }
-
-    if (message.agentSuggestions?.length) {
-      lines.push("### Agent Suggestions", "");
-      for (const suggestion of message.agentSuggestions) {
-        lines.push(
-          `- **${suggestion.agentName}** (${suggestion.mode}, ${Math.round(suggestion.confidence * 100)}% match)`,
-        );
-        lines.push(`  - Reason: ${suggestion.reason}`);
-        if (suggestion.matchedTerms?.length) {
-          lines.push(`  - Matched terms: ${suggestion.matchedTerms.join(", ")}`);
-        }
-        if (suggestion.matchedConcepts?.length) {
-          lines.push(`  - Routing evidence: ${suggestion.matchedConcepts.join("; ")}`);
-        }
-        if (suggestion.matchedResources?.length) {
-          lines.push(
-            `  - Planned sources: ${suggestion.matchedResources
-              .map(chatResourceLabel)
-              .join(", ")}`,
-          );
-        }
-        lines.push(`  - Scopes: ${suggestion.scopes.join(", ") || "none"}`);
-      }
-      lines.push("");
-    }
-  }
-
-  return capExportContent(`${lines.join("\n")}\n`);
-}
-
-function capExportContent(content: string): string {
-  const maxLength = 1_900_000;
-  if (content.length <= maxLength) return content;
-  return `${content.slice(0, maxLength)}\n\n_Export truncated by OpenAdminOS because it exceeded the local save limit._\n`;
-}
 
 function detectsAllTenantPrompt(prompt: string): boolean {
   return /\b(all tenants|every tenant|every connected tenant|all customers|all clients|across tenants|from every tenant)\b/i.test(prompt);

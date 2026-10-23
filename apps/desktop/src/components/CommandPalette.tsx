@@ -36,7 +36,7 @@ interface PaletteItem {
   id: string;
   label: string;
   hint?: string;
-  group: "Agents" | "Hub" | "Navigate" | "Actions" | "Chats" | "Workspaces";
+  group: "Agents" | "Hub" | "Navigate" | "Actions" | "Conversations" | "Workspaces";
   icon: React.ReactNode;
   shortcut?: string;
   action: () => void | Promise<void>;
@@ -148,7 +148,7 @@ export function CommandPalette({
         id: `chat-${conversation.id}`,
         label: conversation.title,
         hint: "Recent conversation",
-        group: "Chats" as const,
+        group: "Conversations" as const,
         icon: <IconChat size={13} className="text-[var(--color-text-soft)]" />,
         action: go(`/chat/${encodeURIComponent(conversation.id)}`),
       })),
@@ -302,6 +302,7 @@ export function CommandPalette({
     const q = query.toLowerCase();
     return items.filter(
       (i) =>
+        i.group === "Conversations" ||
         i.label.toLowerCase().includes(q) ||
         i.hint?.toLowerCase().includes(q) ||
         i.group.toLowerCase().includes(q),
@@ -309,7 +310,7 @@ export function CommandPalette({
   }, [items, query]);
 
   const grouped = useMemo(() => {
-    const order: PaletteItem["group"][] = ["Actions", "Chats", "Workspaces", "Navigate", "Agents", "Hub"];
+    const order: PaletteItem["group"][] = ["Actions", "Conversations", "Workspaces", "Navigate", "Agents", "Hub"];
     const map: Record<string, PaletteItem[]> = {};
     for (const i of filtered) {
       if (!map[i.group]) map[i.group] = [];
@@ -344,19 +345,31 @@ export function CommandPalette({
   useEffect(() => {
     const api = window.openAdminOS;
     if (!open || !api) return;
-    void Promise.all([
-      api.listIntuneChatConversations(),
-      api.listWorkspaces(),
-    ])
-      .then(([nextConversations, nextWorkspaces]) => {
-        setRecentConversations(nextConversations);
-        setWorkspaces(nextWorkspaces);
-      })
-      .catch(() => {
-        setRecentConversations([]);
-        setWorkspaces([]);
-      });
-  }, [open]);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const search = query.trim();
+      void Promise.all([
+        search
+          ? api.searchIntuneChatConversations(search)
+          : api.listIntuneChatConversations(),
+        api.listWorkspaces(),
+      ])
+        .then(([nextConversations, nextWorkspaces]) => {
+          if (cancelled) return;
+          setRecentConversations(nextConversations);
+          setWorkspaces(nextWorkspaces);
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setRecentConversations([]);
+          setWorkspaces([]);
+        });
+    }, query.trim() ? 180 : 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, query]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -427,7 +440,7 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center px-6 pt-[12vh]"
+      className="fixed inset-x-0 bottom-0 top-[52px] z-[100] flex items-start justify-center px-6 pt-11"
       style={{ background: "rgba(10, 12, 16, 0.55)" }}
       onClick={onClose}
     >
@@ -437,11 +450,11 @@ export function CommandPalette({
         aria-modal="true"
         aria-label="Command Palette"
         tabIndex={-1}
-        className="w-full max-w-[640px] overflow-hidden rounded-2xl bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in-scale"
+        className="w-full max-w-[620px] overscroll-contain overflow-hidden rounded-[16px] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in-scale"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onPaletteKeyDown}
       >
-        <div className="flex items-center gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
+        <div className="flex h-14 items-center gap-3 border-b border-[var(--color-border-soft)] px-4">
           <IconSearch size={15} className="text-[var(--color-text-muted)]" />
           <label htmlFor="command-palette-search" className="sr-only">
             Search commands, agents, or pages

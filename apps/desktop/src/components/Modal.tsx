@@ -93,7 +93,7 @@ export function Modal({
   // from a drawer, such as Configure or the run review, are never covered.
   return createPortal(
     <div
-      className="fixed inset-0 z-[95] flex items-center justify-center px-6 py-10"
+      className="app-shell-scrim fixed inset-x-0 bottom-0 top-[52px] z-[95] flex items-center justify-center px-6 py-10"
       style={{ background: "var(--color-scrim)" }}
       onClick={() => {
         if (closeOnScrim) onClose();

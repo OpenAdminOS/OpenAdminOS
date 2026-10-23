@@ -24,6 +24,12 @@ describe("windows title bar overlay", () => {
     );
   });
 
+  it("uses the 52 pixel shell row for native window controls", () => {
+    assert.match(main, /titleBarOverlay:\s*\{[^}]*height:\s*52/);
+    assert.match(main, /setTitleBarOverlay\(\{[^}]*height:\s*52/);
+    assert.match(main, /trafficLightPosition:\s*\{\s*x:\s*18,\s*y:\s*18\s*\}/);
+  });
+
   it("opens each window on the current system background so launch does not flash", () => {
     assert.match(
       main,

@@ -1,6 +1,6 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
-import { AppShell, TitleBarInset } from "./components/AppShell";
+import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { IconChat, IconWarning } from "./components/icons";
 import { EmptyState } from "./components/ui";
@@ -260,7 +260,6 @@ function DesktopBridgeUnavailable({
 }) {
   return (
     <div className="flex h-full w-full flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
-      <TitleBarInset />
       <div className="flex min-h-0 flex-1 items-center justify-center px-6">
         <EmptyState
           icon={<IconWarning size={18} />}

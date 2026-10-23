@@ -4,37 +4,22 @@ import { useNavigate } from "react-router";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { ConnectorConfirmModal } from "./ConnectorConfirmModal";
-import { StatusStrip } from "./StatusStrip";
-import { UpdateBanner } from "./UpdateBanner";
 import { ReportIssueProvider } from "./ReportIssueModal";
 import { matchesShortcut, OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { overlayStackSize } from "../shared/overlay-stack";
+import {
+  ConversationWorkspaceProvider,
+  DataBoundaryProvider,
+  ShellChromeProvider,
+  UpdateStateProvider,
+  useDataBoundary,
+  useShellChrome,
+} from "../state";
+import { TopBar } from "./TopBar";
 
 export { PageHeader } from "./ui/PageHeader";
 
-// Reserve space at the top of the window for the macOS traffic-light buttons
-// (titleBarStyle: "hiddenInset" leaves them floating over the renderer) and
-// make that strip draggable so users can move the window from the top edge.
-// On Windows the same strip is the drag region that the system window
-// controls are overlaid onto (titleBarOverlay), which is why it keeps its
-// height there. On Linux the native frame is still drawn, so the strip
-// would be nothing but wasted vertical space and is omitted.
-const TITLE_BAR_HEIGHT = 32;
-
-export function TitleBarInset() {
-  const platform = window.openAdminOS?.platform;
-  if (platform === "linux") return null;
-  return (
-    <div
-      aria-hidden
-      className="app-titlebar app-region-drag shrink-0 bg-[var(--color-bg)]"
-      style={{ height: TITLE_BAR_HEIGHT }}
-    />
-  );
-}
-
 export function AppShell({ children }: { children: ReactNode }) {
-  const [voiceHosted, setVoiceHosted] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const navigate = useNavigate();
 
@@ -59,6 +44,9 @@ export function AppShell({ children }: { children: ReactNode }) {
       } else if (matchesShortcut(e, "settings") && overlayStackSize() === 0) {
         e.preventDefault();
         navigate("/settings");
+      } else if (matchesShortcut(e, "toggleSidebar") && overlayStackSize() === 0) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("openadminos:toggle-sidebar"));
       }
     };
     window.addEventListener("keydown", onKey);
@@ -67,30 +55,61 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <ReportIssueProvider>
-      <div className="flex h-full w-full flex-col overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
-        <a
-          href="#main-content"
-          className="fixed left-3 top-3 z-[200] -translate-y-24 rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-transform focus:translate-y-0"
-        >
-          Skip to main content
-        </a>
-        <TitleBarInset />
-        <UpdateBanner />
-        <div className="flex min-h-0 flex-1 overflow-hidden">
-          <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
-          <main id="main-content" tabIndex={-1} className="relative flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-            {children}
-          </main>
-        </div>
-        <Nova onHostedChange={setVoiceHosted} />
-        <StatusStrip voiceHosted={voiceHosted} />
-        <CommandPalette
-          open={paletteOpen}
-          onClose={() => setPaletteOpen(false)}
-        />
-        <ConnectorConfirmModal />
-      </div>
+      <UpdateStateProvider>
+        <DataBoundaryProvider>
+          <ShellChromeProvider>
+            <ConversationWorkspaceProvider>
+              <ShellLayout
+                paletteOpen={paletteOpen}
+                setPaletteOpen={setPaletteOpen}
+              >
+                {children}
+              </ShellLayout>
+            </ConversationWorkspaceProvider>
+          </ShellChromeProvider>
+        </DataBoundaryProvider>
+      </UpdateStateProvider>
     </ReportIssueProvider>
+  );
+}
+
+function ShellLayout({
+  children,
+  paletteOpen,
+  setPaletteOpen,
+}: {
+  children: ReactNode;
+  paletteOpen: boolean;
+  setPaletteOpen: (open: boolean) => void;
+}) {
+  const { setVoiceHosted } = useDataBoundary();
+  const { toggleSidebar } = useShellChrome();
+
+  useEffect(() => {
+    const onToggle = () => toggleSidebar();
+    window.addEventListener("openadminos:toggle-sidebar", onToggle);
+    return () => window.removeEventListener("openadminos:toggle-sidebar", onToggle);
+  }, [toggleSidebar]);
+
+  return (
+    <div className="flex h-full w-full overflow-hidden bg-[var(--color-bg)] text-[var(--color-text)]">
+      <a
+        href="#main-content"
+        className="fixed left-3 top-3 z-[200] -translate-y-24 rounded-md bg-[var(--color-accent)] px-3 py-2 text-sm font-semibold text-[var(--color-on-accent)] transition-transform focus:translate-y-0"
+      >
+        Skip to main content
+      </a>
+      <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <TopBar />
+        <main id="main-content" tabIndex={-1} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {children}
+        </main>
+      </div>
+      <Nova onHostedChange={setVoiceHosted} />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <ConnectorConfirmModal />
+    </div>
   );
 }
 

@@ -670,8 +670,8 @@ html[data-reduced-motion] *::after {
 /* Shared desktop rhythm: quiet surfaces, explicit boundaries, compact headers. */
 .app-page-header { padding: 24px 32px 20px; gap: 20px; align-items: center; }
 .app-page-body { padding: 24px 32px; }
-.app-sidebar { width: 224px; }
-.app-sidebar[data-collapsed="true"] { width: 56px; }
+.app-sidebar { width: 268px; }
+.app-sidebar[data-collapsed="true"] { width: 0; }
 .app-titlebar { border-bottom: 1px solid var(--color-border-soft); }
 table { font-variant-numeric: tabular-nums; }
 input::placeholder, textarea::placeholder { color: var(--color-text-placeholder); }

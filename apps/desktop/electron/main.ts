@@ -1028,7 +1028,7 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/chat",
       name: "chat-empty",
       file: "app/chat-empty.png",
-      waitFor: ["Chat", "Ollama"],
+      waitFor: ["Ollama", "Send"],
       prepare: "chat-empty",
       selector: "#intune-chat-composer",
     },
@@ -1036,7 +1036,7 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/chat",
       name: "chat-transcript",
       file: "app/chat-transcript.png",
-      waitFor: ["Chat", "Ollama"],
+      waitFor: ["Ollama", "Send"],
       prepare: "chat-transcript",
       selector: "#intune-chat-composer",
     },
@@ -4846,12 +4846,15 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         : process.platform === "win32"
           ? "hidden"
           : "default",
+    ...(process.platform === "darwin"
+      ? { trafficLightPosition: { x: 18, y: 18 } }
+      : {}),
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
             color: initialThemeColors.background,
             symbolColor: initialThemeColors.textMuted,
-            height: 32,
+            height: 52,
           },
         }
       : {}),
@@ -5120,7 +5123,7 @@ function registerIpcHandlers() {
         window.setTitleBarOverlay({
           color: colors.background,
           symbolColor: colors.textMuted,
-          height: 32,
+          height: 52,
         });
       }
     }

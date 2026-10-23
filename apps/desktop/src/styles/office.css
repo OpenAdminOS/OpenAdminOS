@@ -1887,8 +1887,19 @@ html[data-team-presentation]
   font-size: 12px;
 }
 html[data-team-fullscreen] aside[aria-label="Application navigation"],
+html[data-team-fullscreen] .app-topbar,
 html[data-team-fullscreen] .app-region-drag {
   display: none;
+}
+
+html[data-team-presentation] aside[aria-label="Application navigation"],
+html[data-team-presentation] .app-topbar {
+  display: none;
+}
+
+html[data-team-fullscreen] .app-shell-scrim,
+html[data-team-presentation] .app-shell-scrim {
+  top: 0;
 }
 .office-fullscreen {
   display: flex;

@@ -258,7 +258,7 @@ The model picker is populated from Codex's local `models_cache.json`, with
 `config.toml` supplying the default model when present.
 Selecting a model under an inactive provider also makes that provider active
 for future runs; model pinning must not leave the visible active provider on a
-different provider. Overview surfaces such as Agents, StatusStrip, Settings,
+different provider. Overview surfaces such as Agents, the shell top bar, Settings,
 and Intune Chat show the active provider plus the selected default model for
 that provider. Queued run surfaces show the provider and model pinned on that
 run, even if global defaults later change.
@@ -1126,8 +1126,8 @@ returns a clear lookup failure after bounded repair attempts. A valid empty resu
 remains distinct from an unavailable snapshot. Security-incidents preload requests
 at most 50 records per page and follows continuation links.
 
-Chat does not run without an active tenant. The status strip shows the active
-tenant, provider, model, and data freshness. When the selected provider is local,
+Chat does not run without an active tenant. The shell top bar shows the active
+tenant, provider, model, and strictest current data boundary. When the selected provider is local,
 Graph data, prompts, chat history, answer packs, and optional self-training data
 stay on the device. When a hosted provider is selected, the chat UI must state
 that retrieved tenant context will be sent to that provider before the answer is
@@ -1287,8 +1287,8 @@ list/search pane on the left and the selected workspace detail on the right. The
 detail view groups notes, pinned evidence, linked conversations, linked runs, and
 workspace-local instructions into clear sections without nesting cards inside
 cards or becoming a project board. On narrower desktop widths, the list can
-collapse to preserve evidence reading width, but the global sidebar and status
-strip remain visible. Workspace filters, selected section, and expanded evidence
+collapse to preserve evidence reading width, but the global sidebar and top bar
+remain visible. Workspace filters, selected section, and expanded evidence
 groups restore when the admin returns to a workspace.
 
 v0.2.5 ships the read-only multi-tenant Intune Chat path, single-tenant
@@ -1764,8 +1764,18 @@ may use `#9DBBFF` for contrast. Semantic colors are limited to status meaning.
   corrections from the visual reference needed to preserve 4.5:1 contrast.
 - Radii are 8px small, 10px medium, 14px large, and 18px for dialogs. Quiet
   status badges are 22px high with a 6px radius.
-- The sidebar is 224px wide and collapses to a 56px icon rail; shared page
-  padding is 24px vertically and 32px horizontally.
+- The sidebar is 268px wide and collapses fully to zero. Its 52px top row owns
+  the sidebar toggle, while the persistent 52px top bar exposes the toggle and
+  New chat whenever the sidebar is collapsed. Shared page padding is 24px
+  vertically and 32px horizontally.
+- The top bar always keeps the active tenant switcher and data boundary visible.
+  Page titles occupy its center and route-specific actions sit before the
+  boundary chip on the right. Dialog and drawer scrims begin below this bar,
+  except for Office fullscreen and presentation modes.
+- On macOS, the sidebar top row and top bar are the title-bar drag surfaces and
+  the traffic lights sit inside the 52px row. On Windows, the 52px title-bar
+  overlay reserves the rightmost 140px for system buttons. Linux keeps its
+  native frame and does not add drag regions.
 
 Regenerate raster brand assets with `node scripts/generate-brand-assets.mjs`.
 The macOS multi-resolution installer TIFF additionally uses `tiffutil`, as
@@ -1874,20 +1884,28 @@ messages, and never suggest the same agent twice in one conversation.
 
 ### Navigation (locked for the enterprise redesign)
 
-The sidebar contains exactly six destinations in this order:
+The shell sidebar presents these primary actions and destinations in this order:
 
-| Nav item | Route | Contains |
+| Item | Route or action | Contains |
 |---|---|---|
-| Chat | `/chat` and `/chat/workspaces/:workspaceId` | Tenant Q&A, conversation history, and Workspaces |
+| New chat | `/chat` | Starts a new tenant Q&A conversation |
+| Search | Command palette | Commands, conversations, agents, and Settings targets |
 | Agent Team | `/office` | Persistent teammates, assignments, evidence review, conversations, and the Office and List views |
 | Agents | `/agents` | Installed and Hub libraries, schedules, and agent details |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
-| Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, System plus three device-local themes in Appearance, Privacy, and About |
 
-**Decided 2026-10-12 by Ugur:** Agent Team stays a top-level destination; Runs
-stays a daily page; Workspaces in Chat; Connectors and Data in Settings; Nova in
-the sidebar; Chat boundary line shown only for hosted providers.
+Pinned conversations, Workspaces, and grouped recent conversations follow the
+primary navigation. Settings, Tenants, Voice, Keyboard shortcuts, and About and
+updates live in the tenant-aware account menu at the bottom of the sidebar.
+Conversation and workspace state is shared by the shell and Chat so first-send
+pending insertion, search, reload reconciliation, rename, pin, export, move,
+and delete behavior is identical from either surface.
+
+**Updated 2026-10-23:** Agent Team stays a top-level destination; Runs stays a
+daily page; Workspaces live in the sidebar and Chat; Connectors and Data stay in
+Settings; Nova moves to the account menu; the top-bar boundary chip is always
+present for local, hosted, and unconfigured states.
 
 Workspaces live in the Chat left panel and remain reachable from the command
 palette. Legacy `/workspaces` and `/workspaces/:workspaceId` URLs redirect to
@@ -1921,7 +1939,7 @@ terminal runs in a URL-addressable drawer. History links can prefilter by
 `?agent=<slug>`, `?status=failed|review`, and `?tenant=<id>`.
 
 Removed from navigation:
-- **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
+- **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent shell boundary. `/` redirects to `/chat`.
 - **Report issue**: available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
 ### First run and contextual activation (updated for v0.5)
@@ -1939,7 +1957,11 @@ Setup opens only when an action needs tenant context: sending Chat, starting or 
 
 Pending setup intent is safe session metadata only: action kind, local return route, conversation id, agent slug, validated resource kind, optional run pinning or scheduled batch mode, and creation time. Chat text remains in its separately namespaced per-conversation session draft record and is never copied into the pending-intent record. Pending intents expire after 30 minutes. Cancel clears the intent but preserves the Chat draft. Sign-in exposes cancel, a three-minute soft waiting state, and a five-minute host timeout; the local loopback listener closes on cancel or timeout.
 
-The persistent status strip and tenant switcher are the canonical Connect tenant entry points. Disconnecting the last tenant leaves the shell available and never destroys unrelated provider, registry, or local draft state. Agents still cannot run, Graph cache refreshes still cannot start, and Changes still cannot load tenant data without an active tenant.
+The persistent top-bar tenant switcher is the canonical Connect tenant entry
+point. Disconnecting the last tenant leaves the shell available and never
+destroys unrelated provider, registry, or local draft state. Agents still
+cannot run, Graph cache refreshes still cannot start, and Changes still cannot
+load tenant data without an active tenant.
 
 Answered chat question means the local chat store contains at least one completed assistant message. Empty draft conversations, failed responses, and stopped responses do not count.
 
@@ -1968,9 +1990,19 @@ North-star metric: time from install to first successful result, target under 5 
 ### Quality implementation decisions (locked for v0.4)
 
 - Stable wording introduced by the v0.4 pass lives in typed copy modules. Trust messaging, Settings search entries, recoverable Chat errors, and agent display names have one derivation or formatting path rather than per-surface variants.
-- StatusStrip is the canonical persistent tenant/provider/data-boundary surface. Local Chat does not need a second long trust explanation; hosted and attached-context sends retain explicit boundary confirmation.
-- `Mod+K`, `Mod+N`, and `Mod+,` are defined once and shared by visible labels, renderer handling, and the native application menu.
-- Dialogs and the Command Palette use one topmost-Escape model, dialog/combobox semantics, initial focus, focus trapping, and focus return. Escape never confirms an action.
+- The top bar is the canonical persistent tenant/provider/data-boundary surface.
+  The boundary resolves to the strictest active boundary, so a hosted Nova voice
+  session wins over a local global provider. Local Chat does not need a second
+  long trust explanation; hosted and attached-context sends retain explicit
+  boundary confirmation. Provider settings do not currently store hosted
+  region metadata, so the shell states "Region not provided" rather than
+  inventing one.
+- `Mod+K`, `Mod+N`, `Mod+,`, and `Mod+Shift+S` are defined once and shared by
+  visible labels and renderer handling. The last shortcut toggles the sidebar.
+- Dialogs and drawers keep the tenant and boundary visible by starting their
+  scrims below the 52px top bar. The Command Palette uses the same top offset,
+  topmost-Escape model, dialog/combobox semantics, initial focus, focus trapping,
+  and focus return. Escape never confirms an action.
 - Chat send/stream/stop/fail/retry behavior is an explicit tested state machine. A failed question remains available to Retry, and retry re-enters the same tenant, hosted-provider, and workspace-context checks.
 - Conversation drafts use per-conversation `sessionStorage` for v0.4. Drafts remain on the device, survive route changes within the session, clear after a successful send, and are never sent without the user action.
 - Persisted conversations use `/chat/:conversationId` and Settings sections use `/settings/:section`. Reload and browser history restore those selections; `/chat` remains a new draft, and deleted or unknown conversation links render an explicit local recovery state instead of silently selecting another conversation.
