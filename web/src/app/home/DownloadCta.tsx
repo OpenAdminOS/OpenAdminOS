@@ -49,9 +49,9 @@ export function DownloadCta({
       </a>
       <Link
         href="/download"
-        className="inline-flex h-12 items-center justify-center rounded-[10px] px-4 text-[15px] font-medium text-brand-muted transition-colors hover:bg-brand-hover hover:text-brand-ink"
+        className="inline-flex h-12 items-center justify-center whitespace-nowrap rounded-[10px] px-4 text-[15px] font-medium text-brand-muted transition-colors hover:bg-brand-hover hover:text-brand-ink"
       >
-        Other platforms and checksums
+        All platforms and checksums
       </Link>
     </div>
   );
