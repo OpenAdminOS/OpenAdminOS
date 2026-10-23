@@ -16,22 +16,21 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [0.7.1] - 2026-10-23
 
+Nightly builds for admins who want new changes early, and Midnight as the default theme for new installs.
+
 ### Added
 
-- Publish a signed Nightly prerelease after every merge that changes the app, and let installs opt in from Settings > About.
+- Nightly builds: a signed prerelease is published after every merge that changes the app. Turn on "Get nightly builds" in Settings > About to receive them. Nightly installs also receive newer stable releases, and turning nightlies off returns to the current stable release, even when it is older. A Nightly badge in the status strip marks these builds. Linux nightly packages are attached to the GitHub prerelease; the apt repository stays stable-only.
+- Settings > About shows the update status and a Check for updates button.
 
 ### Changed
 
-- Restyle the public website with the Midnight dark palette, one blue accent, dark content surfaces, and a populated Chat answer in the product demo.
 - Use Midnight as the desktop theme for new installs while preserving Graphite and all existing saved appearance values.
-
-### Removed
+- Restyle the public website with the Midnight dark palette, one blue accent, dark content surfaces, and a populated Chat answer in the product demo. The download page links to nightly builds.
 
 ### Fixed
 
 - Keep documentation index releases from becoming the GitHub "Latest" release, which stable update checks and the download page rely on.
-
-### Security
 
 ## [0.7.0] - 2026-10-12
 
