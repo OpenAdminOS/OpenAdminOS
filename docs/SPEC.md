@@ -150,42 +150,34 @@ items, because they target durable admin search and product-evaluation topics.
 The examples gallery at `/examples` is also a secondary marketing page, with
 copyable Build your own Agent prompts grouped by read investigations, confirmed
 write plans, and connector-backed delivery examples.
-The marketing homepage retains its hero, traction, testimonials,
-how-it-works, write-gate, benchmarks, open-source, FAQ, and download sections.
-The hero product area uses unedited screenshots captured from the built Electron
-app with an isolated synthetic-data profile. Invisible, keyboard-accessible
-hotspots are measured from the actual controls in each captured screen. Sidebar,
-settings sections, agent details, and selected dialogs navigate between those
-screens. The website must not re-create or approximate the desktop interface in
-HTML. Actions not represented by a captured screen explain that they require the
-desktop app; they do not simulate a successful write, installation, or connection.
-No external preview label, walkthrough, or reset toolbar is shown. The tenant
-selector offers Contoso, Dev Tenant, and Customer Tenant. Selecting a tenant
-preserves the current page and uses that tenant’s real captures throughout
-navigation. Tenant names and account identifiers use plain customer labels. Screenshots keep
-the actual app aspect ratio. Small screens can pan within the preview instead of
-receiving a different invented mobile UI. Screenshot transitions respect reduced
-motion. Agent Team opens in the expanded office with Chief of Staff, Policy Watcher,
-and Device Investigator. Its room animation is a muted recording of the built app,
-positioned over the matching room capture. The pause control switches to an actual
-paused capture; reduced-motion users see the static office. Playback stops when
-the preview is offscreen or the browser tab is hidden. The current Contoso
-populated Chat answer capture is also the no-JavaScript fallback.
+The marketing homepage (calm identity, 2026-10-23) runs in this order: hero
+with an OS-aware download button, a real Chat capture with numbered callouts,
+four principles, how a run works, where data goes (an inverted band naming
+local and hosted providers with the app's own disclosure strings), write
+confirmation, a bento of real captures (Chat, providers, agent permissions,
+Agent Team), the community registry, benchmarks, open source with live
+numbers and one testimonial, FAQ, and a closing download band. Product images
+are unedited desktop captures from `docs/screenshots/app/brand-{light,dark}-*.png`,
+converted to WebP under `web/public/app/` and swapped with
+`prefers-color-scheme` so only the matching file loads. Crops scale a region
+of a capture; they never redraw the interface. The animated run log and write
+confirmation are captioned illustrations that reuse the demo tenant's strings;
+they never report a real tenant change. The earlier clickable screenshot
+viewer (`web/src/app/product-demo/`) is no longer on the homepage because its
+captures show the desktop shell from before the calm redesign; it stays in the tree until it is
+either recaptured with the calm shell or removed.
 The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API and total release
 asset downloads across all releases (both revalidated hourly), plus the community
 agent count from the synced `public/stats/agents.json`. Downloads replace the
 aggregate agent installation count and match the README's total-downloads badge.
 When a source is unavailable its cell is omitted, never faked. Registry
-agent display metadata (names, descriptions, mode, scopes) is curated in
-`web/src/lib/stats/summary.ts` because repo-root `agents/index.json` is not
+agent display metadata (names, mode, scopes) is curated in
+`web/src/app/home/agents.ts` because repo-root `agents/index.json` is not
 available inside the `web/` Vercel build. Historical demo video assets are rendered offline from the top-level `remotion/`
 project (not part of the npm workspace, never installed on Vercel) and retained
-under `web/public/videos/`. The current homepage uses the clickable screenshot viewer
-instead. Its styling follows the Midnight desktop tokens and preserves
-the sidebar, tenant context, provider disclosure, and status-strip conventions.
-See `docs/brand/interactive-product-demo.md` for the interaction contract and
-verification notes.
+under `web/public/videos/`. See `docs/brand/interactive-product-demo.md` for the
+retired clickable viewer's interaction contract.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
@@ -1729,13 +1721,14 @@ chrome when that preference changes. Midnight remains an explicit dark theme.
 The preference stays on the device, is synchronized across renderer windows,
 and emits no telemetry. Saved `graphite` and `dark` values map to Dark;
 `off-white`, `sand`, and `light` map to Light; `midnight` remains Midnight.
-Unknown old values safely fall back to System. The public website uses the
-Midnight dark theme with one blue accent. Its
-base is `#0B1018`, cards use `#111826`, primary actions use light text-colored
-surfaces, and `#7AA2FF` is the only non-semantic accent. The hero shows a matching
-Midnight desktop capture inside a bordered, raised stage with a restrained blue
-glow. The animated change-review demo uses dark surfaces and reserves red for its
-destructive operation and typed confirmation state.
+Unknown old values safely fall back to System. The public website follows the
+visitor's `prefers-color-scheme` with the same warm paper Light and graphite
+Dark palettes, ink-colored primary actions, Newsreader for headlines and Geist
+for the interface (self-hosted through `@fontsource-variable`, no runtime font
+requests), sentence case, and the `oa` mark with a Newsreader "OpenAdminOS"
+wordmark. Inverted ink bands re-scope the same tokens. Color is reserved for
+meaning: focus, local (success) versus hosted (warning), read versus write, and
+destructive red in the write-confirmation illustration.
 Semantic success, warning, danger, information, and reasoning colors remain
 separate from the brand accent. Destructive approval uses danger; typed
 confirmation and tenant/provider trust behavior are unchanged.
@@ -1748,10 +1741,11 @@ and companion surfaces consume these tokens. The Agent Team illustration is
 neutral, while activity and attention indicators retain semantic color.
 
 `web/src/styles/globals.css` is the production source of truth for the public
-website Midnight palette. The website uses `#0B1018` for the page, `#111826` and
-`#151E2D` for surfaces, `#222C3B` and `#33425A` for borders, `#E8EEF7` and
-`#9AA8BD` for text, and `#7AA2FF` as its single brand accent. Small accent text
-may use `#9DBBFF` for contrast. Semantic colors are limited to status meaning.
+website palette. Its `brand-*` tokens mirror the desktop Light values
+(`#FAF9F6` page, `#1F1D1A` ink, `#5C5852` and `#6F6A63` muted text) and switch
+to the desktop Dark values (`#17191D` page, `#F4F5F7` ink) under
+`prefers-color-scheme: dark`. Focus rings use the desktop focus blue. Shared
+class strings for buttons, eyebrows, and section titles live in `web/src/app/ui.ts`.
 
 - Light: warm paper surfaces with ink actions.
 - Dark: neutral graphite surfaces with paper actions.

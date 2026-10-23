@@ -13,6 +13,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Restyle Agent Team, Agents, Runs, Changes, and Settings with quieter lists and headings, and add a Comfortable or Compact density setting.
 - Replace the four themes with System, Light (warm paper), Dark (graphite), and Midnight. New installs follow the operating system; saved themes migrate automatically.
 - Bundle the Geist and Newsreader fonts with the app (no network font loading) and introduce the new oa ligature logo across the app, installers, and website icons.
+- Rework openadminos.com in the calm identity (paper light, graphite dark, self-hosted Geist and Newsreader, oa wordmark) and rewrite the homepage around real screenshots of the redesigned app.
 
 ### Removed
 
