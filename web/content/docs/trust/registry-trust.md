@@ -41,4 +41,4 @@ If an agent requires a newer OpenAdminOS version, Agent Hub still shows it but b
 
 Registry CI rejects malformed or incomplete public agents before they can appear in the generated index. Checks cover duplicate slugs, invalid semver, missing README files, missing LLM steps, undeclared scopes, content-safety issues, and stale generated index output.
 
-Generated GitBook agent pages come from reviewed manifest metadata, so the catalog, scope matrix, write safety matrix, and per-agent pages stay aligned with the registry.
+Generated agent pages come from reviewed manifest metadata, so the catalog, scope matrix, write safety matrix, and per-agent pages stay aligned with the registry.
