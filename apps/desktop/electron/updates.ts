@@ -1,19 +1,21 @@
 import { app, dialog, BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
+import type {
+  UpdateChannel,
+  UpdateChannelSettings,
+  UpdateState,
+} from "@openadminos/agent-sdk";
+import { UpdateController, updateUnavailableReason } from "./update-controller.js";
+import { RELEASE_FEED, ReleaseProvider } from "./update-provider.js";
 
-const { autoUpdater } = electronUpdater;
+export type { UpdateState };
 
-export interface UpdateState {
-  status: "idle" | "checking" | "available" | "downloading" | "ready" | "error";
-  version?: string;
-  message?: string;
-}
-
-let currentState: UpdateState = { status: "idle" };
+let controller: UpdateController | undefined;
+let idleState: UpdateState = { status: "idle" };
 const listeners = new Set<(state: UpdateState) => void>();
 
 export function getUpdateState(): UpdateState {
-  return currentState;
+  return controller?.current() ?? idleState;
 }
 
 export function subscribeToUpdateState(
@@ -23,8 +25,7 @@ export function subscribeToUpdateState(
   return () => listeners.delete(listener);
 }
 
-function setUpdateState(next: UpdateState): void {
-  currentState = next;
+function notify(next: UpdateState): void {
   for (const listener of listeners) {
     try {
       listener(next);
@@ -34,51 +35,51 @@ function setUpdateState(next: UpdateState): void {
   }
 }
 
+function unavailableReason() {
+  return updateUnavailableReason({
+    isPackaged: app.isPackaged,
+    platform: process.platform,
+    windowsStore: isWindowsStoreBuild(),
+  });
+}
+
+export function getUpdateChannelSettings(channel: UpdateChannel): UpdateChannelSettings {
+  const reason = unavailableReason();
+  return reason ? { channel, unavailableReason: reason } : { channel };
+}
+
+/**
+ * Applies a channel the admin picked. The caller persists it first; this
+ * only switches the running updater, which discards a ready update from
+ * the other channel and checks the new one right away.
+ */
+export function setUpdateChannel(channel: UpdateChannel): UpdateChannelSettings {
+  controller?.configure(channel);
+  return getUpdateChannelSettings(channel);
+}
+
 export async function applyUpdateNow(): Promise<void> {
-  if (currentState.status !== "ready") return;
-  autoUpdater.quitAndInstall();
+  await controller?.install();
 }
 
 export async function checkForUpdatesNow(): Promise<UpdateState> {
-  if (!app.isPackaged) return currentState;
-  if (process.platform === "linux") {
-    setUpdateState({
+  if (!app.isPackaged) return getUpdateState();
+  if (unavailableReason() === "linux") {
+    idleState = {
       status: "error",
       message:
         "Automatic updates are unavailable for unsigned Linux packages. Update through the signed apt repository or install the next package manually.",
-    });
-    return currentState;
+    };
+    notify(idleState);
+    return idleState;
   }
-  if (process.platform === "win32" && isWindowsStoreBuild()) {
-    return currentState;
-  }
-
-  setUpdateState({ status: "checking" });
-  try {
-    await autoUpdater.checkForUpdates();
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("[updater] checkForUpdates failed", error);
-    setUpdateState({
-      status: "error",
-      message: `Update check failed. ${message}`,
-    });
-  }
-  return currentState;
+  if (!controller) return getUpdateState();
+  return controller.check();
 }
 
 /**
- * Update polling cadence: a 15-second startup delay
- * (so first-run UX isn't dominated by a network round-trip) plus a
- * 4-hour poll while the app is open.
- */
-const STARTUP_DELAY_MS = 15_000;
-const POLL_INTERVAL_MS = 4 * 60 * 60 * 1000;
-
-let pollTimer: NodeJS.Timeout | undefined;
-
-/**
- * Wire `electron-updater` against the GitHub Releases publish channel.
+ * Wire `electron-updater` against the GitHub Releases feed on the given
+ * channel: a 15-second startup delay, then a 4-hour poll.
  *
  * Skipped when:
  *   - The app is unpackaged (`npm run dev`): no autoUpdater target.
@@ -86,79 +87,58 @@ let pollTimer: NodeJS.Timeout | undefined;
  *     Store handles updates itself; calling out to GitHub would let the
  *     two update channels race and break Store reputation. Detected
  *     via Electron's `process.windowsStore` flag.
+ *   - Linux: packages are not executable-signed. Updates flow through the
+ *     signed apt repository or an explicit package download instead of
+ *     electron-updater replacing an executable without package trust.
  *
  * Call this after the main window is created so notification dialogs
  * have a parent. Safe to call once per session.
  */
-export function startAutoUpdater(getMainWindow: () => BrowserWindow | undefined): void {
-  if (!app.isPackaged) return;
-  if (process.platform === "win32" && isWindowsStoreBuild()) return;
-  // Linux packages are not executable-signed. Updates flow through the
-  // signed apt repository or an explicit package download instead of
-  // electron-updater replacing an executable without package trust.
-  if (process.platform === "linux") return;
+export function startAutoUpdater(
+  getMainWindow: () => BrowserWindow | undefined,
+  channel: UpdateChannel,
+): void {
+  if (controller || unavailableReason()) return;
+  const { autoUpdater } = electronUpdater;
 
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true;
-
-  autoUpdater.on("error", (error) => {
-    console.error("[updater] error", error);
-    setUpdateState({
-      status: "error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+  // The GitHub feed from app-update.yml, but nightly checks also offer a
+  // newer stable release. Windows signature verification still reads
+  // publisherName from app-update.yml, independent of this feed.
+  autoUpdater.setFeedURL({
+    ...RELEASE_FEED,
+    provider: "custom",
+    updateProvider: ReleaseProvider,
   });
 
-  autoUpdater.on("checking-for-update", () => {
-    if (currentState.status === "idle") {
-      setUpdateState({ status: "checking" });
-    }
+  controller = new UpdateController({
+    updater: autoUpdater,
+    version: app.getVersion(),
+    platform: process.platform,
+    quit: () => app.quit(),
+    onBeforeQuit: (listener) => app.on("before-quit", listener),
+    confirmRestart: async (version) => {
+      const parent = getMainWindow();
+      const options: Electron.MessageBoxOptions = {
+        type: "info",
+        title: "Update ready",
+        message: `OpenAdminOS ${version} downloaded`,
+        detail: "Restart to install. The update is already on disk and will apply on quit.",
+        buttons: ["Restart now", "Later"],
+        defaultId: 0,
+        cancelId: 1,
+      };
+      const result = parent
+        ? await dialog.showMessageBox(parent, options)
+        : await dialog.showMessageBox(options);
+      return result.response === 0;
+    },
+    notify,
   });
-
-  autoUpdater.on("update-available", (info) => {
-    setUpdateState({ status: "downloading", version: info.version });
-  });
-
-  autoUpdater.on("update-not-available", () => {
-    setUpdateState({ status: "idle" });
-  });
-
-  autoUpdater.on("update-downloaded", (info) => {
-    setUpdateState({ status: "ready", version: info.version });
-
-    const parent = getMainWindow();
-    const options: Electron.MessageBoxOptions = {
-      type: "info",
-      title: "Update ready",
-      message: `OpenAdminOS ${info.version} downloaded`,
-      detail: "Restart to install. The update is already on disk and will apply on quit.",
-      buttons: ["Restart now", "Later"],
-      defaultId: 0,
-      cancelId: 1,
-    };
-
-    const dialogPromise = parent
-      ? dialog.showMessageBox(parent, options)
-      : dialog.showMessageBox(options);
-
-    void dialogPromise.then((result) => {
-      if (result.response === 0) {
-        autoUpdater.quitAndInstall();
-      }
-    });
-  });
-
-  const check = () => void checkForUpdatesNow();
-
-  setTimeout(check, STARTUP_DELAY_MS);
-  pollTimer = setInterval(check, POLL_INTERVAL_MS);
+  controller.configure(channel);
 }
 
 export function stopAutoUpdater(): void {
-  if (pollTimer) {
-    clearInterval(pollTimer);
-    pollTimer = undefined;
-  }
+  controller?.stop();
 }
 
 function isWindowsStoreBuild(): boolean {

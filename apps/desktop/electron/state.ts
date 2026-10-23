@@ -158,6 +158,7 @@ import {
   type ProviderSummary,
   type RegistryAgentSummary,
   type RunRecord,
+  type UpdateChannel,
   type WhatsAppWebGroupRef,
   type WhatsAppWebSendResult,
   type WhatsAppWebStatus,
@@ -170,6 +171,7 @@ import {
 } from "@openadminos/connector-whatsapp-web";
 
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
+import { defaultUpdateChannel } from "../src/shared/update-channel.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { searchEndpoints } from "./graph-catalog.js";
@@ -317,6 +319,12 @@ interface PersistedState {
    * honor a launch-time developer env override.
    */
   sandboxedCodeEnabled?: boolean;
+  /**
+   * Desktop update channel the admin picked. Undefined means no choice
+   * yet, so the updater follows the installed build: a nightly build
+   * follows nightlies, a stable build follows stable releases.
+   */
+  updateChannel?: UpdateChannel;
   /**
    * Per-connector persisted state. Keyed by connector id. Stores the
    * user-supplied config (validated against the connector's
@@ -1903,6 +1911,19 @@ export class AppStateStore {
   async getSandboxedCodeEnabled(): Promise<boolean> {
     const persisted = await this.read();
     return persisted.sandboxedCodeEnabled ?? this.sandboxedCodeDefault;
+  }
+
+  async getUpdateChannel(): Promise<UpdateChannel> {
+    const persisted = await this.read();
+    return persisted.updateChannel ?? defaultUpdateChannel(this.appVersion);
+  }
+
+  async setUpdateChannel(channel: UpdateChannel): Promise<UpdateChannel> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      await this.write({ ...current, updateChannel: channel });
+    });
+    return channel;
   }
 
   async setSandboxedCodeEnabled(enabled: boolean): Promise<boolean> {
@@ -5633,6 +5654,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       if (typeof parsed.sandboxedCodeEnabled === "boolean") {
         state.sandboxedCodeEnabled = parsed.sandboxedCodeEnabled;
+      }
+      if (parsed.updateChannel === "stable" || parsed.updateChannel === "nightly") {
+        state.updateChannel = parsed.updateChannel;
       }
       if (typeof parsed.registrySource === "string" && parsed.registrySource.length > 0) {
         try {

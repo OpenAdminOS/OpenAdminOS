@@ -12,6 +12,7 @@ import type {
   SupportBundleInput,
   SupportIssueSubmissionInput,
   StartRunOptions,
+  UpdateChannel,
   UpdateState,
   IntuneChatStreamEvent,
   MultiTenantChatStreamEvent,
@@ -524,6 +525,9 @@ const api: OpenAdminOSApi = {
   checkForUpdatesNow: () =>
     ipcRenderer.invoke("openadminos:check-for-updates-now"),
   applyUpdateNow: () => ipcRenderer.invoke("openadminos:apply-update-now"),
+  getUpdateChannel: () => ipcRenderer.invoke("openadminos:get-update-channel"),
+  setUpdateChannel: (channel: UpdateChannel) =>
+    ipcRenderer.invoke("openadminos:set-update-channel", channel),
   onUpdateStateChanged: (listener: (state: UpdateState) => void) => {
     const wrapped = (_event: unknown, state: UpdateState) => listener(state);
     ipcRenderer.on("openadminos:update-state", wrapped);
