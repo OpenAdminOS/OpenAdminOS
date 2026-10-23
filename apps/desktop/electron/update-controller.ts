@@ -36,6 +36,34 @@ export interface UpdateHost {
 export const CHANNEL_LOCKED_WHILE_INSTALLING =
   "An update is being installed. Change the channel after OpenAdminOS restarts.";
 
+/**
+ * Switches the running updater, then saves the choice. The switch happens
+ * synchronously before anything is awaited, so an install cannot start
+ * between the lock check and the switch; a refused switch saves nothing.
+ * When saving fails, the previous channel is restored where still possible
+ * and the error is rethrown, so the caller can report "not changed".
+ */
+export async function switchAndSaveChannel(
+  controller: Pick<UpdateController, "channel" | "configure"> | undefined,
+  channel: UpdateChannel,
+  save: (channel: UpdateChannel) => Promise<unknown>,
+): Promise<void> {
+  const previous = controller?.channel() ?? null;
+  controller?.configure(channel);
+  try {
+    await save(channel);
+  } catch (error) {
+    if (previous && previous !== channel) {
+      try {
+        controller?.configure(previous);
+      } catch {
+        // An install started meanwhile; the saved channel applies after it.
+      }
+    }
+    throw error;
+  }
+}
+
 /** Startup delay so first-run UX is not dominated by a network round-trip. */
 export const STARTUP_DELAY_MS = 15_000;
 /** Poll while the app is open. */

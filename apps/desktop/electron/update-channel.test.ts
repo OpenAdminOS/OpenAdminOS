@@ -10,6 +10,7 @@ import { withAgentCompatibility } from "./agent-draft-helpers.js";
 import { AppStateStore } from "./state.js";
 import {
   UpdateController,
+  switchAndSaveChannel,
   updateUnavailableReason,
   type UpdaterPort,
 } from "./update-controller.js";
@@ -350,6 +351,58 @@ describe("installing a ready update", () => {
     assert.equal(controller.canChangeChannel("stable"), true);
     controller.configure("stable");
     assert.equal(updater.channel, "latest");
+  });
+
+  it("saves nothing when a switch is refused during an install", async (t) => {
+    const { updater, controller, confirm } = harness(t, "0.7.1-nightly.20261023141500");
+    confirm.answer = true;
+    controller.configure("nightly");
+    updater.emit("update-downloaded", { version: "0.7.1-nightly.20261024080000" });
+    await settle();
+    const saved: string[] = [];
+    await assert.rejects(
+      switchAndSaveChannel(controller, "stable", async (channel) => saved.push(channel)),
+      /being installed/,
+    );
+    assert.deepEqual(saved, []);
+    assert.equal(controller.channel(), "nightly");
+  });
+
+  it("switches before saving, so an install starting during the save cannot split them", async (t) => {
+    const { updater, controller, confirm } = harness(t, "0.7.1-nightly.20261023141500");
+    confirm.answer = true;
+    controller.configure("nightly");
+    let finishSave!: () => void;
+    const saving = switchAndSaveChannel(
+      controller,
+      "stable",
+      () => new Promise<void>((resolve) => (finishSave = resolve)),
+    );
+    // The live updater is already on stable while the save is pending.
+    assert.equal(controller.channel(), "stable");
+    assert.equal(updater.channel, "latest");
+    // A stable update downloads and installs before the save finishes.
+    controller.check();
+    await settle();
+    updater.emit("update-downloaded", { version: "0.7.0" });
+    await settle();
+    assert.equal(controller.canChangeChannel("nightly"), false);
+    finishSave();
+    await saving;
+    assert.equal(controller.channel(), "stable");
+  });
+
+  it("restores the previous channel when saving fails", async (t) => {
+    const { updater, controller } = harness(t, "0.7.1-nightly.20261023141500");
+    controller.configure("nightly");
+    await assert.rejects(
+      switchAndSaveChannel(controller, "stable", async () => {
+        throw new Error("disk full");
+      }),
+      /disk full/,
+    );
+    assert.equal(controller.channel(), "nightly");
+    assert.equal(updater.channel, "nightly");
   });
 
   it("installs on quit when the admin chose Later", async (t) => {

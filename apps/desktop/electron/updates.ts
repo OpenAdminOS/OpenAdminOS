@@ -6,8 +6,8 @@ import type {
   UpdateState,
 } from "@openadminos/agent-sdk";
 import {
-  CHANNEL_LOCKED_WHILE_INSTALLING,
   UpdateController,
+  switchAndSaveChannel,
   updateUnavailableReason,
 } from "./update-controller.js";
 import { RELEASE_FEED, ReleaseProvider } from "./update-provider.js";
@@ -53,22 +53,15 @@ export function getUpdateChannelSettings(channel: UpdateChannel): UpdateChannelS
 }
 
 /**
- * Throws when the running updater cannot switch to the channel right now,
- * so the caller can refuse before persisting the choice.
+ * Applies and saves a channel the admin picked. Switching the running
+ * updater discards a ready update from the other channel and checks the
+ * new one right away. Refused while an update is being installed.
  */
-export function assertUpdateChannelChangeAllowed(channel: UpdateChannel): void {
-  if (controller && !controller.canChangeChannel(channel)) {
-    throw new Error(CHANNEL_LOCKED_WHILE_INSTALLING);
-  }
-}
-
-/**
- * Applies a channel the admin picked. The caller persists it first; this
- * only switches the running updater, which discards a ready update from
- * the other channel and checks the new one right away.
- */
-export function setUpdateChannel(channel: UpdateChannel): UpdateChannelSettings {
-  controller?.configure(channel);
+export async function setUpdateChannel(
+  channel: UpdateChannel,
+  save: (channel: UpdateChannel) => Promise<unknown>,
+): Promise<UpdateChannelSettings> {
+  await switchAndSaveChannel(controller, channel, save);
   return getUpdateChannelSettings(channel);
 }
 
