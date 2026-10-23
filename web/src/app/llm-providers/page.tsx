@@ -24,16 +24,16 @@ export const metadata: Metadata = pageMetadata({
 
 const PROVIDERS = [
   {
-    title: "Ollama",
-    text: "Local provider available today. Tenant data and prompts stay on the admin workstation.",
+    title: "Local: Ollama, LM Studio, Apple Foundation",
+    text: "Run open-source models locally. Tenant data and prompts stay on this machine.",
   },
   {
-    title: "LM Studio",
-    text: "Planned local provider path for admins who prefer a local desktop model host.",
+    title: "Hosted through a vendor CLI",
+    text: "Anthropic through Claude Code, OpenAI Codex, GitHub Copilot, and Google Gemini use the CLI you already signed in to. Tenant prompts are sent to that vendor's service while the provider is active.",
   },
   {
-    title: "OpenAI, Anthropic, Azure OpenAI",
-    text: "Hosted providers are optional. The app labels provider and region before tenant context is sent.",
+    title: "Azure OpenAI",
+    text: "Uses your own Azure OpenAI deployment. Tenant prompts are sent to your Azure resource's endpoint.",
   },
 ];
 
@@ -76,10 +76,10 @@ export default function LlmProvidersPage() {
 
       <section className="mt-12 grid gap-5 border-t border-brand-line pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             Provider trust
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             The selected model changes the data boundary.
           </h2>
         </div>
@@ -96,7 +96,7 @@ export default function LlmProvidersPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
+            className="inline-flex font-medium text-link"
           >
             Read the full trust model
           </Link>
