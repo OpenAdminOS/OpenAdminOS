@@ -557,6 +557,43 @@ describe("Settings provider section", () => {
     expect(screen.getByText("Test ping sent.")).toBeInTheDocument();
   });
 
+  it("switches to nightly builds from About and checks for updates", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({
+      checkForUpdatesNow: vi.fn(async () => ({ status: "not-available" as const })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/about", bridge });
+
+    const nightly = await screen.findByRole("switch", { name: "Get nightly builds" });
+    await waitFor(() => expect(nightly).toBeEnabled());
+    expect(nightly).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByText(/moves you back to the current stable release/)).toBeInTheDocument();
+
+    await user.click(nightly);
+    await waitFor(() => expect(nightly).toHaveAttribute("aria-checked", "true"));
+    expect(bridge.setUpdateChannel).toHaveBeenCalledWith("nightly");
+
+    await user.click(screen.getByRole("button", { name: "Check for updates" }));
+    expect(await screen.findByText("Up to date on the nightly channel.")).toBeInTheDocument();
+    expect(bridge.checkForUpdatesNow).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the update channel with an explanation on Linux", async () => {
+    const bridge = makeMockBridge({
+      getUpdateChannel: vi.fn(async () => ({
+        channel: "stable" as const,
+        unavailableReason: "linux" as const,
+      })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/about", bridge });
+
+    expect(
+      await screen.findByText(/Linux updates come from the apt repository or a manual download/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: "Get nightly builds" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Check for updates" })).toBeDisabled();
+  });
+
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {
     const user = userEvent.setup();
     const reason = "The local Microsoft documentation index is not installed.";

@@ -51,8 +51,11 @@ import {
   type SetAzureOpenAIProviderConfigInput,
   type TenantRecord,
   type TrustState,
+  type UpdateChannelSettings,
+  type UpdateState,
   type UsageTelemetryPayload,
 } from "../shared/openAdminOS";
+import { UPDATE_UNAVAILABLE_DETAIL } from "../shared/update-channel";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
 import { useAppState } from "../state";
@@ -3753,6 +3756,11 @@ function PrivacySection({
   onSetUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
 }) {
   const platform = window.openAdminOS?.platform ?? "unknown";
+  const updateChannelSettings = useUpdateChannel().settings;
+  // The channel only applies where the in-app updater runs.
+  const updateChannel = updateChannelSettings?.unavailableReason
+    ? "stable"
+    : (updateChannelSettings?.channel ?? "stable");
   const [savingInstallCounts, setSavingInstallCounts] = useState(false);
   const [installCountsError, setInstallCountsError] = useState<string | null>(null);
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
@@ -4265,14 +4273,18 @@ function PrivacySection({
           description={
             platform === "linux"
               ? "Stable-only. Linux updates are installed through the signed apt repository or by downloading the next package; the app does not replace unsigned Linux executables automatically."
-              : platform === "windows"
-                ? "Stable-only, never pre-releases. Microsoft Store builds update through the Store. Other signed builds check the release channel, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit."
-                : "Stable-only, never pre-releases. Signed builds check the release channel on launch and every four hours, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit."
+              : `${updateChannel === "nightly" ? "Nightly prereleases, plus any newer stable release." : "Stable releases only."} ${platform === "windows" ? "Microsoft Store builds update through the Store. Other signed builds check" : "Signed builds check"} on launch and every four hours, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit. Change the channel under About.`
           }
           control={
-            <Badge tone="success">
-              <StatusDot tone="success" /> Stable
-            </Badge>
+            updateChannel === "nightly" ? (
+              <Badge tone="warning">
+                <StatusDot tone="warning" /> Nightly
+              </Badge>
+            ) : (
+              <Badge tone="success">
+                <StatusDot tone="success" /> Stable
+              </Badge>
+            )
           }
         />
       </div>
@@ -4508,6 +4520,164 @@ function RegistrySourceModal({
   );
 }
 
+function useUpdateChannel() {
+  const [settings, setSettings] = useState<UpdateChannelSettings | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    window.openAdminOS
+      ?.getUpdateChannel()
+      .then((next) => {
+        if (!cancelled) setSettings(next);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) setLoadError(error instanceof Error ? error.message : String(error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  return { settings, setSettings, loadError };
+}
+
+function updateStatusText(state: UpdateState, channel: UpdateChannelSettings["channel"]): string {
+  switch (state.status) {
+    case "checking":
+      return "Checking for updates";
+    case "not-available":
+      return `Up to date on the ${channel} channel.`;
+    case "available":
+    case "downloading":
+      return `Downloading ${state.version ?? "the update"} in the background.`;
+    case "ready":
+      return `${state.version ?? "The update"} is ready. Restart to install, or it installs on the next quit.`;
+    case "error":
+      return state.message ?? "The update check failed. Check the network connection, then try again.";
+    default:
+      return "Checks on launch and every four hours.";
+  }
+}
+
+function AppUpdateRows() {
+  const { settings, setSettings, loadError } = useUpdateChannel();
+  const [state, setState] = useState<UpdateState>({ status: "idle" });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    let cancelled = false;
+    api
+      .getUpdateState()
+      .then((next) => {
+        if (!cancelled) setState(next);
+      })
+      .catch(() => undefined);
+    const unsubscribe = api.onUpdateStateChanged(setState);
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, []);
+
+  const unavailable = settings?.unavailableReason;
+  // The channel only applies where the in-app updater runs.
+  const nightly = !unavailable && settings?.channel === "nightly";
+  const busy = state.status === "checking" || state.status === "downloading";
+
+  const setNightly = async (next: boolean) => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    setSaving(true);
+    setError(null);
+    try {
+      setSettings(await api.setUpdateChannel(next ? "nightly" : "stable"));
+    } catch (cause) {
+      const reason = userFacingErrorReason(cause instanceof Error ? cause.message : String(cause));
+      setError(`The update channel was not changed.${reason ? ` ${reason}` : ""} Try again.`);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const checkNow = async () => {
+    const api = window.openAdminOS;
+    if (!api) return;
+    setError(null);
+    try {
+      setState(await api.checkForUpdatesNow());
+    } catch (cause) {
+      const reason = userFacingErrorReason(cause instanceof Error ? cause.message : String(cause));
+      setError(`The update check did not start.${reason ? ` ${reason}` : ""} Try again.`);
+    }
+  };
+
+  return (
+    <div className="border-t border-[var(--color-border-soft)]">
+      <SettingRow
+        id="nightly-builds"
+        description={
+          unavailable
+            ? UPDATE_UNAVAILABLE_DETAIL[unavailable]
+            : "Nightly builds are built from every merge to main and signed like stable releases, but they are less tested. A newer stable release is still offered. Turning this off moves you back to the current stable release, even if it is older than the installed nightly. Switching discards an update waiting to install."
+        }
+        control={
+          <Switch
+            className="w-auto gap-3"
+            aria-label="Get nightly builds"
+            checked={nightly}
+            disabled={!settings || Boolean(unavailable) || saving}
+            onCheckedChange={(next) => void setNightly(next)}
+            label={saving ? "Saving..." : unavailable ? "Not available" : nightly ? "Nightly" : "Stable"}
+          />
+        }
+      />
+      <SettingRow
+        id="app-updates"
+        description={
+          unavailable
+            ? "This install does not use the in-app updater."
+            : settings
+              ? updateStatusText(state, settings.channel)
+              : undefined
+        }
+        control={
+          state.status === "ready" && !unavailable ? (
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                void window.openAdminOS?.applyUpdateNow();
+              }}
+            >
+              Restart now
+            </Button>
+          ) : (
+            <Button
+              variant="secondary"
+              size="sm"
+              disabled={!settings || Boolean(unavailable) || busy}
+              onClick={() => void checkNow()}
+            >
+              <IconRefresh size={13} />
+              {state.status === "checking" ? "Checking" : "Check for updates"}
+            </Button>
+          )
+        }
+      />
+      {(error ?? loadError) && (
+        <div
+          role="alert"
+          className="mx-5 mb-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
+        >
+          {error ?? `The update channel could not be read. ${loadError} Reopen Settings to try again.`}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AboutSection() {
   const { openSetup } = useSetupFlow();
   const { state } = useAppState();
@@ -4549,6 +4719,7 @@ function AboutSection() {
         <KeyValue label="Repository" value={<span className="font-mono">OpenAdminOS/OpenAdminOS</span>} />
         <KeyValue label="Built by" value="OpenAdminOS" />
       </dl>
+      <AppUpdateRows />
       <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border-soft)] px-5 py-4">
         <Button
           variant="secondary"

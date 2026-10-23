@@ -32,6 +32,7 @@ import {
   type SendIntuneChatMessageInput,
   type SendIntuneChatMessageResult,
   type TenantRecord,
+  type UpdateChannel,
   type UpdateState,
 } from "../shared/openAdminOS";
 
@@ -696,6 +697,8 @@ export function makeMockBridge(
     onNavigate: vi.fn(() => () => undefined),
     onOpenCommandPalette: vi.fn(() => () => undefined),
     applyUpdateNow: vi.fn(async () => undefined),
+    getUpdateChannel: vi.fn(async () => ({ channel: "stable" as const })),
+    setUpdateChannel: vi.fn(async (channel: UpdateChannel) => ({ channel })),
   };
 
   return {
