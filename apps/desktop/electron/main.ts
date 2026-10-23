@@ -6,9 +6,8 @@ import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import { captureWebsiteDemo } from "./website-demo-capture.js";
 import {
-  DEFAULT_NATIVE_THEME_ID,
   NATIVE_THEME_COLORS,
-  parseNativeTheme,
+  parseNativeAppearance,
 } from "./appearance.js";
 import {
   app,
@@ -1094,7 +1093,7 @@ async function runScreenshotCapture(): Promise<void> {
       { route: "/settings/appearance", name: "appearance", waitFor: ["Midnight"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
-    for (const theme of ["graphite", "midnight", "off-white", "sand"] as const) {
+    for (const theme of ["light", "dark", "midnight"] as const) {
       await window.webContents.executeJavaScript(`window.openAdminOS.setAppearance(${JSON.stringify(theme)})`);
       await window.webContents.executeJavaScript(`localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)}); window.dispatchEvent(new StorageEvent("storage", {key:"openadminos:appearance:v1"}));`);
       for (const shot of [...appShots, ...extraShots]) {
@@ -1102,7 +1101,7 @@ async function runScreenshotCapture(): Promise<void> {
         await captureScreenshotPng(window, `app/brand-${theme}-${shot.name}.png`);
       }
     }
-    console.log("[screenshot-capture] passed all four brand themes and route families");
+    console.log("[screenshot-capture] passed all three brand themes and route families");
     app.exit(0);
     return;
   }
@@ -4816,6 +4815,8 @@ let officeWindowMode: ReturnType<typeof officeFullscreen> | undefined;
 
 async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
+  const initialThemeColors =
+    NATIVE_THEME_COLORS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
   mainWindow = new BrowserWindow({
     ...(!isScreenshotCaptureLaunch && typeof persisted.x === "number"
       ? { x: persisted.x }
@@ -4833,7 +4834,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
+    backgroundColor: initialThemeColors.background,
     show: false,
     // Windows: draw our own chrome and overlay the system buttons on it,
     // so the app header replaces the native title bar instead of stacking
@@ -4848,8 +4849,8 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
-            color: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
-            symbolColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].textMuted,
+            color: initialThemeColors.background,
+            symbolColor: initialThemeColors.textMuted,
             height: 32,
           },
         }
@@ -4934,6 +4935,8 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     return companionWindow;
   }
 
+  const initialThemeColors =
+    NATIVE_THEME_COLORS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
   companionWindow = new BrowserWindow({
     width: COMPANION_WINDOW_WIDTH,
     height: COMPANION_WINDOW_HEIGHT,
@@ -4950,7 +4953,7 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     fullscreenable: false,
     skipTaskbar: true,
     title: "OpenAdminOS Menu Bar",
-    backgroundColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
+    backgroundColor: initialThemeColors.background,
     vibrancy: process.platform === "darwin" ? "menu" : undefined,
     visualEffectState: "active",
     webPreferences: {
@@ -5104,9 +5107,12 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
 
 function registerIpcHandlers() {
   ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
-    const themeId = parseNativeTheme(theme);
-    const colors = NATIVE_THEME_COLORS[themeId];
-    nativeTheme.themeSource = colors.mode;
+    const appearance = parseNativeAppearance(
+      theme,
+      nativeTheme.shouldUseDarkColors ? "dark" : "light",
+    );
+    const colors = NATIVE_THEME_COLORS[appearance.resolvedTheme];
+    nativeTheme.themeSource = appearance.preference === "system" ? "system" : colors.mode;
     for (const window of BrowserWindow.getAllWindows()) {
       if (window.isDestroyed()) continue;
       window.setBackgroundColor(colors.background);

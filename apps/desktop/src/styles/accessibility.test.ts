@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 
 const fullStylesheet = readFileSync(resolve(process.cwd(), "src/styles/globals.css"), "utf8");
 
-const themeIds = ["graphite", "midnight", "off-white", "sand"] as const;
+const themeIds = ["light", "dark", "midnight"] as const;
 
 function colorTokens(source: string) {
   return new Map(
@@ -21,7 +21,7 @@ if (!defaultBlock) throw new Error("Missing default @theme block");
 const defaultTokens = colorTokens(defaultBlock);
 
 function tokensFor(theme: (typeof themeIds)[number]) {
-  if (theme === "graphite") return defaultTokens;
+  if (theme === "light") return defaultTokens;
   const escaped = theme.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const block = fullStylesheet.match(
     new RegExp(`:root\\[data-theme="${escaped}"\\]\\s*\\{([\\s\\S]*?)\\n\\}`),
@@ -83,8 +83,11 @@ describe.each(themeIds)("%s accessibility design tokens", (theme) => {
       token(theme, "color-bg"),
       token(theme, "color-bg-elevated"),
       token(theme, "color-bg-raised"),
+      token(theme, "color-sidebar-solid"),
       token(theme, "color-surface"),
-      token(theme, "color-surface-hover"),
+      token(theme, "color-bubble"),
+      token(theme, "color-floor"),
+      token(theme, "color-raised"),
     ];
 
     for (const foreground of foregrounds) {
@@ -94,17 +97,23 @@ describe.each(themeIds)("%s accessibility design tokens", (theme) => {
     }
   });
 
-  it("keeps the on-accent foreground above 4.5:1 on every filled control color", () => {
+  it("keeps filled control foregrounds above 4.5:1", () => {
     const onAccent = token(theme, "color-on-accent");
-    const fills = [
+    const accentFills = [
       token(theme, "color-accent"),
       token(theme, "color-accent-hover"),
       token(theme, "color-accent-strong"),
-      token(theme, "color-warning-fg"),
-      token(theme, "color-danger-fg"),
     ];
-    for (const fill of fills) {
+    for (const fill of accentFills) {
       expect(contrastRatio(onAccent, fill)).toBeGreaterThanOrEqual(4.5);
+    }
+    const onDanger = token(theme, "color-on-danger");
+    const dangerFills = [
+      token(theme, "color-danger-fg"),
+      token(theme, "color-danger-hover"),
+    ];
+    for (const fill of dangerFills) {
+      expect(contrastRatio(onDanger, fill)).toBeGreaterThanOrEqual(4.5);
     }
   });
 
@@ -114,8 +123,11 @@ describe.each(themeIds)("%s accessibility design tokens", (theme) => {
       token(theme, "color-bg"),
       token(theme, "color-bg-elevated"),
       token(theme, "color-bg-raised"),
+      token(theme, "color-sidebar-solid"),
       token(theme, "color-surface"),
-      token(theme, "color-surface-hover"),
+      token(theme, "color-bubble"),
+      token(theme, "color-floor"),
+      token(theme, "color-raised"),
     ];
     for (const surface of inputSurfaces) {
       expect(contrastRatio(placeholder, surface)).toBeGreaterThanOrEqual(4.5);
@@ -127,8 +139,11 @@ describe.each(themeIds)("%s accessibility design tokens", (theme) => {
       token(theme, "color-bg"),
       token(theme, "color-bg-elevated"),
       token(theme, "color-bg-raised"),
+      token(theme, "color-sidebar-solid"),
       token(theme, "color-surface"),
-      token(theme, "color-surface-hover"),
+      token(theme, "color-bubble"),
+      token(theme, "color-floor"),
+      token(theme, "color-raised"),
     ];
     for (const state of ["success", "warning", "danger", "info", "think"]) {
       const foreground = token(theme, `color-${state}-fg`);
@@ -174,11 +189,13 @@ describe.each(themeIds)("%s accessibility design tokens", (theme) => {
 describe("desktop type scale", () => {
   it("exposes the locked sizes and line heights as Tailwind theme tokens", () => {
     for (const [name, size, lineHeight] of [
-      ["xs", "11px", "16px"],
-      ["sm", "12px", "18px"],
-      ["base", "13px", "20px"],
-      ["md", "15px", "22px"],
-      ["lg", "20px", "28px"],
+      ["xs", "12px", "18px"],
+      ["sm", "13px", "19.5px"],
+      ["base", "14px", "21px"],
+      ["md", "16px", "24px"],
+      ["lg", "24px", "32px"],
+      ["answer", "17.5px", "1.65"],
+      ["display", "34px", "42px"],
     ]) {
       expect(fullStylesheet).toContain(`--text-${name}: ${size};`);
       expect(fullStylesheet).toContain(`--text-${name}--line-height: ${lineHeight};`);

@@ -116,7 +116,7 @@ export function DataTable<Row>({
                   scope="col"
                   aria-sort={column.sortable ? (activeSort ?? "none") : undefined}
                   style={style}
-                  className={`whitespace-nowrap px-3 py-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-muted)] ${
+                  className={`whitespace-nowrap px-3 py-2 text-sm font-medium text-[var(--color-text-muted)] ${
                     column.align === "right" ? "text-right" : "text-left"
                   }`}
                 >

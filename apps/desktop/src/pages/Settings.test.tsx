@@ -81,23 +81,26 @@ describe("Settings provider section", () => {
       expect(screen.getByRole("heading", { name: "Appearance" })).toHaveFocus(),
     );
     expect(within(picker).getAllByRole("radio")).toHaveLength(4);
-    const graphite = within(picker).getByRole("radio", { name: /Graphite, Dark/ });
-    graphite.focus();
+    const system = within(picker).getByRole("radio", { name: /System, Follows system/ });
+    system.focus();
     await user.keyboard("{ArrowRight}");
 
-    const midnight = within(picker).getByRole("radio", { name: /Midnight, Dark/ });
-    expect(midnight).toHaveFocus();
-    expect(midnight).toHaveAttribute("aria-checked", "true");
-    expect(document.documentElement.dataset.theme).toBe("midnight");
-    expect(document.documentElement.dataset.mode).toBe("dark");
-    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("midnight");
-    expect(setAppearance).toHaveBeenLastCalledWith("midnight");
-
-    await user.keyboard("{ArrowRight}");
-    expect(document.documentElement.dataset.theme).toBe("off-white");
+    const light = within(picker).getByRole("radio", { name: /Light, Light/ });
+    expect(light).toHaveFocus();
+    expect(light).toHaveAttribute("aria-checked", "true");
+    expect(document.documentElement.dataset.theme).toBe("light");
     expect(document.documentElement.dataset.mode).toBe("light");
+    expect(localStorage.getItem("openadminos:appearance:v1")).toBe("light");
+    expect(setAppearance).toHaveBeenLastCalledWith({
+      preference: "light",
+      resolvedTheme: "light",
+    });
 
-    await user.click(graphite);
+    await user.keyboard("{ArrowRight}");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(document.documentElement.dataset.mode).toBe("dark");
+
+    await user.click(system);
   });
 
   it("scrolls deep links inside the Settings content container", async () => {

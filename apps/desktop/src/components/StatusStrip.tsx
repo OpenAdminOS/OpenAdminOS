@@ -42,7 +42,7 @@ export function StatusStrip({ voiceHosted = false }: { voiceHosted?: boolean }) 
   return (
     <footer
       aria-label="Current tenant, provider, and data boundary"
-      className="grid h-7 shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_auto] items-center gap-3 overflow-hidden whitespace-nowrap border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 font-mono text-xs text-[var(--color-text-muted)]"
+      className="grid h-7 shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_auto] items-center gap-3 overflow-hidden whitespace-nowrap border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 text-xs text-[var(--color-text-muted)]"
     >
       <div className="flex min-w-0 items-center gap-1.5 overflow-hidden">
         <IconCloud size={11} className="shrink-0 text-[var(--color-info)]" />
@@ -73,7 +73,7 @@ export function StatusStrip({ voiceHosted = false }: { voiceHosted?: boolean }) 
         {isNightlyVersion(state.appVersion) ? (
           <Badge
             tone="warning"
-            className="shrink-0 py-0 font-mono font-normal"
+            className="shrink-0 py-0 font-normal"
             title={`OpenAdminOS ${state.appVersion} is a nightly prerelease built from main. It is less tested than a stable release.`}
           >
             Nightly

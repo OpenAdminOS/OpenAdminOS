@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_NATIVE_THEME_ID,
   NATIVE_THEME_COLORS,
+  parseNativeAppearance,
   parseNativeTheme,
 } from "./appearance.js";
 
@@ -27,7 +28,7 @@ if (!defaultBlock) throw new Error("Missing default @theme block");
 const defaultTokens = blockTokens(defaultBlock);
 
 function themeTokens(themeId: keyof typeof NATIVE_THEME_COLORS) {
-  if (themeId === "graphite") return defaultTokens;
+  if (themeId === "light") return defaultTokens;
   const block = stylesheet.match(
     new RegExp(`:root\\[data-theme="${themeId}"\\]\\s*\\{([\\s\\S]*?)\\n\\}`),
   )?.[1];
@@ -45,15 +46,28 @@ describe("native appearance", () => {
   });
 
   it("accepts current theme ids and normalizes legacy aliases", () => {
-    assert.equal(DEFAULT_NATIVE_THEME_ID, "midnight");
+    assert.equal(DEFAULT_NATIVE_THEME_ID, "light");
     for (const themeId of Object.keys(NATIVE_THEME_COLORS)) {
       assert.equal(parseNativeTheme(themeId), themeId);
     }
-    assert.equal(parseNativeTheme("dark"), "graphite");
-    assert.equal(parseNativeTheme("light"), "off-white");
-    assert.throws(() => parseNativeTheme("unknown"), /Choose Graphite/);
+    assert.equal(parseNativeTheme("graphite"), "dark");
+    assert.equal(parseNativeTheme("off-white"), "light");
+    assert.equal(parseNativeTheme("sand"), "light");
+    assert.deepEqual(parseNativeAppearance("system", "dark"), {
+      preference: "system",
+      resolvedTheme: "dark",
+    });
+    assert.deepEqual(
+      parseNativeAppearance({ preference: "system", resolvedTheme: "light" }),
+      { preference: "system", resolvedTheme: "light" },
+    );
+    assert.throws(
+      () => parseNativeAppearance({ preference: "system", resolvedTheme: "midnight" }),
+      /must resolve to Light or Dark/,
+    );
+    assert.throws(() => parseNativeTheme("unknown"), /Choose System/);
     for (const inherited of ["constructor", "toString", "__proto__"]) {
-      assert.throws(() => parseNativeTheme(inherited), /Choose Graphite/);
+      assert.throws(() => parseNativeTheme(inherited), /Choose System/);
     }
   });
 });

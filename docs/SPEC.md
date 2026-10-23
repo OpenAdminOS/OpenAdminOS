@@ -1628,7 +1628,8 @@ plain JSON object size caps before reaching the store; TypeScript annotations in
 the preload are not sufficient security validation.
 
 The desktop HTML must not load remote fonts or decorative remote assets. The
-app uses system font stacks and a restrictive Content Security Policy: scripts,
+app bundles its OFL-licensed Geist, Geist Mono, and Newsreader font files and
+uses a restrictive Content Security Policy: scripts,
 styles, images, and fonts are self/data/blob-limited as needed; renderer
 connections are limited to the app/dev server and loopback local-provider
 endpoints. The host classifies local-provider endpoints conservatively before
@@ -1714,20 +1715,22 @@ The macOS menu bar companion must be created during any interactive app launch, 
 
 ## 3. Design system
 
-### Monochrome identity (2026-10-06)
+### Calm identity foundation (2026-10-23)
 
-The approved identity uses the OA monogram in graphite `#17191D` and off-white
-`#F4F5F7` across every desktop surface, packaged icons, installer artwork, and
-public website branding. `docs/brand/oa-mark.svg` is the vector reference;
-`docs/mockups/22-monochrome-brand.html` records the original interactive study.
+The approved identity uses the lowercase `oa` ligature in ink `#1F1D1A` and
+paper `#FAF9F6` across every desktop surface, packaged icon, installer artwork,
+and public website brand asset. `docs/brand/oa-mark.svg` is the vector reference;
+`docs/mockups/28-logo-explorations.html` records the approved concept A study.
 
-Desktop appearance defaults to the Midnight theme for new installs. Settings >
-Appearance offers four built-in themes: Graphite and Midnight are dark, while
-Off-white and Sand are light. Graphite remains available. The preference stays
-on the device, is synchronized across renderer windows, and emits no telemetry.
-Saved legacy `dark` and `light` values continue to map to Graphite and Off-white.
-Native window controls use the selected theme colors and follow its dark or light
-mode. The public website uses the Midnight dark theme with one blue accent. Its
+Desktop appearance defaults to the System preference for new installs. Settings
+> Appearance offers System, Light, Dark, and Midnight. System resolves to Light
+or Dark from the operating system and updates the renderer and native window
+chrome when that preference changes. Midnight remains an explicit dark theme.
+The preference stays on the device, is synchronized across renderer windows,
+and emits no telemetry. Saved `graphite` and `dark` values map to Dark;
+`off-white`, `sand`, and `light` map to Light; `midnight` remains Midnight.
+Unknown old values safely fall back to System. The public website uses the
+Midnight dark theme with one blue accent. Its
 base is `#0B1018`, cards use `#111826`, primary actions use light text-colored
 surfaces, and `#7AA2FF` is the only non-semantic accent. The hero shows a matching
 Midnight desktop capture inside a bordered, raised stage with a restrained blue
@@ -1739,8 +1742,8 @@ confirmation and tenant/provider trust behavior are unchanged.
 
 ### Tokens
 
-`apps/desktop/src/styles/globals.css` is the production source of truth for all
-four themes. All shared controls, navigation, dialogs, page layouts, and custom voice
+`apps/desktop/src/styles/globals.css` is the production source of truth for the
+three resolved themes. All shared controls, navigation, dialogs, page layouts, and custom voice
 and companion surfaces consume these tokens. The Agent Team illustration is
 neutral, while activity and attention indicators retain semantic color.
 
@@ -1750,13 +1753,17 @@ website Midnight palette. The website uses `#0B1018` for the page, `#111826` and
 `#9AA8BD` for text, and `#7AA2FF` as its single brand accent. Small accent text
 may use `#9DBBFF` for contrast. Semantic colors are limited to status meaning.
 
-- Graphite: neutral charcoal base with off-white actions; available but not the new-install default.
-- Midnight: cool navy surfaces with a pale blue action color; the default for new installs.
-- Off-white: neutral light surfaces with graphite actions.
-- Sand: warm light surfaces with a rust action color.
+- Light: warm paper surfaces with ink actions.
+- Dark: neutral graphite surfaces with paper actions.
+- Midnight: cool navy surfaces with a pale blue action color.
+- System is the new-install preference and resolves live to Light or Dark.
 - Body, metadata, placeholder, and semantic text meet 4.5:1 contrast against
   their supported surfaces in every theme, verified by automated tests.
-- Cards use a 10px radius; status badges use a compact 6px radius.
+- The light accessibility tokens use `#6F6A63` for readable muted text,
+  `#3A7246` for success, and `#895A05` for warning. These are the minimum
+  corrections from the visual reference needed to preserve 4.5:1 contrast.
+- Radii are 8px small, 10px medium, 14px large, and 18px for dialogs. Quiet
+  status badges are 22px high with a 6px radius.
 - The sidebar is 224px wide and collapses to a 56px icon rail; shared page
   padding is 24px vertically and 32px horizontally.
 
@@ -1766,16 +1773,20 @@ explained in `apps/desktop/build/README.md`.
 
 ### Typography
 
-- **UI:** system UI stack (`ui-sans-serif`, `system-ui`, `-apple-system`, `Segoe UI`, sans-serif)
-- Five-step scale: `text-xs` 11/16px, `text-sm` 12/18px, `text-base`
-  13/20px, `text-md` 15/22px, and `text-lg` 20/28px. Arbitrary UI text
-  sizes are not used.
-- Base size: 13px, with 12px controls and 11px metadata for admin-focused density
+- **UI:** locally bundled Geist Variable with system UI fallbacks
+- **Reading:** locally bundled Newsreader Variable with Iowan Old Style,
+  Charter, Georgia, and serif fallbacks
+- **Code:** locally bundled Geist Mono Variable with system monospace fallbacks
+- Scale: `text-xs` 12/18px, `text-sm` 13/19.5px, `text-base` 14/21px,
+  `text-md` 16/24px, `text-lg` 24/32px, `text-answer` 17.5px at 1.65 line
+  height, and `text-display` 34/42px. Arbitrary small UI sizes are not used.
+- Base size: 14px at 1.5 line height
 - Weights are limited to 400, 500, and 600.
-- Monospace is limited to identifiers, versions, model IDs, Graph scopes,
-  request or JSON previews, typed confirmation phrases, and the status strip.
-- Uppercase is limited to data-table column headers. Eyebrows and section labels
-  use sentence case without wide tracking.
+- Monospace is limited to code, Graph paths, identifiers, device names in
+  tables, model IDs, request or JSON previews, and typed confirmation phrases.
+- Uppercase is limited to data such as typed confirmation phrases and Entra
+  tier codes. Table headers, eyebrows, and section labels use sentence case
+  without wide tracking.
 - Letter-spacing: 0
 
 ### Interaction and information hierarchy
@@ -1872,7 +1883,7 @@ The sidebar contains exactly six destinations in this order:
 | Agents | `/agents` | Installed and Hub libraries, schedules, and agent details |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
-| Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, four device-local themes in Appearance, Privacy, and About |
+| Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, System plus three device-local themes in Appearance, Privacy, and About |
 
 **Decided 2026-10-12 by Ugur:** Agent Team stays a top-level destination; Runs
 stays a daily page; Workspaces in Chat; Connectors and Data in Settings; Nova in
@@ -1952,7 +1963,7 @@ North-star metric: time from install to first successful result, target under 5 
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls; Connectors live in Settings |
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
-| Theme | Appearance setting | Device-local Graphite, Midnight, Off-white, or Sand color scheme shared by renderer windows and native chrome |
+| Theme | Appearance setting | Device-local System, Light, Dark, or Midnight preference shared by renderer windows and native chrome |
 
 ### Quality implementation decisions (locked for v0.4)
 

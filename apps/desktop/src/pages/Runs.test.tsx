@@ -65,7 +65,10 @@ describe("Runs", () => {
     const reviewButtons = screen.getAllByRole("button", { name: "Review" });
     expect(reviewButtons).toHaveLength(2);
     expect(reviewButtons[0]).toHaveClass("bg-[var(--color-accent)]");
-    expect(reviewButtons[1]).toHaveClass("bg-[var(--color-surface)]");
+    expect(reviewButtons[1]).toHaveClass(
+      "bg-transparent",
+      "shadow-[inset_0_0_0_1px_var(--color-border)]",
+    );
     expect(screen.getByText("1 of 2 steps")).toBeInTheDocument();
   });
 

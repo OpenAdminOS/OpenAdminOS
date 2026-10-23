@@ -126,7 +126,11 @@ export function CommandPalette({
         id: `act-theme-${theme.id}`,
         label: `Theme: ${theme.label}`,
         hint: `${theme.id === activeTheme ? "Current · " : ""}${
-          theme.mode === "dark" ? "Dark" : "Light"
+          theme.mode === "system"
+            ? "Follows system"
+            : theme.mode === "dark"
+              ? "Dark"
+              : "Light"
         }`,
         group: "Actions" as const,
         icon:

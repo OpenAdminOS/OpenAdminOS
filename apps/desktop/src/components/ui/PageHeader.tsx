@@ -22,7 +22,7 @@ export function PageHeader({
             {resolvedBreadcrumb}
           </div>
         ) : null}
-        <h1 className="truncate text-lg font-semibold tracking-tight text-[var(--color-text)]">
+        <h1 className="truncate text-lg font-semibold text-[var(--color-text)]">
           {title}
         </h1>
       </div>

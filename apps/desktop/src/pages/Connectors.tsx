@@ -602,7 +602,7 @@ function FeaturedTeamsCard({
                 <h2 className="text-md font-semibold text-[var(--color-text)]">
                   {descriptor.name}
                 </h2>
-                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
+                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 text-xs text-[var(--color-text-muted)]">
                   v{descriptor.version}
                 </span>
                 <Tag tone="neutral">Graph delegated</Tag>
@@ -966,7 +966,7 @@ function WhatsAppWebCard({
               <h2 className="text-md font-semibold text-[var(--color-text)]">
                 {descriptor.name}
               </h2>
-              <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
+              <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 text-xs text-[var(--color-text-muted)]">
                 v{descriptor.version}
               </span>
               <Tag tone="neutral">External</Tag>
@@ -998,8 +998,8 @@ function WhatsAppWebCard({
                   Message content leaves Microsoft 365 and is delivered by WhatsApp.
                   No Microsoft Graph scopes are requested.
                 </p>
-                <p className="mt-2 font-mono text-xs text-[var(--color-text-muted)]">
-                  auth: local WhatsApp Web QR
+                <p className="mt-2 text-xs text-[var(--color-text-muted)]">
+                  Auth: local WhatsApp Web QR
                 </p>
               </ConnectorInfoBlock>
             </div>
@@ -1585,7 +1585,7 @@ function NotificationConnectorCard({
                 <h2 className="text-md font-semibold text-[var(--color-text)]">
                   {summary.descriptor.name}
                 </h2>
-                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-muted)]">
+                <span className="rounded bg-[var(--color-bg-raised)] px-1.5 py-0.5 text-xs text-[var(--color-text-muted)]">
                   v{summary.descriptor.version}
                 </span>
                 <Tag tone="neutral">{spec.authLabel}</Tag>

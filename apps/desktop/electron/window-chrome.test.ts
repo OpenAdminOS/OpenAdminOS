@@ -13,24 +13,26 @@ describe("windows title bar overlay", () => {
   it("paints the overlay in the renderer's background color", () => {
     assert.match(
       main,
-      /titleBarOverlay:\s*\{[^}]*color:\s*NATIVE_THEME_COLORS\[DEFAULT_NATIVE_THEME_ID\]\.background/,
+      /titleBarOverlay:\s*\{[^}]*color:\s*initialThemeColors\.background/,
     );
   });
 
   it("paints the window control glyphs in the muted text color", () => {
     assert.match(
       main,
-      /symbolColor:\s*NATIVE_THEME_COLORS\[DEFAULT_NATIVE_THEME_ID\]\.textMuted/,
+      /symbolColor:\s*initialThemeColors\.textMuted/,
     );
   });
 
-  it("opens the window on the renderer background so launch does not flash", () => {
-    const backgrounds = main.match(
-      /backgroundColor:\s*NATIVE_THEME_COLORS\[DEFAULT_NATIVE_THEME_ID\]\.background/g,
+  it("opens each window on the current system background so launch does not flash", () => {
+    assert.match(
+      main,
+      /NATIVE_THEME_COLORS\[nativeTheme\.shouldUseDarkColors \? "dark" : "light"\]/,
     );
+    const backgrounds = main.match(/backgroundColor:\s*initialThemeColors\.background/g);
     assert.ok(
       (backgrounds?.length ?? 0) >= 2,
-      "main and companion windows should use the default native theme background",
+      "main and companion windows should use the system theme background",
     );
   });
 });

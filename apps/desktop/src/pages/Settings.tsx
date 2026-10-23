@@ -3590,7 +3590,7 @@ function AuditLogExportControls({
               aria-pressed={active}
               disabled={busy}
               onClick={() => onFormatChange(option)}
-              className={`h-7 rounded-md text-sm font-medium tracking-normal transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+              className={`h-7 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-focus)] ${
                 active
                   ? "bg-[var(--color-accent-soft)] text-[var(--color-accent)]"
                   : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
@@ -3652,7 +3652,7 @@ function AppearanceSection() {
       <SettingRow
         id="theme"
         stacked
-        description={appearance.error ?? "Choose a built-in theme. This device-only preference is shared with the menu bar companion."}
+        description={appearance.error ?? "Choose System, Light, Dark, or Midnight. This device-only preference is shared with the menu bar companion."}
         control={
           <div
             ref={pickerRef}
@@ -3662,7 +3662,12 @@ function AppearanceSection() {
           >
             {THEMES.map((theme) => {
               const selected = appearance.theme === theme.id;
-              const modeLabel = theme.mode === "dark" ? "Dark" : "Light";
+              const modeLabel =
+                theme.mode === "system"
+                  ? "Follows system"
+                  : theme.mode === "dark"
+                    ? "Dark"
+                    : "Light";
               return (
                 <button
                   key={theme.id}
@@ -3674,7 +3679,7 @@ function AppearanceSection() {
                   tabIndex={selected ? 0 : -1}
                   onClick={() => appearance.setAppearance(theme.id)}
                   onKeyDown={(event) => selectWithKeyboard(event, theme.id)}
-                  className={`min-w-0 rounded-lg p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${
+                  className={`min-w-0 rounded-lg p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] ${
                     selected
                       ? "bg-[var(--color-accent-soft)] ring-2 ring-[var(--color-accent)]"
                       : "bg-[var(--color-bg)] ring-1 ring-[var(--color-border)] hover:bg-[var(--color-surface-hover)] hover:ring-[var(--color-border-strong)]"
@@ -4743,9 +4748,9 @@ function AboutSection() {
   return (
     <div className="max-w-[1040px] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
       <dl className="divide-y divide-[var(--color-border-soft)] px-5">
-        <KeyValue label="Version" value={<span className="font-mono">{__APP_VERSION__}</span>} />
+        <KeyValue label="Version" value={__APP_VERSION__} />
         <KeyValue label="License" value="MIT" />
-        <KeyValue label="Repository" value={<span className="font-mono">OpenAdminOS/OpenAdminOS</span>} />
+        <KeyValue label="Repository" value="OpenAdminOS/OpenAdminOS" />
         <KeyValue label="Built by" value="OpenAdminOS" />
       </dl>
       <AppUpdateRows />
@@ -4979,7 +4984,7 @@ function formatSandboxDetail(
 function SectionTitle({ title, subtitle }: { title: string; subtitle: string }) {
   return (
     <div>
-      <h2 className="text-lg font-semibold tracking-tight text-[var(--color-text)]">
+      <h2 className="text-lg font-semibold text-[var(--color-text)]">
         {title}
       </h2>
       <p className="mt-1 max-w-[640px] text-base leading-relaxed text-[var(--color-text-soft)]">

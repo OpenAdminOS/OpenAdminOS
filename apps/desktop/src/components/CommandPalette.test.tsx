@@ -207,21 +207,24 @@ it("lists all theme actions and applies the selected theme", async () => {
     bridge: makeMockBridge({ setAppearance }),
   });
 
-  for (const label of ["Graphite", "Midnight", "Off-white", "Sand"]) {
+  for (const label of ["System", "Light", "Dark", "Midnight"]) {
     expect(
       screen.getByRole("option", { name: new RegExp(`^Theme: ${label}`) }),
     ).toBeInTheDocument();
   }
   expect(
-    screen.getByRole("option", { name: /^Theme: MidnightCurrent · Dark/ }),
+    screen.getByRole("option", { name: /^Theme: SystemCurrent · Follows system/ }),
   ).toBeInTheDocument();
 
-  await user.click(screen.getByRole("option", { name: /^Theme: Sand/ }));
-  expect(document.documentElement.dataset.theme).toBe("sand");
+  await user.click(screen.getByRole("option", { name: /^Theme: Light/ }));
+  expect(document.documentElement.dataset.theme).toBe("light");
   expect(document.documentElement.dataset.mode).toBe("light");
-  expect(setAppearance).toHaveBeenCalledWith("sand");
+  expect(setAppearance).toHaveBeenCalledWith({
+    preference: "light",
+    resolvedTheme: "light",
+  });
 
-  await user.click(screen.getByRole("option", { name: /^Theme: Graphite/ }));
+  await user.click(screen.getByRole("option", { name: /^Theme: Dark/ }));
 });
 
 function LocationProbe() {

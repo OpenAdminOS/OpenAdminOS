@@ -1705,7 +1705,7 @@ function ChangeDetailDrawer({
                         key={`${version.snapshotId}:${version.version}`}
                         className="grid gap-1 py-2 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center sm:gap-3"
                       >
-                        <span className="font-mono text-sm text-[var(--color-text)]">
+                        <span className="text-sm text-[var(--color-text)]">
                           v{version.version}
                         </span>
                         <span className="truncate font-mono text-xs text-[var(--color-text-muted)]">

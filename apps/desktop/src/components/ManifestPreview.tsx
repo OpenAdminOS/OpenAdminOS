@@ -232,9 +232,9 @@ function DescriptorCard({ manifest }: { manifest: AgentTemplate }) {
               {descriptor.description}
             </p>
           </div>
-          <div className="shrink-0 text-right font-mono text-xs leading-relaxed text-[var(--color-text-muted)]">
+          <div className="shrink-0 text-right text-xs leading-relaxed text-[var(--color-text-muted)]">
             <div>v{descriptor.version}</div>
-            <div className="mt-0.5">{descriptor.id}</div>
+            <div className="mt-0.5 font-mono">{descriptor.id}</div>
           </div>
         </div>
       </div>

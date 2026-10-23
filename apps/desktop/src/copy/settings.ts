@@ -6,7 +6,7 @@ export const SETTINGS_SECTIONS = [
   { id: "connectors", title: "Connectors", description: "Configure external delivery integrations and routing defaults.", keywords: ["teams", "outlook", "slack", "discord", "signal", "whatsapp", "routing"] },
   { id: "gateway", title: "Gateway", description: "Pair local MCP clients with one tenant.", keywords: ["mcp", "loopback", "external", "proposal", "pairing", "client"] },
   { id: "general", title: "General", description: "Configure desktop behavior, safety, and local history.", keywords: ["menu bar", "scheduler", "sandbox", "retention", "audit"] },
-  { id: "appearance", title: "Appearance", description: "Choose the desktop color theme.", keywords: ["theme", "dark", "light", "midnight", "sand", "graphite", "off-white", "appearance", "color"] },
+  { id: "appearance", title: "Appearance", description: "Choose the desktop color theme.", keywords: ["theme", "system", "dark", "light", "midnight", "appearance", "color"] },
   { id: "privacy", title: "Privacy", description: "Review data residency, telemetry, registry, and updates.", keywords: ["data", "telemetry", "residency", "registry", "crash", "writes"] },
   { id: "about", title: "About", description: "Review version, diagnostics, and project information.", keywords: ["version", "diagnostics", "support", "github"] },
 ] as const;
@@ -23,7 +23,7 @@ export const SETTINGS_ITEMS = {
   "os-scheduler": { section: "general", title: "OS scheduler", description: "Run active schedules in the background.", keywords: ["background", "schedule"] },
   "default-tenant-scope": { section: "general", title: "Default tenant scope", description: "Review the tenant used for agent runs.", keywords: ["active tenant", "scope"] },
   "destructive-confirmation": { section: "general", title: "Destructive write confirmation", description: "Require a typed phrase for destructive writes.", keywords: ["typed phrase", "safety", "write"] },
-  theme: { section: "appearance", title: "Theme", description: "Choose the color theme for this device.", keywords: ["theme", "dark", "light", "midnight", "sand", "graphite", "off-white", "appearance", "color"] },
+  theme: { section: "appearance", title: "Theme", description: "Choose the color theme for this device.", keywords: ["theme", "system", "dark", "light", "midnight", "appearance", "color"] },
   "run-history-retention": { section: "general", title: "Run history retention", description: "Control pruning of local run records.", keywords: ["history", "prune", "local"] },
   "change-history": { section: "general", title: "Change history", description: "Control pruning of local drift snapshots.", keywords: ["drift", "retention", "snapshots"] },
   "audit-log-export": { section: "general", title: "Audit log export", description: "Export retained audit records.", keywords: ["json", "csv", "events"] },

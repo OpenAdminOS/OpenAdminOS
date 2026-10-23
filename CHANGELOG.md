@@ -8,6 +8,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Refresh the desktop visual foundation with System-aware Light, Dark, and Midnight themes, locally bundled Geist and Newsreader fonts, calmer shared controls, and the new oa ligature brand mark.
+
 ### Removed
 
 ### Fixed
