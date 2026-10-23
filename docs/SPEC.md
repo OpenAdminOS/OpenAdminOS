@@ -162,8 +162,10 @@ works-with grid of model providers and model families (Ollama, LM Studio,
 Apple Foundation, Mistral, Muse by Meta, Claude Code, OpenAI Codex, GitHub
 Copilot, Google Gemini, Azure OpenAI; Microsoft tenant services are not listed
 there), with Simple Icons (CC0) marks for Ollama, LM Studio, Claude Code, and
-GitHub Copilot only; Microsoft, Apple, OpenAI, Google, Meta, and Mistral
-entries stay as names because of trademark restrictions; on hover each cell
+GitHub Copilot and the monochrome icon from Mistral's official brand kit;
+Microsoft, Apple, OpenAI, Google, and Meta entries stay as names because those
+vendors restrict third-party logo use (Meta requires brand review for every
+use of its logo); on hover each cell
 fills from the bottom with
 a shaded tint of that company's brand color; a
 two-tone lead and three isometric line figures (FIG 0.1 to 0.3) that draw
