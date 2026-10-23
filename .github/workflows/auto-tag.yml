@@ -1,13 +1,20 @@
 name: Auto-tag release versions
 
-# After CI succeeds on main, this workflow reads the repository version and
-# pushes the matching tag when it does not exist yet. Waiting for green CI is
-# important because a squash merge can change path-specific generated-doc
-# metadata; the documentation workflow may need to land its reconciliation PR
-# before the release source is ready to tag.
+# After CI succeeds on main, this workflow decides what the green commit ships:
 #
-# Day-to-day merges are harmless because their package version already has a
-# tag. A release-prep merge introduces the next untagged version.
+#   - Stable: the repository version has no tag yet (a release-prep merge).
+#     It pushes the tag and dispatches release.yml against it. Waiting for
+#     green CI is important because a squash merge can change path-specific
+#     generated-doc metadata; the documentation workflow may need to land its
+#     reconciliation PR before the release source is ready to tag.
+#   - Nightly: the version is already tagged and an app path changed since the
+#     newest v* tag of either channel. It dispatches release.yml on main with
+#     nightly_sha set; release.yml computes the nightly version and creates the
+#     prerelease tag only when it publishes. Comparing with the newest tag
+#     rather than the parent commit means a merge whose CI was cancelled by a
+#     later push (the hourly install-stats commit, for example) still ships in
+#     the next nightly.
+#   - Nothing: the version is tagged and only non-app paths changed.
 
 on:
   workflow_run:
@@ -18,7 +25,7 @@ on:
 permissions:
   contents: write
   # The "Dispatch release workflow" step calls
-  # `gh workflow run release.yml --ref vX.Y.Z`, which goes through the
+  # `gh workflow run release.yml`, which goes through the
   # repos/.../actions/workflows/release.yml/dispatches endpoint —
   # that needs actions:write, separate from contents:write.
   actions: write
@@ -111,3 +118,44 @@ jobs:
           set -euo pipefail
           gh workflow run release.yml --ref "refs/tags/$TAG"
           echo "Dispatched release.yml for $TAG."
+
+      - name: Decide whether main needs a nightly build
+        id: nightly
+        if: ${{ steps.current.outputs.matches == 'true' && steps.existing.outputs.exists == 'true' }}
+        run: |
+          set -euo pipefail
+          base="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+          if [ -z "$base" ]; then
+            echo "::warning::No v* tag is reachable from HEAD; skipping the nightly build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Paths that never change the installed app. Everything else,
+          # including agents/, packages/, apps/ and build scripts, does.
+          changed="$(git diff --name-only "$base" HEAD -- . \
+            ':(exclude)stats' \
+            ':(exclude)web' \
+            ':(exclude)docs' \
+            ':(exclude)tasks' \
+            ':(exclude)model' \
+            ':(exclude)remotion' \
+            ':(exclude).github' \
+            ':(exclude,glob)*.md')"
+          if [ -z "$changed" ]; then
+            echo "::notice::No app changes since $base; skipping the nightly build."
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "App changes since $base:"
+          printf '%s\n' "$changed" | head -50
+          echo "build=true" >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch nightly build
+        if: ${{ steps.nightly.outputs.build == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NIGHTLY_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml --ref main -f nightly_sha="$NIGHTLY_SHA"
+          echo "Dispatched a nightly build of $NIGHTLY_SHA."
