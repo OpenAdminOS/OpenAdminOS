@@ -158,8 +158,12 @@ visual language, and credibility comes from real momentum rather than claims.
 Order: a release announcement bar; a split hero (serif headline left, deck and
 OS-aware download right); the real Chat capture in a window frame on a
 relief-map stage with two floating cards quoting real app strings; a
-works-with grid of compatible services and providers (type only, no logos); a
-two-tone lead and three isometric line figures (FIG 0.1 to 0.3); an accordion
+works-with grid of compatible services and providers, with Simple Icons
+(CC0) marks for Ollama, LM Studio, Claude Code, and GitHub Copilot only;
+Microsoft, Apple, and OpenAI entries stay as names because those vendors
+restrict third-party logo use; a
+two-tone lead and three isometric line figures (FIG 0.1 to 0.3) that draw
+themselves once on reveal; an accordion
 product tour of real captures (Chat, Agents, Agent Team, Write confirmation,
 Models) that auto-advances while visible unless reduced motion is set; a
 Security band with a local versus hosted data table and four guarantees; a
