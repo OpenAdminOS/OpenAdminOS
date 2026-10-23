@@ -147,7 +147,9 @@ jobs:
             exit 0
           fi
           echo "App changes since $base:"
-          printf '%s\n' "$changed" | head -50
+          # sed reads all of its input; head would close the pipe early and
+          # fail this step under pipefail when many paths changed.
+          printf '%s\n' "$changed" | sed -n '1,50p'
           echo "build=true" >> "$GITHUB_OUTPUT"
 
       - name: Dispatch nightly build

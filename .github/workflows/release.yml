@@ -1004,10 +1004,23 @@ jobs:
       - name: Validate backfill tag
         env:
           BACKFILL_TAG: ${{ inputs.backfill_apt_tag }}
+          NIGHTLY_SHA: ${{ inputs.nightly_sha }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [ -n "$NIGHTLY_SHA" ]; then
+            echo "::error::Run an apt backfill and a nightly build separately."
+            exit 1
+          fi
           if ! printf '%s' "$BACKFILL_TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+([.-][[:alnum:].-]+)?$'; then
             echo "::error::Refusing apt backfill for invalid tag '$BACKFILL_TAG'."
+            exit 1
+          fi
+          # The apt repository is stable-only: never backfill a nightly or
+          # any other prerelease into it.
+          prerelease="$(gh release view "$BACKFILL_TAG" --repo OpenAdminOS/OpenAdminOS --json isPrerelease --jq .isPrerelease)"
+          if [[ "$BACKFILL_TAG" == *-nightly.* || "$prerelease" != "false" ]]; then
+            echo "::error::Refusing apt backfill for '$BACKFILL_TAG': only stable releases go into the apt repository."
             exit 1
           fi
 
