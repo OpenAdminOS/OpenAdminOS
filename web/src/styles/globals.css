@@ -386,7 +386,10 @@
 
 /* Works-with grid: a cell fills from the bottom with its company's color. */
 .brand-cell {
+  cursor: default;
   isolation: isolate;
+  -webkit-user-select: none;
+  user-select: none;
   overflow: hidden;
   position: relative;
   transition: color 300ms ease;
