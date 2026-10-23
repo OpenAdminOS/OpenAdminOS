@@ -219,6 +219,21 @@ describe("update channel", () => {
     });
   });
 
+  it("publishes download progress when electron-updater provides it", async (t) => {
+    const { updater, controller } = harness(t);
+    controller.configure("stable");
+    updater.checkQueue.push(async () => {
+      updater.emit("update-available", { version: "0.7.1" });
+    });
+    await controller.check();
+    updater.emit("download-progress", { percent: 42.4 });
+    assert.deepEqual(controller.current(), {
+      status: "downloading",
+      version: "0.7.1",
+      progress: 42.4,
+    });
+  });
+
   it("discards a downloaded update from the old channel and checks the selected channel", async (t) => {
     const { updater, controller, confirm } = harness(t);
     confirm.answer = true;

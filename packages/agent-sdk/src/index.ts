@@ -2911,6 +2911,7 @@ export interface UpdateState {
     | "error";
   version?: string;
   message?: string;
+  progress?: number;
 }
 
 /** Stable releases, or nightly prereleases built from every merge to main. */

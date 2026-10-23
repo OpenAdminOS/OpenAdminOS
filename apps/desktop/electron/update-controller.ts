@@ -160,6 +160,13 @@ export class UpdateController {
         if (restart && generation === this.generation) void this.install();
       });
     });
+    updater.on("download-progress", (progress) => {
+      if (!this.currentActivity() || this.state.status !== "downloading") return;
+      this.set({
+        ...this.state,
+        progress: Math.max(0, Math.min(100, progress.percent)),
+      });
+    });
     updater.on("error", (error) => {
       const quitAfterError = this.quitAfterInstallError;
       if (!this.currentActivity() && !quitAfterError) return;
