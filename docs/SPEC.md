@@ -160,7 +160,9 @@ OS-aware download right); the real Chat capture in a window frame on a
 relief-map stage with two floating cards quoting real app strings; a
 works-with grid of model providers and model families (Ollama, LM Studio,
 Apple Foundation, Mistral, Muse by Meta, Claude Code, OpenAI Codex, GitHub
-Copilot, Google Gemini, Azure OpenAI; Microsoft tenant services are not listed
+Copilot, Google Gemini, Microsoft AI, Azure OpenAI, and a closing "Other local
+models" cell for anything run through Ollama or LM Studio; Microsoft tenant
+services are not listed
 there), with Simple Icons (CC0) marks for Ollama, LM Studio, Claude Code, and
 GitHub Copilot and the monochrome icon from Mistral's official brand kit;
 Microsoft, Apple, OpenAI, Google, and Meta entries stay as names because those
