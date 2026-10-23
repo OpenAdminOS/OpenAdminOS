@@ -1,7 +1,6 @@
 import { useNavigate } from "react-router";
 
 import { useDataBoundary, useShellChrome } from "../state";
-import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { IconChat, IconChevronRight, IconCloud, IconLock, IconSettings } from "./icons";
 import { TenantSwitcher } from "./TenantSwitcher";
 import { Tooltip } from "./ui";
@@ -14,10 +13,7 @@ export function TopBar() {
   const draggable = platform === "macos" || platform === "windows";
 
   const newConversation = () => {
-    navigate("/chat");
-    window.requestAnimationFrame(() =>
-      window.dispatchEvent(new CustomEvent(OPEN_NEW_CONVERSATION_EVENT)),
-    );
+    navigate("/chat?new=1");
   };
 
   return (

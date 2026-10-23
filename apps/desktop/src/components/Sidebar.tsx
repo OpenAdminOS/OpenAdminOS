@@ -1,4 +1,11 @@
-import { useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+} from "react";
 import { NavLink, useNavigate } from "react-router";
 
 import {
@@ -9,11 +16,7 @@ import {
   useUpdateState,
 } from "../state";
 import { isNightlyVersion } from "../shared/update-channel";
-import {
-  OPEN_NEW_CONVERSATION_EVENT,
-  SHORTCUTS,
-  shortcutLabel,
-} from "../shared/shortcuts";
+import { SHORTCUTS, shortcutLabel } from "../shared/shortcuts";
 import { openNovaPanel } from "../shared/nova-panel";
 import {
   IconActivity,
@@ -143,10 +146,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   );
 
   const newChat = () => {
-    navigate("/chat");
-    window.requestAnimationFrame(() =>
-      window.dispatchEvent(new CustomEvent(OPEN_NEW_CONVERSATION_EVENT)),
-    );
+    navigate("/chat?new=1");
   };
 
   const focusAdjacent = (event: ReactKeyboardEvent<HTMLElement>) => {
@@ -424,11 +424,37 @@ function ConversationRow({
   onDelete: () => void;
 }) {
   const tenant = tenants.find((entry) => entry.id === conversation.tenantId);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const close = () => setContextMenu(null);
+    const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("mousedown", close);
+    window.addEventListener("keydown", closeFromEscape);
+    return () => {
+      window.removeEventListener("mousedown", close);
+      window.removeEventListener("keydown", closeFromEscape);
+    };
+  }, [contextMenu]);
+
+  const openContextMenu = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setContextMenu({
+      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 228)),
+      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 112)),
+    });
+  };
+
   return (
     <div className={`group relative flex items-center rounded-[8px] ${active ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}>
       <button
         type="button"
         onClick={onOpen}
+        onContextMenu={openContextMenu}
         title={conversation.title}
         className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-[8px] px-2.5 pr-8 text-left text-sm text-[var(--color-text-soft)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
       >
@@ -461,6 +487,35 @@ function ConversationRow({
           { id: "delete", label: "Delete", danger: true, onSelect: onDelete },
         ]}
       />
+      {contextMenu ? (
+        <div
+          role="menu"
+          aria-label={`Local conversation actions for ${conversation.title}`}
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={(event) => event.stopPropagation()}
+          className="fixed z-[90] w-[220px] overflow-hidden rounded-[14px] bg-[var(--color-raised)] shadow-[var(--shadow-pop)]"
+        >
+          <div className="border-b border-[var(--color-border-soft)] px-3 py-2">
+            <div className="truncate text-sm font-medium text-[var(--color-text)]">
+              {conversation.title}
+            </div>
+            <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
+              Local conversation
+            </div>
+          </div>
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              setContextMenu(null);
+              onDelete();
+            }}
+            className="flex w-full items-center px-3 py-2 text-left text-base text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-danger)]"
+          >
+            Delete conversation
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

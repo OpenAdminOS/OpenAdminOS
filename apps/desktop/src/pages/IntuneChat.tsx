@@ -4362,40 +4362,91 @@ function SuggestedAgentsBlock({
   onRun: (slug: string) => void;
   onDismiss: () => void;
 }) {
+  const [detailsSlug, setDetailsSlug] = useState<string | null>(null);
   if (suggestions.length === 0) return null;
   return (
     <div className="mb-[34px] w-full max-w-[740px] space-y-2">
-      {suggestions.map((suggestion) => (
-        <div key={suggestion.slug} className="flex items-center gap-4 rounded-[14px] px-4 py-3 font-sans text-base text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
-          <div className="min-w-0 flex-1 leading-5">
-            <span className="font-medium text-[var(--color-text)]">{suggestion.name}</span>{" "}
-            <span>
-              {suggestion.mode === "write"
-                ? `${suggestion.reason} Nothing changes until you review and confirm.`
-                : suggestion.reason}
-            </span>
+      {suggestions.map((suggestion) => {
+        const detailsOpen = detailsSlug === suggestion.slug;
+        return (
+          <div key={suggestion.slug} className="rounded-[14px] px-4 py-3 font-sans text-base text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
+            <div className="flex items-center gap-4">
+              <div className="min-w-0 flex-1 leading-5">
+                <span className="font-medium text-[var(--color-text)]">{suggestion.name}</span>{" "}
+                <span>
+                  {suggestion.mode === "write"
+                    ? `${suggestion.reason} Nothing changes until you review and confirm.`
+                    : suggestion.reason}
+                </span>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={detailsOpen}
+                onClick={() => setDetailsSlug(detailsOpen ? null : suggestion.slug)}
+              >
+                Details
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={runningAgentSlug === suggestion.slug}
+                onClick={() => onRun(suggestion.slug)}
+              >
+                {runningAgentSlug === suggestion.slug
+                  ? "Starting"
+                  : suggestion.mode === "write"
+                    ? "Review change"
+                    : "Run agent"}
+              </Button>
+              <IconButton
+                size="sm"
+                label="Dismiss suggested agent"
+                tooltip="Dismiss"
+                icon={<IconClose size={12} />}
+                onClick={onDismiss}
+              />
           </div>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={runningAgentSlug === suggestion.slug}
-            onClick={() => onRun(suggestion.slug)}
-          >
-            {runningAgentSlug === suggestion.slug
-              ? "Starting"
-              : suggestion.mode === "write"
-                ? "Review change"
-                : "Run agent"}
-          </Button>
-          <IconButton
-            size="sm"
-            label="Dismiss suggested agent"
-            tooltip="Dismiss"
-            icon={<IconClose size={12} />}
-            onClick={onDismiss}
-          />
-        </div>
-      ))}
+            {detailsOpen ? (
+              <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-sm leading-5 text-[var(--color-text-muted)]">
+                <div className="font-medium text-[var(--color-text-soft)]">Why suggested</div>
+                <div>{suggestion.reason}</div>
+                {(suggestion.matchedConcepts?.length ?? 0) > 0 ? (
+                  <ul className="mt-2 space-y-1 text-[var(--color-text-soft)]">
+                    {suggestion.matchedConcepts?.map((concept) => (
+                      <li key={concept}>{concept}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {(suggestion.matchedTerms?.length ?? 0) > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {suggestion.matchedTerms?.map((term) => <Badge key={term}>{term}</Badge>)}
+                  </div>
+                ) : null}
+                {(suggestion.matchedResources?.length ?? 0) > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {suggestion.matchedResources?.map((resource) => (
+                      <Badge key={resource}>{chatResourceLabel(resource)}</Badge>
+                    ))}
+                  </div>
+                ) : null}
+                {suggestion.scopes.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span>Required scopes</span>
+                    {suggestion.scopes.slice(0, 4).map((scope) => <Badge key={scope}>{scope}</Badge>)}
+                    {suggestion.scopes.length > 4 ? <Badge>{suggestion.scopes.length - 4} more</Badge> : null}
+                  </div>
+                ) : null}
+                {suggestion.mode === "write" ? (
+                  <div className="mt-2 text-[var(--color-warning)]">
+                    Write actions still use the normal plan and confirmation flow.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

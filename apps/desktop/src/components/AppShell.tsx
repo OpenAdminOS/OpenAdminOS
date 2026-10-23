@@ -5,7 +5,7 @@ import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
 import { ConnectorConfirmModal } from "./ConnectorConfirmModal";
 import { ReportIssueProvider } from "./ReportIssueModal";
-import { matchesShortcut, OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
+import { matchesShortcut } from "../shared/shortcuts";
 import { overlayStackSize } from "../shared/overlay-stack";
 import {
   ConversationWorkspaceProvider,
@@ -37,10 +37,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         setPaletteOpen((o) => !o);
       } else if (matchesShortcut(e, "newConversation") && overlayStackSize() === 0) {
         e.preventDefault();
-        navigate("/chat");
-        window.requestAnimationFrame(() =>
-          window.dispatchEvent(new CustomEvent(OPEN_NEW_CONVERSATION_EVENT)),
-        );
+        navigate("/chat?new=1");
       } else if (matchesShortcut(e, "settings") && overlayStackSize() === 0) {
         e.preventDefault();
         navigate("/settings");
