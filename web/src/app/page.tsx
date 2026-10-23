@@ -9,7 +9,6 @@ import {
 } from "~/lib/benchmarks/data";
 import { getAgentStatsSummary } from "~/lib/stats/summary";
 
-import { BLOG_POSTS, blogPostPath } from "./blog/posts";
 import { getGitHubDownloadCount } from "./github-downloads";
 import { getRecentReleases } from "./github-releases";
 import { getGitHubRepoStats } from "./github-repo";
@@ -248,7 +247,6 @@ export default async function HomePage() {
     linux: latestRelease.linuxAppImageUrl,
   };
   const latestNote = releases.find((release) => release.version === latestRelease.version);
-  const posts = BLOG_POSTS.slice(0, 3);
   const structuredData = {
     "@context": "https://schema.org",
     "@graph": [
@@ -743,40 +741,6 @@ export default async function HomePage() {
               &ldquo;{TESTIMONIAL.quote}&rdquo;
             </blockquote>
           </figure>
-        </div>
-      </section>
-
-      {/* Writing */}
-      <section className="border-t border-brand-line">
-        <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10">
-          <div className="flex items-baseline justify-between">
-            <h2 className="font-display text-[2rem] leading-tight">From the blog</h2>
-            <Link href="/blog" className="text-link text-sm">
-              All articles
-            </Link>
-          </div>
-          <ul className="mt-8 grid gap-6 md:grid-cols-3">
-            {posts.map((post) => (
-              <li key={post.slug} data-reveal>
-                <Link href={blogPostPath(post)} className="group block">
-                  <img
-                    src={post.imagePath}
-                    alt={post.imageAlt}
-                    width={1200}
-                    height={630}
-                    loading="lazy"
-                    className="aspect-[1200/630] w-full rounded-[14px] border border-brand-line object-cover"
-                  />
-                  <p className="mt-4 text-sm text-brand-faint">
-                    {post.category} · {post.readingTime}
-                  </p>
-                  <p className="mt-1 text-lg font-medium leading-snug group-hover:underline">
-                    {post.title}
-                  </p>
-                </Link>
-              </li>
-            ))}
-          </ul>
         </div>
       </section>
 
