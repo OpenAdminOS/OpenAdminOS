@@ -1028,17 +1028,17 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/chat",
       name: "chat-empty",
       file: "app/chat-empty.png",
-      waitFor: ["Ollama", "Send"],
+      waitFor: ["Ollama"],
       prepare: "chat-empty",
-      selector: "#intune-chat-composer",
+      selector: '[id^="intune-chat-composer"]',
     },
     {
       route: "/chat",
       name: "chat-transcript",
       file: "app/chat-transcript.png",
-      waitFor: ["Ollama", "Send"],
+      waitFor: ["Ollama"],
       prepare: "chat-transcript",
-      selector: "#intune-chat-composer",
+      selector: '[id^="intune-chat-composer"]',
     },
     {
       route: "/changes",
@@ -1351,14 +1351,14 @@ async function screenshotCaptureStepScript(
       // The New chat control lives in the history panel, which is a closed
       // overlay at narrow widths; Mod+N's event covers that case.
       await waitFor(
-        () => Boolean(document.querySelector("#intune-chat-composer")),
+        () => Boolean(document.querySelector('[id^="intune-chat-composer"]')),
         "Chat composer",
       );
       const newConversation = findNewChatButton();
       if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
-        () => bodyText().includes("What do you want to inspect?"),
+        () => bodyText().includes("Run an agent with /"),
         "empty Chat state",
       );
     } else if (step.prepare === "chat-transcript") {
@@ -1366,7 +1366,7 @@ async function screenshotCaptureStepScript(
       if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
-        () => bodyText().includes("What do you want to inspect?"),
+        () => bodyText().includes("Run an agent with /"),
         "new Chat transcript fixture",
       );
       const textarea = setTextarea(
@@ -1630,7 +1630,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   location.hash = "/chat";
   await waitFor(
     () =>
-      bodyText().includes("What do you want to inspect?") &&
+      bodyText().includes("Run an agent with /") &&
       bodyText().includes("Smoke Tenant"),
     "direct Chat front door",
   );
@@ -1664,7 +1664,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => learningSwitch.getAttribute("aria-checked") === "true", "self-training enabled");
 
   location.hash = "/chat";
-  await waitFor(() => bodyText().includes("What do you want to inspect?"), "Intune Chat route");
+  await waitFor(() => bodyText().includes("Run an agent with /"), "Intune Chat route");
   await waitFor(
     () => bodyText().includes("Smoke Tenant") && bodyText().includes("New conversation"),
     "tenant-connected chat shell",
@@ -2063,7 +2063,7 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   };
 
   await waitFor(
-    () => bodyText().includes("What do you want to inspect?"),
+    () => bodyText().includes("Run an agent with /"),
     "initial Chat route",
   );
   location.hash = "/settings/about";
