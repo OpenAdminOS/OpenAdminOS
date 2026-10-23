@@ -39,6 +39,7 @@ import { AppStateStore } from "./state.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import {
   applyUpdateNow,
+  assertUpdateChannelChangeAllowed,
   checkForUpdatesNow,
   getUpdateChannelSettings,
   getUpdateState,
@@ -6348,6 +6349,7 @@ function registerIpcHandlers() {
       if (unavailable) {
         throw new Error(UPDATE_UNAVAILABLE_DETAIL[unavailable]);
       }
+      assertUpdateChannelChangeAllowed(channel);
       await store.setUpdateChannel(channel);
       return setUpdateChannel(channel);
     }),

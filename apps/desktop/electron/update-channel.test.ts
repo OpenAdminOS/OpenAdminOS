@@ -331,6 +331,27 @@ describe("installing a ready update", () => {
     assert.equal(updater.autoRunAppAfterInstall, true);
   });
 
+  it("refuses a channel switch once an install has started", async (t) => {
+    const { updater, controller, confirm, states } = harness(t, "0.7.1-nightly.20261023141500");
+    confirm.answer = true;
+    controller.configure("nightly");
+    updater.emit("update-downloaded", { version: "0.7.1-nightly.20261024080000" });
+    await settle();
+    // macOS: quitAndInstall() was called and Squirrel is staging the nightly.
+    assert.equal(updater.installs.length, 1);
+    assert.equal(controller.canChangeChannel("stable"), false);
+    assert.equal(controller.canChangeChannel("nightly"), true);
+    assert.throws(() => controller.configure("stable"), /being installed/);
+    assert.equal(updater.channel, "nightly");
+    assert.equal(states.at(-1)?.status, "ready");
+
+    // A failed install releases the lock, so the admin can switch again.
+    updater.emit("error", new Error("Squirrel could not stage the update"));
+    assert.equal(controller.canChangeChannel("stable"), true);
+    controller.configure("stable");
+    assert.equal(updater.channel, "latest");
+  });
+
   it("installs on quit when the admin chose Later", async (t) => {
     const { updater, controller, beforeQuit } = harness(t, "0.7.0", "win32");
     controller.configure("stable");

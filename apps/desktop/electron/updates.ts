@@ -5,7 +5,11 @@ import type {
   UpdateChannelSettings,
   UpdateState,
 } from "@openadminos/agent-sdk";
-import { UpdateController, updateUnavailableReason } from "./update-controller.js";
+import {
+  CHANNEL_LOCKED_WHILE_INSTALLING,
+  UpdateController,
+  updateUnavailableReason,
+} from "./update-controller.js";
 import { RELEASE_FEED, ReleaseProvider } from "./update-provider.js";
 
 export type { UpdateState };
@@ -46,6 +50,16 @@ function unavailableReason() {
 export function getUpdateChannelSettings(channel: UpdateChannel): UpdateChannelSettings {
   const reason = unavailableReason();
   return reason ? { channel, unavailableReason: reason } : { channel };
+}
+
+/**
+ * Throws when the running updater cannot switch to the channel right now,
+ * so the caller can refuse before persisting the choice.
+ */
+export function assertUpdateChannelChangeAllowed(channel: UpdateChannel): void {
+  if (controller && !controller.canChangeChannel(channel)) {
+    throw new Error(CHANNEL_LOCKED_WHILE_INSTALLING);
+  }
 }
 
 /**

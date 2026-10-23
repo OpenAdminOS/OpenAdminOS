@@ -32,6 +32,10 @@ export interface UpdateHost {
   notify(state: UpdateState): void;
 }
 
+/** Shown when the admin changes the channel while an update is being installed. */
+export const CHANNEL_LOCKED_WHILE_INSTALLING =
+  "An update is being installed. Change the channel after OpenAdminOS restarts.";
+
 /** Startup delay so first-run UX is not dominated by a network round-trip. */
 export const STARTUP_DELAY_MS = 15_000;
 /** Poll while the app is open. */
@@ -156,10 +160,23 @@ export class UpdateController {
   }
 
   /**
+   * Whether the channel can change now. Not while an install is under way:
+   * on macOS, Squirrel stages the downloaded update asynchronously after
+   * quitAndInstall() and then installs it from a native callback the
+   * generation counter cannot reach, so a switch at that point would still
+   * install the previous channel's update.
+   */
+  canChangeChannel(channel: UpdateChannel): boolean {
+    return !this.installing || this.channel() === channel;
+  }
+
+  /**
    * Starts background checks on the given channel, or switches channel.
    * A switch cancels work for the previous channel and checks right away.
+   * Throws while an update is being installed, see canChangeChannel().
    */
   configure(channel: UpdateChannel): void {
+    if (!this.canChangeChannel(channel)) throw new Error(CHANNEL_LOCKED_WHILE_INSTALLING);
     const nightly = channel === "nightly";
     const firstStart = !this.started;
     const channelChanged = this.nightly !== null && nightly !== this.nightly;
