@@ -14,6 +14,7 @@ import { getGitHubDownloadCount } from "./github-downloads";
 import { getRecentReleases } from "./github-releases";
 import { getGitHubRepoStats } from "./github-repo";
 import { REGISTRY_AGENTS } from "./home/agents";
+import { BRAND_MARKS } from "./home/brandMarks";
 import { AppWindow } from "./home/AppWindow";
 import { DownloadCta } from "./home/DownloadCta";
 import { FigureApproval, FigureEvidence, FigureLocal } from "./home/Figures";
@@ -346,14 +347,26 @@ export default async function HomePage() {
           Works with the tenant and the models you already use
         </p>
         <ul className="mt-6 grid grid-cols-2 border-l border-t border-brand-line sm:grid-cols-5">
-          {WORKS_WITH.map((name) => (
-            <li
-              key={name}
-              className="flex h-16 items-center justify-center border-b border-r border-brand-line px-3 text-center text-[15px] text-brand-muted"
-            >
-              {name}
-            </li>
-          ))}
+          {WORKS_WITH.map((name) => {
+            const mark = BRAND_MARKS[name];
+            return (
+              <li
+                key={name}
+                className="flex h-16 items-center justify-center gap-2.5 border-b border-r border-brand-line px-3 text-center text-[15px] text-brand-muted"
+              >
+                {mark ? (
+                  <svg
+                    aria-hidden
+                    viewBox="0 0 24 24"
+                    className="h-5 w-5 shrink-0 fill-current text-brand-ink"
+                  >
+                    <path d={mark} />
+                  </svg>
+                ) : null}
+                {name}
+              </li>
+            );
+          })}
         </ul>
       </section>
 
