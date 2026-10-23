@@ -578,6 +578,38 @@ describe("Settings provider section", () => {
     expect(bridge.checkForUpdatesNow).toHaveBeenCalledTimes(1);
   });
 
+  it("shows the update channel in Privacy only once it is known", async () => {
+    const nightly = makeMockBridge({
+      platform: "macos",
+      getUpdateChannel: vi.fn(async () => ({ channel: "nightly" as const })),
+    });
+    const { unmount } = renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/privacy",
+      bridge: nightly,
+    });
+    expect(
+      await screen.findByText(/Nightly prereleases, plus any newer stable release\./),
+    ).toBeInTheDocument();
+    unmount();
+
+    const failing = makeMockBridge({
+      platform: "macos",
+      getUpdateChannel: vi.fn(async () => {
+        throw new Error("The settings store is locked.");
+      }),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge: failing });
+    // Privacy row and the About alert.
+    expect(
+      await screen.findAllByText(
+        "The update channel could not be read. The settings store is locked. Reopen Settings to try again.",
+      ),
+    ).toHaveLength(2);
+    expect(screen.getByText("Unknown")).toBeInTheDocument();
+    expect(screen.queryByText("Stable releases only.", { exact: false })).not.toBeInTheDocument();
+  });
+
   it("disables the update channel with an explanation on Linux", async () => {
     const bridge = makeMockBridge({
       getUpdateChannel: vi.fn(async () => ({

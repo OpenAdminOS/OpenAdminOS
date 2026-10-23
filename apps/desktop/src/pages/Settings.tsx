@@ -3756,11 +3756,14 @@ function PrivacySection({
   onSetUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
 }) {
   const platform = window.openAdminOS?.platform ?? "unknown";
-  const updateChannelSettings = useUpdateChannel().settings;
-  // The channel only applies where the in-app updater runs.
-  const updateChannel = updateChannelSettings?.unavailableReason
-    ? "stable"
-    : (updateChannelSettings?.channel ?? "stable");
+  const { settings: updateChannelSettings, loadError: updateChannelError } = useUpdateChannel();
+  // The channel only applies where the in-app updater runs. Null until the
+  // main process answers, so a nightly install never flashes "Stable".
+  const updateChannel = updateChannelSettings
+    ? updateChannelSettings.unavailableReason
+      ? "stable"
+      : updateChannelSettings.channel
+    : null;
   const [savingInstallCounts, setSavingInstallCounts] = useState(false);
   const [installCountsError, setInstallCountsError] = useState<string | null>(null);
   const [registryModalOpen, setRegistryModalOpen] = useState(false);
@@ -4273,10 +4276,14 @@ function PrivacySection({
           description={
             platform === "linux"
               ? "Stable-only. Linux updates are installed through the signed apt repository or by downloading the next package; the app does not replace unsigned Linux executables automatically."
-              : `${updateChannel === "nightly" ? "Nightly prereleases, plus any newer stable release." : "Stable releases only."} ${platform === "windows" ? "Microsoft Store builds update through the Store. Other signed builds check" : "Signed builds check"} on launch and every four hours, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit. Change the channel under About.`
+              : updateChannelError
+                ? updateChannelLoadErrorText(updateChannelError)
+                : `${updateChannel === "nightly" ? "Nightly prereleases, plus any newer stable release." : updateChannel === "stable" ? "Stable releases only." : "Reading the update channel."} ${platform === "windows" ? "Microsoft Store builds update through the Store. Other signed builds check" : "Signed builds check"} on launch and every four hours, download the update in the background, then ask before restarting. If you choose Later it is applied the next time you quit. Change the channel under About.`
           }
           control={
-            updateChannel === "nightly" ? (
+            updateChannel === null ? (
+              <Badge tone="neutral">{updateChannelError ? "Unknown" : "Reading"}</Badge>
+            ) : updateChannel === "nightly" ? (
               <Badge tone="warning">
                 <StatusDot tone="warning" /> Nightly
               </Badge>
@@ -4520,6 +4527,11 @@ function RegistrySourceModal({
   );
 }
 
+function updateChannelLoadErrorText(cause: string | null): string {
+  const reason = cause ? userFacingErrorReason(cause) : undefined;
+  return `The update channel could not be read.${reason ? ` ${reason}` : ""} Reopen Settings to try again.`;
+}
+
 function useUpdateChannel() {
   const [settings, setSettings] = useState<UpdateChannelSettings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -4648,7 +4660,10 @@ function AppUpdateRows() {
               variant="primary"
               size="sm"
               onClick={() => {
-                void window.openAdminOS?.applyUpdateNow();
+                window.openAdminOS?.applyUpdateNow().catch((cause: unknown) => {
+                  const reason = userFacingErrorReason(cause instanceof Error ? cause.message : String(cause));
+                  setError(`The update did not start installing.${reason ? ` ${reason}` : ""} Quit OpenAdminOS to install it, or try again.`);
+                });
               }}
             >
               Restart now
@@ -4671,7 +4686,7 @@ function AppUpdateRows() {
           role="alert"
           className="mx-5 mb-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30"
         >
-          {error ?? `The update channel could not be read. ${loadError} Reopen Settings to try again.`}
+          {error ?? updateChannelLoadErrorText(loadError)}
         </div>
       )}
     </div>
