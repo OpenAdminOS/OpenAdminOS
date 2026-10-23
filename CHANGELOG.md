@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.7.1] - 2026-10-23
+
+### Added
+
 - Publish a signed Nightly prerelease after every merge that changes the app, and let installs opt in from Settings > About.
 
 ### Changed
