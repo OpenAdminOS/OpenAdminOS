@@ -1,52 +1,312 @@
 @import "tailwindcss";
 
+/*
+ * Calm shell identity, ported from docs/mockups/27-calm-shell.html and the
+ * desktop tokens in apps/desktop/src/styles/globals.css. Warm paper in light,
+ * graphite in dark, ink-colored primary actions. Color is reserved for
+ * meaning: focus, local vs hosted, read vs write, destructive.
+ */
 @theme {
-  --color-brand-bg: #0b1018;
-  --color-brand-surface: #111826;
-  --color-brand-raised: #151e2d;
-  --color-brand-card: #111826;
-  --color-brand-line: #222c3b;
-  --color-brand-line-strong: #33425a;
-  --color-brand-ink: #e8eef7;
-  --color-brand-muted: #9aa8bd;
-  --color-brand-accent: #7aa2ff;
-  --color-brand-accent-text: #9dbbff;
-  --color-brand-danger: #ff9da3;
-  --color-brand-danger-surface: #30151d;
-  --color-brand-danger-line: #71313d;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
-    "Segoe UI Symbol", "Noto Color Emoji";
+  --color-brand-bg: #faf9f6;
+  --color-brand-surface: #f2f0eb;
+  --color-brand-floor: #f2efe9;
+  --color-brand-bubble: #eeebe5;
+  --color-brand-raised: #ffffff;
+  --color-brand-card: #ffffff;
+  --color-brand-hover: rgba(31, 29, 26, 0.05);
+  --color-brand-line: rgba(31, 29, 26, 0.12);
+  --color-brand-line-soft: rgba(31, 29, 26, 0.065);
+  --color-brand-line-strong: rgba(31, 29, 26, 0.22);
+  --color-brand-ink: #1f1d1a;
+  --color-brand-ink-hover: #37342f;
+  --color-brand-on-ink: #faf9f6;
+  --color-brand-muted: #5c5852;
+  --color-brand-faint: #6f6a63;
+  --color-brand-dot: rgba(31, 29, 26, 0.11);
+  --color-brand-code: rgba(31, 29, 26, 0.045);
+  --color-brand-focus: #2f6feb;
+  /* Legacy names kept so older markup resolves to the calm palette. */
+  --color-brand-accent: #1f1d1a;
+  --color-brand-accent-text: #1f1d1a;
+  --color-brand-ok: #3a7246;
+  --color-brand-ok-surface: rgba(58, 114, 70, 0.08);
+  --color-brand-warn: #895a05;
+  --color-brand-warn-surface: rgba(138, 91, 5, 0.08);
+  --color-brand-danger: #a8382b;
+  --color-brand-danger-surface: rgba(168, 56, 43, 0.07);
+  --color-brand-danger-line: rgba(168, 56, 43, 0.3);
+  --color-brand-on-danger: #ffffff;
+  --color-brand-info: #345d83;
+
+  --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui,
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Newsreader Variable", "Newsreader", "Iowan Old Style",
+    Charter, Georgia, serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono",
+    SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --shadow-frame: 0 0 0 1px rgba(31, 29, 26, 0.08),
+    0 2px 6px rgba(31, 29, 26, 0.04), 0 30px 80px -24px rgba(31, 29, 26, 0.22);
+  --shadow-pop: 0 0 0 1px rgba(31, 29, 26, 0.07),
+    0 10px 32px rgba(31, 29, 26, 0.12);
+
+  --ease-calm: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.brand-grid {
-  background-image:
-    linear-gradient(
-      color-mix(in srgb, var(--color-brand-accent) 5%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--color-brand-accent) 5%, transparent) 1px,
-      transparent 1px
-    );
-  background-size: 72px 72px;
-  mask-image: linear-gradient(to bottom, black, transparent 76%);
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-brand-bg: #17191d;
+    --color-brand-surface: #121418;
+    --color-brand-floor: #1a1d22;
+    --color-brand-bubble: #262a31;
+    --color-brand-raised: #22262c;
+    --color-brand-card: #1e2126;
+    --color-brand-hover: rgba(255, 255, 255, 0.05);
+    --color-brand-line: rgba(255, 255, 255, 0.12);
+    --color-brand-line-soft: rgba(255, 255, 255, 0.065);
+    --color-brand-line-strong: rgba(255, 255, 255, 0.24);
+    --color-brand-ink: #f4f5f7;
+    --color-brand-ink-hover: #ffffff;
+    --color-brand-on-ink: #17191d;
+    --color-brand-muted: #c2c7ce;
+    --color-brand-faint: #98a0ab;
+    --color-brand-dot: rgba(255, 255, 255, 0.09);
+    --color-brand-code: rgba(255, 255, 255, 0.055);
+    --color-brand-focus: #8fb4ff;
+    --color-brand-accent: #f4f5f7;
+    --color-brand-accent-text: #f4f5f7;
+    --color-brand-ok: #9cc88f;
+    --color-brand-ok-surface: rgba(156, 200, 143, 0.1);
+    --color-brand-warn: #e5c678;
+    --color-brand-warn-surface: rgba(229, 198, 120, 0.1);
+    --color-brand-danger: #f1a0a0;
+    --color-brand-danger-surface: rgba(241, 160, 160, 0.1);
+    --color-brand-danger-line: rgba(241, 160, 160, 0.32);
+    --color-brand-on-danger: #17191d;
+    --color-brand-info: #a3bfd9;
+
+    --shadow-frame: 0 0 0 1px rgba(255, 255, 255, 0.1),
+      0 30px 80px -24px rgba(0, 0, 0, 0.7);
+    --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.09),
+      0 12px 36px rgba(0, 0, 0, 0.45);
+  }
 }
 
-.brand-page-glow {
-  background: radial-gradient(
-    ellipse at top,
-    color-mix(in srgb, var(--color-brand-accent) 11%, transparent),
-    transparent 70%
+/*
+ * Inverted band: an ink-colored section inside a paper page (and the
+ * reverse in dark). Re-scopes the tokens so children keep using brand-*.
+ */
+.band-ink {
+  --color-brand-bg: #1f1d1a;
+  --color-brand-surface: #2a2723;
+  --color-brand-card: #26231f;
+  --color-brand-raised: #2e2b26;
+  --color-brand-floor: #23201c;
+  --color-brand-bubble: #34302b;
+  --color-brand-hover: rgba(250, 249, 246, 0.06);
+  --color-brand-line: rgba(250, 249, 246, 0.14);
+  --color-brand-line-soft: rgba(250, 249, 246, 0.07);
+  --color-brand-line-strong: rgba(250, 249, 246, 0.26);
+  --color-brand-ink: #faf9f6;
+  --color-brand-ink-hover: #ffffff;
+  --color-brand-on-ink: #1f1d1a;
+  --color-brand-muted: #cfcac2;
+  --color-brand-faint: #a9a399;
+  --color-brand-dot: rgba(250, 249, 246, 0.1);
+  --color-brand-code: rgba(250, 249, 246, 0.07);
+  --color-brand-focus: #8fb4ff;
+  --color-brand-accent: #faf9f6;
+  --color-brand-accent-text: #faf9f6;
+  --color-brand-ok: #9cc88f;
+  --color-brand-ok-surface: rgba(156, 200, 143, 0.12);
+  --color-brand-warn: #e5c678;
+  --color-brand-warn-surface: rgba(229, 198, 120, 0.12);
+  --color-brand-danger: #f1a0a0;
+  --color-brand-danger-surface: rgba(241, 160, 160, 0.1);
+  --color-brand-danger-line: rgba(241, 160, 160, 0.32);
+  background: var(--color-brand-bg);
+  color: var(--color-brand-ink);
+}
+
+@media (prefers-color-scheme: dark) {
+  .band-ink {
+    --color-brand-bg: #f4f3ef;
+    --color-brand-surface: #ebe8e2;
+    --color-brand-card: #ffffff;
+    --color-brand-raised: #ffffff;
+    --color-brand-floor: #ece9e3;
+    --color-brand-bubble: #e5e1da;
+    --color-brand-hover: rgba(31, 29, 26, 0.05);
+    --color-brand-line: rgba(31, 29, 26, 0.12);
+    --color-brand-line-soft: rgba(31, 29, 26, 0.065);
+    --color-brand-line-strong: rgba(31, 29, 26, 0.22);
+    --color-brand-ink: #1f1d1a;
+    --color-brand-ink-hover: #37342f;
+    --color-brand-on-ink: #faf9f6;
+    --color-brand-muted: #5c5852;
+    --color-brand-faint: #6f6a63;
+    --color-brand-dot: rgba(31, 29, 26, 0.11);
+    --color-brand-code: rgba(31, 29, 26, 0.045);
+    --color-brand-focus: #2f6feb;
+    --color-brand-accent: #1f1d1a;
+    --color-brand-accent-text: #1f1d1a;
+    --color-brand-ok: #3a7246;
+    --color-brand-ok-surface: rgba(58, 114, 70, 0.08);
+    --color-brand-warn: #895a05;
+    --color-brand-warn-surface: rgba(138, 91, 5, 0.08);
+    --color-brand-danger: #a8382b;
+    --color-brand-danger-surface: rgba(168, 56, 43, 0.07);
+    --color-brand-danger-line: rgba(168, 56, 43, 0.3);
+  }
+}
+
+@layer base {
+  html {
+    background: var(--color-brand-bg);
+    color: var(--color-brand-ink);
+    color-scheme: light dark;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-brand-focus) 22%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-focus);
+    outline-offset: 2px;
+  }
+
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Headline type: Newsreader with optical sizing, as in the desktop. */
+.font-display {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-weight: 420;
+  letter-spacing: -0.022em;
+}
+
+/* Dotted floor, borrowed from the Agent Team office. */
+.brand-dots {
+  background-image: radial-gradient(
+    var(--color-brand-dot) 1px,
+    transparent 1.2px
   );
+  background-size: 18px 18px;
 }
 
-.brand-product-glow {
-  background: radial-gradient(
-    ellipse at center,
-    color-mix(in srgb, var(--color-brand-accent) 17%, transparent),
-    transparent 68%
+.brand-dots-fade {
+  mask-image: radial-gradient(ellipse at 50% 30%, black 20%, transparent 72%);
+}
+
+/* Inline text link: ink with a quiet underline that firms up on hover. */
+.text-link {
+  color: var(--color-brand-ink);
+  text-decoration-line: underline;
+  text-decoration-color: var(--color-brand-line-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  transition: text-decoration-color 160ms ease;
+}
+
+.text-link:hover {
+  text-decoration-color: currentColor;
+}
+
+/* Scroll reveal. Content stays visible without JavaScript. */
+.js-reveal [data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
+  transition:
+    opacity 700ms var(--ease-calm),
+    transform 700ms var(--ease-calm);
+}
+
+.js-reveal [data-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+/* Agent run log on the landing page. */
+@keyframes run-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes run-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 40%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent);
+  }
+}
+
+.run-armed .run-step {
+  opacity: 0;
+}
+
+.run-active .run-step {
+  animation: run-step-in 520ms var(--ease-calm) both;
+  animation-delay: calc(var(--step) * 650ms);
+}
+
+.run-pulse {
+  animation: run-pulse 1.8s ease-in-out infinite;
+}
+
+/* Registry marquee. */
+@keyframes marquee {
+  from {
+    transform: translateX(0);
+  }
+
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.marquee-track {
+  animation: marquee var(--marquee-duration, 60s) linear infinite;
+}
+
+.marquee-reverse {
+  animation-direction: reverse;
+}
+
+.marquee:hover .marquee-track {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee {
+    overflow-x: auto;
+  }
+}
+
+.marquee-mask {
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    black 8%,
+    black 92%,
+    transparent
   );
 }
 
@@ -82,7 +342,7 @@
 
   72%,
   100% {
-    max-width: 17ch;
+    max-width: 16ch;
   }
 }
 
@@ -107,25 +367,25 @@
   }
 
   76% {
-    left: calc(100% - 4.4rem);
+    left: calc(100% - 5.5rem);
     opacity: 1;
     transform: scale(1);
   }
 
   84% {
-    left: calc(100% - 4.4rem);
+    left: calc(100% - 5.5rem);
     opacity: 1;
     transform: scale(0.88);
   }
 
   92% {
-    left: calc(100% - 4.4rem);
+    left: calc(100% - 5.5rem);
     opacity: 1;
     transform: scale(1);
   }
 
   100% {
-    left: calc(100% - 4.4rem);
+    left: calc(100% - 5.5rem);
     opacity: 0;
     transform: scale(1);
   }
@@ -183,12 +443,15 @@
 }
 
 .diff-confirm-input {
+  width: 16ch;
+}
+
+.diff-demo-armed .diff-confirm-input {
   max-width: 0;
-  width: 17ch;
 }
 
 .diff-demo-active .diff-confirm-input {
-  animation: diff-admin-input-type 3s steps(17, end) 500ms forwards;
+  animation: diff-admin-input-type 3s steps(16, end) 500ms forwards;
 }
 
 .diff-confirm-caret {
@@ -196,7 +459,7 @@
 }
 
 .diff-confirm-button {
-  min-width: 5.75rem;
+  min-width: 8.5rem;
   overflow: hidden;
   position: relative;
   text-align: center;
@@ -274,8 +537,22 @@
   }
 }
 
-html {
-  color-scheme: dark;
-  background: var(--color-brand-bg);
-  color: var(--color-brand-ink);
+
+@media (prefers-reduced-motion: reduce) {
+  .js-reveal [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .run-armed .run-step,
+  .run-active .run-step {
+    animation: none;
+    opacity: 1;
+  }
+
+  .run-pulse,
+  .marquee-track {
+    animation: none;
+  }
 }

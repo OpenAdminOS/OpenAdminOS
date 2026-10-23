@@ -1,8 +1,12 @@
+import "@fontsource-variable/geist/wght.css";
+import "@fontsource-variable/geist-mono/wght.css";
+import "@fontsource-variable/newsreader/opsz.css";
 import "~/styles/globals.css";
 
 import { type Metadata, type Viewport } from "next";
 import Script from "next/script";
 
+import { RevealObserver } from "./RevealObserver";
 import {
   HOME_DESCRIPTION,
   HOME_TITLE,
@@ -78,8 +82,11 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  colorScheme: "dark",
-  themeColor: "#0B1018",
+  colorScheme: "light dark",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#FAF9F6" },
+    { media: "(prefers-color-scheme: dark)", color: "#17191D" },
+  ],
 };
 
 const PLAUSIBLE_SCRIPT_URL =
@@ -92,8 +99,9 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
-      <body className="font-sans antialiased">
+      <body className="bg-brand-bg font-sans text-brand-ink antialiased">
         {children}
+        <RevealObserver />
         <Script id="plausible-init" strategy="afterInteractive">
           {PLAUSIBLE_INIT_SCRIPT}
         </Script>
