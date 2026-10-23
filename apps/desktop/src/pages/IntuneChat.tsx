@@ -1,5 +1,4 @@
-import { PublicWebSources } from "../components/PublicWebSources";
-import { useEffect, useMemo, useReducer, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
@@ -8,7 +7,9 @@ import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, Out
 import {
   IconCloud,
   IconCopy,
-  IconArrowLeft,
+  IconArrowDown,
+  IconArrowUp,
+  IconAgentTeam,
   IconChevronDown,
   IconChevronRight,
   IconChat,
@@ -16,17 +17,35 @@ import {
   IconClose,
   IconDownload,
   IconHardDrive,
-  IconPlay,
+  IconLayers,
+  IconLock,
+  IconMicrophone,
+  IconMore,
+  IconPencil,
   IconPlus,
-  IconSearch,
+  IconRefresh,
+  IconSettings,
+  IconSlash,
   IconStar,
+  IconStop,
+  IconWarning,
 } from "../components/icons";
-import { useAppState } from "../state";
+import {
+  TopBarActions,
+  TopBarTitle,
+  useAppState,
+  useConversations,
+  useConversationsOptional,
+  ConversationWorkspaceProvider,
+  useDataBoundaryOptional,
+  useShellChromeOptional,
+  useUpdateStateOptional,
+  type DataBoundary,
+} from "../state";
 import { suggestAgentForQuestion } from "../shared/agent-suggestions";
 import {
   type AgentSummary,
   resolveProviderDefaultModel,
-  type GraphCacheStatus,
   type GraphCacheResourceKind,
   type ImportMultiTenantResultToWorkspacesResult,
   type IntuneChatAgentSuggestion,
@@ -45,6 +64,7 @@ import {
   type TenantScopePreflight,
   type RunMultiTenantChatInput,
   type ProviderId,
+  type ProviderSummary,
   type SendIntuneChatMessageInput,
   type WorkspaceDetail,
   type WorkspacePromptContextInput,
@@ -52,7 +72,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, COMMON_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -65,6 +85,9 @@ import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
+import { MarkdownPreview } from "../components/MarkdownPreview";
+import { MultiTenantTile, TenantTile } from "../components/TenantTile";
+import { openNovaPanel } from "../shared/nova-panel";
 import Workspaces from "./Workspaces";
 
 const promptGroups = [
@@ -218,41 +241,58 @@ const focusRingClass =
   "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]";
 
 export default function IntuneChat() {
+  const conversations = useConversationsOptional();
+  if (conversations) return <IntuneChatContent />;
+  return (
+    <ConversationWorkspaceProvider>
+      <IntuneChatContent />
+    </ConversationWorkspaceProvider>
+  );
+}
+
+function IntuneChatContent() {
   const navigate = useNavigate();
   const location = useLocation();
   const {
     conversationId: routeConversationId,
     workspaceId: routeWorkspaceId,
   } = useParams<{ conversationId?: string; workspaceId?: string }>();
-  const { state, startRun, refresh, loading } = useAppState();
+  const {
+    state,
+    startRun,
+    refresh,
+    loading,
+    setActiveModel,
+  } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
-  const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
-  /**
-   * The conversation the host reported creating for an in-flight send.
-   *
-   * The sidebar list is reloaded asynchronously and can legitimately not
-   * contain it yet, so the route must not depend on the list alone to
-   * decide whether the open conversation exists.
-   */
-  const [pendingConversation, setPendingConversation] =
-    useState<IntuneChatConversation | null>(null);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(
-    routeConversationId ?? null,
-  );
-  const lastConversationIdRef = useRef<string | null>(routeConversationId ?? null);
-  const [shellLoaded, setShellLoaded] = useState(false);
+  const shellChrome = useShellChromeOptional();
+  const dataBoundaryContext = useDataBoundaryOptional();
+  const updateContext = useUpdateStateOptional();
+  const {
+    conversations,
+    activeConversationId,
+    activeConversation,
+    shellLoaded,
+    conversationSearch,
+    panelMode,
+    workspaceCreateRequest,
+    tenantWorkspaces: workspaces,
+    cacheStatus,
+    setPendingConversation,
+    setCacheStatus,
+    replaceWorkspaces: setAllWorkspaces,
+    openConversation,
+    upsertConversation,
+    reloadConversations: loadShell,
+    requestRename,
+    requestDelete,
+    togglePinned,
+    exportConversation,
+    moveToWorkspace,
+  } = useConversations();
   const [messages, setMessages] = useState<IntuneChatMessage[]>([]);
-  const [cacheStatus, setCacheStatus] = useState<GraphCacheStatus | null>(null);
   const [input, setInput] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
-  const [conversationSearch, setConversationSearch] = useState("");
-  const [workspaceSearch, setWorkspaceSearch] = useState("");
-  const [panelMode, setPanelMode] = useState<"chats" | "workspaces">(
-    routeWorkspaceId || new URLSearchParams(location.search).get("panel") === "workspaces"
-      ? "workspaces"
-      : "chats",
-  );
-  const [workspaceCreateRequest, setWorkspaceCreateRequest] = useState(0);
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [sendState, dispatchSend] = useReducer(chatSendReducer, initialChatSendState);
@@ -266,10 +306,6 @@ export default function IntuneChat() {
     suggestionsByMessageId: {},
     suggestedSlugsByConversationId: {},
   });
-  const [historyOpen, setHistoryOpen] = useState(true);
-  const [historyIsOverlay, setHistoryIsOverlay] = useState(false);
-  const historySearchRef = useRef<HTMLInputElement | null>(null);
-  const [pinnedSectionOpen, setPinnedSectionOpen] = useState(true);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [hostedConsentPrompt, setHostedConsentPrompt] =
     useState<HostedChatConsentPrompt | null>(null);
@@ -296,8 +332,6 @@ export default function IntuneChat() {
   const [splitJob, setSplitJob] = useState<MultiTenantChatJob | null>(null);
   const [splitResult, setSplitResult] =
     useState<ImportMultiTenantResultToWorkspacesResult | null>(null);
-  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
-  const [allWorkspaces, setAllWorkspaces] = useState<WorkspaceSummary[]>([]);
   const [attachedWorkspaceId, setAttachedWorkspaceId] = useState("");
   const [attachedWorkspace, setAttachedWorkspace] = useState<WorkspaceDetail | null>(null);
   const [selectedWorkspaceEvidenceIds, setSelectedWorkspaceEvidenceIds] = useState<string[]>([]);
@@ -308,15 +342,8 @@ export default function IntuneChat() {
   const [selectedBatchAgentSlug, setSelectedBatchAgentSlug] = useState("");
   const [batchNotice, setBatchNotice] = useState<string | null>(null);
   const [groupName, setGroupName] = useState("");
-  const [renameTarget, setRenameTarget] = useState<IntuneChatConversation | null>(null);
-  const [renameTitle, setRenameTitle] = useState("");
-  const [deleteTarget, setDeleteTarget] = useState<IntuneChatConversation | null>(null);
-  const [conversationMenu, setConversationMenu] = useState<{
-    conversation: IntuneChatConversation;
-    x: number;
-    y: number;
-  } | null>(null);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
   const initialQuestionConsumedRef = useRef(false);
@@ -325,48 +352,10 @@ export default function IntuneChat() {
   const copiedClearTimerRef = useRef<number | null>(null);
   const draftConversationRef = useRef<string | null | undefined>(undefined);
   const skipDraftWriteRef = useRef(false);
-  const renameInputRef = useRef<HTMLInputElement | null>(null);
   const [dismissedSuggestionMessageIds, setDismissedSuggestionMessageIds] = useState<string[]>([]);
-
-  const focusPanelToggle = () => {
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLButtonElement>('[aria-label="Show chat panel"]')?.focus();
-    });
-  };
-
-  /**
-   * Put a conversation into the sidebar list immediately.
-   *
-   * Sending the first message creates the conversation in the host and
-   * routes to /chat/<id> before the sidebar list has been reloaded. Without
-   * this the route points at an id the renderer has not seen yet, and the
-   * "Conversation not found" empty state flashes over a send that is in
-   * fact working.
-   */
-  const upsertConversation = (conversation: IntuneChatConversation) => {
-    setConversations((current) =>
-      current.some((entry) => entry.id === conversation.id)
-        ? current.map((entry) =>
-            entry.id === conversation.id ? conversation : entry,
-          )
-        : [conversation, ...current],
-    );
-  };
-
-  const openConversation = (
-    conversationId: string | null,
-    options: { replace?: boolean } = {},
-  ) => {
-    setPanelMode("chats");
-    setActiveConversationId(conversationId);
-    lastConversationIdRef.current = conversationId;
-    const destination = conversationId
-      ? `/chat/${encodeURIComponent(conversationId)}`
-      : "/chat";
-    if (`${location.pathname}${location.search}` !== destination) {
-      navigate(destination, { replace: options.replace });
-    }
-  };
+  const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+  const followLatestRef = useRef(true);
+  const restoreConversationScrollRef = useRef<string | null>(null);
 
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -376,6 +365,33 @@ export default function IntuneChat() {
     provider,
     state.activeModelByProviderId,
   ).model;
+  const providerReady = Boolean(
+    provider && ["connected", "available"].includes(provider.status),
+  );
+  const dataBoundary = dataBoundaryContext?.boundary ?? (
+    !providerReady
+      ? {
+          kind: "none" as const,
+          label: "No model" as const,
+          tooltip: "Choose an LLM provider before sending tenant context.",
+          isVoiceHosted: false as const,
+        }
+      : provider?.isLocal
+        ? {
+            kind: "local" as const,
+            label: `Local · ${provider.name}`,
+            ...(activeModel ? { model: activeModel } : {}),
+            tooltip: "Tenant data stays on this device.",
+            isVoiceHosted: false as const,
+          }
+        : {
+            kind: "hosted" as const,
+            label: `Hosted · ${provider?.name ?? "provider"}`,
+            ...(activeModel ? { model: activeModel } : {}),
+            tooltip: `Tenant context will be sent to ${provider?.name ?? "the selected provider"}.`,
+            isVoiceHosted: false as const,
+          }
+  );
   const workspaceContextSummary = useMemo<WorkspacePromptContextSummary | undefined>(() => {
     if (!attachedWorkspace) return undefined;
     const includesInstructions =
@@ -433,46 +449,10 @@ export default function IntuneChat() {
   }, []);
 
   useEffect(() => {
-    if (!historyIsOverlay || !historyOpen) return;
-    const onHistoryKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      event.preventDefault();
-      setHistoryOpen(false);
-      focusPanelToggle();
-    };
-    window.addEventListener("keydown", onHistoryKeyDown);
-    return () => window.removeEventListener("keydown", onHistoryKeyDown);
-  }, [historyIsOverlay, historyOpen]);
-
-  useEffect(() => {
-    const api = window.openAdminOS;
-    if (!api) {
-      setWorkspaces([]);
-      setAllWorkspaces([]);
-      setAttachedWorkspaceId("");
-      setAttachedWorkspace(null);
-      return;
-    }
-    void api
-      .listWorkspaces()
-      .then((nextWorkspaces) => {
-        setAllWorkspaces(nextWorkspaces);
-        const tenantWorkspaces = state.activeTenantId
-          ? nextWorkspaces.filter(
-              (workspace) => workspace.tenantId === state.activeTenantId,
-            )
-          : [];
-        setWorkspaces(tenantWorkspaces);
-        setAttachedWorkspaceId((current) =>
-          current && tenantWorkspaces.some((workspace) => workspace.id === current)
-            ? current
-            : "",
-        );
-      })
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : String(caught)),
-      );
-  }, [state.activeTenantId]);
+    setAttachedWorkspaceId((current) =>
+      current && workspaces.some((workspace) => workspace.id === current) ? current : "",
+    );
+  }, [workspaces]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -506,106 +486,6 @@ export default function IntuneChat() {
   }, [scopeMode, selectedTenantIds.length, state.activeTenantId]);
 
   useEffect(() => {
-    const narrowWindow = window.matchMedia("(max-width: 1100px)");
-    const updateHistoryLayout = (matches: boolean) => {
-      setHistoryIsOverlay(matches);
-      setHistoryOpen(!matches);
-    };
-    const onBreakpointChange = (event: MediaQueryListEvent) => {
-      updateHistoryLayout(event.matches);
-    };
-
-    updateHistoryLayout(narrowWindow.matches);
-    narrowWindow.addEventListener("change", onBreakpointChange);
-    return () => narrowWindow.removeEventListener("change", onBreakpointChange);
-  }, []);
-
-  useEffect(() => {
-    if (routeConversationId) {
-      setActiveConversationId(routeConversationId);
-      lastConversationIdRef.current = routeConversationId;
-      return;
-    }
-    const showingWorkspaces =
-      Boolean(routeWorkspaceId) ||
-      new URLSearchParams(location.search).get("panel") === "workspaces";
-    if (!showingWorkspaces) {
-      setActiveConversationId(null);
-      lastConversationIdRef.current = null;
-    }
-  }, [location.search, routeConversationId, routeWorkspaceId]);
-
-  useEffect(() => {
-    const nextPanelMode =
-      routeWorkspaceId || new URLSearchParams(location.search).get("panel") === "workspaces"
-        ? "workspaces"
-        : "chats";
-    setPanelMode(nextPanelMode);
-  }, [location.search, routeWorkspaceId]);
-
-  const loadShell = async (
-    preferredActiveConversationId?: string | null,
-    searchOverride = conversationSearch,
-  ) => {
-    const api = window.openAdminOS;
-    if (!api) return;
-    const query = searchOverride.trim();
-    const [nextConversations, nextCache] = await Promise.all([
-      query
-        ? api.searchIntuneChatConversations(query)
-        : api.listIntuneChatConversations(),
-      api.getGraphCacheStatus().catch(() => null),
-    ]);
-    setConversations((current) => {
-      if (!activeConversationId) return nextConversations;
-      // Keep the open conversation in the list when the reload does not
-      // return it. This was written for search (a filtered list hides the
-      // open conversation), but the same staleness happens right after a
-      // conversation is created: the route already points at it while the
-      // list still predates it, and dropping it here renders the
-      // "Conversation not found" state over a send that is working.
-      const activeConversation = current.find(
-        (conversation) => conversation.id === activeConversationId,
-      );
-      return activeConversation &&
-        !nextConversations.some((conversation) => conversation.id === activeConversationId)
-        ? [activeConversation, ...nextConversations]
-        : nextConversations;
-    });
-    setCacheStatus(nextCache);
-    setShellLoaded(true);
-    if (sendInFlightRef.current && preferredActiveConversationId === undefined) {
-      return;
-    }
-    if (preferredActiveConversationId !== undefined) {
-      const nextConversationId =
-        preferredActiveConversationId ?? nextConversations[0]?.id ?? null;
-      openConversation(nextConversationId, { replace: true });
-      return;
-    }
-    // Conversation selection is route-owned. Refreshing or filtering the rail
-    // must never switch the open transcript without updating the URL.
-  };
-
-  useEffect(() => {
-    setShellLoaded(false);
-    void loadShell().catch((caught) =>
-      setError(caught instanceof Error ? caught.message : String(caught)),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state.activeTenantId]);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadShell(undefined, conversationSearch).catch((caught) =>
-        setError(caught instanceof Error ? caught.message : String(caught)),
-      );
-    }, 180);
-    return () => window.clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [conversationSearch]);
-
-  useEffect(() => {
     const api = window.openAdminOS;
     if (sending || sendInFlightRef.current) {
       return;
@@ -617,10 +497,24 @@ export default function IntuneChat() {
     const activeConversation = conversations.find(
       (conversation) => conversation.id === activeConversationId,
     );
+    const shouldRestoreScroll = restoreConversationScrollRef.current !== activeConversationId;
+    if (shouldRestoreScroll) {
+      restoreConversationScrollRef.current = activeConversationId;
+      followLatestRef.current = false;
+    }
     void api
       .getIntuneChatMessages(activeConversationId)
       .then(async (nextMessages) => {
         setMessages(nextMessages);
+        if (shouldRestoreScroll) {
+          window.requestAnimationFrame(() => {
+            window.requestAnimationFrame(() => {
+              setShowScrollToLatest(
+                scrollLatestUserNearTop(messagesScrollRef.current, nextMessages),
+              );
+            });
+          });
+        }
         if (activeConversation?.multiTenantJobId) {
           const job = await api.getMultiTenantChatJob(activeConversation.multiTenantJobId);
           if (job?.conversationId) {
@@ -653,8 +547,8 @@ export default function IntuneChat() {
 
   useEffect(() => {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const scrollRoot = messagesEndRef.current?.closest<HTMLElement>(".overflow-y-auto");
-    if (!scrollRoot) return;
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot || !followLatestRef.current) return;
     if (typeof scrollRoot.scrollTo === "function") {
       scrollRoot.scrollTo({
         top: scrollRoot.scrollHeight,
@@ -663,7 +557,8 @@ export default function IntuneChat() {
     } else {
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
     }
-  }, [messages.length, sending, chatProgress?.message]);
+    setShowScrollToLatest(false);
+  }, [messages, sending, chatProgress?.message]);
 
   useEffect(
     () => () => {
@@ -676,22 +571,6 @@ export default function IntuneChat() {
     },
     [],
   );
-
-  useEffect(() => {
-    if (!conversationMenu) return;
-    const closeMenu = () => setConversationMenu(null);
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") closeMenu();
-    };
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", closeMenu, true);
-    return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", closeMenu, true);
-    };
-  }, [conversationMenu]);
 
   const clearProgressTimer = () => {
     if (progressClearTimerRef.current !== null) {
@@ -730,6 +609,9 @@ export default function IntuneChat() {
     setPreflightPrompt("");
     setActiveMultiTenantJob(null);
     setBatchNotice(null);
+    restoreConversationScrollRef.current = null;
+    followLatestRef.current = true;
+    setShowScrollToLatest(false);
   };
 
   useEffect(() => {
@@ -783,6 +665,29 @@ export default function IntuneChat() {
     ) {
       writeChatDraft(targetConversationId, content);
       setInput(content);
+      return;
+    }
+    const requestedAgent = matchComposerAgent(content, state.installedAgents);
+    if (requestedAgent) {
+      clearChatDraft(targetConversationId);
+      setInput("");
+      if (requestedAgent.mode === "write") {
+        navigate(`/agents/${encodeURIComponent(requestedAgent.slug)}/confirm`);
+        return;
+      }
+      setRunningAgentSlug(requestedAgent.slug);
+      setError(null);
+      setNotice(null);
+      try {
+        const run = await startRun(requestedAgent.slug);
+        await refresh();
+        navigate(`/runs/${run.id}`);
+      } catch (caught) {
+        setInput(content);
+        setError(caught instanceof Error ? caught.message : String(caught));
+      } finally {
+        setRunningAgentSlug(null);
+      }
       return;
     }
     if (shouldUseMultiTenantFlow(content, scopeMode)) {
@@ -1008,6 +913,8 @@ export default function IntuneChat() {
     };
 
     sendInFlightRef.current = true;
+    followLatestRef.current = true;
+    setShowScrollToLatest(false);
     dispatchSend({ type: "send" });
     setSending(true);
     setFailedRequest(null);
@@ -1388,52 +1295,11 @@ export default function IntuneChat() {
     }
   };
 
-  const handleRenameConversation = async () => {
-    const api = window.openAdminOS;
-    const target = renameTarget;
-    const nextTitle = renameTitle.trim();
-    if (!api || !target || !nextTitle) return;
-    setError(null);
-    try {
-      const renamed = await api.renameIntuneChatConversation(target.id, nextTitle);
-      setRenameTarget(null);
-      setRenameTitle("");
-      await loadShell(renamed.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
   const handleTogglePinnedConversation = async (conversation: IntuneChatConversation) => {
-    const api = window.openAdminOS;
-    if (!api || sending) return;
+    if (sending) return;
     setError(null);
     try {
-      const updated = await api.setIntuneChatConversationPinned(
-        conversation.id,
-        !conversation.pinnedAt,
-      );
-      await loadShell(updated.id);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
-    }
-  };
-
-  const handleDeleteConversation = async () => {
-    const api = window.openAdminOS;
-    const target = deleteTarget;
-    if (!api || !target) return;
-    setError(null);
-    try {
-      await api.deleteIntuneChatConversation(target.id);
-      setDeleteTarget(null);
-      if (target.id === activeConversationId) {
-        setMessages([]);
-        openConversation(null, { replace: true });
-        await loadShell();
-      } else {
-        await loadShell(activeConversationId);
-      }
+      await togglePinned(conversation);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -1453,6 +1319,11 @@ export default function IntuneChat() {
         }),
       )
     ) {
+      return;
+    }
+    const matchedAgent = state.installedAgents.find((agent) => agent.slug === slug);
+    if (matchedAgent?.mode === "write") {
+      navigate(`/agents/${encodeURIComponent(slug)}/confirm`);
       return;
     }
     setRunningAgentSlug(slug);
@@ -1501,23 +1372,12 @@ export default function IntuneChat() {
   };
 
   const handleExportConversation = async () => {
-    const api = window.openAdminOS;
-    if (!api || !activeConversation || messages.length === 0) return;
+    if (!activeConversation) return;
     setError(null);
     setNotice(null);
     try {
-      const result = await api.saveTextFile({
-        suggestedName: `${safeFileName(activeConversation.title)}.md`,
-        content: buildConversationExportMarkdown({
-          conversation: activeConversation,
-          messages,
-          tenantName: activeTenant?.displayName,
-          providerName: provider?.name ?? state.activeProviderId,
-          cacheSummary,
-        }),
-        filters: [{ name: "Markdown", extensions: ["md"] }],
-      });
-      if (!result.canceled) {
+      const result = await exportConversation(activeConversation);
+      if (result && !result.canceled) {
         setNotice(
           result.filePath
             ? `Exported conversation to ${result.filePath}.`
@@ -1530,24 +1390,11 @@ export default function IntuneChat() {
   };
 
   const handleCreateWorkspaceFromConversation = async () => {
-    const api = window.openAdminOS;
-    if (!api || !activeConversation || activeConversation.scopeKind === "multi-tenant") return;
+    if (!activeConversation || activeConversation.scopeKind === "multi-tenant") return;
     setError(null);
     setNotice(null);
     try {
-      const workspace = await api.createWorkspace({
-        title: activeConversation.title,
-        ...(activeConversation.tenantId ? { tenantId: activeConversation.tenantId } : {}),
-        conversationId: activeConversation.id,
-      });
-      setNotice(`Created workspace ${workspace.title} and linked this conversation.`);
-      if (activeTenant) {
-        const nextWorkspaces = await api.listWorkspaces();
-        setAllWorkspaces(nextWorkspaces);
-        setWorkspaces(
-          nextWorkspaces.filter((entry) => entry.tenantId === activeTenant.id),
-        );
-      }
+      await moveToWorkspace(activeConversation);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
@@ -1613,823 +1460,192 @@ export default function IntuneChat() {
       setPinWorkspaceId("");
       const nextWorkspaces = await api.listWorkspaces();
       setAllWorkspaces(nextWorkspaces);
-      setWorkspaces(
-        nextWorkspaces.filter((entry) => entry.tenantId === activeTenant.id),
-      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
-  const cacheSummary = useMemo(() => {
-    if (!cacheStatus) return "No cache";
-    const refreshed = cacheStatus.resources.filter((resource) => resource.refreshedAt);
-    if (refreshed.length === 0) return "No cache";
-    const newest = refreshed
-      .map((resource) => resource.refreshedAt)
-      .filter((value): value is string => Boolean(value))
-      .sort()
-      .at(-1);
-    return newest ? `Updated ${formatDateTime(newest)}` : "Cache ready";
-  }, [cacheStatus]);
-
-  const activeConversation =
-    conversations.find(
-      (conversation) => conversation.id === activeConversationId,
-    ) ??
-    (pendingConversation && pendingConversation.id === activeConversationId
-      ? pendingConversation
-      : undefined);
   const workspaceView = panelMode === "workspaces";
-  const filteredPanelWorkspaces = useMemo(() => {
-    const needle = workspaceSearch.trim().toLowerCase();
-    if (!needle) return allWorkspaces;
-    return allWorkspaces.filter((workspace) =>
-      `${workspace.title} ${workspace.tenantName ?? ""}`.toLowerCase().includes(needle),
-    );
-  }, [allWorkspaces, workspaceSearch]);
-  const scopedTenantNames = useMemo(() => {
-    if (scopeMode === "all") return state.tenants.map((tenant) => tenant.displayName);
-    if (scopeMode === "selected") {
-      return state.tenants
-        .filter((tenant) => selectedTenantIds.includes(tenant.id))
-        .map((tenant) => tenant.displayName);
-    }
-    return activeTenant ? [activeTenant.displayName] : [];
-  }, [activeTenant, scopeMode, selectedTenantIds, state.tenants]);
   const scopeLabel =
     scopeMode === "all"
       ? "All connected tenants"
       : scopeMode === "selected"
         ? `${selectedTenantIds.length} selected tenant${selectedTenantIds.length === 1 ? "" : "s"}`
         : activeTenant?.displayName ?? "No active tenant";
-  const composerTrustCopy = deriveTrustCopy({
-    provider,
-    ...(activeModel ? { model: activeModel } : {}),
-    scope: { tenantNames: scopedTenantNames },
-    ...(workspaceContextSummary
-      ? {
-          attachments: {
-            workspaceTitle: workspaceContextSummary.workspaceTitle,
-            evidenceCount: workspaceContextSummary.evidenceCount,
-            noteCount: workspaceContextSummary.noteCount,
-            includesInstructions: workspaceContextSummary.includesInstructions,
-          },
-        }
-      : {}),
-  });
+  const latestCacheRefresh = newestTimestamp(
+    cacheStatus?.resources.flatMap((resource) => resource.refreshedAt ?? []) ?? [],
+  );
+  const homeFreshness = latestCacheRefresh
+    ? `Graph data from ${formatRelativeAge(latestCacheRefresh)}`
+    : "Graph data has not been cached yet";
+  const awaitingConfirmationRuns = state.runs.filter(
+    (run) =>
+      run.status === "awaiting-confirmation" &&
+      run.tenantId === state.activeTenantId,
+  );
+  const openFindings = (state.office?.findings ?? []).filter(
+    (finding) =>
+      finding.tenantId === state.activeTenantId && finding.state === "open",
+  );
+  const updateNeedsAttention =
+    updateContext?.state.status === "ready" || updateContext?.state.status === "error";
+  const needsYouCount =
+    awaitingConfirmationRuns.length + openFindings.length + (updateNeedsAttention ? 1 : 0);
+  const homeSuggestions = promptGroups.flatMap((group) => group.prompts).slice(0, 3);
   const unknownConversation = Boolean(
     shellLoaded &&
       routeConversationId &&
       conversationSearch.trim() === "" &&
       !activeConversation,
   );
-  const pinnedConversations = conversations.filter(
-    (conversation) => conversation.pinnedAt,
-  );
-  const recentConversations = conversations.filter(
-    (conversation) => !conversation.pinnedAt,
-  );
-  const activeConversationInRail = conversations.some(
-    (conversation) => conversation.id === activeConversationId,
-  );
-  const draftConversationActive =
-    activeConversationId === null ||
-    (sending && optimisticDraft !== null && !activeConversationInRail);
-
   useEffect(() => {
     const onRenameShortcut = (event: KeyboardEvent) => {
       if (event.key !== "F2" || !activeConversation || workspaceView || sending) return;
       event.preventDefault();
-      setRenameTarget(activeConversation);
-      setRenameTitle(activeConversation.title);
-      window.requestAnimationFrame(() => renameInputRef.current?.select());
+      requestRename(activeConversation);
     };
     window.addEventListener("keydown", onRenameShortcut);
     return () => window.removeEventListener("keydown", onRenameShortcut);
-  }, [activeConversation, sending, workspaceView]);
+  }, [activeConversation, requestRename, sending, workspaceView]);
   const displayedMessages = mergeOptimisticMessages(messages, optimisticDraft);
+  const latestAssistantMessageId = [...displayedMessages]
+    .reverse()
+    .find((message) => message.role === "assistant")?.id;
   const progressMessageVisible =
     progressAssistantMessageId !== null &&
     displayedMessages.some((message) => message.id === progressAssistantMessageId);
-  const openConversationContextMenu = (
-    event: MouseEvent<HTMLButtonElement>,
-    conversation: IntuneChatConversation,
-  ) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setConversationMenu({
-      conversation,
-      x: Math.max(8, Math.min(event.clientX, window.innerWidth - 228)),
-      y: Math.max(8, Math.min(event.clientY, window.innerHeight - 100)),
-    });
+  const fillComposer = (value: string) => {
+    setInput(value);
+    writeChatDraft(activeConversationId, value);
+    window.requestAnimationFrame(() => composerRef.current?.focus());
   };
-  const renderConversationRow = (conversation: IntuneChatConversation) => (
-    <button
-      key={conversation.id}
-      type="button"
-      aria-label={`Open conversation ${conversation.title}. Updated ${formatDateTime(conversation.updatedAt)}`}
-      title={conversation.title}
-      onClick={() => {
-        openConversation(conversation.id);
-        if (historyIsOverlay) {
-          setHistoryOpen(false);
-          focusPanelToggle();
-        }
-      }}
-      onContextMenu={(event) => openConversationContextMenu(event, conversation)}
-      className={`mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors ${focusRingClass} ${
-        activeConversationId === conversation.id
-          ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-          : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-      }`}
-    >
-      <div className="truncate text-base font-medium">
-        {conversation.pinnedAt && (
-          <IconStar
-            size={10}
-            className="mr-1 inline align-[-1px] text-[var(--color-text-muted)]"
-          />
-        )}
-        {conversation.title}
-      </div>
-      <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-        {formatDateTime(conversation.updatedAt)}
-      </div>
-    </button>
+
+  const scrollToLatest = () => {
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot) return;
+    followLatestRef.current = true;
+    setShowScrollToLatest(false);
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth";
+    if (typeof scrollRoot.scrollTo === "function") {
+      scrollRoot.scrollTo({ top: scrollRoot.scrollHeight, behavior });
+    } else {
+      scrollRoot.scrollTop = scrollRoot.scrollHeight;
+    }
+  };
+
+  const handleConversationScroll = () => {
+    const scrollRoot = messagesScrollRef.current;
+    if (!scrollRoot) return;
+    const atBottom =
+      scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight < 56;
+    followLatestRef.current = atBottom;
+    setShowScrollToLatest(!atBottom);
+  };
+
+  const handleModelSelect = async (providerId: ProviderId, model: string) => {
+    setError(null);
+    try {
+      await setActiveModel(providerId, model);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    }
+  };
+
+  const composerScopeProps = {
+    label: scopeLabel,
+    scopeMode,
+    onScopeModeChange: setScopeMode,
+    tenants: state.tenants,
+    activeTenantId: state.activeTenantId,
+    selectedTenantIds,
+    onToggleTenant: toggleTenantSelection,
+    tenantGroups,
+    selectedGroupIds,
+    onToggleGroup: toggleGroupSelection,
+    workspaces,
+    workspace: attachedWorkspace,
+    attachedWorkspaceId,
+    onWorkspaceChange: setAttachedWorkspaceId,
+    selectedEvidenceIds: selectedWorkspaceEvidenceIds,
+    onToggleEvidence: (id: string) =>
+      setSelectedWorkspaceEvidenceIds((current) =>
+        current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
+      ),
+    selectedNoteIds: selectedWorkspaceNoteIds,
+    onToggleNote: (id: string) =>
+      setSelectedWorkspaceNoteIds((current) =>
+        current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
+      ),
+    includeInstructions: includeWorkspaceInstructions,
+    onIncludeInstructionsChange: setIncludeWorkspaceInstructions,
+    disabled: unknownConversation || sending || runningMultiTenant,
+  };
+
+  const renderComposer = (placement: "home" | "docked") => (
+    <ChatComposer
+      placement={placement}
+      textareaRef={composerRef}
+      value={input}
+      onValueChange={setInput}
+      onSend={() => void handleSend()}
+      onStop={() => void handleStopGeneration()}
+      sending={sending}
+      stopping={stopping}
+      disabled={unknownConversation}
+      activeTenant={activeTenant}
+      scopeProps={composerScopeProps}
+      installedAgents={state.installedAgents}
+      savedQueries={savedQueries}
+      onSavedQuery={applySavedQuery}
+      providers={state.providers}
+      activeProviderId={state.activeProviderId}
+      activeModel={activeModel}
+      onModelSelect={(providerId, model) => void handleModelSelect(providerId, model)}
+      onOpenProviders={() => navigate("/settings/providers")}
+      dataBoundary={dataBoundary}
+    />
   );
 
-  return (
-    <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
-      {historyIsOverlay && historyOpen && (
-        <button
-          type="button"
-          aria-label="Close chat history"
-          onClick={() => {
-            setHistoryOpen(false);
-            focusPanelToggle();
-          }}
-          className="absolute inset-0 z-20 border-0 bg-black/55"
-        />
-      )}
-      <aside
-        aria-label="Chat navigation"
-        aria-hidden={!historyOpen}
-        inert={!historyOpen}
-        className={`flex min-h-0 flex-col bg-[var(--color-sidebar-solid)] transition-[transform,width] duration-150 ${
-          historyIsOverlay
-            ? `absolute inset-y-0 left-0 z-30 w-[260px] border-r border-[var(--color-border-soft)] ${historyOpen ? "translate-x-0 shadow-[18px_0_48px_rgba(0,0,0,0.25)]" : "-translate-x-full"}`
-            : historyOpen
-              ? "relative w-[260px] shrink-0 border-r border-[var(--color-border-soft)]"
-              : "relative w-0 shrink-0 overflow-hidden border-r-0"
-        }`}
-      >
-        <div className="border-b border-[var(--color-border-soft)] px-3 pb-3 pt-4">
-          <div className="flex items-center justify-between gap-3">
-            <SegmentedControl
-              className="min-w-0 flex-1"
-              fullWidth
-              ariaLabel="Chat panel"
-              value={panelMode}
-              options={[
-                { id: "chats", label: "Chats" },
-                { id: "workspaces", label: "Workspaces" },
-              ]}
-              onValueChange={(value) => {
-                const nextMode = value === "workspaces" ? "workspaces" : "chats";
-                setPanelMode(nextMode);
-                navigate(
-                  nextMode === "workspaces"
-                    ? "/chat?panel=workspaces"
-                    : (activeConversationId ?? lastConversationIdRef.current)
-                      ? `/chat/${encodeURIComponent((activeConversationId ?? lastConversationIdRef.current)!)}`
-                      : "/chat",
-                );
-              }}
-            />
-            <div className="flex shrink-0 items-center gap-1">
-              <IconButton
-                size="sm"
-                label="Collapse chat panel"
-                tooltip="Collapse panel"
-                icon={<IconArrowLeft size={13} />}
-                onClick={() => {
-                  setHistoryOpen(false);
-                  focusPanelToggle();
-                }}
-              />
-              <IconButton
-                size="sm"
-                label={panelMode === "chats" ? "New chat" : "New workspace"}
-                tooltip={panelMode === "chats" ? "New chat (Mod+N)" : "New workspace"}
-                icon={<IconPlus size={13} />}
-                disabled={sending}
-                onClick={() => {
-                  if (panelMode === "chats") {
-                    startNewConversation();
-                  } else {
-                    setWorkspaceCreateRequest((value) => value + 1);
-                  }
-                  if (historyIsOverlay) setHistoryOpen(false);
-                }}
-              />
-            </div>
-          </div>
-        </div>
+  const homeOpen =
+    !workspaceView &&
+    activeConversationId === null &&
+    !unknownConversation &&
+    !multiTenantPreflight &&
+    displayedMessages.length === 0 &&
+    !chatProgress;
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          <div className="sticky top-0 z-10 bg-[var(--color-sidebar-solid)] pb-2">
-            <div className="relative">
-              <IconSearch
-                size={13}
-                aria-hidden="true"
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-              />
-              <label htmlFor="chat-panel-search" className="sr-only">
-                {panelMode === "chats" ? "Search conversations" : "Search workspaces"}
-              </label>
-              <input
-                id="chat-panel-search"
-                ref={historySearchRef}
-                name="chat-panel-search"
-                type="search"
-                value={panelMode === "chats" ? conversationSearch : workspaceSearch}
-                onChange={(event) => {
-                  if (panelMode === "chats") setConversationSearch(event.target.value);
-                  else setWorkspaceSearch(event.target.value);
-                }}
-                placeholder={panelMode === "chats" ? "Search conversations" : "Search workspaces"}
-                autoComplete="off"
-                className="h-8 w-full rounded-md bg-[var(--color-bg-raised)] pl-8 pr-2 text-sm text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] focus:ring-[var(--color-accent)]"
-              />
-            </div>
-          </div>
-          {panelMode === "workspaces" ? (
-            filteredPanelWorkspaces.length === 0 ? (
-              <div className="rounded-lg px-3 py-4 text-sm leading-5 text-[var(--color-text-muted)]">
-                {workspaceSearch.trim() ? "No matching workspaces." : "No workspaces yet."}
-              </div>
-            ) : (
-              filteredPanelWorkspaces.map((workspace) => (
-                <button
-                  key={workspace.id}
-                  type="button"
-                  title={workspace.title}
-                  onClick={() => {
-                    navigate(`/chat/workspaces/${encodeURIComponent(workspace.id)}`);
-                    if (historyIsOverlay) setHistoryOpen(false);
-                  }}
-                  className={`mb-1 w-full rounded-lg px-3 py-2.5 text-left transition-colors ${focusRingClass} ${
-                    routeWorkspaceId === workspace.id
-                      ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                      : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                  }`}
-                >
-                  <div className="flex items-center gap-2">
-                    <IconHardDrive size={13} className="text-[var(--color-accent)]" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-medium">
-                      {workspace.title}
-                    </span>
-                  </div>
-                  <div className="mt-1 truncate text-xs text-[var(--color-text-muted)]">
-                    {workspace.tenantName ?? workspace.tenantId}
-                  </div>
-                </button>
-              ))
-            )
-          ) : (
-            <>
-              {draftConversationActive && (
-                <button
-                  type="button"
-                  disabled={sending}
-                  onClick={() => {
-                    startNewConversation();
-                    if (historyIsOverlay) setHistoryOpen(false);
-                  }}
-                  className="mb-1 w-full rounded-lg bg-[var(--color-surface-hover)] px-3 py-2.5 text-left text-[var(--color-text)] transition-colors disabled:cursor-not-allowed"
-                >
-                  <div className="truncate text-sm font-medium">New conversation</div>
-                  <div className="mt-1 text-xs text-[var(--color-text-muted)]">
-                    {sending ? "Thinking" : input.trim() ? "Draft" : "Ready"}
-                  </div>
-                </button>
-              )}
-              {conversations.length === 0 && (
-                <div className="rounded-lg px-3 py-4 text-sm leading-5 text-[var(--color-text-muted)]">
-                  {conversationSearch.trim()
-                    ? "No matching conversations."
-                    : "Chat history will appear here."}
-                </div>
-              )}
-              {pinnedConversations.length > 0 && (
-                <div className="mb-2">
-                  <button
-                    type="button"
-                    onClick={() => setPinnedSectionOpen((open) => !open)}
-                    className="mb-1 flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-xs font-medium text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
-                    aria-expanded={pinnedSectionOpen}
-                  >
-                    <span className="inline-flex items-center gap-1.5">
-                      <IconStar size={10} className="text-[var(--color-text-muted)]" />
-                      Pinned
-                      <span className="text-xs tabular-nums opacity-70">
-                        {pinnedConversations.length}
-                      </span>
-                    </span>
-                    {pinnedSectionOpen ? (
-                      <IconChevronDown size={11} />
-                    ) : (
-                      <IconChevronRight size={11} />
-                    )}
-                  </button>
-                  {pinnedSectionOpen && pinnedConversations.map(renderConversationRow)}
-                </div>
-              )}
-              {recentConversations.length > 0 && (
-                <div>
-                  {pinnedConversations.length > 0 && (
-                    <div className="mb-1 px-2 py-1 text-xs font-medium text-[var(--color-text-muted)]">
-                      Recent
-                    </div>
-                  )}
-                  {recentConversations.map(renderConversationRow)}
-                </div>
-              )}
-            </>
-          )}
-        </div>
-      </aside>
+  const calmTopBar = shellChrome ? (
+    <>
+      <TopBarTitle>
+        <span className="block max-w-full truncate text-sm font-medium text-[var(--color-text-soft)]">
+          {workspaceView
+            ? "Workspaces"
+            : unknownConversation
+              ? "Conversation not found"
+              : activeConversation?.title ?? ""}
+        </span>
+      </TopBarTitle>
+      <TopBarActions>
+        {activeConversation && !workspaceView ? (
+          <ConversationActionsMenu
+            conversation={activeConversation}
+            sending={sending}
+            messagesAvailable={messages.length > 0}
+            onRename={() => requestRename(activeConversation)}
+            onTogglePin={() => void handleTogglePinnedConversation(activeConversation)}
+            onExport={() => void handleExportConversation()}
+            onMove={() => void handleCreateWorkspaceFromConversation()}
+            onDelete={() => requestDelete(activeConversation)}
+          />
+        ) : null}
+      </TopBarActions>
+    </>
+  ) : null;
 
-      {workspaceView ? (
-        <Workspaces
-          embedded
-          selectedWorkspaceId={routeWorkspaceId ?? null}
-          createRequest={workspaceCreateRequest}
-          leadingAction={
-            !historyOpen ? (
-              <IconButton
-                label="Show chat panel"
-                tooltip="Show chat panel"
-                icon={<IconChevronRight size={13} />}
-                onClick={() => {
-                  setHistoryOpen(true);
-                  window.requestAnimationFrame(() => historySearchRef.current?.focus());
-                }}
-              />
-            ) : undefined
-          }
-          onWorkspaceSelected={(workspaceId) =>
-            navigate(
-              workspaceId
-                ? `/chat/workspaces/${encodeURIComponent(workspaceId)}`
-                : "/chat?panel=workspaces",
-            )
-          }
-          onWorkspacesChange={(nextWorkspaces) => {
-            setAllWorkspaces(nextWorkspaces);
-            setWorkspaces(
-              activeTenant
-                ? nextWorkspaces.filter(
-                    (workspace) => workspace.tenantId === activeTenant.id,
-                  )
-                : [],
-            );
-          }}
-        />
-      ) : (
-      <section className="flex min-w-0 flex-1 flex-col">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] px-6">
-          <div className="flex min-w-0 items-center gap-3">
-            {!historyOpen && (
-              <IconButton
-                  label="Show chat panel"
-                  tooltip="Show chat panel"
-                  icon={<IconChevronRight size={13} />}
-                  onClick={() => {
-                    setHistoryOpen(true);
-                    window.requestAnimationFrame(() => historySearchRef.current?.focus());
-                  }}
-              />
-            )}
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-              <IconChat size={16} />
-            </div>
-            <div
-              className="min-w-0"
-              title={activeConversation ? `Updated ${formatDateTime(activeConversation.updatedAt)}` : undefined}
-            >
-              {renameTarget && renameTarget.id === activeConversation?.id ? (
-                <input
-                  ref={renameInputRef}
-                  name="conversation-title"
-                  value={renameTitle}
-                  autoFocus
-                  autoComplete="off"
-                  aria-label="Conversation title"
-                  onChange={(event) => setRenameTitle(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") {
-                      event.preventDefault();
-                      void handleRenameConversation();
-                    } else if (event.key === "Escape") {
-                      setRenameTarget(null);
-                      setRenameTitle("");
-                    }
-                  }}
-                  onBlur={() => {
-                    setRenameTarget(null);
-                    setRenameTitle("");
-                  }}
-                  className="h-8 min-w-0 max-w-96 rounded-md bg-[var(--color-bg-raised)] px-2 text-base font-medium text-[var(--color-text)] outline-none ring-1 ring-[var(--color-accent)]"
-                />
-              ) : (
-              <button
-                type="button"
-                disabled={!activeConversation || sending}
-                onClick={() => {
-                  if (!activeConversation) return;
-                  setRenameTarget(activeConversation);
-                  setRenameTitle(activeConversation.title);
-                  window.requestAnimationFrame(() => renameInputRef.current?.select());
-                }}
-                className={`block max-w-full truncate text-left text-base font-medium text-[var(--color-text)] disabled:cursor-default ${focusRingClass}`}
-              >
-                {activeConversation?.pinnedAt && (
-                  <IconStar
-                    size={11}
-                    className="mr-1.5 inline align-[-1px] text-[var(--color-text-muted)]"
-                  />
-                )}
-                {unknownConversation
-                  ? "Conversation not found"
-                  : activeConversation?.title ?? "New conversation"}
-              </button>
-              )}
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {activeConversation && (
-              <Menu
-                ariaLabel="Conversation actions"
-                trigger={
-                  <IconButton
-                    label="Conversation actions"
-                    tooltip="Conversation actions"
-                    icon={<IconChevronDown size={14} />}
-                  />
-                }
-                items={[
-                  {
-                    id: "pin",
-                    label: activeConversation.pinnedAt ? "Unpin" : "Pin",
-                    icon: <IconStar size={12} />,
-                    disabled: sending,
-                    onSelect: () => void handleTogglePinnedConversation(activeConversation),
-                  },
-                  {
-                    id: "export",
-                    label: "Export",
-                    icon: <IconDownload size={12} />,
-                    disabled: sending || messages.length === 0,
-                    onSelect: () => void handleExportConversation(),
-                  },
-                  {
-                    id: "workspace",
-                    label: "Move to workspace",
-                    icon: <IconHardDrive size={12} />,
-                    disabled: sending || activeConversation.scopeKind === "multi-tenant",
-                    onSelect: () => void handleCreateWorkspaceFromConversation(),
-                  },
-                  { type: "separator", id: "delete-separator" },
-                  {
-                    id: "delete",
-                    label: "Delete",
-                    danger: true,
-                    disabled: sending,
-                    onSelect: () => setDeleteTarget(activeConversation),
-                  },
-                ]}
-              />
-            )}
-          </div>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex min-h-full w-full max-w-[860px] flex-col px-6 py-8">
-            {unknownConversation ? (
-              <div className="flex flex-1 items-center justify-center py-16">
-                <div
-                  role="status"
-                  className="w-full max-w-[520px] rounded-xl bg-[var(--color-bg-raised)] p-6 text-center ring-1 ring-[var(--color-border)]"
-                >
-                  <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--color-accent-soft)] text-[var(--color-accent)]">
-                    <IconChat size={18} />
-                  </div>
-                  <h1 className="text-md font-semibold text-[var(--color-text)]">
-                    Conversation not found
-                  </h1>
-                  <p className="mx-auto mt-2 max-w-[420px] text-base leading-5 text-[var(--color-text-muted)]">
-                    It may have been deleted, or this link belongs to another local profile.
-                    No tenant data was changed.
-                  </p>
-                  <Button
-                    className="mt-5"
-                    variant="primary"
-                    leadingIcon={<IconPlus size={12} />}
-                    onClick={() => startNewConversation(true)}
-                  >
-                    Start a new conversation
-                  </Button>
-                </div>
-              </div>
-            ) : multiTenantPreflight ? (
-              <div className="flex flex-1 flex-col justify-center gap-6 py-8">
-                <ScopeReviewCard
-                  preflight={multiTenantPreflight}
-                  progressJob={activeMultiTenantJob}
-                  groupName={groupName}
-                  onGroupNameChange={setGroupName}
-                  onSaveGroup={() => void saveCurrentTenantGroup()}
-                  onCancel={() => {
-                    setMultiTenantPreflight(null);
-                    setPreflightPrompt("");
-                    setActiveMultiTenantJob(null);
-                    setBatchNotice(null);
-                  }}
-                  onRun={() => void runMultiTenantQuery()}
-                  running={runningMultiTenant}
-                  installedAgents={state.installedAgents}
-                  selectedBatchAgentSlug={selectedBatchAgentSlug}
-                  onSelectedBatchAgentSlugChange={setSelectedBatchAgentSlug}
-                  onQueueBatch={() => void queueMultiTenantAgentBatch()}
-                  batchNotice={batchNotice}
-                />
-              </div>
-            ) : displayedMessages.length === 0 ? (
-              chatProgress ? (
-                <div className="flex flex-1 flex-col justify-center gap-6 py-16">
-                  <ChatProgressCard progress={chatProgress} />
-                </div>
-              ) : (
-                <div className="flex-1" />
-              )
-            ) : (
-              <div className="flex flex-1 flex-col gap-6">
-                {displayedMessages.map((message) => {
-                  const job = multiTenantJobsByConversationId[message.conversationId];
-                  const relatedAgentSuggestion =
-                    message.role === "assistant" &&
-                    message.status === "completed"
-                      ? relatedAgentState.suggestionsByMessageId[message.id]
-                      : undefined;
-                  const suggestedAgents = mergeSuggestedAgents(
-                    message.agentSuggestions,
-                    relatedAgentSuggestion,
-                  );
-                  return (
-                    <div key={message.id} className="space-y-4">
-                      <ChatMessageBubble
-                        message={message}
-                        progress={message.id === progressAssistantMessageId ? chatProgress : null}
-                        copied={message.id === copiedMessageId}
-                        regenerateDisabled={
-                          sending ||
-                          !previousUserPromptForMessage(displayedMessages, message)
-                        }
-                        onCopy={() => void handleCopyMessage(message)}
-                        onEditPrompt={() => handleEditPrompt(message)}
-                        onRegenerate={() => void handleRegenerateResponse(message)}
-                        pinDisabled={
-                          !activeTenant ||
-                          activeConversation?.scopeKind === "multi-tenant" ||
-                          workspaces.length === 0 ||
-                          message.status !== "completed"
-                        }
-                        onPin={() => {
-                          setPinTarget(message);
-                          setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
-                        }}
-                      />
-                      {message.role === "assistant" &&
-                        suggestedAgents.length > 0 &&
-                        !dismissedSuggestionMessageIds.includes(message.id) && (
-                        <SuggestedAgentsBlock
-                          suggestions={suggestedAgents}
-                          runningAgentSlug={runningAgentSlug}
-                          onOpen={(slug) => navigate(`/agents/${slug}`)}
-                          onRun={(slug) =>
-                            void handleRunAgent(slug, message.conversationId, message.id)
-                          }
-                          onDismiss={() => {
-                            dismissRelatedAgentSuggestion(message.id);
-                            setDismissedSuggestionMessageIds((current) => [
-                              ...new Set([...current, message.id]),
-                            ]);
-                          }}
-                        />
-                      )}
-                      {message.role === "assistant" && job && (
-                        <MultiTenantResultArtifact
-                          job={job}
-                          filters={multiTenantFilters}
-                          onFiltersChange={setMultiTenantFilters}
-                          expandedTenantIds={expandedTenantIds}
-                          onToggleTenant={(tenantId) =>
-                            setExpandedTenantIds((current) =>
-                              current.includes(tenantId)
-                                ? current.filter((id) => id !== tenantId)
-                                : [...current, tenantId],
-                            )
-                          }
-                          onExport={(format) => void exportMultiTenantJob(job, format)}
-                          onSplit={() => {
-                            setSplitJob(job);
-                            setSplitResult(null);
-                          }}
-                        />
-                      )}
-                    </div>
-                  );
-                })}
-                {sending && chatProgress && !progressMessageVisible && (
-                  <ChatProgressCard progress={chatProgress} />
-                )}
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-        </div>
-
-        <div className="shrink-0 border-t border-[var(--color-border-soft)] bg-[var(--color-bg)] px-6 py-4">
-          <div className="mx-auto w-full max-w-[860px]">
-            {error && (
-              <div
-                role="alert"
-                className="mb-3 flex items-start justify-between gap-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
-              >
-                <div className="min-w-0">
-                  <div className="font-medium">
-                    {failedRequest ? chatErrorCopy(error).what : "The requested action could not be completed."}
-                  </div>
-                  <div className="mt-0.5 break-words text-[var(--color-text-soft)]">
-                    {chatErrorCopy(error).why ??
-                      "Retry the action. If it still fails, review the provider and tenant connection in Settings."}
-                  </div>
-                </div>
-                {failedRequest && (
-                  <Button size="sm" variant="secondary" onClick={() => void handleRetryFailedSend()}>
-                    {chatErrorCopy(error).action.label}
-                  </Button>
-                )}
-              </div>
-            )}
-            {notice && (
-              <div className="mb-3 rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
-                {notice}
-              </div>
-            )}
-            {displayedMessages.length === 0 && !chatProgress && !multiTenantPreflight && !unknownConversation && (
-              <EmptyChat
-                disabled={sending}
-                onPrompt={(prompt) => {
-                  setInput(prompt);
-                  writeChatDraft(activeConversationId, prompt);
-                  window.requestAnimationFrame(() => composerRef.current?.focus());
-                }}
-              />
-            )}
-            <div className="intune-chat-composer rounded-xl bg-[var(--color-bg-raised)] p-2 ring-1 ring-[var(--color-border)] focus-within:ring-[var(--color-accent)]">
-              {!activeTenant && (
-                <div className="mx-1 mb-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-                  {SETUP_COPY.guestChatHint}
-                </div>
-              )}
-              <label htmlFor="intune-chat-composer" className="sr-only">
-                {CHAT_COPY.composerLabel}
-              </label>
-              <textarea
-                id="intune-chat-composer"
-                name="intune-chat-composer"
-                ref={composerRef}
-                disabled={unknownConversation}
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (shouldSubmitComposerKey(event.nativeEvent)) {
-                    event.preventDefault();
-                    void handleSend();
-                  }
-                }}
-                placeholder={activeTenant ? CHAT_COPY.composerPlaceholder : SETUP_COPY.guestComposerPlaceholder}
-                className="max-h-[180px] min-h-[72px] w-full resize-none bg-transparent px-2 py-2 text-base leading-6 text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
-              />
-              <div className="flex items-center justify-between gap-3 px-1 pb-1">
-                <div className="flex min-w-0 items-center gap-1">
-                  <ComposerScopePopover
-                    label={scopeLabel}
-                    scopeMode={scopeMode}
-                    onScopeModeChange={setScopeMode}
-                    tenants={state.tenants}
-                    activeTenantId={state.activeTenantId}
-                    selectedTenantIds={selectedTenantIds}
-                    onToggleTenant={toggleTenantSelection}
-                    tenantGroups={tenantGroups}
-                    selectedGroupIds={selectedGroupIds}
-                    onToggleGroup={toggleGroupSelection}
-                    workspaces={workspaces}
-                    workspace={attachedWorkspace}
-                    attachedWorkspaceId={attachedWorkspaceId}
-                    onWorkspaceChange={setAttachedWorkspaceId}
-                    selectedEvidenceIds={selectedWorkspaceEvidenceIds}
-                    onToggleEvidence={(id) =>
-                      setSelectedWorkspaceEvidenceIds((current) =>
-                        current.includes(id)
-                          ? current.filter((entry) => entry !== id)
-                          : [...current, id],
-                      )
-                    }
-                    selectedNoteIds={selectedWorkspaceNoteIds}
-                    onToggleNote={(id) =>
-                      setSelectedWorkspaceNoteIds((current) =>
-                        current.includes(id)
-                          ? current.filter((entry) => entry !== id)
-                          : [...current, id],
-                      )
-                    }
-                    includeInstructions={includeWorkspaceInstructions}
-                    onIncludeInstructionsChange={setIncludeWorkspaceInstructions}
-                    disabled={unknownConversation || sending || runningMultiTenant}
-                  />
-                  <Menu
-                    align="start"
-                    ariaLabel="Saved queries"
-                    className="[&_[role=menu]]:bottom-[calc(100%+6px)] [&_[role=menu]]:top-auto"
-                    trigger={
-                      <IconButton
-                        size="sm"
-                        label="Saved queries"
-                        tooltip="Saved queries"
-                        icon={<IconStar size={12} />}
-                        disabled={unknownConversation || sending || runningMultiTenant}
-                      />
-                    }
-                    items={
-                      savedQueries.length > 0
-                        ? savedQueries.map((query) => ({
-                            id: query.id,
-                            label: query.title,
-                            onSelect: () => applySavedQuery(query),
-                          }))
-                        : [
-                            {
-                              id: "empty",
-                              label: "No saved queries",
-                              disabled: true,
-                              onSelect: () => undefined,
-                            },
-                          ]
-                    }
-                  />
-                </div>
-                {sending ? (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    leadingIcon={<IconClose size={12} />}
-                    disabled={stopping}
-                    onClick={() => void handleStopGeneration()}
-                  >
-                    {stopping ? COMMON_COPY.actions.stopping : COMMON_COPY.actions.stop}
-                  </Button>
-                ) : (
-                  <Button
-                    variant="primary"
-                    size="sm"
-                    disabled={unknownConversation || input.trim().length === 0}
-                    onClick={() => void handleSend()}
-                  >
-                    {COMMON_COPY.actions.send}
-                  </Button>
-                )}
-              </div>
-            </div>
-            {!composerTrustCopy.isLocal && composerTrustCopy.boundary && (
-              <div className="mt-2 text-xs text-[var(--color-warning)]" role="note">
-                {composerTrustCopy.boundary}
-              </div>
-            )}
-            <div
-              aria-live="polite"
-              aria-atomic="true"
-              className="sr-only"
-            >
-              {sendState.phase === "failed" ? "" : sendState.announcement}
-            </div>
-          </div>
-        </div>
-      </section>
-      )}
+  const calmModals = (
+    <>
       <HostedChatConsentModal
         prompt={hostedConsentPrompt}
         remember={rememberHostedConsent}
@@ -2462,22 +1678,870 @@ export default function IntuneChat() {
         }}
         onConfirm={() => void handlePinMessageToWorkspace()}
       />
-      <DeleteConversationModal
-        conversation={deleteTarget}
-        onClose={() => setDeleteTarget(null)}
-        onConfirm={() => void handleDeleteConversation()}
-      />
-      {conversationMenu && (
-        <ConversationContextMenu
-          conversation={conversationMenu.conversation}
-          x={conversationMenu.x}
-          y={conversationMenu.y}
-          onDelete={() => {
-            setDeleteTarget(conversationMenu.conversation);
-            setConversationMenu(null);
-          }}
+    </>
+  );
+  if (workspaceView) {
+    return (
+      <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
+        {calmTopBar}
+        <Workspaces
+          embedded
+          selectedWorkspaceId={routeWorkspaceId ?? null}
+          createRequest={workspaceCreateRequest}
+          onWorkspaceSelected={(workspaceId) =>
+            navigate(
+              workspaceId
+                ? `/chat/workspaces/${encodeURIComponent(workspaceId)}`
+                : "/chat?panel=workspaces",
+            )
+          }
+          onWorkspacesChange={setAllWorkspaces}
         />
+        {calmModals}
+      </div>
+    );
+  }
+
+  if (homeOpen) {
+    return (
+      <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
+        {calmTopBar}
+        <section className="min-w-0 flex-1 overflow-y-auto">
+          <div className="mx-auto w-full max-w-[788px] px-6 pb-12 pt-[9vh]">
+            {activeTenant ? (
+              <div className="mb-[26px] flex items-center gap-4">
+                <TenantTile tenantId={activeTenant.id} displayName={activeTenant.displayName} size="md" />
+                <div className="min-w-0">
+                  <h1 className="line-clamp-2 font-serif text-display font-medium tracking-[-0.015em] text-[var(--color-text)]">
+                    {activeTenant.displayName}
+                  </h1>
+                  <p className="mt-1.5 text-base text-[var(--color-text-muted)]">{homeFreshness}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="mb-6 max-w-[620px]">
+                <h1 className="font-serif text-display font-medium tracking-[-0.015em] text-[var(--color-text)]">
+                  Connect a tenant to begin
+                </h1>
+                <p className="mt-2 text-md leading-6 text-[var(--color-text-muted)]">
+                  {SETUP_COPY.guestChatHint}
+                </p>
+              </div>
+            )}
+            <ChatNotices
+              error={error}
+              notice={notice}
+              retryLabel={failedRequest ? chatErrorCopy(error ?? "").action.label : undefined}
+              onRetry={failedRequest ? () => void handleRetryFailedSend() : undefined}
+            />
+            {renderComposer("home")}
+            {needsYouCount > 0 ? (
+              <section className="mt-[30px]" aria-labelledby="needs-you-heading">
+                <div className="flex items-baseline justify-between px-0.5 pb-2 text-sm text-[var(--color-text-muted)]">
+                  <h2 id="needs-you-heading">Needs you</h2>
+                  <span className="tabular-nums">{needsYouCount}</span>
+                </div>
+                <div className="overflow-hidden rounded-2xl ring-1 ring-[var(--color-border-soft)]">
+                  {awaitingConfirmationRuns.map((run) => {
+                    const agent = state.installedAgents.find((entry) => entry.slug === run.agentSlug);
+                    return (
+                      <TenantBriefingRow
+                        key={run.id}
+                        icon={<IconWarning size={15} />}
+                        warn
+                        title={`${agent ? formatAgentDisplayName(agent) : run.agentSlug} is ready for review`}
+                        detail={run.plan?.summary ?? run.summary ?? "A write plan is waiting for confirmation."}
+                        action="Review"
+                        onClick={() => navigate(`/runs/${run.id}`)}
+                      />
+                    );
+                  })}
+                  {openFindings.map((finding) => (
+                    <TenantBriefingRow
+                      key={finding.id}
+                      icon={<IconAgentTeam size={15} />}
+                      title={finding.title}
+                      detail={finding.summary}
+                      action="Open"
+                      onClick={() => navigate("/office")}
+                    />
+                  ))}
+                  {updateContext?.state.status === "ready" ? (
+                    <TenantBriefingRow
+                      icon={<IconRefresh size={15} />}
+                      title={updateContext.state.version ? `Update ${updateContext.state.version} is ready` : "Update ready"}
+                      detail="Restart to install, or it installs on the next quit."
+                      action="Restart"
+                      onClick={() => void updateContext.restart()}
+                    />
+                  ) : null}
+                  {updateContext?.state.status === "error" ? (
+                    <TenantBriefingRow
+                      icon={<IconWarning size={15} />}
+                      warn
+                      title="Update check failed"
+                      detail={updateContext.state.message ?? "Check the network connection, then try again."}
+                      action="Retry"
+                      onClick={() => void updateContext.retry()}
+                    />
+                  ) : null}
+                </div>
+              </section>
+            ) : null}
+            <div className="mt-5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+              <span className="mr-0.5">Try</span>
+              {homeSuggestions.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  disabled={sending}
+                  onClick={() => fillComposer(prompt)}
+                  className="h-[30px] max-w-[22rem] truncate rounded-lg bg-[var(--color-hover)] px-2.5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-active)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+                >
+                  {suggestionLabel(prompt)}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={sending}
+                onClick={() => fillComposer("/")}
+                className="h-[30px] rounded-lg bg-[var(--color-hover)] px-2.5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-active)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+              >
+                Run an agent with /
+              </button>
+            </div>
+          </div>
+        </section>
+        {calmModals}
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
+      {calmTopBar}
+      <section className="flex min-w-0 flex-1 flex-col">
+        <div
+          ref={messagesScrollRef}
+          onScroll={handleConversationScroll}
+          className="min-h-0 flex-1 overflow-y-auto"
+        >
+          <div className="mx-auto flex min-h-full w-full max-w-[788px] flex-col px-6 pb-14 pt-[18px]">
+            {unknownConversation ? (
+              <div className="flex flex-1 items-center justify-center py-16">
+                <div role="status" className="w-full max-w-[520px] rounded-2xl bg-[var(--color-surface)] p-6 text-center ring-1 ring-[var(--color-border-soft)]">
+                  <h1 className="font-serif text-lg font-medium text-[var(--color-text)]">
+                    Conversation not found
+                  </h1>
+                  <p className="mx-auto mt-2 max-w-[420px] text-base leading-5 text-[var(--color-text-muted)]">
+                    It may have been deleted, or this link belongs to another local profile. No tenant data was changed.
+                  </p>
+                  <Button className="mt-5" variant="primary" leadingIcon={<IconPlus size={12} />} onClick={() => startNewConversation(true)}>
+                    Start a new conversation
+                  </Button>
+                </div>
+              </div>
+            ) : multiTenantPreflight ? (
+              <div className="flex flex-1 flex-col justify-center gap-6 py-8">
+                <ScopeReviewCard
+                  preflight={multiTenantPreflight}
+                  progressJob={activeMultiTenantJob}
+                  groupName={groupName}
+                  onGroupNameChange={setGroupName}
+                  onSaveGroup={() => void saveCurrentTenantGroup()}
+                  onCancel={() => {
+                    setMultiTenantPreflight(null);
+                    setPreflightPrompt("");
+                    setActiveMultiTenantJob(null);
+                    setBatchNotice(null);
+                  }}
+                  onRun={() => void runMultiTenantQuery()}
+                  running={runningMultiTenant}
+                  installedAgents={state.installedAgents}
+                  selectedBatchAgentSlug={selectedBatchAgentSlug}
+                  onSelectedBatchAgentSlugChange={setSelectedBatchAgentSlug}
+                  onQueueBatch={() => void queueMultiTenantAgentBatch()}
+                  batchNotice={batchNotice}
+                />
+              </div>
+            ) : displayedMessages.length === 0 && chatProgress ? (
+              <div className="flex flex-1 flex-col justify-center py-16">
+                <AssistantPendingScopeLine tenant={activeTenant} label={chatProgress.message} />
+              </div>
+            ) : (
+              <div className="flex flex-1 flex-col">
+                {displayedMessages.map((message) => {
+                  const job = multiTenantJobsByConversationId[message.conversationId];
+                  const relatedAgentSuggestion =
+                    message.role === "assistant" && message.status === "completed"
+                      ? relatedAgentState.suggestionsByMessageId[message.id]
+                      : undefined;
+                  const suggestedAgents = mergeSuggestedAgents(
+                    message.agentSuggestions,
+                    relatedAgentSuggestion,
+                  );
+                  const messageConversation =
+                    conversations.find((entry) => entry.id === message.conversationId) ??
+                    activeConversation;
+                  const messageTenant = messageConversation?.tenantId
+                    ? state.tenants.find((tenant) => tenant.id === messageConversation.tenantId)
+                    : activeTenant;
+                  return (
+                    <div key={message.id} data-message-id={message.id}>
+                      <ChatMessageBubble
+                        message={message}
+                        progress={message.id === progressAssistantMessageId ? chatProgress : null}
+                        copied={message.id === copiedMessageId}
+                        latestAssistant={message.id === latestAssistantMessageId}
+                        tenant={messageTenant}
+                        multiTenant={messageConversation?.scopeKind === "multi-tenant"}
+                        regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
+                        onCopy={() => void handleCopyMessage(message)}
+                        onEditPrompt={() => handleEditPrompt(message)}
+                        onRegenerate={() => void handleRegenerateResponse(message)}
+                        pinDisabled={!activeTenant || activeConversation?.scopeKind === "multi-tenant" || workspaces.length === 0 || message.status !== "completed"}
+                        onPin={() => {
+                          setPinTarget(message);
+                          setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
+                        }}
+                      />
+                      {message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
+                        <SuggestedAgentsBlock
+                          suggestions={suggestedAgents}
+                          runningAgentSlug={runningAgentSlug}
+                          onRun={(slug) => void handleRunAgent(slug, message.conversationId, message.id)}
+                          onDismiss={() => {
+                            dismissRelatedAgentSuggestion(message.id);
+                            setDismissedSuggestionMessageIds((current) => [...new Set([...current, message.id])]);
+                          }}
+                        />
+                      ) : null}
+                      {message.role === "assistant" && job ? (
+                        <MultiTenantResultArtifact
+                          job={job}
+                          filters={multiTenantFilters}
+                          onFiltersChange={setMultiTenantFilters}
+                          expandedTenantIds={expandedTenantIds}
+                          onToggleTenant={(tenantId) =>
+                            setExpandedTenantIds((current) =>
+                              current.includes(tenantId)
+                                ? current.filter((id) => id !== tenantId)
+                                : [...current, tenantId],
+                            )
+                          }
+                          onExport={(format) => void exportMultiTenantJob(job, format)}
+                          onSplit={() => {
+                            setSplitJob(job);
+                            setSplitResult(null);
+                          }}
+                        />
+                      ) : null}
+                    </div>
+                  );
+                })}
+                {sending && chatProgress && !progressMessageVisible ? (
+                  <AssistantPendingScopeLine tenant={activeTenant} label={chatProgress.message} />
+                ) : null}
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        </div>
+
+        <div className="relative shrink-0 px-6 pb-3.5">
+          {showScrollToLatest ? (
+            <IconButton
+              label="Scroll to latest"
+              tooltip="Scroll to latest"
+              icon={<IconArrowDown size={13} />}
+              onClick={scrollToLatest}
+              className="absolute bottom-[calc(100%+10px)] left-1/2 z-20 -translate-x-1/2 bg-[var(--color-surface)] shadow-[var(--shadow-pop)]"
+            />
+          ) : null}
+          <div className="pointer-events-none absolute inset-x-0 -top-7 h-7 bg-gradient-to-b from-transparent to-[var(--color-bg)]" />
+          <div className="relative mx-auto w-full max-w-[740px]">
+            <ChatNotices
+              error={error}
+              notice={notice}
+              retryLabel={failedRequest ? chatErrorCopy(error ?? "").action.label : undefined}
+              onRetry={failedRequest ? () => void handleRetryFailedSend() : undefined}
+            />
+            {renderComposer("docked")}
+          </div>
+        </div>
+        <div aria-live="polite" aria-atomic="true" className="sr-only">
+          {sendState.phase === "failed" ? "" : sendState.announcement}
+        </div>
+      </section>
+      {calmModals}
+    </div>
+  );
+
+}
+
+function ConversationActionsMenu({
+  conversation,
+  sending,
+  messagesAvailable,
+  onRename,
+  onTogglePin,
+  onExport,
+  onMove,
+  onDelete,
+}: {
+  conversation: IntuneChatConversation;
+  sending: boolean;
+  messagesAvailable: boolean;
+  onRename: () => void;
+  onTogglePin: () => void;
+  onExport: () => void;
+  onMove: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <Menu
+      ariaLabel="Conversation actions"
+      trigger={
+        <IconButton
+          label="Conversation actions"
+          tooltip="Conversation actions"
+          icon={<IconMore size={14} />}
+        />
+      }
+      items={[
+        {
+          id: "workspace",
+          label: "Workspace",
+          icon: <IconHardDrive size={12} />,
+          disabled: sending || conversation.scopeKind === "multi-tenant",
+          onSelect: onMove,
+        },
+        {
+          id: "export",
+          label: "Export",
+          icon: <IconDownload size={12} />,
+          disabled: sending || !messagesAvailable,
+          onSelect: onExport,
+        },
+        {
+          id: "pin",
+          label: conversation.pinnedAt ? "Unpin" : "Pin",
+          icon: <IconStar size={12} />,
+          disabled: sending,
+          onSelect: onTogglePin,
+        },
+        {
+          id: "rename",
+          label: "Rename",
+          icon: <IconChat size={12} />,
+          disabled: sending,
+          onSelect: onRename,
+        },
+        { type: "separator", id: "delete-separator" },
+        {
+          id: "delete",
+          label: "Delete",
+          danger: true,
+          disabled: sending,
+          onSelect: onDelete,
+        },
+      ]}
+    />
+  );
+}
+
+type ComposerScopeProps = Parameters<typeof ComposerScopePopover>[0];
+
+function ChatComposer({
+  placement,
+  textareaRef,
+  value,
+  onValueChange,
+  onSend,
+  onStop,
+  sending,
+  stopping,
+  disabled,
+  activeTenant,
+  scopeProps,
+  installedAgents,
+  savedQueries,
+  onSavedQuery,
+  providers,
+  activeProviderId,
+  activeModel,
+  onModelSelect,
+  onOpenProviders,
+  dataBoundary,
+}: {
+  placement: "home" | "docked";
+  textareaRef: RefObject<HTMLTextAreaElement | null>;
+  value: string;
+  onValueChange: (value: string) => void;
+  onSend: () => void;
+  onStop: () => void;
+  sending: boolean;
+  stopping: boolean;
+  disabled: boolean;
+  activeTenant?: TenantRecord;
+  scopeProps: ComposerScopeProps;
+  installedAgents: AgentSummary[];
+  savedQueries: SavedMultiTenantQuery[];
+  onSavedQuery: (query: SavedMultiTenantQuery) => void;
+  providers: ProviderSummary[];
+  activeProviderId: ProviderId;
+  activeModel?: string;
+  onModelSelect: (providerId: ProviderId, model: string) => void;
+  onOpenProviders: () => void;
+  dataBoundary: DataBoundary;
+}) {
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [activePickerIndex, setActivePickerIndex] = useState(0);
+  const query = value.startsWith("/") ? value.slice(1).trim().toLocaleLowerCase() : "";
+  const hasAgentToken = installedAgents.some((agent) =>
+    value
+      .toLocaleLowerCase()
+      .startsWith(`/${formatAgentDisplayName(agent).toLocaleLowerCase()} `),
+  );
+  const matchingAgents = installedAgents.filter((agent) => {
+    const name = formatAgentDisplayName(agent).toLocaleLowerCase();
+    return !query || name.includes(query) || agent.slug.toLocaleLowerCase().includes(query);
+  });
+  const matchingQueries = savedQueries.filter((savedQuery) =>
+    !query ||
+    savedQuery.title.toLocaleLowerCase().includes(query) ||
+    savedQuery.prompt.toLocaleLowerCase().includes(query),
+  );
+  const pickerEntries: Array<
+    | { kind: "agent"; agent: AgentSummary }
+    | { kind: "query"; query: SavedMultiTenantQuery }
+  > = [
+    ...matchingAgents.map((agent) => ({ kind: "agent" as const, agent })),
+    ...matchingQueries.map((savedQuery) => ({ kind: "query" as const, query: savedQuery })),
+  ];
+
+  useEffect(() => {
+    const textarea = textareaRef.current;
+    if (!textarea) return;
+    textarea.style.height = "auto";
+    textarea.style.height = `${Math.min(textarea.scrollHeight, 220)}px`;
+  }, [textareaRef, value]);
+
+  useEffect(() => {
+    setPickerOpen(value.startsWith("/") && !hasAgentToken);
+    setActivePickerIndex(0);
+  }, [hasAgentToken, value]);
+
+  const pickEntry = (index: number) => {
+    const entry = pickerEntries[index];
+    if (!entry) return;
+    if (entry.kind === "agent") {
+      onValueChange(`/${formatAgentDisplayName(entry.agent)} `);
+      window.requestAnimationFrame(() => textareaRef.current?.focus());
+    } else {
+      onSavedQuery(entry.query);
+    }
+    setPickerOpen(false);
+  };
+
+  const placeholder = activeTenant
+    ? placement === "home"
+      ? activeTenant.displayName.length <= 28
+        ? `Ask about ${activeTenant.displayName}, or type / to run an agent`
+        : "Ask about this tenant, or type / to run an agent"
+      : "Ask a follow-up, or type / to run an agent"
+    : SETUP_COPY.guestComposerPlaceholder;
+  const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+
+  return (
+    <div className="relative">
+      {pickerOpen ? (
+        <div
+          id={`chat-agent-picker-${placement}`}
+          role="listbox"
+          aria-label="Agents and saved queries"
+          className={`absolute inset-x-0 z-[90] max-h-[min(420px,52vh)] overflow-y-auto rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)] ${
+            placement === "docked" ? "bottom-[calc(100%+8px)]" : "top-[calc(100%+8px)]"
+          }`}
+        >
+          {pickerEntries.length === 0 ? (
+            <div className="px-3 py-3 text-sm text-[var(--color-text-muted)]">
+              No matching agents or saved queries.
+            </div>
+          ) : (
+            <>
+              {matchingAgents.length > 0 ? (
+                <div className="px-2 pb-1 pt-1 text-xs text-[var(--color-text-muted)]">Agents</div>
+              ) : null}
+              {matchingAgents.map((agent, index) => (
+                <button
+                  key={agent.slug}
+                  id={`chat-picker-${placement}-${index}`}
+                  type="button"
+                  role="option"
+                  aria-selected={activePickerIndex === index}
+                  onMouseEnter={() => setActivePickerIndex(index)}
+                  onClick={() => pickEntry(index)}
+                  className={`flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)] ${
+                    activePickerIndex === index ? "bg-[var(--color-hover)]" : "hover:bg-[var(--color-hover)]"
+                  }`}
+                >
+                  <IconLayers size={13} className="shrink-0 text-[var(--color-text-muted)]" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-base font-medium text-[var(--color-text)]">
+                      {formatAgentDisplayName(agent)}
+                    </span>
+                    <span className="block truncate text-sm text-[var(--color-text-muted)]">
+                      {agent.description}
+                    </span>
+                  </span>
+                  {agent.mode === "write" ? <Badge tone="warning">Makes changes</Badge> : null}
+                </button>
+              ))}
+              {matchingQueries.length > 0 ? (
+                <div className="mt-1 border-t border-[var(--color-border-soft)] px-2 pb-1 pt-2 text-xs text-[var(--color-text-muted)]">
+                  Saved queries
+                </div>
+              ) : null}
+              {matchingQueries.map((savedQuery, queryIndex) => {
+                const index = matchingAgents.length + queryIndex;
+                return (
+                  <button
+                    key={savedQuery.id}
+                    id={`chat-picker-${placement}-${index}`}
+                    type="button"
+                    role="option"
+                    aria-selected={activePickerIndex === index}
+                    onMouseEnter={() => setActivePickerIndex(index)}
+                    onClick={() => pickEntry(index)}
+                    className={`flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)] ${
+                      activePickerIndex === index ? "bg-[var(--color-hover)]" : "hover:bg-[var(--color-hover)]"
+                    }`}
+                  >
+                    <IconStar size={13} className="shrink-0 text-[var(--color-text-muted)]" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-base font-medium text-[var(--color-text)]">
+                        {savedQuery.title}
+                      </span>
+                      <span className="block truncate text-sm text-[var(--color-text-muted)]">
+                        {savedQuery.prompt}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
+            </>
+          )}
+        </div>
+      ) : null}
+
+      <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
+        {!activeTenant ? (
+          <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
+            {SETUP_COPY.guestChatHint}
+          </div>
+        ) : null}
+        <label htmlFor={`intune-chat-composer-${placement}`} className="sr-only">
+          {CHAT_COPY.composerLabel}
+        </label>
+        <textarea
+          id={`intune-chat-composer-${placement}`}
+          name={`intune-chat-composer-${placement}`}
+          ref={textareaRef}
+          rows={1}
+          disabled={disabled}
+          value={value}
+          role="combobox"
+          aria-controls={pickerOpen ? `chat-agent-picker-${placement}` : undefined}
+          aria-expanded={pickerOpen}
+          aria-haspopup="listbox"
+          aria-activedescendant={
+            pickerOpen && pickerEntries.length > 0
+              ? `chat-picker-${placement}-${activePickerIndex}`
+              : undefined
+          }
+          aria-autocomplete="list"
+          autoComplete="off"
+          onChange={(event) => onValueChange(event.target.value)}
+          onKeyDown={(event) => {
+            if (pickerOpen && pickerEntries.length > 0) {
+              if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                event.preventDefault();
+                setActivePickerIndex((current) =>
+                  (current + (event.key === "ArrowDown" ? 1 : -1) + pickerEntries.length) % pickerEntries.length,
+                );
+                return;
+              }
+              if (event.key === "Enter" || event.key === "Tab") {
+                event.preventDefault();
+                pickEntry(activePickerIndex);
+                return;
+              }
+            }
+            if (event.key === "Escape" && pickerOpen) {
+              event.preventDefault();
+              setPickerOpen(false);
+              return;
+            }
+            if (shouldSubmitComposerKey(event.nativeEvent)) {
+              event.preventDefault();
+              onSend();
+            }
+          }}
+          placeholder={placeholder}
+          className="block min-h-[38px] max-h-[220px] w-full resize-none overflow-y-auto bg-transparent pb-3 pr-2 pt-0.5 text-md leading-[1.55] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
+        />
+        <div className="flex items-center gap-1">
+          <ComposerScopePopover {...scopeProps} />
+          <IconButton
+            size="sm"
+            label="Run an agent"
+            tooltip="Run an agent"
+            shortcut="/"
+            icon={<IconSlash size={13} />}
+            disabled={disabled || sending}
+            onClick={() => {
+              onValueChange("/");
+              setPickerOpen(true);
+              window.requestAnimationFrame(() => textareaRef.current?.focus());
+            }}
+          />
+          <span className="min-w-2 flex-1" />
+          <ComposerModelPopover
+            providers={providers}
+            activeProviderId={activeProviderId}
+            activeModel={activeModel}
+            onSelect={onModelSelect}
+            onManage={onOpenProviders}
+            disabled={disabled || sending}
+          />
+          <IconButton
+            size="sm"
+            label="Voice"
+            tooltip="Voice"
+            shortcut="Alt+V"
+            icon={<IconMicrophone size={14} />}
+            disabled={disabled}
+            onClick={openNovaPanel}
+          />
+          <button
+            type="button"
+            aria-label={sending ? (stopping ? "Stopping" : "Stop") : "Send"}
+            title={sending ? (stopping ? "Stopping" : "Stop") : "Send"}
+            disabled={sending ? stopping : disabled || value.trim().length === 0}
+            onClick={sending ? onStop : onSend}
+            className="ml-1 inline-flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[10px] bg-[var(--color-accent)] text-[var(--color-on-accent)] transition-colors hover:bg-[var(--color-accent-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:bg-[var(--color-active)] disabled:text-[var(--color-text-muted)]"
+          >
+            {sending ? <IconStop size={13} /> : <IconArrowUp size={15} />}
+          </button>
+        </div>
+      </div>
+
+      {dataBoundary.kind === "none" ? (
+        <div className={`mt-2.5 flex items-center gap-2 text-sm text-[var(--color-warning)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
+          <IconSettings size={13} />
+          <span>No model selected.</span>
+          <button type="button" onClick={onOpenProviders} className="rounded font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
+            Set up a model
+          </button>
+        </div>
+      ) : dataBoundary.kind === "local" ? (
+        <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
+          <IconLock size={13} />
+          <span>Local model. Tenant data stays on this device.</span>
+        </div>
+      ) : (
+        <div role="note" className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-warning)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
+          <IconCloud size={13} />
+          <span>Prompts and tenant data go to {activeProvider?.name ?? "the selected provider"} while this model is selected.</span>
+        </div>
       )}
+    </div>
+  );
+}
+
+function ComposerModelPopover({
+  providers,
+  activeProviderId,
+  activeModel,
+  onSelect,
+  onManage,
+  disabled,
+}: {
+  providers: ProviderSummary[];
+  activeProviderId: ProviderId;
+  activeModel?: string;
+  onSelect: (providerId: ProviderId, model: string) => void;
+  onManage: () => void;
+  disabled: boolean;
+}) {
+  const detailsRef = useRef<HTMLDetailsElement | null>(null);
+  const availableProviders = providers.filter(
+    (provider) => ["connected", "available"].includes(provider.status) && provider.models.length > 0,
+  );
+  const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+
+  useEffect(() => {
+    const closeFromOutside = (event: globalThis.MouseEvent) => {
+      const details = detailsRef.current;
+      if (details?.open && !details.contains(event.target as Node)) details.open = false;
+    };
+    const closeFromEscape = (event: KeyboardEvent) => {
+      const details = detailsRef.current;
+      if (event.key !== "Escape" || !details?.open) return;
+      event.preventDefault();
+      details.open = false;
+      details.querySelector<HTMLElement>("summary")?.focus();
+    };
+    window.addEventListener("mousedown", closeFromOutside);
+    window.addEventListener("keydown", closeFromEscape);
+    return () => {
+      window.removeEventListener("mousedown", closeFromOutside);
+      window.removeEventListener("keydown", closeFromEscape);
+    };
+  }, []);
+
+  return (
+    <details ref={detailsRef} className="group relative">
+      <summary
+        aria-label={`Model: ${activeModel ?? activeProvider?.name ?? "No model"}`}
+        aria-disabled={disabled}
+        onClick={(event) => {
+          if (disabled) event.preventDefault();
+        }}
+        className={`flex h-8 max-w-[240px] cursor-pointer list-none items-center gap-1.5 rounded-[9px] px-2.5 text-sm text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] [&::-webkit-details-marker]:hidden ${focusRingClass} ${disabled ? "pointer-events-none opacity-50" : ""}`}
+      >
+        {activeProvider?.isLocal === false ? <IconCloud size={12} /> : <IconLock size={12} />}
+        <span className="truncate">{activeModel ?? activeProvider?.name ?? "Choose model"}</span>
+        <IconChevronDown size={11} className="text-[var(--color-text-muted)]" />
+      </summary>
+      <div role="menu" aria-label="Models" className="absolute bottom-[calc(100%+8px)] right-0 z-[90] w-[min(360px,calc(100vw-48px))] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]">
+        {([true, false] as const).map((local, groupIndex) => {
+          const group = availableProviders.filter((provider) => provider.isLocal === local);
+          if (group.length === 0) return null;
+          return (
+            <div key={local ? "local" : "hosted"} className={groupIndex > 0 ? "mt-1 border-t border-[var(--color-border-soft)] pt-1" : ""}>
+              <div className="px-2 pb-1 pt-1 text-xs text-[var(--color-text-muted)]">
+                {local ? "On this device" : "Hosted"}
+              </div>
+              {group.flatMap((provider) =>
+                provider.models.map((model) => {
+                  const selected = provider.id === activeProviderId && model === activeModel;
+                  return (
+                    <button
+                      key={`${provider.id}:${model}`}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={selected}
+                      onClick={() => {
+                        detailsRef.current?.removeAttribute("open");
+                        onSelect(provider.id, model);
+                      }}
+                      className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-left hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)]"
+                    >
+                      {local ? <IconLock size={13} /> : <IconCloud size={13} />}
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-base text-[var(--color-text)]">{model}</span>
+                        <span className="block truncate text-sm text-[var(--color-text-muted)]">{provider.name}</span>
+                      </span>
+                      {selected ? <IconCheck size={13} /> : null}
+                    </button>
+                  );
+                }),
+              )}
+            </div>
+          );
+        })}
+        <div className="mt-1 border-t border-[var(--color-border-soft)] pt-1">
+          <button
+            type="button"
+            role="menuitem"
+            onClick={() => {
+              detailsRef.current?.removeAttribute("open");
+              onManage();
+            }}
+            className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)]"
+          >
+            <IconSettings size={13} />
+            Manage models
+          </button>
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ChatNotices({
+  error,
+  notice,
+  retryLabel,
+  onRetry,
+}: {
+  error: string | null;
+  notice: string | null;
+  retryLabel?: string;
+  onRetry?: () => void;
+}) {
+  return (
+    <>
+      {error ? (
+        <div role="alert" className="mb-3 flex items-start justify-between gap-4 rounded-[10px] bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          <div className="min-w-0">
+            <div className="font-medium">{onRetry ? chatErrorCopy(error).what : "The requested action could not be completed."}</div>
+            <div className="mt-0.5 break-words text-[var(--color-text-soft)]">
+              {chatErrorCopy(error).why ?? "Retry the action. If it still fails, review the provider and tenant connection in Settings."}
+            </div>
+          </div>
+          {onRetry ? <Button size="sm" variant="secondary" onClick={onRetry}>{retryLabel ?? "Retry"}</Button> : null}
+        </div>
+      ) : null}
+      {notice ? (
+        <div role="status" className="mb-3 rounded-[10px] bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+          {notice}
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+function TenantBriefingRow({
+  icon,
+  warn = false,
+  title,
+  detail,
+  action,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  warn?: boolean;
+  title: string;
+  detail: string;
+  action: string;
+  onClick: () => void;
+}) {
+  return (
+    <button type="button" onClick={onClick} className="grid w-full grid-cols-[32px_minmax(0,1fr)_auto] items-center gap-3.5 border-t border-[var(--color-border-soft)] px-4 py-3 text-left first:border-t-0 hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)]">
+      <span className={`inline-flex h-8 w-8 items-center justify-center rounded-[9px] ${warn ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)]" : "bg-[var(--color-bubble)] text-[var(--color-text-soft)]"}`}>
+        {icon}
+      </span>
+      <span className="min-w-0">
+        <span className="block truncate text-base font-medium text-[var(--color-text)]">{title}</span>
+        <span className="block truncate text-sm text-[var(--color-text-muted)]">{detail}</span>
+      </span>
+      <span className="inline-flex items-center gap-1 text-sm text-[var(--color-text-soft)]">
+        {action}<IconChevronRight size={11} />
+      </span>
+    </button>
+  );
+}
+
+function AssistantPendingScopeLine({ tenant, label }: { tenant?: TenantRecord; label: string }) {
+  return (
+    <div className="mb-8 flex items-center gap-2 text-sm text-[var(--color-text-muted)]">
+      {tenant ? <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" /> : null}
+      {tenant?.displayName ? <span>{tenant.displayName}</span> : null}
+      <span aria-hidden="true">·</span>
+      <span className="chat-scope-shimmer">{label}</span>
     </div>
   );
 }
@@ -2579,6 +2643,7 @@ function ComposerScopePopover({
     (selectedEvidenceIds.length > 0 ||
       selectedNoteIds.length > 0 ||
       (includeInstructions && Boolean(workspace?.instructions?.trim())));
+  const activeTenant = tenants.find((tenant) => tenant.id === activeTenantId);
 
   useEffect(() => {
     const closeFromOutside = (event: globalThis.MouseEvent) => {
@@ -2613,15 +2678,20 @@ function ComposerScopePopover({
             event.preventDefault();
           }
         }}
-        className={`flex h-7 cursor-pointer list-none items-center gap-1.5 rounded-md bg-[var(--color-surface)] px-2.5 text-sm font-medium text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] [&::-webkit-details-marker]:hidden ${focusRingClass} ${
+        className={`flex h-8 max-w-[260px] cursor-pointer list-none items-center gap-1.5 rounded-[9px] px-2.5 text-sm text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] [&::-webkit-details-marker]:hidden ${focusRingClass} ${
           disabled ? "pointer-events-none opacity-50" : ""
         }`}
       >
+        {scopeMode === "active" && activeTenant ? (
+          <TenantTile tenantId={activeTenant.id} displayName={activeTenant.displayName} size="xs" />
+        ) : (
+          <MultiTenantTile size="xs" />
+        )}
         <span className="max-w-52 truncate">{label}</span>
         {hasWorkspaceContext && <Badge tone="info">Context</Badge>}
         <IconChevronDown size={11} />
       </summary>
-      <div className="absolute bottom-[calc(100%+8px)] left-0 z-[70] w-[min(440px,calc(100vw-64px))] rounded-lg bg-[var(--color-bg-elevated)] p-3 shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)]">
+      <div className="absolute bottom-[calc(100%+8px)] left-0 z-[70] w-[min(440px,calc(100vw-64px))] rounded-[14px] bg-[var(--color-raised)] p-3 shadow-[var(--shadow-pop)]">
         <div className="text-sm font-medium text-[var(--color-text)]">Tenant scope</div>
         {hasMultipleTenants ? (
           <SegmentedControl
@@ -3619,80 +3689,6 @@ function ConsentFact({ label, value }: { label: string; value: string }) {
   );
 }
 
-function DeleteConversationModal({
-  conversation,
-  onClose,
-  onConfirm,
-}: {
-  conversation: IntuneChatConversation | null;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal open={Boolean(conversation)} onClose={onClose} size="md">
-      <ModalHeader
-        title="Delete conversation"
-        subtitle={conversation?.title}
-        badge={<Badge tone="danger">Local deletion</Badge>}
-        onClose={onClose}
-      />
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          This removes the conversation, messages, and chat tool-call records
-          from the local SQLite store. It does not disconnect the tenant or
-          clear the Graph cache.
-        </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="danger" onClick={onConfirm}>
-            Delete
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ConversationContextMenu({
-  conversation,
-  x,
-  y,
-  onDelete,
-}: {
-  conversation: IntuneChatConversation;
-  x: number;
-  y: number;
-  onDelete: () => void;
-}) {
-  return (
-    <div
-      className="fixed z-[80] w-[220px] overflow-hidden rounded-lg bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in-scale"
-      style={{ left: x, top: y }}
-      onClick={(event) => event.stopPropagation()}
-      role="menu"
-    >
-      <div className="border-b border-[var(--color-border-soft)] px-3 py-2">
-        <div className="truncate text-sm font-medium text-[var(--color-text)]">
-          {conversation.title}
-        </div>
-        <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-          Local conversation
-        </div>
-      </div>
-      <button
-        type="button"
-        role="menuitem"
-        onClick={onDelete}
-        className={`flex w-full items-center justify-between px-3 py-2 text-left text-base text-[var(--color-danger)] transition-colors hover:bg-[var(--color-danger-soft)] ${focusRingClass}`}
-      >
-        Delete conversation
-      </button>
-    </div>
-  );
-}
-
 function requiresHostedChatConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
@@ -3851,173 +3847,13 @@ function estimateProgressPercent(steps: IntuneChatProgressStep[]): number {
   return Math.max(5, Math.min(100, Math.round((score / steps.length) * 100)));
 }
 
-function ChatProgressCard({ progress }: { progress: ChatProgressState }) {
-  const percent = Math.max(5, Math.min(100, progress.progressPercent));
-  const hasFailed = progress.steps.some((step) => step.status === "failed");
-  const isComplete =
-    progress.steps.length > 0 &&
-    progress.steps.every((step) => step.status === "completed");
-  const completedCount = progress.steps.filter(
-    (step) => step.status === "completed" || step.status === "failed",
-  ).length;
-
-  return (
-    <div className="flex justify-start">
-      <div
-        role="status"
-        aria-live="polite"
-        className="w-full max-w-[560px] rounded-xl bg-[var(--color-bg-raised)] px-3.5 py-3 ring-1 ring-[var(--color-border-soft)]"
-      >
-        <div className="flex items-center justify-between gap-3">
-          <div className="min-w-0 truncate text-base font-medium text-[var(--color-text)]">
-            {progress.message}
-          </div>
-          <div className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
-            {completedCount}/{progress.steps.length}
-          </div>
-        </div>
-        <div
-          className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--color-border-soft)]"
-          role="progressbar"
-          aria-label={progress.message}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-valuenow={percent}
-        >
-          <div
-            className={`h-full rounded-full transition-[width,background-color] duration-300 ${
-              hasFailed
-                ? "bg-[var(--color-danger)]"
-                : isComplete
-                  ? "bg-[var(--color-success)]"
-                  : "bg-[var(--color-info)]"
-            }`}
-            style={{ width: `${percent}%` }}
-          />
-        </div>
-        <div className="mt-3 grid gap-2">
-          {progress.steps.map((step) => (
-            <div key={step.id} className="flex min-w-0 items-start gap-2.5">
-              <ProgressStepGlyph status={step.status} />
-              <div className="min-w-0 flex-1">
-                <div
-                  className={`truncate text-sm ${
-                    step.status === "pending"
-                      ? "text-[var(--color-text-muted)]"
-                      : "text-[var(--color-text-soft)]"
-                  }`}
-                >
-                  {step.label}
-                </div>
-                {step.detail && (
-                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
-                    {step.detail}
-                  </div>
-                )}
-              </div>
-              <span className="shrink-0 text-xs text-[var(--color-text-muted)]">
-                {statusLabel(step.status)}
-              </span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ProgressStepGlyph({
-  status,
-}: {
-  status: IntuneChatProgressStep["status"];
-}) {
-  if (status === "completed") {
-    return (
-      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/35">
-        <IconCheck size={10} aria-hidden="true" />
-      </span>
-    );
-  }
-  if (status === "failed") {
-    return (
-      <span
-        aria-hidden="true"
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-[var(--color-danger-soft)] text-xs font-semibold text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/35"
-      >
-        !
-      </span>
-    );
-  }
-  if (status === "active") {
-    return (
-      <span
-        aria-hidden="true"
-        className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[var(--color-info)]"
-      >
-        <span className="h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
-      </span>
-    );
-  }
-  return (
-    <span
-      aria-hidden="true"
-      className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full ring-1 ring-[var(--color-text)]/25"
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-text-soft)]" />
-    </span>
-  );
-}
-
-function EmptyChat({
-  disabled,
-  onPrompt,
-}: {
-  disabled: boolean;
-  onPrompt: (prompt: string) => void;
-}) {
-  const [activeGroup, setActiveGroup] = useState(promptGroups[0]?.label ?? "Devices");
-  const prompts =
-    promptGroups.find((group) => group.label === activeGroup)?.prompts ??
-    promptGroups[0]?.prompts ??
-    [];
-
-  return (
-    <div className="mb-5 flex flex-col items-center justify-end px-4 pt-2">
-      <div className="w-full max-w-[680px] text-center">
-        <h1 className="text-pretty text-lg font-semibold text-[var(--color-text)]">
-          {CHAT_COPY.emptyTitle}
-        </h1>
-        <p className="mx-auto mt-1 max-w-[520px] text-base leading-5 text-[var(--color-text-soft)]">
-          {CHAT_COPY.emptySubtitle}
-        </p>
-        <SegmentedControl
-          className="mt-4 max-w-full overflow-x-auto"
-          ariaLabel="Suggestion category"
-          value={activeGroup}
-          options={promptGroups.map((group) => ({ id: group.label, label: group.label }))}
-          onValueChange={setActiveGroup}
-        />
-        <div className="mt-3 grid gap-2 text-left sm:grid-cols-2">
-          {prompts.map((prompt) => (
-            <button
-              key={prompt}
-              disabled={disabled}
-              onClick={() => onPrompt(prompt)}
-              className={`rounded-lg bg-[var(--color-surface)] px-3 py-2 text-base text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-50 ${focusRingClass}`}
-            >
-              {prompt}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function ChatMessageBubble({
   message,
   progress,
   copied,
+  latestAssistant,
+  tenant,
+  multiTenant,
   regenerateDisabled,
   onCopy,
   onEditPrompt,
@@ -4028,6 +3864,9 @@ function ChatMessageBubble({
   message: IntuneChatMessage;
   progress: ChatProgressState | null;
   copied: boolean;
+  latestAssistant: boolean;
+  tenant?: TenantRecord;
+  multiTenant: boolean;
   regenerateDisabled: boolean;
   onCopy: () => void;
   onEditPrompt: () => void;
@@ -4041,130 +3880,184 @@ function ChatMessageBubble({
   // the Suggested agents block now shows it, so drop the duplicate line.
   const bodyContent = message.content.replace(/\n\nDetected matching agent: [^\n]*$/, "");
   const displayContent = hasWebSources ? bodyContent.split("\n\nPublic web sources:")[0] : bodyContent;
-  return (
-    <div className={`group flex ${isUser ? "justify-end" : "justify-start"}`}>
-      <div className={isUser ? "max-w-[76%]" : "w-full max-w-[760px]"}>
-        <div
-          className={
-            isUser
-              ? "rounded-2xl border border-[var(--color-border)] border-r-2 border-r-[var(--color-accent)] bg-[var(--color-bg-raised)] px-4 py-2.5 text-base leading-6 text-[var(--color-text)]"
-              : "text-base leading-6 text-[var(--color-text)]"
-          }
-        >
-          {!isUser && progress ? (
-            <div className="space-y-4">
-              <ChatProgressCard progress={progress} />
-              {message.content.trim().length > 0 && (
-                <div className="whitespace-pre-wrap">{displayContent}</div>
-              )}
-            </div>
-          ) : (
-            <div className="whitespace-pre-wrap">
-              {displayContent || (message.status === "streaming" ? "..." : "")}
-            </div>
-          )}
-        </div>
-        {!isUser && <PublicWebSources trace={message.toolTrace} />}
-        {!isUser && message.sources && message.sources.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5 text-xs text-[var(--color-text-muted)]">
-              {message.sources.slice(0, 4).map((source) => (
-                <Badge
-                  key={source.resource}
-                  tone={source.error ? "warning" : source.source === "live" ? "success" : "neutral"}
-                >
-                  {source.label}
-                </Badge>
-              ))}
-              {message.sources.length > 4 && (
-                <Badge>{message.sources.length - 4} more</Badge>
-              )}
-            </div>
-        )}
-        {!isUser && (message.engineNotice || (message.sources?.length ?? 0) > 0) && (
-          <AnswerDetails notice={message.engineNotice} sources={message.sources ?? []} />
-        )}
-        {!isUser && message.toolTrace && message.toolTrace.length > 0 && (
-          <ToolTraceDetails trace={message.toolTrace} />
-        )}
-        <div
-          className={`mt-2 flex items-center gap-2 text-xs text-[var(--color-text-muted)] opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 ${
-            isUser ? "justify-end text-right" : "justify-start"
-          }`}
-        >
-          <span>{formatDateTime(message.createdAt)}</span>
-          <button
-            type="button"
-            title={isUser ? "Copy prompt" : "Copy response"}
-            aria-label={isUser ? "Copy prompt" : "Copy response"}
-            disabled={message.content.trim().length === 0}
-            onClick={onCopy}
-            className={`inline-flex h-6 items-center gap-1 rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40 ${focusRingClass}`}
+  const timestamp = formatDateTime(message.createdAt);
+
+  if (isUser) {
+    return (
+      <div className="group mb-[18px] flex justify-end">
+        <div className="flex max-w-[78%] flex-col items-end">
+          <div
+            title={`Sent ${timestamp}`}
+            className="whitespace-pre-wrap rounded-[16px_16px_4px_16px] bg-[var(--color-bubble)] px-[15px] py-2.5 text-md leading-[1.55] text-[var(--color-text)]"
           >
-            <IconCopy size={11} />
-            <span>{copied ? "Copied" : "Copy"}</span>
-          </button>
-          {isUser && (
-            <button
-              type="button"
-              title="Edit and resend prompt"
-              aria-label="Edit and resend prompt"
+            {displayContent}
+          </div>
+          <div className="mt-1 flex gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+            <IconButton
+              size="sm"
+              label="Copy prompt"
+              tooltip={`${copied ? "Copied" : "Copy"} · ${timestamp}`}
+              icon={copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+              disabled={!message.content.trim()}
+              onClick={onCopy}
+            />
+            <IconButton
+              size="sm"
+              label="Edit and resend prompt"
+              tooltip={`Edit · ${timestamp}`}
+              icon={<IconPencil size={12} />}
               onClick={onEditPrompt}
-              className={`inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] ${focusRingClass}`}
-            >
-              Edit
-            </button>
-          )}
-          {!isUser && !progress && (
-            <>
-              <button
-                type="button"
-                title="Pin response to workspace"
-                aria-label="Pin response to workspace"
-                disabled={pinDisabled}
-                onClick={onPin}
-                className="inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Pin answer
-              </button>
-              <button
-                type="button"
-                title="Regenerate response"
-                aria-label="Regenerate response"
-                disabled={regenerateDisabled}
-                onClick={onRegenerate}
-                className={`inline-flex h-6 items-center rounded-md px-1.5 transition-colors hover:bg-[var(--color-surface)] hover:text-[var(--color-text)] disabled:cursor-not-allowed disabled:opacity-40 ${focusRingClass}`}
-              >
-                Regenerate
-              </button>
-            </>
-          )}
+            />
+          </div>
         </div>
       </div>
-    </div>
+    );
+  }
+
+  return (
+    <article className="group mb-[34px] w-full" title={`Answered ${timestamp}`}>
+      {progress ? (
+        <AssistantPendingScopeLine tenant={tenant} label={progress.message} />
+      ) : (
+        <AnswerScopeDisclosure
+          tenant={tenant}
+          multiTenant={multiTenant}
+          notice={message.engineNotice}
+          sources={message.sources ?? []}
+          trace={message.toolTrace ?? []}
+        />
+      )}
+      {displayContent ? (
+        <MarkdownPreview
+          source={displayContent}
+          numberedSections={false}
+          tableTools
+          className="chat-answer text-[var(--color-text)]"
+        />
+      ) : null}
+      <AnswerSources sources={message.sources ?? []} trace={message.toolTrace ?? []} />
+      {!progress ? (
+        <div className={`-ml-1.5 mt-1 flex gap-0.5 transition-opacity ${latestAssistant ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
+          <IconButton
+            size="sm"
+            label="Copy response"
+            tooltip={`${copied ? "Copied" : "Copy"} · ${timestamp}`}
+            icon={copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+            disabled={!message.content.trim()}
+            onClick={onCopy}
+          />
+          <IconButton
+            size="sm"
+            label="Regenerate response"
+            tooltip={`Regenerate · ${timestamp}`}
+            icon={<IconRefresh size={12} />}
+            disabled={regenerateDisabled}
+            onClick={onRegenerate}
+          />
+          <IconButton
+            size="sm"
+            label="Pin response to workspace"
+            tooltip={`Pin answer · ${timestamp}`}
+            icon={<IconStar size={12} />}
+            disabled={pinDisabled}
+            onClick={onPin}
+          />
+        </div>
+      ) : null}
+    </article>
   );
 }
 
-function AnswerDetails({
+function AnswerScopeDisclosure({
+  tenant,
+  multiTenant,
   notice,
   sources,
+  trace,
 }: {
+  tenant?: TenantRecord;
+  multiTenant: boolean;
   notice?: string;
   sources: IntuneChatSource[];
+  trace: IntuneChatToolTraceEntry[];
 }) {
+  const refreshedAt = newestTimestamp(
+    sources.flatMap((source) => source.refreshedAt ?? []),
+  );
+  const resourceNames = [...new Set(sources.map((source) => source.label))].join(", ");
+  const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
+  const hasDetails = Boolean(notice || sources.length > 0 || trace.length > 0);
+
   return (
-    <details className="mt-2 rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
-      <summary className="cursor-pointer select-none px-3 py-2 text-sm font-medium text-[var(--color-text-soft)] transition-colors hover:text-[var(--color-text)]">
-        How this was answered
+    <details className="group/details mb-2.5">
+      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-md text-sm text-[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] [&::-webkit-details-marker]:hidden">
+        {multiTenant ? (
+          <MultiTenantTile size="xs" />
+        ) : tenant ? (
+          <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
+        ) : null}
+        <span>{scopeName}</span>
+        <span aria-hidden="true" className="opacity-60">·</span>
+        <span>{resourceNames || "Tenant data"}</span>
+        {refreshedAt ? (
+          <>
+            <span aria-hidden="true" className="opacity-60">·</span>
+            <span>data from {formatRelativeAge(refreshedAt)}</span>
+          </>
+        ) : null}
+        <span aria-hidden="true" className="opacity-60">·</span>
+        <span className="inline-flex items-center gap-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
+          How I checked
+          <IconChevronRight size={13} className="transition-transform duration-150 group-open/details:rotate-90" />
+        </span>
       </summary>
-      <div className="space-y-3 border-t border-[var(--color-border-soft)] px-3 py-3">
-        {notice && (
-          <div className="rounded-md bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
+      <div className="mt-2 border-l-2 border-[var(--color-border)] pl-3 text-sm text-[var(--color-text-soft)]">
+        {notice ? (
+          <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[var(--color-warning)]">
             {notice}
           </div>
-        )}
-        {sources.length > 0 && <SourceDetails sources={sources} />}
+        ) : null}
+        {sources.length > 0 ? <SourceDetails sources={sources} /> : null}
+        {trace.length > 0 ? <ToolTraceDetails trace={trace} /> : null}
+        {!hasDetails ? <div className="py-1">No source trace was stored for this answer.</div> : null}
       </div>
     </details>
+  );
+}
+
+function AnswerSources({
+  sources,
+  trace,
+}: {
+  sources: IntuneChatSource[];
+  trace: IntuneChatToolTraceEntry[];
+}) {
+  const webSources = safeWebSources(trace);
+  if (sources.length === 0 && webSources.length === 0) return null;
+  return (
+    <ol aria-label="Sources" className="mb-4 mt-1 list-none space-y-0.5 p-0 font-sans text-sm text-[var(--color-text-muted)]">
+      {sources.map((source, index) => (
+        <li key={`${source.resource}-${index}`} className="flex flex-wrap items-center gap-2 py-0.5">
+          <span className="inline-grid h-[17px] min-w-[17px] place-items-center rounded-[5px] bg-[var(--color-hover)] px-1 text-[11px] font-medium text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]">
+            {index + 1}
+          </span>
+          <span className="font-medium text-[var(--color-text-soft)]">{source.label}</span>
+          <span>· {source.rows.toLocaleString()} {source.rows === 1 ? "row" : "rows"}</span>
+          <span>· {source.refreshedAt ? formatRelativeAge(source.refreshedAt) : "not refreshed"}</span>
+        </li>
+      ))}
+      {webSources.map((source, webIndex) => (
+        <li key={source.url} className="flex min-w-0 items-center gap-2 py-0.5">
+          <span className="inline-grid h-[17px] min-w-[17px] place-items-center rounded-[5px] bg-[var(--color-hover)] px-1 text-[11px] font-medium text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]">
+            {sources.length + webIndex + 1}
+          </span>
+          <a href={source.url} target="_blank" rel="noopener noreferrer" className="truncate rounded font-medium text-[var(--color-text-soft)] hover:text-[var(--color-text)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
+            {source.title || new URL(source.url).hostname}
+          </a>
+          <span className="shrink-0">· web source</span>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -4358,105 +4251,6 @@ function formatSourceQuery(query: Record<string, string>): string {
     .join("&");
 }
 
-function buildConversationExportMarkdown(input: {
-  conversation: IntuneChatConversation;
-  messages: IntuneChatMessage[];
-  tenantName?: string;
-  providerName?: string;
-  cacheSummary: string;
-}): string {
-  const lines = [
-    `# ${input.conversation.title}`,
-    "",
-    `Exported: ${new Date().toISOString()}`,
-    `Tenant: ${input.tenantName ?? input.conversation.tenantId ?? "Unknown"}`,
-    `Provider: ${input.providerName ?? "Unknown"}`,
-    `Cache: ${input.cacheSummary}`,
-    "",
-    "This export was generated locally by OpenAdminOS. It includes chat text and source metadata, not cached Graph row payloads.",
-    "",
-  ];
-
-  for (const message of input.messages) {
-    lines.push(`## ${message.role === "user" ? "Prompt" : "Response"} · ${formatDateTime(message.createdAt)}`);
-    if (message.providerId || message.model || message.status !== "completed") {
-      lines.push(
-        [
-          message.status !== "completed" ? `status=${message.status}` : undefined,
-          message.providerId ? `provider=${message.providerId}` : undefined,
-          message.model ? `model=${message.model}` : undefined,
-        ]
-          .filter(Boolean)
-          .join(" · "),
-      );
-    }
-    lines.push("", message.content.trim() || "_No content._", "");
-
-    if (message.sources?.length) {
-      lines.push("### Sources", "");
-      for (const source of message.sources) {
-        lines.push(`- **${source.label}** (${source.source})`);
-        lines.push(`  - Resource: \`${source.resource}\``);
-        if (source.path) lines.push(`  - Path: \`${source.path}\``);
-        if (source.select?.length) {
-          lines.push(`  - Select: \`${source.select.join(", ")}\``);
-        }
-        if (source.query && Object.keys(source.query).length > 0) {
-          lines.push(`  - Query: \`${formatSourceQuery(source.query)}\``);
-        }
-        lines.push(`  - Rows: ${source.rows}`);
-        lines.push(`  - Pages: ${source.pages ?? "unknown"}`);
-        lines.push(`  - Capped: ${source.pageLimitReached ? "yes" : "no"}`);
-        lines.push(`  - Refreshed: ${source.refreshedAt ?? "not refreshed"}`);
-        if (source.error) lines.push(`  - Error: ${source.error}`);
-      }
-      lines.push("");
-    }
-
-    if (message.toolTrace?.length) {
-      lines.push("### What Ran", "");
-      for (const entry of message.toolTrace) {
-        lines.push(`- \`${entry.tool}\` · ${entry.resultSummary} · ${entry.durationMs} ms`);
-        lines.push(`  - Params: \`${summarizeToolParams(entry.params)}\``);
-        if (entry.error) lines.push(`  - Error: ${entry.error}`);
-      }
-      lines.push("");
-    }
-
-    if (message.agentSuggestions?.length) {
-      lines.push("### Agent Suggestions", "");
-      for (const suggestion of message.agentSuggestions) {
-        lines.push(
-          `- **${suggestion.agentName}** (${suggestion.mode}, ${Math.round(suggestion.confidence * 100)}% match)`,
-        );
-        lines.push(`  - Reason: ${suggestion.reason}`);
-        if (suggestion.matchedTerms?.length) {
-          lines.push(`  - Matched terms: ${suggestion.matchedTerms.join(", ")}`);
-        }
-        if (suggestion.matchedConcepts?.length) {
-          lines.push(`  - Routing evidence: ${suggestion.matchedConcepts.join("; ")}`);
-        }
-        if (suggestion.matchedResources?.length) {
-          lines.push(
-            `  - Planned sources: ${suggestion.matchedResources
-              .map(chatResourceLabel)
-              .join(", ")}`,
-          );
-        }
-        lines.push(`  - Scopes: ${suggestion.scopes.join(", ") || "none"}`);
-      }
-      lines.push("");
-    }
-  }
-
-  return capExportContent(`${lines.join("\n")}\n`);
-}
-
-function capExportContent(content: string): string {
-  const maxLength = 1_900_000;
-  if (content.length <= maxLength) return content;
-  return `${content.slice(0, maxLength)}\n\n_Export truncated by OpenAdminOS because it exceeded the local save limit._\n`;
-}
 
 function detectsAllTenantPrompt(prompt: string): boolean {
   return /\b(all tenants|every tenant|every connected tenant|all customers|all clients|across tenants|from every tenant)\b/i.test(prompt);
@@ -4560,116 +4354,99 @@ function mergeSuggestedAgents(
 function SuggestedAgentsBlock({
   suggestions,
   runningAgentSlug,
-  onOpen,
   onRun,
   onDismiss,
 }: {
   suggestions: UnifiedAgentSuggestion[];
   runningAgentSlug: string | null;
-  onOpen: (slug: string) => void;
   onRun: (slug: string) => void;
   onDismiss: () => void;
 }) {
   const [detailsSlug, setDetailsSlug] = useState<string | null>(null);
+  if (suggestions.length === 0) return null;
   return (
-    <div className="w-full max-w-[760px] rounded-lg bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
-      <div className="flex items-center justify-between border-b border-[var(--color-border-soft)] px-3 py-2">
-        <div className="text-sm font-medium text-[var(--color-text)]">Suggested agents</div>
-        <IconButton
-          size="sm"
-          label="Dismiss suggested agents"
-          tooltip="Dismiss"
-          icon={<IconClose size={12} />}
-          onClick={onDismiss}
-        />
-      </div>
-      <div className="divide-y divide-[var(--color-border-soft)]">
-        {suggestions.map((suggestion) => {
-          const detailsOpen = detailsSlug === suggestion.slug;
-          return (
-            <div key={suggestion.slug} className="px-3 py-2.5">
-              <div className="flex items-center gap-3">
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-[var(--color-text)]">
-                      {suggestion.name}
-                    </span>
-                    <Badge tone={suggestion.mode === "write" ? "warning" : "success"}>
-                      {suggestion.mode === "write" ? "Write" : "Read"}
-                    </Badge>
-                  </div>
-                  <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={suggestion.reason}>
-                    {suggestion.reason}
-                  </div>
-                </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  aria-expanded={detailsOpen}
-                  onClick={() => setDetailsSlug(detailsOpen ? null : suggestion.slug)}
-                >
-                  Details
-                </Button>
-                <Button
-                  size="sm"
-                  variant="secondary"
-                  leadingIcon={<IconPlay size={12} />}
-                  disabled={runningAgentSlug === suggestion.slug}
-                  onClick={() => onRun(suggestion.slug)}
-                >
-                  {runningAgentSlug === suggestion.slug ? "Starting" : "Run"}
-                </Button>
+    <div className="mb-[34px] w-full max-w-[740px] space-y-2">
+      {suggestions.map((suggestion) => {
+        const detailsOpen = detailsSlug === suggestion.slug;
+        return (
+          <div key={suggestion.slug} className="rounded-[14px] px-4 py-3 font-sans text-base text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">
+            <div className="flex items-center gap-4">
+              <div className="min-w-0 flex-1 leading-5">
+                <span className="font-medium text-[var(--color-text)]">{suggestion.name}</span>{" "}
+                <span>
+                  {suggestion.mode === "write"
+                    ? `${suggestion.reason} Nothing changes until you review and confirm.`
+                    : suggestion.reason}
+                </span>
               </div>
-              {detailsOpen && (
-                <div className="mt-2 border-t border-[var(--color-border-soft)] pt-2 text-xs leading-5 text-[var(--color-text-muted)]">
-                  <div className="font-medium text-[var(--color-text-soft)]">Why suggested</div>
-                  <div>{suggestion.reason}</div>
-                  {(suggestion.matchedConcepts?.length ?? 0) > 0 && (
-                    <ul className="mt-2 space-y-1 text-[var(--color-text-soft)]">
-                      {suggestion.matchedConcepts?.map((concept) => (
-                        <li key={concept}>{concept}</li>
-                      ))}
-                    </ul>
-                  )}
-                  {(suggestion.matchedTerms?.length ?? 0) > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {suggestion.matchedTerms?.map((term) => (
-                        <Badge key={term}>{term}</Badge>
-                      ))}
-                    </div>
-                  )}
-                  {(suggestion.matchedResources?.length ?? 0) > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {suggestion.matchedResources?.map((resource) => (
-                        <Badge key={resource}>{chatResourceLabel(resource)}</Badge>
-                      ))}
-                    </div>
-                  )}
-                  {suggestion.scopes.length > 0 && (
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                      <span>Required scopes</span>
-                      {suggestion.scopes.slice(0, 4).map((scope) => (
-                        <Badge key={scope}>{scope}</Badge>
-                      ))}
-                      {suggestion.scopes.length > 4 && (
-                        <Badge>{suggestion.scopes.length - 4} more</Badge>
-                      )}
-                    </div>
-                  )}
-                  {suggestion.mode === "write" && (
-                    <div className="mt-2 text-[var(--color-warning)]">
-                      Write actions still use the normal plan and confirmation flow.
-                    </div>
-                  )}
-                  <Button className="mt-2" size="sm" variant="ghost" onClick={() => onOpen(suggestion.slug)}>
-                    Open agent
-                  </Button>
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-expanded={detailsOpen}
+                onClick={() => setDetailsSlug(detailsOpen ? null : suggestion.slug)}
+              >
+                Details
+              </Button>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={runningAgentSlug === suggestion.slug}
+                onClick={() => onRun(suggestion.slug)}
+              >
+                {runningAgentSlug === suggestion.slug
+                  ? "Starting"
+                  : suggestion.mode === "write"
+                    ? "Review change"
+                    : "Run agent"}
+              </Button>
+              <IconButton
+                size="sm"
+                label="Dismiss suggested agent"
+                tooltip="Dismiss"
+                icon={<IconClose size={12} />}
+                onClick={onDismiss}
+              />
+          </div>
+            {detailsOpen ? (
+              <div className="mt-3 border-t border-[var(--color-border-soft)] pt-3 text-sm leading-5 text-[var(--color-text-muted)]">
+                <div className="font-medium text-[var(--color-text-soft)]">Why suggested</div>
+                <div>{suggestion.reason}</div>
+                {(suggestion.matchedConcepts?.length ?? 0) > 0 ? (
+                  <ul className="mt-2 space-y-1 text-[var(--color-text-soft)]">
+                    {suggestion.matchedConcepts?.map((concept) => (
+                      <li key={concept}>{concept}</li>
+                    ))}
+                  </ul>
+                ) : null}
+                {(suggestion.matchedTerms?.length ?? 0) > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {suggestion.matchedTerms?.map((term) => <Badge key={term}>{term}</Badge>)}
+                  </div>
+                ) : null}
+                {(suggestion.matchedResources?.length ?? 0) > 0 ? (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {suggestion.matchedResources?.map((resource) => (
+                      <Badge key={resource}>{chatResourceLabel(resource)}</Badge>
+                    ))}
+                  </div>
+                ) : null}
+                {suggestion.scopes.length > 0 ? (
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                    <span>Required scopes</span>
+                    {suggestion.scopes.slice(0, 4).map((scope) => <Badge key={scope}>{scope}</Badge>)}
+                    {suggestion.scopes.length > 4 ? <Badge>{suggestion.scopes.length - 4} more</Badge> : null}
+                  </div>
+                ) : null}
+                {suggestion.mode === "write" ? (
+                  <div className="mt-2 text-[var(--color-warning)]">
+                    Write actions still use the normal plan and confirmation flow.
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -4683,4 +4460,78 @@ function formatDateTime(value: string) {
     hour: "2-digit",
     minute: "2-digit",
   }).format(date);
+}
+
+function matchComposerAgent(content: string, agents: AgentSummary[]): AgentSummary | undefined {
+  const normalized = content.trimStart().toLocaleLowerCase();
+  if (!normalized.startsWith("/")) return undefined;
+  return agents.find((agent) => {
+    const names = [formatAgentDisplayName(agent), agent.name, agent.slug];
+    return names.some((name) => {
+      const token = `/${name.toLocaleLowerCase()}`;
+      return normalized === token || normalized.startsWith(`${token} `);
+    });
+  });
+}
+
+function suggestionLabel(prompt: string): string {
+  // Keep whole words; the chip truncates visually with an ellipsis if needed.
+  return prompt.replace(/[?.]$/, "");
+}
+
+function newestTimestamp(values: string[]): string | undefined {
+  return values.reduce<string | undefined>((latest, value) => {
+    const time = Date.parse(value);
+    if (!Number.isFinite(time)) return latest;
+    if (!latest || time > Date.parse(latest)) return value;
+    return latest;
+  }, undefined);
+}
+
+function formatRelativeAge(value: string): string {
+  const time = Date.parse(value);
+  if (!Number.isFinite(time)) return value;
+  const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
+  if (seconds < 45) return "just now";
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return `${minutes} minute${minutes === 1 ? "" : "s"} ago`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.round(hours / 24);
+  return `${days} day${days === 1 ? "" : "s"} ago`;
+}
+
+function safeWebSources(trace: IntuneChatToolTraceEntry[]) {
+  return [
+    ...new Map(
+      trace
+        .flatMap((entry) => entry.webSources ?? [])
+        .filter((source) => {
+          try {
+            const url = new URL(source.url);
+            return url.protocol === "https:" && !url.username && !url.password;
+          } catch {
+            return false;
+          }
+        })
+        .map((source) => [source.url, source]),
+    ).values(),
+  ];
+}
+
+function scrollLatestUserNearTop(
+  scrollRoot: HTMLElement | null,
+  messages: IntuneChatMessage[],
+): boolean {
+  if (!scrollRoot) return false;
+  const latestUser = [...messages].reverse().find((message) => message.role === "user");
+  const element = latestUser
+    ? [...scrollRoot.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+        (candidate) => candidate.dataset.messageId === latestUser.id,
+      )
+    : undefined;
+  const top = Math.max(0, (element?.offsetTop ?? scrollRoot.scrollHeight) - 18);
+  if (typeof scrollRoot.scrollTo === "function") scrollRoot.scrollTo({ top, behavior: "auto" });
+  else scrollRoot.scrollTop = top;
+  return scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight >= 56;
 }

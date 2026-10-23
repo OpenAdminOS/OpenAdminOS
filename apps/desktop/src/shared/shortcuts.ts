@@ -1,4 +1,4 @@
-export type ShortcutCommand = "commandPalette" | "newConversation" | "settings";
+export type ShortcutCommand = "commandPalette" | "newConversation" | "settings" | "toggleSidebar";
 export type ShortcutContext = "global" | "overlayClosed";
 
 export const OPEN_NEW_CONVERSATION_EVENT = "openadminos:new-conversation";
@@ -7,6 +7,7 @@ export interface ShortcutDefinition {
   command: ShortcutCommand;
   key: string;
   modifier: "mod";
+  shift?: boolean;
   label: string;
   when: readonly ShortcutContext[];
 }
@@ -15,11 +16,12 @@ export const SHORTCUTS: Readonly<Record<ShortcutCommand, ShortcutDefinition>> = 
   commandPalette: { command: "commandPalette", key: "k", modifier: "mod", label: "Command Palette", when: ["global"] },
   newConversation: { command: "newConversation", key: "n", modifier: "mod", label: "New conversation", when: ["global", "overlayClosed"] },
   settings: { command: "settings", key: ",", modifier: "mod", label: "Settings", when: ["global", "overlayClosed"] },
+  toggleSidebar: { command: "toggleSidebar", key: "s", modifier: "mod", shift: true, label: "Toggle sidebar", when: ["global", "overlayClosed"] },
 };
 
 export function electronAccelerator(command: ShortcutCommand): string {
   const shortcut = SHORTCUTS[command];
-  return `CmdOrCtrl+${shortcut.key === "," ? "," : shortcut.key.toUpperCase()}`;
+  return `CmdOrCtrl+${shortcut.shift ? "Shift+" : ""}${shortcut.key === "," ? "," : shortcut.key.toUpperCase()}`;
 }
 
 export function isMacPlatform(platform = globalThis.navigator?.platform ?? ""): boolean {
@@ -32,14 +34,15 @@ export function shortcutLabel(
 ): string {
   const shortcut = SHORTCUTS[command];
   const key = shortcut.key === "," ? "," : shortcut.key.toUpperCase();
-  return isMacPlatform(platform) ? `⌘${key}` : `Ctrl+${key}`;
+  if (isMacPlatform(platform)) return `⌘${shortcut.shift ? "⇧" : ""}${key}`;
+  return `Ctrl+${shortcut.shift ? "Shift+" : ""}${key}`;
 }
 
 export function matchesShortcut(event: Pick<KeyboardEvent, "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey">, command: ShortcutCommand): boolean {
   const shortcut = SHORTCUTS[command];
   return (
     !event.altKey &&
-    !event.shiftKey &&
+    event.shiftKey === Boolean(shortcut.shift) &&
     (event.metaKey || event.ctrlKey) &&
     event.key.toLocaleLowerCase() === shortcut.key
   );

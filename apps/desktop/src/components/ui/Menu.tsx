@@ -141,7 +141,7 @@ export function Menu({
           role="menu"
           aria-label={ariaLabel}
           onKeyDown={onMenuKeyDown}
-          className={`absolute top-[calc(100%+6px)] z-[80] min-w-48 overflow-hidden rounded-lg bg-[var(--color-bg-elevated)] p-1 shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] ${
+          className={`absolute top-[calc(100%+6px)] z-[80] min-w-48 overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)] ${
             align === "end" ? "right-0" : "left-0"
           }`}
         >
@@ -162,10 +162,10 @@ export function Menu({
                   item.onSelect();
                   close(true);
                 }}
-                className={`flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors disabled:opacity-50 ${
+                className={`flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base transition-colors disabled:opacity-40 ${
                   item.danger
                     ? "text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
-                    : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
+                    : "text-[var(--color-text)] hover:bg-[var(--color-hover)]"
                 }`}
               >
                 {item.icon ? (

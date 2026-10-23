@@ -1,14 +1,17 @@
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { Route, Routes, useLocation } from "react-router";
 
 import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
 import {
+  createAwaitingConfirmationRun,
   createMockAgent,
   createMockAppState,
   makeMockBridge,
   mockProviders,
   renderRoute,
+  renderWithAppState,
 } from "../test/test-utils";
 import type {
   GraphCacheStatus,
@@ -18,7 +21,11 @@ import type {
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
-import { CHAT_COPY, deriveTrustCopy } from "../copy";
+import { deriveTrustCopy } from "../copy";
+
+function LocationProbe() {
+  return <output data-testid="location">{useLocation().pathname}</output>;
+}
 
 describe("IntuneChat guest exploration", () => {
   it("lets a user draft from a suggestion and asks for setup only on Send", async () => {
@@ -34,12 +41,12 @@ describe("IntuneChat guest exploration", () => {
       bridge,
     });
 
-    const composer = await screen.findByPlaceholderText(
-      "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
-    );
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
     await user.click(
       screen.getByRole("button", {
-        name: "Which managed devices have not synced in the last 7 days?",
+        name: /managed devices have not synced in the las/,
       }),
     );
     expect(composer).toHaveValue(
@@ -64,7 +71,7 @@ describe("IntuneChat guest exploration", () => {
       bridge: makeMockBridge({}, createMockAppState()),
     });
 
-    expect(await screen.findByRole("button", { name: "New conversation" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Contoso IT" })).toBeInTheDocument();
     expect(screen.queryByRole("textbox", { name: "Conversation title" })).not.toBeInTheDocument();
   });
 
@@ -89,9 +96,9 @@ describe("IntuneChat guest exploration", () => {
       await screen.findByRole("button", { name: "Close" }),
     );
 
-    const composer = await screen.findByPlaceholderText(
-      "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
-    );
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
     await user.click(
@@ -159,7 +166,9 @@ describe("IntuneChat new conversation routing", () => {
       bridge,
     });
 
-    const composer = await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
@@ -169,6 +178,126 @@ describe("IntuneChat new conversation routing", () => {
     await waitFor(() =>
       expect(screen.queryByText("Conversation not found")).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("IntuneChat tenant briefing", () => {
+  it("shows real confirmation work and opens its existing review route", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({
+      id: "run-review-1",
+      tenantId: "tenant-1",
+      agentSlug: "device-offboard",
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ runs: [run] }),
+    );
+
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<><IntuneChat /><LocationProbe /></>} />
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+
+    expect(await screen.findByRole("heading", { name: "Needs you" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /ready for review.*Review/i }));
+    expect(screen.getByTestId("location")).toHaveTextContent("/runs/run-review-1");
+  });
+});
+
+describe("IntuneChat agent picker", () => {
+  it("keeps saved queries reachable with keyboard selection", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({
+      listSavedMultiTenantQueries: vi.fn(async () => [
+        {
+          id: "query-1",
+          title: "Stale device review",
+          prompt: "Compare stale devices across connected tenants",
+          resourceHints: ["managedDevices" as const],
+          defaultScope: { kind: "all" as const },
+          order: 0,
+          createdAt: "2026-08-06T10:00:00.000Z",
+          updatedAt: "2026-08-06T10:00:00.000Z",
+        },
+      ]),
+    });
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
+    await user.type(composer, "/");
+    expect(await screen.findByRole("listbox", { name: "Agents and saved queries" })).toBeInTheDocument();
+    expect(screen.getByText("Saved queries")).toBeInTheDocument();
+    await user.keyboard("{ArrowDown}{Enter}");
+    expect(composer).toHaveValue("Compare stale devices across connected tenants");
+    expect(composer).toHaveFocus();
+  });
+
+  it("routes write agents to confirmation without starting a run", async () => {
+    const user = userEvent.setup();
+    const writeAgent = createMockAgent();
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ installedAgents: [writeAgent] }),
+    );
+
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<><IntuneChat /><LocationProbe /></>} />
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Run an agent" }));
+    await user.click(await screen.findByRole("option", { name: /Device Offboard/ }));
+    expect(screen.getByRole("combobox", { name: "Ask about your Microsoft 365 tenant" })).toHaveValue("/Device Offboard ");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location")).toHaveTextContent("/agents/device-offboard/confirm");
+    });
+    expect(bridge.startRun).not.toHaveBeenCalled();
+  });
+
+  it("starts read-only agents through the existing run flow", async () => {
+    const user = userEvent.setup();
+    const readAgent = createMockAgent({
+      id: "inactive-devices",
+      slug: "inactive-devices",
+      name: "Inactive Devices",
+      mode: "read",
+      scopes: ["DeviceManagementManagedDevices.Read.All"],
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ installedAgents: [readAgent] }),
+    );
+
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<><IntuneChat /><LocationProbe /></>} />
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Run an agent" }));
+    await user.click(await screen.findByRole("option", { name: /Inactive Devices/ }));
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("inactive-devices", undefined));
+    expect(screen.getByTestId("location")).toHaveTextContent("/runs/run-new-1");
   });
 });
 
@@ -189,14 +318,12 @@ describe("IntuneChat hosted-provider consent", () => {
       bridge,
     });
 
-    const composer = await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
-    expect(document.querySelector("header")).not.toHaveTextContent("OpenAI");
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
+    expect(document.querySelector("header")?.textContent ?? "").not.toContain("OpenAI");
     await screen.findByText(
-      deriveTrustCopy({
-        provider: { name: "OpenAI", isLocal: false },
-        model: "gpt-5",
-        scope: { tenantNames: ["Contoso IT"] },
-      }).boundary!,
+      "Prompts and tenant data go to OpenAI while this model is selected.",
     );
 
     await user.type(composer, "Which Windows devices are stale?");
@@ -278,18 +405,33 @@ describe("IntuneChat hosted-provider consent", () => {
 });
 
 describe("IntuneChat trust presentation", () => {
-  it("does not repeat local provider or boundary status in the Chat header and composer", async () => {
+  it("keeps provider status out of the header and shows one local boundary footnote", async () => {
     renderRoute(<IntuneChat />, {
       path: "/chat/:conversationId?",
       route: "/chat",
       bridge: makeMockBridge(),
     });
 
-    await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
-    expect(document.querySelector("header")).not.toHaveTextContent("Ollama");
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    expect(document.querySelector("header")?.textContent ?? "").not.toContain("Ollama");
     expect(screen.queryByText("Local provider")).not.toBeInTheDocument();
-    expect(screen.queryByText(CHAT_COPY.localBoundary)).not.toBeInTheDocument();
-    expect(screen.queryByText("Ollama")).not.toBeInTheDocument();
+    expect(screen.getByText("Local model. Tenant data stays on this device.")).toBeInTheDocument();
+  });
+
+  it("shows a setup action when no model is ready", async () => {
+    const providers = mockProviders.map((provider) =>
+      provider.id === "ollama"
+        ? { ...provider, status: "not-installed" as const, models: [] }
+        : provider,
+    );
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({ providers })),
+    });
+
+    expect(await screen.findByText("No model selected.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Set up a model" })).toBeInTheDocument();
   });
 
   it.each([900, 1100])("keeps Send in the normal composer flow at %dpx", async (width) => {
@@ -419,32 +561,31 @@ describe("IntuneChat related agent hint", () => {
       bridge,
     });
 
-    const composer = await screen.findByPlaceholderText(CHAT_COPY.composerPlaceholder);
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
     await user.type(composer, "Which managed devices have not synced in 45 days?");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(await screen.findByText("Suggested agents")).toBeInTheDocument();
+    expect(await screen.findByText("Find inactive devices")).toBeInTheDocument();
     expect(screen.getAllByText("Find inactive devices")).toHaveLength(1);
-    expect(screen.getByText("Read")).toBeInTheDocument();
     expect(
       screen.getByText(
         "Reviews Intune-managed device inactivity by sync age, compliance, OS, ownership, and enrollment signals with review-first cleanup guidance.",
       ),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Details" }));
-    expect(screen.getByRole("button", { name: "Open agent" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Run agent" })).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: "Dismiss suggested agents" }),
+      screen.getByRole("button", { name: "Dismiss suggested agent" }),
     );
 
-    expect(screen.queryByText("Suggested agents")).not.toBeInTheDocument();
+    expect(screen.queryByText("Find inactive devices")).not.toBeInTheDocument();
   });
 });
 
 describe("IntuneChat conversation routes", () => {
-  it("uses a readable overlay drawer instead of a numbered mini-rail at constrained widths", async () => {
-    const user = userEvent.setup();
+  it("does not render a second Chat navigation column at constrained widths", async () => {
     const matchMedia = vi.spyOn(window, "matchMedia").mockImplementation(
       (query) =>
         ({
@@ -476,20 +617,10 @@ describe("IntuneChat conversation routes", () => {
       bridge,
     });
 
-    const historyButton = await screen.findByRole("button", { name: "Show chat panel" });
+    await screen.findByRole("heading", { name: "Contoso IT" });
+    expect(screen.queryByRole("button", { name: "Show chat panel" })).not.toBeInTheDocument();
     expect(screen.queryByRole("searchbox", { name: "Search conversations" })).not.toBeInTheDocument();
     expect(screen.queryByText("01")).not.toBeInTheDocument();
-
-    await user.click(historyButton);
-    const search = await screen.findByRole("searchbox", { name: "Search conversations" });
-    await waitFor(() => expect(search).toHaveFocus());
-    expect(screen.getByText("Windows compliance gaps")).toBeInTheDocument();
-
-    await user.keyboard("{Escape}");
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Show chat panel" })).toHaveFocus(),
-    );
-    expect(screen.queryByRole("searchbox", { name: "Search conversations" })).not.toBeInTheDocument();
     matchMedia.mockRestore();
   });
 
@@ -512,12 +643,10 @@ describe("IntuneChat conversation routes", () => {
       bridge,
     });
 
-    expect(
-      (await screen.findAllByText("Review stale device evidence")).length,
-    ).toBeGreaterThan(0);
     await waitFor(() => {
       expect(bridge.getIntuneChatMessages).toHaveBeenCalledWith("conversation-route-1");
     });
+    expect(screen.getByPlaceholderText("Ask a follow-up, or type / to run an agent")).toBeInTheDocument();
   });
 
   it("hides the legacy trailing agent sentence in stored answers", async () => {
@@ -569,11 +698,10 @@ describe("IntuneChat conversation routes", () => {
     expect(
       screen.getByRole("button", { name: "Start a new conversation" }),
     ).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(CHAT_COPY.composerPlaceholder)).toBeDisabled();
+    expect(screen.getByPlaceholderText("Ask a follow-up, or type / to run an agent")).toBeDisabled();
   });
 
-  it("filters the rail without changing the URL-owned open conversation", async () => {
-    const user = userEvent.setup();
+  it("keeps the URL-owned conversation open without a local history rail", async () => {
     const activeConversation: IntuneChatConversation = {
       id: "conversation-active",
       title: "Active device review",
@@ -592,7 +720,6 @@ describe("IntuneChat conversation routes", () => {
       activeConversation,
       matchingConversation,
     ]);
-    bridge.searchIntuneChatConversations = vi.fn(async () => [matchingConversation]);
     bridge.getIntuneChatMessages = vi.fn(async () => []);
 
     renderRoute(<IntuneChat />, {
@@ -601,14 +728,10 @@ describe("IntuneChat conversation routes", () => {
       bridge,
     });
 
-    const showPanel = screen.queryByRole("button", { name: "Show chat panel" });
-    if (showPanel) await user.click(showPanel);
-    const search = await screen.findByRole("searchbox", { name: "Search conversations" });
-    await user.type(search, "other");
     await waitFor(() => {
-      expect(bridge.searchIntuneChatConversations).toHaveBeenCalledWith("other");
+      expect(bridge.getIntuneChatMessages).toHaveBeenCalledWith("conversation-active");
     });
-    expect(screen.getAllByText("Active device review").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("searchbox", { name: "Search conversations" })).not.toBeInTheDocument();
     expect(bridge.getIntuneChatMessages).not.toHaveBeenCalledWith("conversation-match");
   });
 
@@ -636,7 +759,7 @@ describe("IntuneChat conversation routes", () => {
       bridge,
     });
 
-    await screen.findAllByText("Original title");
+    await waitFor(() => expect(bridge.getIntuneChatMessages).toHaveBeenCalledWith("conversation-rename"));
     await user.keyboard("{F2}");
     const titleInput = screen.getByRole("textbox", { name: "Conversation title" });
     await user.clear(titleInput);
@@ -680,7 +803,7 @@ describe("IntuneChat conversation routes", () => {
 
     expect(await screen.findByText("Pinned evidence")).toBeInTheDocument();
     expect(screen.getAllByText("Stale device review").length).toBeGreaterThan(0);
-    expect(screen.getByRole("radio", { name: "Workspaces" })).toBeChecked();
+    expect(screen.queryByRole("radio", { name: "Workspaces" })).not.toBeInTheDocument();
   });
 
   it("keeps an engine notice out of the answer until details are expanded", async () => {
@@ -717,7 +840,7 @@ describe("IntuneChat conversation routes", () => {
 
     expect(await screen.findByText("Two devices need review.")).toBeInTheDocument();
     expect(screen.queryByText(notice)).not.toBeVisible();
-    await user.click(screen.getByText("How this was answered"));
+    await user.click(screen.getByText("How I checked"));
     expect(screen.getByText(notice)).toBeVisible();
   });
 });

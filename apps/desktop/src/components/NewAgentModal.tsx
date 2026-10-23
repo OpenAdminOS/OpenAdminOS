@@ -798,7 +798,7 @@ function BuilderSelect({
         value={value}
         disabled={disabled}
         onChange={(event) => onChange(event.currentTarget.value)}
-        className="mt-1 h-9 w-full rounded-md bg-[var(--color-surface)] px-2 text-base normal-case tracking-normal text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-accent)]/50 disabled:opacity-60"
+        className="mt-1 h-9 w-full rounded-md bg-[var(--color-surface)] px-2 text-base normal-case text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-[var(--color-focus)] disabled:opacity-60"
       >
         {options.map((option) => (
           <option key={option} value={option}>

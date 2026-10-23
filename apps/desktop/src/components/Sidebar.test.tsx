@@ -1,8 +1,8 @@
 import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
-import { Nova } from "../voice/Nova";
-import { Sidebar, SIDEBAR_COLLAPSED_KEY } from "./Sidebar";
+import { SIDEBAR_COLLAPSED_KEY } from "./Sidebar";
+import { AppShell } from "./AppShell";
 import {
   createAwaitingConfirmationRun,
   createMockAppState,
@@ -20,8 +20,8 @@ beforeEach(() => {
 });
 
 describe("Sidebar", () => {
-  it("renders exactly six primary destinations in the locked order", () => {
-    renderRoute(<Sidebar />, {
+  it("renders the six primary actions in the locked order", () => {
+    renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
       bridge: makeMockBridge(),
@@ -30,15 +30,17 @@ describe("Sidebar", () => {
     const primary = screen.getByRole("navigation", { name: "Primary" });
     expect(
       within(primary)
-        .getAllByRole("link")
-        .map((link) => link.textContent?.trim()),
-    ).toEqual(["Chat", "Agent Team", "Agents", "Runs", "Changes", "Settings"]);
-    expect(screen.queryByRole("navigation", { name: "More" })).not.toBeInTheDocument();
+        .getAllByRole("button")
+        .map((button) => button.textContent?.trim()),
+    ).toEqual(expect.arrayContaining([expect.stringContaining("New chat"), expect.stringContaining("Search")]));
+    expect(
+      within(primary).getAllByRole("link").map((link) => link.textContent?.trim()),
+    ).toEqual(["Agent Team", "Agents", "Runs", "Changes"]);
     expect(screen.getByRole("link", { name: "Agent Team" })).toHaveAttribute("href", "/office");
   });
 
   it("shows the Runs review badge only when a run awaits confirmation", async () => {
-    const empty = renderRoute(<Sidebar />, {
+    const empty = renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
       bridge: makeMockBridge(),
@@ -66,7 +68,7 @@ describe("Sidebar", () => {
       createMockAppState({ runs }),
     );
 
-    renderRoute(<Sidebar />, {
+    renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
       bridge,
@@ -75,34 +77,34 @@ describe("Sidebar", () => {
     expect(screen.getByRole("link", { name: /Runs/ })).toHaveTextContent("3");
   });
 
-  it("persists the collapsed rail and defaults to it below 1000px", async () => {
+  it("persists the fully collapsed sidebar and defaults to it below 1000px", async () => {
     const user = userEvent.setup();
-    const first = renderRoute(<Sidebar />, {
+    const first = renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
       bridge: makeMockBridge(),
     });
     await user.click(screen.getByRole("button", { name: "Collapse sidebar" }));
-    expect(screen.getByRole("complementary", { name: "Application navigation" })).toHaveAttribute(
+    expect(first.container.querySelector(".app-sidebar")).toHaveAttribute(
       "data-collapsed",
       "true",
     );
+    expect(first.container.querySelector(".app-sidebar")).toHaveAttribute("inert");
     expect(localStorage.getItem(SIDEBAR_COLLAPSED_KEY)).toBe("true");
     first.unmount();
 
-    const restored = renderRoute(<Sidebar />, {
+    const restored = renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
       bridge: makeMockBridge(),
     });
     expect(screen.getByRole("button", { name: "Expand sidebar" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Agent Team" })).toHaveAttribute("href", "/office");
-    expect(screen.getByRole("tooltip", { name: "Agent Team" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Agent Team" })).not.toBeInTheDocument();
     restored.unmount();
 
     localStorage.clear();
     window.innerWidth = 900;
-    renderRoute(<Sidebar />, {
+    renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
       bridge: makeMockBridge(),
@@ -113,10 +115,7 @@ describe("Sidebar", () => {
   it("opens Nova from the Voice footer without a floating launcher", async () => {
     const user = userEvent.setup();
     renderRoute(
-      <>
-        <Sidebar />
-        <Nova />
-      </>,
+      <AppShell><div /></AppShell>,
       {
         path: "*",
         route: "/chat",
@@ -125,9 +124,27 @@ describe("Sidebar", () => {
     );
 
     expect(screen.queryByRole("button", { name: /Talk to Nova/ })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Voice" }));
+    await user.click(await screen.findByRole("button", { name: /admin@contoso/i }));
+    await user.click(screen.getByRole("menuitem", { name: /Voice/ }));
     expect(
       await screen.findByRole("region", { name: "Nova voice assistant" }),
     ).toBeVisible();
+  });
+
+  it("opens the shared keyboard shortcut reference from the account menu", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+
+    await user.click(await screen.findByRole("button", { name: /admin@contoso/i }));
+    await user.click(screen.getByRole("menuitem", { name: "Keyboard shortcuts" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Keyboard shortcuts" });
+    expect(within(dialog).getByText("Toggle sidebar")).toBeInTheDocument();
+    expect(within(dialog).getByText("Ctrl+Shift+S")).toBeInTheDocument();
+    expect(within(dialog).getByText("Open Voice")).toBeInTheDocument();
   });
 });

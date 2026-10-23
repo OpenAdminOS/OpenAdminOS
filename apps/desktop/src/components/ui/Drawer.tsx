@@ -95,7 +95,7 @@ export function Drawer({
 
   return createPortal(
     <div
-      className="fixed inset-0 z-[90] flex justify-end bg-black/60"
+      className="app-shell-scrim fixed inset-x-0 bottom-0 top-[52px] z-[90] flex justify-end bg-black/60"
       onMouseDown={(event) => {
         if (closeOnScrim && event.target === event.currentTarget) onClose();
       }}
@@ -107,11 +107,11 @@ export function Drawer({
         aria-labelledby={titleId}
         tabIndex={-1}
         onKeyDown={trapFocus}
-        className="flex h-full w-[min(560px,45vw)] max-w-full flex-col bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] transition-transform duration-200 ease-out motion-reduce:transition-none"
+        className="flex h-full w-[min(560px,45vw)] max-w-full flex-col overflow-hidden rounded-l-[18px] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-soft)] transition-transform duration-200 ease-out motion-reduce:transition-none"
       >
         <DrawerTitleContext.Provider value={titleId}>
-          <header className="flex min-h-14 shrink-0 items-center gap-3 border-b border-[var(--color-border-soft)] px-5 py-3">
-            <h2 id={titleId} className="min-w-0 flex-1 truncate text-md font-semibold text-[var(--color-text)]">
+          <header className="flex min-h-16 shrink-0 items-center gap-3 border-b border-[var(--color-border-soft)] px-5 py-4">
+            <h2 id={titleId} className="min-w-0 flex-1 truncate font-serif text-[22px] font-medium leading-7 tracking-[-0.01em] text-[var(--color-text)]">
               {title}
             </h2>
             {actions ? <div className="flex items-center gap-2">{actions}</div> : null}

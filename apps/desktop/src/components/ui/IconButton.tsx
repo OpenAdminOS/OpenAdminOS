@@ -6,6 +6,7 @@ export interface IconButtonProps
   label: string;
   icon: ReactNode;
   tooltip?: string;
+  shortcut?: string;
   size?: "sm" | "md";
   tone?: "neutral" | "danger";
 }
@@ -14,6 +15,7 @@ export function IconButton({
   label,
   icon,
   tooltip = label,
+  shortcut,
   size = "md",
   tone = "neutral",
   className = "",
@@ -21,12 +23,12 @@ export function IconButton({
   ...rest
 }: IconButtonProps) {
   return (
-    <Tooltip content={tooltip}>
+    <Tooltip content={tooltip} shortcut={shortcut}>
       <button
         {...rest}
         type={type}
         aria-label={label}
-        className={`inline-flex shrink-0 items-center justify-center rounded-md transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] disabled:cursor-not-allowed disabled:opacity-50 ${
+        className={`inline-flex shrink-0 items-center justify-center rounded-[10px] transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] disabled:cursor-not-allowed disabled:opacity-40 ${
           size === "sm" ? "h-7 w-7" : "h-9 w-9"
         } ${
           tone === "danger"

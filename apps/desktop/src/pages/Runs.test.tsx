@@ -64,8 +64,8 @@ describe("Runs", () => {
 
     const reviewButtons = screen.getAllByRole("button", { name: "Review" });
     expect(reviewButtons).toHaveLength(2);
-    expect(reviewButtons[0]).toHaveClass("bg-[var(--color-accent)]");
-    expect(reviewButtons[1]).toHaveClass("bg-[var(--color-surface)]");
+    expect(reviewButtons[0]).toHaveClass("bg-transparent", "shadow-[inset_0_0_0_1px_var(--color-border)]");
+    expect(reviewButtons[1]).toHaveClass("bg-transparent", "shadow-[inset_0_0_0_1px_var(--color-border)]");
     expect(screen.getByText("1 of 2 steps")).toBeInTheDocument();
   });
 
@@ -104,10 +104,10 @@ describe("Runs", () => {
       bridge,
     });
 
-    const table = await screen.findByRole("table", { name: "Run history" });
-    expect(within(table).getByText("Agent B")).toBeInTheDocument();
-    expect(within(table).getByText("Fabrikam")).toBeInTheDocument();
-    expect(within(table).queryByText("Agent A")).not.toBeInTheDocument();
+    const history = await screen.findByRole("list", { name: "Run history" });
+    expect(within(history).getByText("Agent B")).toBeInTheDocument();
+    expect(within(history).getByText("Fabrikam")).toBeInTheDocument();
+    expect(within(history).queryByText("Agent A")).not.toBeInTheDocument();
     expect(screen.getByRole("radio", { name: "Failed" })).toHaveAttribute(
       "aria-checked",
       "true",
@@ -206,7 +206,7 @@ describe("Runs", () => {
       </Routes>,
       { route: "/runs", bridge },
     );
-    const history = await screen.findByRole("table", { name: "Run history" });
+    const history = await screen.findByRole("list", { name: "Run history" });
     await user.click(within(history).getByText("run-done"));
     expect(await screen.findByTestId("location")).toHaveTextContent("/runs/run-done");
   });

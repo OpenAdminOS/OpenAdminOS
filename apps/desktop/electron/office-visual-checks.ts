@@ -8,8 +8,14 @@ export async function runOfficeVisualChecks(
   output: string,
 ) {
   window.webContents.setBackgroundThrottling(false);
-  const evaluate = <T>(code: string): Promise<T> =>
-    window.webContents.executeJavaScript(code, true);
+  const evaluate = async <T>(code: string): Promise<T> => {
+    try {
+      return await window.webContents.executeJavaScript(code, true);
+    } catch (error) {
+      console.error("[office-visual-evaluate]", code, error);
+      throw error;
+    }
+  };
   const reload = async () => {
     // Waiting only for a selector can match the old document during reload.
     const loaded = new Promise<void>((resolve) =>
@@ -90,10 +96,12 @@ export async function runOfficeVisualChecks(
   measurements.push(
     await evaluate(`(()=>{
     const stage=document.querySelector('.office-stage').getBoundingClientRect();
-    const scope=document.querySelector('footer[aria-label="Current tenant, provider, and data boundary"]');
+    const scope=document.querySelector('header[aria-label="Current tenant, provider, and data boundary"]');
     const exit=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Exit full screen').getBoundingClientRect();
     if(stage.top<0||stage.bottom>innerHeight||stage.right>innerWidth)throw new Error('Fullscreen room is clipped');
-    if(getComputedStyle(scope).visibility==='hidden'||getComputedStyle(scope).display==='none')throw new Error('Fullscreen concealed the tenant boundary');
+    if(!(scope instanceof Element))throw new Error('Fullscreen lost the tenant boundary');
+    const scopeStyle=window.getComputedStyle(scope);
+    if(scopeStyle.visibility==='hidden'||scopeStyle.display==='none')throw new Error('Fullscreen concealed the tenant boundary');
     if(exit.bottom>innerHeight)throw new Error('Fullscreen exit is clipped');
     return {mode:'fullscreen',width:innerWidth,height:innerHeight,stage:stage.toJSON(),tenantBoundaryVisible:true};
   })()`),
@@ -121,7 +129,7 @@ export async function runOfficeVisualChecks(
   await evaluate(`(()=>{
     const stage=document.querySelector('.office-stage').getBoundingClientRect(), viewport=document.querySelector('.scene-viewport').getBoundingClientRect();
     if(stage.width>viewport.width+2||stage.height>viewport.height+2)throw new Error('Room did not fit after 200% zoom: '+JSON.stringify({stage:stage.toJSON(),viewport:viewport.toJSON()}));
-    const labels=[...document.querySelectorAll('.scene-persona-label')].filter(e=>getComputedStyle(e).opacity!=='0').map(e=>e.getBoundingClientRect());
+    const labels=[...document.querySelectorAll('.scene-persona-label')].filter(e=>e instanceof Element&&window.getComputedStyle(e).opacity!=='0').map(e=>e.getBoundingClientRect());
     if(labels.length!==1)throw new Error('Expected exactly one visible selection label');
     for(let i=0;i<labels.length;i++)for(let j=i+1;j<labels.length;j++){const a=labels[i],b=labels[j];if(a.left<b.right&&a.right>b.left&&a.top<b.bottom&&a.bottom>b.top)throw new Error('Teammate labels overlap at 200%');}
     if(document.querySelectorAll('.scene-roster button').length!==6)throw new Error('Visible floor lost roster access at 200%');
@@ -138,7 +146,7 @@ export async function runOfficeVisualChecks(
   if (window.isFullScreen())
     throw new Error("Escape did not restore the native window.");
   await wait(
-    `[...document.querySelectorAll('button')].some(b=>b.textContent==='Restore layout')`,
+    `[...document.querySelectorAll('button')].some(b=>b.getAttribute('aria-label')==='Restore layout')`,
   );
   await click("Full screen");
   await wait(`document.documentElement.hasAttribute('data-team-fullscreen')`);

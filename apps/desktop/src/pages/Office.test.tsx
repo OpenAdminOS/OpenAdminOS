@@ -341,7 +341,7 @@ describe("Office", () => {
       screen.getByRole("button", { name: "Run assignment" }),
     ).toBeDisabled();
     await userEvent.keyboard("{Escape}");
-    await userEvent.click(screen.getByRole("radio", { name: "List view" }));
+    await userEvent.click(screen.getByRole("radio", { name: "List" }));
     expect(
       screen.getByRole("button", { name: "Policy Watcher, Needs approval" }),
     ).toBeInTheDocument();
@@ -545,7 +545,7 @@ it("keeps fullscreen separate from concealment and gives nested dialogs Escape f
   expect(
     await screen.findByRole("button", { name: "Full screen" }),
   ).toHaveFocus();
-  expect(screen.getByRole("radio", { name: "List view" })).toHaveAttribute(
+  expect(screen.getByRole("radio", { name: "List" })).toHaveAttribute(
     "aria-checked",
     "true",
   );

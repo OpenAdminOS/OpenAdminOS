@@ -877,7 +877,7 @@ describe("Changes page", () => {
     });
 
     await user.click(
-      (await screen.findByText("Device restriction policy")).closest("tr")!,
+      (await screen.findByText("Device restriction policy")).closest("button")!,
     );
 
     expect(await screen.findByText("Field changes")).toBeInTheDocument();
@@ -952,8 +952,8 @@ describe("Changes page", () => {
     ).not.toBeInTheDocument();
 
     expect(
-      screen.getByText("Conditional Access baseline").closest("tr"),
-    ).toHaveAttribute("tabindex", "0");
+      screen.getByText("Conditional Access baseline").closest("button"),
+    ).toHaveAttribute("type", "button");
   });
 });
 

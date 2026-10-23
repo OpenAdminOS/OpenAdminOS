@@ -35,7 +35,7 @@ export async function captureWebsiteDemo(
       id: "chat",
       route: "/chat",
       label: "Chat",
-      wait: ["What do you want to inspect?"],
+      wait: ["Run an agent with /"],
       prepare: "chat-empty" as const,
       click: "Devices",
     },

@@ -29,7 +29,7 @@
 //     package.json (regex won't match) and CHANGELOG (won't double-roll
 //     because the version header already exists).
 //   - Refuses to roll minor or major unless BUMP_TYPE is explicitly
-//     "minor" or "major". Default is "patch" — matches the project's
+//     "minor" or "major". Default is "patch", which matches the project's
 //     v0.1.x line discipline.
 
 import { readFileSync, writeFileSync } from "node:fs";
@@ -181,7 +181,7 @@ function rollChangelog(current, next) {
   const body = unreleasedMatch[1].trim();
   if (!hasRealEntries(body)) {
     fail(
-      `CHANGELOG.md [Unreleased] has no real entries — refusing to cut a "no changes" release.\n` +
+      `CHANGELOG.md [Unreleased] has no real entries, refusing to cut a "no changes" release.\n` +
       `Add at least one bullet under Added/Changed/Removed/Fixed/Security before rolling.`,
     );
   }

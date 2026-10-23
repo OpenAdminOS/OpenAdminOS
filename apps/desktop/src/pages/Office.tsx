@@ -9,8 +9,9 @@ import type {
 import { useAppState } from "../state";
 import { Button } from "../components/Button";
 import { PageHeader } from "../components/AppShell";
-import { IconButton, SegmentedControl } from "../components/ui";
-import { IconRefresh } from "../components/icons";
+import { IconButton, SegmentedControl, StatusDot, type StatusDotTone } from "../components/ui";
+import { IconCloud, IconLock, IconRefresh } from "../components/icons";
+import { TenantTile } from "../components/TenantTile";
 import { Modal, ModalHeader } from "../components/Modal";
 import { OfficeScene, PersonaAvatar } from "../components/office/OfficeScene";
 import "../styles/office.css";
@@ -98,6 +99,8 @@ export default function Office() {
   const office = state.office ?? { personas: [], missions: [] };
   const selected =
     office.personas.find((p) => p.id === selectedId) ?? office.personas[0];
+  const selectedTenant = state.tenants.find((tenant) => tenant.id === selected?.tenantId);
+  const selectedProvider = state.providers.find((provider) => provider.id === selected?.providerId);
   const selectedMissions = office.missions.filter(
     (m) => m.personaId === selected?.id,
   );
@@ -105,17 +108,7 @@ export default function Office() {
   const running = office.missions.filter((m) =>
     ["queued", "running", "executing", "awaiting-review"].includes(m.status),
   ).length;
-  const attention = office.personas.filter(
-    (p) =>
-      p.lastError ||
-      office.findings?.some(
-        (f) => f.personaId === p.id && f.state === "open",
-      ) ||
-      state.runs.some(
-        (r) =>
-          r.office?.personaId === p.id && r.status === "awaiting-confirmation",
-      ),
-  ).length;
+  const openFindings = (office.findings ?? []).filter((finding) => finding.state === "open");
   const api = window.openAdminOS;
   const act = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -142,15 +135,27 @@ export default function Office() {
     <>
     <PageHeader
       title="Agent Team"
+      wide
       actions={
-        <Button
-          variant="primary"
-          size="sm"
-          disabled={busy || !api?.saveOfficePersona}
-          onClick={() => setEditing("new")}
-        >
-          Add teammate
-        </Button>
+        <>
+          <SegmentedControl
+            ariaLabel="Team view"
+            value={view}
+            onValueChange={setView}
+            options={[
+              { id: "room", label: "Office" },
+              { id: "list", label: "List", disabled: presentation || fullscreen.active },
+            ]}
+          />
+          <Button
+            variant="primary"
+            size="sm"
+            disabled={busy || !api?.saveOfficePersona}
+            onClick={() => setEditing("new")}
+          >
+            Add teammate
+          </Button>
+        </>
       }
     />
     <div className="app-page-body min-w-0 flex-1 overflow-y-auto">
@@ -184,23 +189,15 @@ export default function Office() {
         <div>
           <strong>{office.personas.length}</strong>{" "}
           {office.personas.length === 1 ? "teammate" : "teammates"} <span>·</span>{" "}
-          <strong>{running}</strong> in progress <span>·</span>{" "}
-          <strong>{attention}</strong>{" "}
-          {attention === 1 ? "needs attention" : "need attention"}
+          <strong>{running}</strong> working <span>·</span>{" "}
+          <strong>{openFindings.length}</strong>{" "}
+          {openFindings.length === 1 ? "finding" : "findings"} to review
         </div>
         <div className="office-view" aria-label="Agent Team controls">
+          <span className="office-storage-note">Status reflects actual agent runs. Stored on this device.</span>
           {!presentation && (
             <Button size="sm" variant="ghost" onClick={() => setInboxOpen(true)}>Review inbox</Button>
           )}
-          <SegmentedControl
-            ariaLabel="Team view"
-            value={view}
-            onValueChange={setView}
-            options={[
-              { id: "room", label: "Office" },
-              { id: "list", label: "List view", disabled: presentation || fullscreen.active },
-            ]}
-          />
           <IconButton
             label={expanded ? "Restore layout" : "Expand office"}
             icon={<IconRefresh size={14} />}
@@ -236,6 +233,38 @@ export default function Office() {
           </Button>
         </div>
       </div>
+      {!presentation && openFindings.length > 0 ? (
+        <section className="office-findings" aria-labelledby="office-findings-title">
+          <h2 id="office-findings-title">Findings to review</h2>
+          <div className="office-findings-group">
+            {openFindings.map((finding) => {
+              const persona = office.personas.find((candidate) => candidate.id === finding.personaId);
+              const evidenceId = finding.runIds[0];
+              return (
+                <div key={finding.id} className="office-finding-row">
+                  {persona ? <PersonaAvatar avatar={persona.avatar} color={persona.color} /> : null}
+                  <div className="office-finding-copy">
+                    <strong>{finding.title}</strong>
+                    <span>{finding.summary}</span>
+                  </div>
+                  <div className="office-finding-actions">
+                    {evidenceId ? <Link className="inline-flex h-[34px] items-center justify-center rounded-[10px] px-3 text-sm font-medium text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]" to={`/runs/${evidenceId}`}>Open evidence</Link> : null}
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy || !api?.reviewOfficeFinding}
+                      onClick={() => void act(() => api!.reviewOfficeFinding!({ id: finding.id, state: "acknowledged" }))}
+                    >
+                      Acknowledge
+                    </Button>
+                    <Button size="sm" variant="secondary" onClick={() => setInboxOpen(true)}>Review</Button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      ) : null}
       <div className="office-layout">
         <section
           className={`office-room ${view === "list" ? "office-list" : ""}`}
@@ -358,7 +387,7 @@ export default function Office() {
               </ol>
             </div>
           ) : view === "list" ? (
-            <div className="office-stations">
+            <div className="office-persona-list">
               {office.personas.map((p) => {
                 const m = office.missions.find((m) => m.personaId === p.id);
                 const label = status(p, m, state.runs, office.findings);
@@ -368,41 +397,17 @@ export default function Office() {
                 return (
                   <button
                     key={p.id}
-                    className={`office-station ${label === "Working" ? "is-working" : ""}`}
+                    className="office-persona-row"
                     aria-pressed={selected?.id === p.id}
                     aria-label={`${p.name}, ${label}`}
                     onClick={() => setSelectedId(p.id)}
                   >
-                    <span
-                      className={`office-station-status ${label === "Needs approval" || label === "Needs attention" ? "attention" : ""}`}
-                    >
-                      {label}
+                    <PersonaAvatar avatar={p.avatar} color={p.color} />
+                    <span className="office-persona-copy">
+                      <span className="office-persona-line"><strong>{p.name}</strong><span><StatusDot tone={officeStatusTone(label)} className={label === "Working" ? "calm-status-pulse" : ""} />{label}</span></span>
+                      <span>{current ? (state.installedAgents.find((agent) => agent.slug === current.agentSlug)?.name ?? current.agentSlug) : p.responsibility}</span>
                     </span>
-                    <span className="office-desk-scene">
-                      <span className="office-chair" />
-                      <PersonaAvatar avatar={p.avatar} color={p.color} />
-                      <span className="office-desk">
-                        <span className="office-monitor">
-                          <i />
-                          <i />
-                          <i />
-                        </span>
-                        <span className="office-keyboard" />
-                        <span className="office-mug" />
-                      </span>
-                    </span>
-                    <strong>{p.name}</strong>
-                    <span className="office-station-task">
-                      {current
-                        ? (state.installedAgents.find(
-                            (a) => a.slug === current.agentSlug,
-                          )?.name ?? current.agentSlug)
-                        : p.responsibility}
-                    </span>
-                    <span className="office-station-tenant">
-                      {state.tenants.find((t) => t.id === p.tenantId)
-                        ?.displayName ?? "Tenant disconnected"}
-                    </span>
+                    <span className="office-persona-tenant">{state.tenants.find((tenant) => tenant.id === p.tenantId)?.displayName ?? "Tenant disconnected"}</span>
                   </button>
                 );
               })}
@@ -411,10 +416,9 @@ export default function Office() {
           <footer className="office-room-footer">
             <span>
               {view === "list"
-                ? "Status reflects actual agent runs."
+                ? "Select a teammate to inspect its assignment."
                 : "Desks: working · Lounge & games: idle"}
             </span>
-            <span>Stored on this device</span>
           </footer>
         </section>
         <aside
@@ -430,8 +434,8 @@ export default function Office() {
                   color={selected.color}
                 />
                 <div>
-                  <div className="office-eyebrow">Assignment</div>
                   <h2>{selected.name}</h2>
+                  <span className="office-persona-role">Teammate</span>
                 </div>
               </div>
               <p className="office-responsibility">{selected.responsibility}</p>
@@ -447,22 +451,21 @@ export default function Office() {
               )}
               <dl className="office-facts">
                 <div>
+                  <dt>Status</dt>
+                  <dd className="office-fact-status"><StatusDot tone={officeStatusTone(status(selected, mission, state.runs, office.findings))} />{status(selected, mission, state.runs, office.findings)}</dd>
+                </div>
+                <div>
                   <dt>Tenant</dt>
-                  <dd>
-                    {state.tenants.find((t) => t.id === selected.tenantId)
-                      ?.displayName ?? "Disconnected"}
+                  <dd className="office-fact-tenant">
+                    {selectedTenant ? <TenantTile tenantId={selectedTenant.id} displayName={selectedTenant.displayName} size="sm" /> : null}
+                    {selectedTenant?.displayName ?? "Disconnected"}
                   </dd>
                 </div>
                 <div>
                   <dt>Provider</dt>
-                  <dd>
-                    {state.providers.find((p) => p.id === selected.providerId)
-                      ?.name ?? selected.providerId}{" "}
-                    ·{" "}
-                    {state.providers.find((p) => p.id === selected.providerId)
-                      ?.isLocal
-                      ? "Local"
-                      : "Hosted"}
+                  <dd className="office-fact-provider">
+                    {selectedProvider?.isLocal ? <IconLock size={12} /> : <IconCloud size={12} />}
+                    {selectedProvider?.name ?? selected.providerId} · {selectedProvider?.isLocal ? "Local, stays on this device" : "Hosted provider"}
                   </dd>
                 </div>
                 <div>
@@ -470,7 +473,7 @@ export default function Office() {
                   <dd>{selected.model ?? "Provider default"}</dd>
                 </div>
                 <div>
-                  <dt>Next run</dt>
+                  <dt>Schedule</dt>
                   <dd>
                     {selected.nextRunAt
                       ? date(selected.nextRunAt)
@@ -843,6 +846,13 @@ export default function Office() {
     </div>
     </>
   );
+}
+
+function officeStatusTone(label: string): StatusDotTone {
+  if (label === "Working") return "info";
+  if (label === "Needs approval" || label === "Needs attention") return "warning";
+  if (label === "Paused") return "neutral";
+  return "success";
 }
 
 function FullScreenIcon() {

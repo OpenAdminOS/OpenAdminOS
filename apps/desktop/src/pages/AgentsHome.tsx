@@ -6,32 +6,30 @@ import {
   useState,
 } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
-import { AgentIdentity } from "../components/AgentCard";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { useToast } from "../components/Toast";
 import {
   IconChevronDown,
+  IconBolt,
   IconClock,
   IconPlay,
   IconRefresh,
   IconSearch,
   IconSettings,
   IconShare,
+  IconShield,
 } from "../components/icons";
 import {
   Badge,
   Button,
-  DataTable,
   IconButton,
   Menu,
-  Section,
-  SegmentedControl,
   StatusDot,
-  Toolbar,
-  type DataTableColumn,
+  Tabs,
   type MenuEntry,
 } from "../components/ui";
 import type { AgentDisplay } from "../shared/agent-display";
+import { formatAgentDisplayName } from "../shared/agent-display";
 import type {
   AgentSummary,
   RegistryAgentSummary,
@@ -79,6 +77,7 @@ export default function AgentsHome() {
   const modeFilter: ModeFilter = modeParam === "read" || modeParam === "write" ? modeParam : "all";
   const categoryFilter = searchParams.get("category") || "all";
   const scheduledOnly = searchParams.get("filter") === "scheduled";
+  const activeTab = source === "hub" ? "hub" : scheduledOnly ? "schedules" : "installed";
   const updatesOnly = searchParams.get("updates") === "available";
   const addFlow = searchParams.get("add");
   const activeTenant = state.activeTenantId
@@ -232,12 +231,14 @@ export default function AgentsHome() {
     return matchesQuery && matchesMode && matchesCategory && matchesSchedule && matchesUpdates;
   });
 
-  const setSource = (nextSource: string) => {
+  const setLibraryTab = (nextTab: string) => {
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.delete("add");
-      if (nextSource === "hub") next.set("source", "hub");
+      if (nextTab === "hub") next.set("source", "hub");
       else next.delete("source");
+      if (nextTab === "schedules") next.set("filter", "scheduled");
+      else next.delete("filter");
       return next;
     });
   };
@@ -321,138 +322,6 @@ export default function AgentsHome() {
     }
   };
 
-  const columns: DataTableColumn<LibraryRow>[] = [
-    {
-      id: "agent",
-      header: "Agent",
-      sortable: true,
-      sortValue: (row) => row.display.name,
-      width: "34%",
-      render: (row) => (
-        <div className="flex min-w-0 items-center gap-2">
-          <AgentIdentity agent={row.display} />
-          {row.licenseMissing ? <Badge tone="warning">License required</Badge> : null}
-        </div>
-      ),
-    },
-    {
-      id: "mode",
-      header: "Mode",
-      sortable: true,
-      sortValue: (row) => row.display.mode,
-      render: (row) => (
-        <Badge tone={row.display.mode === "write" ? "warning" : "neutral"}>
-          {row.display.mode === "write" ? "Write" : "Read"}
-        </Badge>
-      ),
-    },
-    {
-      id: "category",
-      header: "Category",
-      sortable: true,
-      sortValue: (row) => row.display.category,
-      render: (row) => <span className="capitalize">{row.display.category}</span>,
-    },
-    {
-      id: "schedule",
-      header: "Schedule",
-      sortable: true,
-      sortValue: (row) => row.installed?.schedule?.intervalSeconds ?? 0,
-      render: (row) => (
-        <button
-          type="button"
-          className="rounded text-left text-sm text-[var(--color-text-soft)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]"
-          onClick={(event) => {
-            event.stopPropagation();
-            openAgent(row.slug, "schedule");
-          }}
-        >
-          <span className="block">
-            {row.installed?.schedule?.enabled
-              ? `Every ${formatInterval(row.installed.schedule.intervalSeconds)}`
-              : "Manual"}
-          </span>
-          {row.installed?.schedule?.enabled && row.latestScheduledRun ? (
-            <span className="mt-0.5 inline-flex items-center gap-1.5 text-xs text-[var(--color-text-muted)]">
-              <StatusDot
-                tone={runStatusTone(row.latestScheduledRun)}
-                label={`Last scheduled run ${runStatusLabel(row.latestScheduledRun.status)}`}
-              />
-              {runStatusLabel(row.latestScheduledRun.status)}
-              {row.latestScheduledRun.changeState
-                ? `, ${runChangeLabel(row.latestScheduledRun.changeState)}`
-                : ""}
-            </span>
-          ) : null}
-        </button>
-      ),
-    },
-    {
-      id: "last-run",
-      header: "Last run",
-      sortable: true,
-      sortValue: (row) => row.latestRun?.queuedAt,
-      render: (row) => (
-        <span className="inline-flex items-center gap-2 text-sm">
-          <StatusDot
-            tone={runStatusTone(row.latestRun)}
-            label={row.latestRun ? runStatusLabel(row.latestRun.status) : "Never run"}
-          />
-          <span>{row.latestRun ? formatRelative(row.latestRun.queuedAt) : "Never"}</span>
-        </span>
-      ),
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      align: "right",
-      render: (row) => (
-        <div
-          className="flex items-center justify-end gap-1"
-          onClick={(event) => event.stopPropagation()}
-          onKeyDown={(event) => event.stopPropagation()}
-        >
-          {row.installed ? (
-            <>
-              <IconButton
-                label={`Run ${row.display.name}`}
-                icon={<IconPlay size={13} />}
-                size="sm"
-                disabled={row.display.compatibility?.supported === false}
-                onClick={() => void runAgent(row.installed!)}
-              />
-              <Menu
-                ariaLabel={`${row.display.name} actions`}
-                trigger={
-                  <IconButton
-                    label={`More actions for ${row.display.name}`}
-                    icon={<IconChevronDown size={13} />}
-                    size="sm"
-                  />
-                }
-                items={installedAgentMenu(row)}
-              />
-            </>
-          ) : (
-            <>
-              <Button
-                size="sm"
-                variant="secondary"
-                disabled={row.display.compatibility?.supported === false}
-                onClick={() => openAgent(row.slug, "install")}
-              >
-                Install
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => openAgent(row.slug)}>
-                Details
-              </Button>
-            </>
-          )}
-        </div>
-      ),
-    },
-  ];
-
   function installedAgentMenu(row: LibraryRow): MenuEntry[] {
     return [
       {
@@ -524,16 +393,24 @@ export default function AgentsHome() {
   ];
 
   return (
-    <div>
-      <Section title="Library">
-        <Toolbar
-          search={
-            <label className="relative min-w-[220px] flex-1 sm:max-w-sm">
+    <div className="calm-page-column">
+      <section aria-labelledby="agent-library-title">
+        <h2 id="agent-library-title" className="sr-only">Library</h2>
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+          <Tabs
+            ariaLabel="Agent library sections"
+            value={activeTab}
+            onValueChange={setLibraryTab}
+            tabs={[
+              { id: "installed", label: "Installed" },
+              { id: "hub", label: "Browse" },
+              { id: "schedules", label: "Schedules" },
+            ]}
+          />
+          <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
+            <label className="relative min-w-[220px] sm:max-w-[280px]">
               <span className="sr-only">Search agents</span>
-              <IconSearch
-                size={14}
-                className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]"
-              />
+              <IconSearch size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--color-text-muted)]" />
               <input
                 name="agent-library-search"
                 type="search"
@@ -541,73 +418,45 @@ export default function AgentsHome() {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder={source === "hub" ? "Search hub…" : "Search installed agents…"}
-                className="h-9 w-full rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+                className="h-8 w-full rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus)]"
               />
             </label>
-          }
-          filters={
-            <>
-              <SegmentedControl
-                ariaLabel="Agent source"
-                value={source}
-                onValueChange={setSource}
-                options={[
-                  { id: "installed", label: "Installed" },
-                  { id: "hub", label: "Hub" },
-                ]}
+            <Menu ariaLabel="Filter agents" align="end" trigger={<Button size="sm" variant="ghost">Filter</Button>} items={filterItems} />
+            {source === "hub" ? (
+              <IconButton
+                label="Refresh hub"
+                icon={<IconRefresh size={14} className={refreshingHub ? "animate-spin" : ""} />}
+                disabled={refreshingHub}
+                onClick={() => {
+                  setRefreshingHub(true);
+                  void refreshRegistry()
+                    .catch((caught) => toast.error(caught instanceof Error ? caught.message : String(caught)))
+                    .finally(() => setRefreshingHub(false));
+                }}
               />
-              <Menu
-                ariaLabel="Filter agents"
-                align="start"
-                trigger={<Button size="sm" variant="secondary">Filter</Button>}
-                items={filterItems}
-              />
-            </>
-          }
-          actions={
-            <>
-              {source === "hub" ? (
-                <IconButton
-                  label="Refresh hub"
-                  icon={<IconRefresh size={14} className={refreshingHub ? "animate-spin" : ""} />}
-                  disabled={refreshingHub}
-                  onClick={() => {
-                    setRefreshingHub(true);
-                    void refreshRegistry()
-                      .catch((caught) => toast.error(caught instanceof Error ? caught.message : String(caught)))
-                      .finally(() => setRefreshingHub(false));
-                  }}
-                />
-              ) : null}
-              <Menu
-                ariaLabel="Schedule actions"
-                trigger={
-                  <IconButton
-                    label="Schedule actions"
-                    icon={<IconChevronDown size={14} />}
-                  />
-                }
-                items={[
-                  {
-                    id: "run-due",
-                    label: bulkRunning === "due" ? "Queueing due schedules" : `Run due now (${dueAgents.length})`,
-                    disabled: bulkRunning !== null || dueAgents.length === 0,
-                    icon: <IconPlay size={13} />,
-                    onSelect: () => void runScheduledBatch(dueAgents, "due"),
-                  },
-                  {
-                    id: "run-all",
-                    label: bulkRunning === "all" ? "Queueing schedules" : "Run all scheduled",
-                    disabled: bulkRunning !== null || scheduledAgents.length === 0,
-                    icon: <IconPlay size={13} />,
-                    onSelect: () => void runScheduledBatch(scheduledAgents, "all"),
-                  },
-                ]}
-              />
-            </>
-          }
-          className="mb-3"
-        />
+            ) : null}
+            <Menu
+              ariaLabel="Schedule actions"
+              trigger={<IconButton label="Schedule actions" icon={<IconChevronDown size={14} />} />}
+              items={[
+                {
+                  id: "run-due",
+                  label: bulkRunning === "due" ? "Queueing due schedules" : `Run due now (${dueAgents.length})`,
+                  disabled: bulkRunning !== null || dueAgents.length === 0,
+                  icon: <IconPlay size={13} />,
+                  onSelect: () => void runScheduledBatch(dueAgents, "due"),
+                },
+                {
+                  id: "run-all",
+                  label: bulkRunning === "all" ? "Queueing schedules" : "Run all scheduled",
+                  disabled: bulkRunning !== null || scheduledAgents.length === 0,
+                  icon: <IconPlay size={13} />,
+                  onSelect: () => void runScheduledBatch(scheduledAgents, "all"),
+                },
+              ]}
+            />
+          </div>
+        </div>
         <div className="mb-2 flex items-center justify-between gap-3 text-xs text-[var(--color-text-muted)]">
           <span>{rows.length} of {sourceRows.length} {source === "hub" ? "hub" : "installed"} agents</span>
           {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
@@ -628,22 +477,70 @@ export default function AgentsHome() {
             </Link>
           </div>
         ) : null}
-        <DataTable
-          caption={source === "hub" ? "Agent hub" : "Installed agents"}
-          columns={columns}
-          rows={rows}
-          rowKey={(row) => row.id}
-          onRowClick={(row) => openAgent(row.slug)}
-          emptyTitle={source === "hub" ? "No hub agents match" : "No installed agents match"}
-          emptyDescription={
-            source === "hub"
-              ? "Clear filters or refresh the hub catalog."
-              : state.installedAgents.length === 0
-                ? "Install an agent from the hub to add it to this library."
-                : "Clear filters or search for another agent."
-          }
-        />
-      </Section>
+        <div aria-label={source === "hub" ? "Agent hub" : "Installed agents"}>
+          {rows.map((row) => {
+            const scheduled = row.installed?.schedule?.enabled === true;
+            const meta = scheduled
+              ? `Every ${formatInterval(row.installed!.schedule!.intervalSeconds)}`
+              : row.latestRun
+                ? `Last run ${formatRelative(row.latestRun.queuedAt)}`
+                : "Never run";
+            return (
+              <div key={row.id} className="calm-list-row group">
+                <span className="calm-row-icon">
+                  {row.display.mode === "write" ? <IconBolt size={16} /> : <IconShield size={16} />}
+                </span>
+                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openAgent(row.slug)}>
+                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span className="truncate font-medium text-[var(--color-text)]">{formatAgentDisplayName(row.display)}</span>
+                    <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                      <StatusDot tone={row.display.mode === "write" ? "warning" : "success"} />
+                      {row.display.mode === "write" ? "Makes changes" : "Read-only"}
+                      <span aria-hidden="true">·</span>
+                      {meta}
+                    </span>
+                  </span>
+                  <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
+                  {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
+                </button>
+                <div className="calm-row-actions flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                  {row.installed ? (
+                    <>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        leadingIcon={<IconPlay size={13} />}
+                        disabled={row.display.compatibility?.supported === false}
+                        onClick={() => void runAgent(row.installed!)}
+                      >
+                        Run
+                      </Button>
+                      <Menu
+                        ariaLabel={`${row.display.name} actions`}
+                        trigger={<IconButton label={`More actions for ${row.display.name}`} icon={<IconChevronDown size={13} />} size="sm" />}
+                        items={installedAgentMenu(row)}
+                      />
+                    </>
+                  ) : (
+                    <>
+                      <Button size="sm" variant="secondary" disabled={row.display.compatibility?.supported === false} onClick={() => openAgent(row.slug, "install")}>Install</Button>
+                      <Button size="sm" variant="ghost" onClick={() => openAgent(row.slug)}>Details</Button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+          {rows.length === 0 ? (
+            <div role="status" className="px-6 py-12 text-center">
+              <div className="font-medium text-[var(--color-text)]">{source === "hub" ? "No hub agents match" : "No installed agents match"}</div>
+              <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+                {source === "hub" ? "Clear filters or refresh the hub catalog." : state.installedAgents.length === 0 ? "Install an agent from the hub to add it to this library." : "Clear filters or search for another agent."}
+              </p>
+            </div>
+          ) : null}
+        </div>
+      </section>
       <NewAgentModal open={addFlow === "agent"} onClose={closeAddFlow} />
     </div>
   );
@@ -705,24 +602,6 @@ function formatRelative(iso: string, future = false) {
   if (absolute < 60 * 60_000) return `${Math.floor(absolute / 60_000)}m ${future ? "from now" : "ago"}`;
   if (absolute < 24 * 60 * 60_000) return `${Math.floor(absolute / (60 * 60_000))}h ${future ? "from now" : "ago"}`;
   return `${Math.floor(absolute / (24 * 60 * 60_000))}d ${future ? "from now" : "ago"}`;
-}
-
-function runStatusTone(run?: RunRecord): "neutral" | "success" | "warning" | "danger" | "info" {
-  if (!run) return "neutral";
-  if (run.status === "completed") return "success";
-  if (run.status === "failed" || run.status === "cancelled" || run.status === "rejected") return "danger";
-  if (run.status === "awaiting-confirmation") return "warning";
-  return "info";
-}
-
-function runStatusLabel(status: RunRecord["status"]) {
-  return status.replaceAll("-", " ");
-}
-
-function runChangeLabel(changeState: NonNullable<RunRecord["changeState"]>) {
-  if (changeState === "unchanged") return "no changes";
-  if (changeState === "changed") return "changes found";
-  return changeState.replaceAll("-", " ");
 }
 
 function titleCase(value: string) {

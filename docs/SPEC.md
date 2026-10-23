@@ -258,7 +258,7 @@ The model picker is populated from Codex's local `models_cache.json`, with
 `config.toml` supplying the default model when present.
 Selecting a model under an inactive provider also makes that provider active
 for future runs; model pinning must not leave the visible active provider on a
-different provider. Overview surfaces such as Agents, StatusStrip, Settings,
+different provider. Overview surfaces such as Agents, the shell top bar, Settings,
 and Intune Chat show the active provider plus the selected default model for
 that provider. Queued run surfaces show the provider and model pinned on that
 run, even if global defaults later change.
@@ -1126,8 +1126,8 @@ returns a clear lookup failure after bounded repair attempts. A valid empty resu
 remains distinct from an unavailable snapshot. Security-incidents preload requests
 at most 50 records per page and follows continuation links.
 
-Chat does not run without an active tenant. The status strip shows the active
-tenant, provider, model, and data freshness. When the selected provider is local,
+Chat does not run without an active tenant. The shell top bar shows the active
+tenant, provider, model, and strictest current data boundary. When the selected provider is local,
 Graph data, prompts, chat history, answer packs, and optional self-training data
 stay on the device. When a hosted provider is selected, the chat UI must state
 that retrieved tenant context will be sent to that provider before the answer is
@@ -1287,8 +1287,8 @@ list/search pane on the left and the selected workspace detail on the right. The
 detail view groups notes, pinned evidence, linked conversations, linked runs, and
 workspace-local instructions into clear sections without nesting cards inside
 cards or becoming a project board. On narrower desktop widths, the list can
-collapse to preserve evidence reading width, but the global sidebar and status
-strip remain visible. Workspace filters, selected section, and expanded evidence
+collapse to preserve evidence reading width, but the global sidebar and top bar
+remain visible. Workspace filters, selected section, and expanded evidence
 groups restore when the admin returns to a workspace.
 
 v0.2.5 ships the read-only multi-tenant Intune Chat path, single-tenant
@@ -1628,7 +1628,8 @@ plain JSON object size caps before reaching the store; TypeScript annotations in
 the preload are not sufficient security validation.
 
 The desktop HTML must not load remote fonts or decorative remote assets. The
-app uses system font stacks and a restrictive Content Security Policy: scripts,
+app bundles its OFL-licensed Geist, Geist Mono, and Newsreader font files and
+uses a restrictive Content Security Policy: scripts,
 styles, images, and fonts are self/data/blob-limited as needed; renderer
 connections are limited to the app/dev server and loopback local-provider
 endpoints. The host classifies local-provider endpoints conservatively before
@@ -1714,20 +1715,22 @@ The macOS menu bar companion must be created during any interactive app launch, 
 
 ## 3. Design system
 
-### Monochrome identity (2026-10-06)
+### Calm identity foundation (2026-10-23)
 
-The approved identity uses the OA monogram in graphite `#17191D` and off-white
-`#F4F5F7` across every desktop surface, packaged icons, installer artwork, and
-public website branding. `docs/brand/oa-mark.svg` is the vector reference;
-`docs/mockups/22-monochrome-brand.html` records the original interactive study.
+The approved identity uses the lowercase `oa` ligature in ink `#1F1D1A` and
+paper `#FAF9F6` across every desktop surface, packaged icon, installer artwork,
+and public website brand asset. `docs/brand/oa-mark.svg` is the vector reference;
+`docs/mockups/28-logo-explorations.html` records the approved concept A study.
 
-Desktop appearance defaults to the Midnight theme for new installs. Settings >
-Appearance offers four built-in themes: Graphite and Midnight are dark, while
-Off-white and Sand are light. Graphite remains available. The preference stays
-on the device, is synchronized across renderer windows, and emits no telemetry.
-Saved legacy `dark` and `light` values continue to map to Graphite and Off-white.
-Native window controls use the selected theme colors and follow its dark or light
-mode. The public website uses the Midnight dark theme with one blue accent. Its
+Desktop appearance defaults to the System preference for new installs. Settings
+> Appearance offers System, Light, Dark, and Midnight. System resolves to Light
+or Dark from the operating system and updates the renderer and native window
+chrome when that preference changes. Midnight remains an explicit dark theme.
+The preference stays on the device, is synchronized across renderer windows,
+and emits no telemetry. Saved `graphite` and `dark` values map to Dark;
+`off-white`, `sand`, and `light` map to Light; `midnight` remains Midnight.
+Unknown old values safely fall back to System. The public website uses the
+Midnight dark theme with one blue accent. Its
 base is `#0B1018`, cards use `#111826`, primary actions use light text-colored
 surfaces, and `#7AA2FF` is the only non-semantic accent. The hero shows a matching
 Midnight desktop capture inside a bordered, raised stage with a restrained blue
@@ -1739,8 +1742,8 @@ confirmation and tenant/provider trust behavior are unchanged.
 
 ### Tokens
 
-`apps/desktop/src/styles/globals.css` is the production source of truth for all
-four themes. All shared controls, navigation, dialogs, page layouts, and custom voice
+`apps/desktop/src/styles/globals.css` is the production source of truth for the
+three resolved themes. All shared controls, navigation, dialogs, page layouts, and custom voice
 and companion surfaces consume these tokens. The Agent Team illustration is
 neutral, while activity and attention indicators retain semantic color.
 
@@ -1750,15 +1753,29 @@ website Midnight palette. The website uses `#0B1018` for the page, `#111826` and
 `#9AA8BD` for text, and `#7AA2FF` as its single brand accent. Small accent text
 may use `#9DBBFF` for contrast. Semantic colors are limited to status meaning.
 
-- Graphite: neutral charcoal base with off-white actions; available but not the new-install default.
-- Midnight: cool navy surfaces with a pale blue action color; the default for new installs.
-- Off-white: neutral light surfaces with graphite actions.
-- Sand: warm light surfaces with a rust action color.
+- Light: warm paper surfaces with ink actions.
+- Dark: neutral graphite surfaces with paper actions.
+- Midnight: cool navy surfaces with a pale blue action color.
+- System is the new-install preference and resolves live to Light or Dark.
 - Body, metadata, placeholder, and semantic text meet 4.5:1 contrast against
   their supported surfaces in every theme, verified by automated tests.
-- Cards use a 10px radius; status badges use a compact 6px radius.
-- The sidebar is 224px wide and collapses to a 56px icon rail; shared page
-  padding is 24px vertically and 32px horizontally.
+- The light accessibility tokens use `#6F6A63` for readable muted text,
+  `#3A7246` for success, and `#895A05` for warning. These are the minimum
+  corrections from the visual reference needed to preserve 4.5:1 contrast.
+- Radii are 8px small, 10px medium, 14px large, and 18px for dialogs. Quiet
+  status badges are 22px high with a 6px radius.
+- The sidebar is 268px wide and collapses fully to zero. Its 52px top row owns
+  the sidebar toggle, while the persistent 52px top bar exposes the toggle and
+  New chat whenever the sidebar is collapsed. Shared page padding is 24px
+  vertically and 32px horizontally.
+- The top bar always keeps the active tenant switcher and data boundary visible.
+  Page titles occupy its center and route-specific actions sit before the
+  boundary chip on the right. Dialog and drawer scrims begin below this bar,
+  except for Office fullscreen and presentation modes.
+- On macOS, the sidebar top row and top bar are the title-bar drag surfaces and
+  the traffic lights sit inside the 52px row. On Windows, the 52px title-bar
+  overlay reserves the rightmost 140px for system buttons. Linux keeps its
+  native frame and does not add drag regions.
 
 Regenerate raster brand assets with `node scripts/generate-brand-assets.mjs`.
 The macOS multi-resolution installer TIFF additionally uses `tiffutil`, as
@@ -1766,16 +1783,20 @@ explained in `apps/desktop/build/README.md`.
 
 ### Typography
 
-- **UI:** system UI stack (`ui-sans-serif`, `system-ui`, `-apple-system`, `Segoe UI`, sans-serif)
-- Five-step scale: `text-xs` 11/16px, `text-sm` 12/18px, `text-base`
-  13/20px, `text-md` 15/22px, and `text-lg` 20/28px. Arbitrary UI text
-  sizes are not used.
-- Base size: 13px, with 12px controls and 11px metadata for admin-focused density
+- **UI:** locally bundled Geist Variable with system UI fallbacks
+- **Reading:** locally bundled Newsreader Variable with Iowan Old Style,
+  Charter, Georgia, and serif fallbacks
+- **Code:** locally bundled Geist Mono Variable with system monospace fallbacks
+- Scale: `text-xs` 12/18px, `text-sm` 13/19.5px, `text-base` 14/21px,
+  `text-md` 16/24px, `text-lg` 24/32px, `text-answer` 17.5px at 1.65 line
+  height, and `text-display` 34/42px. Arbitrary small UI sizes are not used.
+- Base size: 14px at 1.5 line height
 - Weights are limited to 400, 500, and 600.
-- Monospace is limited to identifiers, versions, model IDs, Graph scopes,
-  request or JSON previews, typed confirmation phrases, and the status strip.
-- Uppercase is limited to data-table column headers. Eyebrows and section labels
-  use sentence case without wide tracking.
+- Monospace is limited to code, Graph paths, identifiers, device names in
+  tables, model IDs, request or JSON previews, and typed confirmation phrases.
+- Uppercase is limited to data such as typed confirmation phrases and Entra
+  tier codes. Table headers, eyebrows, and section labels use sentence case
+  without wide tracking.
 - Letter-spacing: 0
 
 ### Interaction and information hierarchy
@@ -1863,20 +1884,28 @@ messages, and never suggest the same agent twice in one conversation.
 
 ### Navigation (locked for the enterprise redesign)
 
-The sidebar contains exactly six destinations in this order:
+The shell sidebar presents these primary actions and destinations in this order:
 
-| Nav item | Route | Contains |
+| Item | Route or action | Contains |
 |---|---|---|
-| Chat | `/chat` and `/chat/workspaces/:workspaceId` | Tenant Q&A, conversation history, and Workspaces |
+| New chat | `/chat` | Starts a new tenant Q&A conversation |
+| Search | Command palette | Commands, conversations, agents, and Settings targets |
 | Agent Team | `/office` | Persistent teammates, assignments, evidence review, conversations, and the Office and List views |
 | Agents | `/agents` | Installed and Hub libraries, schedules, and agent details |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
-| Settings | `/settings/:section?` | One scrolling page with Providers, Tenants, Data, Chat, Connectors, Gateway, General, four device-local themes in Appearance, Privacy, and About |
 
-**Decided 2026-10-12 by Ugur:** Agent Team stays a top-level destination; Runs
-stays a daily page; Workspaces in Chat; Connectors and Data in Settings; Nova in
-the sidebar; Chat boundary line shown only for hosted providers.
+Pinned conversations, Workspaces, and grouped recent conversations follow the
+primary navigation. Settings, Tenants, Voice, Keyboard shortcuts, and About and
+updates live in the tenant-aware account menu at the bottom of the sidebar.
+Conversation and workspace state is shared by the shell and Chat so first-send
+pending insertion, search, reload reconciliation, rename, pin, export, move,
+and delete behavior is identical from either surface.
+
+**Updated 2026-10-23:** Agent Team stays a top-level destination; Runs stays a
+daily page; Workspaces live in the sidebar and Chat; Connectors and Data stay in
+Settings; Nova moves to the account menu; the top-bar boundary chip is always
+present for local, hosted, and unconfigured states.
 
 Workspaces live in the Chat left panel and remain reachable from the command
 palette. Legacy `/workspaces` and `/workspaces/:workspaceId` URLs redirect to
@@ -1910,7 +1939,7 @@ terminal runs in a URL-addressable drawer. History links can prefilter by
 `?agent=<slug>`, `?status=failed|review`, and `?tenant=<id>`.
 
 Removed from navigation:
-- **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent status strip. `/` redirects to `/chat`.
+- **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent shell boundary. `/` redirects to `/chat`.
 - **Report issue**: available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
 ### First run and contextual activation (updated for v0.5)
@@ -1928,7 +1957,11 @@ Setup opens only when an action needs tenant context: sending Chat, starting or 
 
 Pending setup intent is safe session metadata only: action kind, local return route, conversation id, agent slug, validated resource kind, optional run pinning or scheduled batch mode, and creation time. Chat text remains in its separately namespaced per-conversation session draft record and is never copied into the pending-intent record. Pending intents expire after 30 minutes. Cancel clears the intent but preserves the Chat draft. Sign-in exposes cancel, a three-minute soft waiting state, and a five-minute host timeout; the local loopback listener closes on cancel or timeout.
 
-The persistent status strip and tenant switcher are the canonical Connect tenant entry points. Disconnecting the last tenant leaves the shell available and never destroys unrelated provider, registry, or local draft state. Agents still cannot run, Graph cache refreshes still cannot start, and Changes still cannot load tenant data without an active tenant.
+The persistent top-bar tenant switcher is the canonical Connect tenant entry
+point. Disconnecting the last tenant leaves the shell available and never
+destroys unrelated provider, registry, or local draft state. Agents still
+cannot run, Graph cache refreshes still cannot start, and Changes still cannot
+load tenant data without an active tenant.
 
 Answered chat question means the local chat store contains at least one completed assistant message. Empty draft conversations, failed responses, and stopped responses do not count.
 
@@ -1952,14 +1985,24 @@ North-star metric: time from install to first successful result, target under 5 
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls; Connectors live in Settings |
 | Tenant | Unchanged | The Microsoft 365 tenant |
 | Provider | Unchanged | LLM backend |
-| Theme | Appearance setting | Device-local Graphite, Midnight, Off-white, or Sand color scheme shared by renderer windows and native chrome |
+| Theme | Appearance setting | Device-local System, Light, Dark, or Midnight preference shared by renderer windows and native chrome |
 
 ### Quality implementation decisions (locked for v0.4)
 
 - Stable wording introduced by the v0.4 pass lives in typed copy modules. Trust messaging, Settings search entries, recoverable Chat errors, and agent display names have one derivation or formatting path rather than per-surface variants.
-- StatusStrip is the canonical persistent tenant/provider/data-boundary surface. Local Chat does not need a second long trust explanation; hosted and attached-context sends retain explicit boundary confirmation.
-- `Mod+K`, `Mod+N`, and `Mod+,` are defined once and shared by visible labels, renderer handling, and the native application menu.
-- Dialogs and the Command Palette use one topmost-Escape model, dialog/combobox semantics, initial focus, focus trapping, and focus return. Escape never confirms an action.
+- The top bar is the canonical persistent tenant/provider/data-boundary surface.
+  The boundary resolves to the strictest active boundary, so a hosted Nova voice
+  session wins over a local global provider. Local Chat does not need a second
+  long trust explanation; hosted and attached-context sends retain explicit
+  boundary confirmation. Provider settings do not currently store hosted
+  region metadata, so the shell states "Region not provided" rather than
+  inventing one.
+- `Mod+K`, `Mod+N`, `Mod+,`, and `Mod+Shift+S` are defined once and shared by
+  visible labels and renderer handling. The last shortcut toggles the sidebar.
+- Dialogs and drawers keep the tenant and boundary visible by starting their
+  scrims below the 52px top bar. The Command Palette uses the same top offset,
+  topmost-Escape model, dialog/combobox semantics, initial focus, focus trapping,
+  and focus return. Escape never confirms an action.
 - Chat send/stream/stop/fail/retry behavior is an explicit tested state machine. A failed question remains available to Retry, and retry re-enters the same tenant, hosted-provider, and workspace-context checks.
 - Conversation drafts use per-conversation `sessionStorage` for v0.4. Drafts remain on the device, survive route changes within the session, clear after a successful send, and are never sent without the user action.
 - Persisted conversations use `/chat/:conversationId` and Settings sections use `/settings/:section`. Reload and browser history restore those selections; `/chat` remains a new draft, and deleted or unknown conversation links render an explicit local recovery state instead of silently selecting another conversation.

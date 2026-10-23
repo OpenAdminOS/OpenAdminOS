@@ -198,6 +198,40 @@ it("lists recent conversations and Workspaces with their Chat routes", async () 
   ).toBeInTheDocument();
 });
 
+it("uses server conversation search for message-content matches", async () => {
+  const user = userEvent.setup();
+  const searchIntuneChatConversations = vi.fn(async () => [
+    {
+      id: "conversation-search-result",
+      title: "Enrollment investigation",
+      createdAt: "2026-10-10T08:00:00.000Z",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant" as const,
+    },
+  ]);
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => []),
+      searchIntuneChatConversations,
+    }),
+  });
+
+  await user.type(
+    screen.getByRole("combobox", { name: "Search commands, agents, or pages" }),
+    "autopilot failure",
+  );
+
+  await waitFor(() =>
+    expect(searchIntuneChatConversations).toHaveBeenLastCalledWith("autopilot failure"),
+  );
+  expect(
+    await screen.findByRole("option", { name: /Enrollment investigation/ }),
+  ).toBeInTheDocument();
+});
+
 it("lists all theme actions and applies the selected theme", async () => {
   const user = userEvent.setup();
   const setAppearance = vi.fn(async () => undefined);
@@ -207,21 +241,24 @@ it("lists all theme actions and applies the selected theme", async () => {
     bridge: makeMockBridge({ setAppearance }),
   });
 
-  for (const label of ["Graphite", "Midnight", "Off-white", "Sand"]) {
+  for (const label of ["System", "Light", "Dark", "Midnight"]) {
     expect(
       screen.getByRole("option", { name: new RegExp(`^Theme: ${label}`) }),
     ).toBeInTheDocument();
   }
   expect(
-    screen.getByRole("option", { name: /^Theme: MidnightCurrent · Dark/ }),
+    screen.getByRole("option", { name: /^Theme: SystemCurrent · Follows system/ }),
   ).toBeInTheDocument();
 
-  await user.click(screen.getByRole("option", { name: /^Theme: Sand/ }));
-  expect(document.documentElement.dataset.theme).toBe("sand");
+  await user.click(screen.getByRole("option", { name: /^Theme: Light/ }));
+  expect(document.documentElement.dataset.theme).toBe("light");
   expect(document.documentElement.dataset.mode).toBe("light");
-  expect(setAppearance).toHaveBeenCalledWith("sand");
+  expect(setAppearance).toHaveBeenCalledWith({
+    preference: "light",
+    resolvedTheme: "light",
+  });
 
-  await user.click(screen.getByRole("option", { name: /^Theme: Graphite/ }));
+  await user.click(screen.getByRole("option", { name: /^Theme: Dark/ }));
 });
 
 function LocationProbe() {
