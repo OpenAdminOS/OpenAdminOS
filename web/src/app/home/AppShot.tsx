@@ -5,7 +5,9 @@ export type AppScreen =
   | "agent-drawer"
   | "agent-team"
   | "chat-transcript"
-  | "settings";
+  | "hub-grid"
+  | "settings"
+  | "write-confirmation";
 
 /** Captured at 1920 x 1012 from the desktop screenshot harness. */
 export const SHOT_WIDTH = 1920;

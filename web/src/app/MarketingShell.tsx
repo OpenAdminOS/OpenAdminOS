@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
+import { Stage, type StageTone } from "./home/Stage";
 import { LogoMark, Wordmark } from "./Logo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
 import { DOCS_URL, GITHUB_URL, LINKEDIN_URL } from "./seo";
@@ -54,10 +55,13 @@ const FOOTER_GROUPS: readonly {
 export function MarketingShell({
   children,
   bare = false,
+  announcement,
 }: {
   children: ReactNode;
   /** Full-bleed main area for pages that lay out their own bands. */
   bare?: boolean;
+  /** One-line notice above the header, such as the latest release. */
+  announcement?: { href: string; label: string };
 }) {
   return (
     <div className="relative flex min-h-screen flex-col bg-brand-bg text-brand-ink">
@@ -67,6 +71,18 @@ export function MarketingShell({
       >
         Skip to content
       </a>
+      {announcement ? (
+        <Link
+          href={announcement.href}
+          target="_blank"
+          rel="noreferrer"
+          className="block bg-brand-ink px-6 py-2.5 text-center text-[13px] text-brand-on-ink transition-colors hover:bg-brand-ink-hover"
+        >
+          <span className="line-clamp-1">
+            {announcement.label} <span aria-hidden>→</span>
+          </span>
+        </Link>
+      ) : null}
       <header className="sticky top-0 z-40 border-b border-brand-line-soft bg-brand-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-brand-bg/70">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-6 sm:px-10">
           <Link href="/" aria-label="OpenAdminOS home" className="rounded-md">
@@ -161,20 +177,27 @@ export function PageIntro({
   eyebrow: label,
   title,
   description,
+  tone = "sand",
 }: {
   eyebrow: string;
   title: string;
   description: string;
+  tone?: StageTone;
 }) {
   return (
-    <section className="max-w-3xl" data-reveal>
-      <p className={eyebrow}>{label}</p>
-      <h1 className="font-display mt-4 text-balance text-[2.6rem] leading-[1.05] sm:text-[4rem]">
-        {title}
-      </h1>
-      <p className="mt-6 max-w-2xl text-pretty text-base leading-7 text-brand-muted sm:text-lg sm:leading-8">
-        {description}
-      </p>
+    <section>
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)] lg:items-end lg:gap-16" data-reveal>
+        <div>
+          <p className={eyebrow}>{label}</p>
+          <h1 className="font-display mt-4 text-balance text-[2.6rem] leading-[1.04] sm:text-[4rem]">
+            {title}
+          </h1>
+        </div>
+        <p className="text-pretty text-base leading-7 text-brand-muted sm:text-lg sm:leading-8 lg:pb-2">
+          {description}
+        </p>
+      </div>
+      <Stage tone={tone} className="mt-12 h-28 rounded-[18px] sm:h-40" />
     </section>
   );
 }

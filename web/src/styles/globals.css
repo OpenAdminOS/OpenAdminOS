@@ -220,6 +220,122 @@
   text-decoration-color: currentColor;
 }
 
+/*
+ * Art stages: generated relief-map artwork (web/scripts/stage-art) behind
+ * product windows. Only the file for the active color scheme is fetched.
+ */
+.stage {
+  background-color: var(--stage-fallback, var(--color-brand-floor));
+  background-image: var(--stage-light);
+  background-position: center;
+  background-size: cover;
+  isolation: isolate;
+  position: relative;
+}
+
+.stage::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  content: "";
+  inset: 0;
+  mix-blend-mode: multiply;
+  opacity: 0.16;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
+}
+
+.stage-sand {
+  --stage-light: url("/art/stage-sand-light.webp");
+  --stage-dark: url("/art/stage-sand-dark.webp");
+  --stage-fallback: #e2dacb;
+}
+
+.stage-sage {
+  --stage-light: url("/art/stage-sage-light.webp");
+  --stage-dark: url("/art/stage-sage-dark.webp");
+  --stage-fallback: #c9d1c0;
+}
+
+.stage-slate {
+  --stage-light: url("/art/stage-slate-light.webp");
+  --stage-dark: url("/art/stage-slate-dark.webp");
+  --stage-fallback: #c4cdd6;
+}
+
+.stage-clay {
+  --stage-light: url("/art/stage-clay-light.webp");
+  --stage-dark: url("/art/stage-clay-dark.webp");
+  --stage-fallback: #dec4ae;
+}
+
+@media (prefers-color-scheme: dark) {
+  .stage {
+    background-image: var(--stage-dark);
+  }
+
+  .stage::after {
+    mix-blend-mode: screen;
+    opacity: 0.06;
+  }
+
+  .stage-sand {
+    --stage-fallback: #24262b;
+  }
+
+  .stage-sage {
+    --stage-fallback: #202823;
+  }
+
+  .stage-slate {
+    --stage-fallback: #1e252e;
+  }
+
+  .stage-clay {
+    --stage-fallback: #2e231f;
+  }
+}
+
+/* Two-tone lead paragraph: the first sentence in ink, the rest muted. */
+.lead-two-tone {
+  color: var(--color-brand-faint);
+}
+
+.lead-two-tone strong {
+  color: var(--color-brand-ink);
+  font-weight: inherit;
+}
+
+@keyframes tour-progress {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.tour-progress {
+  animation: tour-progress linear both;
+  transform-origin: left;
+}
+
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+.figure-caret {
+  animation: caret-blink 1.1s step-end infinite;
+}
+
 /* Scroll reveal. Content stays visible without JavaScript. */
 .js-reveal [data-reveal] {
   opacity: 0;
@@ -234,310 +350,6 @@
   transform: none;
 }
 
-/* Agent run log on the landing page. */
-@keyframes run-step-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: none;
-  }
-}
-
-@keyframes run-pulse {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 40%, transparent);
-  }
-
-  50% {
-    box-shadow: 0 0 0 5px color-mix(in srgb, currentColor 0%, transparent);
-  }
-}
-
-.run-armed .run-step {
-  opacity: 0;
-}
-
-.run-active .run-step {
-  animation: run-step-in 520ms var(--ease-calm) both;
-  animation-delay: calc(var(--step) * 650ms);
-}
-
-.run-pulse {
-  animation: run-pulse 1.8s ease-in-out infinite;
-}
-
-/* Registry marquee. */
-@keyframes marquee {
-  from {
-    transform: translateX(0);
-  }
-
-  to {
-    transform: translateX(-50%);
-  }
-}
-
-.marquee-track {
-  animation: marquee var(--marquee-duration, 60s) linear infinite;
-}
-
-.marquee-reverse {
-  animation-direction: reverse;
-}
-
-.marquee:hover .marquee-track {
-  animation-play-state: paused;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .marquee {
-    overflow-x: auto;
-  }
-}
-
-.marquee-mask {
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    black 8%,
-    black 92%,
-    transparent
-  );
-}
-
-@keyframes diff-row-in {
-  0% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes diff-badge-attention {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-
-  45% {
-    box-shadow: 0 0 0 4px
-      color-mix(in srgb, var(--color-brand-danger) 14%, transparent);
-  }
-}
-
-@keyframes diff-admin-input-type {
-  0%,
-  22% {
-    max-width: 0;
-  }
-
-  72%,
-  100% {
-    max-width: 16ch;
-  }
-}
-
-@keyframes diff-confirm-caret {
-  0%,
-  48% {
-    opacity: 1;
-  }
-
-  49%,
-  100% {
-    opacity: 0;
-  }
-}
-
-@keyframes diff-admin-cursor-click {
-  0%,
-  68% {
-    left: 0.75rem;
-    opacity: 0;
-    transform: scale(1);
-  }
-
-  76% {
-    left: calc(100% - 5.5rem);
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  84% {
-    left: calc(100% - 5.5rem);
-    opacity: 1;
-    transform: scale(0.88);
-  }
-
-  92% {
-    left: calc(100% - 5.5rem);
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  100% {
-    left: calc(100% - 5.5rem);
-    opacity: 0;
-    transform: scale(1);
-  }
-}
-
-@keyframes diff-button-click {
-  0%,
-  78%,
-  92%,
-  100% {
-    transform: translateY(0) scale(1);
-  }
-
-  84% {
-    transform: translateY(1px) scale(0.96);
-  }
-}
-
-@keyframes diff-click-ripple {
-  0%,
-  78% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.2);
-  }
-
-  84% {
-    opacity: 0.42;
-    transform: translate(-50%, -50%) scale(0.2);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(1.8);
-  }
-}
-
-.diff-row {
-  opacity: 1;
-}
-
-.diff-demo-active .diff-row {
-  animation: diff-row-in 520ms ease-out both;
-}
-
-.diff-demo-active .diff-row:nth-child(2) {
-  animation-delay: 120ms;
-}
-
-.diff-demo-active .diff-row:nth-child(3) {
-  animation-delay: 240ms;
-}
-
-.diff-demo-active .diff-badge {
-  animation: diff-badge-attention 1.8s ease-in-out 2;
-}
-
-.diff-confirm-input {
-  width: 16ch;
-}
-
-.diff-demo-armed .diff-confirm-input {
-  max-width: 0;
-}
-
-.diff-demo-active .diff-confirm-input {
-  animation: diff-admin-input-type 3s steps(16, end) 500ms forwards;
-}
-
-.diff-confirm-caret {
-  animation: diff-confirm-caret 900ms step-end infinite;
-}
-
-.diff-confirm-button {
-  min-width: 8.5rem;
-  overflow: hidden;
-  position: relative;
-  text-align: center;
-  transition:
-    background-color 240ms ease,
-    border-color 240ms ease,
-    color 240ms ease;
-}
-
-.diff-demo-active .diff-confirm-button {
-  animation: diff-button-click 5.1s ease-in-out forwards;
-}
-
-.diff-click-ripple {
-  background: color-mix(in srgb, var(--color-brand-danger) 38%, transparent);
-  border-radius: 999px;
-  height: 2.4rem;
-  left: 38%;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 52%;
-  transform: translate(-50%, -50%) scale(0.2);
-  width: 2.4rem;
-}
-
-.diff-demo-active .diff-click-ripple {
-  animation: diff-click-ripple 5.1s ease-in-out forwards;
-}
-
-.diff-demo-approved .diff-confirm-caret {
-  display: none;
-}
-
-.diff-demo-cursor {
-  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.45));
-  left: 0.75rem;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 0.7rem;
-  transform: scale(1);
-  width: 1.25rem;
-  z-index: 2;
-}
-
-.diff-demo-active .diff-demo-cursor {
-  animation: diff-admin-cursor-click 5.1s ease-in-out forwards;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .diff-row,
-  .diff-badge,
-  .diff-confirm-input,
-  .diff-confirm-caret,
-  .diff-confirm-button,
-  .diff-click-ripple,
-  .diff-demo-cursor {
-    animation: none;
-  }
-
-  .diff-confirm-input {
-    max-width: none;
-  }
-
-  .diff-row,
-  .diff-demo-cursor,
-  .diff-click-ripple {
-    opacity: 1;
-  }
-
-  .diff-demo-cursor,
-  .diff-click-ripple {
-    display: none;
-  }
-}
-
-
 @media (prefers-reduced-motion: reduce) {
   .js-reveal [data-reveal] {
     opacity: 1;
@@ -545,14 +357,8 @@
     transition: none;
   }
 
-  .run-armed .run-step,
-  .run-active .run-step {
-    animation: none;
-    opacity: 1;
-  }
-
-  .run-pulse,
-  .marquee-track {
+  .figure-caret,
+  .tour-progress {
     animation: none;
   }
 }
