@@ -1014,7 +1014,7 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/agents?source=hub",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Library", "Agent hub"],
+      waitFor: ["Library", "hub agents"],
       heading: "Agents",
     },
     {

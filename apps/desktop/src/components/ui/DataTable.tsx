@@ -96,7 +96,7 @@ export function DataTable<Row>({
 
   return (
     <div
-      className={`min-w-0 overflow-auto rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)] ${className}`}
+      className={`min-w-0 overflow-auto ${className}`}
     >
       <table
         aria-busy={loading}
@@ -116,7 +116,7 @@ export function DataTable<Row>({
                   scope="col"
                   aria-sort={column.sortable ? (activeSort ?? "none") : undefined}
                   style={style}
-                  className={`whitespace-nowrap px-3 py-2 text-sm font-medium text-[var(--color-text-muted)] ${
+                  className={`whitespace-nowrap px-3 py-[var(--cell-y)] text-sm font-medium text-[var(--color-text-muted)] ${
                     column.align === "right" ? "text-right" : "text-left"
                   }`}
                 >
@@ -159,7 +159,7 @@ export function DataTable<Row>({
             ? Array.from({ length: loadingRows }, (_, rowIndex) => (
                 <tr key={`loading-${rowIndex}`} aria-hidden="true">
                   {columns.map((column, columnIndex) => (
-                    <td key={column.id} className="px-3 py-2.5">
+                    <td key={column.id} className="px-3 py-[var(--cell-y)]">
                       <Skeleton
                         className={columnIndex === 0 ? "w-3/4" : "w-1/2"}
                       />
@@ -180,7 +180,7 @@ export function DataTable<Row>({
                   {columns.map((column) => (
                     <td
                       key={column.id}
-                      className={`px-3 py-2.5 text-[var(--color-text-soft)] ${
+                      className={`px-3 py-[var(--cell-y)] text-[var(--color-text-soft)] ${
                         column.align === "right" ? "text-right" : "text-left"
                       }`}
                     >

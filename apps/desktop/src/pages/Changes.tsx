@@ -1052,6 +1052,7 @@ export default function Changes() {
     <>
       <PageHeader
         title="Changes"
+        subtitle="Tenant change history from locally retained snapshots."
         actions={
           <>
             <span
@@ -1074,6 +1075,7 @@ export default function Changes() {
         }
       />
       <PageBody>
+        <div className="calm-page-column">
         <div role="status" aria-live="polite" className="sr-only">
           {allTenantScope
             ? "Showing all-tenant change status."
@@ -1291,6 +1293,7 @@ export default function Changes() {
             />
           )}
         </div>
+        </div>
       </PageBody>
 
       <ChangeDetailDrawer
@@ -1469,68 +1472,6 @@ function TimelineView({
   onClearFilters: () => void;
   onRefresh: () => void;
 }) {
-  const columns = useMemo<DataTableColumn<DriftTimelineEntry>[]>(
-    () => [
-      {
-        id: "day",
-        header: "Day",
-        sortValue: (entry) => entry.capturedAt,
-        sortable: true,
-        render: (entry) => formatDay(entry.capturedAt),
-      },
-      {
-        id: "object",
-        header: "Object",
-        sortValue: displayNameForEntry,
-        sortable: true,
-        render: (entry) => (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-[var(--color-text)]">
-              {displayNameForEntry(entry)}
-            </div>
-            {entry.graphId ? (
-              <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
-                {entry.graphId}
-              </div>
-            ) : null}
-          </div>
-        ),
-      },
-      {
-        id: "resource",
-        header: "Resource type",
-        accessor: "resourceLabel",
-        sortable: true,
-      },
-      {
-        id: "kind",
-        header: "Change kind",
-        accessor: "changeKind",
-        sortable: true,
-        render: (entry) => <ChangeKindBadge kind={entry.changeKind} />,
-      },
-      {
-        id: "time",
-        header: "Time",
-        sortValue: (entry) => entry.capturedAt,
-        sortable: true,
-        render: (entry) => (
-          <time dateTime={entry.capturedAt} title={formatDateTime(entry.capturedAt)}>
-            {formatTime(entry.capturedAt)}
-          </time>
-        ),
-      },
-      {
-        id: "actor",
-        header: "Actor or source",
-        sortValue: (entry) => attributionSummary(entry.attribution),
-        sortable: true,
-        render: (entry) => <AttributionCell attribution={entry.attribution} />,
-      },
-    ],
-    [],
-  );
-
   if (noBaselineYet) {
     return (
       <EmptyState
@@ -1573,8 +1514,12 @@ function TimelineView({
       {loading && entries.length === 0 ? (
         <DataTable
           caption="Tenant change timeline"
-          columns={columns}
-          rows={[]}
+          columns={[
+            { id: "object", header: "Object" },
+            { id: "kind", header: "Change kind" },
+            { id: "time", header: "Time" },
+          ]}
+          rows={[] as DriftTimelineEntry[]}
           rowKey={(entry) => entry.id}
           loading
         />
@@ -1592,14 +1537,32 @@ function TimelineView({
           }
         />
       ) : (
-        <DataTable
-          caption="Tenant change timeline"
-          columns={columns}
-          rows={entries}
-          rowKey={(entry) => entry.id}
-          onRowClick={onSelectEntry}
-          initialSort={{ columnId: "time", direction: "descending" }}
-        />
+        <ul aria-label="Tenant change timeline" className="calm-row-list">
+          {[...entries]
+            .sort((left, right) => Date.parse(right.capturedAt) - Date.parse(left.capturedAt))
+            .map((entry) => {
+              const kind = changeKindConfig(entry.changeKind);
+              return (
+                <li key={entry.id}>
+                <button type="button" className="calm-list-row w-full text-left" onClick={() => onSelectEntry(entry)}>
+                  <span className="calm-row-icon"><StatusDot tone={kind.tone} /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                      <span className="truncate font-medium text-[var(--color-text)]">{displayNameForEntry(entry)}</span>
+                      <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone={kind.tone} />{kind.label} · {entry.resourceLabel}</span>
+                    </span>
+                    <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">
+                      <span>{attributionSummary(entry.attribution)}</span>
+                      {entry.attribution?.status !== "matched" && entry.attribution?.reason === "audit-cache-stale" ? <span> · Refresh audit data to attribute</span> : null}
+                      {entry.graphId ? <span> · {entry.graphId}</span> : null}
+                    </span>
+                  </span>
+                  <time className="shrink-0 text-sm text-[var(--color-text-muted)]" dateTime={entry.capturedAt} title={formatDateTime(entry.capturedAt)}>{formatRelativeTime(entry.capturedAt)}</time>
+                </button>
+                </li>
+              );
+            })}
+        </ul>
       )}
       {hasMore ? (
         <div className="flex items-center justify-between gap-3 text-sm text-[var(--color-text-muted)]">
@@ -1724,31 +1687,6 @@ function ChangeDetailDrawer({
         </div>
       ) : null}
     </Drawer>
-  );
-}
-
-function AttributionCell({ attribution }: { attribution?: DriftAttribution }) {
-  if (attribution?.status === "matched") {
-    return (
-      <div className="min-w-0">
-        <div className="truncate text-[var(--color-text-soft)]">
-          {actorLabel(attribution)}
-        </div>
-        <div className="truncate text-xs text-[var(--color-text-muted)]">
-          {sourceLabel(attribution.source)}
-        </div>
-      </div>
-    );
-  }
-  return (
-    <div>
-      <div className="text-[var(--color-text-muted)]">Actor unknown</div>
-      {attribution?.reason === "audit-cache-stale" ? (
-        <div className="text-xs text-[var(--color-text-muted)]">
-          Refresh audit data to attribute
-        </div>
-      ) : null}
-    </div>
   );
 }
 
@@ -3266,25 +3204,6 @@ function inlineMarkdownValue(value: unknown): string {
 
 function escapeMarkdownTable(value: string): string {
   return value.replaceAll("|", "\\|").replaceAll("\n", " ");
-}
-
-function formatDay(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-  });
-}
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function formatDateTime(value: string): string {

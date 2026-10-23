@@ -1,5 +1,6 @@
-import { THEMES, useAppearance, type ThemeId } from "../styles/appearance";
+import { THEMES, useAppearance } from "../styles/appearance";
 import { useAnswerFont } from "../styles/answer-font";
+import { useDensity } from "../styles/density";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageHeader } from "../components/AppShell";
@@ -13,15 +14,22 @@ import { useReportIssue } from "../components/ReportIssueModal";
 import {
   IconCheck,
   IconChat,
+  IconCloud,
+  IconConnectors,
   IconExternal,
   IconHardDrive,
   IconHash,
+  IconLogo,
   IconLock,
   IconRefresh,
   IconSearch,
+  IconSettings,
   IconShield,
+  IconSparkle,
+  IconUsers,
   IconWarning,
 } from "../components/icons";
+import { TenantTile } from "../components/TenantTile";
 import {
   DEFAULT_DRIFT_RETENTION_DAYS,
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
@@ -56,10 +64,10 @@ import {
   type UpdateState,
   type UsageTelemetryPayload,
 } from "../shared/openAdminOS";
-import { UPDATE_UNAVAILABLE_DETAIL } from "../shared/update-channel";
+import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
-import { useAppState } from "../state";
+import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import {
@@ -97,6 +105,21 @@ interface DriftRetentionDraft {
 
 const OFFICIAL_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
+
+function settingsSectionIcon(section: SettingsSectionId) {
+  switch (section) {
+    case "providers": return <IconCloud size={14} />;
+    case "tenants": return <IconUsers size={14} />;
+    case "data": return <IconHardDrive size={14} />;
+    case "chat": return <IconChat size={14} />;
+    case "connectors": return <IconConnectors size={14} />;
+    case "gateway": return <IconHash size={14} />;
+    case "general": return <IconSettings size={14} />;
+    case "appearance": return <IconSparkle size={14} />;
+    case "privacy": return <IconShield size={14} />;
+    case "about": return <IconCheck size={14} />;
+  }
+}
 
 function scrollWithinSettings(
   root: HTMLElement,
@@ -300,9 +323,9 @@ export default function Settings() {
 
   return (
     <>
-      <PageHeader title="Settings" />
-      <div className="flex min-h-0 flex-1">
-        <nav aria-label="Settings sections" className="sticky top-0 flex w-[190px] shrink-0 self-start flex-col gap-0.5 border-r border-[var(--color-border-soft)] px-3 py-5 xl:w-[220px]">
+      <PageHeader title="Settings" wide />
+      <div className="settings-page flex min-h-0 flex-1">
+        <nav aria-label="Settings sections" className="settings-nav sticky top-0 flex w-[190px] shrink-0 self-start flex-col gap-0.5 border-r border-[var(--color-border-soft)] px-3 py-5">
           <div className="relative mb-3">
             <IconSearch
               size={13}
@@ -384,12 +407,13 @@ export default function Settings() {
               key={s.id}
               onClick={() => selectSettingsTarget({ section: s.id })}
               aria-current={s.id === section ? "location" : undefined}
-              className={`rounded-lg px-3 py-1.5 text-left text-base font-medium transition-colors ${
+              className={`flex min-h-8 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-sm font-medium transition-colors ${
                 s.id === section
-                  ? "bg-[var(--color-surface-hover)] text-[var(--color-text)]"
-                  : "text-[var(--color-text-soft)] hover:bg-[var(--color-surface)] hover:text-[var(--color-text)]"
+                  ? "bg-[var(--color-active)] text-[var(--color-text)]"
+                  : "text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]"
               }`}
             >
+              <span className="inline-flex w-4 shrink-0 justify-center text-[var(--color-text-muted)]">{settingsSectionIcon(s.id)}</span>
               {s.title}
             </button>
           ))}
@@ -400,7 +424,7 @@ export default function Settings() {
               No settings match this search. Try provider, cache, or privacy.
             </div>
           ) : null}
-          <div className="space-y-10 pb-16">
+          <div className="settings-content mx-auto max-w-[680px] space-y-10 pb-16">
             <SettingsPageSection
               id="providers"
               visible={visibleSectionIds.has("providers")}
@@ -497,13 +521,13 @@ function SettingsPageSection({
       id={`settings-section-${id}`}
       data-settings-section={id}
       aria-labelledby={`settings-heading-${id}`}
-      className="scroll-mt-5"
+      className="settings-section scroll-mt-5"
     >
-      <div className="mb-3 flex min-h-8 items-center justify-between gap-4 border-b border-[var(--color-border-soft)] pb-2">
+      <div className="mb-2 flex min-h-8 items-center justify-between gap-4">
         <h2
           id={`settings-heading-${id}`}
           tabIndex={-1}
-          className={`scroll-mt-5 text-md font-semibold text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${query.trim() ? "rounded bg-[var(--color-accent-soft)] px-1" : ""}`}
+          className={`scroll-mt-5 text-sm font-medium text-[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] ${query.trim() ? "rounded bg-[var(--color-accent-soft)] px-1" : ""}`}
         >
           {entry.title}
         </h2>
@@ -1159,6 +1183,7 @@ function TenantRow({
   onSetActive: (id: string) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
+  const { openSetup } = useSetupFlow();
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
@@ -1182,28 +1207,30 @@ function TenantRow({
         ...skuLicenses,
       ]
     : skuLicenses;
+  const domain = tenant.username.includes("@")
+    ? tenant.username.slice(tenant.username.lastIndexOf("@") + 1)
+    : tenant.username;
   return (
     <>
-      <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4 last:border-b-0">
+      <div className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-soft)] px-0 py-[var(--row-y)] last:border-b-0">
+        <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="row" />
         <div className="min-w-[220px] flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span title={tenant.displayName} className="min-w-0 max-w-full flex-1 truncate text-base font-medium text-[var(--color-text)]">
+            <span title={tenant.displayName} className="min-w-0 max-w-full truncate text-base font-medium text-[var(--color-text)]">
               {tenant.displayName}
             </span>
-            {isActive ? <Badge tone="info">Active</Badge> : null}
+            {isActive ? <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone="success" />Active</span> : null}
           </div>
-          <div className="mt-0.5 text-sm text-[var(--color-text-soft)]">
-            {tenant.username}
-          </div>
-          <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">
-            {tenant.id}
+          <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
+            {domain} · {entraLicenseName ?? "Entra tier not available"}
           </div>
         </div>
-        <div className="min-w-[180px] flex-1 text-sm text-[var(--color-text-muted)]">
+        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={licenses.map((license) => license.displayName).join(", ")}>
           {licenses.length > 0
             ? licenses.map((license) => license.displayName).join(", ")
             : "No license details"}
         </div>
+        <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
         {!isActive ? (
           <UiButton variant="secondary" size="sm" onClick={() => void onSetActive(tenant.id)}>
             Set active
@@ -2781,6 +2808,7 @@ function gatewayConfirmationCopy(
 function GeneralSection() {
   const { state, refresh } = useAppState();
   const { answerFont, setAnswerFont } = useAnswerFont();
+  const { density, setDensity } = useDensity();
   const [schedulerLaunch, setSchedulerLaunch] =
     useState<SchedulerLaunchSettings | null>(null);
   const [companionLaunch, setCompanionLaunch] =
@@ -3071,6 +3099,21 @@ function GeneralSection() {
                 { id: "sans", label: "Sans" },
               ]}
               onValueChange={(value) => setAnswerFont(value === "sans" ? "sans" : "serif")}
+            />
+          }
+        />
+        <SettingRow
+          id="density"
+          description="Changes list, table, and navigation spacing on this device."
+          control={
+            <SegmentedControl
+              ariaLabel="Density"
+              value={density}
+              options={[
+                { id: "comfortable", label: "Comfortable" },
+                { id: "compact", label: "Compact" },
+              ]}
+              onValueChange={(value) => setDensity(value === "compact" ? "compact" : "comfortable")}
             />
           }
         />
@@ -3639,114 +3682,19 @@ function AuditLogExportControls({
 
 function AppearanceSection() {
   const appearance = useAppearance();
-  const pickerRef = useRef<HTMLDivElement | null>(null);
-
-  const selectWithKeyboard = (
-    event: React.KeyboardEvent<HTMLButtonElement>,
-    themeId: ThemeId,
-  ) => {
-    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) {
-      return;
-    }
-    event.preventDefault();
-    const currentIndex = THEMES.findIndex((theme) => theme.id === themeId);
-    const forward = event.key === "ArrowRight" || event.key === "ArrowDown";
-    const next =
-      event.key === "Home"
-        ? THEMES[0]
-        : event.key === "End"
-          ? THEMES.at(-1)
-          : THEMES[(currentIndex + (forward ? 1 : -1) + THEMES.length) % THEMES.length];
-    if (!next) return;
-    appearance.setAppearance(next.id);
-    pickerRef.current
-      ?.querySelector<HTMLButtonElement>(`[data-theme-choice="${next.id}"]`)
-      ?.focus();
-  };
 
   return (
-    <div className="max-w-[1040px] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+    <div className="max-w-[680px]">
       <SettingRow
         id="theme"
-        stacked
         description={appearance.error ?? "Choose System, Light, Dark, or Midnight. This device-only preference is shared with the menu bar companion."}
         control={
-          <div
-            ref={pickerRef}
-            role="radiogroup"
-            aria-label="Color theme"
-            className="grid w-full grid-cols-2 gap-2 xl:grid-cols-4"
-          >
-            {THEMES.map((theme) => {
-              const selected = appearance.theme === theme.id;
-              const modeLabel =
-                theme.mode === "system"
-                  ? "Follows system"
-                  : theme.mode === "dark"
-                    ? "Dark"
-                    : "Light";
-              return (
-                <button
-                  key={theme.id}
-                  type="button"
-                  role="radio"
-                  data-theme-choice={theme.id}
-                  aria-checked={selected}
-                  aria-label={`${theme.label}, ${modeLabel}`}
-                  tabIndex={selected ? 0 : -1}
-                  onClick={() => appearance.setAppearance(theme.id)}
-                  onKeyDown={(event) => selectWithKeyboard(event, theme.id)}
-                  className={`min-w-0 rounded-lg p-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-bg)] ${
-                    selected
-                      ? "bg-[var(--color-accent-soft)] ring-2 ring-[var(--color-accent)]"
-                      : "bg-[var(--color-bg)] ring-1 ring-[var(--color-border)] hover:bg-[var(--color-surface-hover)] hover:ring-[var(--color-border-strong)]"
-                  }`}
-                >
-                  <span
-                    aria-hidden="true"
-                    className="relative block h-12 overflow-hidden rounded-md ring-1 ring-black/15"
-                    style={{ backgroundColor: theme.swatches.background }}
-                  >
-                    <span
-                      className="absolute inset-y-0 left-0 w-3"
-                      style={{ backgroundColor: theme.swatches.surface }}
-                    />
-                    <span
-                      className="absolute inset-y-1.5 left-4 right-1.5 rounded-sm"
-                      style={{ backgroundColor: theme.swatches.surface }}
-                    />
-                    <span
-                      className="absolute left-6 top-3 h-1.5 w-8 rounded-sm"
-                      style={{ backgroundColor: theme.swatches.accent }}
-                    />
-                    <span
-                      className="absolute bottom-3 left-6 h-1 w-12 rounded-sm opacity-70"
-                      style={{ backgroundColor: theme.swatches.text }}
-                    />
-                  </span>
-                  <span className="mt-2 flex min-w-0 items-center gap-2">
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-sm font-medium text-[var(--color-text)]">
-                        {theme.label}
-                      </span>
-                      <span className="block text-xs text-[var(--color-text-muted)]">
-                        {modeLabel}
-                      </span>
-                    </span>
-                    {selected ? (
-                      <span
-                        aria-hidden="true"
-                        className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent)] text-[var(--color-on-accent)]"
-                      >
-                        <IconCheck size={12} />
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="sr-only">{theme.description}</span>
-                </button>
-              );
-            })}
-          </div>
+          <SegmentedControl
+            ariaLabel="Color theme"
+            value={appearance.theme}
+            onValueChange={(value) => appearance.setAppearance(value as (typeof THEMES)[number]["id"])}
+            options={THEMES.map((theme) => ({ id: theme.id, label: theme.label }))}
+          />
         }
       />
     </div>
@@ -4608,26 +4556,36 @@ function updateStatusText(state: UpdateState, channel: UpdateChannelSettings["ch
 
 function AppUpdateRows() {
   const { settings, loadError } = useUpdateChannel();
-  const [state, setState] = useState<UpdateState>({ status: "idle" });
+  const sharedUpdates = useUpdateStateOptional();
+  const [fallbackState, setFallbackState] = useState<UpdateState>({ status: "idle" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (sharedUpdates) return;
     const api = window.openAdminOS;
     if (!api) return;
     let cancelled = false;
-    api
-      .getUpdateState()
-      .then((next) => {
-        if (!cancelled) setState(next);
-      })
-      .catch(() => undefined);
-    const unsubscribe = api.onUpdateStateChanged(setState);
+    void api.getUpdateState().then((next) => {
+      if (!cancelled) setFallbackState(next);
+    }).catch(() => undefined);
+    const unsubscribe = api.onUpdateStateChanged(setFallbackState);
     return () => {
       cancelled = true;
       unsubscribe();
     };
-  }, []);
+  }, [sharedUpdates]);
+
+  const state = sharedUpdates?.state ?? fallbackState;
+  const retryUpdate = async () => {
+    if (sharedUpdates) return sharedUpdates.retry();
+    const next = await window.openAdminOS?.checkForUpdatesNow();
+    if (next) setFallbackState(next);
+  };
+  const restartUpdate = async () => {
+    if (sharedUpdates) return sharedUpdates.restart();
+    await window.openAdminOS?.applyUpdateNow();
+  };
 
   const unavailable = settings?.unavailableReason;
   // The channel only applies where the in-app updater runs.
@@ -4650,11 +4608,9 @@ function AppUpdateRows() {
   };
 
   const checkNow = async () => {
-    const api = window.openAdminOS;
-    if (!api) return;
     setError(null);
     try {
-      setState(await api.checkForUpdatesNow());
+      await retryUpdate();
     } catch (cause) {
       const reason = userFacingErrorReason(cause instanceof Error ? cause.message : String(cause));
       setError(`The update check did not start.${reason ? ` ${reason}` : ""} Try again.`);
@@ -4696,13 +4652,13 @@ function AppUpdateRows() {
               variant="primary"
               size="sm"
               onClick={() => {
-                window.openAdminOS?.applyUpdateNow().catch((cause: unknown) => {
+                restartUpdate().catch((cause: unknown) => {
                   const reason = userFacingErrorReason(cause instanceof Error ? cause.message : String(cause));
                   setError(`The update did not start installing.${reason ? ` ${reason}` : ""} Quit OpenAdminOS to install it, or try again.`);
                 });
               }}
             >
-              Restart now
+              Restart to install
             </Button>
           ) : (
             <Button
@@ -4712,7 +4668,7 @@ function AppUpdateRows() {
               onClick={() => void checkNow()}
             >
               <IconRefresh size={13} />
-              {state.status === "checking" ? "Checking" : "Check for updates"}
+              {state.status === "checking" ? "Checking" : state.status === "error" ? "Retry" : "Check for updates"}
             </Button>
           )
         }
@@ -4763,61 +4719,44 @@ function AboutSection() {
   }, []);
 
   return (
-    <div className="max-w-[1040px] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
-      <dl className="divide-y divide-[var(--color-border-soft)] px-5">
-        <KeyValue label="Version" value={__APP_VERSION__} />
-        <KeyValue label="License" value="MIT" />
-        <KeyValue label="Repository" value="OpenAdminOS/OpenAdminOS" />
-        <KeyValue label="Built by" value="OpenAdminOS" />
-      </dl>
+    <div className="max-w-[680px]">
+      <SettingRow
+        label="Version"
+        description="OpenAdminOS desktop"
+        control={
+          <div className="flex items-center gap-2">
+            <IconLogo size={22} className="text-[var(--color-text)]" />
+            <span className="font-mono text-sm text-[var(--color-text-soft)]">{__APP_VERSION__}</span>
+            {isNightlyVersion(__APP_VERSION__) ? <Badge tone="warning"><StatusDot tone="warning" />Nightly</Badge> : null}
+          </div>
+        }
+      />
       <AppUpdateRows />
-      <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border-soft)] px-5 py-4">
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={openSetup}
-        >
-          Connect tenant
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            void window.openAdminOS?.openExternal(
-              "https://github.com/OpenAdminOS/OpenAdminOS",
-            );
-          }}
-        >
-          View on GitHub
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            void window.openAdminOS?.openExternal(
-              "https://github.com/OpenAdminOS/OpenAdminOS/blob/main/CHANGELOG.md",
-            );
-          }}
-        >
-          What's new
-        </Button>
-        <Button
-          variant="secondary"
-          size="sm"
-          onClick={() =>
-            openReportIssue({
-              source: "settings-about",
-              title: "OpenAdminOS issue",
-              description:
-                "I found an issue while using OpenAdminOS. Details are below.",
-            })
-          }
-        >
-          Report issue
-        </Button>
-      </div>
+      <SettingRow
+        label="Source code and license"
+        description="OpenAdminOS is open source under the MIT license."
+        control={<Button variant="ghost" size="sm" onClick={() => { void window.openAdminOS?.openExternal("https://github.com/OpenAdminOS/OpenAdminOS"); }}>View source</Button>}
+      />
+      <SettingRow
+        label="Project"
+        description="Tenant setup, release notes, and support."
+        stacked
+        control={
+          <div className="flex flex-wrap items-center gap-2">
+            <Button variant="secondary" size="sm" onClick={openSetup}>Connect tenant</Button>
+            <Button variant="ghost" size="sm" onClick={() => { void window.openAdminOS?.openExternal("https://github.com/OpenAdminOS/OpenAdminOS/blob/main/CHANGELOG.md"); }}>What's new</Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              onClick={() => openReportIssue({ source: "settings-about", title: "OpenAdminOS issue", description: "I found an issue while using OpenAdminOS. Details are below." })}
+            >
+              Report a problem
+            </Button>
+          </div>
+        }
+      />
 
-      <details className="border-t border-[var(--color-border-soft)] px-5 py-4">
+      <details className="border-t border-[var(--color-border-soft)] py-4">
         <summary className="cursor-pointer text-base font-medium text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">
           Readiness diagnostics
         </summary>
@@ -5051,17 +4990,17 @@ function SettingRow({
       className={`setting-row scroll-mt-6 border-b border-[var(--color-border-soft)] last:border-b-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)] ${normalizedQuery ? "bg-[var(--color-accent-soft)]/35" : ""}`}
     >
       <div
-        className={`grid items-center gap-4 px-5 py-4 ${stacked ? "" : "lg:grid-cols-[minmax(220px,0.8fr)_minmax(0,1fr)]"}`}
+        className={`grid items-center gap-4 px-0 py-[var(--row-y)] ${stacked ? "" : "sm:grid-cols-[minmax(220px,1fr)_minmax(0,auto)]"}`}
       >
         <div className="min-w-0">
-          <div className="text-base font-medium text-[var(--color-text)]">
+          <div className="text-[14px] font-medium text-[var(--color-text)]">
             {renderedLabel}
           </div>
-          <div className="mt-0.5 text-sm leading-5 text-[var(--color-text-muted)]">
+          <div className="mt-0.5 text-[13px] leading-5 text-[var(--color-text-muted)]">
             {renderedDescription}
           </div>
         </div>
-        <div className={`min-w-0 ${stacked ? "w-full" : "justify-self-start lg:justify-self-end"}`}>{control}</div>
+        <div className={`min-w-0 ${stacked ? "w-full" : "justify-self-start sm:justify-self-end"}`}>{control}</div>
       </div>
     </div>
   );

@@ -11,9 +11,11 @@ import { AppStateProvider } from "./state";
 import "./styles/globals.css";
 import { initializeAppearance } from "./styles/appearance";
 import { initializeAnswerFont } from "./styles/answer-font";
+import { initializeDensity } from "./styles/density";
 
 initializeAppearance();
 initializeAnswerFont();
+initializeDensity();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

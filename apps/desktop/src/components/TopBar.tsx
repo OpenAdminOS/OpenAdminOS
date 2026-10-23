@@ -22,6 +22,7 @@ export function TopBar() {
 
   return (
     <header
+      aria-label="Current tenant, provider, and data boundary"
       className={`app-topbar relative flex h-[52px] shrink-0 items-center border-b border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 ${draggable ? "app-region-drag" : ""}`}
       style={platform === "windows" ? { paddingRight: 140 } : undefined}
     >

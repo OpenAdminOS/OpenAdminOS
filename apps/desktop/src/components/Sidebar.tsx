@@ -54,7 +54,7 @@ function NavRow({ item }: { item: NavItem }) {
     <NavLink
       to={item.to}
       className={({ isActive }) =>
-        `group flex h-8 items-center gap-2 rounded-[8px] px-2.5 text-base transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+        `group flex h-[var(--nav-h)] items-center gap-2 rounded-[8px] px-2.5 text-base transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
           isActive
             ? "bg-[var(--color-active)] font-medium text-[var(--color-text)]"
             : "text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]"
@@ -223,7 +223,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           <button
             type="button"
             onClick={newChat}
-            className="group flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-left text-base text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+            className="group flex h-[var(--nav-h)] w-full items-center gap-2 rounded-[8px] px-2.5 text-left text-base text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
           >
             <IconPlus size={14} className="w-4 text-[var(--color-text-muted)]" />
             <span className="flex-1">New chat</span>
@@ -232,7 +232,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           <button
             type="button"
             onClick={onOpenPalette}
-            className="group flex h-8 w-full items-center gap-2 rounded-[8px] px-2.5 text-left text-base text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+            className="group flex h-[var(--nav-h)] w-full items-center gap-2 rounded-[8px] px-2.5 text-left text-base text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
           >
             <IconSearch size={14} className="w-4 text-[var(--color-text-muted)]" />
             <span className="flex-1">Search</span>

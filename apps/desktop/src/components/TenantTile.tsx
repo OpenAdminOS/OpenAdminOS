@@ -14,6 +14,7 @@ const TENANT_COLORS = [
 const SIZE_CLASSES = {
   xs: "h-4 w-4 text-[8px] rounded-[4px]",
   sm: "h-5 w-5 text-[9px] rounded-[5px]",
+  row: "h-[38px] w-[38px] text-[13px] rounded-[10px]",
   md: "h-10 w-10 text-sm rounded-[10px]",
 } as const;
 

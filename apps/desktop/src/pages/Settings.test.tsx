@@ -15,6 +15,7 @@ import {
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
 import { setAnswerFont } from "../styles/answer-font";
+import { setDensity } from "../styles/density";
 
 function provider(id: string) {
   const match = mockProviders.find((entry) => entry.id === id);
@@ -26,6 +27,7 @@ describe("Settings provider section", () => {
   it("stores the Chat answer font as a device-local General preference", async () => {
     const user = userEvent.setup();
     setAnswerFont("serif");
+    setDensity("comfortable");
     renderRoute(<Settings />, {
       path: "/settings/:section?",
       route: "/settings/general",
@@ -37,6 +39,11 @@ describe("Settings provider section", () => {
     await user.click(within(picker).getByRole("radio", { name: "Sans" }));
     expect(document.documentElement.dataset.answerFont).toBe("sans");
     expect(localStorage.getItem("openadminos:answer-font:v1")).toBe("sans");
+
+    const density = screen.getByRole("radiogroup", { name: "Density" });
+    await user.click(within(density).getByRole("radio", { name: "Compact" }));
+    expect(document.documentElement.dataset.density).toBe("compact");
+    expect(localStorage.getItem("openadminos:density:v1")).toBe("compact");
   });
 
   it("saves audit exports in the host without resubmitting content through text-file IPC", async () => {
@@ -98,11 +105,11 @@ describe("Settings provider section", () => {
       expect(screen.getByRole("heading", { name: "Appearance" })).toHaveFocus(),
     );
     expect(within(picker).getAllByRole("radio")).toHaveLength(4);
-    const system = within(picker).getByRole("radio", { name: /System, Follows system/ });
+    const system = within(picker).getByRole("radio", { name: "System" });
     system.focus();
     await user.keyboard("{ArrowRight}");
 
-    const light = within(picker).getByRole("radio", { name: /Light, Light/ });
+    const light = within(picker).getByRole("radio", { name: "Light" });
     expect(light).toHaveFocus();
     expect(light).toHaveAttribute("aria-checked", "true");
     expect(document.documentElement.dataset.theme).toBe("light");

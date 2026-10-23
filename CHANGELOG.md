@@ -8,6 +8,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Restyle Agent Team, Agents, Runs, Changes, and Settings with calm list rows, editorial page headings, clearer review states, and a device-local Comfortable or Compact density setting.
 - Rebuild Chat around tenant briefings and focused conversations, with a shared slash-enabled composer, scoped answer provenance, quieter agent handoffs, and a device-local answer font preference.
 - Replace the desktop status strip and separate Chat history rail with a shared 52px top bar and 268px conversation sidebar, including tenant switching, persistent data-boundary status, updater progress and recovery, grouped conversation history, workspace actions, and platform-native window controls.
 - Refresh the desktop visual foundation with System-aware Light, Dark, and Midnight themes, locally bundled Geist and Newsreader fonts, calmer shared controls, and the new oa ligature brand mark.

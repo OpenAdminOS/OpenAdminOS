@@ -153,7 +153,7 @@ export async function runOfficeSmoke(
   );
   window.setContentSize(1440, 1000);
   await evaluate(
-    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'List view').click()`,
+    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'List').click()`,
   );
   await wait(`Boolean(document.querySelector('.office-list'))`);
   await writeFile(join(outputDir, "office-list.png"), await capture());
