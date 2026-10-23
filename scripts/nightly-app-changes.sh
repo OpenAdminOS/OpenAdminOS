@@ -13,6 +13,17 @@
 set -euo pipefail
 
 commit="${1:?usage: nightly-app-changes.sh <commit>}"
+
+# A release already contains this commit when a v* tag sits on it or on a
+# descendant. That happens when a newer nightly published first (GitHub does
+# not order dispatched runs) or when a superseded run is re-run. Building it
+# then would ship older code under a newer nightly version.
+containing="$(git tag --contains "$commit" --list 'v[0-9]*' | head -n 1 || true)"
+if [ -n "$containing" ]; then
+  echo "$containing already contains $commit." >&2
+  exit 0
+fi
+
 base="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "$commit" 2>/dev/null || true)"
 if [ -z "$base" ]; then
   echo "No v* tag is reachable from $commit." >&2

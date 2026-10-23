@@ -146,3 +146,48 @@ test("the downloads table links the installers that were built", () => {
   assert.doesNotMatch(notes, /Unreleased changelog/);
   assert.doesNotMatch(notes, /\u2014|\u2013/);
 });
+
+test("nightly-app-changes lists app paths and skips commits a release already contains", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const script = resolve("scripts/nightly-app-changes.sh");
+  const repo = mkdtempSync(join(tmpdir(), "nightly-app-changes-"));
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+  const changes = (commit) =>
+    execFileSync("bash", [script, commit], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const commit = (path, message) => {
+    mkdirSync(join(repo, path, ".."), { recursive: true });
+    writeFileSync(join(repo, path), message);
+    git("add", "-A");
+    git("commit", "-qm", message);
+    return git("rev-parse", "HEAD");
+  };
+  try {
+    git("init", "-q");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "test");
+    commit("apps/a.ts", "base");
+    git("tag", "v0.7.0");
+    assert.equal(changes("HEAD"), "");
+
+    const a = commit("apps/a.ts", "app change A");
+    commit("stats/agents.json", "stats: +1 install");
+    commit("README.md", "docs");
+    const b = commit("packages/b.ts", "app change B");
+    assert.equal(changes(a), "apps/a.ts");
+    assert.equal(changes(b), "apps/a.ts\npackages/b.ts");
+
+    // B publishes first. A, dispatched earlier but started later, has nothing to ship.
+    git("tag", "v0.7.1-nightly.20261023150000", b);
+    assert.equal(changes(a), "");
+    assert.equal(changes(b), "");
+
+    // Only stats and docs after the newest nightly: nothing to ship.
+    const stats = commit("stats/agents.json", "stats: +2 installs");
+    assert.equal(changes(stats), "");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
