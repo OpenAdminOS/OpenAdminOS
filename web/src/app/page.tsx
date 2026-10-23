@@ -384,15 +384,9 @@ export default async function HomePage() {
       {/* Product tour */}
       <section className="border-t border-brand-line">
         <div className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
-          <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,28rem)] lg:items-end">
-            <h2 data-reveal className={sectionTitle}>
-              One app, from the first question to the reviewed change.
-            </h2>
-            <p data-reveal className="text-lg leading-8 text-brand-muted">
-              Every view below is a real capture of the desktop app with its
-              demo tenant.
-            </p>
-          </div>
+          <h2 data-reveal className={`${sectionTitle} max-w-3xl`}>
+            One app, from the first question to the reviewed change.
+          </h2>
           <div className="mt-14">
             <ProductTour items={TOUR} />
           </div>
