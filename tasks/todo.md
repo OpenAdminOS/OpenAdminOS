@@ -1,5 +1,23 @@
 # Current active plan
 
+## Nightly update channel (branch `feature/nightly-channel`)
+
+Decisions (Ugur, 2026-10-23): build after every merge to `main`, channel name "Nightly", Linux packages attached to the prerelease but never published to apt. Design ported from TenuVault (`origin/main`, including #219).
+
+- [ ] Pipeline: `auto-tag.yml` cuts a stable release when the package version is untagged, otherwise dispatches a nightly when app paths changed since the last `v*` tag.
+- [ ] Pipeline: `release.yml` resolves the channel in a `meta` job; nightlies skip the release gate (CI already passed on that commit), set `X.Y.Z-nightly.YYYYMMDDHHMMSS` and the `nightly` update channel at build time, publish a signed prerelease with `--latest=false`, prune to 20, and never touch apt.
+- [ ] App: channel-aware updater (ported from TenuVault), newer stable offered to nightly users, Settings > About toggle and "Check for updates", Nightly badge in the status strip.
+- [ ] Docs: `docs/RELEASING.md`, `docs/SPEC.md`, `CHANGELOG.md`.
+
+Acceptance criteria:
+1. A green CI run on `main` whose diff since the last `v*` tag touches only `stats/`, `web/`, `docs/`, `tasks/`, `.github/` or root Markdown dispatches nothing.
+2. A green CI run on `main` with an app change and an already-tagged package version dispatches exactly one nightly; a release-prep merge still cuts the stable release and no nightly.
+3. A nightly run publishes a GitHub prerelease tagged `vX.Y.Z-nightly.<14 digits>` (X.Y.Z = newest stable patch + 1) containing signed Windows and notarized macOS installers, Linux packages, `nightly.yml`, `nightly-mac.yml`, and `SHA256SUMS.txt`; it is not marked latest, so `/releases/latest` and the website keep pointing at stable.
+4. Stable tag releases behave exactly as before (same gate, assets, CHANGELOG notes, apt publish).
+5. Nightly runs never deploy the apt repository and fail if signing secrets are missing.
+6. A stable install never offers a nightly. A nightly install offers newer nightlies and any newer stable. Turning nightly off on a nightly install offers the current stable even if older. Updates from a previous channel are cancelled or discarded.
+7. Version tooling, notes generation, and updater channel logic are covered by tests that run in CI.
+
 - [ ] Prepare **0.6.4** after PR #91: fix issue #89 where a Windows provider-probe `spawn EINVAL` aborted tenant connection. Batch launchers are resolved or refused, synchronous spawn failures are contained, and provider checks are isolated. Verified on the Windows mini PC and macOS.
 - [ ] Close the known Chat, Nova and Agent Team demo blockers using the [0.6.3 live desktop readiness plan](./demo-readiness-063-plan.md), then verify the signed installed build against the configured tenant/providers.
 

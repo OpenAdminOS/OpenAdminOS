@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Publish a signed Nightly prerelease after every merge that changes the app, and let installs opt in from Settings > About.
+
 ### Changed
 
 - Restyle the public website with the Midnight dark palette, one blue accent, dark content surfaces, and a populated Chat answer in the product demo.
@@ -14,6 +16,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Removed
 
 ### Fixed
+
+- Keep documentation index releases from becoming the GitHub "Latest" release, which stable update checks and the download page rely on.
 
 ### Security
 
