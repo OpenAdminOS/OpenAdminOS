@@ -2674,7 +2674,17 @@ export interface OpenAdminOSApi {
   setActiveModel(providerId: ProviderId, model: string | null): Promise<AppState>;
   /** Update native window chrome to match the device-local renderer theme. */
   setAppearance?(
-    theme: "graphite" | "midnight" | "off-white" | "sand" | "dark" | "light",
+    appearance:
+      | {
+          preference: "system" | "light" | "dark" | "midnight";
+          resolvedTheme: "light" | "dark" | "midnight";
+        }
+      | "graphite"
+      | "midnight"
+      | "off-white"
+      | "sand"
+      | "dark"
+      | "light",
   ): Promise<void>;
   setOfficeFullscreen?(active: boolean): Promise<boolean>;
   onOfficeFullscreenChanged?(listener: (active: boolean) => void): () => void;
@@ -2901,6 +2911,7 @@ export interface UpdateState {
     | "error";
   version?: string;
   message?: string;
+  progress?: number;
 }
 
 /** Stable releases, or nightly prereleases built from every merge to main. */

@@ -684,7 +684,7 @@ function HubAgentCard({
                   />
                 )}
                 <span className="opacity-50">·</span>
-                <span className="font-mono">{agent.version}</span>
+                <span>{agent.version}</span>
               </div>
             </div>
           </div>
@@ -714,7 +714,7 @@ function HubAgentCard({
 
         <div className="flex items-center justify-between border-t border-[var(--color-border-soft)] pt-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-xs text-[var(--color-text-muted)]">
+            <span className="text-xs text-[var(--color-text-muted)]">
               v{agent.version}
             </span>
             {typeof installs === "number" && (

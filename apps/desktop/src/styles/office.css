@@ -1594,7 +1594,7 @@ html[data-team-presentation]
   > :not(.office-toolbar):not(.office-layout):not(.office-header),
 html[data-team-presentation] .office-panel,
 html[data-team-presentation] aside,
-html[data-team-presentation] [role="status"],
+html[data-team-presentation] .office-page [role="status"],
 html[data-team-presentation] .office-header button {
   display: none !important;
 }
@@ -1650,10 +1650,6 @@ html[data-team-presentation] .office-page {
 }
 .office-room a.scene-event {
   color: var(--color-text);
-}
-html[data-team-presentation]
-  footer[aria-label="Current tenant, provider, and data boundary"] {
-  visibility: hidden;
 }
 .team-rehearsal-banner {
   font: 500 11px/16px var(--font-sans);
@@ -1886,9 +1882,17 @@ html[data-team-presentation]
   margin: 24px 0 0;
   font-size: 12px;
 }
-html[data-team-fullscreen] aside[aria-label="Application navigation"],
-html[data-team-fullscreen] .app-region-drag {
+html[data-team-fullscreen] aside[aria-label="Application navigation"] {
   display: none;
+}
+
+html[data-team-presentation] aside[aria-label="Application navigation"] {
+  display: none;
+}
+
+html[data-team-fullscreen] .app-shell-scrim,
+html[data-team-presentation] .app-shell-scrim {
+  top: 0;
 }
 .office-fullscreen {
   display: flex;
@@ -2251,3 +2255,142 @@ html[data-team-presentation] .office-fullscreen .office-room {
 
 /* The studio illustration shares the neutral identity; status indicators retain semantic color. */
 .office-interior, .office-empty-avatar { filter: grayscale(1); }
+
+/* Calm shell presentation. The illustrated office remains functional inside a quieter frame. */
+.office-page {
+  width: 100%;
+  max-width: 1160px;
+  height: auto;
+  min-height: 100%;
+  margin-inline: auto;
+  overflow: visible;
+  padding: 24px 32px 36px;
+}
+.office-toolbar {
+  margin: 0 0 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border-soft);
+  font-size: 13px;
+}
+.office-storage-note {
+  margin-right: 4px;
+  color: var(--color-text-muted);
+  font-size: 12px;
+}
+.office-findings {
+  margin: 0 0 22px;
+}
+.office-findings > h2 {
+  margin: 0 0 8px 12px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+.office-findings-group {
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+}
+.office-finding-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: var(--row-y) 12px;
+}
+.office-finding-row + .office-finding-row {
+  border-top: 1px solid var(--color-border-soft);
+}
+.office-finding-row > .persona-avatar {
+  width: 38px;
+  height: 38px;
+}
+.office-finding-copy {
+  min-width: 0;
+  flex: 1;
+}
+.office-finding-copy strong,
+.office-finding-copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.office-finding-copy strong { font-size: 14px; font-weight: 500; }
+.office-finding-copy span { margin-top: 2px; color: var(--color-text-muted); font-size: 13px; }
+.office-finding-actions { display: flex; flex: none; align-items: center; gap: 4px; }
+.office-room {
+  border: 0;
+  background-color: var(--color-floor);
+  background-image: radial-gradient(circle, var(--color-dot) 1px, transparent 1px);
+  background-size: 18px 18px;
+  box-shadow: inset 0 0 0 1px var(--color-border-soft), var(--shadow-soft);
+}
+.office-list { min-height: 350px; background-color: var(--color-floor); }
+.office-persona-list {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
+}
+.office-persona-row {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 12px;
+  border-radius: 14px;
+  padding: var(--row-y) 12px;
+  color: var(--color-text);
+  text-align: left;
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.office-persona-row:hover { background: var(--color-hover); }
+.office-persona-row[aria-pressed="true"] {
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+.office-persona-row > .persona-avatar { width: 38px; height: 38px; }
+.office-persona-copy { min-width: 0; flex: 1; }
+.office-persona-copy > span:last-child {
+  display: block;
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.office-persona-line { display: flex; min-width: 0; align-items: center; gap: 8px; }
+.office-persona-line strong { overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.office-persona-line > span { display: inline-flex; align-items: center; gap: 6px; color: var(--color-text-muted); font-size: 13px; }
+.office-persona-tenant { flex: none; color: var(--color-text-muted); font-size: 13px; }
+.office-panel {
+  border: 0;
+  background: var(--color-surface);
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+}
+.office-panel h2 {
+  margin: 0;
+  font-family: var(--font-serif);
+  font-size: 22px;
+  font-weight: 500;
+}
+.office-persona-role { color: var(--color-text-muted); font-size: 12px; }
+.office-facts > div {
+  margin: 0;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+}
+.office-facts > div:last-child { border-bottom: 0; }
+.office-fact-status,
+.office-fact-tenant,
+.office-fact-provider { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.office-room-footer { background: color-mix(in srgb, var(--color-floor) 88%, var(--color-surface)); }
+@media (max-width: 860px) {
+  .office-page { padding: 20px 24px 30px; }
+  .office-storage-note { width: 100%; text-align: right; }
+  .office-finding-row { align-items: flex-start; flex-wrap: wrap; }
+  .office-finding-actions { margin-left: 50px; }
+}

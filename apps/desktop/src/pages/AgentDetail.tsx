@@ -530,7 +530,7 @@ export default function AgentDetail({
           <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
             {agent.mode === "write" ? "Write" : "Read"}
           </Badge>
-          <span className="font-mono text-sm text-[var(--color-text-soft)]">v{agent.version}</span>
+          <span className="text-sm text-[var(--color-text-soft)]">v{agent.version}</span>
           <span className="text-sm text-[var(--color-text-muted)]">{agent.author.name}</span>
           {agent.author.verified ? (
             <IconBadgeCheck aria-label="Verified publisher" size={13} className="text-[var(--color-info)]" />
@@ -561,9 +561,9 @@ export default function AgentDetail({
               <span className="font-medium">
                 {updateRequiresNewerApp(agent) ? "App update required." : "Update available."}
               </span>{" "}
-              <span className="font-mono">v{agent.version}</span>
+              <span>v{agent.version}</span>
               <span className="opacity-50"> → </span>
-              <span className="font-mono">v{agent.updateAvailable.version}</span>
+              <span>v{agent.updateAvailable.version}</span>
               <span className="opacity-70">
                 {" "}
                 {updateRequiresNewerApp(agent)
@@ -1019,7 +1019,7 @@ function HubAgentDrawer({
             <Badge tone={agent.mode === "write" ? "warning" : "neutral"}>
               {agent.mode === "write" ? "Write" : "Read"}
             </Badge>
-            <span className="font-mono text-sm text-[var(--color-text-soft)]">v{agent.version}</span>
+            <span className="text-sm text-[var(--color-text-soft)]">v{agent.version}</span>
             <span className="text-sm text-[var(--color-text-muted)]">{agent.author.name}</span>
             {agent.author.verified ? (
               <IconBadgeCheck aria-label="Verified publisher" size={13} className="text-[var(--color-info)]" />
@@ -1060,7 +1060,7 @@ function HubAgentDrawer({
             <p className="text-base leading-relaxed text-[var(--color-text-soft)]">{agent.description}</p>
             <dl className="mt-3 divide-y divide-[var(--color-border-soft)]">
               <KeyValue label="Category" value={<span className="capitalize">{agent.category}</span>} />
-              <KeyValue label="Minimum app" value={<span className="font-mono">{agent.minAppVersion ?? "0.1.0"}</span>} />
+              <KeyValue label="Minimum app" value={agent.minAppVersion ?? "0.1.0"} />
               <KeyValue
                 label="License"
                 value={agent.requiresEntraTier === "free" ? "No premium tier declared" : `Entra ID ${agent.requiresEntraTier.toUpperCase()}`}

@@ -6,9 +6,8 @@ import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import { captureWebsiteDemo } from "./website-demo-capture.js";
 import {
-  DEFAULT_NATIVE_THEME_ID,
   NATIVE_THEME_COLORS,
-  parseNativeTheme,
+  parseNativeAppearance,
 } from "./appearance.js";
 import {
   app,
@@ -1015,7 +1014,7 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/agents?source=hub",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Library", "Agent hub"],
+      waitFor: ["Library", "hub agents"],
       heading: "Agents",
     },
     {
@@ -1029,17 +1028,17 @@ async function runScreenshotCapture(): Promise<void> {
       route: "/chat",
       name: "chat-empty",
       file: "app/chat-empty.png",
-      waitFor: ["Chat", "Ollama"],
+      waitFor: ["Ollama"],
       prepare: "chat-empty",
-      selector: "#intune-chat-composer",
+      selector: '[id^="intune-chat-composer"]',
     },
     {
       route: "/chat",
       name: "chat-transcript",
       file: "app/chat-transcript.png",
-      waitFor: ["Chat", "Ollama"],
+      waitFor: ["Ollama"],
       prepare: "chat-transcript",
-      selector: "#intune-chat-composer",
+      selector: '[id^="intune-chat-composer"]',
     },
     {
       route: "/changes",
@@ -1094,7 +1093,7 @@ async function runScreenshotCapture(): Promise<void> {
       { route: "/settings/appearance", name: "appearance", waitFor: ["Midnight"] },
     ];
     window.setContentSize(SCREENSHOT_CAPTURE_WIDTH, SCREENSHOT_CAPTURE_HEIGHT);
-    for (const theme of ["graphite", "midnight", "off-white", "sand"] as const) {
+    for (const theme of ["light", "dark", "midnight"] as const) {
       await window.webContents.executeJavaScript(`window.openAdminOS.setAppearance(${JSON.stringify(theme)})`);
       await window.webContents.executeJavaScript(`localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)}); window.dispatchEvent(new StorageEvent("storage", {key:"openadminos:appearance:v1"}));`);
       for (const shot of [...appShots, ...extraShots]) {
@@ -1102,7 +1101,7 @@ async function runScreenshotCapture(): Promise<void> {
         await captureScreenshotPng(window, `app/brand-${theme}-${shot.name}.png`);
       }
     }
-    console.log("[screenshot-capture] passed all four brand themes and route families");
+    console.log("[screenshot-capture] passed all three brand themes and route families");
     app.exit(0);
     return;
   }
@@ -1352,14 +1351,14 @@ async function screenshotCaptureStepScript(
       // The New chat control lives in the history panel, which is a closed
       // overlay at narrow widths; Mod+N's event covers that case.
       await waitFor(
-        () => Boolean(document.querySelector("#intune-chat-composer")),
+        () => Boolean(document.querySelector('[id^="intune-chat-composer"]')),
         "Chat composer",
       );
       const newConversation = findNewChatButton();
       if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
-        () => bodyText().includes("What do you want to inspect?"),
+        () => bodyText().includes("Run an agent with /"),
         "empty Chat state",
       );
     } else if (step.prepare === "chat-transcript") {
@@ -1367,7 +1366,7 @@ async function screenshotCaptureStepScript(
       if (newConversation && !newConversation.disabled) newConversation.click();
       window.dispatchEvent(new CustomEvent("openadminos:new-conversation"));
       await waitFor(
-        () => bodyText().includes("What do you want to inspect?"),
+        () => bodyText().includes("Run an agent with /"),
         "new Chat transcript fixture",
       );
       const textarea = setTextarea(
@@ -1484,14 +1483,20 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const findButton = (label: string): HTMLButtonElement | undefined => {
     const buttons = Array.from(document.querySelectorAll("button"));
     return (
-      buttons.find((button) => button.textContent?.trim() === label) ??
-      buttons.find((button) => button.textContent?.trim().includes(label))
+      buttons.find(
+        (button) =>
+          button.getAttribute("aria-label") === label ||
+          button.title === label ||
+          button.textContent?.trim() === label,
+      ) ?? buttons.find((button) => button.textContent?.trim().includes(label))
     );
   };
   const findNamedButton = (name: string): HTMLButtonElement | undefined =>
     Array.from(document.querySelectorAll("button")).find(
       (button) =>
-        button.getAttribute("aria-label") === name || button.title === name,
+        button.getAttribute("aria-label") === name ||
+        button.title === name ||
+        button.textContent?.trim() === name,
     );
   const clickButton = async (label: string) => {
     await waitFor(() => {
@@ -1542,13 +1547,31 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const clickSummary = async (label: string) => {
     await waitFor(() => {
       const summary = Array.from(document.querySelectorAll("summary")).find(
-        (candidate) => candidate.textContent?.trim().includes(label),
+        (candidate) =>
+          candidate.getAttribute("aria-label") === label ||
+          candidate.textContent?.trim().includes(label),
       );
       return Boolean(summary);
     }, `${label} disclosure`);
     Array.from(document.querySelectorAll("summary"))
-      .find((candidate) => candidate.textContent?.trim().includes(label))
+      .find(
+        (candidate) =>
+          candidate.getAttribute("aria-label") === label ||
+          candidate.textContent?.trim().includes(label),
+      )
       ?.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  };
+  const newChatReady = () => {
+    const textarea = document.querySelector("textarea");
+    const send = findNamedButton("Send");
+    return (
+      location.hash === "#/chat" &&
+      textarea instanceof HTMLTextAreaElement &&
+      textarea.value === "" &&
+      Boolean(send?.disabled) &&
+      Boolean(findNamedButton("Switch tenant, Smoke Tenant")) &&
+      Boolean(document.querySelector('summary[aria-label="Scope: Smoke Tenant"]'))
+    );
   };
   const setTextarea = async (value: string) => {
     await waitFor(() => Boolean(document.querySelector("textarea")), "chat input");
@@ -1627,11 +1650,24 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       }),
     );
   };
+  const observeChatProgress = () => {
+    let seen = false;
+    const record = () => {
+      if (document.querySelector(".chat-scope-shimmer")) seen = true;
+    };
+    const observer = new MutationObserver(record);
+    observer.observe(document.body, { childList: true, subtree: true });
+    record();
+    return {
+      seen: () => seen,
+      disconnect: () => observer.disconnect(),
+    };
+  };
 
   location.hash = "/chat";
   await waitFor(
     () =>
-      bodyText().includes("What do you want to inspect?") &&
+      bodyText().includes("Run an agent with /") &&
       bodyText().includes("Smoke Tenant"),
     "direct Chat front door",
   );
@@ -1665,21 +1701,38 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => learningSwitch.getAttribute("aria-checked") === "true", "self-training enabled");
 
   location.hash = "/chat";
-  await waitFor(() => bodyText().includes("What do you want to inspect?"), "Intune Chat route");
+  await waitFor(() => bodyText().includes("Run an agent with /"), "Intune Chat route");
   await waitFor(
-    () => bodyText().includes("Smoke Tenant") && bodyText().includes("New conversation"),
+    () =>
+      Boolean(findNamedButton("Switch tenant, Smoke Tenant")) &&
+      Boolean(document.querySelector('textarea[role="combobox"]')) &&
+      Boolean(document.querySelector('[aria-label="Application navigation"]')),
     "tenant-connected chat shell",
   );
-  await clickNamedButton("Collapse chat panel");
-  await waitFor(() => Boolean(findNamedButton("Show chat panel")), "collapsed chat panel");
+  await clickNamedButton("Collapse sidebar");
   await waitFor(
-    () => Boolean(findNamedButton("Show chat panel")),
-    "collapsed panel action",
+    () =>
+      document
+        .querySelector('[aria-label="Application navigation"]')
+        ?.getAttribute("aria-hidden") === "true" &&
+      Boolean(findNamedButton("Expand sidebar")),
+    "collapsed application sidebar",
   );
-  await clickNamedButton("Show chat panel");
-  await waitFor(() => bodyText().includes("Chats"), "expanded chat panel");
+  await clickNamedButton("Expand sidebar");
+  await waitFor(
+    () =>
+      document
+        .querySelector('[aria-label="Application navigation"]')
+        ?.getAttribute("aria-hidden") === "false" &&
+      bodyText().includes("Workspaces"),
+    "expanded application sidebar",
+  );
 
-  await clickNamedButton("Saved queries");
+  await clickNamedButton("Run an agent");
+  await waitFor(
+    () => Boolean(document.querySelector('[role="listbox"][aria-label="Agents and saved queries"]')),
+    "agent and saved query picker",
+  );
   await clickButton("Windows compliance by tenant");
   await waitFor(() => {
     const textarea = document.querySelector("textarea");
@@ -1700,11 +1753,8 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => bodyText().includes("Created") && bodyText().includes("evidence"), "split workspace evidence");
   const sawSplitToWorkspaces = bodyText().includes("workspace evidence");
   await clickModalButton("Close");
-  await clickNamedButton("New chat");
-  await waitFor(
-    () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
-    "new conversation after multi-tenant result",
-  );
+  await clickButton("New chat");
+  await waitFor(newChatReady, "new chat after multi-tenant result");
 
   await setTextarea("Hold response for cancellation smoke.");
   await pressEnterInTextarea();
@@ -1716,11 +1766,8 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   );
   await waitFor(() => !bodyText().includes("Thinking"), "stopped chat send settled");
   const sawStopGeneration = bodyText().includes("Response stopped by user");
-  await clickNamedButton("New chat");
-  await waitFor(
-    () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
-    "new conversation after stopped response",
-  );
+  await clickButton("New chat");
+  await waitFor(newChatReady, "new chat after stopped response");
 
   const testPrompts = [
     "Always retire stale Windows devices that have not synced.",
@@ -1742,23 +1789,16 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const writeBlockedAnswer = "I cannot perform tenant changes directly from chat.";
   for (const [index, prompt] of testPrompts.entries()) {
     if (index === 1) {
-      await clickNamedButton("New chat");
-      await waitFor(
-        () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
-        "visible new conversation draft",
-      );
+      await clickButton("New chat");
+      await waitFor(newChatReady, "visible new chat draft");
       responseCount = 0;
     }
     const expectedResponseCount = responseCount + 1;
     await setTextarea(prompt);
+    const progress = observeChatProgress();
     await pressEnterInTextarea();
-    await waitFor(
-      () =>
-        bodyText().includes("Check cached tenant data") ||
-        bodyText().includes("Generate response"),
-      "immediate chat progress checklist",
-      2500,
-    );
+    await waitFor(progress.seen, "immediate chat progress", 2500);
+    progress.disconnect();
     await waitFor(() => bodyText().includes(prompt), "optimistic user prompt", 2500);
     if (index === 0) {
       // Write-intent prompts are blocked before any LLM call; expect the
@@ -1792,7 +1832,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     responseCount = expectedResponseCount;
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
-  await clickSummary("How this was answered");
+  await clickSummary("How I checked");
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
@@ -1820,22 +1860,19 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     "read conversation transcript restored",
   );
   await clickNamedButton("Conversation actions");
-  await clickButton("Move to workspace");
+  await clickButton("Workspace");
   await waitFor(
     () => bodyText().includes("Created workspace") && bodyText().includes("linked this conversation"),
     "workspace created from conversation",
   );
-  await clickButton("Pin answer");
+  await clickNamedButton("Pin response to workspace");
   await waitFor(() => bodyText().includes("Pin answer to workspace"), "pin answer modal");
   await clickModalButton("Pin answer");
   await waitFor(() => bodyText().includes("Pinned evidence to"), "pinned answer evidence");
   const sawWorkspacePin = bodyText().includes("Pinned evidence to");
-  await clickNamedButton("New chat");
-  await waitFor(
-    () => bodyText().includes("New conversation") && bodyText().includes("Ready"),
-    "new conversation for workspace context",
-  );
-  await clickSummary("Smoke Tenant");
+  await clickButton("New chat");
+  await waitFor(newChatReady, "new chat for workspace context");
+  await clickSummary("Scope: Smoke Tenant");
   await selectFirstOption("Workspace context");
   await waitFor(() => bodyText().includes("Chat answer"), "workspace evidence option");
   await clickFirstEnabledCheckbox("workspace context evidence");
@@ -1853,21 +1890,17 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const sawWorkspaceContextAttachment =
     bodyText().includes("Context") ||
     bodyText().includes("Use the attached workspace context");
-  await clickButton("Regenerate");
-  await waitFor(
-    () =>
-      bodyText().includes("Check cached tenant data") ||
-      bodyText().includes("Generate response"),
-    "regenerate progress checklist",
-    2500,
-  );
+  const regenerateProgress = observeChatProgress();
+  await clickNamedButton("Regenerate response");
+  await waitFor(regenerateProgress.seen, "regenerate progress", 2500);
+  regenerateProgress.disconnect();
   await waitFor(
     () => textOccurrenceCount(smokeAnswer) >= workspaceResponseCount + 1,
     "regenerated chat response",
   );
   await waitFor(() => !bodyText().includes("Thinking"), "regenerate send settled");
   const sawRegenerate = textOccurrenceCount(smokeAnswer) >= workspaceResponseCount + 1;
-  await clickButton("Edit");
+  await clickNamedButton("Edit and resend prompt");
   await waitFor(() => {
     const textarea = document.querySelector("textarea");
     return textarea instanceof HTMLTextAreaElement &&
@@ -1886,25 +1919,23 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const sawUnpinAction = Boolean(findMenuItem("Unpin"));
   await clickNamedButton("Conversation actions");
   await waitFor(() => !findMenuItem("Unpin"), "conversation actions menu closed");
+  await clickNamedButton("Conversation actions");
+  await waitFor(() => Boolean(findMenuItem("Rename")), "rename conversation action");
+  findMenuItem("Rename")?.click();
   await waitFor(
-    () => Boolean(document.querySelector('header [title^="Updated"] button')),
-    "conversation title button",
-  );
-  (document.querySelector('header [title^="Updated"] button') as HTMLButtonElement).click();
-  await waitFor(
-    () => Boolean(document.querySelector('input[aria-label="Conversation title"]')),
-    "inline conversation rename",
+    () => Boolean(document.querySelector('input[name="conversation-title"]')),
+    "conversation rename dialog",
   );
   {
-    const input = document.querySelector('input[aria-label="Conversation title"]') as HTMLInputElement;
+    const input = document.querySelector('input[name="conversation-title"]') as HTMLInputElement;
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set?.call(
       input,
       "Smoke lifecycle review",
     );
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await waitFor(() => input.value === "Smoke lifecycle review", "rename input value");
-    input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
   }
+  await clickModalButton("Rename");
   await waitFor(() => bodyText().includes("Smoke lifecycle review"), "renamed conversation");
   const sawPinnedCategory = bodyText().includes("Pinned");
   await rightClickConversation("Smoke lifecycle review");
@@ -2064,7 +2095,7 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   };
 
   await waitFor(
-    () => bodyText().includes("What do you want to inspect?"),
+    () => bodyText().includes("Run an agent with /"),
     "initial Chat route",
   );
   location.hash = "/settings/about";
@@ -2075,7 +2106,7 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
       bodyText().includes("Readiness diagnostics"),
     "About settings",
   );
-  await clickButton("Report issue");
+  await clickButton("Report a problem");
   await waitFor(
     () =>
       bodyText().includes("Submit a public GitHub issue") &&
@@ -4816,6 +4847,8 @@ let officeWindowMode: ReturnType<typeof officeFullscreen> | undefined;
 
 async function createWindow({ show = true, route }: { show?: boolean; route?: string } = {}) {
   const persisted = await loadWindowState();
+  const initialThemeColors =
+    NATIVE_THEME_COLORS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
   mainWindow = new BrowserWindow({
     ...(!isScreenshotCaptureLaunch && typeof persisted.x === "number"
       ? { x: persisted.x }
@@ -4833,7 +4866,7 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         }
       : {}),
     title: "OpenAdminOS",
-    backgroundColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
+    backgroundColor: initialThemeColors.background,
     show: false,
     // Windows: draw our own chrome and overlay the system buttons on it,
     // so the app header replaces the native title bar instead of stacking
@@ -4845,12 +4878,15 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
         : process.platform === "win32"
           ? "hidden"
           : "default",
+    ...(process.platform === "darwin"
+      ? { trafficLightPosition: { x: 18, y: 18 } }
+      : {}),
     ...(process.platform === "win32"
       ? {
           titleBarOverlay: {
-            color: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
-            symbolColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].textMuted,
-            height: 32,
+            color: initialThemeColors.background,
+            symbolColor: initialThemeColors.textMuted,
+            height: 52,
           },
         }
       : {}),
@@ -4934,6 +4970,8 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     return companionWindow;
   }
 
+  const initialThemeColors =
+    NATIVE_THEME_COLORS[nativeTheme.shouldUseDarkColors ? "dark" : "light"];
   companionWindow = new BrowserWindow({
     width: COMPANION_WINDOW_WIDTH,
     height: COMPANION_WINDOW_HEIGHT,
@@ -4950,7 +4988,7 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
     fullscreenable: false,
     skipTaskbar: true,
     title: "OpenAdminOS Menu Bar",
-    backgroundColor: NATIVE_THEME_COLORS[DEFAULT_NATIVE_THEME_ID].background,
+    backgroundColor: initialThemeColors.background,
     vibrancy: process.platform === "darwin" ? "menu" : undefined,
     visualEffectState: "active",
     webPreferences: {
@@ -5104,9 +5142,12 @@ function createMenuBarCompanionForInteractiveLaunch(): void {
 
 function registerIpcHandlers() {
   ipcMain.handle("openadminos:set-appearance", handleTrusted((_event, theme: unknown) => {
-    const themeId = parseNativeTheme(theme);
-    const colors = NATIVE_THEME_COLORS[themeId];
-    nativeTheme.themeSource = colors.mode;
+    const appearance = parseNativeAppearance(
+      theme,
+      nativeTheme.shouldUseDarkColors ? "dark" : "light",
+    );
+    const colors = NATIVE_THEME_COLORS[appearance.resolvedTheme];
+    nativeTheme.themeSource = appearance.preference === "system" ? "system" : colors.mode;
     for (const window of BrowserWindow.getAllWindows()) {
       if (window.isDestroyed()) continue;
       window.setBackgroundColor(colors.background);
@@ -5114,7 +5155,7 @@ function registerIpcHandlers() {
         window.setTitleBarOverlay({
           color: colors.background,
           symbolColor: colors.textMuted,
-          height: 32,
+          height: 52,
         });
       }
     }

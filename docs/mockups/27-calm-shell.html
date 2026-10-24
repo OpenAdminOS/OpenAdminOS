@@ -1,0 +1,1857 @@
+<!doctype html>
+<html lang="en" data-theme="light" data-font="serif" data-density="comfortable" data-build="nightly">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>27 · Calm shell · OpenAdminOS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <!--
+    Proposal mockup, revision 2: a calm, document-like shell with an OpenAdminOS identity.
+    Standalone on purpose; it does not use _design.css.
+
+    Borrowed from ChatGPT and Claude (interaction patterns, not looks):
+      - One centered reading column, one sidebar with recents, chrome that recedes.
+      - One composer with model and scope inside it; trust line said once, under it.
+      - Five type sizes, sentence case, monospace only for code and identifiers.
+      - Secondary and destructive actions in menus; icon buttons have tooltips.
+
+    OpenAdminOS's own identity (what keeps it from looking like either app):
+      - OA palette: warm paper in light, graphite in dark, ink-colored primary actions.
+        Brand color is neutral; color is reserved for meaning, tenants, and teammates.
+      - Tenant first: the home screen is the tenant briefing, not a greeting.
+        Each tenant has its own color tile so the active tenant is never ambiguous.
+      - Evidence first: every answer opens with its scope and data age, and claims
+        carry numbered citations to the Graph sources they came from.
+      - Newsreader for answers and headings, Geist for the interface.
+      - Square-ish geometry (12 to 16px radii), ink send button, dotted floor plan
+        for Agent Team.
+
+    The mockbar at the top is not part of the app.
+  -->
+  <style>
+    :root {
+      --font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-serif: "Newsreader", "Iowan Old Style", Charter, Georgia, serif;
+      --font-code: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --font-read: var(--font-serif);
+
+      --fs-small: 13px;
+      --fs-ui: 14px;
+      --fs-read: 16px;
+      --fs-answer: 17.5px; /* Newsreader runs small, so answers get a little extra */
+      --fs-title: 24px;
+      --fs-display: 34px;
+
+      --row-y: 12px;
+      --cell-y: 10px;
+      --nav-h: 36px;
+
+      --ease: cubic-bezier(.2, .8, .2, 1);
+      --col: 740px;
+
+      --p-chief: #E0A458;
+      --p-watcher: #7FB58A;
+      --p-investigator: #7FA7D9;
+      --p-analyst: #B79AD9;
+    }
+    [data-font="sans"] { --font-read: var(--font-ui); --fs-answer: 16px; }
+    [data-density="compact"] { --row-y: 7px; --cell-y: 6px; --nav-h: 32px; }
+
+    [data-theme="light"] {
+      /* Warm paper, as in revision 1. Primary actions stay ink, not clay. */
+      --bg: #FAF9F6;
+      --sidebar: #F2F0EB;
+      --surface: #FFFFFF;
+      --raised: #FFFFFF;
+      --floor: #F2EFE9;
+      --bubble: #EEEBE5;
+      --hover: rgba(31, 29, 26, .05);
+      --active: rgba(31, 29, 26, .085);
+      --line: rgba(31, 29, 26, .12);
+      --line-soft: rgba(31, 29, 26, .065);
+      --text: #1F1D1A;
+      --text-2: #5C5852;
+      --text-3: #78736B;
+      --ink: #1F1D1A;
+      --ink-hover: #37342F;
+      --on-ink: #FAF9F6;
+      --focus: #2F6FEB;
+      --ok: #3E7A4B;
+      --warn: #8A5B05;
+      --warn-soft: rgba(138, 91, 5, .08);
+      --danger: #A8382B;
+      --danger-hover: #923024;
+      --on-danger: #FFFFFF;
+      --danger-soft: rgba(168, 56, 43, .07);
+      --code-bg: rgba(31, 29, 26, .045);
+      --dot: rgba(31, 29, 26, .11);
+      --scrim: rgba(28, 25, 22, .26);
+      --tip-bg: #1F1D1A;
+      --tip-fg: #F5F3EF;
+      --shadow-composer: 0 0 0 1px rgba(31, 29, 26, .09), 0 2px 4px rgba(31, 29, 26, .03), 0 10px 30px rgba(31, 29, 26, .06);
+      --shadow-composer-focus: 0 0 0 1px rgba(31, 29, 26, .22), 0 2px 4px rgba(31, 29, 26, .04), 0 12px 34px rgba(31, 29, 26, .09);
+      --shadow-pop: 0 0 0 1px rgba(31, 29, 26, .07), 0 10px 32px rgba(31, 29, 26, .14);
+      --shadow-dialog: 0 0 0 1px rgba(31, 29, 26, .06), 0 24px 64px rgba(31, 29, 26, .2);
+      color-scheme: light;
+    }
+    [data-theme="dark"] {
+      --bg: #17191D;
+      --sidebar: #121418;
+      --surface: #1E2126;
+      --raised: #22262C;
+      --floor: #1A1D22;
+      --bubble: #262A31;
+      --hover: rgba(255, 255, 255, .05);
+      --active: rgba(255, 255, 255, .085);
+      --line: rgba(255, 255, 255, .12);
+      --line-soft: rgba(255, 255, 255, .065);
+      --text: #F4F5F7;
+      --text-2: #C2C7CE;
+      --text-3: #98A0AB;
+      --ink: #F4F5F7;
+      --ink-hover: #FFFFFF;
+      --on-ink: #17191D;
+      --focus: #8FB4FF;
+      --ok: #9CC88F;
+      --warn: #E5C678;
+      --warn-soft: rgba(229, 198, 120, .1);
+      --danger: #F1A0A0;
+      --danger-hover: #F6B5B5;
+      --on-danger: #17191D;
+      --danger-soft: rgba(241, 160, 160, .1);
+      --code-bg: rgba(255, 255, 255, .055);
+      --dot: rgba(255, 255, 255, .09);
+      --scrim: rgba(0, 0, 0, .55);
+      --tip-bg: #F4F5F7;
+      --tip-fg: #17191D;
+      --shadow-composer: 0 0 0 1px rgba(255, 255, 255, .1), 0 8px 24px rgba(0, 0, 0, .25);
+      --shadow-composer-focus: 0 0 0 1px rgba(255, 255, 255, .24), 0 10px 28px rgba(0, 0, 0, .32);
+      --shadow-pop: 0 0 0 1px rgba(255, 255, 255, .09), 0 12px 36px rgba(0, 0, 0, .45);
+      --shadow-dialog: 0 0 0 1px rgba(255, 255, 255, .09), 0 24px 70px rgba(0, 0, 0, .55);
+      color-scheme: dark;
+    }
+    [data-theme="midnight"] {
+      --bg: #0F1520;
+      --sidebar: #0B1019;
+      --surface: #141B28;
+      --raised: #182132;
+      --floor: #111826;
+      --bubble: #1B2433;
+      --hover: rgba(200, 220, 255, .05);
+      --active: rgba(200, 220, 255, .085);
+      --line: rgba(200, 220, 255, .13);
+      --line-soft: rgba(200, 220, 255, .07);
+      --text: #E8EEF7;
+      --text-2: #B7C3D6;
+      --text-3: #93A2BA;
+      --ink: #8FB4FF;
+      --ink-hover: #A9C5FF;
+      --on-ink: #0B1322;
+      --focus: #8FB4FF;
+      --ok: #9CC88F;
+      --warn: #E5C678;
+      --warn-soft: rgba(229, 198, 120, .1);
+      --danger: #F1A0A0;
+      --danger-hover: #F6B5B5;
+      --on-danger: #0B1322;
+      --danger-soft: rgba(241, 160, 160, .1);
+      --code-bg: rgba(200, 220, 255, .06);
+      --dot: rgba(200, 220, 255, .09);
+      --scrim: rgba(2, 6, 14, .6);
+      --tip-bg: #E8EEF7;
+      --tip-fg: #0B1322;
+      --shadow-composer: 0 0 0 1px rgba(200, 220, 255, .11), 0 8px 24px rgba(0, 0, 0, .3);
+      --shadow-composer-focus: 0 0 0 1px rgba(143, 180, 255, .45), 0 10px 28px rgba(0, 0, 0, .36);
+      --shadow-pop: 0 0 0 1px rgba(200, 220, 255, .1), 0 12px 36px rgba(0, 0, 0, .5);
+      --shadow-dialog: 0 0 0 1px rgba(200, 220, 255, .1), 0 24px 70px rgba(0, 0, 0, .6);
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; flex-direction: column; overflow: hidden;
+      min-width: 1080px; min-height: 680px;
+      font-family: var(--font-ui); font-size: var(--fs-ui); line-height: 1.5;
+      color: var(--text); background: var(--bg);
+      -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+    }
+    button, input, textarea { font: inherit; color: inherit; }
+    button { cursor: pointer; background: none; border: 0; padding: 0; text-align: left; }
+    button:disabled { cursor: default; }
+    a { color: inherit; }
+    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 8px; }
+    .thread:focus-visible, .page:focus-visible, .dialog:focus-visible, .sb-scroll:focus-visible, .home:focus-visible { outline: none; }
+    .ico { width: 18px; height: 18px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+    .ico.sm { width: 16px; height: 16px; }
+    .spacer { flex: 1; }
+    .mono { font-family: var(--font-code); font-size: .92em; }
+    [hidden] { display: none !important; }
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-thumb { background: var(--active); border-radius: 99px; border: 3px solid transparent; background-clip: content-box; }
+    ::-webkit-scrollbar-track { background: transparent; }
+
+    /* Mockbar: not part of the app */
+    .mockbar { flex: none; height: 40px; display: flex; align-items: center; gap: 20px; padding: 0 14px; background: #0A0B0D; color: #9AA1AB; font-size: 12px; border-bottom: 1px solid #23262B; white-space: nowrap; overflow-x: auto; }
+    .mockbar b { color: #F4F5F7; font-weight: 500; }
+    .mb-group { display: flex; align-items: center; gap: 2px; }
+    .mb-group > span { margin-right: 6px; color: #626A75; }
+    .mb-btn { height: 26px; padding: 0 9px; border-radius: 7px; color: #9AA1AB; }
+    .mb-btn:hover { color: #F4F5F7; background: #1B1E23; }
+    .mb-btn.on { color: #F4F5F7; background: #2A2E35; }
+
+    /* Shell */
+    .app { flex: 1; display: flex; min-height: 0; background: var(--bg); }
+    .sidebar { width: 268px; flex: none; background: var(--sidebar); overflow: hidden; transition: width .22s var(--ease); }
+    .sb-inner { width: 268px; height: 100%; display: flex; flex-direction: column; }
+    .app.sb-collapsed .sidebar { width: 0; }
+    .sb-top { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 10px 0 16px; }
+    .lights { display: flex; gap: 8px; }
+    .lights i { width: 12px; height: 12px; border-radius: 50%; background: #FF5F57; }
+    .lights i:nth-child(2) { background: #FEBC2E; }
+    .lights i:nth-child(3) { background: #28C840; }
+    .tag { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 6px; font-size: 12px; font-weight: 500; white-space: nowrap; }
+    .tag.warn { color: var(--warn); background: var(--warn-soft); }
+    .tag.danger { color: var(--danger); background: var(--danger-soft); }
+    .tag.plain { color: var(--text-2); background: var(--hover); }
+    [data-build="stable"] .nightly-only { display: none !important; }
+
+    .icon-btn { width: 34px; height: 34px; display: inline-grid; place-items: center; border-radius: 10px; color: var(--text-2); transition: background .12s, color .12s; }
+    .icon-btn:hover, .icon-btn[aria-expanded="true"], .icon-btn.on { background: var(--hover); color: var(--text); }
+    .icon-btn.sm { width: 30px; height: 30px; border-radius: 8px; }
+
+    .brand { display: flex; align-items: center; gap: 10px; padding: 2px 18px 12px; font-weight: 600; letter-spacing: -.01em; }
+    .oa { width: 24px; height: 24px; flex: none; }
+    .sb-nav { padding: 0 8px; display: flex; flex-direction: column; gap: 1px; }
+    .nav-item { width: 100%; height: var(--nav-h); display: flex; align-items: center; gap: 11px; padding: 0 10px; border-radius: 10px; color: var(--text); transition: background .12s; }
+    .nav-item:hover { background: var(--hover); }
+    .nav-item.active { background: var(--active); }
+    .nav-item .ico { color: var(--text-2); }
+    .nav-item .hint { margin-left: auto; font-size: var(--fs-small); color: var(--text-3); opacity: 0; transition: opacity .12s; }
+    .nav-item:hover .hint { opacity: 1; }
+    .nav-item .count { margin-left: auto; min-width: 20px; height: 20px; display: inline-grid; place-items: center; padding: 0 6px; border-radius: 6px; font-size: 12px; font-weight: 500; color: var(--text); background: var(--active); font-variant-numeric: tabular-nums; }
+
+    .sb-scroll { flex: 1; overflow-y: auto; padding: 14px 8px 12px; }
+    .group-label { font-size: var(--fs-small); color: var(--text-3); padding: 12px 10px 4px; }
+    .recent { position: relative; width: 100%; height: calc(var(--nav-h) - 2px); display: flex; align-items: center; gap: 9px; padding: 0 36px 0 10px; border-radius: 10px; color: var(--text); cursor: pointer; transition: background .12s; }
+    .recent span:not(.tile) { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .recent:hover { background: var(--hover); }
+    .recent.active { background: var(--active); }
+    .recent .icon-btn { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); opacity: 0; }
+    .recent:hover .icon-btn, .recent.active .icon-btn, .recent .icon-btn[aria-expanded="true"] { opacity: 1; }
+    .recent .icon-btn:hover { background: transparent; }
+    .recent.fresh { animation: rise .3s var(--ease); }
+
+    .sb-bottom { flex: none; padding: 6px 8px 10px; display: flex; flex-direction: column; gap: 2px; }
+    .sb-line { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px; font-size: var(--fs-small); color: var(--text-2); }
+    .sb-line:hover { background: var(--hover); color: var(--text); }
+    .sb-line .grow { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+    .sb-line .act { color: var(--text); font-weight: 500; }
+    .pulse { width: 8px; height: 8px; flex: none; margin: 0 4px 0 3px; border-radius: 50%; background: var(--ok); animation: pulse 1.8s var(--ease) infinite; }
+    @keyframes pulse {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 50%, transparent); }
+      70% { box-shadow: 0 0 0 7px transparent; }
+      100% { box-shadow: 0 0 0 0 transparent; }
+    }
+    .account { width: 100%; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 12px; }
+    .account:hover, .account[aria-expanded="true"] { background: var(--hover); }
+    .avatar { width: 30px; height: 30px; flex: none; border-radius: 9px; display: grid; place-items: center; background: var(--bubble); color: var(--text); font-size: 12px; font-weight: 600; }
+    .account .sub { display: block; font-size: var(--fs-small); color: var(--text-3); line-height: 1.3; }
+    .account .name { display: block; line-height: 1.3; }
+
+    /* Tenant tile: the tenant's own color, everywhere the tenant appears */
+    .tile { width: 20px; height: 20px; flex: none; display: inline-grid; place-items: center; border-radius: 6px; color: #fff; font-size: 10px; font-weight: 600; letter-spacing: .02em; }
+    .tile.xs { width: 16px; height: 16px; border-radius: 5px; font-size: 8.5px; }
+    .tile.lg { width: 40px; height: 40px; border-radius: 11px; font-size: 15px; }
+    .tile.row { width: 38px; height: 38px; border-radius: 11px; font-size: 13px; }
+
+    .main { flex: 1; min-width: 0; display: flex; flex-direction: column; position: relative; }
+    .topbar { height: 52px; flex: none; display: grid; grid-template-columns: 1fr minmax(0, auto) 1fr; align-items: center; padding: 0 12px; }
+    .tb-left { display: flex; align-items: center; min-width: 0; }
+    .tb-center { max-width: 440px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 500; text-align: center; }
+    .tb-right { display: flex; justify-content: flex-end; gap: 2px; }
+    .collapsed-tools { display: none; align-items: center; gap: 2px; margin-right: 6px; }
+    .collapsed-tools .lights { margin: 0 12px 0 4px; }
+    .app.sb-collapsed .collapsed-tools { display: flex; }
+    .tenant-btn { height: 36px; display: inline-flex; align-items: center; gap: 9px; padding: 0 10px 0 8px; border-radius: 10px; font-weight: 500; transition: background .12s; }
+    .tenant-btn:hover, .tenant-btn[aria-expanded="true"] { background: var(--hover); }
+    .tenant-btn .ico { width: 14px; height: 14px; color: var(--text-3); }
+    .dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ok); }
+    .dot.bad { background: var(--danger); }
+    .dot.warn { background: var(--warn); }
+
+    .view { display: none; flex: 1; min-height: 0; flex-direction: column; position: relative; }
+    .view.on { display: flex; animation: fade .18s var(--ease); }
+    @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes rise { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* Home: the tenant briefing */
+    .home { flex: 1; overflow-y: auto; }
+    .home-in { width: 100%; max-width: calc(var(--col) + 48px); margin: 0 auto; padding: 9vh 24px 48px; }
+    .home-head { display: flex; align-items: center; gap: 16px; margin: 0 0 26px; }
+    .home-title { margin: 0; font-family: var(--font-read); font-size: var(--fs-display); font-weight: 500; line-height: 1.1; letter-spacing: -.015em; }
+    .home-sub { margin-top: 6px; color: var(--text-3); }
+    .brief { margin-top: 30px; }
+    .brief-label { display: flex; align-items: baseline; justify-content: space-between; padding: 0 2px 8px; font-size: var(--fs-small); color: var(--text-3); }
+    .brief-list { border-radius: 16px; box-shadow: 0 0 0 1px var(--line-soft); overflow: hidden; }
+    .brief-row { width: 100%; display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: var(--row-y) 14px var(--row-y) 16px; border-top: 1px solid var(--line-soft); transition: background .12s; }
+    .brief-row:first-child { border-top: 0; }
+    .brief-row:hover { background: var(--hover); }
+    .brief-row .b-ico { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 9px; background: var(--bubble); color: var(--text-2); }
+    .brief-row .b-ico.warn { background: var(--warn-soft); color: var(--warn); }
+    .brief-row b { display: block; font-weight: 500; }
+    .brief-row .b-sub { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--fs-small); color: var(--text-3); }
+    .brief-row .b-act { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); font-size: var(--fs-small); }
+    .brief-row:hover .b-act { color: var(--text); }
+    .try { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 20px; color: var(--text-3); font-size: var(--fs-small); }
+    .try button { height: 30px; padding: 0 11px; border-radius: 8px; color: var(--text-2); background: var(--hover); transition: background .12s, color .12s; }
+    .try button:hover { color: var(--text); background: var(--active); }
+
+    /* Composer */
+    .composer-slot { position: relative; width: 100%; max-width: var(--col); }
+    .home .composer-slot { max-width: none; }
+    .composer { background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-composer); padding: 14px 10px 10px 16px; cursor: text; transition: box-shadow .16s; }
+    .composer:focus-within { box-shadow: var(--shadow-composer-focus); }
+    .composer textarea { display: block; width: 100%; min-height: 26px; max-height: 220px; padding: 2px 8px 12px 0; border: 0; outline: 0; resize: none; background: transparent; font-size: var(--fs-read); line-height: 1.55; }
+    .composer textarea::placeholder { color: var(--text-3); }
+    .composer .listening { display: none; align-items: center; gap: 12px; height: 38px; padding: 0 0 12px; color: var(--text-2); }
+    .composer.voice textarea { display: none; }
+    .composer.voice .listening { display: flex; }
+    .bars { display: flex; align-items: center; gap: 3px; height: 20px; }
+    .bars i { width: 3px; height: 6px; border-radius: 2px; background: var(--text); animation: bar 1s ease-in-out infinite; }
+    .bars i:nth-child(2) { animation-delay: .12s; } .bars i:nth-child(3) { animation-delay: .24s; } .bars i:nth-child(4) { animation-delay: .36s; } .bars i:nth-child(5) { animation-delay: .48s; }
+    @keyframes bar { 0%, 100% { height: 5px; } 50% { height: 18px; } }
+    .c-row { display: flex; align-items: center; gap: 4px; margin-left: -8px; cursor: default; }
+    .c-chip { height: 32px; display: inline-flex; align-items: center; gap: 7px; padding: 0 9px; border-radius: 9px; color: var(--text-2); transition: background .12s, color .12s; }
+    .c-chip:hover, .c-chip[aria-expanded="true"] { background: var(--hover); color: var(--text); }
+    .c-chip .caret { width: 14px; height: 14px; color: var(--text-3); }
+    .send { width: 34px; height: 34px; margin-left: 4px; display: grid; place-items: center; border-radius: 10px; background: var(--ink); color: var(--on-ink); transition: background .12s; }
+    .send:hover:not(:disabled) { background: var(--ink-hover); }
+    .send:disabled { background: var(--active); color: var(--text-3); }
+    .send .ico { stroke-width: 2.2; }
+    .send .i-stop { display: none; }
+    .send.stop .i-send { display: none; }
+    .send.stop .i-stop { display: block; }
+    .footnote { margin-top: 10px; display: flex; justify-content: center; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--text-3); }
+    .footnote .ico { width: 13px; height: 13px; }
+    .footnote.hosted { color: var(--warn); }
+    .home .footnote { justify-content: flex-start; padding-left: 4px; }
+
+    /* Thread */
+    .thread { flex: 1; overflow-y: auto; }
+    .col { max-width: calc(var(--col) + 48px); margin: 0 auto; padding: 18px 24px 56px; }
+    .u { display: flex; justify-content: flex-end; margin: 10px 0 18px; }
+    .u-in { max-width: 78%; display: flex; flex-direction: column; align-items: flex-end; }
+    .bubble { background: var(--bubble); border-radius: 16px 16px 4px 16px; padding: 10px 15px; font-size: var(--fs-read); line-height: 1.55; white-space: pre-wrap; }
+    .bubble .agent-token { display: inline-flex; align-items: center; gap: 6px; padding: 1px 8px 1px 6px; margin-right: 4px; border-radius: 7px; background: var(--surface); box-shadow: 0 0 0 1px var(--line-soft); font-size: var(--fs-ui); }
+    .u-actions { display: flex; gap: 2px; margin-top: 4px; opacity: 0; transition: opacity .15s; }
+    .u:hover .u-actions { opacity: 1; }
+    .u.fresh, .a.fresh { animation: rise .25s var(--ease); }
+    .a { margin-bottom: 34px; }
+    .scope-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 10px; font-size: var(--fs-small); color: var(--text-3); }
+    .scope-line .sep { opacity: .6; }
+    .step { display: inline-flex; align-items: center; gap: 3px; border-radius: 6px; color: var(--text-3); transition: color .12s; }
+    .step:hover { color: var(--text); }
+    .step .ico { width: 14px; height: 14px; transition: transform .16s var(--ease); }
+    .step[aria-expanded="true"] .ico { transform: rotate(90deg); }
+    .step-body { display: none; margin: -2px 0 14px 1px; padding: 2px 0 2px 14px; border-left: 2px solid var(--line); font-size: var(--fs-small); color: var(--text-2); }
+    .step-body.on { display: block; animation: rise .2s var(--ease); }
+    .step-body div { padding: 3px 0; }
+    .shimmer { background: linear-gradient(90deg, var(--text-3) 30%, var(--text) 50%, var(--text-3) 70%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shimmer 1.4s linear infinite; }
+    @keyframes shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+    .answer { font-family: var(--font-read); font-size: var(--fs-answer); line-height: 1.65; }
+    .answer p { margin: 0 0 14px; }
+    .answer strong { font-weight: 600; }
+    .cite { display: inline-grid; place-items: center; min-width: 17px; height: 17px; padding: 0 4px; margin: 0 1px 0 2px; border-radius: 5px; background: var(--hover); box-shadow: inset 0 0 0 1px var(--line-soft); font-family: var(--font-ui); font-size: 11px; font-weight: 500; line-height: 1; color: var(--text-2); vertical-align: 2px; cursor: default; }
+    .cite:hover, .cite.hl { background: var(--ink); color: var(--on-ink); box-shadow: none; }
+    .table-wrap { position: relative; margin: 6px 0 18px; }
+    .table-tools { position: absolute; right: 0; top: -2px; display: flex; gap: 2px; opacity: 0; transition: opacity .15s; }
+    .table-wrap:hover .table-tools { opacity: 1; }
+    table.data { width: 100%; border-collapse: collapse; font-family: var(--font-ui); font-size: var(--fs-ui); font-variant-numeric: tabular-nums; line-height: 1.45; }
+    table.data th { padding: 8px 16px 8px 0; border-bottom: 1px solid var(--line); text-align: left; font-weight: 500; color: var(--text-2); }
+    table.data td { padding: var(--cell-y) 16px var(--cell-y) 0; border-bottom: 1px solid var(--line-soft); }
+    table.data tr:last-child td { border-bottom: 0; }
+    table.data .mono { color: var(--text); }
+    ol.sources { list-style: none; margin: 4px 0 16px; padding: 0; font-family: var(--font-ui); font-size: var(--fs-small); color: var(--text-3); }
+    ol.sources li { display: flex; align-items: center; gap: 8px; padding: 3px 6px 3px 0; border-radius: 6px; transition: color .12s; }
+    ol.sources li.hl { color: var(--text); }
+    ol.sources li .cite { margin: 0; }
+    ol.sources b { font-weight: 500; color: var(--text-2); }
+    .handoff { display: flex; align-items: center; gap: 16px; margin: 8px 0 10px; padding: 12px 12px 12px 16px; border-radius: 14px; box-shadow: 0 0 0 1px var(--line); font-family: var(--font-ui); font-size: var(--fs-ui); line-height: 1.5; color: var(--text-2); }
+    .handoff b { color: var(--text); font-weight: 500; }
+    .handoff .grow { flex: 1; }
+    .handoff.done { box-shadow: none; background: var(--hover); padding: 12px 16px; animation: rise .25s var(--ease); }
+    .handoff.done .ico { color: var(--ok); }
+    .run-card { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 14px; margin: 0 0 14px; padding: 12px 12px 12px 14px; border-radius: 14px; box-shadow: 0 0 0 1px var(--line); font-family: var(--font-ui); }
+    .run-card .row-icon { width: 34px; height: 34px; }
+    .run-card b { font-weight: 500; }
+    .run-card .r-status { font-size: var(--fs-small); color: var(--text-3); }
+    .progress { height: 3px; margin: 7px 0 5px; border-radius: 3px; background: var(--active); overflow: hidden; }
+    .progress i { display: block; height: 100%; width: 0; border-radius: 3px; background: var(--ink); transition: width .5s var(--ease); }
+    .actions { display: flex; gap: 2px; margin-left: -7px; transition: opacity .15s; }
+    .col > .a:not(:last-child) .actions { opacity: 0; }
+    .col > .a:hover .actions, .col > .a:focus-within .actions { opacity: 1; }
+    .actions.fresh { animation: fade .3s var(--ease); }
+    .dock { flex: none; position: relative; padding: 0 24px 14px; }
+    .dock::before { content: ""; position: absolute; left: 0; right: 10px; top: -28px; height: 28px; background: linear-gradient(transparent, var(--bg)); pointer-events: none; }
+    .dock .composer-slot { margin: 0 auto; }
+    .to-bottom { position: absolute; left: 50%; bottom: calc(100% + 10px); z-index: 2; width: 34px; height: 34px; display: grid; place-items: center; border-radius: 10px; background: var(--surface); box-shadow: var(--shadow-pop); color: var(--text-2); opacity: 0; pointer-events: none; transform: translate(-50%, 6px); transition: opacity .16s, transform .16s var(--ease); }
+    .to-bottom.on { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
+    .to-bottom:hover { color: var(--text); }
+
+    /* Pages */
+    .page { flex: 1; overflow-y: auto; }
+    .page-in { max-width: 840px; margin: 0 auto; padding: 26px 24px 64px; }
+    .page-in.wide { max-width: 1160px; }
+    .page-head { display: flex; align-items: center; gap: 12px; margin-bottom: 6px; }
+    .page-head h1 { flex: 1; margin: 0; font-family: var(--font-read); font-size: calc(var(--fs-title) + 4px); font-weight: 500; letter-spacing: -.015em; }
+    .page-sub { margin: 0 0 22px; color: var(--text-3); }
+    .tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 10px; }
+    .tab { height: 32px; padding: 0 12px; border-radius: 9px; color: var(--text-2); transition: background .12s, color .12s; }
+    .tab:hover { background: var(--hover); color: var(--text); }
+    .tab.on { background: var(--active); color: var(--text); }
+    .search { width: 240px; height: 34px; margin-left: auto; display: flex; align-items: center; gap: 8px; padding: 0 12px; border-radius: 10px; background: var(--hover); color: var(--text-3); }
+    .search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); }
+    .search input::placeholder { color: var(--text-3); }
+    .search:focus-within { box-shadow: 0 0 0 1px var(--line); }
+    .list-row { display: grid; grid-template-columns: 38px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: var(--row-y) 12px; border-radius: 14px; transition: background .12s; }
+    .list-row:hover { background: var(--hover); }
+    .row-icon { width: 38px; height: 38px; display: grid; place-items: center; border-radius: 11px; background: var(--bubble); color: var(--text-2); }
+    .row-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+    .row-title b { font-weight: 500; white-space: nowrap; }
+    .meta { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--text-3); white-space: nowrap; }
+    .meta .dot { width: 6px; height: 6px; }
+    .meta .pulse { width: 7px; height: 7px; margin: 0 1px; }
+    .row-desc { margin-top: 1px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-2); }
+    .row-actions { display: flex; align-items: center; gap: 2px; opacity: 0; transition: opacity .12s; }
+    .list-row:hover .row-actions, .list-row:focus-within .row-actions, .row-actions.keep { opacity: 1; }
+    .row-time { font-size: var(--fs-small); color: var(--text-3); white-space: nowrap; }
+    .section-label { display: flex; align-items: center; gap: 8px; padding: 20px 12px 6px; font-size: var(--fs-small); color: var(--text-3); }
+    .muted-row { color: var(--text-2); }
+    .empty-note { padding: 18px 12px; color: var(--text-3); }
+
+    .btn { height: 34px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 10px; font-weight: 500; white-space: nowrap; transition: background .12s, color .12s, opacity .12s; }
+    .btn .ico { width: 16px; height: 16px; }
+    .btn.primary { background: var(--ink); color: var(--on-ink); }
+    .btn.primary:hover { background: var(--ink-hover); }
+    .btn.secondary { box-shadow: inset 0 0 0 1px var(--line); color: var(--text); }
+    .btn.secondary:hover { background: var(--hover); }
+    .btn.ghost { color: var(--text-2); padding: 0 11px; }
+    .btn.ghost:hover { background: var(--hover); color: var(--text); }
+    .btn.danger { background: var(--danger); color: var(--on-danger); }
+    .btn.danger:hover:not(:disabled) { background: var(--danger-hover); }
+    .btn:disabled { opacity: .4; cursor: not-allowed; }
+    .seg { display: inline-flex; padding: 3px; border-radius: 10px; background: var(--hover); }
+    .seg button { height: 28px; padding: 0 12px; border-radius: 8px; color: var(--text-2); }
+    .seg button.on { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgba(0, 0, 0, .1), 0 0 0 1px var(--line-soft); }
+
+    /* Agent Team */
+    .team-summary { display: flex; align-items: center; gap: 14px; margin: 0 0 18px; color: var(--text-3); }
+    .team-summary b { color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
+    .findings { margin-bottom: 22px; border-radius: 16px; box-shadow: 0 0 0 1px var(--line-soft); overflow: hidden; }
+    .finding { display: grid; grid-template-columns: 40px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: var(--row-y) 14px var(--row-y) 16px; border-top: 1px solid var(--line-soft); }
+    .finding:first-child { border-top: 0; }
+    .finding b { font-weight: 500; }
+    .finding .f-sub { display: block; font-size: var(--fs-small); color: var(--text-3); }
+    .finding.done { opacity: .55; }
+    .team-body { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 18px; align-items: start; }
+    .floor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) 210px; grid-auto-rows: minmax(158px, auto); gap: 14px; padding: 18px; border-radius: 18px; background-color: var(--floor); background-image: radial-gradient(var(--dot) 1px, transparent 1.2px); background-size: 16px 16px; box-shadow: inset 0 0 0 1px var(--line-soft); }
+    .floor-label { grid-column: 1 / -1; display: flex; justify-content: space-between; margin: -4px 2px -4px; font-size: var(--fs-small); color: var(--text-3); }
+    .floor > .floor-label { grid-row: 1; min-height: 0; }
+    .floor { grid-template-rows: auto; }
+    .desk { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 14px; border-radius: 14px; background: var(--raised); box-shadow: 0 0 0 1px var(--line-soft), 0 1px 2px rgba(0, 0, 0, .04); text-align: left; transition: box-shadow .14s; }
+    .desk:hover { box-shadow: 0 0 0 1px var(--line), 0 4px 14px rgba(0, 0, 0, .06); }
+    .desk.sel { box-shadow: 0 0 0 2px var(--ink); }
+    .desk .monitor { position: absolute; top: 14px; right: 14px; width: 54px; height: 34px; border-radius: 6px; background: var(--bubble); box-shadow: inset 0 0 0 1px var(--line-soft); overflow: hidden; }
+    .desk .monitor::after { content: ""; position: absolute; left: 7px; right: 7px; top: 8px; height: 2px; border-radius: 2px; background: var(--line); box-shadow: 0 6px 0 var(--line), 0 12px 0 var(--line); }
+    .desk.working .monitor { background: color-mix(in srgb, var(--p) 22%, var(--raised)); }
+    .desk.working .monitor::after { background: var(--p); box-shadow: 0 6px 0 var(--p), 0 12px 0 color-mix(in srgb, var(--p) 50%, transparent); animation: type 1.6s steps(4) infinite; }
+    @keyframes type { from { right: 40px; } to { right: 7px; } }
+    .desk [data-bot] { margin-bottom: 8px; }
+    .desk b { font-weight: 500; }
+    .desk .d-task { font-size: var(--fs-small); color: var(--text-2); }
+    .desk .d-state { margin-top: auto; padding-top: 8px; display: flex; align-items: center; gap: 7px; font-size: var(--fs-small); color: var(--text-3); }
+    .desk .d-state.warn { color: var(--warn); }
+    .desk.empty { align-items: center; justify-content: center; gap: 6px; background: transparent; box-shadow: inset 0 0 0 1px var(--line); color: var(--text-3); text-align: center; }
+    .desk.empty:hover { color: var(--text); box-shadow: inset 0 0 0 1px var(--text-3); }
+    .typing { display: inline-flex; gap: 3px; }
+    .typing i { width: 4px; height: 4px; border-radius: 50%; background: var(--ok); animation: typing 1.2s infinite; }
+    .typing i:nth-child(2) { animation-delay: .15s; } .typing i:nth-child(3) { animation-delay: .3s; }
+    @keyframes typing { 0%, 60%, 100% { opacity: .25; transform: none; } 30% { opacity: 1; transform: translateY(-2px); } }
+    .lounge { grid-column: 3; grid-row: 2 / span 2; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line); background: color-mix(in srgb, var(--floor) 60%, transparent); }
+    .lounge-label { font-size: var(--fs-small); color: var(--text-3); }
+    .lounger { display: flex; align-items: center; gap: 10px; padding: 6px; border-radius: 10px; text-align: left; }
+    .lounger:hover { background: var(--hover); }
+    .lounger.sel { box-shadow: 0 0 0 2px var(--ink); }
+    .lounger .l-sub { display: block; font-size: var(--fs-small); color: var(--text-3); }
+    .lounge .plant { margin-top: auto; align-self: flex-end; color: var(--ok); opacity: .7; }
+    .detail { position: sticky; top: 0; padding: 18px; border-radius: 18px; background: var(--surface); box-shadow: 0 0 0 1px var(--line-soft); }
+    .detail h2 { margin: 10px 0 2px; font-family: var(--font-read); font-size: 22px; font-weight: 500; letter-spacing: -.01em; }
+    .detail p { margin: 0 0 14px; color: var(--text-2); }
+    .kv { display: grid; grid-template-columns: auto 1fr; gap: 7px 14px; margin: 0 0 16px; font-size: var(--fs-small); }
+    .kv dt { color: var(--text-3); }
+    .kv dd { margin: 0; text-align: right; color: var(--text); display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+    .detail .btns { display: flex; gap: 8px; }
+
+    /* Menus */
+    .menu { position: fixed; z-index: 60; display: none; min-width: 240px; max-width: 360px; padding: 6px; border-radius: 14px; background: var(--raised); box-shadow: var(--shadow-pop); }
+    .menu.on { display: block; animation: pop .14s var(--ease); }
+    @keyframes pop { from { opacity: 0; transform: translateY(-3px) scale(.985); } to { opacity: 1; transform: none; } }
+    .mi { width: 100%; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; color: var(--text); }
+    .mi:hover, .mi.kb { background: var(--hover); }
+    .mi .ico { color: var(--text-2); }
+    .mi .t { display: block; }
+    .mi .sub { display: block; font-size: var(--fs-small); color: var(--text-3); line-height: 1.35; }
+    .mi .sub.bad { color: var(--danger); }
+    .mi .tick { margin-left: auto; color: var(--text); visibility: hidden; }
+    .mi.sel .tick { visibility: visible; }
+    .mi.danger, .mi.danger .ico { color: var(--danger); }
+    .mi kbd { margin-left: auto; font-family: var(--font-ui); font-size: var(--fs-small); color: var(--text-3); }
+    .mi .tag { margin-left: auto; }
+    .m-label { padding: 8px 10px 4px; font-size: var(--fs-small); color: var(--text-3); }
+    .m-sep { height: 1px; margin: 6px 4px; background: var(--line-soft); }
+    #menu-slash { width: 440px; max-width: 440px; }
+
+    /* Dialogs */
+    .scrim { position: fixed; inset: 0; z-index: 50; display: none; align-items: center; justify-content: center; background: var(--scrim); }
+    .scrim.on { display: flex; animation: fade .16s var(--ease); }
+    .scrim.top { align-items: flex-start; padding-top: 96px; }
+    .dialog { display: flex; flex-direction: column; max-height: calc(100% - 80px); border-radius: 18px; background: var(--raised); box-shadow: var(--shadow-dialog); animation: dialog-in .2s var(--ease); }
+    @keyframes dialog-in { from { opacity: 0; transform: translateY(8px) scale(.985); } to { opacity: 1; transform: none; } }
+    .d-head { display: flex; align-items: center; gap: 12px; padding: 16px 14px 6px 24px; }
+    .d-head h2 { flex: 1; margin: 0; font-size: var(--fs-read); font-weight: 600; }
+    .d-foot { display: flex; justify-content: flex-end; gap: 8px; padding: 16px 24px 20px; }
+
+    .settings { width: 800px; height: 600px; }
+    .settings .d-body { flex: 1; min-height: 0; display: grid; grid-template-columns: 190px 1fr; }
+    .s-tabs { padding: 6px 10px; display: flex; flex-direction: column; gap: 1px; }
+    .s-pane { overflow-y: auto; padding: 0 28px 24px 16px; }
+    .s-pane > section { display: none; }
+    .s-pane > section.on { display: block; animation: fade .16s var(--ease); }
+    .s-group { padding: 14px 0 2px; font-size: var(--fs-small); color: var(--text-3); }
+    .s-row { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--line-soft); }
+    .s-row:last-child { border-bottom: 0; }
+    .s-row .lbl { min-width: 0; display: flex; flex-direction: column; }
+    .s-row .lbl-row { display: flex; align-items: center; gap: 10px; }
+    .s-row .desc { margin-top: 2px; font-size: var(--fs-small); color: var(--text-3); max-width: 430px; }
+    .s-row .desc.bad { color: var(--danger); }
+    .s-row .right { display: flex; align-items: center; gap: 8px; flex: none; }
+    .s-note { margin: 10px 0 4px; color: var(--text-2); }
+    .switch { position: relative; width: 38px; height: 22px; flex: none; border-radius: 999px; background: var(--active); transition: background .16s; }
+    .switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: var(--surface); box-shadow: 0 1px 2px rgba(0, 0, 0, .25); transition: transform .18s var(--ease); }
+    .switch[aria-checked="true"] { background: var(--ink); }
+    .switch[aria-checked="true"]::after { transform: translateX(16px); background: var(--on-ink); }
+    kbd.k { display: inline-block; min-width: 22px; margin-left: 4px; padding: 1px 6px; border-radius: 6px; background: var(--hover); font-family: var(--font-ui); font-size: var(--fs-small); color: var(--text-2); text-align: center; }
+
+    .review { width: 580px; }
+    .r-body { overflow-y: auto; padding: 0 24px 4px; }
+    .r-tenant { display: flex; align-items: center; gap: 10px; margin: 2px 0 14px; padding: 10px 12px; border-radius: 12px; background: var(--hover); }
+    .r-tenant b { font-weight: 500; }
+    .r-tenant .sub { color: var(--text-3); font-size: var(--fs-small); }
+    .r-item { display: flex; align-items: center; gap: 14px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+    .r-item .grow { flex: 1; min-width: 0; }
+    .r-item b { font-weight: 500; }
+    .r-item .sub { display: block; font-size: var(--fs-small); color: var(--text-3); }
+    .r-change { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-small); color: var(--text-2); }
+    .r-change .ico { width: 14px; height: 14px; color: var(--text-3); }
+    .r-change .to { color: var(--danger); font-weight: 500; }
+    .code { margin: 0 0 4px; padding: 12px 14px; border-radius: 12px; background: var(--code-bg); font-family: var(--font-code); font-size: 12.5px; line-height: 1.65; color: var(--text-2); white-space: pre; overflow-x: auto; }
+    .warnbox { display: flex; gap: 10px; margin: 14px 0 18px; padding: 12px 14px; border-radius: 12px; background: var(--danger-soft); }
+    .warnbox .ico { margin-top: 2px; color: var(--danger); }
+    .confirm-label { display: block; margin: 0 0 8px; font-size: var(--fs-small); color: var(--text-2); }
+    .confirm-label b { color: var(--text); font-weight: 600; font-family: var(--font-code); font-size: 12.5px; }
+    .input { width: 100%; height: 40px; padding: 0 12px; border: 0; border-radius: 10px; outline: 0; background: transparent; box-shadow: inset 0 0 0 1px var(--line); font-family: var(--font-code); font-size: 13px; transition: box-shadow .12s; }
+    .input:focus { box-shadow: inset 0 0 0 1px var(--text-3); }
+    .input.match { box-shadow: inset 0 0 0 1px var(--danger); }
+
+    .search-dlg { width: 620px; max-height: 480px; overflow: hidden; }
+    .search-dlg .s-in { display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 16px 0 20px; border-bottom: 1px solid var(--line-soft); color: var(--text-3); }
+    .search-dlg .s-in input { flex: 1; border: 0; outline: 0; background: transparent; font-size: var(--fs-read); color: var(--text); }
+    .search-dlg .s-in input::placeholder { color: var(--text-3); }
+    .search-dlg .s-list { overflow-y: auto; padding: 6px; }
+    .small-dlg { width: 440px; }
+    .small-dlg p { margin: 0; padding: 0 24px; color: var(--text-2); }
+
+    .tip { position: fixed; z-index: 90; max-width: 340px; padding: 5px 9px; border-radius: 8px; background: var(--tip-bg); color: var(--tip-fg); font-size: 12px; pointer-events: none; opacity: 0; transform: translateY(-2px); transition: opacity .1s, transform .1s; }
+    .tip.on { opacity: 1; transform: none; }
+    .tip kbd { margin-left: 8px; font-family: var(--font-ui); opacity: .6; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    }
+  </style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="i-oa" viewBox="0 0 100 100"><rect width="100" height="100" rx="22" style="fill:var(--ink)"/><path style="fill:var(--sidebar)" fill-rule="evenodd" d="M30 16H70Q84 16 84 30V70Q84 84 70 84L50 50L30 84Q16 84 16 70V30Q16 16 30 16Z M32 28H68Q72 28 72 32V69L50 31L28 69V32Q28 28 32 28Z M46 64H54L59 73H41Z"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-newchat" viewBox="0 0 24 24"><path d="M11 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/><path d="M18.4 2.6a2 2 0 0 1 2.9 2.9L12 14.8l-4 1 1-4Z"/></symbol>
+  <symbol id="i-chev-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-chev-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></symbol>
+  <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></symbol>
+  <symbol id="i-arrow-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
+  <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-retry" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="i-thumb" viewBox="0 0 24 24"><path d="M7 10v12"/><path d="M15 5.9 14 10h5.8a2 2 0 0 1 1.9 2.6l-2.3 7A2 2 0 0 1 17.5 21H4a2 2 0 0 1-2-2v-7a2 2 0 0 1 2-2h2.8a2 2 0 0 0 1.8-1.1L12 2a3.1 3.1 0 0 1 3 3.9Z"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+  <symbol id="i-cloud" viewBox="0 0 24 24"><path d="M17.5 19H9a7 7 0 1 1 6.7-9h1.8a4.5 4.5 0 1 1 0 9Z"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4"/></symbol>
+  <symbol id="i-building" viewBox="0 0 24 24"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2M10 6h4M10 10h4M10 14h4M10 18h4"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.7 9a1 1 0 0 1-.7 0C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.2-2.7a1.2 1.2 0 0 1 1.6 0C14.5 3.8 17 5 19 5a1 1 0 0 1 1 1Z"/></symbol>
+  <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></symbol>
+  <symbol id="i-team" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 20v-1a6 6 0 0 1 12 0v1"/><path d="M16 5a3 3 0 0 1 0 6M18 14a5 5 0 0 1 3 4.6V20"/></symbol>
+  <symbol id="i-changes" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"/><circle cx="6" cy="6" r="3"/><path d="M13 6h3a2 2 0 0 1 2 2v7M6 9v12"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 2 10 5-10 5L2 7Z"/><path d="m2 17 10 5 10-5M2 12l10 5 10-5"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5Z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></symbol>
+  <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 15V3M7 10l5 5 5-5M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 17v5M9 10.8a2 2 0 0 1-1.1 1.8l-1.8.9A2 2 0 0 0 5 15.2V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.8a2 2 0 0 0-1.1-1.8l-1.8-.9A2 2 0 0 1 15 10.8V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1Z"/></symbol>
+  <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.7-.9l-.8-1.2A2 2 0 0 0 7.9 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12Z"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-device" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v4"/></symbol>
+  <symbol id="i-activity" viewBox="0 0 24 24"><path d="M22 12h-4l-3 8-6-16-3 8H2"/></symbol>
+  <symbol id="i-restart" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="i-slash" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="4"/><path d="m14 7-4 10"/></symbol>
+  <symbol id="i-plant" viewBox="0 0 24 24"><path d="M7 20h10M12 20v-8M12 12c0-4 3-6 7-6 0 4-3 6-7 6ZM12 14c0-3-2.5-5-6-5 0 3 2.5 5 6 5Z"/></symbol>
+</svg>
+
+<!-- Mockbar (not part of the app) -->
+<div class="mockbar">
+  <b>Mockup 27 · rev 2</b>
+  <div class="mb-group"><span>View</span>
+    <button class="mb-btn" data-mock-view="new">Home</button>
+    <button class="mb-btn" data-mock-view="thread">Conversation</button>
+    <button class="mb-btn" data-mock-view="team">Agent Team</button>
+    <button class="mb-btn" data-mock-view="agents">Agents</button>
+    <button class="mb-btn" data-mock-view="changes">Changes</button>
+    <button class="mb-btn" data-action="open-settings">Settings</button>
+    <button class="mb-btn" data-action="open-review">Write review</button>
+  </div>
+  <div class="mb-group"><span>Theme</span>
+    <button class="mb-btn" data-set="theme" data-val="system">System</button>
+    <button class="mb-btn" data-set="theme" data-val="light">Light</button>
+    <button class="mb-btn" data-set="theme" data-val="dark">Dark</button>
+    <button class="mb-btn" data-set="theme" data-val="midnight">Midnight</button>
+  </div>
+  <div class="mb-group"><span>Build</span>
+    <button class="mb-btn" data-set="build" data-val="stable">Stable</button>
+    <button class="mb-btn" data-set="build" data-val="nightly">Nightly</button>
+  </div>
+  <div class="mb-group"><span>Answers</span>
+    <button class="mb-btn" data-set="font" data-val="serif">Serif</button>
+    <button class="mb-btn" data-set="font" data-val="sans">Sans</button>
+  </div>
+</div>
+
+<div class="app" id="app">
+  <aside class="sidebar" aria-label="Sidebar">
+    <div class="sb-inner">
+      <div class="sb-top">
+        <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+        <span class="spacer"></span>
+        <button class="icon-btn" data-action="toggle-sidebar" data-tip="Close sidebar" data-kbd="mod+Shift+S" aria-label="Close sidebar"><svg class="ico"><use href="#i-panel"/></svg></button>
+      </div>
+      <div class="brand"><svg class="oa"><use href="#i-oa"/></svg>OpenAdminOS<span class="tag warn nightly-only" data-tip-bind="nightly">Nightly</span></div>
+
+      <nav class="sb-nav">
+        <button class="nav-item" data-action="new-chat"><svg class="ico"><use href="#i-newchat"/></svg>New chat<span class="hint" data-kbd-text="mod+Shift+O"></span></button>
+        <button class="nav-item" data-action="open-search"><svg class="ico"><use href="#i-search"/></svg>Search<span class="hint" data-kbd-text="mod+K"></span></button>
+        <button class="nav-item" data-nav="team"><svg class="ico"><use href="#i-team"/></svg>Agent Team<span class="count" id="team-count" data-tip="Findings to review">2</span></button>
+        <button class="nav-item" data-nav="agents"><svg class="ico"><use href="#i-grid"/></svg>Agents</button>
+        <button class="nav-item" data-nav="changes"><svg class="ico"><use href="#i-changes"/></svg>Changes<span class="count" id="changes-count" data-tip="1 change waiting for your review">1</span></button>
+      </nav>
+
+      <div class="sb-scroll" id="recents">
+        <div class="group-label">Today</div>
+        <div id="recents-today">
+          <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="contoso"></span><span>Devices not synced in 7 days</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+          <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="fabrikam"></span><span>Guest accounts with no sign-in this year</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+        </div>
+        <div class="group-label">Previous 7 days</div>
+        <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="contoso"></span><span>Conditional Access gaps for admins</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+        <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="contoso"></span><span>Expiring app registration secrets</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+        <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="fabrikam"></span><span>Autopilot profile assignments</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+        <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="contoso"></span><span>Compliance drift since Monday</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+        <div class="group-label">September</div>
+        <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="northwind"></span><span>License usage by department</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+        <div class="recent" tabindex="0" data-thread="seed"><span class="tile xs" data-tile="fabrikam"></span><span>Stale groups in Fabrikam EU</span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+      </div>
+
+      <div class="sb-bottom">
+        <button class="sb-line" data-nav="team" id="sb-working"><span class="pulse"></span><span class="grow">Chief of Staff is working</span></button>
+        <button class="sb-line nightly-only" data-action="restart" id="sb-update" data-tip-bind="update-ready"><svg class="ico sm"><use href="#i-restart"/></svg><span class="grow">Update ready</span><span class="act">Restart</span></button>
+        <button class="account" data-menu="menu-account" aria-haspopup="menu">
+          <span class="avatar">UK</span>
+          <span><span class="name">Ugur Koc</span><span class="sub">3 tenants</span></span>
+        </button>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="tb-left">
+        <div class="collapsed-tools">
+          <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <button class="icon-btn" data-action="toggle-sidebar" data-tip="Open sidebar" data-kbd="mod+Shift+S" aria-label="Open sidebar"><svg class="ico"><use href="#i-panel"/></svg></button>
+          <button class="icon-btn" data-action="new-chat" data-tip="New chat" data-kbd="mod+Shift+O" aria-label="New chat"><svg class="ico"><use href="#i-newchat"/></svg></button>
+        </div>
+        <button class="tenant-btn" data-menu="menu-tenant" aria-haspopup="menu" data-tip-bind="tenant">
+          <span class="tile" data-tile="active"></span><span data-bind="tenant">Contoso Demo</span><span class="tag warn" data-prod hidden>Production</span><svg class="ico"><use href="#i-chev-down"/></svg>
+        </button>
+      </div>
+      <div class="tb-center" id="tb-title"></div>
+      <div class="tb-right">
+        <button class="icon-btn" id="tb-more" data-menu="menu-thread" data-align="end" data-tip="Conversation options" aria-label="Conversation options"><svg class="ico"><use href="#i-more"/></svg></button>
+      </div>
+    </header>
+
+    <!-- Home: tenant briefing -->
+    <section class="view" data-view="new">
+      <div class="home"><div class="home-in">
+        <div class="home-head">
+          <span class="tile lg" data-tile="active"></span>
+          <div>
+            <h1 class="home-title" data-bind="tenant">Contoso Demo</h1>
+            <div class="home-sub" data-bind="tenant-sub">Graph data from 4 minutes ago · 214 devices · 1,204 users</div>
+          </div>
+        </div>
+        <div class="composer-slot" data-placeholder="home"></div>
+        <div class="brief">
+          <div class="brief-label"><span>Needs you</span><span data-bind="brief-count"></span></div>
+          <div class="brief-list" id="brief-list">
+            <button class="brief-row" data-action="open-review" id="brief-change">
+              <span class="b-ico warn"><svg class="ico"><use href="#i-changes"/></svg></span>
+              <span><b>Retire 2 devices</b><span class="b-sub">Offboarding agent proposed this 5 minutes ago. Nothing changes until you confirm.</span></span>
+              <span class="b-act">Review<svg class="ico sm"><use href="#i-chev-right"/></svg></span>
+            </button>
+            <button class="brief-row" data-nav="team" id="brief-team">
+              <span data-bot="watcher" data-size="32"></span>
+              <span><b>Policy Watcher found a compliance drop</b><span class="b-sub">Compliant Windows devices went from 96% to 93% since Monday.</span></span>
+              <span class="b-act">Open<svg class="ico sm"><use href="#i-chev-right"/></svg></span>
+            </button>
+            <button class="brief-row nightly-only" data-action="restart" id="brief-update">
+              <span class="b-ico"><svg class="ico"><use href="#i-restart"/></svg></span>
+              <span><b data-bind="update-title">Update ready</b><span class="b-sub">Restart to install, or it installs on the next quit.</span></span>
+              <span class="b-act">Restart<svg class="ico sm"><use href="#i-chev-right"/></svg></span>
+            </button>
+          </div>
+        </div>
+        <div class="try"><span>Try</span>
+          <button data-fill="Which Windows devices aren't encrypted, and why?">Unencrypted Windows devices</button>
+          <button data-fill="Summarize risky sign-ins from the last 24 hours.">Risky sign-ins today</button>
+          <button data-fill="/">Run an agent with /</button>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- Conversation -->
+    <section class="view" data-view="thread">
+      <div class="thread" id="thread"><div class="col" id="col"></div></div>
+      <div class="dock">
+        <button class="to-bottom" id="to-bottom" data-action="to-bottom" aria-label="Scroll to latest"><svg class="ico sm"><use href="#i-arrow-down"/></svg></button>
+        <div class="composer-slot" data-placeholder="thread"></div>
+      </div>
+    </section>
+
+    <!-- Agent Team -->
+    <section class="view" data-view="team">
+      <div class="page"><div class="page-in wide">
+        <div class="page-head">
+          <h1>Agent Team</h1>
+          <div class="seg"><button class="on" data-team-mode="office">Office</button><button data-team-mode="list">List</button></div>
+          <button class="btn primary"><svg class="ico"><use href="#i-plus"/></svg>Add teammate</button>
+        </div>
+        <div class="team-summary"><span><b>4</b> teammates</span><span><b>1</b> working</span><span><b id="findings-n">2</b> findings to review</span><span class="spacer"></span><span>Status reflects actual agent runs. Stored on this device.</span></div>
+
+        <div class="findings" id="findings">
+          <div class="finding">
+            <span data-bot="watcher" data-size="40"></span>
+            <div><b>Compliance dropped 3 points since Monday</b><span class="f-sub">Policy Watcher · 11 Windows devices moved to noncompliant, 8 of them for BitLocker. Evidence from 2 runs.</span></div>
+            <div class="row-actions keep"><button class="btn ghost">Open evidence</button><button class="btn secondary" data-action="ack">Acknowledge</button></div>
+          </div>
+          <div class="finding">
+            <span data-bot="investigator" data-size="40"></span>
+            <div><b>2 stale devices are ready for offboarding</b><span class="f-sub">Device Investigator handed this to Offboarding agent. The proposal is waiting in Changes.</span></div>
+            <div class="row-actions keep"><button class="btn ghost">Open evidence</button><button class="btn secondary" data-action="open-review">Review change</button></div>
+          </div>
+        </div>
+
+        <div class="team-body">
+          <div id="team-office">
+            <div class="floor">
+              <div class="floor-label"><span>Floor 1 · <span data-bind="tenant">Contoso Demo</span></span><span>Desks: working · Lounge: idle</span></div>
+              <button class="desk working" data-persona="chief" style="--p:var(--p-chief)"><span class="monitor"></span><span data-bot="chief" data-size="44"></span><b>Chief of Staff</b><span class="d-task">Reviewing handed-over compliance evidence</span><span class="d-state"><span class="typing"><i></i><i></i><i></i></span>Working · 0:42</span></button>
+              <button class="desk" data-persona="watcher" style="--p:var(--p-watcher)"><span class="monitor"></span><span data-bot="watcher" data-size="44"></span><b>Policy Watcher</b><span class="d-task">Watches compliance posture and flags changes</span><span class="d-state warn"><span class="dot warn"></span>Finding waiting for you</span></button>
+              <div class="lounge">
+                <span class="lounge-label">Lounge</span>
+                <button class="lounger" data-persona="analyst"><span data-bot="analyst" data-size="32"></span><span>Identity Analyst<span class="l-sub">Idle since 09:12</span></span></button>
+                <svg class="ico plant" style="width:28px;height:28px"><use href="#i-plant"/></svg>
+              </div>
+              <button class="desk" data-persona="investigator" style="--p:var(--p-investigator)"><span class="monitor"></span><span data-bot="investigator" data-size="44"></span><b>Device Investigator</b><span class="d-task">Investigates inactive devices and stale inventory</span><span class="d-state"><svg class="ico sm"><use href="#i-clock"/></svg>Next run tomorrow at 07:00</span></button>
+              <button class="desk empty"><svg class="ico"><use href="#i-plus"/></svg><span>Open desk</span><span class="d-task" style="color:inherit">Add a teammate</span></button>
+            </div>
+          </div>
+          <div id="team-list" hidden>
+            <button class="list-row" data-persona="chief" style="width:100%;text-align:left"><span data-bot="chief" data-size="38"></span><div><div class="row-title"><b>Chief of Staff</b><span class="meta"><span class="pulse"></span>Working · 0:42</span></div><div class="row-desc">Assesses device compliance and delegates changed findings.</div></div><span class="row-time">Manual</span></button>
+            <button class="list-row" data-persona="watcher" style="width:100%;text-align:left"><span data-bot="watcher" data-size="38"></span><div><div class="row-title"><b>Policy Watcher</b><span class="meta"><span class="dot warn"></span>Finding waiting for you</span></div><div class="row-desc">Reviews compliance posture and flags changes.</div></div><span class="row-time">Daily 06:00</span></button>
+            <button class="list-row" data-persona="investigator" style="width:100%;text-align:left"><span data-bot="investigator" data-size="38"></span><div><div class="row-title"><b>Device Investigator</b><span class="meta">Scheduled</span></div><div class="row-desc">Investigates inactive devices and stale inventory.</div></div><span class="row-time">Daily 07:00</span></button>
+            <button class="list-row" data-persona="analyst" style="width:100%;text-align:left"><span data-bot="analyst" data-size="38"></span><div><div class="row-title"><b>Identity Analyst</b><span class="meta">Idle</span></div><div class="row-desc">Reviews risky sign-ins and Conditional Access coverage.</div></div><span class="row-time">Manual</span></button>
+          </div>
+          <aside class="detail" id="detail"></aside>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- Agents -->
+    <section class="view" data-view="agents">
+      <div class="page"><div class="page-in">
+        <div class="page-head">
+          <h1>Agents</h1>
+          <button class="btn primary"><svg class="ico"><use href="#i-plus"/></svg>New agent</button>
+        </div>
+        <p class="page-sub">Installed agents, their runs, and schedules.</p>
+        <div class="tabs">
+          <button class="tab on" data-tab-group="agents" data-tab="installed">Installed</button>
+          <button class="tab" data-tab-group="agents" data-tab="runs">Runs</button>
+          <button class="tab" data-tab-group="agents" data-tab="schedules">Schedules</button>
+          <button class="tab" data-tab-group="agents" data-tab="browse">Browse</button>
+          <label class="search"><svg class="ico sm"><use href="#i-search"/></svg><input placeholder="Search agents" aria-label="Search agents"></label>
+        </div>
+
+        <div data-pane-group="agents" data-pane="installed">
+          <div class="list-row">
+            <div class="row-icon"><svg class="ico"><use href="#i-device"/></svg></div>
+            <div><div class="row-title"><b>Offboarding agent</b><span class="meta"><span class="dot warn"></span>Makes changes · Waiting for review</span></div>
+              <div class="row-desc">Builds a retirement plan for stale devices. Every change waits for your review.</div></div>
+            <div class="row-actions keep"><button class="btn ghost" data-action="open-review">Review</button><button class="icon-btn sm" aria-label="More"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+          </div>
+          <div class="list-row">
+            <div class="row-icon"><svg class="ico"><use href="#i-clock"/></svg></div>
+            <div><div class="row-title"><b>Find inactive devices</b><span class="meta" data-meta>Read-only · Last run 2 hours ago</span></div>
+              <div class="row-desc">Finds Intune devices that stopped syncing and checks Entra activity before suggesting cleanup.</div></div>
+            <div class="row-actions"><button class="btn ghost" data-action="run-agent"><svg class="ico"><use href="#i-play"/></svg>Run</button><button class="icon-btn sm" aria-label="More"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+          </div>
+          <div class="list-row">
+            <div class="row-icon"><svg class="ico"><use href="#i-shield"/></svg></div>
+            <div><div class="row-title"><b>Compliance overview</b><span class="meta" data-meta>Read-only · Mondays at 08:00</span></div>
+              <div class="row-desc">Summarizes compliance by state, platform, ownership, and enrollment type.</div></div>
+            <div class="row-actions"><button class="btn ghost" data-action="run-agent"><svg class="ico"><use href="#i-play"/></svg>Run</button><button class="icon-btn sm" aria-label="More"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+          </div>
+          <div class="list-row">
+            <div class="row-icon"><svg class="ico"><use href="#i-alert"/></svg></div>
+            <div><div class="row-title"><b>Risky sign-in triage</b><span class="meta" data-meta>Read-only · Never run</span></div>
+              <div class="row-desc">Groups risky sign-ins by user and location, and separates likely false positives.</div></div>
+            <div class="row-actions"><button class="btn ghost" data-action="run-agent"><svg class="ico"><use href="#i-play"/></svg>Run</button><button class="icon-btn sm" aria-label="More"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+          </div>
+          <div class="list-row">
+            <div class="row-icon"><svg class="ico"><use href="#i-lock"/></svg></div>
+            <div><div class="row-title"><b>Rotate expiring secrets</b><span class="meta" data-meta><span class="dot warn"></span>Makes changes · Last run yesterday</span></div>
+              <div class="row-desc">Finds app registration secrets that expire within 30 days and proposes new ones.</div></div>
+            <div class="row-actions"><button class="btn ghost" data-action="run-agent"><svg class="ico"><use href="#i-play"/></svg>Run</button><button class="icon-btn sm" aria-label="More"><svg class="ico sm"><use href="#i-more"/></svg></button></div>
+          </div>
+        </div>
+
+        <div data-pane-group="agents" data-pane="runs" hidden>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-activity"/></svg></div><div><div class="row-title"><b>Compliance overview</b><span class="meta"><span class="pulse"></span>Running for Chief of Staff</span></div><div class="row-desc">Reading Intune compliance states · Qwen 2.5 7B · on this device</div></div><span class="row-time">Now</span></div>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-activity"/></svg></div><div><div class="row-title"><b>Offboarding agent</b><span class="meta"><span class="dot warn"></span>Proposed 1 change</span></div><div class="row-desc">2 devices to retire · 6.1 s · Qwen 2.5 7B · on this device</div></div><span class="row-time">5 min ago</span></div>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-activity"/></svg></div><div><div class="row-title"><b>Find inactive devices</b><span class="meta"><span class="dot"></span>Completed</span></div><div class="row-desc">3 devices over 7 days · 4.2 s · Qwen 2.5 7B · on this device</div></div><span class="row-time">2 h ago</span></div>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-activity"/></svg></div><div><div class="row-title"><b>Risky sign-in triage</b><span class="meta"><span class="dot bad"></span>Failed</span></div><div class="row-desc">Missing permission IdentityRiskyUser.Read.All. Grant it in Tenants, then run again.</div></div><span class="row-time">Yesterday</span></div>
+        </div>
+
+        <div data-pane-group="agents" data-pane="schedules" hidden>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-clock"/></svg></div><div><div class="row-title"><b>Compliance overview</b><span class="meta">Mondays at 08:00 · Contoso Demo</span></div><div class="row-desc">Next run in 3 days. Schedules need this computer on and a signed-in session.</div></div><div class="row-actions"><button class="btn ghost">Edit</button></div></div>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-clock"/></svg></div><div><div class="row-title"><b>Policy Watcher</b><span class="meta">Daily at 06:00 · Agent Team</span></div><div class="row-desc">Runs Compliance overview and compares it with the previous run.</div></div><div class="row-actions"><button class="btn ghost">Edit</button></div></div>
+        </div>
+
+        <div data-pane-group="agents" data-pane="browse" hidden>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-building"/></svg></div><div><div class="row-title"><b>Stale guest cleanup</b><span class="meta"><span class="dot warn"></span>Makes changes · by OpenAdminOS</span></div><div class="row-desc">Finds guests with no sign-in for 90 days and proposes removal, one batch at a time.</div></div><div class="row-actions keep"><button class="btn secondary">Add</button></div></div>
+          <div class="list-row"><div class="row-icon"><svg class="ico"><use href="#i-shield"/></svg></div><div><div class="row-title"><b>Secure Score prioritizer</b><span class="meta">Read-only · by community</span></div><div class="row-desc">Ranks open Secure Score actions by effort and user impact.</div></div><div class="row-actions keep"><button class="btn secondary">Add</button></div></div>
+        </div>
+      </div></div>
+    </section>
+
+    <!-- Changes -->
+    <section class="view" data-view="changes">
+      <div class="page"><div class="page-in">
+        <div class="page-head"><h1>Changes</h1></div>
+        <p class="page-sub">Every write to a tenant waits here for your confirmation.</p>
+        <div class="section-label" style="padding-top:0">Waiting for your review</div>
+        <div id="pending">
+          <div class="list-row">
+            <span class="tile row" data-tile="contoso"></span>
+            <div><div class="row-title"><b>Retire 2 devices</b><span class="meta">Offboarding agent · 5 minutes ago</span></div>
+              <div class="row-desc">WIN-01 and MAC-ENG-14 in Contoso Demo</div></div>
+            <div class="row-actions keep"><button class="btn secondary" data-action="open-review">Review</button></div>
+          </div>
+        </div>
+        <div class="section-label">Earlier</div>
+        <div id="earlier">
+          <div class="list-row muted-row">
+            <span class="tile row" data-tile="contoso"></span>
+            <div><div class="row-title"><b>Rotate 3 app secrets</b><span class="meta">Applied · Yesterday</span></div>
+              <div class="row-desc">Contoso Demo · approved by Ugur Koc</div></div>
+            <div class="row-actions"><button class="btn ghost">Details</button></div>
+          </div>
+          <div class="list-row muted-row">
+            <span class="tile row" data-tile="fabrikam"></span>
+            <div><div class="row-title"><b>Remove 12 stale guests</b><span class="meta">Declined · Oct 18</span></div>
+              <div class="row-desc">Fabrikam EU · declined by Ugur Koc</div></div>
+            <div class="row-actions"><button class="btn ghost">Details</button></div>
+          </div>
+        </div>
+      </div></div>
+    </section>
+  </main>
+</div>
+
+<!-- Composer template -->
+<template id="tpl-composer">
+  <div class="composer">
+    <textarea rows="1" aria-label="Message"></textarea>
+    <div class="listening"><span class="bars"><i></i><i></i><i></i><i></i><i></i></span><span>Listening. Voice runs on this device.</span></div>
+    <div class="c-row">
+      <button class="icon-btn sm" data-tip="Attach a file or export" aria-label="Attach"><svg class="ico"><use href="#i-plus"/></svg></button>
+      <button class="c-chip" data-menu="menu-scope" aria-haspopup="menu" data-tip="Which tenants this question covers"><span class="tile xs" data-tile="active"></span><span data-bind="scope">Contoso Demo</span><svg class="ico caret"><use href="#i-chev-down"/></svg></button>
+      <button class="icon-btn sm" data-action="slash" data-tip="Run an agent" data-kbd="/" aria-label="Run an agent"><svg class="ico"><use href="#i-slash"/></svg></button>
+      <span class="spacer"></span>
+      <button class="c-chip" data-menu="menu-model" data-align="end" aria-haspopup="menu"><svg class="ico sm"><use data-bind="model-icon" href="#i-lock"/></svg><span data-bind="model">Qwen 2.5 7B</span><svg class="ico caret"><use href="#i-chev-down"/></svg></button>
+      <button class="icon-btn sm" data-action="voice" data-tip="Voice" data-kbd="Alt+V" aria-label="Voice"><svg class="ico"><use href="#i-mic"/></svg></button>
+      <button class="send" data-action="send" disabled aria-label="Send"><svg class="ico i-send"><use href="#i-arrow-up"/></svg><svg class="ico i-stop"><use href="#i-stop"/></svg></button>
+    </div>
+  </div>
+  <div class="footnote"><svg class="ico"><use data-bind="model-icon" href="#i-lock"/></svg><span data-bind="footnote"></span></div>
+</template>
+
+<!-- Seeded conversation -->
+<template id="tpl-seed">
+  <div class="u">
+    <div class="u-in">
+      <div class="bubble">Which managed devices have not synced in the last 7 days, and what evidence supports the answer?</div>
+      <div class="u-actions">
+        <button class="icon-btn sm" data-action="copy" data-tip="Copy" aria-label="Copy"><svg class="ico sm"><use href="#i-copy"/></svg></button>
+        <button class="icon-btn sm" data-tip="Edit" aria-label="Edit"><svg class="ico sm"><use href="#i-pencil"/></svg></button>
+      </div>
+    </div>
+  </div>
+  <div class="a">
+    <div class="scope-line"><span class="tile xs" data-tile="contoso"></span>Contoso Demo<span class="sep">·</span>Intune, Entra<span class="sep">·</span>data from 4 minutes ago<span class="sep">·</span><button class="step" data-action="toggle-step" aria-expanded="false">How I checked<svg class="ico"><use href="#i-chev-right"/></svg></button></div>
+    <div class="step-body">
+      <div>Read 214 Intune managed devices from the local cache</div>
+      <div>Read 231 Entra devices from the local cache</div>
+      <div>Matched on device ID, then compared last sync and last sign-in</div>
+    </div>
+    <div class="answer">
+      <p>Three devices have not checked in with Intune for more than 7 days<span class="cite" data-cite="1">1</span>. Two of them are also inactive in Entra<span class="cite" data-cite="2">2</span>, so they are most likely retired hardware rather than a sync problem.</p>
+      <div class="table-wrap">
+        <div class="table-tools">
+          <button class="icon-btn sm" data-action="copy" data-tip="Copy table" aria-label="Copy table"><svg class="ico sm"><use href="#i-copy"/></svg></button>
+          <button class="icon-btn sm" data-tip="Export CSV" aria-label="Export CSV"><svg class="ico sm"><use href="#i-download"/></svg></button>
+        </div>
+        <table class="data">
+          <thead><tr><th>Device</th><th>Owner</th><th>Last Intune sync</th><th>Last Entra sign-in</th></tr></thead>
+          <tbody>
+            <tr><td class="mono">WIN-01</td><td>J. Alvarez</td><td>23 days ago</td><td>41 days ago</td></tr>
+            <tr><td class="mono">MAC-ENG-14</td><td>Shared</td><td>19 days ago</td><td>26 days ago</td></tr>
+            <tr><td class="mono">WIN-KIOSK-03</td><td>Kiosk</td><td>9 days ago</td><td>Today</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p><strong>WIN-KIOSK-03</strong> still signs in to Entra every day<span class="cite" data-cite="2">2</span>, so the Intune management extension on it is probably stuck. Check that device before retiring anything.</p>
+      <ol class="sources">
+        <li data-src="1"><span class="cite">1</span><b>Intune managed devices</b> · 214 records · 4 minutes ago</li>
+        <li data-src="2"><span class="cite">2</span><b>Entra devices</b> · 231 records · 4 minutes ago</li>
+      </ol>
+      <div class="handoff" data-handoff>
+        <div class="grow"><b>Offboarding agent</b> proposed retiring WIN-01 and MAC-ENG-14. Nothing changes until you review and confirm.</div>
+        <button class="btn secondary" data-action="open-review">Review change</button>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="icon-btn sm" data-action="copy" data-tip="Copy" aria-label="Copy"><svg class="ico sm"><use href="#i-copy"/></svg></button>
+      <button class="icon-btn sm" data-tip="Retry" aria-label="Retry"><svg class="ico sm"><use href="#i-retry"/></svg></button>
+      <button class="icon-btn sm" data-tip="Good answer" aria-label="Good answer"><svg class="ico sm"><use href="#i-thumb"/></svg></button>
+      <button class="icon-btn sm" data-tip="Bad answer" aria-label="Bad answer"><svg class="ico sm" style="transform:rotate(180deg)"><use href="#i-thumb"/></svg></button>
+    </div>
+  </div>
+</template>
+
+<!-- Menus -->
+<div class="menu" id="menu-tenant" role="menu">
+  <div class="m-label">Tenants</div>
+  <button class="mi" data-pick="tenant:contoso"><span class="tile" data-tile="contoso"></span><span><span class="t">Contoso Demo</span><span class="sub">contoso-demo.onmicrosoft.com</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <button class="mi" data-pick="tenant:fabrikam"><span class="tile" data-tile="fabrikam"></span><span><span class="t">Fabrikam EU</span><span class="sub">fabrikam-eu.onmicrosoft.com · Production</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <button class="mi" data-action="open-settings" data-tab="tenants"><span class="tile" data-tile="northwind" style="opacity:.55"></span><span><span class="t">Northwind Labs</span><span class="sub bad">Sign-in expired. Sign in again to use it.</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <div class="m-sep"></div>
+  <button class="mi" data-action="open-settings" data-tab="tenants"><svg class="ico"><use href="#i-plus"/></svg>Add tenant</button>
+  <button class="mi" data-action="open-settings" data-tab="tenants"><svg class="ico"><use href="#i-settings"/></svg>Manage tenants</button>
+</div>
+
+<div class="menu" id="menu-model" role="menu">
+  <div class="m-label">On this device</div>
+  <button class="mi" data-pick="model:qwen"><svg class="ico"><use href="#i-lock"/></svg><span><span class="t">Qwen 2.5 7B</span><span class="sub">Ollama · nothing leaves this device</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <button class="mi" data-pick="model:oa8b"><svg class="ico"><use href="#i-lock"/></svg><span><span class="t">OpenAdmin 8B</span><span class="sub">Ollama · tuned for Intune and Entra</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <div class="m-sep"></div>
+  <div class="m-label">Hosted</div>
+  <button class="mi" data-pick="model:sonnet"><svg class="ico"><use href="#i-cloud"/></svg><span><span class="t">Claude Sonnet 5</span><span class="sub">Anthropic · US · via Claude Code</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <button class="mi" data-pick="model:gpt"><svg class="ico"><use href="#i-cloud"/></svg><span><span class="t">GPT-5</span><span class="sub">OpenAI · US · via Codex</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <div class="m-sep"></div>
+  <button class="mi" data-action="open-settings" data-tab="models"><svg class="ico"><use href="#i-settings"/></svg>Manage models</button>
+</div>
+
+<div class="menu" id="menu-scope" role="menu">
+  <div class="m-label">Ask across</div>
+  <button class="mi" data-pick="scope:active"><span class="tile" data-tile="active"></span><span><span class="t">Active tenant</span><span class="sub" data-bind="tenant">Contoso Demo</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <button class="mi" data-pick="scope:selected"><svg class="ico"><use href="#i-layers"/></svg><span><span class="t">Selected tenants</span><span class="sub">Contoso Demo, Fabrikam EU</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+  <button class="mi" data-pick="scope:all"><svg class="ico"><use href="#i-layers"/></svg><span><span class="t">All signed-in tenants</span><span class="sub">2 tenants · Northwind Labs is signed out</span></span><svg class="ico tick"><use href="#i-check"/></svg></button>
+</div>
+
+<div class="menu" id="menu-slash" role="listbox"></div>
+
+<div class="menu" id="menu-thread" role="menu">
+  <button class="mi"><svg class="ico"><use href="#i-pin"/></svg>Pin</button>
+  <button class="mi"><svg class="ico"><use href="#i-pencil"/></svg>Rename</button>
+  <button class="mi"><svg class="ico"><use href="#i-folder"/></svg>Move to workspace</button>
+  <button class="mi"><svg class="ico"><use href="#i-download"/></svg>Export</button>
+  <div class="m-sep"></div>
+  <button class="mi danger" data-action="open-delete"><svg class="ico"><use href="#i-trash"/></svg>Delete</button>
+</div>
+
+<div class="menu" id="menu-account" role="menu">
+  <div class="m-label">admin@contoso-demo.onmicrosoft.com</div>
+  <button class="mi" data-action="open-settings" data-tab="general"><svg class="ico"><use href="#i-settings"/></svg>Settings<kbd data-kbd-text="mod+,"></kbd></button>
+  <button class="mi" data-action="open-settings" data-tab="tenants"><svg class="ico"><use href="#i-building"/></svg>Tenants</button>
+  <button class="mi" data-action="voice-global"><svg class="ico"><use href="#i-mic"/></svg>Voice<kbd data-kbd-text="Alt+V"></kbd></button>
+  <button class="mi" data-action="open-settings" data-tab="shortcuts"><svg class="ico"><use href="#i-keyboard"/></svg>Keyboard shortcuts</button>
+  <div class="m-sep"></div>
+  <button class="mi" data-action="open-settings" data-tab="about"><svg class="ico"><use href="#i-info"/></svg>About and updates<span class="tag warn nightly-only">Nightly</span></button>
+</div>
+
+<!-- Settings -->
+<div class="scrim" id="dlg-settings">
+  <div class="dialog settings" tabindex="-1" role="dialog" aria-modal="true" aria-label="Settings">
+    <div class="d-head"><h2>Settings</h2><button class="icon-btn" data-action="close-dialog" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div>
+    <div class="d-body">
+      <div class="s-tabs">
+        <button class="nav-item" data-stab="general"><svg class="ico"><use href="#i-settings"/></svg>General</button>
+        <button class="nav-item" data-stab="models"><svg class="ico"><use href="#i-lock"/></svg>Models</button>
+        <button class="nav-item" data-stab="tenants"><svg class="ico"><use href="#i-building"/></svg>Tenants</button>
+        <button class="nav-item" data-stab="privacy"><svg class="ico"><use href="#i-shield"/></svg>Privacy</button>
+        <button class="nav-item" data-stab="shortcuts"><svg class="ico"><use href="#i-keyboard"/></svg>Shortcuts</button>
+        <button class="nav-item" data-stab="about"><svg class="ico"><use href="#i-info"/></svg>About</button>
+      </div>
+      <div class="s-pane">
+        <section data-spane="general">
+          <div class="s-row"><div class="lbl">Appearance</div>
+            <div class="seg"><button data-set="theme" data-val="system">System</button><button data-set="theme" data-val="light">Light</button><button data-set="theme" data-val="dark">Dark</button><button data-set="theme" data-val="midnight">Midnight</button></div></div>
+          <div class="s-row"><div class="lbl">Density<span class="desc">Compact fits more rows in tables and lists.</span></div>
+            <div class="seg"><button data-set="density" data-val="comfortable">Comfortable</button><button data-set="density" data-val="compact">Compact</button></div></div>
+          <div class="s-row"><div class="lbl">Answer font<span class="desc">Used for answers and page titles.</span></div>
+            <div class="seg"><button data-set="font" data-val="serif">Serif</button><button data-set="font" data-val="sans">Sans</button></div></div>
+          <div class="s-row"><div class="lbl">Send with Enter<span class="desc">Shift+Enter adds a new line.</span></div>
+            <button class="switch" role="switch" aria-checked="true" data-action="switch" aria-label="Send with Enter"></button></div>
+          <div class="s-row"><div class="lbl">Voice shortcut<span class="desc">Starts voice from anywhere in the app.</span></div>
+            <div data-kbd-keys="Alt+V"></div></div>
+        </section>
+
+        <section data-spane="models">
+          <div class="s-group">On this device</div>
+          <div class="s-row"><div class="lbl">Ollama<span class="desc">Running · 2 models installed</span></div>
+            <div class="right"><button class="btn secondary">Manage</button></div></div>
+          <div class="s-row"><div class="lbl">LM Studio<span class="desc">Not running. Start the local server in LM Studio, then check again.</span></div>
+            <div class="right"><button class="btn ghost">Check again</button></div></div>
+          <div class="s-group">Hosted</div>
+          <div class="s-row"><div class="lbl">Anthropic via Claude Code<span class="desc">Signed in. Prompts and tenant data go to Anthropic (US) when selected.</span></div>
+            <button class="switch" role="switch" aria-checked="true" data-action="switch" aria-label="Anthropic"></button></div>
+          <div class="s-row"><div class="lbl">OpenAI via Codex<span class="desc">Signed in. Prompts and tenant data go to OpenAI (US) when selected.</span></div>
+            <button class="switch" role="switch" aria-checked="true" data-action="switch" aria-label="OpenAI"></button></div>
+          <div class="s-row"><div class="lbl">GitHub Copilot CLI<span class="desc">Not installed.</span></div>
+            <div class="right"><button class="btn ghost">Set up</button></div></div>
+        </section>
+
+        <section data-spane="tenants">
+          <div class="s-row"><div class="lbl"><span class="lbl-row"><span class="tile" data-tile="contoso"></span>Contoso Demo</span><span class="desc">contoso-demo.onmicrosoft.com · Entra P2 · Active</span></div>
+            <div class="right"><button class="btn ghost">Color</button><button class="btn ghost">Permissions</button><button class="btn ghost">Sign out</button></div></div>
+          <div class="s-row"><div class="lbl"><span class="lbl-row"><span class="tile" data-tile="fabrikam"></span>Fabrikam EU<span class="tag warn">Production</span></span><span class="desc">Marked as production. Its label shows in the header and on every write review.</span></div>
+            <div class="right"><button class="btn ghost">Color</button><button class="btn ghost">Permissions</button><button class="btn ghost">Sign out</button></div></div>
+          <div class="s-row"><div class="lbl"><span class="lbl-row"><span class="tile" data-tile="northwind"></span>Northwind Labs</span><span class="desc bad">Sign-in expired on Oct 20. Agents can't run here until you sign in again.</span></div>
+            <div class="right"><button class="btn secondary">Sign in</button></div></div>
+          <div style="padding-top:14px"><button class="btn secondary"><svg class="ico"><use href="#i-plus"/></svg>Add tenant</button></div>
+        </section>
+
+        <section data-spane="privacy">
+          <p class="s-note">OpenAdminOS sends no usage, prompt, or tenant telemetry. With a local model, tenant data never leaves this device.</p>
+          <div class="s-row"><div class="lbl">Crash reports<span class="desc">Off by default. When on, reports contain stack traces only.</span></div>
+            <button class="switch" role="switch" aria-checked="false" data-action="switch" aria-label="Crash reports"></button></div>
+          <div class="s-row"><div class="lbl">Update channel<span class="desc" data-bind="channel-desc"></span></div>
+            <div class="right"><button class="btn ghost" data-stab="about">Change</button></div></div>
+          <div class="s-row"><div class="lbl">Cached Graph data<span class="desc">48 MB across 3 tenants, stored on this device.</span></div>
+            <div class="right"><button class="btn ghost">Clear</button></div></div>
+        </section>
+
+        <section data-spane="shortcuts">
+          <div class="s-row"><div class="lbl">New chat</div><div data-kbd-keys="mod+Shift+O"></div></div>
+          <div class="s-row"><div class="lbl">Search</div><div data-kbd-keys="mod+K"></div></div>
+          <div class="s-row"><div class="lbl">Run an agent from the composer</div><div data-kbd-keys="/"></div></div>
+          <div class="s-row"><div class="lbl">Voice</div><div data-kbd-keys="Alt+V"></div></div>
+          <div class="s-row"><div class="lbl">Toggle sidebar</div><div data-kbd-keys="mod+Shift+S"></div></div>
+          <div class="s-row"><div class="lbl">Settings</div><div data-kbd-keys="mod+,"></div></div>
+          <div class="s-row"><div class="lbl">Close dialog or menu</div><div data-kbd-keys="Esc"></div></div>
+        </section>
+
+        <section data-spane="about">
+          <div class="s-row"><div class="lbl"><span class="lbl-row"><svg class="oa" style="width:22px;height:22px"><use href="#i-oa"/></svg><span>OpenAdminOS <span data-bind="version">0.7.1</span></span><span class="tag warn nightly-only">Nightly</span></span><span class="desc" data-bind="version-desc"></span></div></div>
+          <div class="s-row"><div class="lbl">Get nightly builds<span class="desc">Signed prereleases built from every merge to main. They are less tested than stable releases, and a newer stable release is still offered. Turning this off moves you back to the current stable release, even if it is older than the installed nightly.</span></div>
+            <button class="switch" role="switch" aria-checked="true" data-action="toggle-nightly" id="nightly-switch" aria-label="Get nightly builds"></button></div>
+          <div class="s-row"><div class="lbl">Updates<span class="desc" id="upd-status"></span></div>
+            <div class="right"><button class="btn secondary" id="upd-btn" data-action="check-updates">Check for updates</button></div></div>
+          <div class="s-row"><div class="lbl">Source code<span class="desc">github.com/OpenAdminOS/OpenAdminOS · MIT license</span></div>
+            <div class="right"><button class="btn ghost">Open</button></div></div>
+          <div class="s-row"><div class="lbl">Report a problem<span class="desc">Opens a prefilled GitHub issue. You review it before anything is sent.</span></div>
+            <div class="right"><button class="btn ghost">Report</button></div></div>
+        </section>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Write review -->
+<div class="scrim" id="dlg-review">
+  <div class="dialog review" role="dialog" aria-modal="true" aria-labelledby="review-title">
+    <div class="d-head"><h2 id="review-title">Retire 2 devices</h2><button class="icon-btn" data-action="close-dialog" aria-label="Close"><svg class="ico"><use href="#i-x"/></svg></button></div>
+    <div class="r-body">
+      <div class="r-tenant"><span class="tile" data-tile="contoso"></span><span><b>Contoso Demo</b><span class="sub"> · proposed by Offboarding agent 5 minutes ago</span></span></div>
+      <div class="r-item">
+        <div class="row-icon"><svg class="ico"><use href="#i-device"/></svg></div>
+        <div class="grow"><b class="mono">WIN-01</b><span class="sub">Windows 11 · J. Alvarez · last sync 23 days ago</span></div>
+        <span class="r-change">Managed<svg class="ico"><use href="#i-arrow-right"/></svg><span class="to">Retired</span></span>
+      </div>
+      <div class="r-item" style="border-bottom:0">
+        <div class="row-icon"><svg class="ico"><use href="#i-device"/></svg></div>
+        <div class="grow"><b class="mono">MAC-ENG-14</b><span class="sub">macOS 15 · Shared · last sync 19 days ago</span></div>
+        <span class="r-change">Managed<svg class="ico"><use href="#i-arrow-right"/></svg><span class="to">Retired</span></span>
+      </div>
+      <button class="step" data-action="toggle-step" aria-expanded="false" style="margin:4px 0 8px">Show Graph requests<svg class="ico"><use href="#i-chev-right"/></svg></button>
+      <div class="step-body" style="border:0;padding:0;margin:0"><div class="code">POST /deviceManagement/managedDevices/7c1e…a91/retire
+POST /deviceManagement/managedDevices/f04b…3d2/retire</div></div>
+      <div class="warnbox"><svg class="ico"><use href="#i-alert"/></svg><div>Retiring removes company data, apps, and the management profile from these devices. OpenAdminOS can't undo this.</div></div>
+      <label class="confirm-label" for="confirm-input">Type <b>RETIRE 2 DEVICES</b> to confirm</label>
+      <input class="input" id="confirm-input" autocomplete="off" spellcheck="false">
+    </div>
+    <div class="d-foot">
+      <button class="btn ghost" data-action="close-dialog">Cancel</button>
+      <button class="btn danger" id="confirm-btn" data-action="confirm-review" disabled>Retire 2 devices</button>
+    </div>
+  </div>
+</div>
+
+<!-- Delete conversation -->
+<div class="scrim" id="dlg-delete">
+  <div class="dialog small-dlg" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="delete-title">
+    <div class="d-head"><h2 id="delete-title">Delete conversation?</h2></div>
+    <p>This removes the conversation and its cached answers from this device.</p>
+    <div class="d-foot">
+      <button class="btn ghost" data-action="close-dialog">Cancel</button>
+      <button class="btn danger" data-action="confirm-delete">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="scrim top" id="dlg-search">
+  <div class="dialog search-dlg" role="dialog" aria-modal="true" aria-label="Search">
+    <div class="s-in"><svg class="ico"><use href="#i-search"/></svg><input id="search-input" placeholder="Search chats, agents, teammates, and settings" aria-label="Search"><button class="icon-btn sm" data-action="close-dialog" aria-label="Close"><svg class="ico sm"><use href="#i-x"/></svg></button></div>
+    <div class="s-list" id="search-list"></div>
+  </div>
+</div>
+
+<div class="tip" id="tip" role="tooltip"></div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const wait = ms => new Promise(r => setTimeout(r, ms));
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const isMac = /Mac/.test(navigator.platform);
+  const keyLabel = combo => combo === '/' ? ['/'] : combo.split('+').map(k => k === 'mod' ? (isMac ? '⌘' : 'Ctrl') : (k === 'Alt' && isMac ? '⌥' : k));
+  const keyText = combo => keyLabel(combo).join(isMac ? '' : '+');
+
+  const MODELS = {
+    qwen:   { name: 'Qwen 2.5 7B',     local: true },
+    oa8b:   { name: 'OpenAdmin 8B',    local: true },
+    sonnet: { name: 'Claude Sonnet 5', local: false, where: 'Anthropic (US)' },
+    gpt:    { name: 'GPT-5',           local: false, where: 'OpenAI (US)' },
+  };
+  const TENANTS = {
+    contoso:   { name: 'Contoso Demo',   initials: 'CD', color: '#2A8C80', domain: 'contoso-demo.onmicrosoft.com', sub: 'Graph data from 4 minutes ago · 214 devices · 1,204 users' },
+    fabrikam:  { name: 'Fabrikam EU',    initials: 'FE', color: '#7C5CC4', domain: 'fabrikam-eu.onmicrosoft.com', prod: true, sub: 'Graph data from 12 minutes ago · 1,840 devices · 6,310 users' },
+    northwind: { name: 'Northwind Labs', initials: 'NL', color: '#B07A22', domain: 'northwind-labs.onmicrosoft.com' },
+  };
+  const PERSONAS = {
+    chief:        { name: 'Chief of Staff',      color: 'var(--p-chief)',        role: 'Assesses device compliance and delegates changed findings for evidence review.', status: 'Working · 0:42', schedule: 'Manual', last: 'Today, 09:40' },
+    watcher:      { name: 'Policy Watcher',      color: 'var(--p-watcher)',      role: 'Reviews compliance posture and flags changes between runs.', status: 'Finding waiting for you', schedule: 'Daily at 06:00', last: 'Today, 06:02' },
+    investigator: { name: 'Device Investigator', color: 'var(--p-investigator)', role: 'Investigates inactive devices and stale inventory, then hands cleanup to Offboarding agent.', status: 'Scheduled', schedule: 'Daily at 07:00', last: 'Today, 07:04' },
+    analyst:      { name: 'Identity Analyst',    color: 'var(--p-analyst)',      role: 'Reviews risky sign-ins and Conditional Access coverage.', status: 'Idle', schedule: 'Manual', last: 'Oct 21, 14:10' },
+  };
+  const AGENTS = [
+    { name: 'Find inactive devices',   write: false, desc: 'Intune devices that stopped syncing, checked against Entra' },
+    { name: 'Compliance overview',     write: false, desc: 'Compliance by state, platform, ownership, and enrollment' },
+    { name: 'Risky sign-in triage',    write: false, desc: 'Risky sign-ins grouped by user and location' },
+    { name: 'Offboarding agent',       write: true,  desc: 'Retirement plan for stale devices, reviewed before anything runs' },
+    { name: 'Rotate expiring secrets', write: true,  desc: 'New secrets for app registrations expiring within 30 days' },
+  ];
+  const VERSIONS = { stable: '0.7.1', nightly: '0.7.2-nightly.20261023', ready: '0.7.2-nightly.20261024' };
+  const SCOPES = { selected: '2 tenants', all: 'All signed-in tenants' };
+  const state = { view: 'new', theme: 'system', font: 'serif', density: 'comfortable', build: 'nightly', model: 'qwen', scope: 'active', tenant: 'contoso', streaming: false, abort: false, retired: false, title: 'Devices not synced in 7 days', persona: 'chief', updateReady: true, findings: 2 };
+  const app = $('#app');
+
+  // Robots for Agent Team personas
+  function bot(key, size) {
+    const c = PERSONAS[key].color;
+    return `<svg class="bot" width="${size}" height="${size}" viewBox="0 0 40 40" aria-hidden="true">
+      <circle cx="20" cy="4.5" r="2.2" style="fill:${c}"/><path d="M20 6.5v3" style="stroke:${c}" stroke-width="2" stroke-linecap="round"/>
+      <rect x="6" y="9.5" width="28" height="22" rx="8" style="fill:${c}"/>
+      <rect x="10.5" y="14.5" width="19" height="10.5" rx="5" fill="#17191D" opacity=".88"/>
+      <circle cx="16" cy="19.75" r="2.1" style="fill:${c}"/><circle cx="24" cy="19.75" r="2.1" style="fill:${c}"/>
+      <rect x="13" y="33" width="14" height="4" rx="2" style="fill:${c}" opacity=".55"/></svg>`;
+  }
+  const renderBots = (root = document) => $$('[data-bot]', root).forEach(el => { el.innerHTML = bot(el.dataset.bot, +el.dataset.size || 36); el.style.display = 'inline-flex'; });
+
+  function renderTiles(root = document) {
+    $$('[data-tile]', root).forEach(el => {
+      const t = TENANTS[el.dataset.tile === 'active' ? state.tenant : el.dataset.tile];
+      el.textContent = t.initials; el.style.background = t.color;
+    });
+  }
+
+  // Keyboard labels
+  $$('[data-kbd-text]').forEach(el => { el.textContent = keyText(el.dataset.kbdText); });
+  $$('[data-kbd-keys]').forEach(el => { el.innerHTML = keyLabel(el.dataset.kbdKeys).map(k => `<kbd class="k">${k}</kbd>`).join(''); });
+
+  // Theme, font, density, build
+  const mq = matchMedia('(prefers-color-scheme: dark)');
+  function syncSet(name, val) { $$(`[data-set="${name}"]`).forEach(b => b.classList.toggle('on', b.dataset.val === val)); }
+  function applyLook() {
+    const root = document.documentElement;
+    root.dataset.theme = state.theme === 'system' ? (mq.matches ? 'dark' : 'light') : state.theme;
+    root.dataset.font = state.font;
+    root.dataset.density = state.density;
+    root.dataset.build = state.build;
+    ['theme', 'font', 'density', 'build'].forEach(k => syncSet(k, state[k]));
+  }
+  mq.addEventListener('change', applyLook);
+
+  // Composers
+  const tpl = $('#tpl-composer');
+  $$('.composer-slot').forEach(slot => slot.appendChild(tpl.content.cloneNode(true)));
+
+  let updState = 'idle';
+  function renderUpdateStatus() {
+    const s = $('#upd-status'), b = $('#upd-btn');
+    const ready = state.updateReady && state.build === 'nightly';
+    b.disabled = updState === 'checking';
+    b.textContent = updState === 'checking' ? 'Checking' : ready ? 'Restart to install' : 'Check for updates';
+    b.dataset.action = ready ? 'restart' : 'check-updates';
+    if (updState === 'checking') s.innerHTML = '<span class="shimmer">Checking for updates</span>';
+    else if (ready) s.textContent = `${VERSIONS.ready} is ready. Restart to install, or it installs on the next quit.`;
+    else if (updState === 'current') s.textContent = `You're on the latest ${state.build} build. Checked just now.`;
+    else s.textContent = 'Checks on launch and every four hours.';
+  }
+
+  function applyBindings() {
+    const m = MODELS[state.model], t = TENANTS[state.tenant];
+    $$('[data-bind="model"]').forEach(el => el.textContent = m.name);
+    $$('[data-bind="model-icon"]').forEach(el => el.setAttribute('href', m.local ? '#i-lock' : '#i-cloud'));
+    $$('[data-bind="footnote"]').forEach(el => el.textContent = m.local
+      ? 'Local model. Tenant data stays on this device.'
+      : `Prompts and tenant data go to ${m.where} while this model is selected.`);
+    $$('.footnote').forEach(el => el.classList.toggle('hosted', !m.local));
+    $$('[data-bind="tenant"]').forEach(el => el.textContent = t.name);
+    $$('[data-bind="tenant-sub"]').forEach(el => el.textContent = t.sub);
+    $$('[data-bind="scope"]').forEach(el => el.textContent = state.scope === 'active' ? t.name : SCOPES[state.scope]);
+    $$('[data-prod]').forEach(el => el.hidden = !t.prod);
+    $$('.composer-slot').forEach(slot => {
+      $('textarea', slot).placeholder = slot.dataset.placeholder === 'home'
+        ? `Ask about ${t.name}, or type / to run an agent`
+        : 'Ask a follow-up, or type / to run an agent';
+    });
+    $$('[data-bind="version"]').forEach(el => el.textContent = VERSIONS[state.build]);
+    $$('[data-bind="version-desc"]').forEach(el => el.textContent = state.build === 'nightly'
+      ? 'Nightly prerelease built from main. Less tested than a stable release.'
+      : 'Stable release.');
+    $$('[data-bind="channel-desc"]').forEach(el => el.textContent = state.build === 'nightly'
+      ? 'Nightly prereleases, plus any newer stable release. Checks on launch and every four hours, then asks before restarting.'
+      : 'Stable releases only. Checks on launch and every four hours, then asks before restarting.');
+    $$('[data-bind="update-title"]').forEach(el => el.textContent = `${VERSIONS.ready} is ready`);
+    $('#nightly-switch').setAttribute('aria-checked', String(state.build === 'nightly'));
+    const ready = state.updateReady && state.build === 'nightly';
+    $('#sb-update').hidden = !ready;
+    const bu = $('#brief-update'); if (bu) bu.hidden = !ready;
+    renderUpdateStatus();
+    const briefN = $$('#brief-list .brief-row').filter(r => !r.hidden && getComputedStyle(r).display !== 'none').length;
+    $('[data-bind="brief-count"]').textContent = briefN ? `${briefN} ${briefN === 1 ? 'item' : 'items'}` : '';
+    $('.brief').hidden = !briefN;
+    $$('#menu-model [data-pick]').forEach(b => b.classList.toggle('sel', b.dataset.pick === 'model:' + state.model));
+    $$('#menu-scope [data-pick]').forEach(b => b.classList.toggle('sel', b.dataset.pick === 'scope:' + state.scope));
+    $$('#menu-tenant [data-pick]').forEach(b => b.classList.toggle('sel', b.dataset.pick === 'tenant:' + state.tenant));
+    renderTiles();
+  }
+
+  function syncSend() {
+    $$('.composer').forEach(c => {
+      const btn = $('.send', c), ta = $('textarea', c);
+      btn.classList.toggle('stop', state.streaming);
+      btn.disabled = !state.streaming && !ta.value.trim();
+      btn.setAttribute('aria-label', state.streaming ? 'Stop' : 'Send');
+      btn.dataset.tip = state.streaming ? 'Stop' : '';
+    });
+  }
+  function autosize(ta) { ta.style.height = 'auto'; ta.style.height = Math.min(ta.scrollHeight, 220) + 'px'; }
+
+  // Agent Team
+  function renderDetail() {
+    const p = PERSONAS[state.persona];
+    $('#detail').innerHTML = `${bot(state.persona, 56)}<h2>${p.name}</h2><p>${p.role}</p>
+      <dl class="kv">
+        <dt>Status</dt><dd>${p.status}</dd>
+        <dt>Tenant</dt><dd><span class="tile xs" data-tile="contoso"></span>Contoso Demo</dd>
+        <dt>Model</dt><dd><svg class="ico sm"><use href="#i-lock"/></svg>Qwen 2.5 7B · local</dd>
+        <dt>Schedule</dt><dd>${p.schedule}</dd>
+        <dt>Last completed</dt><dd>${p.last}</dd>
+        <dt>Time budget</dt><dd>30 minutes</dd>
+      </dl>
+      <div class="btns"><button class="btn secondary"><svg class="ico"><use href="#i-play"/></svg>Run assignment</button><button class="btn ghost">Edit</button></div>`;
+    renderTiles($('#detail'));
+    $$('.desk[data-persona], .lounger[data-persona]').forEach(d => d.classList.toggle('sel', d.dataset.persona === state.persona));
+  }
+
+  // Thread
+  const thread = $('#thread'), col = $('#col'), toBottom = $('#to-bottom');
+  const saved = new Map();
+  let follow = true, currentRecent = null;
+  thread.addEventListener('scroll', () => {
+    const near = thread.scrollHeight - thread.scrollTop - thread.clientHeight < 60;
+    follow = near;
+    toBottom.classList.toggle('on', !near);
+  });
+  const stick = () => { if (follow) thread.scrollTop = thread.scrollHeight; };
+
+  function loadSeed() { col.innerHTML = ''; col.appendChild($('#tpl-seed').content.cloneNode(true)); renderTiles(col); if (state.retired) markRetired(); }
+
+  function openRecent(el) {
+    if (currentRecent && currentRecent.dataset.thread !== 'seed') saved.set(currentRecent, col.innerHTML);
+    currentRecent = el;
+    state.title = $('span:not(.tile)', el).textContent;
+    if (el.dataset.thread === 'seed') loadSeed(); else col.innerHTML = saved.get(el) || '';
+    setView('thread');
+    const lastU = $$('.u', col).pop();
+    thread.scrollTop = lastU ? lastU.offsetTop - 12 : 0;
+  }
+
+  function setView(v) {
+    state.view = v;
+    closeSlash();
+    $$('.view').forEach(el => el.classList.toggle('on', el.dataset.view === v));
+    $$('.sb-nav [data-nav]').forEach(el => el.classList.toggle('active', el.dataset.nav === v));
+    $$('.recent').forEach(el => el.classList.toggle('active', v === 'thread' && el === currentRecent));
+    $$('[data-mock-view]').forEach(b => b.classList.toggle('on', b.dataset.mockView === v));
+    $('#tb-title').textContent = v === 'thread' ? state.title : '';
+    $('#tb-more').style.visibility = v === 'thread' ? 'visible' : 'hidden';
+    if (v === 'new') setTimeout(() => $('[data-view="new"] textarea').focus(), 30);
+    if (v === 'thread') { follow = true; toBottom.classList.remove('on'); }
+    if (v === 'team') renderDetail();
+  }
+
+  function addUser(html) {
+    const u = document.createElement('div');
+    u.className = 'u fresh';
+    u.innerHTML = `<div class="u-in"><div class="bubble">${html}</div><div class="u-actions">
+      <button class="icon-btn sm" data-action="copy" data-tip="Copy" aria-label="Copy"><svg class="ico sm"><use href="#i-copy"/></svg></button>
+      <button class="icon-btn sm" data-tip="Edit" aria-label="Edit"><svg class="ico sm"><use href="#i-pencil"/></svg></button></div></div>`;
+    col.appendChild(u);
+  }
+  const actionsHTML = `<div class="actions fresh">
+    <button class="icon-btn sm" data-action="copy" data-tip="Copy" aria-label="Copy"><svg class="ico sm"><use href="#i-copy"/></svg></button>
+    <button class="icon-btn sm" data-tip="Retry" aria-label="Retry"><svg class="ico sm"><use href="#i-retry"/></svg></button>
+    <button class="icon-btn sm" data-tip="Good answer" aria-label="Good answer"><svg class="ico sm"><use href="#i-thumb"/></svg></button>
+    <button class="icon-btn sm" data-tip="Bad answer" aria-label="Bad answer"><svg class="ico sm" style="transform:rotate(180deg)"><use href="#i-thumb"/></svg></button></div>`;
+
+  // Each paragraph: [text before the citation, citation number, text after it]
+  const REPLY = [
+    ['11 Windows devices in {tenant} report BitLocker as off or unknown', 1, '8 of them are corporate-owned, so the encryption policy applies to them.'],
+    ['The other 3 are personal devices enrolled as BYOD, where the policy is not assigned', 1, 'I would leave those out of any follow-up.'],
+    ['Most of the corporate devices enrolled through Autopilot in the last 30 days and still show the policy as pending', 2, 'That usually means the device has not restarted since enrollment, not that the policy failed.'],
+  ];
+
+  async function typeInto(p, text) {
+    const words = text.split(' ');
+    for (let i = 0; i < words.length && !state.abort; i++) {
+      p.append((i ? ' ' : '') + words[i]);
+      if (i % 2 === 0) { stick(); await wait(16 + Math.random() * 30); }
+    }
+  }
+
+  function finishAnswer(a, stoppedNote) {
+    const ans = $('.answer', a);
+    if (state.abort && stoppedNote) {
+      const p = document.createElement('p');
+      Object.assign(p.style, { color: 'var(--text-3)', fontFamily: 'var(--font-ui)', fontSize: 'var(--fs-small)' });
+      p.textContent = 'Stopped.'; ans.appendChild(p);
+    }
+    a.insertAdjacentHTML('beforeend', actionsHTML);
+    stick();
+    state.streaming = false; syncSend();
+  }
+
+  async function streamReply() {
+    state.streaming = true; state.abort = false; syncSend();
+    const t = TENANTS[state.tenant];
+    const a = document.createElement('div');
+    a.className = 'a fresh';
+    a.innerHTML = `<div class="scope-line"><span class="tile xs" data-tile="${state.tenant}"></span>${esc(t.name)}<span class="sep">·</span><span class="shimmer" data-live>Reading Intune managed devices</span></div><div class="answer"></div>`;
+    renderTiles(a);
+    col.appendChild(a); stick();
+    await wait(750);
+    if (!state.abort) { $('[data-live]', a).textContent = 'Reading BitLocker recovery keys'; await wait(750); }
+    $('[data-live]', a).outerHTML = `Intune, BitLocker keys<span class="sep">·</span>data from 1 minute ago<span class="sep">·</span><button class="step" data-action="toggle-step" aria-expanded="false">How I checked<svg class="ico"><use href="#i-chev-right"/></svg></button>`;
+    $('.scope-line', a).insertAdjacentHTML('afterend', '<div class="step-body"><div>Read 214 Intune managed devices from the local cache</div><div>Read 187 BitLocker recovery keys from the local cache</div></div>');
+    const ans = $('.answer', a);
+    for (const [before, cite, after] of REPLY) {
+      if (state.abort) break;
+      const p = document.createElement('p'); ans.appendChild(p);
+      await typeInto(p, before.replace('{tenant}', t.name));
+      if (state.abort) break;
+      p.insertAdjacentHTML('beforeend', `<span class="cite" data-cite="${cite}">${cite}</span>. `);
+      await typeInto(p, after);
+      await wait(120);
+    }
+    if (!state.abort) ans.insertAdjacentHTML('beforeend', `<ol class="sources"><li data-src="1"><span class="cite">1</span><b>Intune managed devices</b> · 214 records · 1 minute ago</li><li data-src="2"><span class="cite">2</span><b>BitLocker recovery keys</b> · 187 records · 1 minute ago</li></ol>`);
+    finishAnswer(a, true);
+  }
+
+  async function runAgentReply(agent) {
+    state.streaming = true; state.abort = false; syncSend();
+    const a = document.createElement('div');
+    a.className = 'a fresh';
+    a.innerHTML = `<div class="run-card"><div class="row-icon"><svg class="ico"><use href="#i-grid"/></svg></div>
+      <div><b>${esc(agent.name)}</b> <span class="meta">${agent.write ? 'Makes changes' : 'Read-only'} · ${esc(TENANTS[state.tenant].name)}</span>
+      <div class="progress"><i></i></div><div class="r-status shimmer">Starting run</div></div>
+      <button class="btn ghost" data-nav-run>Open run</button></div><div class="answer"></div>`;
+    col.appendChild(a); stick();
+    const steps = agent.write
+      ? ['Reading Intune managed devices', 'Checking Entra sign-ins', 'Building the change proposal']
+      : ['Reading Intune managed devices', 'Checking Entra sign-ins', 'Writing the summary'];
+    const bar = $('.progress i', a), st = $('.r-status', a);
+    for (let i = 0; i < steps.length && !state.abort; i++) { st.textContent = steps[i]; bar.style.width = ((i + 1) / (steps.length + 1) * 100) + '%'; await wait(900); }
+    bar.style.width = '100%';
+    st.classList.remove('shimmer');
+    st.textContent = state.abort ? 'Stopped. No changes were made.' : agent.write ? 'Completed in 3.1 s · 1 change proposed' : 'Completed in 2.9 s · 3 devices over 7 days';
+    if (!state.abort) {
+      const p = document.createElement('p'); $('.answer', a).appendChild(p);
+      await typeInto(p, agent.write
+        ? 'The proposal is waiting in Changes. Nothing has been written to the tenant.'
+        : 'WIN-01, MAC-ENG-14, and WIN-KIOSK-03 have not synced in more than 7 days. The full report is saved with the run.');
+    }
+    finishAnswer(a, false);
+  }
+
+  function send(composer) {
+    if (state.streaming) { state.abort = true; return; }
+    const ta = $('textarea', composer);
+    const text = ta.value.trim();
+    if (!text) return;
+    const agent = text.startsWith('/') ? AGENTS.find(x => text.slice(1).toLowerCase().startsWith(x.name.toLowerCase())) : null;
+    if (text.startsWith('/') && !agent) { openSlash(ta); return; }
+    ta.value = ''; autosize(ta); syncSend(); closeSlash();
+    if (state.view !== 'thread') {
+      if (currentRecent && currentRecent.dataset.thread !== 'seed') saved.set(currentRecent, col.innerHTML);
+      const r = document.createElement('div');
+      r.className = 'recent fresh'; r.tabIndex = 0; r.dataset.thread = 'new';
+      r.innerHTML = `<span class="tile xs" data-tile="${state.tenant}"></span><span></span><button class="icon-btn sm" data-menu="menu-thread" aria-label="Conversation options"><svg class="ico sm"><use href="#i-more"/></svg></button>`;
+      const title = agent ? agent.name : text.replace(/[?.!]+$/, '');
+      $('span:not(.tile)', r).textContent = title.length > 40 ? title.slice(0, 38).trimEnd() + '…' : title;
+      renderTiles(r);
+      $('#recents-today').prepend(r);
+      currentRecent = r;
+      state.title = $('span:not(.tile)', r).textContent;
+      col.innerHTML = '';
+      setView('thread');
+    }
+    if (agent) {
+      addUser(`<span class="agent-token"><svg class="ico sm"><use href="#i-grid"/></svg>${esc(agent.name)}</span>${esc(text.slice(agent.name.length + 1).trim())}`);
+      follow = true; stick(); runAgentReply(agent);
+    } else {
+      addUser(esc(text)); follow = true; stick(); streamReply();
+    }
+  }
+
+  // Slash menu: type / to run an installed agent
+  const slash = $('#menu-slash');
+  let slashFor = null, slashIdx = 0, slashItems = [];
+  function openSlash(ta) {
+    const q = ta.value.slice(1).toLowerCase().trim();
+    if (AGENTS.some(a => ta.value.slice(1).toLowerCase().startsWith(a.name.toLowerCase() + ' '))) { closeSlash(); return; }
+    slashItems = AGENTS.filter(a => !q || a.name.toLowerCase().includes(q));
+    if (!slashItems.length) { closeSlash(); return; }
+    slashIdx = Math.min(slashIdx, slashItems.length - 1);
+    slash.innerHTML = `<div class="m-label">Run an agent on ${esc(TENANTS[state.tenant].name)}</div>` + slashItems.map((a, i) =>
+      `<button class="mi${i === slashIdx ? ' kb' : ''}" data-slash="${i}"><svg class="ico"><use href="#i-grid"/></svg><span><span class="t">${esc(a.name)}</span><span class="sub">${esc(a.desc)}</span></span>${a.write ? '<span class="tag warn">Makes changes</span>' : ''}</button>`).join('');
+    closeMenus();
+    slash.classList.add('on');
+    slashFor = ta;
+    const c = ta.closest('.composer').getBoundingClientRect(), mh = slash.offsetHeight;
+    slash.style.left = c.left + 'px';
+    slash.style.top = (c.bottom + mh + 8 < innerHeight ? c.bottom + 6 : c.top - mh - 6) + 'px';
+  }
+  function closeSlash() { slash.classList.remove('on'); slashFor = null; slashIdx = 0; }
+  function pickSlash(i) {
+    const ta = slashFor, a = slashItems[i];
+    if (!ta || !a) return;
+    ta.value = '/' + a.name + ' ';
+    closeSlash(); autosize(ta); syncSend(); ta.focus();
+  }
+
+  // Menus
+  let openMenu = null;
+  function showMenu(id, anchor) {
+    const same = openMenu && openMenu.anchor === anchor;
+    closeMenus(); closeSlash();
+    if (same) return;
+    const m = $('#' + id);
+    m.classList.add('on');
+    anchor.setAttribute('aria-expanded', 'true');
+    openMenu = { m, anchor };
+    const r = anchor.getBoundingClientRect(), mw = m.offsetWidth, mh = m.offsetHeight;
+    let left = anchor.dataset.align === 'end' ? r.right - mw : r.left;
+    left = Math.max(8, Math.min(left, innerWidth - mw - 8));
+    let top = r.bottom + 6;
+    if (top + mh > innerHeight - 8) top = r.top - mh - 6;
+    m.style.left = left + 'px'; m.style.top = top + 'px';
+    hideTip();
+  }
+  function closeMenus() {
+    if (!openMenu) return;
+    openMenu.m.classList.remove('on');
+    openMenu.anchor.setAttribute('aria-expanded', 'false');
+    openMenu = null;
+  }
+
+  // Dialogs
+  let lastFocus = null;
+  function openDialog(id) {
+    closeMenus(); closeSlash(); hideTip();
+    $$('.scrim.on').forEach(s => s.classList.remove('on'));
+    lastFocus = document.activeElement;
+    const d = $('#' + id);
+    d.classList.add('on');
+    const f = $('input', d) || $('.dialog', d);
+    setTimeout(() => f && f.focus(), 30);
+  }
+  function closeDialog() {
+    $$('.scrim.on').forEach(s => s.classList.remove('on'));
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  function settingsTab(tab) {
+    $$('[data-stab]').forEach(b => b.classList.toggle('active', b.dataset.stab === tab));
+    $$('[data-spane]').forEach(s => s.classList.toggle('on', s.dataset.spane === tab));
+  }
+
+  // Review
+  const confirmInput = $('#confirm-input'), confirmBtn = $('#confirm-btn');
+  confirmInput.addEventListener('input', () => {
+    const ok = confirmInput.value.trim() === 'RETIRE 2 DEVICES';
+    confirmBtn.disabled = !ok;
+    confirmInput.classList.toggle('match', ok);
+  });
+  function markRetired() {
+    $$('[data-handoff]').forEach(h => {
+      h.className = 'handoff done';
+      h.innerHTML = `<svg class="ico"><use href="#i-check"/></svg><div class="grow"><b>Retired WIN-01 and MAC-ENG-14</b> in Contoso Demo. The record is in Changes.</div>`;
+    });
+  }
+  function confirmReview() {
+    state.retired = true;
+    closeDialog();
+    markRetired();
+    const cc = $('#changes-count'); if (cc) cc.remove();
+    const pending = $('#pending .list-row');
+    if (pending) {
+      $('.meta', pending).textContent = 'Applied · Just now';
+      $('.row-desc', pending).textContent = 'WIN-01 and MAC-ENG-14 in Contoso Demo · approved by Ugur Koc';
+      $('.row-actions', pending).className = 'row-actions';
+      $('.row-actions', pending).innerHTML = '<button class="btn ghost">Details</button>';
+      pending.classList.add('muted-row');
+      $('#earlier').prepend(pending);
+      $('#pending').innerHTML = '<div class="empty-note">Nothing is waiting for review. When an agent proposes a change, it shows up here.</div>';
+    }
+    const bc = $('#brief-change'); if (bc) bc.remove();
+    $$('.finding').forEach(f => { if ($('[data-action="open-review"]', f)) { f.classList.add('done'); $('.row-actions', f).innerHTML = '<span class="meta"><svg class="ico sm"><use href="#i-check"/></svg>Applied</span>'; } });
+    applyBindings();
+  }
+
+  // Search
+  const searchItems = () => [
+    ...$$('.recent').map(r => ({ icon: 'i-chat', text: $('span:not(.tile)', r).textContent, meta: TENANTS[$('.tile', r).dataset.tile].name, run: () => { closeDialog(); openRecent(r); } })),
+    ...Object.entries(PERSONAS).map(([k, p]) => ({ icon: 'i-team', text: p.name, meta: 'Teammate', run: () => { closeDialog(); state.persona = k; setView('team'); } })),
+    ...AGENTS.map(a => ({ icon: 'i-grid', text: a.name, meta: 'Agent', run: () => { closeDialog(); setView('agents'); } })),
+    { icon: 'i-settings', text: 'Settings', meta: 'Command', run: () => { openDialog('dlg-settings'); settingsTab('general'); } },
+    { icon: 'i-restart', text: 'Check for updates', meta: 'Command', run: () => { openDialog('dlg-settings'); settingsTab('about'); } },
+    { icon: 'i-building', text: 'Switch tenant', meta: 'Command', run: () => { openDialog('dlg-settings'); settingsTab('tenants'); } },
+  ];
+  let searchResults = [];
+  function renderSearch() {
+    const q = $('#search-input').value.trim().toLowerCase();
+    searchResults = searchItems().filter(i => !q || i.text.toLowerCase().includes(q)).slice(0, 9);
+    $('#search-list').innerHTML = searchResults.length
+      ? searchResults.map((i, n) => `<button class="mi${n === 0 ? ' kb' : ''}" data-sr="${n}"><svg class="ico"><use href="#${i.icon}"/></svg><span class="t" style="flex:1;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(i.text)}</span><kbd>${esc(i.meta)}</kbd></button>`).join('')
+      : '<div class="empty-note">No matches. Try a device, teammate, or agent name.</div>';
+  }
+  $('#search-input').addEventListener('input', renderSearch);
+
+  // Voice
+  let voiceTimer = null;
+  function toggleVoice(composer) {
+    const on = !composer.classList.contains('voice');
+    $$('.composer').forEach(c => c.classList.remove('voice'));
+    $$('[data-action="voice"]').forEach(b => b.classList.remove('on'));
+    clearTimeout(voiceTimer);
+    if (!on) return;
+    composer.classList.add('voice');
+    $('[data-action="voice"]', composer).classList.add('on');
+    voiceTimer = setTimeout(() => {
+      composer.classList.remove('voice');
+      $('[data-action="voice"]', composer).classList.remove('on');
+      const ta = $('textarea', composer);
+      ta.value = 'Which devices failed BitLocker last week?';
+      autosize(ta); syncSend(); ta.focus();
+    }, 2600);
+  }
+
+  // Tooltips
+  const tip = $('#tip');
+  const TIP_BIND = {
+    nightly: () => `OpenAdminOS ${VERSIONS.nightly} is a nightly prerelease built from main. It is less tested than a stable release.`,
+    'update-ready': () => `${VERSIONS.ready} is ready. Restart to install, or it installs on the next quit.`,
+    tenant: () => `Signed in as admin@${TENANTS[state.tenant].domain}`,
+  };
+  let tipTimer = null, tipFor = null;
+  function hideTip() { clearTimeout(tipTimer); tip.classList.remove('on'); tipFor = null; }
+  document.addEventListener('mouseover', e => {
+    const t = e.target.closest('[data-tip],[data-tip-bind]');
+    if (t === tipFor) return;
+    hideTip();
+    if (!t || t.getAttribute('aria-expanded') === 'true') return;
+    const text = t.dataset.tipBind ? TIP_BIND[t.dataset.tipBind]() : t.dataset.tip;
+    if (!text) return;
+    tipFor = t;
+    tipTimer = setTimeout(() => {
+      tip.innerHTML = esc(text) + (t.dataset.kbd ? `<kbd>${keyText(t.dataset.kbd)}</kbd>` : '');
+      const r = t.getBoundingClientRect();
+      tip.style.left = '0px'; tip.style.top = '0px';
+      const w = tip.offsetWidth;
+      const left = Math.max(8, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - 8));
+      let top = r.bottom + 8;
+      if (top + 40 > innerHeight) top = r.top - tip.offsetHeight - 8;
+      tip.style.left = left + 'px'; tip.style.top = top + 'px';
+      tip.classList.add('on');
+    }, 450);
+  });
+  document.addEventListener('mousedown', hideTip);
+
+  // Citation hover links the claim to its source
+  document.addEventListener('mouseover', e => {
+    const c = e.target.closest('.cite[data-cite]');
+    $$('ol.sources li.hl, .cite.hl').forEach(x => x.classList.remove('hl'));
+    if (!c) return;
+    const a = c.closest('.a');
+    $$(`ol.sources li[data-src="${c.dataset.cite}"]`, a).forEach(li => { li.classList.add('hl'); $('.cite', li).classList.add('hl'); });
+  });
+
+  // Clicks
+  document.addEventListener('click', e => {
+    if (e.target.classList.contains('scrim')) { closeDialog(); return; }
+    const t = e.target.closest('[data-action],[data-menu],[data-nav],[data-mock-view],[data-set],[data-pick],[data-fill],[data-stab],[data-tab],[data-sr],[data-slash],[data-team-mode],[data-persona],[data-nav-run],.recent');
+    if (e.target.closest('.composer') && !t) { $('textarea', e.target.closest('.composer')).focus(); }
+    if (!t) { closeMenus(); if (!e.target.closest('.composer')) closeSlash(); return; }
+    if (t.dataset.menu) { e.stopPropagation(); showMenu(t.dataset.menu, t); return; }
+    const inMenu = t.closest('.menu');
+    closeMenus();
+
+    if (t.dataset.slash !== undefined) { pickSlash(+t.dataset.slash); return; }
+    if (t.dataset.sr !== undefined) { searchResults[+t.dataset.sr].run(); return; }
+    if (t.classList.contains('recent')) { openRecent(t); return; }
+    if (t.dataset.mockView) { if (t.dataset.mockView === 'thread') openRecent(currentRecent || $('.recent')); else setView(t.dataset.mockView); return; }
+    if (t.dataset.nav) { setView(t.dataset.nav); return; }
+    if (t.dataset.navRun !== undefined) { setView('agents'); $('[data-tab="runs"]').click(); return; }
+    if (t.dataset.persona) { state.persona = t.dataset.persona; renderDetail(); return; }
+    if (t.dataset.teamMode) {
+      $$('[data-team-mode]').forEach(b => b.classList.toggle('on', b === t));
+      $('#team-office').hidden = t.dataset.teamMode !== 'office';
+      $('#team-list').hidden = t.dataset.teamMode !== 'list';
+      return;
+    }
+    if (t.dataset.set) {
+      state[t.dataset.set] = t.dataset.val;
+      if (t.dataset.set === 'build') { state.updateReady = t.dataset.val === 'nightly'; updState = 'idle'; }
+      applyLook(); applyBindings(); return;
+    }
+    if (t.dataset.stab) { settingsTab(t.dataset.stab); return; }
+    if (t.dataset.tabGroup) {
+      $$(`[data-tab-group="${t.dataset.tabGroup}"]`).forEach(b => b.classList.toggle('on', b === t));
+      $$(`[data-pane-group="${t.dataset.tabGroup}"]`).forEach(p => p.hidden = p.dataset.pane !== t.dataset.tab);
+      return;
+    }
+    if (t.dataset.pick) {
+      const [k, v] = t.dataset.pick.split(':');
+      state[k] = v; applyBindings(); return;
+    }
+    if (t.dataset.fill) {
+      const ta = $('[data-view="new"] textarea');
+      ta.value = t.dataset.fill; autosize(ta); syncSend(); ta.focus();
+      ta.setSelectionRange(ta.value.length, ta.value.length);
+      if (ta.value === '/') openSlash(ta);
+      return;
+    }
+    switch (t.dataset.action) {
+      case 'toggle-sidebar': app.classList.toggle('sb-collapsed'); hideTip(); break;
+      case 'new-chat': setView('new'); $$('.recent').forEach(r => r.classList.remove('active')); break;
+      case 'open-search': openDialog('dlg-search'); $('#search-input').value = ''; renderSearch(); break;
+      case 'open-settings': openDialog('dlg-settings'); settingsTab(t.dataset.tab || 'general'); break;
+      case 'open-review':
+        if (state.retired) { setView('changes'); break; }
+        confirmInput.value = ''; confirmInput.classList.remove('match'); confirmBtn.disabled = true;
+        openDialog('dlg-review'); break;
+      case 'confirm-review': confirmReview(); break;
+      case 'open-delete': openDialog('dlg-delete'); break;
+      case 'confirm-delete': {
+        closeDialog();
+        if (currentRecent) { currentRecent.remove(); currentRecent = null; }
+        setView('new'); break;
+      }
+      case 'close-dialog': closeDialog(); break;
+      case 'send': send(t.closest('.composer')); break;
+      case 'slash': {
+        const ta = $('textarea', t.closest('.composer'));
+        if (!ta.value.startsWith('/')) ta.value = '/';
+        ta.focus(); openSlash(ta); syncSend(); break;
+      }
+      case 'voice': toggleVoice(t.closest('.composer')); break;
+      case 'voice-global': {
+        if (state.view !== 'thread') setView('new');
+        toggleVoice($(`.view[data-view="${state.view}"] .composer`)); break;
+      }
+      case 'to-bottom': thread.scrollTo({ top: thread.scrollHeight, behavior: 'smooth' }); break;
+      case 'toggle-step': {
+        const open = t.getAttribute('aria-expanded') !== 'true';
+        t.setAttribute('aria-expanded', String(open));
+        const body = t.closest('.scope-line') ? t.closest('.scope-line').nextElementSibling : t.nextElementSibling;
+        body.classList.toggle('on', open);
+        break;
+      }
+      case 'switch': t.setAttribute('aria-checked', String(t.getAttribute('aria-checked') !== 'true')); break;
+      case 'toggle-nightly': state.build = state.build === 'nightly' ? 'stable' : 'nightly'; state.updateReady = false; updState = 'idle'; applyLook(); applyBindings(); break;
+      case 'check-updates':
+        updState = 'checking'; renderUpdateStatus();
+        setTimeout(() => { if (state.build === 'nightly') state.updateReady = true; updState = 'current'; applyBindings(); }, 1400);
+        break;
+      case 'restart': {
+        state.updateReady = false; updState = 'current';
+        VERSIONS.nightly = VERSIONS.ready;
+        closeDialog(); applyBindings();
+        document.body.animate([{ opacity: 1 }, { opacity: .15 }, { opacity: 1 }], { duration: 700, easing: 'ease-in-out' });
+        break;
+      }
+      case 'ack': {
+        const f = t.closest('.finding');
+        f.classList.add('done');
+        $('.row-actions', f).innerHTML = '<span class="meta"><svg class="ico sm"><use href="#i-check"/></svg>Acknowledged</span>';
+        state.findings = Math.max(0, state.findings - 1);
+        $('#findings-n').textContent = state.findings;
+        const tc = $('#team-count'); if (tc) { if (state.findings) tc.textContent = state.findings; else tc.remove(); }
+        const bt = $('#brief-team'); if (bt) bt.remove();
+        applyBindings();
+        break;
+      }
+      case 'copy': {
+        const use = $('use', t);
+        use.setAttribute('href', '#i-check'); t.dataset.tip = 'Copied'; hideTip();
+        setTimeout(() => { use.setAttribute('href', '#i-copy'); t.dataset.tip = t.getAttribute('aria-label'); }, 1400);
+        break;
+      }
+      case 'run-agent': {
+        const row = t.closest('.list-row'), meta = $('[data-meta]', row);
+        const before = meta.innerHTML;
+        meta.innerHTML = '<span class="pulse"></span>Running';
+        setTimeout(() => { meta.innerHTML = before.replace(/Last run [^<]*|Never run|Mondays at 08:00/, 'Last run just now'); }, 2600);
+        break;
+      }
+    }
+    if (inMenu) closeMenus();
+  });
+
+  // Composer input
+  document.addEventListener('input', e => {
+    if (!(e.target instanceof Element) || !e.target.matches('.composer textarea')) return;
+    autosize(e.target); syncSend();
+    if (e.target.value.startsWith('/')) openSlash(e.target); else closeSlash();
+  });
+  document.addEventListener('keydown', e => {
+    if (!(e.target instanceof Element)) return;
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    const inComposer = e.target.matches('.composer textarea');
+    if (inComposer && slashFor === e.target && slash.classList.contains('on')) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); slashIdx = (slashIdx + (e.key === 'ArrowDown' ? 1 : -1) + slashItems.length) % slashItems.length; openSlash(e.target); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickSlash(slashIdx); return; }
+      if (e.key === 'Escape') { e.preventDefault(); closeSlash(); return; }
+    }
+    if (inComposer && e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(e.target.closest('.composer')); return; }
+    if (e.target.id === 'search-input' && e.key === 'Enter' && searchResults[0]) { e.preventDefault(); searchResults[0].run(); return; }
+    if (e.target.classList.contains('recent') && e.key === 'Enter') { openRecent(e.target); return; }
+    if (e.key === 'Escape') {
+      const v = $('.composer.voice'); if (v) { toggleVoice(v); return; }
+      if (openMenu) closeMenus(); else closeDialog(); return;
+    }
+    if (e.altKey && e.code === 'KeyV') { e.preventDefault(); $('#menu-account [data-action="voice-global"]').click(); return; }
+    if (mod && e.key.toLowerCase() === 'k') { e.preventDefault(); openDialog('dlg-search'); $('#search-input').value = ''; renderSearch(); }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 'o') { e.preventDefault(); closeDialog(); setView('new'); $$('.recent').forEach(r => r.classList.remove('active')); }
+    if (mod && e.shiftKey && e.key.toLowerCase() === 's') { e.preventDefault(); app.classList.toggle('sb-collapsed'); }
+    if (mod && e.key === ',') { e.preventDefault(); openDialog('dlg-settings'); settingsTab('general'); }
+  });
+  window.addEventListener('resize', () => { closeMenus(); closeSlash(); });
+  thread.addEventListener('scroll', closeMenus);
+
+  // Start (?theme=, ?build=, ?font= and #thread, #team, #agents, #changes, #settings, #about, #review)
+  const params = new URLSearchParams(location.search);
+  if (['system', 'light', 'dark', 'midnight'].includes(params.get('theme'))) state.theme = params.get('theme');
+  if (['serif', 'sans'].includes(params.get('font'))) state.font = params.get('font');
+  if (['stable', 'nightly'].includes(params.get('build'))) { state.build = params.get('build'); state.updateReady = state.build === 'nightly'; }
+  renderBots();
+  applyLook(); applyBindings(); syncSend();
+  currentRecent = $('.recent');
+  const hash = (location.hash || '#new').slice(1);
+  if (hash === 'thread' || hash === 'review') openRecent(currentRecent);
+  else setView(['new', 'team', 'agents', 'changes'].includes(hash) ? hash : 'new');
+  if (hash === 'settings') { openDialog('dlg-settings'); settingsTab('general'); }
+  if (hash === 'about') { openDialog('dlg-settings'); settingsTab('about'); }
+  if (hash === 'review') openDialog('dlg-review');
+})();
+</script>
+</body>
+</html>

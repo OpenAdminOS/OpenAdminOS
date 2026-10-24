@@ -8,6 +8,12 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Redesign the desktop app around a calmer layout: one sidebar with conversations and workspaces, a top bar that always shows the active tenant and where data goes (local, hosted, or no model), and a Chat home that opens on a tenant briefing with the items that need you.
+- Rebuild the Chat composer and answers: scope and model live inside the composer, type `/` to run an installed agent (write agents still go to confirmation), and answers show their tenant, sources, and data age. Answers use a serif font by default; switch to sans in Settings.
+- Restyle Agent Team, Agents, Runs, Changes, and Settings with quieter lists and headings, and add a Comfortable or Compact density setting.
+- Replace the four themes with System, Light (warm paper), Dark (graphite), and Midnight. New installs follow the operating system; saved themes migrate automatically.
+- Bundle the Geist and Newsreader fonts with the app (no network font loading) and introduce the new oa ligature logo across the app, installers, and website icons.
+
 ### Removed
 
 ### Fixed

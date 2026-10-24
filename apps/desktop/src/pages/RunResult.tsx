@@ -8,6 +8,7 @@ import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { CompactRunTelemetry, RunTelemetry } from "../components/RunTelemetry";
 import { useToast } from "../components/Toast";
+import { TenantTile } from "../components/TenantTile";
 import {
   IconArrowLeft,
   IconBolt,
@@ -141,6 +142,7 @@ export default function RunResult() {
       <ConfirmationPage
         run={run}
         displayName={displayName}
+        tenant={runTenant}
         tenantName={tenantName}
         trustDetail={runTrust.detail}
         providerIsLocal={runProvider?.isLocal === true}
@@ -422,6 +424,7 @@ function LiveRunModal({
 function ConfirmationPage({
   run,
   displayName,
+  tenant,
   tenantName,
   trustDetail,
   providerIsLocal,
@@ -431,6 +434,7 @@ function ConfirmationPage({
 }: {
   run: RunRecord;
   displayName: string;
+  tenant?: TenantRecord;
   tenantName: string;
   trustDetail: string;
   providerIsLocal: boolean;
@@ -451,21 +455,26 @@ function ConfirmationPage({
         breadcrumb={<BackToRuns onClick={onBack} />}
         actions={
           <>
-            <Badge tone="warning">Awaiting confirmation</Badge>
+            <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone="warning" />Awaiting confirmation</span>
             <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
           </>
         }
       />
       <PageBody>
-        <div className="mx-auto max-w-[1040px] space-y-6">
-          <div className="flex items-start gap-3 border-b border-[var(--color-warning)]/30 bg-[var(--color-warning-soft)] px-4 py-3 text-sm text-[var(--color-warning)]">
-            <IconWarning size={14} className="mt-0.5 shrink-0" />
-            <span>
-              Write operation paused for confirmation. OpenAdminOS will not proceed until the exact phrase is typed.
-            </span>
+        <div className="calm-page-column space-y-6">
+          <div className="flex items-center gap-3 rounded-[14px] bg-[var(--color-surface)] px-4 py-3 shadow-[inset_0_0_0_1px_var(--color-border-soft)]">
+            {tenant ? <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="row" /> : <span className="calm-row-icon"><IconWarning size={15} /></span>}
+            <div className="min-w-0 flex-1">
+              <div className="font-medium text-[var(--color-text)]">{tenantName}</div>
+              <div className="mt-0.5 truncate text-sm text-[var(--color-text-muted)]">Proposed by {run.external?.clientName ?? displayName}</div>
+              <div className="mt-1 text-sm text-[var(--color-text-soft)]">
+                Write operation paused for confirmation. OpenAdminOS will not proceed until the exact phrase is typed.
+              </div>
+            </div>
+            <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-warning)]"><StatusDot tone="warning" />Review required</span>
           </div>
 
-          <p className="text-base text-[var(--color-text-soft)]">
+          <p className="text-sm text-[var(--color-text-muted)]">
             {run.tenantId
               ? `Applies to ${tenantName} through Microsoft Graph`
               : `Simulates changes for ${tenantName} without Microsoft Graph writes`}
@@ -473,7 +482,8 @@ function ConfirmationPage({
           </p>
 
           {plan && run.tenantId ? (
-            <div className="border-l-2 border-[var(--color-danger)] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)]">
+            <div className="rounded-[14px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+              <div className="mb-1 flex items-center gap-2 font-medium"><IconWarning size={14} />Microsoft Graph write</div>
               Approving will call Microsoft Graph. {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will be applied to {tenantName}. Review every operation below. Microsoft Graph changes may not be reversible.
             </div>
           ) : plan ? (
@@ -491,7 +501,7 @@ function ConfirmationPage({
           {plan ? (
             <>
               <Section title={plan.summary}>
-                <div className="divide-y divide-[var(--color-border-soft)] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+                <div className="divide-y divide-[var(--color-border-soft)] overflow-hidden rounded-[14px] bg-[var(--color-surface)] shadow-[inset_0_0_0_1px_var(--color-border-soft)]">
                   {plan.actions.map((action, index) => (
                     <ActionRow key={action.id} action={action} index={index} />
                   ))}
@@ -573,7 +583,7 @@ function TypedConfirmation({
         Every destructive operation requires a typed phrase. There is no "remember my choice."
       </p>
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_auto]">
-        <div className="flex min-h-11 items-center rounded-lg bg-[var(--color-bg-raised)] px-4 font-mono text-base text-[var(--color-warning)] ring-1 ring-[var(--color-border)]">
+        <div className="flex min-h-11 items-center rounded-lg bg-[var(--color-danger-soft)] px-4 font-mono text-base text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           {plan.confirmationPhrase}
         </div>
         <label htmlFor="run-confirmation-phrase" className="sr-only">
@@ -591,7 +601,7 @@ function TypedConfirmation({
           className={`h-11 rounded-lg bg-[var(--color-bg-raised)] px-4 font-mono text-base text-[var(--color-text)] ring-1 placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-2 ${
             armed
               ? "ring-[var(--color-danger)] focus:ring-[var(--color-danger)]"
-              : "ring-[var(--color-border)] focus:ring-[var(--color-accent)]"
+              : "ring-[var(--color-border)] focus:ring-[var(--color-focus)]"
           }`}
         />
         <div className="flex gap-2">
@@ -639,6 +649,9 @@ function ActionRow({ action, index }: { action: WriteAction; index: number }) {
               {action.description}
             </div>
           ) : null}
+          <div className={`mt-1 whitespace-pre-wrap break-words font-mono text-xs ${destructive ? "text-[var(--color-danger)]" : "text-[var(--color-text-soft)]"}`}>
+            {actionRequestSummary(action)}
+          </div>
         </div>
         <Badge tone={destructive ? "danger" : "neutral"}>{badgeLabel}</Badge>
       </div>
@@ -815,6 +828,37 @@ function formatRequestPreview(request: NonNullable<WriteAction["request"]>): str
     body = String(request.body);
   }
   return `${head}\n\n${body}`;
+}
+
+function actionRequestSummary(action: WriteAction): string {
+  const request = action.request;
+  if (!request) return `${action.kind}: ${action.label}`;
+  const requestTarget = `${request.method} ${request.path}`;
+  if (request.body === undefined) return requestTarget;
+  if (
+    request.body !== null &&
+    typeof request.body === "object" &&
+    !Array.isArray(request.body)
+  ) {
+    const fields = Object.entries(request.body as Record<string, unknown>);
+    if (fields.length === 0) return `${requestTarget} · body: {}`;
+    return `${requestTarget} · ${fields
+      .map(([field, value]) => `${field}: ${requestSummaryValue(value)}`)
+      .join(" · ")}`;
+  }
+  return `${requestTarget} · body: ${requestSummaryValue(request.body)}`;
+}
+
+function requestSummaryValue(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null) return "null";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 function capitalize(value: string): string {

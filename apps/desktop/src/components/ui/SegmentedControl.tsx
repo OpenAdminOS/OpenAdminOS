@@ -56,7 +56,7 @@ export function SegmentedControl({
       ref={rootRef}
       role="radiogroup"
       aria-label={ariaLabel}
-      className={`${fullWidth ? "flex" : "inline-flex"} items-center rounded-lg bg-[var(--color-surface)] p-0.5 ring-1 ring-[var(--color-border)] ${className}`}
+      className={`${fullWidth ? "flex" : "inline-flex"} seg items-center rounded-[10px] bg-[var(--color-bg-raised)] p-0.5 ${className}`}
     >
       {options.map((option) => {
         const checked = option.id === value;
@@ -71,10 +71,10 @@ export function SegmentedControl({
             disabled={option.disabled}
             onClick={() => onValueChange(option.id)}
             onKeyDown={onKeyDown}
-            className={`h-7 rounded-md px-2.5 text-xs font-medium transition-colors ${fullWidth ? "flex-1" : ""} ${
+            className={`h-7 rounded-lg px-2.5 text-xs font-medium transition-colors ${fullWidth ? "flex-1" : ""} ${
               checked
-                ? "bg-[var(--color-bg-raised)] text-[var(--color-text)] shadow-sm"
-                : "text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                ? "bg-[var(--color-surface)] text-[var(--color-text)] shadow-sm"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]"
             }`}
           >
             {option.label}

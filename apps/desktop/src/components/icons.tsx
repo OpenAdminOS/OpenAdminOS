@@ -225,14 +225,71 @@ export const IconSparkle = ({ size = 14, ...p }: IconProps) => (
 );
 
 export const IconLogo = ({ size = 22, ...p }: IconProps) => (
-  <svg {...base(size, p)} viewBox="0 0 100 100">
-    <path d="M30 16H70Q84 16 84 30V70Q84 84 70 84L50 50L30 84Q16 84 16 70V30Q16 16 30 16Z M32 28H68Q72 28 72 32V69L50 31L28 69V32Q28 28 32 28Z M46 64H54L59 73H41Z" fill="currentColor" fillRule="evenodd" stroke="none" />
+  <svg {...base(size, p)} viewBox="0 0 64 64">
+    <g fill="none" stroke="currentColor" strokeWidth="7" strokeLinecap="round">
+      <circle cx="17" cy="32" r="11.5" />
+      <circle cx="46" cy="32" r="11.5" />
+      <path d="M57.5 20.5v23" />
+    </g>
   </svg>
 );
 
 export const IconArrowRight = ({ size = 14, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <path d="M5 12 H19 M13 6 L19 12 L13 18" />
+  </svg>
+);
+
+export const IconArrowUp = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M12 19 V5 M6 11 L12 5 L18 11" />
+  </svg>
+);
+
+export const IconArrowDown = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M12 5 V19 M6 13 L12 19 L18 13" />
+  </svg>
+);
+
+export const IconMore = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <circle cx="5" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1" fill="currentColor" stroke="none" />
+    <circle cx="19" cy="12" r="1" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+export const IconMicrophone = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <rect x="9" y="3" width="6" height="12" rx="3" />
+    <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7" />
+  </svg>
+);
+
+export const IconSlash = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M8 20 L16 4" />
+  </svg>
+);
+
+export const IconStop = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none" />
+  </svg>
+);
+
+export const IconPencil = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M4 20 L8.2 19 L19 8.2 A2.1 2.1 0 0 0 16 5.2 L5.2 16 Z" />
+    <path d="M14.8 6.4 L17.8 9.4" />
+  </svg>
+);
+
+export const IconLayers = ({ size = 14, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M12 3 L21 8 L12 13 L3 8 Z" />
+    <path d="M3 12 L12 17 L21 12 M3 16 L12 21 L21 16" />
   </svg>
 );
 

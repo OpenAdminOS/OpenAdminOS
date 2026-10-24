@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { copyTextToClipboard } from "../shared/clipboard";
+import { IconCopy } from "./icons";
 
 /**
  * Renders a constrained subset of Markdown as React nodes, using the same
@@ -32,15 +34,17 @@ export function MarkdownPreview({
   source,
   className,
   numberedSections = true,
+  tableTools = false,
 }: {
   source: string;
   className?: string;
   numberedSections?: boolean;
+  tableTools?: boolean;
 }) {
   const blocks = parseBlocks(source, numberedSections);
   return (
     <div className={className}>
-      {blocks.map((block, idx) => renderBlock(block, idx))}
+      {blocks.map((block, idx) => renderBlock(block, idx, tableTools))}
     </div>
   );
 }
@@ -182,7 +186,7 @@ function parseBlocks(input: string, numberedSections = true, depth = 0): Block[]
   return blocks;
 }
 
-function renderBlock(block: Block, index: number): ReactNode {
+function renderBlock(block: Block, index: number, tableTools = false): ReactNode {
   switch (block.kind) {
     case "heading": {
       const headingClasses: Record<number, string> = {
@@ -247,7 +251,7 @@ function renderBlock(block: Block, index: number): ReactNode {
           className="mt-2 list-disc space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
-            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex))}</li>
+            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, tableTools))}</li>
           ))}
         </ul>
       );
@@ -259,14 +263,55 @@ function renderBlock(block: Block, index: number): ReactNode {
           className="mt-2 list-decimal space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
-            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex))}</li>
+            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, tableTools))}</li>
           ))}
         </ol>
       );
     case "quote":
-      return <blockquote key={index} className="my-2 border-l-2 border-[var(--color-border-strong)] pl-3 text-[var(--color-text-muted)]">{block.blocks.map((child, i) => renderBlock(child, i))}</blockquote>;
+      return <blockquote key={index} className="my-2 border-l-2 border-[var(--color-border-strong)] pl-3 text-[var(--color-text-muted)]">{block.blocks.map((child, i) => renderBlock(child, i, tableTools))}</blockquote>;
     case "table":
-      return <div key={index} className="my-2 max-w-full overflow-auto" role="region" aria-label="Table" tabIndex={0}><table className="w-full border-collapse text-left text-xs"><thead><tr>{block.headers.map((header, i) => <th key={i} scope="col" className="border border-[var(--color-border)] p-2 font-semibold">{renderInline(header)}</th>)}</tr></thead><tbody>{block.rows.map((row, i) => <tr key={i}>{block.headers.map((_, j) => <td key={j} className="border border-[var(--color-border)] p-2">{renderInline(row[j] || '')}</td>)}</tr>)}</tbody></table></div>;
+      return (
+        <div key={index} className="group/table relative my-3 max-w-full overflow-auto" role="region" aria-label="Table" tabIndex={0}>
+          {tableTools ? (
+            <div className="sticky right-0 top-0 z-10 ml-auto flex w-fit opacity-0 transition-opacity group-hover/table:opacity-100 group-focus-within/table:opacity-100">
+              <button
+                type="button"
+                aria-label="Copy table"
+                title="Copy table"
+                onClick={() => {
+                  const rows = [block.headers, ...block.rows];
+                  void copyTextToClipboard(rows.map((row) => row.join("\t")).join("\n"));
+                }}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-[8px] bg-[var(--color-surface)] text-[var(--color-text-muted)] shadow-[var(--shadow-pop)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+              >
+                <IconCopy size={12} />
+              </button>
+            </div>
+          ) : null}
+          <table className="w-full border-collapse text-left text-xs [&_tbody_tr:last-child_td]:border-b-0">
+            <thead>
+              <tr>
+                {block.headers.map((header, i) => (
+                  <th key={i} scope="col" className="border-b border-[var(--color-border)] px-2 py-2 font-medium text-[var(--color-text-soft)] first:pl-0">
+                    {renderInline(header)}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((row, i) => (
+                <tr key={i}>
+                  {block.headers.map((_, j) => (
+                    <td key={j} className="border-b border-[var(--color-border-soft)] px-2 py-2.5 first:pl-0">
+                      {renderInline(row[j] || "")}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
     case "code":
       return (
         <pre

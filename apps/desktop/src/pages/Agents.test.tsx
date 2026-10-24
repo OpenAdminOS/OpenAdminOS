@@ -20,7 +20,7 @@ describe("Agents", () => {
     expect(screen.queryByText("Open office")).not.toBeInTheDocument();
     expect(screen.queryByText("No teammates")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Add" }));
+    await user.click(screen.getByRole("button", { name: "New agent" }));
     expect(screen.getByRole("menuitem", { name: "Install from hub" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Build your own agent" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: "Add teammate" })).not.toBeInTheDocument();

@@ -18,7 +18,7 @@ import {
   IconSparkle,
 } from "./icons";
 import { useAppState } from "../state";
-import { SETTINGS_ITEMS, SETTINGS_SECTIONS } from "../copy";
+import { SETTINGS_ITEMS, SETTINGS_SECTIONS, userFacingErrorReason } from "../copy";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { registerOverlay } from "../shared/overlay-stack";
 import { createPendingIntent } from "../setup/pending-intent";
@@ -36,9 +36,10 @@ interface PaletteItem {
   id: string;
   label: string;
   hint?: string;
-  group: "Agents" | "Hub" | "Navigate" | "Actions" | "Chats" | "Workspaces";
+  group: "Agents" | "Hub" | "Navigate" | "Actions" | "Conversations" | "Workspaces";
   icon: React.ReactNode;
   shortcut?: string;
+  matchesActiveQuery?: boolean;
   action: () => void | Promise<void>;
 }
 
@@ -57,6 +58,10 @@ export function CommandPalette({
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [recentConversations, setRecentConversations] = useState<IntuneChatConversation[]>([]);
+  const [conversationSearchResult, setConversationSearchResult] = useState<{
+    query: string;
+    conversations: IntuneChatConversation[];
+  } | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -70,6 +75,14 @@ export function CommandPalette({
       navigate(path);
       onClose();
     };
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const currentConversationSearch =
+      normalizedQuery && conversationSearchResult?.query === normalizedQuery
+        ? conversationSearchResult
+        : null;
+    const displayedConversations = currentConversationSearch
+      ? currentConversationSearch.conversations
+      : recentConversations;
     return [
       ...state.installedAgents.map((a) => ({
         id: `agent-${a.id}`,
@@ -126,7 +139,11 @@ export function CommandPalette({
         id: `act-theme-${theme.id}`,
         label: `Theme: ${theme.label}`,
         hint: `${theme.id === activeTheme ? "Current · " : ""}${
-          theme.mode === "dark" ? "Dark" : "Light"
+          theme.mode === "system"
+            ? "Follows system"
+            : theme.mode === "dark"
+              ? "Dark"
+              : "Light"
         }`,
         group: "Actions" as const,
         icon:
@@ -140,11 +157,12 @@ export function CommandPalette({
           onClose();
         },
       })),
-      ...recentConversations.map((conversation) => ({
+      ...displayedConversations.map((conversation) => ({
         id: `chat-${conversation.id}`,
         label: conversation.title,
         hint: "Recent conversation",
-        group: "Chats" as const,
+        group: "Conversations" as const,
+        matchesActiveQuery: Boolean(currentConversationSearch),
         icon: <IconChat size={13} className="text-[var(--color-text-soft)]" />,
         action: go(`/chat/${encodeURIComponent(conversation.id)}`),
       })),
@@ -291,13 +309,14 @@ export function CommandPalette({
           ] as PaletteItem[])
         : []),
     ];
-  }, [activeTheme, navigate, onClose, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
+  }, [activeTheme, conversationSearchResult, navigate, onClose, query, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
     const q = query.toLowerCase();
     return items.filter(
       (i) =>
+        i.matchesActiveQuery ||
         i.label.toLowerCase().includes(q) ||
         i.hint?.toLowerCase().includes(q) ||
         i.group.toLowerCase().includes(q),
@@ -305,7 +324,7 @@ export function CommandPalette({
   }, [items, query]);
 
   const grouped = useMemo(() => {
-    const order: PaletteItem["group"][] = ["Actions", "Chats", "Workspaces", "Navigate", "Agents", "Hub"];
+    const order: PaletteItem["group"][] = ["Actions", "Conversations", "Workspaces", "Navigate", "Agents", "Hub"];
     const map: Record<string, PaletteItem[]> = {};
     for (const i of filtered) {
       if (!map[i.group]) map[i.group] = [];
@@ -340,19 +359,52 @@ export function CommandPalette({
   useEffect(() => {
     const api = window.openAdminOS;
     if (!open || !api) return;
-    void Promise.all([
-      api.listIntuneChatConversations(),
-      api.listWorkspaces(),
-    ])
+    let cancelled = false;
+    setRecentConversations([]);
+    setWorkspaces([]);
+    void Promise.all([api.listIntuneChatConversations(), api.listWorkspaces()])
       .then(([nextConversations, nextWorkspaces]) => {
+        if (cancelled) return;
         setRecentConversations(nextConversations);
         setWorkspaces(nextWorkspaces);
       })
-      .catch(() => {
-        setRecentConversations([]);
-        setWorkspaces([]);
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setActionError(paletteError("Recent conversations and workspaces could not be loaded", error));
       });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    const search = query.trim();
+    setConversationSearchResult(null);
+    if (!open || !api || !search) return;
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      void api
+        .searchIntuneChatConversations(search)
+        .then((conversations) => {
+          if (!cancelled) {
+            setConversationSearchResult({
+              query: search.toLocaleLowerCase(),
+              conversations,
+            });
+          }
+        })
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setActionError(paletteError("Conversation search failed", error));
+          }
+        });
+    }, 180);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [open, query]);
 
   useEffect(() => {
     setActiveIndex(0);
@@ -367,6 +419,7 @@ export function CommandPalette({
   };
 
   const onPaletteKeyDown = (e: React.KeyboardEvent) => {
+    if (e.defaultPrevented) return;
     if (e.key === "Tab") {
       const dialog = dialogRef.current;
       if (!dialog) return;
@@ -423,7 +476,7 @@ export function CommandPalette({
 
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-start justify-center px-6 pt-[12vh]"
+      className="fixed inset-x-0 bottom-0 top-[52px] z-[100] flex items-start justify-center px-6 pt-11"
       style={{ background: "rgba(10, 12, 16, 0.55)" }}
       onClick={onClose}
     >
@@ -433,11 +486,11 @@ export function CommandPalette({
         aria-modal="true"
         aria-label="Command Palette"
         tabIndex={-1}
-        className="w-full max-w-[640px] overflow-hidden rounded-2xl bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in-scale"
+        className="w-full max-w-[620px] overscroll-contain overflow-hidden rounded-[16px] bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in-scale"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={onPaletteKeyDown}
       >
-        <div className="flex items-center gap-3 border-b border-[var(--color-border-soft)] px-4 py-3">
+        <div className="flex h-14 items-center gap-3 border-b border-[var(--color-border-soft)] px-4">
           <IconSearch size={15} className="text-[var(--color-text-muted)]" />
           <label htmlFor="command-palette-search" className="sr-only">
             Search commands, agents, or pages
@@ -549,4 +602,9 @@ export function CommandPalette({
       </div>
     </div>
   );
+}
+
+function paletteError(action: string, error: unknown): string {
+  const detail = userFacingErrorReason(error instanceof Error ? error.message : String(error));
+  return `${action}.${detail ? ` ${detail}` : ""} Close and reopen Search to try again.`;
 }

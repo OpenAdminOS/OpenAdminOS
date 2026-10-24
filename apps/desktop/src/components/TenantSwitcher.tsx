@@ -1,23 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
-import { Avatar } from "./Avatar";
+
+import { useAppState } from "../state";
+import { userFacingErrorReason } from "../copy";
+import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Button } from "./Button";
-import { Modal, ModalHeader } from "./Modal";
-import { Pill, StatusDot } from "./Pill";
 import {
   IconCheck,
-  IconChevronUpDown,
+  IconChevronDown,
   IconClose,
-  IconCloud,
-  IconLogo,
   IconPlus,
+  IconSettings,
 } from "./icons";
-import { useAppState } from "../state";
+import { Modal, ModalHeader } from "./Modal";
+import { Pill } from "./Pill";
+import { TenantTile } from "./TenantTile";
 import { useToast } from "./Toast";
-import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Tooltip } from "./ui";
 
-export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
+function entraTierLabel(tier: "free" | "p1" | "p2" | "unknown" | undefined): string {
+  if (!tier || tier === "unknown") return "Entra tier not detected";
+  return tier === "free" ? "Entra Free" : `Entra ${tier.toUpperCase()}`;
+}
+
+export function TenantSwitcher() {
   const navigate = useNavigate();
   const { state, setActiveTenant, disconnectTenant } = useAppState();
   const { openSetup } = useSetupFlow();
@@ -29,31 +35,28 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
     displayName: string;
   } | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
 
   useEffect(() => {
     if (!open) return;
-    const handleClick = (event: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
+    const onPointerDown = (event: MouseEvent) => {
+      if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false);
     };
-    const handleKey = (event: KeyboardEvent) => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") setOpen(false);
     };
-    window.addEventListener("mousedown", handleClick);
-    window.addEventListener("keydown", handleKey);
+    window.addEventListener("mousedown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
     return () => {
-      window.removeEventListener("mousedown", handleClick);
-      window.removeEventListener("keydown", handleKey);
+      window.removeEventListener("mousedown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
     };
   }, [open]);
 
-  const handlePickTenant = async (tenantId: string) => {
+  const pickTenant = async (tenantId: string) => {
     if (tenantId === activeTenant?.id) {
       setOpen(false);
       return;
@@ -62,17 +65,19 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
     try {
       await setActiveTenant(tenantId);
       setOpen(false);
+    } catch (error) {
+      const detail = userFacingErrorReason(
+        error instanceof Error ? error.message : String(error),
+      );
+      toast.error(
+        `Switching tenants failed.${detail ? ` ${detail}` : ""} Try again from the tenant menu.`,
+      );
     } finally {
       setBusy(false);
     }
   };
 
-  const requestDisconnect = (tenantId: string, displayName: string) => {
-    setPendingDisconnect({ tenantId, displayName });
-    setOpen(false);
-  };
-
-  const handleDisconnect = async () => {
+  const disconnect = async () => {
     if (!pendingDisconnect) return;
     setBusy(true);
     try {
@@ -80,190 +85,163 @@ export function TenantSwitcher({ collapsed = false }: { collapsed?: boolean }) {
       toast.success(`${pendingDisconnect.displayName} disconnected.`);
       setPendingDisconnect(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      const detail = userFacingErrorReason(
+        error instanceof Error ? error.message : String(error),
+      );
+      toast.error(
+        `Disconnecting the tenant failed.${detail ? ` ${detail}` : ""} Try again.`,
+      );
     } finally {
       setBusy(false);
     }
   };
 
+  const tooltip = activeTenant
+    ? `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.`
+    : state.tenants.length > 0
+      ? "No active tenant. Choose a connected tenant."
+      : "No tenant connected. Open setup to connect one.";
+
   return (
     <>
-      <div
-        ref={wrapperRef}
-        className={`relative mt-1 ${collapsed ? "mx-2" : "mx-2.5"}`}
-      >
-        <Tooltip
-          content={activeTenant?.displayName ?? "No tenant connected"}
-          side="right"
-          disabled={!collapsed || open}
-          className="w-full"
-        >
+      <div ref={wrapperRef} className="app-region-no-drag relative min-w-0">
+        <Tooltip content={tooltip} side="bottom">
           <button
             type="button"
-            onClick={() => setOpen((value) => !value)}
-            className={`flex w-full items-center rounded-xl bg-[var(--color-surface)] text-left ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-surface-hover)] ${
-              collapsed ? "h-10 justify-center p-1" : "gap-2.5 px-2.5 py-2"
-            }`}
-            aria-label={collapsed ? `Switch tenant, ${activeTenant?.displayName ?? "none connected"}` : undefined}
+            onClick={() => {
+              if (state.tenants.length === 0) {
+                openSetup();
+                return;
+              }
+              setOpen((current) => !current);
+            }}
             aria-haspopup="menu"
             aria-expanded={open}
+            aria-label={
+              activeTenant
+                ? `Switch tenant, ${activeTenant.displayName}`
+                : state.tenants.length > 0
+                  ? "Choose an active tenant"
+                  : "Connect a tenant"
+            }
+            className="flex h-9 max-w-[320px] items-center gap-2 rounded-[9px] px-2 text-left text-base text-[var(--color-text)] transition-colors hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
           >
-            <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[var(--color-accent)] text-[var(--color-on-accent)]">
-              <IconLogo size={22} />
-            </span>
-            {!collapsed && (
-              <>
-                <div className="min-w-0 flex-1 leading-tight">
-                  <div className="truncate text-base font-semibold text-[var(--color-text)]">
-                    {activeTenant?.displayName ?? "No tenant"}
-                  </div>
-                  <div className="mt-0.5 flex items-center gap-1 text-xs text-[var(--color-text-muted)]">
-                    <StatusDot tone={activeTenant ? "success" : "muted"} />
-                    <span className="truncate">
-                      {activeTenant ? activeTenant.username : "No tenant connected"}
-                    </span>
-                  </div>
-                </div>
-                <IconChevronUpDown size={12} className="text-[var(--color-text-muted)]" />
-              </>
+            {activeTenant ? (
+              <TenantTile tenantId={activeTenant.id} displayName={activeTenant.displayName} size="sm" />
+            ) : (
+              <span className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] bg-[var(--color-warning-soft)] text-xs text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+                ?
+              </span>
             )}
+            <span className="min-w-0 truncate font-medium">
+              {activeTenant?.displayName ?? "No tenant"}
+            </span>
+            <IconChevronDown size={11} className="shrink-0 text-[var(--color-text-muted)]" />
           </button>
         </Tooltip>
 
-        {open && (
+        {open ? (
           <div
             role="menu"
-            className={`absolute top-[calc(100%+6px)] z-50 overflow-hidden rounded-xl bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in ${
-              collapsed ? "-left-1 w-[280px]" : "left-0 right-0"
-            }`}
+            aria-label="Connected tenants"
+            className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[330px] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]"
           >
-            <div className="px-2 py-1.5 text-xs font-medium text-[var(--color-text-muted)]">
+            <div className="px-2.5 pb-1.5 pt-1 text-sm text-[var(--color-text-muted)]">
               Tenants
             </div>
             {state.tenants.length === 0 ? (
-              <div className="px-3 pb-2 pt-1 text-sm text-[var(--color-text-muted)]">
-                No tenants connected.
-              </div>
+              <div className="px-2.5 py-3 text-sm text-[var(--color-text-muted)]">No tenants connected.</div>
             ) : (
-              <div className="flex flex-col">
-                {state.tenants.map((tenant) => {
-                  const isActive = tenant.id === activeTenant?.id;
-                  return (
-                    <div
-                      key={tenant.id}
-                      className={`group flex items-center transition-colors hover:bg-[var(--color-surface-hover)] ${
-                        isActive ? "bg-[var(--color-surface)]" : ""
-                      }`}
+              state.tenants.map((tenant) => {
+                const active = tenant.id === activeTenant?.id;
+                const domain = tenant.username.includes("@")
+                  ? tenant.username.split("@").at(-1)
+                  : tenant.username;
+                return (
+                  <div
+                    key={tenant.id}
+                    className={`group flex items-center rounded-[9px] ${active ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}
+                  >
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      disabled={busy}
+                      onClick={() => void pickTenant(tenant.id)}
+                      className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
                     >
-                      <button
-                        onClick={() => void handlePickTenant(tenant.id)}
-                        disabled={busy}
-                        role="menuitem"
-                        className="flex flex-1 items-center gap-2.5 px-3 py-2 text-left"
-                      >
-                        <Avatar name={tenant.displayName} size={22} />
-                        <div className="min-w-0 flex-1 leading-tight">
-                          <div className="truncate text-base font-medium text-[var(--color-text)]">
-                            {tenant.displayName}
-                          </div>
-                          <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
-                            {tenant.username}
-                          </div>
-                        </div>
-                        {isActive && (
-                          <IconCheck size={12} className="text-[var(--color-accent)]" />
-                        )}
-                      </button>
-                      <button
-                        onClick={() =>
-                          requestDisconnect(tenant.id, tenant.displayName)
-                        }
-                        disabled={busy}
-                        title={`Disconnect ${tenant.displayName}`}
-                        aria-label={`Disconnect ${tenant.displayName}`}
-                        className="mr-2 rounded p-1 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-bg-raised)] hover:text-[var(--color-danger)] group-hover:opacity-100 focus:opacity-100 disabled:opacity-50"
-                      >
-                        <IconClose size={12} />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
+                      <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="sm" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-base font-medium text-[var(--color-text)]">{tenant.displayName}</span>
+                        <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
+                          {domain} · {entraTierLabel(tenant.entraTier)}
+                        </span>
+                      </span>
+                      {active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
+                    </button>
+                    <button
+                      type="button"
+                      aria-label={`Disconnect ${tenant.displayName}`}
+                      title={`Disconnect ${tenant.displayName}`}
+                      disabled={busy}
+                      onClick={() => {
+                        setPendingDisconnect({ tenantId: tenant.id, displayName: tenant.displayName });
+                        setOpen(false);
+                      }}
+                      className="mr-1.5 rounded-[7px] p-1.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)] group-hover:opacity-100"
+                    >
+                      <IconClose size={11} />
+                    </button>
+                  </div>
+                );
+              })
             )}
-
-            <div className="flex items-center gap-1 border-t border-[var(--color-border-soft)] bg-[var(--color-surface)] p-1.5">
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  openSetup();
-                }}
-                disabled={busy}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm font-medium text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-hover)]"
-              >
-                <IconPlus size={11} />
-                Connect tenant
-              </button>
-              <button
-                onClick={() => {
-                  navigate("/settings");
-                  setOpen(false);
-                }}
-                className="flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-sm text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)]"
-              >
-                <IconCloud size={11} /> Manage
-              </button>
-            </div>
+            <div className="my-1 h-px bg-[var(--color-border-soft)]" />
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                openSetup();
+              }}
+              className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+            >
+              <IconPlus size={12} /> Connect tenant
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                navigate("/settings/tenants");
+              }}
+              className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+            >
+              <IconSettings size={12} /> Manage tenants
+            </button>
           </div>
-        )}
+        ) : null}
       </div>
-      <DisconnectTenantModal
-        open={pendingDisconnect !== null}
-        displayName={pendingDisconnect?.displayName ?? ""}
-        busy={busy}
-        onClose={() => {
-          if (!busy) setPendingDisconnect(null);
-        }}
-        onConfirm={() => void handleDisconnect()}
-      />
-    </>
-  );
-}
 
-function DisconnectTenantModal({
-  open,
-  displayName,
-  busy,
-  onClose,
-  onConfirm,
-}: {
-  open: boolean;
-  displayName: string;
-  busy: boolean;
-  onClose: () => void;
-  onConfirm: () => void;
-}) {
-  return (
-    <Modal open={open} onClose={onClose} size="md">
-      <ModalHeader
-        title="Disconnect tenant"
-        subtitle={displayName}
-        badge={<Pill tone="danger">Local credentials</Pill>}
-        onClose={onClose}
-      />
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          Cached credentials for this tenant will be removed from this machine.
-          You can reconnect the tenant later.
+      <Modal open={pendingDisconnect !== null} onClose={() => { if (!busy) setPendingDisconnect(null); }} size="md">
+        <ModalHeader
+          title="Disconnect tenant"
+          subtitle={pendingDisconnect?.displayName}
+          badge={<Pill tone="danger">Local credentials</Pill>}
+          onClose={() => setPendingDisconnect(null)}
+        />
+        <div className="space-y-4 p-6">
+          <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+            Cached credentials for this tenant will be removed from this machine. You can reconnect the tenant later.
+          </div>
+          <div className="flex justify-end gap-2">
+            <Button variant="ghost" disabled={busy} onClick={() => setPendingDisconnect(null)}>Cancel</Button>
+            <Button variant="danger" disabled={busy} onClick={() => void disconnect()}>
+              {busy ? "Disconnecting" : "Disconnect"}
+            </Button>
+          </div>
         </div>
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="danger" disabled={busy} onClick={onConfirm}>
-            {busy ? "Disconnecting" : "Disconnect"}
-          </Button>
-        </div>
-      </div>
-    </Modal>
+      </Modal>
+    </>
   );
 }

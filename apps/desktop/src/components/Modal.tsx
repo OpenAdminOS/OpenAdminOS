@@ -93,8 +93,8 @@ export function Modal({
   // from a drawer, such as Configure or the run review, are never covered.
   return createPortal(
     <div
-      className="fixed inset-0 z-[95] flex items-center justify-center px-6 py-10"
-      style={{ background: "rgba(10, 12, 16, 0.62)" }}
+      className="app-shell-scrim fixed inset-x-0 bottom-0 top-[52px] z-[95] flex items-center justify-center px-6 py-10"
+      style={{ background: "var(--color-scrim)" }}
       onClick={() => {
         if (closeOnScrim) onClose();
       }}
@@ -106,7 +106,7 @@ export function Modal({
         aria-labelledby={ariaLabel ? undefined : headingId}
         aria-label={ariaLabel}
         tabIndex={-1}
-        className={`relative w-full ${widthClass} max-h-full overscroll-contain overflow-hidden rounded-2xl bg-[var(--color-bg-elevated)] shadow-[var(--shadow-modal)] ring-1 ring-[var(--color-border-strong)] animate-fade-in-scale flex flex-col`}
+        className={`relative w-full ${widthClass} max-h-full overscroll-contain overflow-hidden rounded-[18px] bg-[var(--color-raised)] shadow-[var(--shadow-dialog)] animate-fade-in-scale flex flex-col`}
         onClick={(e) => e.stopPropagation()}
         onKeyDown={trapFocus}
       >
@@ -135,7 +135,7 @@ export function ModalHeader({
     <div className="flex shrink-0 items-start justify-between border-b border-[var(--color-border-soft)] px-6 py-4">
       <div className="min-w-0">
         <div className="flex items-center gap-2.5">
-          <h2 id={headingId} className="text-pretty text-md font-semibold tracking-tight text-[var(--color-text)]">
+          <h2 id={headingId} className="text-pretty text-md font-semibold text-[var(--color-text)]">
             {title}
           </h2>
           {badge}

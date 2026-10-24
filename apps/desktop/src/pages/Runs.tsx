@@ -1,19 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { IconChevronDown, IconSearch } from "../components/icons";
 import { stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import {
-  Badge,
   Button,
-  DataTable,
   Menu,
   Section,
   SegmentedControl,
   StatusDot,
   Toolbar,
   type BadgeTone,
-  type DataTableColumn,
+  type StatusDotTone,
   type MenuEntry,
 } from "../components/ui";
 import { useAppState } from "../state";
@@ -192,117 +190,24 @@ export default function Runs() {
   ];
 
   const activeFilterCount = [tenantFilter, agentFilter, triggerFilter].filter(Boolean).length;
-  const columns = useMemo<DataTableColumn<RunRecord>[]>(
-    () => [
-      {
-        id: "agent",
-        header: "Agent",
-        sortable: true,
-        sortValue: (run) => agentNameForRun(run, state.installedAgents),
-        render: (run) => (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-[var(--color-text)]">
-              {agentNameForRun(run, state.installedAgents)}
-            </div>
-            <div className="truncate text-xs text-[var(--color-text-muted)]">{run.id}</div>
-          </div>
-        ),
-      },
-      {
-        id: "tenant",
-        header: "Tenant",
-        sortable: true,
-        sortValue: (run) => tenantNameForRun(run, state.tenants),
-        render: (run) => tenantNameForRun(run, state.tenants),
-      },
-      {
-        id: "trigger",
-        header: "Trigger",
-        sortable: true,
-        sortValue: (run) => triggerForRun(run),
-        render: (run) => capitalize(triggerForRun(run)),
-      },
-      {
-        id: "status",
-        header: "Status",
-        sortable: true,
-        sortValue: (run) => run.status,
-        render: (run) => (
-          <Badge tone={statusTone(run.status)}>
-            {run.status === "running" ? (
-              <StatusDot tone="info" label="Running" />
-            ) : null}
-            {statusLabel(run.status)}
-          </Badge>
-        ),
-      },
-      {
-        id: "started",
-        header: "Started",
-        sortable: true,
-        sortValue: (run) => Date.parse(run.startedAt ?? run.queuedAt),
-        render: (run) => formatDate(run.startedAt ?? run.queuedAt),
-      },
-      {
-        id: "duration",
-        header: "Duration",
-        sortable: true,
-        align: "right",
-        sortValue: (run) => durationMs(run),
-        render: (run) => (
-          <span className="tabular-nums">{formatDuration(run, nowMs)}</span>
-        ),
-      },
-      {
-        id: "provider",
-        header: "Provider",
-        sortable: true,
-        sortValue: (run) => providerNameForRun(run, state.providers),
-        render: (run) => providerNameForRun(run, state.providers),
-      },
-    ],
-    [nowMs, state.installedAgents, state.providers, state.tenants],
-  );
-
   return (
     <>
       <PageHeader title="Runs" />
       <PageBody>
-        <div className="space-y-7">
+        <div className="calm-page-column space-y-7">
           {needsReview.length > 0 && statusFilter !== "failed" ? (
             <Section id="needs-review" title="Needs review" className="scroll-mt-4">
-              <div className="divide-y divide-[var(--color-border-soft)] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
-                {needsReview.map((run, index) => (
-                  <div
+              <div>
+                {needsReview.map((run) => (
+                  <RunListRow
                     key={run.id}
-                    className="grid grid-cols-[minmax(90px,1fr)_minmax(90px,0.8fr)_64px_minmax(120px,1.4fr)_50px_auto] items-center gap-3 px-4 py-3"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-medium text-[var(--color-text)]">
-                        {agentNameForRun(run, state.installedAgents)}
-                      </div>
-                      <div className="truncate text-xs text-[var(--color-text-muted)]">{run.id}</div>
-                    </div>
-                    <div className="truncate text-sm text-[var(--color-text-soft)]">
-                      {tenantNameForRun(run, state.tenants)}
-                    </div>
-                    <div className="text-sm text-[var(--color-text-muted)]">
-                      {capitalize(triggerForRun(run))}
-                    </div>
-                    <div className="truncate text-sm text-[var(--color-text-soft)]" title={reviewSummary(run)}>
-                      {reviewSummary(run)}
-                    </div>
-                    <div className="text-right text-xs tabular-nums text-[var(--color-text-muted)]">
-                      {formatAge(run.queuedAt, nowMs)}
-                    </div>
-                    <Button
-                      size="sm"
-                      variant={index === 0 ? "primary" : "secondary"}
-                      onClick={() => openRun(run)}
-                    >
-                      Review
-                    </Button>
-                  </div>
+                    run={run}
+                    title={agentNameForRun(run, state.installedAgents)}
+                    description={runDescription(run, state.providers, state.tenants)}
+                    detail={reviewSummary(run)}
+                    nowMs={nowMs}
+                    action={<Button size="sm" variant="secondary" onClick={() => openRun(run)}>Review</Button>}
+                  />
                 ))}
               </div>
             </Section>
@@ -310,7 +215,7 @@ export default function Runs() {
 
           {running.length > 0 && statusFilter === "all" ? (
             <Section id="running" title="Running" className="scroll-mt-4">
-              <div className="divide-y divide-[var(--color-border-soft)] overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+              <div>
                 {running.map((run) => {
                   const completed = run.steps.filter(
                     (step) => step.status === "completed" || step.status === "skipped",
@@ -322,35 +227,33 @@ export default function Runs() {
                       key={run.id}
                       type="button"
                       onClick={() => openRun(run)}
-                      className="grid w-full grid-cols-[minmax(120px,1.2fr)_minmax(100px,0.8fr)_minmax(150px,1fr)_72px] items-center gap-4 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+                      className="calm-list-row w-full text-left"
                     >
-                      <div className="min-w-0">
-                        <div className="truncate font-medium text-[var(--color-text)]">
+                      <span className="calm-row-icon"><StatusDot tone={run.status === "running" ? "info" : "warning"} className={run.status === "running" ? "calm-status-pulse" : ""} /></span>
+                      <span className="min-w-0 flex-1">
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate font-medium text-[var(--color-text)]">
                           {agentNameForRun(run, state.installedAgents)}
-                        </div>
-                        <div className="truncate text-xs text-[var(--color-text-muted)]">
-                          {tenantNameForRun(run, state.tenants)}
-                        </div>
-                      </div>
-                      <Badge tone={run.status === "running" ? "info" : "warning"} className="w-fit">
-                        <StatusDot tone={run.status === "running" ? "info" : "warning"} />
-                        {statusLabel(run.status)}
-                      </Badge>
-                      <div className="min-w-0">
-                        <div className="mb-1 flex items-center justify-between gap-2 text-xs text-[var(--color-text-muted)]">
+                          </span>
+                          <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone={run.status === "running" ? "info" : "warning"} />{statusLabel(run.status)}</span>
+                        </span>
+                        <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{runDescription(run, state.providers, state.tenants)}</span>
+                        <span className="mt-1 block max-w-sm">
+                          <span className="mb-1 flex items-center justify-between gap-2 text-xs text-[var(--color-text-muted)]">
                           <span>{total > 0 ? `${completed} of ${total} steps` : "Preparing pipeline"}</span>
                           <span className="tabular-nums">{progress}%</span>
-                        </div>
-                        <div className="h-1.5 overflow-hidden rounded-full bg-[var(--color-bg-raised)]">
+                          </span>
+                          <span className="block h-1 overflow-hidden rounded-full bg-[var(--color-bg-raised)]">
                           <div
                             className="h-full rounded-full bg-[var(--color-info)] transition-transform motion-reduce:transition-none"
                             style={{ width: `${progress}%` }}
                           />
-                        </div>
-                      </div>
-                      <div className="text-right text-sm tabular-nums text-[var(--color-text-soft)]">
+                          </span>
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-right text-sm tabular-nums text-[var(--color-text-soft)]">
                         {formatDuration(run, nowMs)}
-                      </div>
+                      </span>
                     </button>
                   );
                 })}
@@ -414,34 +317,92 @@ export default function Runs() {
                   />
                 }
               />
-              <DataTable
-                caption="Run history"
-                columns={columns}
-                rows={history}
-                rowKey={(run) => run.id}
-                onRowClick={openRun}
-                initialSort={{ columnId: "started", direction: "descending" }}
-                emptyTitle={
-                  statusFilter === "review"
-                    ? "No runs awaiting review"
-                    : hasActiveHistoryFilters
-                      ? "No runs found"
-                      : "No finished runs yet"
-                }
-                emptyDescription={
-                  hasActiveHistoryFilters
-                    ? "Change the search or filters to see more runs."
-                    : state.runs.length === 0
-                      ? "Runs appear here after an agent starts."
-                      : "Finished runs will appear here."
-                }
-              />
+              <ul aria-label="Run history" className="calm-row-list">
+                {[...history]
+                  .sort((left, right) => Date.parse(right.startedAt ?? right.queuedAt) - Date.parse(left.startedAt ?? left.queuedAt))
+                  .map((run) => (
+                    <li key={run.id}>
+                      <button type="button" onClick={() => openRun(run)} className="calm-list-row w-full text-left">
+                        <span className="calm-row-icon"><StatusDot tone={statusDotTone(run.status)} /></span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                            <span className="truncate font-medium text-[var(--color-text)]">{agentNameForRun(run, state.installedAgents)}</span>
+                            <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone={statusDotTone(run.status)} />{statusLabel(run.status)}</span>
+                          </span>
+                          <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{runDescription(run, state.providers, state.tenants)}</span>
+                          <span className="sr-only">{tenantNameForRun(run, state.tenants)}</span>
+                          <span className="sr-only">{run.id}</span>
+                        </span>
+                        <span className="shrink-0 text-right text-sm text-[var(--color-text-muted)]">
+                          <span className="block">{formatAge(run.startedAt ?? run.queuedAt, nowMs)}</span>
+                          <span className="block text-xs tabular-nums">{formatDuration(run, nowMs)}</span>
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                {history.length === 0 ? (
+                  <li role="status" className="px-6 py-10 text-center">
+                    <div className="font-medium text-[var(--color-text)]">{statusFilter === "review" ? "No runs awaiting review" : hasActiveHistoryFilters ? "No runs found" : "No finished runs yet"}</div>
+                    <p className="mt-1 text-sm text-[var(--color-text-muted)]">{hasActiveHistoryFilters ? "Change the search or filters to see more runs." : state.runs.length === 0 ? "Runs appear here after an agent starts." : "Finished runs will appear here."}</p>
+                  </li>
+                ) : null}
+              </ul>
             </div>
           </Section>
         </div>
       </PageBody>
     </>
   );
+}
+
+function RunListRow({
+  run,
+  title,
+  description,
+  detail,
+  nowMs,
+  action,
+}: {
+  run: RunRecord;
+  title: string;
+  description: string;
+  detail?: string;
+  nowMs: number;
+  action?: ReactNode;
+}) {
+  return (
+    <div className="calm-list-row">
+      <span className="calm-row-icon"><StatusDot tone={statusDotTone(run.status)} /></span>
+      <span className="min-w-0 flex-1">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+          <span className="truncate font-medium text-[var(--color-text)]">{title}</span>
+          <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone={statusDotTone(run.status)} />{statusLabel(run.status)}</span>
+        </span>
+        <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{detail ? `${detail} · ${description}` : description}</span>
+      </span>
+      <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">{formatAge(run.queuedAt, nowMs)}</span>
+      {action ? <span className="calm-row-actions flex shrink-0" data-persistent="true">{action}</span> : null}
+    </div>
+  );
+}
+
+function statusDotTone(status: RunStatus): StatusDotTone {
+  if (status === "failed" || status === "rejected" || status === "cancelled") return "danger";
+  if (status === "completed") return "success";
+  if (status === "awaiting-confirmation" || status === "queued") return "warning";
+  return "info";
+}
+
+function runDescription(
+  run: RunRecord,
+  providers: { id: string; name: string; isLocal?: boolean }[],
+  tenants: { id: string; displayName: string }[],
+): string {
+  const provider = providers.find((candidate) => candidate.id === run.providerId);
+  const providerName = provider?.name ?? run.providerId ?? "Provider not recorded";
+  const boundary = provider ? (provider.isLocal ? "local, stays on this device" : "hosted") : "location not recorded";
+  const model = run.model ? ` · ${run.model}` : "";
+  return `${providerName}${model} · ${boundary} · ${tenantNameForRun(run, tenants)} · ${capitalize(triggerForRun(run))}`;
 }
 
 export function agentNameForRun(

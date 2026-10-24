@@ -51,7 +51,7 @@ export function Tabs({
       ref={rootRef}
       role="tablist"
       aria-label={ariaLabel}
-      className={`flex items-end gap-5 border-b border-[var(--color-border-soft)] ${className}`}
+      className={`flex items-center gap-1 ${className}`}
     >
       {tabs.map((tab) => {
         const selected = tab.id === value;
@@ -67,10 +67,10 @@ export function Tabs({
             disabled={tab.disabled}
             onClick={() => onValueChange(tab.id)}
             onKeyDown={selectAdjacent}
-            className={`relative -mb-px min-h-9 border-b-2 px-0.5 pb-2 pt-1 text-sm font-medium transition-colors ${
+            className={`tab inline-flex h-8 items-center rounded-lg px-3 text-sm font-medium transition-colors ${
               selected
-                ? "border-[var(--color-accent)] text-[var(--color-text)]"
-                : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-text)]"
+                ? "bg-[var(--color-active)] text-[var(--color-text)]"
+                : "text-[var(--color-text-muted)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]"
             }`}
           >
             {tab.label}

@@ -51,17 +51,17 @@ describe("Agents schedule actions", () => {
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
   });
 
-  it("uses query-addressable Installed, Hub, and scheduled filters without a Schedules tab", async () => {
+  it("uses query-addressable Installed, Browse, and Schedules tabs", async () => {
     renderRoute(<Agents />, {
       path: "/agents",
       route: "/agents?source=hub&filter=scheduled",
       bridge: makeMockBridge(),
     });
 
-    expect(await screen.findByRole("radio", { name: "Hub" })).toHaveAttribute("aria-checked", "true");
+    expect(await screen.findByRole("tab", { name: "Browse" })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByPlaceholderText("Search hub…")).toBeInTheDocument();
     expect(screen.getByText("Scheduled only")).toBeInTheDocument();
-    expect(screen.queryByRole("tab", { name: "Schedules" })).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Schedules" })).toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument();
   });
 

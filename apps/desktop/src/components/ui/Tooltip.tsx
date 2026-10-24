@@ -7,6 +7,7 @@ import {
 
 export interface TooltipProps {
   content: ReactNode;
+  shortcut?: ReactNode;
   children: ReactElement<Record<string, unknown>>;
   side?: "top" | "right" | "bottom" | "left";
   disabled?: boolean;
@@ -22,6 +23,7 @@ const positions = {
 
 export function Tooltip({
   content,
+  shortcut,
   children,
   side = "top",
   disabled = false,
@@ -40,9 +42,12 @@ export function Tooltip({
       <span
         id={id}
         role="tooltip"
-        className={`pointer-events-none absolute z-[120] hidden w-max max-w-56 whitespace-normal rounded-md bg-[var(--color-bg-elevated)] px-2 py-1 text-xs leading-4 text-[var(--color-text)] shadow-[var(--shadow-soft)] ring-1 ring-[var(--color-border-strong)] group-hover/tooltip:block group-focus-within/tooltip:block ${positions[side]}`}
+        className={`pointer-events-none invisible absolute z-[120] flex w-max max-w-56 items-center whitespace-normal rounded-[8px] bg-[var(--color-tip-bg)] px-[9px] py-[5px] text-xs leading-4 text-[var(--color-tip-fg)] opacity-0 shadow-[var(--shadow-pop)] transition-[opacity,visibility] duration-100 [transition-delay:0ms] group-hover/tooltip:visible group-hover/tooltip:opacity-100 group-hover/tooltip:[transition-delay:450ms] group-focus-within/tooltip:visible group-focus-within/tooltip:opacity-100 group-focus-within/tooltip:[transition-delay:450ms] ${positions[side]}`}
       >
-        {content}
+        <span>{content}</span>
+        {shortcut ? (
+          <kbd className="ml-2 font-sans opacity-60">{shortcut}</kbd>
+        ) : null}
       </span>
     </span>
   );

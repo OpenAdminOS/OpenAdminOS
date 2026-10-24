@@ -27,6 +27,8 @@ describe("shortcut registry", () => {
     expect(electronAccelerator("commandPalette")).toBe("CmdOrCtrl+K");
     expect(electronAccelerator("newConversation")).toBe("CmdOrCtrl+N");
     expect(electronAccelerator("settings")).toBe("CmdOrCtrl+,");
+    expect(electronAccelerator("toggleSidebar")).toBe("CmdOrCtrl+Shift+S");
+    expect(shortcutLabel("toggleSidebar", "MacIntel")).toBe("⌘⇧S");
     expect(SHORTCUTS.newConversation.when).toContain("overlayClosed");
   });
 });

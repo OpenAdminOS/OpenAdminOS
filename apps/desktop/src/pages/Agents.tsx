@@ -23,7 +23,7 @@ export default function Agents({ startRunOnOpen = false }: { startRunOnOpen?: bo
                 leadingIcon={<IconPlus size={14} />}
                 trailingIcon={<IconChevronDown size={13} />}
               >
-                Add
+                New agent
               </Button>
             }
             items={[

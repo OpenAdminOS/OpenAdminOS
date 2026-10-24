@@ -30,6 +30,9 @@
   },
   "dependencies": {
     "@azure/msal-node": "^5.3.1",
+    "@fontsource-variable/geist": "^5.3.0",
+    "@fontsource-variable/geist-mono": "^5.3.0",
+    "@fontsource-variable/newsreader": "^5.3.0",
     "@microsoft/mxc-sdk": "0.6.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
     "@openadminos/agent-sdk": "0.7.1",

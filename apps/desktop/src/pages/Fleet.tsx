@@ -13,6 +13,7 @@ import {
   type DataTableColumn,
 } from "../components/ui";
 import { IconChanges, IconFleet, IconRefresh } from "../components/icons";
+import { TenantTile } from "../components/TenantTile";
 import type {
   FleetDriftStatusResult,
   FleetTenantDriftStatus,
@@ -131,12 +132,15 @@ export default function FleetScope({ reloadToken = 0 }: FleetScopeProps) {
         sortValue: (tenant) => tenant.tenantName,
         sortable: true,
         render: (tenant) => (
-          <div className="min-w-0">
-            <div className="truncate font-medium text-[var(--color-text)]">
-              {tenant.tenantName}
-            </div>
-            <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
-              {tenant.tenantId}
+          <div className="flex min-w-0 items-center gap-2.5">
+            <TenantTile tenantId={tenant.tenantId} displayName={tenant.tenantName} size="row" />
+            <div className="min-w-0">
+              <div className="truncate font-medium text-[var(--color-text)]">
+                {tenant.tenantName}
+              </div>
+              <div className="truncate font-mono text-xs text-[var(--color-text-muted)]">
+                {tenant.tenantId}
+              </div>
             </div>
           </div>
         ),
