@@ -66,6 +66,27 @@ describe("Menu", () => {
     expect(focusSpy).not.toHaveBeenCalledWith({ preventScroll: true });
     focusSpy.mockRestore();
   });
+
+  it("keeps plain opening focus for default bottom menus", async () => {
+    const user = userEvent.setup();
+    const focusSpy = vi.spyOn(HTMLButtonElement.prototype, "focus");
+    render(
+      <Menu
+        trigger={<button>Open actions</button>}
+        items={[{ id: "rename", label: "Rename", onSelect: vi.fn() }]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open actions" }));
+
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("top-[calc(100%+6px)]");
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus(),
+    );
+    expect(focusSpy).not.toHaveBeenCalledWith({ preventScroll: true });
+    focusSpy.mockRestore();
+  });
 });
 
 function renderMenu(onSelect: () => void) {

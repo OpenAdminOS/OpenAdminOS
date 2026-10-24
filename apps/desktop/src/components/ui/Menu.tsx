@@ -58,20 +58,27 @@ export function Menu({
     );
     const entry = entries[index];
     if (!entry) return;
-    // preventScroll is for the opening focus only: a plain focus() there
-    // scrolls every scrollable ancestor (including overflow-hidden shells)
-    // to reveal the item, which shifts the whole layout when the panel
-    // opens near a viewport edge. Keyboard navigation keeps the default
-    // scroll so long menus reveal the focused item.
+    // preventScroll is opt-in per call. Top-side menus open upward from a
+    // bottom-anchored trigger, where a plain focus() scrolls every
+    // scrollable ancestor (including overflow-hidden shells) to reveal the
+    // item and shifts the whole layout. Every other focus keeps the
+    // default scroll so items near a scroll edge are revealed.
     if (preventScroll) entry.focus({ preventScroll: true });
     else entry.focus();
   };
+
+  // Only upward menus anchored to a fixed footer suppress focus scrolling.
+  // Bottom menus keep the plain focus behavior they have always had.
+  const suppressFocusScroll = side === "top";
 
   useEffect(() => {
     if (!open) {
       if (returnFocusRef.current) {
         returnFocusRef.current = false;
-        window.requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
+        window.requestAnimationFrame(() => {
+          if (suppressFocusScroll) triggerRef.current?.focus({ preventScroll: true });
+          else triggerRef.current?.focus();
+        });
       }
       return;
     }
@@ -80,7 +87,7 @@ export function Menu({
       id: overlayId,
       onEscape: () => close(true),
     });
-    const frame = window.requestAnimationFrame(() => focusItem(0, true));
+    const frame = window.requestAnimationFrame(() => focusItem(0, suppressFocusScroll));
     const onPointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) close(false);
     };
@@ -90,7 +97,7 @@ export function Menu({
       window.removeEventListener("mousedown", onPointerDown);
       unregister();
     };
-  }, [open, overlayId]);
+  }, [open, overlayId, suppressFocusScroll]);
 
   const triggerOnClick = trigger.props.onClick as
     | ((event: React.MouseEvent<HTMLElement>) => void)
