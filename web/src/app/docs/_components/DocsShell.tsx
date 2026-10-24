@@ -6,7 +6,7 @@ import type { ReactNode } from "react";
 import { DOCS_NAV, type DocsBase, docsHref } from "~/lib/docs/site";
 
 import { LogoMark, Wordmark } from "../../Logo";
-import { GITHUB_URL, SITE_URL } from "../../seo";
+import { GITHUB_URL, LEGAL_ENTITY_NAME, SITE_URL } from "../../seo";
 import { ThemeToggle } from "../../ThemeToggle";
 import { DocsMobileNav } from "./DocsMobileNav";
 import { DocsSearch } from "./DocsSearch";
@@ -92,7 +92,7 @@ export function DocsShell({
         <div className="mx-auto flex w-full max-w-[90rem] flex-col gap-4 px-4 py-8 text-xs leading-5 text-brand-faint sm:px-6 md:flex-row md:items-center md:justify-between lg:px-8">
           <span className="inline-flex items-center gap-2">
             <LogoMark className="h-3.5 w-3.5" />© {new Date().getFullYear()}{" "}
-            OpenAdminOS. MIT licensed.
+            {LEGAL_ENTITY_NAME}. OpenAdminOS is MIT licensed.
           </span>
           <nav aria-label="Legal" className="flex flex-wrap gap-x-5 gap-y-2">
             <a
