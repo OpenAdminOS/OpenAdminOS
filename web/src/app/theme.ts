@@ -3,8 +3,6 @@
 
 export const THEME_STORAGE_KEY = "openadminos-theme";
 
-export type ThemePreference = "system" | "light" | "dark";
-
 /**
  * Runs in <head> before first paint: resolves the saved preference (or the
  * system setting) to data-theme on <html>, and follows system changes while
