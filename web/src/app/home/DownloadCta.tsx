@@ -7,25 +7,36 @@ import { buttonPrimary } from "../ui";
 
 type Platform = "macos" | "windows" | "linux";
 
+/** A desktop OS with an installer, a device that cannot run the app, or not known yet. */
+type Detected = Platform | "unsupported" | null;
+
 const LABELS: Record<Platform, string> = {
   macos: "Download for macOS",
   windows: "Download for Windows",
   linux: "Download for Linux",
 };
 
-function detectPlatform(): Platform | null {
+function detectPlatform(): Detected {
   const ua = navigator.userAgent;
+  // Phones and tablets first: iOS reports "like Mac OS X", Android reports
+  // Linux, and iPadOS in desktop mode reports Macintosh with touch points.
+  if (/iPhone|iPad|iPod|Android/i.test(ua)) return "unsupported";
+  if (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1) return "unsupported";
+  if (/CrOS/i.test(ua)) return "unsupported";
   if (/Windows/i.test(ua)) return "windows";
-  if (/Android|CrOS/i.test(ua)) return null;
-  if (/Linux|X11/i.test(ua)) return "linux";
   if (/Macintosh|Mac OS X/i.test(ua)) return "macos";
+  if (/Linux|X11/i.test(ua)) return "linux";
   return null;
 }
 
+const secondaryLink =
+  "inline-flex h-12 items-center justify-center whitespace-nowrap rounded-[10px] px-4 text-[15px] font-medium text-brand-muted transition-colors hover:bg-brand-hover hover:text-brand-ink";
+
 /**
- * Primary download button. Server-renders the macOS build and switches to
- * the visitor's platform after hydration. Unknown platforms keep macOS and
- * can pick another build on /download.
+ * Primary download button. The server render (and the no-JavaScript page)
+ * links to /download, which lists every installer, so nobody gets a build for
+ * the wrong OS. After hydration a recognized desktop OS gets its installer
+ * directly; phones, tablets, and ChromeOS are told this is a desktop app.
  */
 export function DownloadCta({
   urls,
@@ -34,23 +45,41 @@ export function DownloadCta({
   urls: Record<Platform, string>;
   className?: string;
 }) {
-  const [platform, setPlatform] = useState<Platform>("macos");
+  const [platform, setPlatform] = useState<Detected>(null);
 
   useEffect(() => {
-    const detected = detectPlatform();
-    if (detected) setPlatform(detected);
+    setPlatform(detectPlatform());
   }, []);
+
+  if (platform === "unsupported") {
+    return (
+      <div className={`flex flex-col gap-3 ${className}`}>
+        <p className="max-w-md text-[15px] leading-7 text-brand-muted">
+          OpenAdminOS is a desktop app for Windows, macOS, and Linux. Open this
+          page on your computer to install it.
+        </p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <Link href="/download" className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
+            See the desktop downloads
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`flex flex-col gap-3 sm:flex-row sm:items-center ${className}`}>
-      <a href={urls[platform]} className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
-        <PlatformIcon platform={platform} />
-        {LABELS[platform]}
-      </a>
-      <Link
-        href="/download"
-        className="inline-flex h-12 items-center justify-center whitespace-nowrap rounded-[10px] px-4 text-[15px] font-medium text-brand-muted transition-colors hover:bg-brand-hover hover:text-brand-ink"
-      >
+      {platform ? (
+        <a href={urls[platform]} className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
+          <PlatformIcon platform={platform} />
+          {LABELS[platform]}
+        </a>
+      ) : (
+        <Link href="/download" className={`${buttonPrimary} h-12 px-5 text-[15px]`}>
+          Download
+        </Link>
+      )}
+      <Link href="/download" className={secondaryLink}>
         All platforms and checksums
       </Link>
     </div>
