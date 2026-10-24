@@ -444,6 +444,29 @@
   transform: none;
 }
 
+/*
+ * Print and save-as-PDF show every section and figure in its finished state,
+ * whether or not it was scrolled into view.
+ */
+@media print {
+  .js-reveal [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .js-reveal [data-reveal] .fig-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .js-reveal [data-reveal] :is(.fig-drop, .fig-fade, .fig-pop) {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .js-reveal [data-reveal] {
     opacity: 1;
