@@ -15,6 +15,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Bundle the Geist and Newsreader fonts with the app (no network font loading) and introduce the new oa ligature logo across the app, installers, and website icons.
 - Rework openadminos.com in the calm identity (paper light, graphite dark, self-hosted Geist and Newsreader, oa wordmark) and rewrite the homepage around real screenshots of the redesigned app.
 - Recapture the homepage screenshots at 1280 x 800 and 2x with the demo tenant, and show the product tour as tabs over a full-width screenshot, so the app is readable on the page.
+- Website fixes: the product tour pauses on keyboard focus and has a Pause button, benchmark charts use distinct colors in both themes, the download button no longer offers the macOS build before it knows your platform (and phones are told it is a desktop app), the theme toggle always changes the theme and stays in sync, and print shows every section.
 
 ### Removed
 
