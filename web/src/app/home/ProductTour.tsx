@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type KeyboardEvent, useEffect, useRef, useState } from "react";
+import { type FocusEvent, type KeyboardEvent, useEffect, useRef, useState } from "react";
 
 import type { AppScreen } from "./AppShot";
 import { AppCrop, AppShot } from "./AppShot";
@@ -25,9 +25,10 @@ const MOBILE_CROP = { x: 540, y: 0, width: 2020, aspect: "2020 / 1600" } as cons
 /**
  * Product areas with the matching real capture on an art stage: tabs over a
  * full-width capture on large screens, an accordion below that. Advances on
- * its own while visible until the visitor picks an item, and pauses while the
- * pointer rests on it. The progress line drives the advance, so pausing the
- * animation pauses the tour. Reduced motion turns the auto-advance and the
+ * its own while visible until the visitor picks an item. It pauses while the
+ * pointer rests on it or keyboard focus is inside it, and a Pause button stops
+ * it outright (WCAG 2.2.2). The progress line drives the advance, so pausing
+ * the animation pauses the tour. Reduced motion turns the auto-advance and the
  * transitions off.
  */
 export function ProductTour({ items }: { items: readonly TourItem[] }) {
@@ -36,7 +37,9 @@ export function ProductTour({ items }: { items: readonly TourItem[] }) {
   const [active, setActive] = useState(0);
   const [auto, setAuto] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [paused, setPaused] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [stopped, setStopped] = useState(false);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -104,6 +107,33 @@ export function ProductTour({ items }: { items: readonly TourItem[] }) {
   const tones = [...new Set(items.map((item) => item.tone))];
   const current = items[active]!;
   const running = auto && visible;
+  const paused = hovered || focused || stopped;
+
+  function onBlur(event: FocusEvent<HTMLDivElement>) {
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      setFocused(false);
+    }
+  }
+
+  // Only offered while the tour moves on its own; after a pick it stays put.
+  const pauseControl = (className: string) =>
+    auto ? (
+      <button
+        type="button"
+        onClick={() => setStopped((value) => !value)}
+        aria-label={stopped ? "Play the product tour" : "Pause the product tour"}
+        title={stopped ? "Play" : "Pause"}
+        className={`inline-flex h-8 w-8 items-center justify-center rounded-full text-brand-muted transition-colors hover:bg-brand-hover hover:text-brand-ink ${className}`}
+      >
+        <svg aria-hidden viewBox="0 0 16 16" className="h-3.5 w-3.5 fill-current">
+          {stopped ? (
+            <path d="M5 3.2v9.6a.6.6 0 0 0 .92.5l7.2-4.8a.6.6 0 0 0 0-1L5.92 2.7A.6.6 0 0 0 5 3.2Z" />
+          ) : (
+            <path d="M4.5 3h2v10h-2zM9.5 3h2v10h-2z" />
+          )}
+        </svg>
+      </button>
+    ) : null;
 
   const progress = (item: TourItem, className: string) =>
     running ? (
@@ -124,8 +154,10 @@ export function ProductTour({ items }: { items: readonly TourItem[] }) {
   return (
     <div
       ref={rootRef}
-      onPointerEnter={() => setPaused(true)}
-      onPointerLeave={() => setPaused(false)}
+      onPointerEnter={() => setHovered(true)}
+      onPointerLeave={() => setHovered(false)}
+      onFocus={() => setFocused(true)}
+      onBlur={onBlur}
     >
       {/* Large screens: tabs over one full-width capture. */}
       <div className="hidden lg:block">
@@ -213,6 +245,9 @@ export function ProductTour({ items }: { items: readonly TourItem[] }) {
                 }`}
               />
             ))}
+            {pauseControl(
+              "absolute right-3 top-3 z-20 bg-brand-raised/85 shadow-(--shadow-pop) backdrop-blur",
+            )}
             <div className="relative z-10 grid px-12 pt-12">
               {items.map((item, index) => (
                 <figure
@@ -241,7 +276,7 @@ export function ProductTour({ items }: { items: readonly TourItem[] }) {
                 aria-expanded={isActive}
                 aria-controls={`tour-panel-${item.id}`}
                 onClick={() => choose(index)}
-                className="group flex w-full items-baseline gap-4 py-5 text-left"
+                className="group flex w-full items-baseline gap-4 py-5 pr-10 text-left"
               >
                 <span
                   className={`w-6 shrink-0 font-mono text-xs transition-colors duration-300 ${
@@ -284,6 +319,7 @@ export function ProductTour({ items }: { items: readonly TourItem[] }) {
                   </div>
                 </div>
               </div>
+              {isActive ? pauseControl("absolute right-0 top-4") : null}
               {isActive ? progress(item, "-bottom-px") : null}
             </li>
           );
