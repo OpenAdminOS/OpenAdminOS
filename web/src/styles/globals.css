@@ -126,6 +126,12 @@
     outline-offset: 2px;
   }
 
+  /* Tailwind v4 resets buttons to the default cursor; clickable means pointer. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
   code,
   kbd,
   pre {
