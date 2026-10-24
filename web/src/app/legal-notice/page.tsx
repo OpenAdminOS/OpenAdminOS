@@ -9,7 +9,9 @@ import {
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
   LEGAL_ENTITY_REGISTER,
+  LEGAL_ENTITY_VAT_ID,
   MANAGING_DIRECTOR_NAME,
+  MICROSOFT_NOTICE,
   SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
@@ -19,7 +21,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-10-24";
+const LAST_UPDATED = "2026-10-25";
 const TITLE = "Legal notice";
 const DESCRIPTION =
   "Provider identification, Impressum, and contact details for OpenAdminOS, a product of Ugurlabs UG (haftungsbeschränkt).";
@@ -112,6 +114,16 @@ export default function LegalNoticePage() {
 
           <section>
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
+              VAT ID
+            </h2>
+            <p className="mt-3">
+              VAT identification number under § 27a of the German VAT Act
+              (UStG): {LEGAL_ENTITY_VAT_ID}
+            </p>
+          </section>
+
+          <section>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Open-source project
             </h2>
             <p className="mt-3">
@@ -134,11 +146,7 @@ export default function LegalNoticePage() {
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Microsoft trademarks
             </h2>
-            <p className="mt-3">
-              Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks
-              of the Microsoft group of companies. OpenAdminOS is not
-              affiliated with, endorsed by, or sponsored by Microsoft.
-            </p>
+            <p className="mt-3">{MICROSOFT_NOTICE}</p>
           </section>
         </div>
 
@@ -154,6 +162,3 @@ export default function LegalNoticePage() {
     </MarketingShell>
   );
 }
-
-// TODO(ugur): Add the VAT ID (USt-IdNr.) here once it is issued; § 5 DDG
-// requires it when one exists.

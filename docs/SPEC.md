@@ -146,7 +146,11 @@ registered at Amtsgericht Düsseldorf under HRB 113979, reachable at
 `support@openadminos.com`. The managing director is Ugur Koc. The privacy policy
 names the company as GDPR controller, the terms name it as the provider, and
 the footer copyright uses the company name. The details live once in
-`web/src/app/seo.tsx`. A VAT ID, if one is issued, still needs to be added.
+`web/src/app/seo.tsx`, including the VAT ID (DE464886395, § 27a UStG), which is
+also in the organization structured data. One shared Microsoft notice in the
+footer, legal notice, and terms states that Ugurlabs is a member of the
+Microsoft AI Cloud Partner Program and that OpenAdminOS is an independent
+product, not made, endorsed, or sponsored by Microsoft.
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
 outside click, Escape, or link activation.
@@ -210,10 +214,9 @@ values (`gpt-oss:20b`, `admin@contoso.com`, the connected Ollama endpoint) in
 place of the smoke-test fixtures; smoke tests and the layout captures are
 unchanged. Captures are taken with no focused control and the pointer parked,
 so no focus rings or hover states appear. Crops scale a region of a capture
-and never redraw the interface. The earlier clickable screenshot
-viewer (`web/src/app/product-demo/`) is no longer on the homepage because its
-captures show the desktop shell from before the calm redesign; it stays in the tree until it is
-either recaptured with the calm shell or removed.
+and never redraw the interface. The earlier clickable screenshot viewer, its
+captures, and its interaction contract were removed with the calm redesign
+(decided 2026-10-25); the homepage shows only the landing captures.
 The traction strip and CTA star count only render
 real numbers: GitHub stars from the unauthenticated repo API (revalidated
 hourly), total release asset downloads across all releases (revalidated every
@@ -238,8 +241,7 @@ normal-vision separation on paper and graphite; labels stay in text colors.
 Scroll-reveal sections are shown in print, and reveal elements mounted after
 the first pass are picked up by a MutationObserver. Historical demo video assets are rendered offline from the top-level `remotion/`
 project (not part of the npm workspace, never installed on Vercel) and retained
-under `web/public/videos/`. See `docs/brand/interactive-product-demo.md` for the
-retired clickable viewer's interaction contract.
+under `web/public/videos/`.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin

@@ -32,6 +32,61 @@ describe("Menu", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  it("opens upward with side=top and focuses without scrolling ancestors", async () => {
+    const user = userEvent.setup();
+    const focusSpy = vi.spyOn(HTMLButtonElement.prototype, "focus");
+    render(
+      <Menu
+        side="top"
+        trigger={<button>Open account</button>}
+        items={[
+          { id: "settings", label: "Settings", onSelect: vi.fn() },
+          { id: "tenants", label: "Tenants", onSelect: vi.fn() },
+        ]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open account" }));
+
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("bottom-[calc(100%+6px)]");
+    expect(menu.className).not.toContain("top-[calc(100%+6px)]");
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus(),
+    );
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+
+    // Keyboard navigation keeps the default focus scroll so long menus
+    // reveal the focused item instead of focusing it off screen.
+    focusSpy.mockClear();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Tenants" })).toHaveFocus();
+    expect(focusSpy).toHaveBeenCalledWith();
+    expect(focusSpy).not.toHaveBeenCalledWith({ preventScroll: true });
+    focusSpy.mockRestore();
+  });
+
+  it("keeps plain opening focus for default bottom menus", async () => {
+    const user = userEvent.setup();
+    const focusSpy = vi.spyOn(HTMLButtonElement.prototype, "focus");
+    render(
+      <Menu
+        trigger={<button>Open actions</button>}
+        items={[{ id: "rename", label: "Rename", onSelect: vi.fn() }]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open actions" }));
+
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("top-[calc(100%+6px)]");
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus(),
+    );
+    expect(focusSpy).not.toHaveBeenCalledWith({ preventScroll: true });
+    focusSpy.mockRestore();
+  });
 });
 
 function renderMenu(onSelect: () => void) {

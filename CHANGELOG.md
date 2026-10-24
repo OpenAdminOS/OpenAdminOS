@@ -22,6 +22,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Fix the sidebar jumping up and hiding its header when the tenant account menu opens. The menu now opens upward from the footer, and menu focus no longer scrolls the shell.
+
 ### Security
 
 ## [0.7.1] - 2026-10-23

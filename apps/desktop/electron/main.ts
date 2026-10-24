@@ -4,7 +4,6 @@ import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
-import { captureLandingShots } from "./landing-capture.js";
 import { captureWebsiteDemo } from "./website-demo-capture.js";
 import {
   NATIVE_THEME_COLORS,
@@ -173,14 +172,6 @@ const isScreenshotCaptureLaunch =
   !app.isPackaged && process.env.OPENADMINOS_SCREENSHOT_CAPTURE === "1";
 const screenshotCaptureUserData =
   process.env.OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA;
-// Website landing captures show realistic display values. Smoke tests and the
-// layout captures keep their deliberate fixtures (including the long model id).
-const isLandingCapture =
-  isScreenshotCaptureLaunch && process.env.OPENADMINOS_LANDING_CAPTURE === "1";
-const smokeModelName = isLandingCapture ? "gpt-oss:20b" : "test-smoke-local-model";
-const screenshotModelName = isLandingCapture
-  ? "gpt-oss:20b"
-  : "screenshot-local-model-with-a-deliberately-long-identifier";
 const screenshotCaptureOutDir = !app.isPackaged
   ? process.env.OPENADMINOS_SCREENSHOT_OUT_DIR
   : undefined;
@@ -415,7 +406,7 @@ function seedIntuneChatSmokeState(userDataDir: string): void {
     JSON.stringify(
       {
         activeProviderId: "ollama",
-        activeModelByProviderId: { ollama: smokeModelName },
+        activeModelByProviderId: { ollama: "test-smoke-local-model" },
         installedAgents: [
           {
             id: "offboarding-agent",
@@ -575,7 +566,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
       {
         activeProviderId: "ollama",
         activeModelByProviderId: {
-          ollama: screenshotModelName,
+          ollama: "screenshot-local-model-with-a-deliberately-long-identifier",
         },
         installedAgents,
         runs: [
@@ -586,7 +577,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
             queuedAt: now,
             startedAt: now,
             providerId: "ollama",
-            model: screenshotModelName,
+            model: "screenshot-local-model-with-a-deliberately-long-identifier",
             tenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             summary: "Write plan is ready for review.",
             steps: [],
@@ -625,11 +616,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
           {
             id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo: European Endpoint Administration and Security",
-            username: isLandingCapture
-              ? "admin@contoso.com"
-              : isWebsiteCapture
-                ? "admin@contoso.invalid"
-                : "admin@contoso-demo.invalid",
+            username: isWebsiteCapture ? "admin@contoso.invalid" : "admin@contoso-demo.invalid",
             homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
             entraTier: "p2",
@@ -826,25 +813,25 @@ function officeRehearsalAnswer(prompt:string): string {
 function createIntuneChatSmokeLlm(): RunLlmApi {
   return {
     available: true,
-    defaultModel: smokeModelName,
+    defaultModel: "test-smoke-local-model",
     async complete(options) {
-      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:smokeModelName};
+      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:"test-smoke-local-model"};
       return {
         text: "WIN-01 is stale based on cached Intune and Entra device evidence.",
-        model: smokeModelName,
+        model: "test-smoke-local-model",
       };
     },
     async *stream(options) {
       if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
         const text=officeRehearsalAnswer(options.prompt);
-        yield {delta:text,accumulated:text,done:true,model:smokeModelName};return;
+        yield {delta:text,accumulated:text,done:true,model:"test-smoke-local-model"};return;
       }
       if (options.prompt.includes("Hold response for cancellation smoke")) {
         yield {
           delta: "Partial response",
           accumulated: "Partial response",
           done: false,
-          model: smokeModelName,
+          model: "test-smoke-local-model",
         };
         const started = Date.now();
         while (!options.signal?.aborted && Date.now() - started < 5000) {
@@ -858,13 +845,13 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
         delta: "WIN-01 is stale",
         accumulated: "WIN-01 is stale",
         done: false,
-        model: smokeModelName,
+        model: "test-smoke-local-model",
       };
       yield {
         delta: " based on cached Intune and Entra device evidence.",
         accumulated: "WIN-01 is stale based on cached Intune and Entra device evidence.",
         done: true,
-        model: smokeModelName,
+        model: "test-smoke-local-model",
       };
     },
   };
@@ -876,12 +863,9 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
       ? {
           ...provider,
           status: "connected",
-          // Landing captures show the text a connected local Ollama reports.
-          detail: isLandingCapture
-            ? "Running on http://localhost:11434"
-            : "Deterministic local provider fixture for Electron smoke tests.",
-          models: [smokeModelName],
-          defaultModel: smokeModelName,
+          detail: "Deterministic local provider fixture for Electron smoke tests.",
+          models: ["test-smoke-local-model"],
+          defaultModel: "test-smoke-local-model",
         }
       : { ...provider },
   );
@@ -997,14 +981,6 @@ async function runScreenshotCapture(): Promise<void> {
   if (process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
     await runOfficeSmoke(window, screenshotCaptureOutDir);
     await runOfficeRehearsal(window,screenshotCaptureOutDir,async()=>{officeRehearsalRevision=1;await store.tickOffice();});
-    app.exit(0);
-    return;
-  }
-
-  if (isLandingCapture) {
-    await captureLandingShots(window, screenshotCaptureOutDir, (step) =>
-      runScreenshotCaptureStep(window, { kind: "route", ...step, reducedMotion: true }),
-    );
     app.exit(0);
     return;
   }

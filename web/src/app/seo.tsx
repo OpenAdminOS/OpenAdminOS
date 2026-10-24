@@ -17,6 +17,15 @@ export const LEGAL_ENTITY_REGISTER = {
   // Non-breaking space: the register number should not wrap.
   number: "HRB\u00a0113979",
 } as const;
+/** USt-IdNr. under § 27a UStG. */
+export const LEGAL_ENTITY_VAT_ID = "DE464886395";
+/**
+ * Trademark and relationship notice, shared by the footer, legal notice, and
+ * terms so the wording cannot drift. Ugurlabs is a Microsoft partner; the
+ * product itself is independent of Microsoft.
+ */
+export const MICROSOFT_NOTICE =
+  "Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks of the Microsoft group of companies. Ugurlabs is a member of the Microsoft AI Cloud Partner Program. OpenAdminOS is an independent product and is not made, endorsed, or sponsored by Microsoft.";
 export const LEGAL_ENTITY_ADDRESS = {
   streetAddress: "Fährstraße 217",
   postalCode: "40221",
@@ -105,6 +114,7 @@ export function organizationSchema() {
     name: SITE_NAME,
     alternateName: "Open Admin OS",
     legalName: LEGAL_ENTITY_NAME,
+    vatID: LEGAL_ENTITY_VAT_ID,
     employee: {
       "@type": "Person",
       name: MANAGING_DIRECTOR_NAME,

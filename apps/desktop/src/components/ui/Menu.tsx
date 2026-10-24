@@ -26,6 +26,7 @@ export interface MenuProps {
   trigger: ReactElement<Record<string, unknown>>;
   items: readonly MenuEntry[];
   align?: "start" | "end";
+  side?: "top" | "bottom";
   ariaLabel?: string;
   className?: string;
 }
@@ -34,6 +35,7 @@ export function Menu({
   trigger,
   items,
   align = "end",
+  side = "bottom",
   ariaLabel = "Actions",
   className = "",
 }: MenuProps) {
@@ -50,18 +52,33 @@ export function Menu({
     setOpen(false);
   };
 
-  const focusItem = (index: number) => {
+  const focusItem = (index: number, preventScroll = false) => {
     const entries = Array.from(
       menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
     );
-    entries[index]?.focus();
+    const entry = entries[index];
+    if (!entry) return;
+    // preventScroll is opt-in per call. Top-side menus open upward from a
+    // bottom-anchored trigger, where a plain focus() scrolls every
+    // scrollable ancestor (including overflow-hidden shells) to reveal the
+    // item and shifts the whole layout. Every other focus keeps the
+    // default scroll so items near a scroll edge are revealed.
+    if (preventScroll) entry.focus({ preventScroll: true });
+    else entry.focus();
   };
+
+  // Only upward menus anchored to a fixed footer suppress focus scrolling.
+  // Bottom menus keep the plain focus behavior they have always had.
+  const suppressFocusScroll = side === "top";
 
   useEffect(() => {
     if (!open) {
       if (returnFocusRef.current) {
         returnFocusRef.current = false;
-        window.requestAnimationFrame(() => triggerRef.current?.focus());
+        window.requestAnimationFrame(() => {
+          if (suppressFocusScroll) triggerRef.current?.focus({ preventScroll: true });
+          else triggerRef.current?.focus();
+        });
       }
       return;
     }
@@ -70,7 +87,7 @@ export function Menu({
       id: overlayId,
       onEscape: () => close(true),
     });
-    const frame = window.requestAnimationFrame(() => focusItem(0));
+    const frame = window.requestAnimationFrame(() => focusItem(0, suppressFocusScroll));
     const onPointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) close(false);
     };
@@ -80,7 +97,7 @@ export function Menu({
       window.removeEventListener("mousedown", onPointerDown);
       unregister();
     };
-  }, [open, overlayId]);
+  }, [open, overlayId, suppressFocusScroll]);
 
   const triggerOnClick = trigger.props.onClick as
     | ((event: React.MouseEvent<HTMLElement>) => void)
@@ -116,16 +133,16 @@ export function Menu({
     const current = entries.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      entries[(current + 1 + entries.length) % entries.length]?.focus();
+      focusItem((current + 1 + entries.length) % entries.length);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      entries[(current - 1 + entries.length) % entries.length]?.focus();
+      focusItem((current - 1 + entries.length) % entries.length);
     } else if (event.key === "Home") {
       event.preventDefault();
-      entries[0]?.focus();
+      focusItem(0);
     } else if (event.key === "End") {
       event.preventDefault();
-      entries.at(-1)?.focus();
+      focusItem(entries.length - 1);
     } else if (event.key === "Tab") {
       close(false);
     }
@@ -141,7 +158,9 @@ export function Menu({
           role="menu"
           aria-label={ariaLabel}
           onKeyDown={onMenuKeyDown}
-          className={`absolute top-[calc(100%+6px)] z-[80] min-w-48 overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)] ${
+          className={`absolute z-[80] min-w-48 overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)] ${
+            side === "top" ? "bottom-[calc(100%+6px)]" : "top-[calc(100%+6px)]"
+          } ${
             align === "end" ? "right-0" : "left-0"
           }`}
         >
