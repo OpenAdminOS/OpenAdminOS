@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- `npm run screenshots:landing` captures the website's app screenshots: the demo tenant at 1280 x 800 and 2x, in light and dark, with realistic display values. It replaces the old clickable-demo capture.
+
 ### Changed
 
 - Redesign the desktop app around a calmer layout: one sidebar with conversations and workspaces, a top bar that always shows the active tenant and where data goes (local, hosted, or no model), and a Chat home that opens on a tenant briefing with the items that need you.
