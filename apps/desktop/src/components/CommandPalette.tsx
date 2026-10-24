@@ -18,7 +18,7 @@ import {
   IconSparkle,
 } from "./icons";
 import { useAppState } from "../state";
-import { SETTINGS_ITEMS, SETTINGS_SECTIONS } from "../copy";
+import { SETTINGS_ITEMS, SETTINGS_SECTIONS, userFacingErrorReason } from "../copy";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { registerOverlay } from "../shared/overlay-stack";
 import { createPendingIntent } from "../setup/pending-intent";
@@ -39,6 +39,7 @@ interface PaletteItem {
   group: "Agents" | "Hub" | "Navigate" | "Actions" | "Conversations" | "Workspaces";
   icon: React.ReactNode;
   shortcut?: string;
+  matchesActiveQuery?: boolean;
   action: () => void | Promise<void>;
 }
 
@@ -57,6 +58,10 @@ export function CommandPalette({
   const [activeIndex, setActiveIndex] = useState(0);
   const [actionError, setActionError] = useState<string | null>(null);
   const [recentConversations, setRecentConversations] = useState<IntuneChatConversation[]>([]);
+  const [conversationSearchResult, setConversationSearchResult] = useState<{
+    query: string;
+    conversations: IntuneChatConversation[];
+  } | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([]);
   const inputRef = useRef<HTMLInputElement | null>(null);
   const dialogRef = useRef<HTMLDivElement | null>(null);
@@ -70,6 +75,14 @@ export function CommandPalette({
       navigate(path);
       onClose();
     };
+    const normalizedQuery = query.trim().toLocaleLowerCase();
+    const currentConversationSearch =
+      normalizedQuery && conversationSearchResult?.query === normalizedQuery
+        ? conversationSearchResult
+        : null;
+    const displayedConversations = currentConversationSearch
+      ? currentConversationSearch.conversations
+      : recentConversations;
     return [
       ...state.installedAgents.map((a) => ({
         id: `agent-${a.id}`,
@@ -144,11 +157,12 @@ export function CommandPalette({
           onClose();
         },
       })),
-      ...recentConversations.map((conversation) => ({
+      ...displayedConversations.map((conversation) => ({
         id: `chat-${conversation.id}`,
         label: conversation.title,
         hint: "Recent conversation",
         group: "Conversations" as const,
+        matchesActiveQuery: Boolean(currentConversationSearch),
         icon: <IconChat size={13} className="text-[var(--color-text-soft)]" />,
         action: go(`/chat/${encodeURIComponent(conversation.id)}`),
       })),
@@ -295,14 +309,14 @@ export function CommandPalette({
           ] as PaletteItem[])
         : []),
     ];
-  }, [activeTheme, navigate, onClose, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
+  }, [activeTheme, conversationSearchResult, navigate, onClose, query, recentConversations, requireTenantAndProvider, startRun, state.installedAgents, state.tenants.length, workspaces]);
 
   const filtered = useMemo(() => {
     if (!query.trim()) return items;
     const q = query.toLowerCase();
     return items.filter(
       (i) =>
-        i.group === "Conversations" ||
+        i.matchesActiveQuery ||
         i.label.toLowerCase().includes(q) ||
         i.hint?.toLowerCase().includes(q) ||
         i.group.toLowerCase().includes(q),
@@ -346,25 +360,46 @@ export function CommandPalette({
     const api = window.openAdminOS;
     if (!open || !api) return;
     let cancelled = false;
+    setRecentConversations([]);
+    setWorkspaces([]);
+    void Promise.all([api.listIntuneChatConversations(), api.listWorkspaces()])
+      .then(([nextConversations, nextWorkspaces]) => {
+        if (cancelled) return;
+        setRecentConversations(nextConversations);
+        setWorkspaces(nextWorkspaces);
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setActionError(paletteError("Recent conversations and workspaces could not be loaded", error));
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  useEffect(() => {
+    const api = window.openAdminOS;
+    const search = query.trim();
+    setConversationSearchResult(null);
+    if (!open || !api || !search) return;
+    let cancelled = false;
     const timer = window.setTimeout(() => {
-      const search = query.trim();
-      void Promise.all([
-        search
-          ? api.searchIntuneChatConversations(search)
-          : api.listIntuneChatConversations(),
-        api.listWorkspaces(),
-      ])
-        .then(([nextConversations, nextWorkspaces]) => {
-          if (cancelled) return;
-          setRecentConversations(nextConversations);
-          setWorkspaces(nextWorkspaces);
+      void api
+        .searchIntuneChatConversations(search)
+        .then((conversations) => {
+          if (!cancelled) {
+            setConversationSearchResult({
+              query: search.toLocaleLowerCase(),
+              conversations,
+            });
+          }
         })
-        .catch(() => {
-          if (cancelled) return;
-          setRecentConversations([]);
-          setWorkspaces([]);
+        .catch((error: unknown) => {
+          if (!cancelled) {
+            setActionError(paletteError("Conversation search failed", error));
+          }
         });
-    }, query.trim() ? 180 : 0);
+    }, 180);
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
@@ -384,6 +419,7 @@ export function CommandPalette({
   };
 
   const onPaletteKeyDown = (e: React.KeyboardEvent) => {
+    if (e.defaultPrevented) return;
     if (e.key === "Tab") {
       const dialog = dialogRef.current;
       if (!dialog) return;
@@ -566,4 +602,9 @@ export function CommandPalette({
       </div>
     </div>
   );
+}
+
+function paletteError(action: string, error: unknown): string {
+  const detail = userFacingErrorReason(error instanceof Error ? error.message : String(error));
+  return `${action}.${detail ? ` ${detail}` : ""} Close and reopen Search to try again.`;
 }

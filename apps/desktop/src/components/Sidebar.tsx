@@ -18,6 +18,7 @@ import {
 import { isNightlyVersion } from "../shared/update-channel";
 import { SHORTCUTS, shortcutLabel } from "../shared/shortcuts";
 import { openNovaPanel } from "../shared/nova-panel";
+import { userFacingErrorReason } from "../copy";
 import {
   IconActivity,
   IconAgentTeam,
@@ -40,6 +41,7 @@ import {
 } from "./icons";
 import { MultiTenantTile, TenantTile } from "./TenantTile";
 import { Modal, ModalHeader } from "./Modal";
+import { useToast } from "./Toast";
 import { Kbd, Menu, Tooltip } from "./ui";
 
 export { SIDEBAR_COLLAPSED_KEY };
@@ -95,6 +97,7 @@ function recentGroup(value: string, now = new Date()): string {
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const navigate = useNavigate();
+  const toast = useToast();
   const { state } = useAppState();
   const { collapsed, toggleSidebar } = useShellChrome();
   const {
@@ -149,14 +152,30 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     navigate("/chat?new=1");
   };
 
+  const runConversationAction = (label: string, action: () => Promise<unknown>) => {
+    void action().catch((error: unknown) => {
+      const detail = userFacingErrorReason(
+        error instanceof Error ? error.message : String(error),
+      );
+      toast.error(
+        `${label} failed.${detail ? ` ${detail}` : ""} Try again from the conversation menu.`,
+      );
+    });
+  };
+
   const focusAdjacent = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.defaultPrevented) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (!target.matches("a[href], button:not([disabled])")) return;
+    if (target.closest('[role="menu"], [role="listbox"]')) return;
     const controls = Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled])',
+        'a[href], button:not([disabled])',
       ),
-    );
-    const index = controls.indexOf(document.activeElement as HTMLElement);
+    ).filter((control) => !control.closest('[role="menu"], [role="listbox"]'));
+    const index = controls.indexOf(target);
     if (index < 0 || controls.length === 0) return;
     event.preventDefault();
     const next =
@@ -183,6 +202,19 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     { to: "/changes", label: "Changes", icon: <IconChanges size={14} /> },
   ];
 
+  const isMac = window.openAdminOS?.platform === "macos";
+  const brand = (
+    <>
+      <IconLogo size={21} className="text-[var(--color-text)]" />
+      <span className="font-semibold tracking-[-0.01em] text-[var(--color-text)]">OpenAdminOS</span>
+      {isNightlyVersion(state.appVersion) ? (
+        <Tooltip content={`OpenAdminOS ${state.appVersion} is a nightly prerelease built from main. It is less tested than a stable release.`} side="right">
+          <span className="app-region-no-drag rounded-md bg-[var(--color-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning)]">Nightly</span>
+        </Tooltip>
+      ) : null}
+    </>
+  );
+
   return (
     <aside
       aria-label="Application navigation"
@@ -195,9 +227,11 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       }`}
     >
       <div className="flex h-full w-[268px] flex-col">
-        <div className={`flex h-[52px] shrink-0 items-center justify-end px-3 ${window.openAdminOS?.platform === "macos" || window.openAdminOS?.platform === "windows" ? "app-region-drag" : ""}`}>
-          {window.openAdminOS?.platform === "macos" ? <span className="mr-auto w-[76px]" /> : null}
-          <Tooltip content="Collapse sidebar" side="right">
+        {/* macOS keeps a dedicated top row for the traffic-light buttons; elsewhere
+            the brand shares the row with the collapse control. */}
+        <div className={`flex h-[52px] shrink-0 items-center gap-2 px-3 ${isMac || window.openAdminOS?.platform === "windows" ? "app-region-drag" : ""}`}>
+          {isMac ? <span className="w-[76px]" /> : brand}
+          <Tooltip content="Collapse sidebar" side="right" className="ml-auto">
             <button
               type="button"
               onClick={toggleSidebar}
@@ -209,15 +243,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           </Tooltip>
         </div>
 
-        <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-          <IconLogo size={21} className="text-[var(--color-text)]" />
-          <span className="font-semibold tracking-[-0.01em] text-[var(--color-text)]">OpenAdminOS</span>
-          {isNightlyVersion(state.appVersion) ? (
-            <Tooltip content={`OpenAdminOS ${state.appVersion} is a nightly prerelease built from main. It is less tested than a stable release.`} side="right">
-              <span className="rounded-md bg-[var(--color-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning)]">Nightly</span>
-            </Tooltip>
-          ) : null}
-        </div>
+        {isMac ? <div className="flex h-10 shrink-0 items-center gap-2 px-3">{brand}</div> : null}
 
         <nav aria-label="Primary" className="space-y-0.5 px-2 py-2">
           <button
@@ -257,9 +283,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
                   tenants={state.tenants}
                   onOpen={() => openConversation(conversation.id)}
                   onRename={() => requestRename(conversation)}
-                  onPin={() => void togglePinned(conversation)}
-                  onExport={() => void exportConversation(conversation)}
-                  onMove={() => void moveToWorkspace(conversation)}
+                  onPin={() => runConversationAction("Pinning the conversation", () => togglePinned(conversation))}
+                  onExport={() => runConversationAction("Exporting the conversation", () => exportConversation(conversation))}
+                  onMove={() => runConversationAction("Moving the conversation", () => moveToWorkspace(conversation))}
                   onDelete={() => requestDelete(conversation)}
                 />
               ))}
@@ -327,9 +353,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
                   tenants={state.tenants}
                   onOpen={() => openConversation(conversation.id)}
                   onRename={() => requestRename(conversation)}
-                  onPin={() => void togglePinned(conversation)}
-                  onExport={() => void exportConversation(conversation)}
-                  onMove={() => void moveToWorkspace(conversation)}
+                  onPin={() => runConversationAction("Pinning the conversation", () => togglePinned(conversation))}
+                  onExport={() => runConversationAction("Exporting the conversation", () => exportConversation(conversation))}
+                  onMove={() => runConversationAction("Moving the conversation", () => moveToWorkspace(conversation))}
                   onDelete={() => requestDelete(conversation)}
                 />
               ))}
@@ -430,6 +456,7 @@ function ConversationRow({
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
     const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") close();
     };
     window.addEventListener("mousedown", close);

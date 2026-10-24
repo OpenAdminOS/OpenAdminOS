@@ -12,7 +12,10 @@ const viteBin = resolve(
 const port = process.env.OPENADMINOS_SCREENSHOT_PORT ?? "5176";
 const rendererUrl = `http://127.0.0.1:${port}`;
 const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-screenshot-capture-"));
-const outDir = resolve(root, "docs/screenshots");
+// --landing captures the website landing set (1280 x 800 at 2x, light and
+// dark, realistic display values) into docs/screenshots/landing.
+const landing = process.argv.includes("--landing");
+const outDir = resolve(root, landing ? "docs/screenshots/landing" : "docs/screenshots");
 let renderer;
 let electron;
 const electronEnv = { ...process.env };
@@ -35,6 +38,10 @@ try {
   // Linux CI containers cannot install Electron's helper as root-owned setuid.
   // This flag is confined to the synthetic capture process, never the packaged app.
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
+  // The landing set renders a 2560 x 1600 window, so it must run on the Xvfb
+  // display (xvfb-run -s "-screen 0 2560x1600x24" or larger). Force X11 so a
+  // Wayland desktop session cannot capture the window at its own screen size.
+  if (landing && process.platform === "linux") electronArgs.push("--ozone-platform=x11");
   electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,
     env: {
@@ -43,6 +50,9 @@ try {
       OPENADMINOS_SCREENSHOT_CAPTURE: "1",
       OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA: userDataDir,
       OPENADMINOS_SCREENSHOT_OUT_DIR: outDir,
+      ...(landing
+        ? { OPENADMINOS_WEBSITE_CAPTURE: "1", OPENADMINOS_LANDING_CAPTURE: "1" }
+        : {}),
     },
     stdio: ["ignore", "pipe", "pipe"],
   });

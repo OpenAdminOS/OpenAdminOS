@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { useAppState } from "../state";
+import { userFacingErrorReason } from "../copy";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Button } from "./Button";
 import {
@@ -44,6 +45,7 @@ export function TenantSwitcher() {
       if (!wrapperRef.current?.contains(event.target as Node)) setOpen(false);
     };
     const onKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") setOpen(false);
     };
     window.addEventListener("mousedown", onPointerDown);
@@ -63,6 +65,13 @@ export function TenantSwitcher() {
     try {
       await setActiveTenant(tenantId);
       setOpen(false);
+    } catch (error) {
+      const detail = userFacingErrorReason(
+        error instanceof Error ? error.message : String(error),
+      );
+      toast.error(
+        `Switching tenants failed.${detail ? ` ${detail}` : ""} Try again from the tenant menu.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -76,7 +85,12 @@ export function TenantSwitcher() {
       toast.success(`${pendingDisconnect.displayName} disconnected.`);
       setPendingDisconnect(null);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      const detail = userFacingErrorReason(
+        error instanceof Error ? error.message : String(error),
+      );
+      toast.error(
+        `Disconnecting the tenant failed.${detail ? ` ${detail}` : ""} Try again.`,
+      );
     } finally {
       setBusy(false);
     }
@@ -84,7 +98,9 @@ export function TenantSwitcher() {
 
   const tooltip = activeTenant
     ? `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.`
-    : "No tenant connected. Open setup to connect one.";
+    : state.tenants.length > 0
+      ? "No active tenant. Choose a connected tenant."
+      : "No tenant connected. Open setup to connect one.";
 
   return (
     <>
@@ -93,7 +109,7 @@ export function TenantSwitcher() {
           <button
             type="button"
             onClick={() => {
-              if (!activeTenant) {
+              if (state.tenants.length === 0) {
                 openSetup();
                 return;
               }
@@ -101,7 +117,13 @@ export function TenantSwitcher() {
             }}
             aria-haspopup="menu"
             aria-expanded={open}
-            aria-label={activeTenant ? `Switch tenant, ${activeTenant.displayName}` : "Connect a tenant"}
+            aria-label={
+              activeTenant
+                ? `Switch tenant, ${activeTenant.displayName}`
+                : state.tenants.length > 0
+                  ? "Choose an active tenant"
+                  : "Connect a tenant"
+            }
             className="flex h-9 max-w-[320px] items-center gap-2 rounded-[9px] px-2 text-left text-base text-[var(--color-text)] transition-colors hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
           >
             {activeTenant ? (

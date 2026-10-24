@@ -14,6 +14,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Replace the four themes with System, Light (warm paper), Dark (graphite), and Midnight. New installs follow the operating system; saved themes migrate automatically.
 - Bundle the Geist and Newsreader fonts with the app (no network font loading) and introduce the new oa ligature logo across the app, installers, and website icons.
 - Rework openadminos.com in the calm identity (paper light, graphite dark, self-hosted Geist and Newsreader, oa wordmark) and rewrite the homepage around real screenshots of the redesigned app.
+- Recapture the homepage screenshots at 1280 x 800 and 2x with the demo tenant, and show the product tour as tabs over a full-width screenshot, so the app is readable on the page.
 - Move the documentation from GitBook to a self-hosted docs site at docs.openadminos.com, built from the same Markdown with a sidebar, local search, page outline, and previous/next links in the calm identity. Existing docs links keep working.
 
 ### Removed

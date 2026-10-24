@@ -307,7 +307,7 @@ export default async function HomePage() {
             <AppWindow
               screen="chat-transcript"
               alt="OpenAdminOS Chat answer with tenant scope, data age, and two numbered Microsoft Graph sources"
-              crop={{ x: 700, y: 60, width: 790, aspect: "4 / 3.6" }}
+              crop={{ x: 780, y: 110, width: 1530, aspect: "4 / 3.6" }}
               className="rounded-b-none sm:hidden"
             />
             <AppWindow
@@ -316,7 +316,7 @@ export default async function HomePage() {
               priority
               className="hidden rounded-b-none sm:block"
             />
-            <div className="pointer-events-none absolute -left-10 top-[28%] hidden w-72 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
+            <div className="pointer-events-none absolute -left-10 top-[41%] hidden w-72 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
               <p className="flex items-center gap-1.5 text-xs text-brand-ok">
                 <LockIcon />
                 Local · Ollama
@@ -325,7 +325,7 @@ export default async function HomePage() {
                 Local model. Tenant data stays on this device.
               </p>
             </div>
-            <div className="pointer-events-none absolute -right-10 top-[58%] hidden w-80 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
+            <div className="pointer-events-none absolute -right-10 top-[62%] hidden w-80 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
               <p className="flex items-center gap-1.5 text-xs text-brand-warn">
                 <span className="h-1.5 w-1.5 rounded-full bg-current" />
                 Awaiting confirmation
@@ -527,7 +527,7 @@ export default async function HomePage() {
               <AppWindow
                 screen="write-confirmation"
                 alt="Write confirmation for the Offboarding agent: two device retirements, a Microsoft Graph write warning, and the typed phrase RETIRE 2 DEVICES"
-                crop={{ x: 662, y: 64, width: 868, aspect: "868 / 830" }}
+                crop={{ x: 680, y: 120, width: 1720, aspect: "1720 / 1480" }}
               />
             </div>
           </Stage>

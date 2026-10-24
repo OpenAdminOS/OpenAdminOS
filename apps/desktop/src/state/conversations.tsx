@@ -24,6 +24,7 @@ import {
   buildConversationExportMarkdown,
   conversationCacheSummary,
 } from "../shared/conversation-export";
+import { userFacingErrorReason } from "../copy";
 import { useAppState } from "./AppStateContext";
 
 export type ConversationPanelMode = "chats" | "workspaces";
@@ -49,6 +50,7 @@ interface ConversationWorkspaceContextValue {
   setPanelMode: (mode: ConversationPanelMode) => void;
   setPinnedSectionOpen: (open: boolean | ((current: boolean) => boolean)) => void;
   requestWorkspaceCreate: () => void;
+  consumeWorkspaceCreateRequest: (request: number) => void;
   replaceWorkspaces: (workspaces: WorkspaceSummary[]) => void;
   reloadWorkspaces: () => Promise<WorkspaceSummary[]>;
   openConversation: (id: string | null, options?: { replace?: boolean }) => void;
@@ -87,6 +89,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
   const toast = useToast();
   const { state } = useAppState();
   const initialConversationId = routeConversationId(location.pathname);
+  const navigateRef = useRef(navigate);
   const [conversations, setConversations] = useState<IntuneChatConversation[]>([]);
   const [pendingConversation, setPendingConversation] =
     useState<IntuneChatConversation | null>(null);
@@ -97,6 +100,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
   const [shellLoaded, setShellLoaded] = useState(false);
   const [conversationSearch, setConversationSearch] = useState("");
   const conversationSearchRef = useRef("");
+  const skipInitialSearchRef = useRef(true);
   const [workspaceSearch, setWorkspaceSearch] = useState("");
   const [panelMode, setPanelModeState] = useState<ConversationPanelMode>(
     routeWorkspaceId(location.pathname) ||
@@ -112,6 +116,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
   const [renameTitle, setRenameTitle] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<IntuneChatConversation | null>(null);
   const [busy, setBusy] = useState(false);
+  navigateRef.current = navigate;
   locationRef.current = location;
   conversationSearchRef.current = conversationSearch;
 
@@ -122,22 +127,22 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       activeConversationIdRef.current = id;
       const destination = id ? `/chat/${encodeURIComponent(id)}` : "/chat";
       if (`${locationRef.current.pathname}${locationRef.current.search}` !== destination) {
-        navigate(destination, { replace: options.replace });
+        navigateRef.current(destination, { replace: options.replace });
       }
     },
-    [navigate],
+    [],
   );
 
   const openWorkspaces = useCallback(
     (workspaceId?: string | null) => {
       setPanelModeState("workspaces");
-      navigate(
+      navigateRef.current(
         workspaceId
           ? `/chat/workspaces/${encodeURIComponent(workspaceId)}`
           : "/chat?panel=workspaces",
       );
     },
-    [navigate],
+    [],
   );
 
   const setPanelMode = useCallback(
@@ -195,6 +200,14 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
     return next;
   }, []);
 
+  const requestWorkspaceCreate = useCallback(() => {
+    setWorkspaceCreateRequest((current) => current + 1);
+  }, []);
+
+  const consumeWorkspaceCreateRequest = useCallback((request: number) => {
+    setWorkspaceCreateRequest((current) => (current === request ? 0 : current));
+  }, []);
+
   useEffect(() => {
     const id = routeConversationId(location.pathname);
     const workspace = routeWorkspaceId(location.pathname);
@@ -211,14 +224,18 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
     setShellLoaded(false);
     setPendingConversation(null);
     void Promise.all([reloadConversations(), reloadWorkspaces()]).catch((error: unknown) => {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(conversationActionError("Loading conversations", error));
     });
   }, [reloadConversations, reloadWorkspaces, state.activeTenantId, toast]);
 
   useEffect(() => {
+    if (skipInitialSearchRef.current) {
+      skipInitialSearchRef.current = false;
+      return;
+    }
     const timer = window.setTimeout(() => {
       void reloadConversations(undefined, conversationSearch).catch((error: unknown) => {
-        toast.error(error instanceof Error ? error.message : String(error));
+        toast.error(conversationActionError("Conversation search", error));
       });
     }, 180);
     return () => window.clearTimeout(timer);
@@ -243,7 +260,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       );
       if (updated) {
         upsertConversation(updated);
-        await reloadConversations(updated.id);
+        await reloadConversations();
       }
     },
     [reloadConversations, upsertConversation],
@@ -309,7 +326,8 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       setWorkspaceSearch,
       setPanelMode,
       setPinnedSectionOpen,
-      requestWorkspaceCreate: () => setWorkspaceCreateRequest((current) => current + 1),
+      requestWorkspaceCreate,
+      consumeWorkspaceCreateRequest,
       replaceWorkspaces: setAllWorkspaces,
       reloadWorkspaces,
       openConversation,
@@ -339,8 +357,10 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       panelMode,
       pendingConversation,
       pinnedSectionOpen,
+      requestWorkspaceCreate,
       reloadConversations,
       reloadWorkspaces,
+      consumeWorkspaceCreateRequest,
       setPanelMode,
       shellLoaded,
       tenantWorkspaces,
@@ -361,12 +381,12 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       );
       if (renamed) {
         upsertConversation(renamed);
-        await reloadConversations(renamed.id);
+        await reloadConversations();
       }
       setRenameTarget(null);
       setRenameTitle("");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(conversationActionError("Renaming the conversation", error));
     } finally {
       setBusy(false);
     }
@@ -380,9 +400,9 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       await window.openAdminOS?.deleteIntuneChatConversation(deleteTarget.id);
       setDeleteTarget(null);
       if (wasActive) openConversation(null, { replace: true });
-      await reloadConversations(wasActive ? undefined : activeConversationIdRef.current);
+      await reloadConversations();
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : String(error));
+      toast.error(conversationActionError("Deleting the conversation", error));
     } finally {
       setBusy(false);
     }
@@ -475,5 +495,10 @@ function safeFileName(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 80);
   return cleaned || "intune-chat-conversation";
+}
+
+function conversationActionError(action: string, error: unknown): string {
+  const detail = userFacingErrorReason(error instanceof Error ? error.message : String(error));
+  return `${action} failed.${detail ? ` ${detail}` : ""} Try again.`;
 }
 

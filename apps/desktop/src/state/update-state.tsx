@@ -8,6 +8,7 @@ import {
 } from "react";
 
 import type { UpdateState } from "../shared/openAdminOS";
+import { userFacingErrorReason } from "../copy";
 
 interface UpdateStateContextValue {
   state: UpdateState;
@@ -29,7 +30,14 @@ export function UpdateStateProvider({ children }: { children: ReactNode }) {
       .then((next) => {
         if (!cancelled) setState(next);
       })
-      .catch(() => undefined);
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          setState({
+            status: "error",
+            message: updateErrorMessage("The update status could not be loaded", error),
+          });
+        }
+      });
     const unsubscribe = api.onUpdateStateChanged((next) => setState(next));
     return () => {
       cancelled = true;
@@ -41,17 +49,36 @@ export function UpdateStateProvider({ children }: { children: ReactNode }) {
     () => ({
       state,
       retry: async () => {
-        const next = await window.openAdminOS?.checkForUpdatesNow();
-        if (next) setState(next);
+        try {
+          const next = await window.openAdminOS?.checkForUpdatesNow();
+          if (next) setState(next);
+        } catch (error) {
+          setState({
+            status: "error",
+            message: updateErrorMessage("The update check failed", error),
+          });
+        }
       },
       restart: async () => {
-        await window.openAdminOS?.applyUpdateNow();
+        try {
+          await window.openAdminOS?.applyUpdateNow();
+        } catch (error) {
+          setState({
+            status: "error",
+            message: updateErrorMessage("The update could not be installed", error),
+          });
+        }
       },
     }),
     [state],
   );
 
   return <UpdateStateContext.Provider value={value}>{children}</UpdateStateContext.Provider>;
+}
+
+function updateErrorMessage(action: string, error: unknown): string {
+  const detail = userFacingErrorReason(error instanceof Error ? error.message : String(error));
+  return `${action}.${detail ? ` ${detail}` : ""} Try again from About and updates.`;
 }
 
 export function useUpdateState(): UpdateStateContextValue {

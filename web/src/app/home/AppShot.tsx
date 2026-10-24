@@ -1,17 +1,19 @@
 import type { CSSProperties } from "react";
 
-/** Files in public/app, copied from docs/screenshots/app/brand-*.png. */
+/**
+ * Files in public/app, from the landing capture: `npm run screenshots:landing`
+ * at the repo root writes docs/screenshots/landing and converts it here.
+ */
 export type AppScreen =
-  | "agent-drawer"
   | "agent-team"
   | "chat-transcript"
   | "hub-grid"
   | "settings"
   | "write-confirmation";
 
-/** Captured at 1920 x 1012 from the desktop screenshot harness. */
-export const SHOT_WIDTH = 1920;
-export const SHOT_HEIGHT = 1012;
+/** The app laid out at 1280 x 800 and captured at 2x. */
+export const SHOT_WIDTH = 2560;
+export const SHOT_HEIGHT = 1600;
 
 /**
  * A real screenshot of the desktop app in the active theme. Both files are

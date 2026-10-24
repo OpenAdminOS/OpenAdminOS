@@ -288,7 +288,7 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
               </button>
             </div>
           ) : null}
-          <table className="w-full border-collapse text-left text-xs">
+          <table className="w-full border-collapse text-left text-xs [&_tbody_tr:last-child_td]:border-b-0">
             <thead>
               <tr>
                 {block.headers.map((header, i) => (
@@ -302,7 +302,7 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
               {block.rows.map((row, i) => (
                 <tr key={i}>
                   {block.headers.map((_, j) => (
-                    <td key={j} className="border-b border-[var(--color-border-soft)] px-2 py-2.5 last:border-b-0 first:pl-0">
+                    <td key={j} className="border-b border-[var(--color-border-soft)] px-2 py-2.5 first:pl-0">
                       {renderInline(row[j] || "")}
                     </td>
                   ))}
