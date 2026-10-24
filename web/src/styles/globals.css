@@ -37,6 +37,14 @@
   --color-brand-danger-line: light-dark(rgba(168, 56, 43, 0.3), rgba(241, 160, 160, 0.32));
   --color-brand-on-danger: light-dark(#ffffff, #17191d);
   --color-brand-info: light-dark(#345d83, #a3bfd9);
+  /*
+   * Chart series, in fixed order: blue, orange, aqua. Validated as a set for
+   * colorblind and normal-vision separation on both paper and graphite; each
+   * theme has its own steps. Labels stay in text tokens, never these.
+   */
+  --color-chart-1: light-dark(#2a78d6, #3987e5);
+  --color-chart-2: light-dark(#eb6834, #d95926);
+  --color-chart-3: light-dark(#1baf7a, #199e70);
 
   --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui,
     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -434,6 +442,29 @@
 .js-reveal [data-reveal].is-revealed {
   opacity: 1;
   transform: none;
+}
+
+/*
+ * Print and save-as-PDF show every section and figure in its finished state,
+ * whether or not it was scrolled into view.
+ */
+@media print {
+  .js-reveal [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .js-reveal [data-reveal] .fig-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+
+  .js-reveal [data-reveal] :is(.fig-drop, .fig-fade, .fig-pop) {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

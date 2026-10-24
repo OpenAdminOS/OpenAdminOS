@@ -129,7 +129,7 @@ export default async function DownloadPage() {
               Current release
             </p>
             <p className="mt-1 font-mono text-sm text-brand-muted">
-              {latestRelease.version}
+              {latestRelease.version ?? "Latest release on GitHub"}
             </p>
           </div>
           <div className="flex flex-wrap gap-3 text-sm">

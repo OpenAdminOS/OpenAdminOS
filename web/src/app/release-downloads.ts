@@ -160,7 +160,8 @@ export async function getLatestReleaseDownloads() {
       macosPkg,
       macosPkgUrl: macosPkg.url,
       releaseNotesUrl: release.html_url ?? LATEST_RELEASE_URL,
-      version: release.tag_name ?? "Latest release",
+      // null when GitHub does not report a tag; callers never show a guess.
+      version: release.tag_name || null,
       windowsExe,
       windowsExeUrl: windowsExe.url,
     };
@@ -184,7 +185,7 @@ export async function getLatestReleaseDownloads() {
       macosPkg: fallbackAsset,
       macosPkgUrl: LATEST_RELEASE_URL,
       releaseNotesUrl: LATEST_RELEASE_URL,
-      version: "Latest release",
+      version: null,
       windowsExe: fallbackAsset,
       windowsExeUrl: LATEST_RELEASE_URL,
     };

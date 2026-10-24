@@ -30,12 +30,12 @@ export const metadata: Metadata = pageMetadata({
   path: "/benchmarks",
 });
 
-// The local model uses the site accent. Hosted models use neutral grays so
-// charts stay legible without introducing additional brand accents.
+// One theme-aware series color per model, assigned in a fixed order so a
+// model keeps its color on every chart (see --color-chart-* in globals.css).
 const COLOURS: Record<string, string> = {
-  "openadmin-8b": "var(--color-brand-accent)",
-  "claude-opus-5": "#c5cedd",
-  "gpt-5-6-sol": "#8190a7",
+  "openadmin-8b": "var(--color-chart-1)",
+  "claude-opus-5": "var(--color-chart-2)",
+  "gpt-5-6-sol": "var(--color-chart-3)",
 };
 
 const data = benchmarkData;

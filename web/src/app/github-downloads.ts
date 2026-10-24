@@ -1,44 +1,25 @@
-const GITHUB_RELEASES_API_URL =
-  "https://api.github.com/repos/OpenAdminOS/OpenAdminOS/releases";
+import { getAllReleases } from "./github-releases";
 
 // Match the README's total-downloads badge: all assets across all releases.
+// Reads the shared release listing rather than fetching it again.
 export async function getGitHubDownloadCount(): Promise<number | null> {
-  try {
-    let total = 0;
-    let page = 1;
+  const releases = await getAllReleases();
+  if (!releases) return null;
 
-    while (true) {
-      const response = await fetch(
-        `${GITHUB_RELEASES_API_URL}?per_page=100&page=${page}`,
-        {
-          headers: { Accept: "application/vnd.github+json" },
-          next: { revalidate: 3600 },
-        },
-      );
-      if (!response.ok) return null;
+  let total = 0;
+  for (const release of releases) {
+    if (!isRecord(release) || !Array.isArray(release.assets)) return null;
 
-      const releases: unknown = await response.json();
-      if (!Array.isArray(releases)) return null;
-
-      for (const release of releases) {
-        if (!isRecord(release) || !Array.isArray(release.assets)) return null;
-
-        for (const asset of release.assets) {
-          if (!isRecord(asset)) return null;
-          const count = asset.download_count;
-          if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
-            return null;
-          }
-          total += count;
-        }
+    for (const asset of release.assets) {
+      if (!isRecord(asset)) return null;
+      const count = asset.download_count;
+      if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+        return null;
       }
-
-      if (releases.length < 100) return total;
-      page += 1;
+      total += count;
     }
-  } catch {
-    return null;
   }
+  return total;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

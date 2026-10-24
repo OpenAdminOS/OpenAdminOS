@@ -18,7 +18,11 @@ export const SHOT_HEIGHT = 1600;
 /**
  * A real screenshot of the desktop app in the active theme. Both files are
  * rendered; CSS shows the one that matches (see .theme-img-* in
- * globals.css), and the hidden one is never fetched when it is lazy.
+ * globals.css). Both are lazy, so the hidden one is never fetched.
+ *
+ * `priority` is for the above-the-fold capture: an inline script reads the
+ * theme the head script already resolved and preloads only that file at high
+ * priority, so the other theme never competes for bandwidth.
  */
 export function AppShot({
   screen,
@@ -35,6 +39,13 @@ export function AppShot({
 }) {
   return (
     <>
+      {priority ? (
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(function(){var t=document.documentElement.dataset.theme==="dark"?"dark":"light";var l=document.createElement("link");l.rel="preload";l.as="image";l.href="/app/${screen}-"+t+".webp";l.setAttribute("fetchpriority","high");document.head.appendChild(l)})();`,
+          }}
+        />
+      ) : null}
       {(["light", "dark"] as const).map((theme) => (
         <img
           key={theme}
@@ -42,7 +53,7 @@ export function AppShot({
           width={SHOT_WIDTH}
           height={SHOT_HEIGHT}
           alt={alt}
-          loading={priority ? "eager" : "lazy"}
+          loading="lazy"
           decoding="async"
           fetchPriority={priority ? "high" : undefined}
           className={`theme-img-${theme} ${className}`}

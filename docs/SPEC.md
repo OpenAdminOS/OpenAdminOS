@@ -187,9 +187,10 @@ themselves once on reveal; a product tour of real captures (Chat, Agents,
 Agent Team, Write confirmation, Models), shown as five tabs over one
 full-width capture on large screens and as an accordion with a sidebar-free
 crop below that, that auto-advances while visible unless reduced motion is
-set, pauses under the pointer, crossfades captures and stage art (the captures
-for the active theme are preloaded), and keeps one height so the page does not
-shift; a
+set, pauses under the pointer or while keyboard focus is inside it, offers a
+Pause/Play button (WCAG 2.2.2), crossfades captures and stage art (the
+captures for the active theme are preloaded), and keeps one height so the page
+does not shift; a
 Security band with a local versus hosted data table and four guarantees; a
 write-confirmation spotlight on the real capture; a registry table; benchmark
 bars; open source stats, a changelog of the latest stable GitHub releases
@@ -214,14 +215,28 @@ viewer (`web/src/app/product-demo/`) is no longer on the homepage because its
 captures show the desktop shell from before the calm redesign; it stays in the tree until it is
 either recaptured with the calm shell or removed.
 The traction strip and CTA star count only render
-real numbers: GitHub stars from the unauthenticated repo API and total release
-asset downloads across all releases (both revalidated hourly), plus the community
-agent count from the synced `public/stats/agents.json`. Downloads replace the
+real numbers: GitHub stars from the unauthenticated repo API (revalidated
+hourly), total release asset downloads across all releases (revalidated every
+15 minutes with the shared releases request), and the registry agent count from
+the synced `agents/index.json`. Downloads replace the
 aggregate agent installation count and match the README's total-downloads badge.
 When a source is unavailable its cell is omitted, never faked. Registry
-agent display metadata (names, mode, scopes) is curated in
-`web/src/app/home/agents.ts` because repo-root `agents/index.json` is not
-available inside the `web/` Vercel build. Historical demo video assets are rendered offline from the top-level `remotion/`
+agent display metadata (names, mode, scopes) and the homepage "Registry
+agents" count both come from repo-root `agents/index.json`, which
+`web/scripts/sync-stats.mjs` copies (or, on Vercel, fetches at the deployed
+commit) into the gitignored `web/src/generated/` before dev, build, and
+typecheck, so the two numbers cannot disagree. The homepage changelog and the
+download total share one paginated GitHub releases request per render. The
+release announcement bar only appears when GitHub reported a version tag.
+The primary download button server-renders a platform-neutral "Download"
+link to `/download` (also the no-JavaScript state); after hydration a
+recognized Windows, macOS, or Linux desktop gets its installer directly, and
+phones, tablets, and ChromeOS are told plainly that OpenAdminOS is a desktop
+app. Benchmark charts use three fixed, theme-aware series colors
+(`--color-chart-1..3`: blue, orange, aqua) validated for colorblind and
+normal-vision separation on paper and graphite; labels stay in text colors.
+Scroll-reveal sections are shown in print, and reveal elements mounted after
+the first pass are picked up by a MutationObserver. Historical demo video assets are rendered offline from the top-level `remotion/`
 project (not part of the npm workspace, never installed on Vercel) and retained
 under `web/public/videos/`. See `docs/brand/interactive-product-demo.md` for the
 retired clickable viewer's interaction contract.
@@ -1770,11 +1785,16 @@ The preference stays on the device, is synchronized across renderer windows,
 and emits no telemetry. Saved `graphite` and `dark` values map to Dark;
 `off-white`, `sand`, and `light` map to Light; `midnight` remains Midnight.
 Unknown old values safely fall back to System. The public website offers a
-header theme toggle that cycles System, Light, and Dark; the choice is stored
-in `localStorage` on the device (no cookie) and applied by an inline script
-before first paint, and without JavaScript the site follows
-`prefers-color-scheme`. Colors are `light-dark()` tokens keyed off
-`data-theme` on `<html>`. It uses the same warm paper Light and graphite
+header theme toggle that switches between Light and Dark, so every click
+changes what is shown; choosing the theme the operating system already uses
+clears the stored choice and the site follows the system again. All toggle
+instances read `data-theme` on `<html>`, so they stay in sync (other tabs via
+the storage event). The choice is stored in `localStorage` on the device (no
+cookie) and applied by an inline script before first paint, and without
+JavaScript the site follows `prefers-color-scheme`. Colors are `light-dark()`
+tokens keyed off `data-theme` on `<html>`; Lightning CSS (inside Tailwind v4)
+compiles them to plain-color variable toggles, so browsers without native
+`light-dark()` support still get the palette. It uses the same warm paper Light and graphite
 Dark palettes, ink-colored primary actions, Newsreader for headlines and Geist
 for the interface (self-hosted through `@fontsource-variable`, no runtime font
 requests), sentence case, and the `oa` mark with a Newsreader "OpenAdminOS"

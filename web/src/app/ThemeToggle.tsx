@@ -1,70 +1,86 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
-import { THEME_STORAGE_KEY, type ThemePreference } from "./theme";
+import { THEME_STORAGE_KEY } from "./theme";
 
-const ORDER: readonly ThemePreference[] = ["system", "light", "dark"];
+type Theme = "light" | "dark";
 
-const LABELS: Record<ThemePreference, string> = {
-  system: "System theme",
-  light: "Light theme",
-  dark: "Dark theme",
-};
+/*
+ * One source of truth for every toggle on the page: the data-theme attribute
+ * the head script sets on <html>. Each instance subscribes to it, so the
+ * header and mobile toggles (and the system-change listener in the head
+ * script) always agree. Choices made in another tab arrive as storage events.
+ */
 
-function readPreference(): ThemePreference {
+function systemTheme(): Theme {
+  return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function storedTheme(): Theme | null {
   try {
     const stored = localStorage.getItem(THEME_STORAGE_KEY);
-    return stored === "light" || stored === "dark" ? stored : "system";
+    return stored === "light" || stored === "dark" ? stored : null;
   } catch {
-    return "system";
+    return null;
   }
 }
 
-function applyPreference(preference: ThemePreference) {
-  const resolved =
-    preference === "system"
-      ? window.matchMedia("(prefers-color-scheme: dark)").matches
-        ? "dark"
-        : "light"
-      : preference;
-  document.documentElement.dataset.theme = resolved;
-  try {
-    if (preference === "system") localStorage.removeItem(THEME_STORAGE_KEY);
-    else localStorage.setItem(THEME_STORAGE_KEY, preference);
-  } catch {
-    // Storage can be unavailable (private modes); the choice still applies
-    // for this page view.
-  }
+function subscribe(onChange: () => void) {
+  const root = document.documentElement;
+  const attributes = new MutationObserver(onChange);
+  attributes.observe(root, { attributes: true, attributeFilter: ["data-theme"] });
+  const onStorage = (event: StorageEvent) => {
+    if (event.key !== THEME_STORAGE_KEY && event.key !== null) return;
+    root.dataset.theme = storedTheme() ?? systemTheme();
+  };
+  window.addEventListener("storage", onStorage);
+  return () => {
+    attributes.disconnect();
+    window.removeEventListener("storage", onStorage);
+  };
 }
 
-/** Cycles System, Light, and Dark. The choice stays on this device. */
+function getTheme(): Theme {
+  return document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+}
+
+/**
+ * Switches between light and dark; every click changes what you see. A choice
+ * that matches the operating system clears the saved preference, so the site
+ * goes back to following the system. The choice stays on this device.
+ */
 export function ThemeToggle({ className = "" }: { className?: string }) {
-  const [preference, setPreference] = useState<ThemePreference>("system");
-
-  useEffect(() => {
-    setPreference(readPreference());
-  }, []);
-
-  const next = ORDER[(ORDER.indexOf(preference) + 1) % ORDER.length]!;
+  // Null on the server and during hydration; the head script has already
+  // painted the right theme, only the label waits.
+  const theme = useSyncExternalStore(subscribe, getTheme, () => null);
+  const next: Theme = theme === "dark" ? "light" : "dark";
+  const label = theme ? `Switch to ${next} theme` : "Switch theme";
 
   return (
     <button
       type="button"
       onClick={() => {
-        applyPreference(next);
-        setPreference(next);
+        try {
+          if (next === systemTheme()) localStorage.removeItem(THEME_STORAGE_KEY);
+          else localStorage.setItem(THEME_STORAGE_KEY, next);
+        } catch {
+          // Storage can be unavailable (private modes); the choice still
+          // applies for this page view.
+        }
+        document.documentElement.dataset.theme = next;
       }}
-      aria-label={`${LABELS[preference]}. Switch to ${LABELS[next].toLowerCase()}`}
-      title={`${LABELS[preference]} (switch to ${LABELS[next].toLowerCase()})`}
+      aria-label={label}
+      title={label}
       className={`theme-toggle inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] text-brand-muted transition-colors hover:bg-brand-hover hover:text-brand-ink ${className}`}
     >
-      <ThemeIcon preference={preference} />
+      <ThemeIcon theme={theme} />
     </button>
   );
 }
 
-function ThemeIcon({ preference }: { preference: ThemePreference }) {
+/** Shows the theme a click switches to; a neutral mark until hydration. */
+function ThemeIcon({ theme }: { theme: Theme | null }) {
   const common = {
     "aria-hidden": true,
     viewBox: "0 0 24 24",
@@ -75,7 +91,7 @@ function ThemeIcon({ preference }: { preference: ThemePreference }) {
     strokeLinecap: "round" as const,
     strokeLinejoin: "round" as const,
   };
-  if (preference === "light") {
+  if (theme === "dark") {
     return (
       <svg {...common}>
         <circle cx="12" cy="12" r="4" />
@@ -83,7 +99,7 @@ function ThemeIcon({ preference }: { preference: ThemePreference }) {
       </svg>
     );
   }
-  if (preference === "dark") {
+  if (theme === "light") {
     return (
       <svg {...common}>
         <path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5Z" />
@@ -92,8 +108,8 @@ function ThemeIcon({ preference }: { preference: ThemePreference }) {
   }
   return (
     <svg {...common}>
-      <rect x="3" y="4.5" width="18" height="12" rx="2" />
-      <path d="M8.5 20h7M12 16.5V20" />
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 4a8 8 0 0 1 0 16Z" fill="currentColor" />
     </svg>
   );
 }

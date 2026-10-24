@@ -1,16 +1,23 @@
 #!/usr/bin/env node
-// Materialise the canonical stats/agents.json into web/public/stats/ so
-// Next.js serves it as a static asset at /stats/agents.json. Two paths:
+// Materialise repo-root data the site needs at build time:
 //
-//   1. Local dev — the canonical file lives at `<repo>/stats/agents.json`
-//      next to the `web/` folder, so we just copy it.
+//   - stats/agents.json -> web/public/stats/agents.json, served as a static
+//     asset at /stats/agents.json.
+//   - agents/index.json -> web/src/generated/registry-index.json, imported by
+//     the homepage so registry names, modes, scopes, and the agent count come
+//     from the registry itself instead of a hand-kept copy.
 //
-//   2. Vercel build — Vercel's "Root Directory = web/" setting excludes
-//      sibling folders from the build sandbox, so `../stats/` isn't
-//      available. We fall back to fetching the file from GitHub at the
-//      exact deployed commit SHA (VERCEL_GIT_COMMIT_SHA) using the bot
-//      PAT we already have wired up. That keeps the build slim and
-//      ensures the file matches the commit being deployed.
+// Two paths for each file:
+//
+//   1. Local dev: the canonical file lives in the repo next to the `web/`
+//      folder, so we just copy it.
+//
+//   2. Vercel build: Vercel's "Root Directory = web/" setting excludes
+//      sibling folders from the build sandbox, so they aren't available. We
+//      fall back to fetching the file from GitHub at the exact deployed
+//      commit SHA (VERCEL_GIT_COMMIT_SHA) using the bot PAT we already have
+//      wired up. That keeps the build slim and ensures the file matches the
+//      commit being deployed.
 
 import {
   copyFileSync,
@@ -24,17 +31,17 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = join(here, "..");
-const destDir = join(webRoot, "public", "stats");
-const dest = join(destDir, "agents.json");
 
-mkdirSync(destDir, { recursive: true });
-
-const localSrc = join(webRoot, "..", "stats", "agents.json");
-if (existsSync(localSrc)) {
-  copyFileSync(localSrc, dest);
-  console.log(`[sync-stats] copied ${localSrc} -> ${dest} (${statSync(dest).size} bytes)`);
-  process.exit(0);
-}
+const FILES = [
+  {
+    source: "stats/agents.json",
+    dest: join(webRoot, "public", "stats", "agents.json"),
+  },
+  {
+    source: "agents/index.json",
+    dest: join(webRoot, "src", "generated", "registry-index.json"),
+  },
+];
 
 const token = process.env.OPENAGENTS_GITHUB_TOKEN;
 const owner = process.env.OPENAGENTS_GITHUB_OWNER ?? "ugurkocde";
@@ -44,33 +51,43 @@ const ref =
   process.env.OPENAGENTS_GITHUB_BRANCH ??
   "main";
 
-if (!token) {
-  console.error(
-    "[sync-stats] no local stats/agents.json AND no OPENAGENTS_GITHUB_TOKEN — cannot resolve.",
-  );
-  process.exit(1);
+for (const { source, dest } of FILES) {
+  mkdirSync(dirname(dest), { recursive: true });
+
+  const localSrc = join(webRoot, "..", source);
+  if (existsSync(localSrc)) {
+    copyFileSync(localSrc, dest);
+    console.log(`[sync-stats] copied ${localSrc} -> ${dest} (${statSync(dest).size} bytes)`);
+    continue;
+  }
+
+  if (!token) {
+    console.error(
+      `[sync-stats] no local ${source} AND no OPENAGENTS_GITHUB_TOKEN, cannot resolve.`,
+    );
+    process.exit(1);
+  }
+
+  const url = `https://api.github.com/repos/${owner}/${repo}/contents/${source}?ref=${ref}`;
+  console.log(`[sync-stats] fetching ${owner}/${repo}@${ref.slice(0, 7)} ${source}`);
+
+  const response = await fetch(url, {
+    headers: {
+      authorization: `Bearer ${token}`,
+      accept: "application/vnd.github.raw",
+      "x-github-api-version": "2022-11-28",
+      "user-agent": "openagents-stats-sync",
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await response.text().catch(() => "");
+    console.error(
+      `[sync-stats] GitHub fetch failed for ${source}: ${response.status} ${response.statusText} ${detail.slice(0, 200)}`,
+    );
+    process.exit(1);
+  }
+
+  writeFileSync(dest, await response.text());
+  console.log(`[sync-stats] wrote ${dest} (${statSync(dest).size} bytes)`);
 }
-
-const url = `https://api.github.com/repos/${owner}/${repo}/contents/stats/agents.json?ref=${ref}`;
-console.log(`[sync-stats] fetching ${owner}/${repo}@${ref.slice(0, 7)} stats/agents.json`);
-
-const response = await fetch(url, {
-  headers: {
-    authorization: `Bearer ${token}`,
-    accept: "application/vnd.github.raw",
-    "x-github-api-version": "2022-11-28",
-    "user-agent": "openagents-stats-sync",
-  },
-});
-
-if (!response.ok) {
-  const detail = await response.text().catch(() => "");
-  console.error(
-    `[sync-stats] GitHub fetch failed: ${response.status} ${response.statusText} ${detail.slice(0, 200)}`,
-  );
-  process.exit(1);
-}
-
-const body = await response.text();
-writeFileSync(dest, body);
-console.log(`[sync-stats] wrote ${dest} (${statSync(dest).size} bytes)`);
