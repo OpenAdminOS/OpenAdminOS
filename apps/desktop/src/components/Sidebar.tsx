@@ -202,6 +202,19 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     { to: "/changes", label: "Changes", icon: <IconChanges size={14} /> },
   ];
 
+  const isMac = window.openAdminOS?.platform === "macos";
+  const brand = (
+    <>
+      <IconLogo size={21} className="text-[var(--color-text)]" />
+      <span className="font-semibold tracking-[-0.01em] text-[var(--color-text)]">OpenAdminOS</span>
+      {isNightlyVersion(state.appVersion) ? (
+        <Tooltip content={`OpenAdminOS ${state.appVersion} is a nightly prerelease built from main. It is less tested than a stable release.`} side="right">
+          <span className="app-region-no-drag rounded-md bg-[var(--color-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning)]">Nightly</span>
+        </Tooltip>
+      ) : null}
+    </>
+  );
+
   return (
     <aside
       aria-label="Application navigation"
@@ -214,9 +227,11 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
       }`}
     >
       <div className="flex h-full w-[268px] flex-col">
-        <div className={`flex h-[52px] shrink-0 items-center justify-end px-3 ${window.openAdminOS?.platform === "macos" || window.openAdminOS?.platform === "windows" ? "app-region-drag" : ""}`}>
-          {window.openAdminOS?.platform === "macos" ? <span className="mr-auto w-[76px]" /> : null}
-          <Tooltip content="Collapse sidebar" side="right">
+        {/* macOS keeps a dedicated top row for the traffic-light buttons; elsewhere
+            the brand shares the row with the collapse control. */}
+        <div className={`flex h-[52px] shrink-0 items-center gap-2 px-3 ${isMac || window.openAdminOS?.platform === "windows" ? "app-region-drag" : ""}`}>
+          {isMac ? <span className="w-[76px]" /> : brand}
+          <Tooltip content="Collapse sidebar" side="right" className="ml-auto">
             <button
               type="button"
               onClick={toggleSidebar}
@@ -228,15 +243,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           </Tooltip>
         </div>
 
-        <div className="flex h-10 shrink-0 items-center gap-2 px-3">
-          <IconLogo size={21} className="text-[var(--color-text)]" />
-          <span className="font-semibold tracking-[-0.01em] text-[var(--color-text)]">OpenAdminOS</span>
-          {isNightlyVersion(state.appVersion) ? (
-            <Tooltip content={`OpenAdminOS ${state.appVersion} is a nightly prerelease built from main. It is less tested than a stable release.`} side="right">
-              <span className="rounded-md bg-[var(--color-warning-soft)] px-2 py-0.5 text-xs font-medium text-[var(--color-warning)]">Nightly</span>
-            </Tooltip>
-          ) : null}
-        </div>
+        {isMac ? <div className="flex h-10 shrink-0 items-center gap-2 px-3">{brand}</div> : null}
 
         <nav aria-label="Primary" className="space-y-0.5 px-2 py-2">
           <button
