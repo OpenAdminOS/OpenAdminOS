@@ -74,10 +74,17 @@ export async function captureLandingShots(
   window.webContents.setBackgroundThrottling(false);
   const applyZoom = async () => {
     window.webContents.setZoomFactor(LANDING_CAPTURE_SCALE);
-    const viewport = await window.webContents.executeJavaScript(
-      "JSON.stringify([innerWidth, innerHeight])",
-    );
-    if (viewport !== JSON.stringify([LANDING_CAPTURE_WIDTH, LANDING_CAPTURE_HEIGHT])) {
+    // The zoom reaches the page asynchronously; wait for the layout viewport.
+    const expected = JSON.stringify([LANDING_CAPTURE_WIDTH, LANDING_CAPTURE_HEIGHT]);
+    let viewport = "";
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      viewport = await window.webContents.executeJavaScript(
+        "JSON.stringify([innerWidth, innerHeight])",
+      );
+      if (viewport === expected) break;
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (viewport !== expected) {
       throw new Error(
         `Landing capture viewport is ${viewport}; expected ${LANDING_CAPTURE_WIDTH}x${LANDING_CAPTURE_HEIGHT}. Use a display of at least ${pixelWidth}x${pixelHeight}.`,
       );
