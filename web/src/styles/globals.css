@@ -313,6 +313,17 @@
   transition-duration: 700ms;
 }
 
+/* Tour descriptions share one cell; the outgoing one fades before the next. */
+.tour-copy {
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+.tour-copy.is-active {
+  opacity: 1;
+  transition: opacity 400ms ease 150ms;
+}
+
 @keyframes caret-blink {
   0%,
   49% {
@@ -442,7 +453,9 @@
   .tour-layer,
   .tour-layer.is-active,
   .tour-shot,
-  .tour-shot.is-active {
+  .tour-shot.is-active,
+  .tour-copy,
+  .tour-copy.is-active {
     transition: none;
   }
 
