@@ -131,6 +131,21 @@ describe("Sidebar", () => {
     ).toBeVisible();
   });
 
+  it("opens the tenant account menu upward from the sidebar footer", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(),
+    });
+
+    await user.click(await screen.findByRole("button", { name: /admin@contoso/i }));
+
+    const menu = screen.getByRole("menu", { name: "Account and application" });
+    expect(menu.className).toContain("bottom-[calc(100%+6px)]");
+    expect(menu.className).not.toContain("top-[calc(100%+6px)]");
+  });
+
   it("opens the shared keyboard shortcut reference from the account menu", async () => {
     const user = userEvent.setup();
     renderRoute(<AppShell><div /></AppShell>, {
