@@ -136,7 +136,11 @@ registered at Amtsgericht Düsseldorf under HRB 113979, reachable at
 `support@openadminos.com`. The managing director is Ugur Koc. The privacy policy
 names the company as GDPR controller, the terms name it as the provider, and
 the footer copyright uses the company name. The details live once in
-`web/src/app/seo.tsx`. A VAT ID, if one is issued, still needs to be added.
+`web/src/app/seo.tsx`, including the VAT ID (DE464886395, § 27a UStG), which is
+also in the organization structured data. One shared Microsoft notice in the
+footer, legal notice, and terms states that Ugurlabs is a member of the
+Microsoft AI Cloud Partner Program and that OpenAdminOS is an independent
+product, not made, endorsed, or sponsored by Microsoft.
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
 outside click, Escape, or link activation.
