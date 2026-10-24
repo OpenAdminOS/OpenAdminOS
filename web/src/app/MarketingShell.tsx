@@ -5,7 +5,7 @@ import { Stage, type StageTone } from "./home/Stage";
 import { LogoMark, Wordmark } from "./Logo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
-import { DOCS_URL, GITHUB_URL, LINKEDIN_URL } from "./seo";
+import { DOCS_URL, GITHUB_URL, LEGAL_ENTITY_NAME, LINKEDIN_URL } from "./seo";
 import { card, eyebrow } from "./ui";
 
 const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
@@ -169,7 +169,7 @@ export function MarketingShell({
           <div className="mx-auto flex w-full max-w-7xl flex-col gap-3 px-6 py-6 text-xs leading-5 text-brand-faint sm:px-10 md:flex-row md:items-center md:justify-between">
             <span className="inline-flex items-center gap-2">
               <LogoMark className="h-3.5 w-3.5" />© {new Date().getFullYear()}{" "}
-              OpenAdminOS
+              {LEGAL_ENTITY_NAME}
             </span>
             <p className="max-w-2xl text-balance md:text-right">
               Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks
