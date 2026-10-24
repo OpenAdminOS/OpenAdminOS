@@ -2240,6 +2240,8 @@ export class IntuneChatService {
                     ? "The reasoning model described a lookup without finishing it. No completed answer is available. Retry or open Chat to inspect the evidence."
                   : agentic.reason === "malformed-output"
                     ? "The selected reasoning model could not produce a valid tool request. Retry or select a model that supports tool use."
+                  : agentic.reason === "no-evidence"
+                    ? "The selected reasoning model answered without checking tenant data. No verified answer is available. Retry or open Chat to inspect the evidence."
                     : agentic.reason === "provider-unavailable"
                       ? "The selected reasoning model is unavailable. Check the provider connection and retry."
                       : "Nova reached its tool-call limit before finishing. Ask a more focused question or open Chat to inspect the evidence.";

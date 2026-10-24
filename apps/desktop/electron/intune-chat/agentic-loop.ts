@@ -37,6 +37,21 @@ export const MAX_AGENTIC_ITERATIONS = 8;
  */
 const MAX_MALFORMED_RETRIES = 3;
 const MAX_UNFINISHED_RETRIES = 2;
+/**
+ * How many evidence-free finals to coach through before giving up.
+ * CLI-agent providers (Codex) intermittently answer in prose that the
+ * tenant tool is unavailable instead of emitting tool JSON; accepting
+ * that as a final answer shipped refusals with sources attached and
+ * reported loop success, so capability memory never flipped either.
+ */
+const MAX_NO_EVIDENCE_RETRIES = 2;
+const EVIDENCE_TOOLS = new Set([
+  "list_cached_resources",
+  "query_cache",
+  "graph_get",
+  "refresh_resource",
+  "query_drift",
+]);
 const DEFAULT_OBSERVATION_CHAR_BUDGET = 36_000;
 
 export const AGENTIC_TOOL_PROTOCOL = [
@@ -46,7 +61,8 @@ export const AGENTIC_TOOL_PROTOCOL = [
   "Every brace and bracket you open must be closed.",
   "If you do not know the Graph path for something, call find_graph_endpoint first rather than guessing a path.",
   "Do not call write tools. No write tools exist.",
-  "When you have enough evidence, either answer in plain prose or return:",
+  "Tenant rows are not supplied in this prompt and documentation is not tenant evidence. Call a tool before answering any question about tenant state.",
+  "When you have enough evidence, return:",
   '```json\n{"final":true,"answer":"..."}\n```',
 ].join("\n");
 
@@ -94,7 +110,7 @@ export type RunAgenticChatResult =
     }
   | {
       ok: false;
-      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer";
+      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer" | "no-evidence";
       fallbackNotice: string;
       toolTrace: IntuneChatToolTraceEntry[];
       iterations: number;
@@ -129,6 +145,8 @@ export async function runAgenticChat(
   const toolTrace: IntuneChatToolTraceEntry[] = [];
   let malformedCount = 0;
   let unfinishedCount = 0;
+  let noEvidenceCount = 0;
+  let evidenceToolCalls = 0;
   let responseModel = input.model;
   const invalidQueries = new Map<string, string>();
   const failedGraphFields = new Map<string, string[]>();
@@ -145,7 +163,7 @@ export async function runAgenticChat(
   // actual tool calls made, and losing the investigation to a fallback.
   let iteration = 0;
   let attempts = 0;
-  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + 1;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES + 1;
   while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
@@ -211,6 +229,28 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: "That was a progress message, not a finished answer. Perform the required read-only tool call now, then answer the current question using its result. If blocked, explain the concrete blocker. No work continues after a final response; do not promise a future lookup." });
       continue;
     }
+    if (action.kind === "final" && input.plannedResources.length > 0 && evidenceToolCalls === 0 && invalidQueries.size === 0) {
+      noEvidenceCount += 1;
+      if (noEvidenceCount > MAX_NO_EVIDENCE_RETRIES) {
+        return {
+          ok: false,
+          reason: "no-evidence",
+          fallbackNotice: "Investigative mode returned an answer without checking tenant data. Deterministic retrieval was used instead.",
+          toolTrace,
+          iterations: iteration,
+          ...(responseModel ? { model: responseModel } : {}),
+        };
+      }
+      turns.push({
+        role: "repair",
+        content: [
+          "That answer used no tenant evidence. The tenant query tools are available in this session: they run on the host when you request them with the JSON protocol. Tenant rows are not in this prompt and documentation does not describe this tenant.",
+          "Call a tool now with exactly one fenced JSON block, for example:",
+          '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":25}}\n```',
+        ].join("\n"),
+      });
+      continue;
+    }
     malformedCount = 0;
     iteration += 1;
     if (action.kind === "final") {
@@ -236,6 +276,7 @@ export async function runAgenticChat(
     });
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params);
     toolTrace.push(execution.trace);
+    if (!execution.trace.error && EVIDENCE_TOOLS.has(action.tool)) evidenceToolCalls += 1;
     if (action.tool === 'query_cache') {
       const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
       if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);
