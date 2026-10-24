@@ -173,7 +173,10 @@ a shaded tint of that company's brand color; a
 two-tone lead and three isometric line figures (FIG 0.1 to 0.3) that draw
 themselves once on reveal; an accordion
 product tour of real captures (Chat, Agents, Agent Team, Write confirmation,
-Models) that auto-advances while visible unless reduced motion is set; a
+Models) that auto-advances while visible unless reduced motion is set,
+pauses under the pointer, crossfades captures and stage art (the captures for
+the active theme are preloaded), and keeps one height so the page does not
+shift; a
 Security band with a local versus hosted data table and four guarantees; a
 write-confirmation spotlight on the real capture; a registry table; benchmark
 bars; open source stats, a changelog of the latest stable GitHub releases
