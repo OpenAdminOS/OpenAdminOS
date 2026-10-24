@@ -138,7 +138,7 @@ export function websiteSchema() {
 }
 
 export function softwareApplicationSchema(input?: {
-  version?: string;
+  version?: string | null;
   downloadUrl?: string;
   operatingSystem?: string;
   availability?: string;
@@ -150,7 +150,7 @@ export function softwareApplicationSchema(input?: {
     applicationCategory: "BusinessApplication",
     applicationSubCategory: "Microsoft 365 administration",
     operatingSystem: input?.operatingSystem ?? "Windows, macOS, Linux",
-    softwareVersion: input?.version,
+    softwareVersion: input?.version ?? undefined,
     description: HOME_DESCRIPTION,
     isAccessibleForFree: true,
     license: `${GITHUB_URL}/blob/main/LICENSE`,

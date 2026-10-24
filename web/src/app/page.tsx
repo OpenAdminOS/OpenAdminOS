@@ -271,12 +271,17 @@ export default async function HomePage() {
   return (
     <MarketingShell
       bare
-      announcement={{
-        href: latestRelease.releaseNotesUrl,
-        label: latestNote?.summary
-          ? `${latestRelease.version}: ${latestNote.summary}`
-          : `${latestRelease.version} is out`,
-      }}
+      announcement={
+        // Only announce a release whose version GitHub actually reported.
+        latestRelease.version
+          ? {
+              href: latestRelease.releaseNotesUrl,
+              label: latestNote?.summary
+                ? `${latestRelease.version}: ${latestNote.summary}`
+                : `${latestRelease.version} is out`,
+            }
+          : undefined
+      }
     >
       <JsonLd data={structuredData} />
 
