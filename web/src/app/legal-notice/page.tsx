@@ -8,6 +8,7 @@ import {
   JsonLd,
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
+  LEGAL_ENTITY_REGISTER,
   MANAGING_DIRECTOR_NAME,
   SUPPORT_EMAIL,
   breadcrumbSchema,
@@ -18,10 +19,10 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-06-04";
+const LAST_UPDATED = "2026-10-24";
 const TITLE = "Legal notice";
 const DESCRIPTION =
-  "Provider identification, Impressum, and contact details for OpenAdminOS.";
+  "Provider identification, Impressum, and contact details for OpenAdminOS, a product of Ugurlabs UG (haftungsbeschränkt).";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -66,8 +67,9 @@ export default function LegalNoticePage() {
               Provider identification
             </h2>
             <p className="mt-3">
-              This page is the Impressum / provider identification for
-              OpenAdminOS under § 5 DDG.
+              This page is the Impressum / provider identification under § 5
+              DDG for openadminos.com and the OpenAdminOS desktop app.
+              OpenAdminOS is a product of {LEGAL_ENTITY_NAME}.
             </p>
             <address className="mt-3 not-italic text-brand-muted">
               {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
@@ -96,6 +98,16 @@ export default function LegalNoticePage() {
               Managing director
             </h2>
             <p className="mt-3">{MANAGING_DIRECTOR_NAME}</p>
+          </section>
+
+          <section>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
+              Commercial register
+            </h2>
+            <p className="mt-3">
+              Registered in the commercial register (Handelsregister) of the{" "}
+              {LEGAL_ENTITY_REGISTER.court} under {LEGAL_ENTITY_REGISTER.number}.
+            </p>
           </section>
 
           <section>
@@ -143,6 +155,5 @@ export default function LegalNoticePage() {
   );
 }
 
-// TODO(ugur): Add the register court/register number and VAT ID if issued.
-// These are generally required in a complete § 5 DDG provider identification
-// for a registered German UG.
+// TODO(ugur): Add the VAT ID (USt-IdNr.) here once it is issued; § 5 DDG
+// requires it when one exists.

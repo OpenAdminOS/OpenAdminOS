@@ -7,6 +7,8 @@ import {
   JsonLd,
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
+  LEGAL_ENTITY_SHORT_NAME,
+  MANAGING_DIRECTOR_NAME,
   SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
@@ -16,7 +18,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-06-07";
+const LAST_UPDATED = "2026-10-24";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
   "How OpenAdminOS handles Microsoft 365 tenant data, authentication tokens, LLM prompts, registry install counts, and website analytics.";
@@ -64,8 +66,8 @@ export default function PrivacyPage() {
             <p className="mt-3">
               OpenAdminOS is a desktop app for Microsoft 365 administrators. It
               runs on your computer. Your Microsoft 365 tenant data, local
-              model prompts, run history, and crash logs are not sent to
-              OpenAdminOS.
+              model prompts, run history, and crash logs are not sent to{" "}
+              {LEGAL_ENTITY_NAME}, the company behind OpenAdminOS.
             </p>
             <p className="mt-3">
               When you choose a hosted language-model provider (Anthropic,
@@ -81,8 +83,11 @@ export default function PrivacyPage() {
               Who is responsible
             </h2>
             <p className="mt-3">
-              OpenAdminOS is an open-source project operated by{" "}
-              {LEGAL_ENTITY_NAME}. The source is at{" "}
+              The controller under the GDPR for this website and for the data
+              described in this policy is {LEGAL_ENTITY_NAME}{" "}
+              (&ldquo;{LEGAL_ENTITY_SHORT_NAME}&rdquo;, &ldquo;we&rdquo;),
+              represented by its managing director, {MANAGING_DIRECTOR_NAME}.
+              OpenAdminOS is our open-source product. The source is at{" "}
               <Link
                 href="https://github.com/OpenAdminOS/OpenAdminOS"
                 target="_blank"
@@ -133,8 +138,7 @@ export default function PrivacyPage() {
                 to the Graph permissions you consented to. Those tokens are
                 stored in your operating-system keychain (macOS Keychain,
                 Windows Credential Manager) and used only by the local app to
-                call Microsoft Graph. They are never transmitted to
-                OpenAdminOS.
+                call Microsoft Graph. They are never transmitted to us.
               </li>
               <li>
                 <span className="text-brand-ink">Microsoft Graph data.</span>{" "}
@@ -150,8 +154,8 @@ export default function PrivacyPage() {
                   Language-model prompts (local provider).
                 </span>{" "}
                 When you select a local LLM provider such as Ollama or LM
-                Studio, prompts and responses stay on your machine. OpenAdminOS
-                does not see them.
+                Studio, prompts and responses stay on your machine. We do not
+                see them.
               </li>
               <li>
                 <span className="text-brand-ink">
@@ -160,9 +164,9 @@ export default function PrivacyPage() {
                 When you select Anthropic, OpenAI, or Azure OpenAI, prompts
                 (which may contain tenant data) are sent over TLS to that
                 provider, under their privacy policy and your account with
-                them. The OpenAdminOS UI labels the selected provider and the
-                region the API is hosted in. OpenAdminOS does not receive a
-                copy of these prompts.
+                them. The app names the selected provider and marks it as
+                hosted before any prompt is sent. We do not receive a copy of
+                these prompts.
               </li>
               <li>
                 <span className="text-brand-ink">No tenant telemetry.</span> The

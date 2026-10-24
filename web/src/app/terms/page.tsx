@@ -7,6 +7,7 @@ import {
   JsonLd,
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
+  LEGAL_ENTITY_SHORT_NAME,
   SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
@@ -16,7 +17,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-06-04";
+const LAST_UPDATED = "2026-10-24";
 const TITLE = "Terms of use";
 const DESCRIPTION =
   "Terms that govern use of the OpenAdminOS desktop app, website, open-source runtime, and community agent registry.";
@@ -62,8 +63,9 @@ export default function TermsPage() {
           <section>
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">Summary</h2>
             <p className="mt-3">
-              OpenAdminOS is open-source software operated by{" "}
-              {LEGAL_ENTITY_NAME} and distributed under the MIT License. These
+              OpenAdminOS is open-source software provided by{" "}
+              {LEGAL_ENTITY_NAME} (&ldquo;{LEGAL_ENTITY_SHORT_NAME}&rdquo;)
+              and distributed under the MIT License. These
               terms govern your use of the desktop app and the website at
               openadminos.com. By installing the app or using the site, you
               agree to them.
@@ -88,7 +90,7 @@ export default function TermsPage() {
               . That license disclaims warranties and limits liability. To
               repeat the substance in plain English: the software is provided
               &ldquo;as is&rdquo;, without warranty of any kind, express or
-              implied. OpenAdminOS is not liable for any damages arising from
+              implied. {LEGAL_ENTITY_SHORT_NAME} is not liable for any damages arising from
               your use of it.
             </p>
           </section>
@@ -113,7 +115,7 @@ export default function TermsPage() {
               </li>
               <li>
                 Community-contributed agents in the registry are not authored
-                or audited by OpenAdminOS. You install and run them at your own
+                or audited by {LEGAL_ENTITY_SHORT_NAME}. You install and run them at your own
                 discretion. Read the source before running any agent against
                 a production tenant.
               </li>
@@ -129,8 +131,8 @@ export default function TermsPage() {
               credentials and with the language-model provider you select
               (local providers such as Ollama or LM Studio, or hosted
               providers such as Anthropic, OpenAI, or Azure OpenAI). Your use
-              of those services is governed by their own terms and pricing.
-              OpenAdminOS is not a party to your contract with Microsoft or with
+              of those services is governed by their own terms and pricing.{" "}
+              {LEGAL_ENTITY_SHORT_NAME} is not a party to your contract with Microsoft or with
               your chosen language-model provider.
             </p>
           </section>
