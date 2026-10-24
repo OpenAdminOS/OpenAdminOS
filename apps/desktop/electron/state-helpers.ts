@@ -584,6 +584,27 @@ export function summarizeMultiTenantResult(
 
 
 
+/**
+ * Read/mutation access to an existing conversation. Multi-tenant result
+ * conversations stay readable; single-tenant conversations require the
+ * owning tenant to be active. Legacy rows without a tenant pass, the
+ * same tolerance assertConversationTenant applies to follow-up sends.
+ */
+export function assertConversationAccess(
+  conversation: IntuneChatConversation,
+  activeTenantId: string | undefined,
+): void {
+  if (conversation.scopeKind === "multi-tenant") return;
+  if (!conversation.tenantId) return;
+  if (conversation.tenantId !== activeTenantId) {
+    throw new Error(
+      "This conversation belongs to a different tenant. Switch to that tenant or start a new conversation.",
+    );
+  }
+}
+
+
+
 export function assertConversationTenant(
   conversation: IntuneChatConversation,
   activeTenantId: string,

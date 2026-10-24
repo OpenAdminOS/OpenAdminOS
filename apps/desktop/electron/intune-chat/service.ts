@@ -61,6 +61,7 @@ import {
 
 import { assertAgentCompatible, withAgentCompatibility } from "../agent-draft-helpers.js";
 import {
+  assertConversationAccess,
   assertConversationTenant,
   buildChatProgressSteps,
   buildIntuneChatSources,
@@ -407,12 +408,27 @@ export class IntuneChatService {
     }
   }
 
+  private async activeTenantId(): Promise<string | undefined> {
+    return (await this.host.read()).activeTenantId;
+  }
+
+  private async requireConversationAccess(conversationId: string): Promise<void> {
+    const store = this.host.requireIntelligenceStore();
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) {
+      throw new Error(`Chat conversation not found: ${conversationId}`);
+    }
+    assertConversationAccess(conversation, await this.activeTenantId());
+  }
+
   async listIntuneChatConversations(): Promise<IntuneChatConversation[]> {
-    return this.host.requireIntelligenceStore().listConversations();
+    const tenantId = (await this.activeTenantId()) ?? "";
+    return this.host.requireIntelligenceStore().listConversations(tenantId);
   }
 
   async searchIntuneChatConversations(query: string): Promise<IntuneChatConversation[]> {
-    return this.host.requireIntelligenceStore().searchConversations(query);
+    const tenantId = (await this.activeTenantId()) ?? "";
+    return this.host.requireIntelligenceStore().searchConversations(query, tenantId);
   }
 
   async renameIntuneChatConversation(
@@ -422,6 +438,7 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
+    await this.requireConversationAccess(conversationId);
     const normalizedTitle = normalizeChatConversationTitle(title);
     return this.host.requireIntelligenceStore().renameConversation(
       conversationId,
@@ -437,6 +454,7 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
+    await this.requireConversationAccess(conversationId);
     return this.host.requireIntelligenceStore().setConversationPinned(
       conversationId,
       pinned,
@@ -448,6 +466,7 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
+    await this.requireConversationAccess(conversationId);
     this.host.requireIntelligenceStore().deleteConversation(conversationId);
   }
 
@@ -455,7 +474,11 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
-    return this.host.requireIntelligenceStore().listMessages(conversationId);
+    const store = this.host.requireIntelligenceStore();
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) return [];
+    assertConversationAccess(conversation, await this.activeTenantId());
+    return store.listMessages(conversationId);
   }
 
   async listTenantGroups(): Promise<TenantGroup[]> {

@@ -409,37 +409,40 @@ export class IntelligenceSqliteStore {
     this.db.close();
   }
 
-  listConversations(): IntuneChatConversation[] {
+  listConversations(tenantId?: string): IntuneChatConversation[] {
+    const scope = conversationTenantScope(tenantId, "chat_conversations");
     const rows = this.db
       .prepare(
         `SELECT id, title, tenant_id, scope_kind, scope_json, multi_tenant_job_id,
                 created_at, updated_at, pinned_at
          FROM chat_conversations
+         ${scope.where}
          ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC`,
       )
-      .all() as unknown as ConversationRow[];
+      .all(...scope.params) as unknown as ConversationRow[];
     return rows.map(readConversation);
   }
 
-  searchConversations(query: string): IntuneChatConversation[] {
+  searchConversations(query: string, tenantId?: string): IntuneChatConversation[] {
     const trimmed = query.trim();
-    if (!trimmed) return this.listConversations();
+    if (!trimmed) return this.listConversations(tenantId);
     const like = `%${escapeSqlLike(trimmed)}%`;
+    const scope = conversationTenantScope(tenantId, "c");
     const rows = this.db
       .prepare(
         `SELECT c.id, c.title, c.tenant_id, c.scope_kind, c.scope_json,
                 c.multi_tenant_job_id, c.created_at, c.updated_at, c.pinned_at
          FROM chat_conversations c
-         WHERE c.title LIKE ? ESCAPE '\\'
+         WHERE (c.title LIKE ? ESCAPE '\\'
             OR EXISTS (
               SELECT 1
               FROM chat_messages m
               WHERE m.conversation_id = c.id
                 AND m.content LIKE ? ESCAPE '\\'
-            )
+            ))${scope.and}
          ORDER BY c.pinned_at IS NULL, c.pinned_at DESC, c.updated_at DESC`,
       )
-      .all(like, like) as unknown as ConversationRow[];
+      .all(like, like, ...scope.params) as unknown as ConversationRow[];
     return rows.map(readConversation);
   }
 
@@ -3646,6 +3649,21 @@ export class IntelligenceSqliteStore {
   private touchWorkspace(id: string, now: string): void {
     this.db.prepare(`UPDATE workspaces SET updated_at = ? WHERE id = ?`).run(now, id);
   }
+}
+
+/**
+ * Tenant visibility for conversation lists. Single-tenant rows belong
+ * to their tenant; multi-tenant result conversations and legacy rows
+ * without a tenant stay visible, matching assertConversationTenant.
+ * Without a tenant id the store returns everything (internal callers).
+ */
+function conversationTenantScope(
+  tenantId: string | undefined,
+  alias: string,
+): { where: string; and: string; params: string[] } {
+  if (tenantId === undefined) return { where: "", and: "", params: [] };
+  const condition = `(${alias}.tenant_id IS NULL OR ${alias}.tenant_id = ? OR ${alias}.scope_kind = 'multi-tenant')`;
+  return { where: `WHERE ${condition}`, and: ` AND ${condition}`, params: [tenantId] };
 }
 
 function readConversation(row: ConversationRow): IntuneChatConversation {

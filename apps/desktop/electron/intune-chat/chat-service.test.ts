@@ -1057,6 +1057,49 @@ describe("Intune Chat host service", () => {
     }
   });
 
+  it("scopes conversation list, read, and mutations to the active tenant", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(statePath, JSON.stringify({
+      activeProviderId: "ollama",
+      installedAgents: [],
+      runs: [],
+      tenants: [
+        { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-account-1", addedAt: now },
+        { id: "tenant-2", displayName: "Fabrikam", username: "admin@fabrikam.example", homeAccountId: "home-account-2", addedAt: now },
+      ],
+      activeTenantId: "tenant-1",
+    }, null, 2), "utf8");
+    const seed = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    seed.createConversation({ id: "chat_a", title: "Contoso devices", tenantId: "tenant-1", now });
+    seed.createConversation({ id: "chat_b", title: "Fabrikam devices", tenantId: "tenant-2", now });
+    seed.insertMessage({ id: "msg_b", conversationId: "chat_b", role: "user", content: "Fabrikam secret question", status: "completed", createdAt: now });
+    seed.close();
+
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => { throw new Error("graph must not run"); },
+      llmFactory: () => { throw new Error("llm must not run"); },
+    });
+    try {
+      assert.deepEqual((await store.listIntuneChatConversations()).map((entry) => entry.id), ["chat_a"]);
+      assert.deepEqual((await store.searchIntuneChatConversations("Fabrikam")).map((entry) => entry.id), []);
+      await assert.rejects(() => store.getIntuneChatMessages("chat_b"), /different tenant/);
+      await assert.rejects(() => store.renameIntuneChatConversation("chat_b", "Renamed"), /different tenant/);
+      await assert.rejects(() => store.setIntuneChatConversationPinned("chat_b", true), /different tenant/);
+      await assert.rejects(() => store.deleteIntuneChatConversation("chat_b"), /different tenant/);
+      const renamed = await store.renameIntuneChatConversation("chat_a", "Contoso renamed");
+      assert.equal(renamed.title, "Contoso renamed");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("allows hosted-provider chat with matching fresh consent", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";

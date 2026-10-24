@@ -157,6 +157,33 @@ describe("Intune Chat SQLite store", () => {
         now: "2026-06-01T10:03:00.000Z",
       });
       assert.equal(store.listConversations()[0]?.id, conversation.id);
+      const otherTenantConversation = store.createConversation({
+        id: "chat_other_tenant",
+        title: "Other tenant Windows review",
+        tenantId: "tenant-2",
+        now: "2026-06-01T10:04:00.000Z",
+      });
+      const multiTenantConversation = store.createConversation({
+        id: "chat_multi",
+        title: "Cross tenant Windows summary",
+        tenantId: "tenant-2",
+        scopeKind: "multi-tenant",
+        now: "2026-06-01T10:05:00.000Z",
+      });
+      assert.deepEqual(
+        store.listConversations("tenant-1").map((entry) => entry.id).sort(),
+        [conversation.id, secondConversation.id, multiTenantConversation.id].sort(),
+      );
+      assert.equal(
+        store.searchConversations("Windows", "tenant-1").some((entry) => entry.id === otherTenantConversation.id),
+        false,
+      );
+      assert.equal(
+        store.searchConversations("Windows", "tenant-2")[0]?.id,
+        multiTenantConversation.id,
+      );
+      store.deleteConversation(otherTenantConversation.id);
+      store.deleteConversation(multiTenantConversation.id);
       store.deleteConversation(secondConversation.id);
       assert.equal(store.getConversation(secondConversation.id), undefined);
 
