@@ -148,6 +148,64 @@ describe("RunResult write confirmation", () => {
     expect(screen.queryByText(/will be retired/i)).not.toBeInTheDocument();
   });
 
+  it("summarizes every PATCH field and a DELETE from the actual requests", async () => {
+    const run = createAwaitingConfirmationRun({
+      id: "run-request-summary",
+      plan: {
+        summary: "Review a multi-field update and deletion.",
+        confirmationPhrase: "APPLY 2 CHANGES",
+        actions: [
+          {
+            id: "action-patch",
+            kind: "update-user",
+            label: "Update Alex Wilber",
+            request: {
+              method: "PATCH",
+              path: "/users/user-1",
+              body: {
+                accountEnabled: false,
+                department: "Security Operations",
+                employeeOrgData: { division: "Response" },
+              },
+            },
+          },
+          {
+            id: "action-delete",
+            kind: "delete-device",
+            label: "Delete stale device",
+            severity: "destructive",
+            request: {
+              method: "DELETE",
+              path: "/deviceManagement/managedDevices/device-1",
+            },
+          },
+        ],
+      },
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        installedAgents: [createMockAgent({ slug: run.agentSlug })],
+        runs: [run],
+      }),
+    );
+
+    renderRoute(<RunResult />, {
+      path: "/runs/:id",
+      route: `/runs/${run.id}`,
+      bridge,
+    });
+
+    expect(
+      await screen.findByText(/PATCH \/users\/user-1.*accountEnabled: false/),
+    ).toHaveTextContent("department: Security Operations");
+    expect(screen.getByText(/employeeOrgData:.*division.*Response/)).toBeInTheDocument();
+    expect(
+      screen.getByText("DELETE /deviceManagement/managedDevices/device-1"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Current tenant state|Current value/)).not.toBeInTheDocument();
+  });
+
   it("renders rollback runs without a rerun action and reports manual changes", async () => {
     const run = createAwaitingConfirmationRun({
       id: "run-baseline-rollback",
