@@ -40,7 +40,10 @@ describe("Menu", () => {
       <Menu
         side="top"
         trigger={<button>Open account</button>}
-        items={[{ id: "settings", label: "Settings", onSelect: vi.fn() }]}
+        items={[
+          { id: "settings", label: "Settings", onSelect: vi.fn() },
+          { id: "tenants", label: "Tenants", onSelect: vi.fn() },
+        ]}
       />,
     );
 
@@ -53,6 +56,14 @@ describe("Menu", () => {
       expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus(),
     );
     expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+
+    // Keyboard navigation keeps the default focus scroll so long menus
+    // reveal the focused item instead of focusing it off screen.
+    focusSpy.mockClear();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Tenants" })).toHaveFocus();
+    expect(focusSpy).toHaveBeenCalledWith();
+    expect(focusSpy).not.toHaveBeenCalledWith({ preventScroll: true });
     focusSpy.mockRestore();
   });
 });

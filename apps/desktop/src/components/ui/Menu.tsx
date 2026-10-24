@@ -52,14 +52,19 @@ export function Menu({
     setOpen(false);
   };
 
-  const focusItem = (index: number) => {
+  const focusItem = (index: number, preventScroll = false) => {
     const entries = Array.from(
       menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
     );
-    // preventScroll: a plain focus() scrolls every scrollable ancestor
-    // (including overflow-hidden shells) to reveal the item, which shifts
-    // the whole layout when the panel opens near a viewport edge.
-    entries[index]?.focus({ preventScroll: true });
+    const entry = entries[index];
+    if (!entry) return;
+    // preventScroll is for the opening focus only: a plain focus() there
+    // scrolls every scrollable ancestor (including overflow-hidden shells)
+    // to reveal the item, which shifts the whole layout when the panel
+    // opens near a viewport edge. Keyboard navigation keeps the default
+    // scroll so long menus reveal the focused item.
+    if (preventScroll) entry.focus({ preventScroll: true });
+    else entry.focus();
   };
 
   useEffect(() => {
@@ -75,7 +80,7 @@ export function Menu({
       id: overlayId,
       onEscape: () => close(true),
     });
-    const frame = window.requestAnimationFrame(() => focusItem(0));
+    const frame = window.requestAnimationFrame(() => focusItem(0, true));
     const onPointerDown = (event: MouseEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) close(false);
     };
