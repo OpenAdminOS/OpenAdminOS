@@ -81,7 +81,7 @@ export function DocsShell({
       <div className="mx-auto w-full max-w-[90rem] flex-1 lg:grid lg:grid-cols-[17rem_minmax(0,1fr)]">
         <aside
           aria-label="Documentation"
-          className="sticky top-16 hidden h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-r border-brand-line-soft px-4 pb-10 pt-8 lg:block"
+          className="sticky top-16 hidden h-[calc(100dvh-4rem)] overflow-y-auto overscroll-contain border-r border-brand-line-soft px-4 pb-10 pt-3 lg:block"
         >
           <DocsSidebarNav base={base} nav={DOCS_NAV} />
         </aside>
