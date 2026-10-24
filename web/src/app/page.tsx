@@ -7,7 +7,6 @@ import {
   ownModel,
   rankedModels,
 } from "~/lib/benchmarks/data";
-import { getAgentStatsSummary } from "~/lib/stats/summary";
 
 import { getGitHubDownloadCount } from "./github-downloads";
 import { getRecentReleases } from "./github-releases";
@@ -222,14 +221,12 @@ function formatStat(value: number) {
 }
 
 export default async function HomePage() {
-  const [latestRelease, githubRepoStats, agentStatsSummary, downloadCount, releases] =
-    await Promise.all([
-      getLatestReleaseDownloads(),
-      getGitHubRepoStats(),
-      getAgentStatsSummary(),
-      getGitHubDownloadCount(),
-      getRecentReleases(4),
-    ]);
+  const [latestRelease, githubRepoStats, downloadCount, releases] = await Promise.all([
+    getLatestReleaseDownloads(),
+    getGitHubRepoStats(),
+    getGitHubDownloadCount(),
+    getRecentReleases(4),
+  ]);
   // Live numbers only. A source that is unavailable is left out, never faked.
   const stats = [
     ...(githubRepoStats
@@ -238,9 +235,8 @@ export default async function HomePage() {
     ...(downloadCount !== null
       ? [{ value: formatStat(downloadCount), label: "Downloads" }]
       : []),
-    ...(agentStatsSummary
-      ? [{ value: formatStat(agentStatsSummary.agentCount), label: "Registry agents" }]
-      : []),
+    // Same source as the registry table below, so the two counts agree.
+    { value: formatStat(REGISTRY_AGENTS.length), label: "Registry agents" },
     { value: "MIT", label: "License" },
   ];
   const downloadUrls = {

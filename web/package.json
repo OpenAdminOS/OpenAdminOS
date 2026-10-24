@@ -12,6 +12,7 @@
     "dev": "next dev --turbo",
     "preview": "next build && next start",
     "start": "next start",
+    "pretypecheck": "npm run sync-stats",
     "typecheck": "tsc --noEmit",
     "landing-shots": "node ./scripts/landing-shots.mjs"
   },
