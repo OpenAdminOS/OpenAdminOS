@@ -130,11 +130,13 @@ The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page
 copy explicitly identifies it as the Impressum / provider identification under
-§ 5 DDG. The legal operator is OpenAdminOS, Winterhuder
-Weg 29, 22085 Hamburg, Germany, reachable at `support@openadminos.com`. The
-listed managing director is Ugur Koc. The register court/register number and VAT
-ID if issued still need confirmation before the provider identification is
-legally complete.
+§ 5 DDG. OpenAdminOS is the product; the company behind it and legal operator
+is Ugurlabs UG (haftungsbeschränkt), Fährstraße 217, 40221 Düsseldorf, Germany,
+registered at Amtsgericht Düsseldorf under HRB 113979, reachable at
+`support@openadminos.com`. The managing director is Ugur Koc. The privacy policy
+names the company as GDPR controller, the terms name it as the provider, and
+the footer copyright uses the company name. The details live once in
+`web/src/app/seo.tsx`. A VAT ID, if one is issued, still needs to be added.
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
 outside click, Escape, or link activation.
