@@ -5,7 +5,13 @@ import { Stage, type StageTone } from "./home/Stage";
 import { LogoMark, Wordmark } from "./Logo";
 import { MobileNav, type MobileNavItem } from "./MobileNav";
 import { ThemeToggle } from "./ThemeToggle";
-import { DOCS_URL, GITHUB_URL, LEGAL_ENTITY_NAME, LINKEDIN_URL } from "./seo";
+import {
+  DOCS_URL,
+  GITHUB_URL,
+  LEGAL_ENTITY_NAME,
+  LINKEDIN_URL,
+  MICROSOFT_NOTICE,
+} from "./seo";
 import { card, eyebrow } from "./ui";
 
 const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
@@ -171,11 +177,7 @@ export function MarketingShell({
               <LogoMark className="h-3.5 w-3.5" />© {new Date().getFullYear()}{" "}
               {LEGAL_ENTITY_NAME}
             </span>
-            <p className="max-w-2xl text-balance md:text-right">
-              Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks
-              of the Microsoft group of companies. OpenAdminOS is not
-              affiliated with, endorsed by, or sponsored by Microsoft.
-            </p>
+            <p className="max-w-2xl text-balance md:text-right">{MICROSOFT_NOTICE}</p>
           </div>
         </div>
       </footer>

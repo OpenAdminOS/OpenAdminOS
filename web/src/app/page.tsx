@@ -194,9 +194,9 @@ const COMMON_QUESTIONS = [
       "Write agents always pause at a diff confirmation screen. Destructive operations require typed confirmation. There is no trust-this-agent bypass and no skip toggle for write operations.",
   },
   {
-    question: "Is OpenAdminOS affiliated with Microsoft?",
+    question: "Is OpenAdminOS a Microsoft product?",
     answer:
-      "No. OpenAdminOS is an independent open-source project. Microsoft 365, Intune, Entra, and Microsoft Graph are Microsoft trademarks and are referenced only to describe compatibility and administration targets.",
+      "No. OpenAdminOS is an independent open-source product from Ugurlabs, a member of the Microsoft AI Cloud Partner Program. It is not made, endorsed, or sponsored by Microsoft. Microsoft 365, Intune, Entra, and Microsoft Graph are Microsoft trademarks and are referenced only to describe compatibility and administration targets.",
   },
 ];
 

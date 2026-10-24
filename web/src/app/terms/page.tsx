@@ -8,6 +8,7 @@ import {
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
   LEGAL_ENTITY_SHORT_NAME,
+  MICROSOFT_NOTICE,
   SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
@@ -17,7 +18,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-10-24";
+const LAST_UPDATED = "2026-10-25";
 const TITLE = "Terms of use";
 const DESCRIPTION =
   "Terms that govern use of the OpenAdminOS desktop app, website, open-source runtime, and community agent registry.";
@@ -170,10 +171,8 @@ export default function TermsPage() {
               Microsoft trademarks
             </h2>
             <p className="mt-3">
-              Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks
-              of the Microsoft group of companies. OpenAdminOS is not affiliated
-              with, endorsed by, or sponsored by Microsoft. References to those
-              services describe compatibility and administration targets only.
+              {MICROSOFT_NOTICE} References to those services describe
+              compatibility and administration targets only.
             </p>
           </section>
 
