@@ -38,14 +38,14 @@ export function MobileNav({ items }: { items: readonly MobileNavItem[] }) {
   }, [pathname]);
 
   return (
-    <div className="relative md:hidden">
+    <div className="relative lg:hidden">
       <button
         type="button"
         aria-controls={menuId}
         aria-expanded={isOpen}
         title={isOpen ? "Close menu" : "Open menu"}
         onClick={() => setIsOpen((current) => !current)}
-        className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-brand-line-strong bg-brand-surface text-brand-muted transition hover:border-brand-accent hover:text-brand-ink focus:outline-none focus:ring-2 focus:ring-brand-accent"
+        className="inline-flex h-10 w-10 items-center justify-center rounded-[10px] border border-brand-line text-brand-ink transition-colors hover:bg-brand-hover"
       >
         <span className="sr-only">{isOpen ? "Close menu" : "Open menu"}</span>
         <span
@@ -82,7 +82,7 @@ export function MobileNav({ items }: { items: readonly MobileNavItem[] }) {
         id={menuId}
         aria-label="Mobile navigation"
         aria-hidden={!isOpen}
-        className={`absolute right-0 top-[calc(100%+0.75rem)] z-40 w-[min(18rem,calc(100vw-3rem))] origin-top-right overflow-hidden rounded-lg border border-brand-line-strong bg-brand-raised/95 p-1 shadow-[0_24px_80px_rgba(0,0,0,0.42)] backdrop-blur transition ${
+        className={`absolute right-0 top-[calc(100%+0.75rem)] z-40 w-[min(18rem,calc(100vw-3rem))] origin-top-right overflow-hidden rounded-[14px] bg-brand-raised p-1.5 shadow-(--shadow-pop) transition ${
           isOpen
             ? "pointer-events-auto translate-y-0 scale-100 opacity-100"
             : "pointer-events-none -translate-y-1 scale-[0.98] opacity-0"
@@ -96,10 +96,10 @@ export function MobileNav({ items }: { items: readonly MobileNavItem[] }) {
             rel={item.external ? "noreferrer" : undefined}
             tabIndex={isOpen ? undefined : -1}
             onClick={() => closeIfRouteWillNotChange(item)}
-            className={`block rounded-md px-3 py-2.5 text-sm transition ${
+            className={`block rounded-[10px] px-3 py-2.5 text-sm transition-colors ${
               item.primary
-                ? "bg-brand-ink text-brand-bg hover:bg-brand-ink/90 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
-                : "text-brand-muted hover:bg-brand-surface hover:text-brand-accent-text focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-accent"
+                ? "mt-1 bg-brand-ink font-medium text-brand-on-ink hover:bg-brand-ink-hover"
+                : "text-brand-muted hover:bg-brand-hover hover:text-brand-ink"
             }`}
           >
             {item.label}

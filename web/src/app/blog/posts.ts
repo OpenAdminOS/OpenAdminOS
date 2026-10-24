@@ -401,7 +401,7 @@ function isParagraphLine(line: string) {
 }
 
 function stripFirstHeading(markdown: string) {
-  return markdown.replace(/^# .+\n+/, "");
+  return markdown.replace(/^\s*# .+\n+/, "");
 }
 
 function stripInternalSections(markdown: string) {

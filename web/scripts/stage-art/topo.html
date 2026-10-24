@@ -1,0 +1,51 @@
+<!doctype html>
+<!-- Relief-map stage artwork for openadminos.com. Seeded gradient noise with
+     domain warp, a hillshaded color ramp, and marching-squares contours.
+     Rendered by render.mjs from variants.json. -->
+<html><body style="margin:0"><canvas id="c"></canvas><script>
+// Seeded value-noise fBm with domain warp, contoured with marching squares.
+function rng(seed){return function(){seed|=0;seed=seed+0x6D2B79F5|0;let t=Math.imul(seed^seed>>>15,1|seed);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function makeNoise(seed){const r=rng(seed),p=new Uint8Array(512),g=[];for(let i=0;i<256;i++){p[i]=i;const a=r()*Math.PI*2;g.push([Math.cos(a),Math.sin(a)])}
+for(let i=255;i>0;i--){const j=(r()*(i+1))|0;[p[i],p[j]]=[p[j],p[i]]}for(let i=0;i<256;i++)p[i+256]=p[i];
+const f=t=>t*t*t*(t*(t*6-15)+10);
+return(x,y)=>{const X=Math.floor(x)&255,Y=Math.floor(y)&255,xf=x-Math.floor(x),yf=y-Math.floor(y);
+const d=(h,dx,dy)=>{const v=g[p[h]];return v[0]*dx+v[1]*dy};
+const n00=d(p[X]+Y,xf,yf),n10=d(p[X+1]+Y,xf-1,yf),n01=d(p[X]+Y+1,xf,yf-1),n11=d(p[X+1]+Y+1,xf-1,yf-1);
+const u=f(xf),v=f(yf);return (n00*(1-u)+n10*u)*(1-v)+(n01*(1-u)+n11*u)*v}}
+window.render=function(o){
+ const W=o.w,H=o.h,c=document.getElementById('c');c.width=W;c.height=H;const x=c.getContext('2d');
+ x.fillStyle=o.bg;x.fillRect(0,0,W,H);
+ const n=makeNoise(o.seed),n2=makeNoise(o.seed+7);
+ const fbm=(px,py)=>{let a=0,amp=1,fr=1;for(let i=0;i<(o.octaves||3);i++){a+=amp*n(px*fr,py*fr);amp*=.5;fr*=2.1}return a};
+ const S=o.step||6, cols=Math.ceil(W/S)+1, rows=Math.ceil(H/S)+1, F=new Float32Array(cols*rows);
+ for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){const px=i*S/o.scale,py=j*S/o.scale;
+  const wx=px+(o.warp??1.2)*fbm(px*.5+3.1,py*.5+1.7),wy=py+(o.warp??1.2)*fbm(px*.5-2.3,py*.5+4.9);
+  F[j*cols+i]=fbm(wx,wy)+ (o.tilt||0)*(j/rows) + .35*n2(px*.25,py*.25);}
+ let mn=1e9,mx=-1e9;for(const v of F){mn=Math.min(mn,v);mx=Math.max(mx,v)}
+ if(o.shade){const off=document.createElement('canvas');off.width=cols;off.height=rows;const ox=off.getContext('2d');const im=ox.createImageData(cols,rows);
+  const lo=o.lo,hi=o.hi;const L=[-.6,-.7,.4];
+  for(let j=0;j<rows;j++)for(let i=0;i<cols;i++){const v=(F[j*cols+i]-mn)/(mx-mn);
+   const gx=(F[j*cols+Math.min(i+1,cols-1)]-F[j*cols+Math.max(i-1,0)])*o.relief,gy=(F[Math.min(j+1,rows-1)*cols+i]-F[Math.max(j-1,0)*cols+i])*o.relief;
+   const nl=Math.hypot(gx,gy,1);const sh=Math.max(0,(-gx*L[0]-gy*L[1]+L[2])/nl/Math.hypot(...L));
+   const t=v*o.tint+(sh-.5)*o.shade;const k=(j*cols+i)*4;
+   const q=Math.max(0,Math.min(1,v));const R=o.ramp;let a0=R[0],a1=R[R.length-1];for(let r=0;r<R.length-1;r++){if(q>=R[r][0]&&q<=R[r+1][0]){a0=R[r];a1=R[r+1];break}}
+   const u=(q-a0[0])/((a1[0]-a0[0])||1);const lit=(sh-.55)*o.shade;
+   for(let c=0;c<3;c++){const base=a0[1][c]+(a1[1][c]-a0[1][c])*u;im.data[k+c]=Math.max(0,Math.min(255,base+lit*255));}im.data[k+3]=255;}
+  ox.putImageData(im,0,0);x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(off,0,0,cols*S,rows*S);}
+ x.lineCap='round';x.lineJoin='round';
+ for(let k=1;k<o.levels;k++){const t=mn+(mx-mn)*k/o.levels;const major=k%o.majorEvery===0;
+  x.strokeStyle=major?o.lineMajor:o.line;x.lineWidth=major?o.wMajor:o.w1;x.beginPath();
+  for(let j=0;j<rows-1;j++)for(let i=0;i<cols-1;i++){
+   const a=F[j*cols+i],b=F[j*cols+i+1],cc=F[(j+1)*cols+i+1],d=F[(j+1)*cols+i];
+   const idx=(a>t?8:0)|(b>t?4:0)|(cc>t?2:0)|(d>t?1:0);if(idx===0||idx===15)continue;
+   const X0=i*S,Y0=j*S,lerp=(p,q)=>(t-p)/(q-p);
+   const top=[X0+S*lerp(a,b),Y0],right=[X0+S,Y0+S*lerp(b,cc)],bot=[X0+S*lerp(d,cc),Y0+S],left=[X0,Y0+S*lerp(a,d)];
+   const seg=(P,Q)=>{x.moveTo(P[0],P[1]);x.lineTo(Q[0],Q[1])};
+   switch(idx){case 1:case 14:seg(left,bot);break;case 2:case 13:seg(bot,right);break;case 3:case 12:seg(left,right);break;
+    case 4:case 11:seg(top,right);break;case 5:seg(left,top);seg(bot,right);break;case 6:case 9:seg(top,bot);break;
+    case 7:case 8:seg(left,top);break;case 10:seg(left,bot);seg(top,right);break;}
+  }x.stroke();}
+ // soft vignette tone
+ if(o.vignette){const gr=x.createRadialGradient(W*.5,H*.45,H*.2,W*.5,H*.5,W*.75);gr.addColorStop(0,'rgba(0,0,0,0)');gr.addColorStop(1,o.vignette);x.fillStyle=gr;x.fillRect(0,0,W,H)}
+ return true};
+</script></body></html>

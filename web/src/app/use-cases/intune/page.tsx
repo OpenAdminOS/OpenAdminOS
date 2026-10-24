@@ -66,6 +66,7 @@ export default function IntuneUseCasePage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="sage"
         eyebrow="Intune use cases"
         title="Tenant investigations that need more than a script."
         description={DESCRIPTION}
@@ -81,10 +82,10 @@ export default function IntuneUseCasePage() {
 
       <section className="mt-12 grid gap-5 border-t border-brand-line pt-12 md:grid-cols-[0.9fr_1.1fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             Microsoft Graph
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             Agents declare every Graph scope they need.
           </h2>
         </div>
@@ -102,7 +103,7 @@ export default function IntuneUseCasePage() {
           </p>
           <Link
             href="/llm-providers"
-            className="inline-flex font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
+            className="inline-flex font-medium text-link"
           >
             Compare local and hosted providers
           </Link>

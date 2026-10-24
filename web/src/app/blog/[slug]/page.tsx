@@ -125,7 +125,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
             <span aria-hidden="true">/</span>
             <span>{post.readingTime}</span>
           </div>
-          <h1 className="mt-5 max-w-4xl text-balance text-4xl font-semibold tracking-tight text-brand-ink sm:text-6xl">
+          <h1 className="font-display mt-5 max-w-4xl text-balance text-[2.6rem] leading-[1.05] text-brand-ink sm:text-[4rem]">
             {post.title}
           </h1>
           <p className="mt-5 max-w-3xl text-base leading-7 text-brand-muted sm:text-lg">
@@ -136,7 +136,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
             alt={post.imageAlt}
             width="1200"
             height="630"
-            className="mt-8 aspect-[1200/630] w-full rounded-lg border border-brand-line bg-brand-surface object-cover"
+            className="mt-8 aspect-[1200/630] w-full rounded-[14px] border border-brand-line bg-brand-surface object-cover"
             loading="eager"
             fetchPriority="high"
           />
@@ -146,11 +146,11 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
           <div className="min-w-0">
             <section
               aria-labelledby="takeaways-heading"
-              className="rounded-lg border border-brand-line-strong bg-brand-surface p-5"
+              className="rounded-[14px] border border-brand-line-strong bg-brand-surface p-5"
             >
               <h2
                 id="takeaways-heading"
-                className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-accent-text"
+                className="text-sm font-medium text-brand-faint"
               >
                 Short version
               </h2>
@@ -159,7 +159,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
                   <li key={takeaway} className="flex gap-3">
                     <span
                       aria-hidden="true"
-                      className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent"
+                      className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-faint"
                     />
                     <span>{renderInline(takeaway)}</span>
                   </li>
@@ -171,8 +171,8 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
               {post.blocks.map((block, index) => renderBlock(block, index))}
             </div>
 
-            <section className="mt-12 rounded-lg border border-brand-line bg-brand-surface p-5">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-accent-text">
+            <section className="mt-12 rounded-[14px] border border-brand-line bg-brand-surface p-5">
+              <h2 className="text-sm font-medium text-brand-faint">
                 About the author
               </h2>
               <p className="mt-3 max-w-3xl text-sm leading-6 text-brand-muted">
@@ -184,7 +184,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
             </section>
 
             <footer className="mt-12 border-t border-brand-line pt-8">
-              <h2 className="text-sm font-semibold uppercase tracking-[0.18em] text-brand-accent-text">
+              <h2 className="text-sm font-medium text-brand-faint">
                 Related
               </h2>
               <div className="mt-4 flex flex-wrap gap-3">
@@ -192,7 +192,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
                   <Link
                     key={link.href}
                     href={link.href}
-                    className="rounded-md border border-brand-line bg-brand-surface px-3 py-2 text-sm text-brand-muted transition hover:border-brand-line-strong hover:text-brand-accent-text"
+                    className="rounded-[10px] border border-brand-line bg-brand-surface px-3 py-2 text-sm text-brand-muted transition hover:border-brand-line-strong hover:text-brand-ink"
                   >
                     {link.label}
                   </Link>
@@ -202,8 +202,8 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
           </div>
 
           <aside className="self-start lg:sticky lg:top-6">
-            <div className="rounded-lg border border-brand-line bg-brand-surface p-4">
-              <h2 className="text-sm font-semibold tracking-tight text-brand-ink">
+            <div className="rounded-[14px] border border-brand-line bg-brand-surface p-4">
+              <h2 className="text-sm font-medium text-brand-ink">
                 In this article
               </h2>
               <nav aria-label="Article sections" className="mt-4">
@@ -221,7 +221,7 @@ export default async function BlogPostPage({ params }: BlogPostPageProps) {
                 </ol>
               </nav>
               <div className="mt-5 border-t border-brand-line pt-4">
-                <p className="text-xs font-semibold uppercase tracking-[0.18em] text-brand-accent-text">
+                <p className="text-sm font-medium text-brand-faint">
                   Primary query
                 </p>
                 <p className="mt-2 font-mono text-xs leading-5 text-brand-muted">
@@ -244,7 +244,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
           <h2
             key={`${block.id}-${index}`}
             id={block.id}
-            className="scroll-mt-24 pt-4 text-2xl font-semibold tracking-tight text-brand-ink"
+            className="font-display scroll-mt-24 pt-4 text-[1.85rem] leading-tight text-brand-ink"
           >
             {block.text}
           </h2>
@@ -255,7 +255,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
         <h3
           key={`${block.id}-${index}`}
           id={block.id}
-          className="scroll-mt-24 pt-2 text-xl font-semibold tracking-tight text-brand-ink"
+          className="font-display scroll-mt-24 pt-2 text-[1.4rem] leading-tight text-brand-ink"
         >
           {block.text}
         </h3>
@@ -273,7 +273,7 @@ function renderBlock(block: MarkdownBlock, index: number) {
             <li key={item} className="flex gap-3">
               <span
                 aria-hidden="true"
-                className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-accent"
+                className="mt-3 h-1.5 w-1.5 shrink-0 rounded-full bg-brand-faint"
               />
               <span>{renderInline(item)}</span>
             </li>
@@ -297,14 +297,14 @@ function renderBlock(block: MarkdownBlock, index: number) {
       return (
         <blockquote
           key={index}
-          className="max-w-3xl border-l-2 border-brand-accent/55 pl-4 text-base leading-7 text-brand-muted"
+          className="max-w-3xl border-l-2 border-brand-line-strong pl-4 text-base leading-7 text-brand-muted"
         >
           {renderInline(block.text)}
         </blockquote>
       );
     case "table":
       return (
-        <div key={index} className="overflow-x-auto rounded-lg border border-brand-line bg-brand-surface">
+        <div key={index} className="overflow-x-auto rounded-[14px] border border-brand-line bg-brand-surface">
           <table className="min-w-full border-collapse text-left text-sm">
             <thead className="bg-brand-raised text-brand-ink">
               <tr>
