@@ -32,6 +32,29 @@ describe("Menu", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu")).not.toBeInTheDocument();
   });
+
+  it("opens upward with side=top and focuses without scrolling ancestors", async () => {
+    const user = userEvent.setup();
+    const focusSpy = vi.spyOn(HTMLButtonElement.prototype, "focus");
+    render(
+      <Menu
+        side="top"
+        trigger={<button>Open account</button>}
+        items={[{ id: "settings", label: "Settings", onSelect: vi.fn() }]}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Open account" }));
+
+    const menu = screen.getByRole("menu");
+    expect(menu.className).toContain("bottom-[calc(100%+6px)]");
+    expect(menu.className).not.toContain("top-[calc(100%+6px)]");
+    await waitFor(() =>
+      expect(screen.getByRole("menuitem", { name: "Settings" })).toHaveFocus(),
+    );
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true });
+    focusSpy.mockRestore();
+  });
 });
 
 function renderMenu(onSelect: () => void) {

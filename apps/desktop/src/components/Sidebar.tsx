@@ -570,6 +570,7 @@ function AccountRow({
     <>
       <Menu
         align="start"
+        side="top"
         ariaLabel="Account and application"
         className="mt-1 w-full"
         trigger={

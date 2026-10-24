@@ -26,6 +26,7 @@ export interface MenuProps {
   trigger: ReactElement<Record<string, unknown>>;
   items: readonly MenuEntry[];
   align?: "start" | "end";
+  side?: "top" | "bottom";
   ariaLabel?: string;
   className?: string;
 }
@@ -34,6 +35,7 @@ export function Menu({
   trigger,
   items,
   align = "end",
+  side = "bottom",
   ariaLabel = "Actions",
   className = "",
 }: MenuProps) {
@@ -54,14 +56,17 @@ export function Menu({
     const entries = Array.from(
       menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
     );
-    entries[index]?.focus();
+    // preventScroll: a plain focus() scrolls every scrollable ancestor
+    // (including overflow-hidden shells) to reveal the item, which shifts
+    // the whole layout when the panel opens near a viewport edge.
+    entries[index]?.focus({ preventScroll: true });
   };
 
   useEffect(() => {
     if (!open) {
       if (returnFocusRef.current) {
         returnFocusRef.current = false;
-        window.requestAnimationFrame(() => triggerRef.current?.focus());
+        window.requestAnimationFrame(() => triggerRef.current?.focus({ preventScroll: true }));
       }
       return;
     }
@@ -116,16 +121,16 @@ export function Menu({
     const current = entries.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === "ArrowDown") {
       event.preventDefault();
-      entries[(current + 1 + entries.length) % entries.length]?.focus();
+      focusItem((current + 1 + entries.length) % entries.length);
     } else if (event.key === "ArrowUp") {
       event.preventDefault();
-      entries[(current - 1 + entries.length) % entries.length]?.focus();
+      focusItem((current - 1 + entries.length) % entries.length);
     } else if (event.key === "Home") {
       event.preventDefault();
-      entries[0]?.focus();
+      focusItem(0);
     } else if (event.key === "End") {
       event.preventDefault();
-      entries.at(-1)?.focus();
+      focusItem(entries.length - 1);
     } else if (event.key === "Tab") {
       close(false);
     }
@@ -141,7 +146,9 @@ export function Menu({
           role="menu"
           aria-label={ariaLabel}
           onKeyDown={onMenuKeyDown}
-          className={`absolute top-[calc(100%+6px)] z-[80] min-w-48 overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)] ${
+          className={`absolute z-[80] min-w-48 overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)] ${
+            side === "top" ? "bottom-[calc(100%+6px)]" : "top-[calc(100%+6px)]"
+          } ${
             align === "end" ? "right-0" : "left-0"
           }`}
         >
