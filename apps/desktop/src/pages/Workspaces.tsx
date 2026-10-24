@@ -27,6 +27,7 @@ export interface WorkspacesProps {
   leadingAction?: ReactNode;
   selectedWorkspaceId?: string | null;
   createRequest?: number;
+  onCreateRequestConsumed?: (request: number) => void;
   onWorkspaceSelected?: (workspaceId: string | null) => void;
   onWorkspacesChange?: (workspaces: WorkspaceSummary[]) => void;
 }
@@ -36,6 +37,7 @@ export default function Workspaces({
   leadingAction,
   selectedWorkspaceId,
   createRequest = 0,
+  onCreateRequestConsumed,
   onWorkspaceSelected,
   onWorkspacesChange,
 }: WorkspacesProps = {}) {
@@ -103,7 +105,8 @@ export default function Workspaces({
     if (!embedded || createRequest === 0) return;
     setCreateTenantId(state.activeTenantId ?? state.tenants[0]?.id ?? "");
     setCreateOpen(true);
-  }, [createRequest, embedded, state.activeTenantId, state.tenants]);
+    onCreateRequestConsumed?.(createRequest);
+  }, [createRequest, embedded, onCreateRequestConsumed, state.activeTenantId, state.tenants]);
 
   useEffect(() => {
     const api = window.openAdminOS;

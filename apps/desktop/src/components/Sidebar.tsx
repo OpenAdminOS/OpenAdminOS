@@ -18,6 +18,7 @@ import {
 import { isNightlyVersion } from "../shared/update-channel";
 import { SHORTCUTS, shortcutLabel } from "../shared/shortcuts";
 import { openNovaPanel } from "../shared/nova-panel";
+import { userFacingErrorReason } from "../copy";
 import {
   IconActivity,
   IconAgentTeam,
@@ -40,6 +41,7 @@ import {
 } from "./icons";
 import { MultiTenantTile, TenantTile } from "./TenantTile";
 import { Modal, ModalHeader } from "./Modal";
+import { useToast } from "./Toast";
 import { Kbd, Menu, Tooltip } from "./ui";
 
 export { SIDEBAR_COLLAPSED_KEY };
@@ -95,6 +97,7 @@ function recentGroup(value: string, now = new Date()): string {
 
 export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
   const navigate = useNavigate();
+  const toast = useToast();
   const { state } = useAppState();
   const { collapsed, toggleSidebar } = useShellChrome();
   const {
@@ -149,14 +152,30 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     navigate("/chat?new=1");
   };
 
+  const runConversationAction = (label: string, action: () => Promise<unknown>) => {
+    void action().catch((error: unknown) => {
+      const detail = userFacingErrorReason(
+        error instanceof Error ? error.message : String(error),
+      );
+      toast.error(
+        `${label} failed.${detail ? ` ${detail}` : ""} Try again from the conversation menu.`,
+      );
+    });
+  };
+
   const focusAdjacent = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.defaultPrevented) return;
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+    const target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (!target.matches("a[href], button:not([disabled])")) return;
+    if (target.closest('[role="menu"], [role="listbox"]')) return;
     const controls = Array.from(
       event.currentTarget.querySelectorAll<HTMLElement>(
-        'a[href], button:not([disabled]), input:not([disabled])',
+        'a[href], button:not([disabled])',
       ),
-    );
-    const index = controls.indexOf(document.activeElement as HTMLElement);
+    ).filter((control) => !control.closest('[role="menu"], [role="listbox"]'));
+    const index = controls.indexOf(target);
     if (index < 0 || controls.length === 0) return;
     event.preventDefault();
     const next =
@@ -257,9 +276,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
                   tenants={state.tenants}
                   onOpen={() => openConversation(conversation.id)}
                   onRename={() => requestRename(conversation)}
-                  onPin={() => void togglePinned(conversation)}
-                  onExport={() => void exportConversation(conversation)}
-                  onMove={() => void moveToWorkspace(conversation)}
+                  onPin={() => runConversationAction("Pinning the conversation", () => togglePinned(conversation))}
+                  onExport={() => runConversationAction("Exporting the conversation", () => exportConversation(conversation))}
+                  onMove={() => runConversationAction("Moving the conversation", () => moveToWorkspace(conversation))}
                   onDelete={() => requestDelete(conversation)}
                 />
               ))}
@@ -327,9 +346,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
                   tenants={state.tenants}
                   onOpen={() => openConversation(conversation.id)}
                   onRename={() => requestRename(conversation)}
-                  onPin={() => void togglePinned(conversation)}
-                  onExport={() => void exportConversation(conversation)}
-                  onMove={() => void moveToWorkspace(conversation)}
+                  onPin={() => runConversationAction("Pinning the conversation", () => togglePinned(conversation))}
+                  onExport={() => runConversationAction("Exporting the conversation", () => exportConversation(conversation))}
+                  onMove={() => runConversationAction("Moving the conversation", () => moveToWorkspace(conversation))}
                   onDelete={() => requestDelete(conversation)}
                 />
               ))}
@@ -430,6 +449,7 @@ function ConversationRow({
     if (!contextMenu) return;
     const close = () => setContextMenu(null);
     const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") close();
     };
     window.addEventListener("mousedown", close);

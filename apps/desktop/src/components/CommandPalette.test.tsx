@@ -232,6 +232,60 @@ it("uses server conversation search for message-content matches", async () => {
   ).toBeInTheDocument();
 });
 
+it("loads workspaces once per open and hides stale conversations while search is pending", async () => {
+  const user = userEvent.setup();
+  const listWorkspaces = vi.fn(async () => []);
+  const searchIntuneChatConversations = vi.fn(async () => [
+    {
+      id: "conversation-search-result",
+      title: "Matching server result",
+      createdAt: "2026-10-10T08:00:00.000Z",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant" as const,
+    },
+  ]);
+  renderRoute(<CommandPalette open onClose={vi.fn()} />, {
+    path: "/",
+    route: "/",
+    bridge: makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [
+        {
+          id: "conversation-recent",
+          title: "Unrelated recent conversation",
+          createdAt: "2026-10-10T08:00:00.000Z",
+          updatedAt: "2026-10-10T09:00:00.000Z",
+          tenantId: "tenant-1",
+          scopeKind: "single-tenant" as const,
+        },
+      ]),
+      listWorkspaces,
+      searchIntuneChatConversations,
+    }),
+  });
+
+  expect(
+    await screen.findByRole("option", { name: /Unrelated recent conversation/ }),
+  ).toBeInTheDocument();
+  const search = screen.getByRole("combobox", {
+    name: "Search commands, agents, or pages",
+  });
+  await user.type(search, "message-only match");
+
+  expect(
+    screen.queryByRole("option", { name: /Unrelated recent conversation/ }),
+  ).not.toBeInTheDocument();
+  await waitFor(() =>
+    expect(searchIntuneChatConversations).toHaveBeenLastCalledWith(
+      "message-only match",
+    ),
+  );
+  expect(
+    await screen.findByRole("option", { name: /Matching server result/ }),
+  ).toBeInTheDocument();
+  expect(listWorkspaces).toHaveBeenCalledTimes(1);
+});
+
 it("lists all theme actions and applies the selected theme", async () => {
   const user = userEvent.setup();
   const setAppearance = vi.fn(async () => undefined);

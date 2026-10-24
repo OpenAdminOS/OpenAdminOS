@@ -276,6 +276,7 @@ function IntuneChatContent() {
     conversationSearch,
     panelMode,
     workspaceCreateRequest,
+    consumeWorkspaceCreateRequest,
     tenantWorkspaces: workspaces,
     cacheStatus,
     setPendingConversation,
@@ -619,7 +620,7 @@ function IntuneChatContent() {
     startNewConversation(true);
     // The one-shot query is intentionally removed after resetting Chat.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.search, navigate, sending]);
+  }, [location.search, sending]);
 
   useEffect(() => {
     const onNewConversation = () => startNewConversation();
@@ -667,8 +668,18 @@ function IntuneChatContent() {
       setInput(content);
       return;
     }
-    const requestedAgent = matchComposerAgent(content, state.installedAgents);
-    if (requestedAgent) {
+    const requestedAgentMatch = matchComposerAgent(content, state.installedAgents);
+    if (requestedAgentMatch?.extraInstructions) {
+      writeChatDraft(targetConversationId, content);
+      setInput(content);
+      setError(null);
+      setNotice(
+        `${formatAgentDisplayName(requestedAgentMatch.agent)} runs without extra instructions. Remove the text after the agent name and send again, or send the text as a normal chat message.`,
+      );
+      return;
+    }
+    if (requestedAgentMatch) {
+      const requestedAgent = requestedAgentMatch.agent;
       clearChatDraft(targetConversationId);
       setInput("");
       if (requestedAgent.mode === "write") {
@@ -1500,6 +1511,7 @@ function IntuneChatContent() {
   );
   useEffect(() => {
     const onRenameShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key !== "F2" || !activeConversation || workspaceView || sending) return;
       event.preventDefault();
       requestRename(activeConversation);
@@ -1688,6 +1700,7 @@ function IntuneChatContent() {
           embedded
           selectedWorkspaceId={routeWorkspaceId ?? null}
           createRequest={workspaceCreateRequest}
+          onCreateRequestConsumed={consumeWorkspaceCreateRequest}
           onWorkspaceSelected={(workspaceId) =>
             navigate(
               workspaceId
@@ -2264,6 +2277,7 @@ function ChatComposer({
           autoComplete="off"
           onChange={(event) => onValueChange(event.target.value)}
           onKeyDown={(event) => {
+            if (event.defaultPrevented) return;
             if (pickerOpen && pickerEntries.length > 0) {
               if (event.key === "ArrowDown" || event.key === "ArrowUp") {
                 event.preventDefault();
@@ -2387,6 +2401,7 @@ function ComposerModelPopover({
       if (details?.open && !details.contains(event.target as Node)) details.open = false;
     };
     const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const details = detailsRef.current;
       if (event.key !== "Escape" || !details?.open) return;
       event.preventDefault();
@@ -2651,6 +2666,7 @@ function ComposerScopePopover({
       if (details?.open && !details.contains(event.target as Node)) details.open = false;
     };
     const closeFromEscape = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       const details = detailsRef.current;
       if (event.key !== "Escape" || !details?.open) return;
       event.preventDefault();
@@ -2671,9 +2687,11 @@ function ComposerScopePopover({
         aria-label={`Scope: ${label}`}
         aria-disabled={disabled}
         onClick={(event) => {
+          if (event.defaultPrevented) return;
           if (disabled) event.preventDefault();
         }}
         onKeyDown={(event) => {
+          if (event.defaultPrevented) return;
           if (disabled && (event.key === "Enter" || event.key === " ")) {
             event.preventDefault();
           }
@@ -4462,16 +4480,33 @@ function formatDateTime(value: string) {
   }).format(date);
 }
 
-function matchComposerAgent(content: string, agents: AgentSummary[]): AgentSummary | undefined {
-  const normalized = content.trimStart().toLocaleLowerCase();
+interface ComposerAgentMatch {
+  agent: AgentSummary;
+  extraInstructions: string;
+}
+
+function matchComposerAgent(
+  content: string,
+  agents: AgentSummary[],
+): ComposerAgentMatch | undefined {
+  const trimmed = content.trimStart();
+  const normalized = trimmed.toLocaleLowerCase();
   if (!normalized.startsWith("/")) return undefined;
-  return agents.find((agent) => {
-    const names = [formatAgentDisplayName(agent), agent.name, agent.slug];
-    return names.some((name) => {
+  const matches = agents.flatMap((agent) =>
+    [formatAgentDisplayName(agent), agent.name, agent.slug].flatMap((name) => {
       const token = `/${name.toLocaleLowerCase()}`;
-      return normalized === token || normalized.startsWith(`${token} `);
-    });
-  });
+      if (!normalized.startsWith(token)) return [];
+      const boundary = normalized[token.length];
+      if (boundary !== undefined && !/\s/u.test(boundary)) return [];
+      return [{ agent, tokenLength: token.length }];
+    }),
+  );
+  const match = matches.sort((left, right) => right.tokenLength - left.tokenLength)[0];
+  if (!match) return undefined;
+  return {
+    agent: match.agent,
+    extraInstructions: trimmed.slice(match.tokenLength).trim(),
+  };
 }
 
 function suggestionLabel(prompt: string): string {

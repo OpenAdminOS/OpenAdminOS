@@ -1,6 +1,6 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { SIDEBAR_COLLAPSED_KEY } from "./Sidebar";
 import { AppShell } from "./AppShell";
 import {
@@ -147,4 +147,82 @@ describe("Sidebar", () => {
     expect(within(dialog).getByText("Ctrl+Shift+S")).toBeInTheDocument();
     expect(within(dialog).getByText("Open Voice")).toBeInTheDocument();
   });
+
+  it.each([
+    {
+      action: "Pin",
+      failure: "Pin IPC failed.",
+      expected: /Pinning the conversation failed.*Try again from the conversation menu/,
+      overrides: { setIntuneChatConversationPinned: vi.fn(async () => { throw new Error("Pin IPC failed."); }) },
+    },
+    {
+      action: "Export",
+      failure: "Export IPC failed.",
+      expected: /Exporting the conversation failed.*Try again from the conversation menu/,
+      overrides: { getIntuneChatMessages: vi.fn(async () => { throw new Error("Export IPC failed."); }) },
+    },
+    {
+      action: "Move to workspace",
+      failure: "Workspace IPC failed.",
+      expected: /Moving the conversation failed.*Try again from the conversation menu/,
+      overrides: { createWorkspace: vi.fn(async () => { throw new Error("Workspace IPC failed."); }) },
+    },
+  ])("surfaces $action failures with recovery", async ({ action, failure, expected, overrides }) => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [sidebarConversation]),
+      ...overrides,
+    });
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/runs",
+      bridge,
+    });
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: `More actions for ${sidebarConversation.title}`,
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: action }));
+
+    const alert = await screen.findByRole("alert");
+    expect(alert).toHaveTextContent(failure);
+    expect(alert).toHaveTextContent(expected);
+  });
+
+  it("keeps menu and search keyboard navigation inside their controls", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({
+        listIntuneChatConversations: vi.fn(async () => [sidebarConversation]),
+      }),
+    });
+
+    const search = await screen.findByRole("searchbox", { name: "Search workspaces" });
+    search.focus();
+    await user.keyboard("{ArrowDown}{Home}{End}");
+    expect(search).toHaveFocus();
+
+    const more = screen.getByRole("button", {
+      name: `More actions for ${sidebarConversation.title}`,
+    });
+    more.focus();
+    await user.keyboard("{ArrowDown}");
+    const pin = await screen.findByRole("menuitem", { name: "Pin" });
+    await waitFor(() => expect(pin).toHaveFocus());
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Rename" })).toHaveFocus();
+  });
 });
+
+const sidebarConversation = {
+  id: "conversation-sidebar",
+  title: "Sidebar investigation",
+  createdAt: "2026-10-10T08:00:00.000Z",
+  updatedAt: "2026-10-10T09:00:00.000Z",
+  tenantId: "tenant-1",
+  scopeKind: "single-tenant" as const,
+};

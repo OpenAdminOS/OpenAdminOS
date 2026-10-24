@@ -1,5 +1,5 @@
 import { Nova } from "../voice/Nova";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Sidebar } from "./Sidebar";
 import { CommandPalette } from "./CommandPalette";
@@ -22,6 +22,8 @@ export { PageHeader } from "./ui/PageHeader";
 export function AppShell({ children }: { children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const navigate = useNavigate();
+  const navigateRef = useRef(navigate);
+  navigateRef.current = navigate;
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -31,16 +33,17 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
       if (matchesShortcut(e, "commandPalette")) {
         if (!paletteOpen && overlayStackSize() > 0) return;
         e.preventDefault();
         setPaletteOpen((o) => !o);
       } else if (matchesShortcut(e, "newConversation") && overlayStackSize() === 0) {
         e.preventDefault();
-        navigate("/chat?new=1");
+        navigateRef.current("/chat?new=1");
       } else if (matchesShortcut(e, "settings") && overlayStackSize() === 0) {
         e.preventDefault();
-        navigate("/settings");
+        navigateRef.current("/settings");
       } else if (matchesShortcut(e, "toggleSidebar") && overlayStackSize() === 0) {
         e.preventDefault();
         window.dispatchEvent(new CustomEvent("openadminos:toggle-sidebar"));
@@ -48,7 +51,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [navigate, paletteOpen]);
+  }, [paletteOpen]);
 
   return (
     <ReportIssueProvider>

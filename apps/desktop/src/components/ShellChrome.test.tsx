@@ -76,6 +76,96 @@ describe("shell chrome", () => {
     expect(checkForUpdatesNow).toHaveBeenCalledTimes(1);
   });
 
+  it("keeps connected tenants selectable when none is active", async () => {
+    const user = userEvent.setup();
+    const state = {
+      ...createMockAppState(),
+      activeTenantId: undefined,
+    };
+    const setActiveTenant = vi.fn(async () => ({ ...state, activeTenantId: "tenant-1" }));
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({ setActiveTenant }, state),
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Choose an active tenant" }),
+    );
+    await user.click(screen.getByRole("menuitemradio", { name: /Contoso IT/ }));
+    expect(setActiveTenant).toHaveBeenCalledWith("tenant-1");
+  });
+
+  it("surfaces tenant switch and updater retry failures", async () => {
+    const user = userEvent.setup();
+    const state = {
+      ...createMockAppState(),
+      activeTenantId: undefined,
+    };
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(
+        {
+          setActiveTenant: vi.fn(async () => {
+            throw new Error("Tenant activation failed at the host.");
+          }),
+          getUpdateState: vi.fn(async () => ({
+            status: "error" as const,
+            message: "Update check failed. Network unavailable.",
+          })),
+          checkForUpdatesNow: vi.fn(async () => {
+            throw new Error("The update service is unavailable.");
+          }),
+        },
+        state,
+      ),
+    });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Choose an active tenant" }),
+    );
+    await user.click(screen.getByRole("menuitemradio", { name: /Contoso IT/ }));
+    expect(await screen.findByText(/Switching tenants failed.*Try again from the tenant menu/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Retry" }));
+    expect(
+      await screen.findByText(/The update could not be installed|The update check failed.*Try again from About and updates/),
+    ).toBeInTheDocument();
+  });
+
+  it("surfaces update status and restart IPC failures with recovery", async () => {
+    const loadFailure = renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({
+        getUpdateState: vi.fn(async () => {
+          throw new Error("Update state IPC failed.");
+        }),
+      }),
+    });
+    expect(
+      await screen.findByText(/update status could not be loaded.*Try again from About and updates/i),
+    ).toBeInTheDocument();
+    loadFailure.unmount();
+
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({
+        getUpdateState: vi.fn(async () => ({ status: "ready" as const })),
+        applyUpdateNow: vi.fn(async () => {
+          throw new Error("Update install IPC failed.");
+        }),
+      }),
+    });
+    await user.click(await screen.findByRole("button", { name: "Restart" }));
+    expect(
+      await screen.findByText(/update could not be installed.*Try again from About and updates/i),
+    ).toBeInTheDocument();
+  });
+
   it("lets an active hosted voice session override a local provider boundary", async () => {
     const user = userEvent.setup();
     renderRoute(
