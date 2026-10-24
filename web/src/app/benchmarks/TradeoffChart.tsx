@@ -112,6 +112,16 @@ export function TradeoffChart({
         const cx = x(valueOf(model));
         const cy = y(model.score);
         const flip = cx > LEFT + PLOT_W * 0.66;
+        // A side label that would run over another model's marker (two models
+        // with the same score sit on one row) moves above its own point.
+        const width = model.name.length * 6.2;
+        const start = flip ? cx - 14 - width : cx + 14;
+        const end = flip ? cx - 14 : cx + 14 + width;
+        const above = data.models.some((other) => {
+          if (other.id === model.id) return false;
+          const ox = x(valueOf(other));
+          return Math.abs(y(other.score) - cy) < 14 && ox + 10 > start && ox - 10 < end;
+        });
         return (
           <g key={model.id}>
             <circle
@@ -126,11 +136,10 @@ export function TradeoffChart({
               <title>{`${model.name}: ${model.score} of ${data.taskCount}, ${format(valueOf(model))}`}</title>
             </circle>
             <text
-              x={cx + (flip ? -14 : 14)}
-              y={cy + 4}
-              textAnchor={flip ? "end" : "start"}
-              className="text-[11px] font-medium"
-              fill={colours[model.id]}
+              x={above ? cx : cx + (flip ? -14 : 14)}
+              y={above ? cy - 14 : cy + 4}
+              textAnchor={above ? "middle" : flip ? "end" : "start"}
+              className="fill-brand-ink text-[11px] font-medium"
             >
               {model.name}
             </text>
