@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
 
 import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
+import { AppShell } from "../components/AppShell";
 import {
   createAwaitingConfirmationRun,
   createMockAgent,
@@ -181,6 +182,76 @@ describe("IntuneChat new conversation routing", () => {
   });
 });
 
+describe("IntuneChat shell conversation actions", () => {
+  it("keeps the active transcript streaming when another conversation is pinned", async () => {
+    const user = userEvent.setup();
+    const activeConversation: IntuneChatConversation = {
+      id: "conversation-active",
+      title: "Active investigation",
+      createdAt: "2026-10-10T08:00:00.000Z",
+      updatedAt: "2026-10-10T10:00:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const otherConversation: IntuneChatConversation = {
+      ...activeConversation,
+      id: "conversation-other",
+      title: "Other investigation",
+      updatedAt: "2026-10-10T09:00:00.000Z",
+    };
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [
+        activeConversation,
+        otherConversation,
+      ]),
+      streamIntuneChatMessage: vi.fn(
+        async () => await new Promise<never>(() => undefined),
+      ),
+    });
+
+    renderWithAppState(
+      <Routes>
+        <Route
+          path="/chat/:conversationId?"
+          element={
+            <AppShell>
+              <IntuneChat />
+              <LocationProbe />
+            </AppShell>
+          }
+        />
+      </Routes>,
+      { route: `/chat/${activeConversation.id}`, bridge },
+    );
+
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
+    await user.type(composer, "Continue checking stale devices");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", {
+        name: `More actions for ${otherConversation.title}`,
+      }),
+    );
+    await user.click(screen.getByRole("menuitem", { name: "Pin" }));
+
+    await waitFor(() =>
+      expect(bridge.setIntuneChatConversationPinned).toHaveBeenCalledWith(
+        otherConversation.id,
+        true,
+      ),
+    );
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      `/chat/${activeConversation.id}`,
+    );
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+  });
+});
+
 describe("IntuneChat tenant briefing", () => {
   it("shows real confirmation work and opens its existing review route", async () => {
     const user = userEvent.setup();
@@ -298,6 +369,78 @@ describe("IntuneChat agent picker", () => {
 
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("inactive-devices", undefined));
     expect(screen.getByTestId("location")).toHaveTextContent("/runs/run-new-1");
+  });
+
+  it("matches the longest installed agent name case-insensitively", async () => {
+    const user = userEvent.setup();
+    const deviceAgent = createMockAgent({
+      id: "device",
+      slug: "device",
+      name: "Device",
+      mode: "read",
+    });
+    const deviceAuditAgent = createMockAgent({
+      id: "device-audit",
+      slug: "device-audit",
+      name: "Device Audit",
+      mode: "read",
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ installedAgents: [deviceAgent, deviceAuditAgent] }),
+    );
+
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<><IntuneChat /><LocationProbe /></>} />
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
+    await user.type(composer, "/DEVICE AUDIT");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    await waitFor(() =>
+      expect(bridge.startRun).toHaveBeenCalledWith("device-audit", undefined),
+    );
+    expect(bridge.startRun).not.toHaveBeenCalledWith("device", undefined);
+  });
+
+  it("keeps trailing agent instructions in the composer and explains recovery", async () => {
+    const user = userEvent.setup();
+    const readAgent = createMockAgent({
+      id: "device-audit",
+      slug: "device-audit",
+      name: "Device Audit",
+      mode: "read",
+    });
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({ installedAgents: [readAgent] }),
+    );
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    const composer = await screen.findByRole("combobox", {
+      name: "Ask about your Microsoft 365 tenant",
+    });
+    const command = "/Device Audit\ncheck stale devices";
+    await user.type(composer, command);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+
+    expect(bridge.startRun).not.toHaveBeenCalled();
+    expect(composer).toHaveValue(command);
+    expect(
+      screen.getByText(/Device Audit runs without extra instructions.*send again/),
+    ).toBeInTheDocument();
   });
 });
 

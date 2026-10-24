@@ -1929,6 +1929,14 @@ Conversation and workspace state is shared by the shell and Chat so first-send
 pending insertion, search, reload reconciliation, rename, pin, export, move,
 and delete behavior is identical from either surface.
 
+**Updated 2026-10-24:** Shell conversation reloads follow active-tenant changes,
+while conversation search follows only its query. Pin, rename, export, and move
+refresh the sidebar in place. Deleting a non-active conversation also stays on
+the current route; deleting the open conversation returns to `/chat`. Workspace
+create requests are one-shot events and cannot reopen the dialog on a later
+visit. If connected tenants remain but none is active, the top-bar tenant
+control opens the tenant menu so the admin can select one or connect another.
+
 **Updated 2026-10-23:** Agent Team stays a top-level destination; Runs stays a
 daily page; Workspaces live in the sidebar and Chat; Connectors and Data stay in
 Settings; Nova moves to the account menu; the top-bar boundary chip is always
@@ -2031,9 +2039,11 @@ North-star metric: time from install to first successful result, target under 5 
   topmost-Escape model, dialog/combobox semantics, initial focus, focus trapping,
   and focus return. Escape never confirms an action.
 - Chat send/stream/stop/fail/retry behavior is an explicit tested state machine. A failed question remains available to Retry, and retry re-enters the same tenant, hosted-provider, and workspace-context checks.
+- Slash commands select the longest matching installed agent name, case-insensitively, and require the full name followed by whitespace or the end of the input. Agent runs do not accept free-form arguments, so trailing text remains in the composer with a recovery notice instead of being discarded or run silently. Write agents still open their confirmation route.
 - Conversation drafts use per-conversation `sessionStorage` for v0.4. Drafts remain on the device, survive route changes within the session, clear after a successful send, and are never sent without the user action.
 - Persisted conversations use `/chat/:conversationId` and Settings sections use `/settings/:section`. Reload and browser history restore those selections; `/chat` remains a new draft, and deleted or unknown conversation links render an explicit local recovery state instead of silently selecting another conversation.
 - User-visible error details pass through the typed copy sanitizer before rendering. Stack frames, local paths, multiline exceptions, and oversized implementation details stay out of Chat, Settings, and write confirmation surfaces while short actionable provider or tenant messages remain visible.
+- Write confirmation summarizes the real request method and target, plus every body field and value. It never invents before/after state that the write plan did not provide, and request previews and typed destructive confirmation remain unchanged.
 - Hosted multi-tenant consent is recorded as a one-response acknowledgement. The batch modal does not offer a remembered-consent choice, so its audit payload must not claim one; every later hosted batch prompts again.
 - At 1100 px and below, the Chat and Workspaces panel closes into a full-text overlay drawer; it never becomes a numbered mini-rail. The primary navigation frame remains fixed. Production screenshot evidence covers seven states, including typed write confirmation, at 900, 1100, and 1600 px with long tenant/model fixtures, default and reduced-motion lanes, and page-level overflow failure.
 - Informative metadata uses at least 11 px and a minimum 4.5:1 token contrast on production surfaces. Placeholder text uses `--color-text-placeholder` and holds 4.5:1 on every input surface; `--color-text-faint` is decorative-only. Accent-filled controls use `--color-on-accent` rather than hardcoded ink literals. Semantic foreground tokens hold 4.5:1 on their paired soft backgrounds over every production surface. Reduced-motion and forced-colors fallbacks are global.

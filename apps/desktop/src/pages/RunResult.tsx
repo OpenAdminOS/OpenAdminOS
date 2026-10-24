@@ -649,8 +649,8 @@ function ActionRow({ action, index }: { action: WriteAction; index: number }) {
               {action.description}
             </div>
           ) : null}
-          <div className={`mt-1 truncate font-mono text-xs ${destructive ? "text-[var(--color-danger)]" : "text-[var(--color-text-soft)]"}`}>
-            {actionTransition(action)}
+          <div className={`mt-1 whitespace-pre-wrap break-words font-mono text-xs ${destructive ? "text-[var(--color-danger)]" : "text-[var(--color-text-soft)]"}`}>
+            {actionRequestSummary(action)}
           </div>
         </div>
         <Badge tone={destructive ? "danger" : "neutral"}>{badgeLabel}</Badge>
@@ -830,26 +830,32 @@ function formatRequestPreview(request: NonNullable<WriteAction["request"]>): str
   return `${head}\n\n${body}`;
 }
 
-function actionTransition(action: WriteAction): string {
-  const extended = action as WriteAction & { before?: unknown; after?: unknown };
-  if (extended.before !== undefined || extended.after !== undefined) {
-    return `${shortValue(extended.before)} → ${shortValue(extended.after)}`;
+function actionRequestSummary(action: WriteAction): string {
+  const request = action.request;
+  if (!request) return `${action.kind}: ${action.label}`;
+  const requestTarget = `${request.method} ${request.path}`;
+  if (request.body === undefined) return requestTarget;
+  if (
+    request.body !== null &&
+    typeof request.body === "object" &&
+    !Array.isArray(request.body)
+  ) {
+    const fields = Object.entries(request.body as Record<string, unknown>);
+    if (fields.length === 0) return `${requestTarget} · body: {}`;
+    return `${requestTarget} · ${fields
+      .map(([field, value]) => `${field}: ${requestSummaryValue(value)}`)
+      .join(" · ")}`;
   }
-  if (action.request?.body && typeof action.request.body === "object" && !Array.isArray(action.request.body)) {
-    const [first] = Object.entries(action.request.body as Record<string, unknown>);
-    if (first) return `Current value → ${first[0]}: ${shortValue(first[1])}`;
-  }
-  return `Current tenant state → ${action.label}`;
+  return `${requestTarget} · body: ${requestSummaryValue(request.body)}`;
 }
 
-function shortValue(value: unknown): string {
-  if (value === undefined) return "Not recorded";
+function requestSummaryValue(value: unknown): string {
+  if (value === undefined) return "undefined";
   if (value === null) return "null";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   try {
-    const serialized = JSON.stringify(value);
-    return serialized.length > 100 ? `${serialized.slice(0, 97)}...` : serialized;
+    return JSON.stringify(value);
   } catch {
     return String(value);
   }
