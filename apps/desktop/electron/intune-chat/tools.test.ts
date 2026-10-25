@@ -86,6 +86,44 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("query_cache accepts operator objects in where for comparison filters", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 0);
+    try {
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        label: "Intune managed devices",
+        scopeSet: ["DeviceManagementManagedDevices.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [
+          { id: "stale-1", deviceName: "STALE-1", operatingSystem: "Windows", lastSyncDateTime: "2026-05-10T09:00:00.000Z" },
+          { id: "fresh-1", deviceName: "FRESH-1", operatingSystem: "Windows", lastSyncDateTime: "2026-05-30T09:00:00.000Z" },
+          { id: "fresh-2", deviceName: "FRESH-2", operatingSystem: "macOS", lastSyncDateTime: "2026-05-31T09:00:00.000Z" },
+        ],
+      });
+      const ctx = toolContext(store);
+      // The shape models reach for when a comparison does not fit the
+      // scalar where map: an operator object per field.
+      const stale = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        where: { lastSyncDateTime: { lt: "2026-05-20" } },
+        limit: 25,
+      });
+      assert.equal(stale.trace.error, undefined);
+      assert.equal((stale.result as { totalCount: number }).totalCount, 1);
+
+      const wrongOp = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        where: { lastSyncDateTime: { approx: "2026-05-20" } },
+      });
+      assert.match(wrongOp.trace.error ?? "", /Unsupported query_cache operator: approx/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("list_cached_resources staleness follows per-resource host TTLs", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
@@ -325,6 +363,50 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(byId.trace.error, undefined);
       assert.ok(byIdScopes.includes("GroupMember.Read.All"));
       assert.equal(requests, 1);
+
+      // Mixed-case paths still attribute the declared scope.
+      const upper = await executeIntuneChatTool(byIdCtx, "graph_get", {
+        path: "/GROUPS/11111111-2222-3333-4444-555555555555",
+      });
+      assert.equal(upper.trace.error, undefined);
+      assert.ok(byIdScopes.includes("GroupMember.Read.All"));
+      assert.equal(requests, 2);
+
+      // A function segment is not a by-id child: this one needs the
+      // ReadWrite scope Chat never requests.
+      const fn = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/deviceManagement/deviceCompliancePolicies/getDevicesScheduledToRetire",
+      });
+      assert.match(fn.trace.error ?? "", /does not request/);
+      assert.equal(requests, 2);
+
+      // A type-cast segment is not a by-id child either.
+      const cast = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/applications/microsoft.graph.agentIdentityBlueprint",
+      });
+      assert.match(cast.trace.error ?? "", /does not request/);
+      assert.equal(requests, 2);
+
+      // Verified deeper reads: another user's memberships are covered
+      // by the already-consented User.Read.All even though the catalog
+      // lists only the self-only User.Read least-privileged scope.
+      let memberScopes: string[] = [];
+      const memberCtx = toolContext(store, {
+        graphForScopes: async (scopes) => {
+          memberScopes = scopes;
+          return graph;
+        },
+      });
+      const memberOf = await executeIntuneChatTool(memberCtx, "graph_get", {
+        path: "/users/11111111-2222-3333-4444-555555555555/memberOf",
+      });
+      assert.equal(memberOf.trace.error, undefined);
+      assert.ok(memberScopes.includes("User.Read.All"));
+      const transitive = await executeIntuneChatTool(memberCtx, "graph_get", {
+        path: "/users/11111111-2222-3333-4444-555555555555/transitiveMemberOf",
+      });
+      assert.equal(transitive.trace.error, undefined);
+      assert.equal(requests, 4);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });

@@ -531,6 +531,27 @@ it('does not accept a false zero after an invalid filter, and permits a correcte
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
+it('lets a successful live read of the same resource resolve a failed cache query', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agentic-live-resolves-'));
+  const store = seededStore(dir);
+  try {
+    const input = baseInput(store, scriptedLlm([
+      JSON.stringify({ tool: 'query_cache', params: { resource: 'managedDevices', where: { deviceEncryptionState: 'unencrypted' } } }),
+      JSON.stringify({ tool: 'graph_get', params: { path: '/deviceManagement/managedDevices', query: { $filter: "lastSyncDateTime lt 2026-05-20" } } }),
+      'STALE-1 has not synced since 2026-05-10.',
+      'STALE-1 has not synced since 2026-05-10.',
+    ]));
+    input.tools.graphForScopes = async () => ({
+      listManagedDevices: async () => [],
+      retireManagedDevice: async () => { throw Error('Unexpected write'); },
+      request: async () => ({ value: [{ id: 'stale-1', deviceName: 'STALE-1', lastSyncDateTime: '2026-05-10T09:00:00.000Z' }] }),
+    });
+    const result = await runAgenticChat(input);
+    assert.equal(result.ok, true);
+    assert.equal(result.answer, 'STALE-1 has not synced since 2026-05-10.');
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 it('does not turn failed license reads into an empty-tenant answer from unrelated cached users', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agentic-failed-license-'));
   const store = seededStore(dir);

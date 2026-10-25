@@ -321,7 +321,18 @@ export async function runAgenticChat(
         invalidQueries.set(key, execution.trace.error);
         const selection = params.query?.$select;
         failedGraphFields.set(key, Array.isArray(selection) ? selection : typeof selection === 'string' ? selection.split(',').map(field => field.trim()) : []);
-      } else { invalidQueries.delete(key); failedGraphFields.delete(key); }
+      } else {
+        invalidQueries.delete(key); failedGraphFields.delete(key);
+        // A successful live read of a planner collection supersedes a
+        // failed cache query for the same resource: the live rows are
+        // the fresher evidence the failed lookup was reaching for, so
+        // they must not stay blocked by the earlier failure.
+        const livePath = String(params?.path ?? '').split('?')[0]!.toLowerCase().replace(/\/+$/, '');
+        const resource = GRAPH_CACHE_RESOURCES.find(
+          entry => pathForResource(entry.resource).path.toLowerCase() === livePath,
+        )?.resource;
+        if (resource) invalidQueries.delete(resource);
+      }
     }
     input.onToolFinish?.({
       traceEntry: execution.trace,
