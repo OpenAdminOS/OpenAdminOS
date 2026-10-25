@@ -561,6 +561,25 @@ describe("IntuneChat trust presentation", () => {
     expect(screen.getByText("Local model. Tenant data stays on this device.")).toBeInTheDocument();
   });
 
+  it("activates the provider when picking another provider's model", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge();
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.click(screen.getByLabelText(/Model:/));
+    await user.click(await screen.findByRole("menuitemradio", { name: /gpt-5/ }));
+
+    await waitFor(() => {
+      expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
+      expect(bridge.setActiveModel).toHaveBeenCalledWith("openai", "gpt-5");
+    });
+  });
+
   it("shows a setup action when no model is ready", async () => {
     const providers = mockProviders.map((provider) =>
       provider.id === "ollama"

@@ -262,6 +262,7 @@ function IntuneChatContent() {
     startRun,
     refresh,
     loading,
+    setActiveProvider,
     setActiveModel,
   } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
@@ -1559,6 +1560,9 @@ function IntuneChatContent() {
   const handleModelSelect = async (providerId: ProviderId, model: string) => {
     setError(null);
     try {
+      if (providerId !== state.activeProviderId) {
+        await setActiveProvider(providerId);
+      }
       await setActiveModel(providerId, model);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));

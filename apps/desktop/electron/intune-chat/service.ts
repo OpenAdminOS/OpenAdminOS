@@ -412,6 +412,24 @@ export class IntuneChatService {
     return (await this.host.read()).activeTenantId;
   }
 
+  /**
+   * Fail closed when the persisted provider id is not in the catalog.
+   * Substituting providers[0] would silently send tenant context to a
+   * provider the admin never selected.
+   */
+  private resolveActiveProvider(
+    providers: ProviderSummary[],
+    activeProviderId: ProviderId,
+  ): ProviderSummary {
+    const provider = providers.find((entry) => entry.id === activeProviderId);
+    if (!provider) {
+      throw new Error(
+        `The selected provider (${activeProviderId}) is no longer available. Open Settings and choose a connected provider.`,
+      );
+    }
+    return provider;
+  }
+
   private async requireConversationAccess(conversationId: string): Promise<void> {
     const store = this.host.requireIntelligenceStore();
     const conversation = store.getConversation(conversationId);
@@ -534,9 +552,8 @@ export class IntuneChatService {
     const preflight = await this.buildMultiTenantPreflight(input);
     const providers = await this.host.listProviders();
     const activeTenant = this.host.resolveTenant(persisted);
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
     if (provider?.isLocal === false && input.hostedProviderConsent) {
       this.recordHostedProviderConsentSafely({
@@ -1065,9 +1082,8 @@ export class IntuneChatService {
     const resources = sanitizeGraphResources([...resourceSet]);
     const requiredScopes = requiredScopesForResources(resources);
     const providers = await this.host.listProviders();
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     const model = resolveProviderDefaultModel(
       provider,
       persisted.activeModelByProviderId,
@@ -1491,9 +1507,8 @@ export class IntuneChatService {
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
     const providers = await this.host.listProviders();
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     const selectedModel = resolveProviderDefaultModel(
       provider,
       persisted.activeModelByProviderId,
@@ -1767,9 +1782,8 @@ export class IntuneChatService {
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
     const providers = await this.host.listProviders();
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     options.signal?.throwIfAborted();
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");

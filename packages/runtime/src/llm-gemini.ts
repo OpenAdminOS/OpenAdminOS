@@ -6,6 +6,12 @@ import { CliEvents, CliProviderError, cliFailure, cliProviderEnv, discoverCli, r
 import { rpcObject } from "./cli-rpc.js";
 
 export interface GeminiProviderOptions { binaryPath?: string; defaultModel?: string; timeoutMs?: number; }
+/**
+ * Picker-facing sentinel for "the CLI's configured model". The probe must
+ * advertise at least one model or host pickers hide Gemini entirely, but
+ * the sentinel is never passed to the CLI as --model.
+ */
+export const GEMINI_DEFAULT_MODEL = "gemini-default";
 // Gemini has no non-interactive auth-status command. Only an actual successful
 // request marks it connected; discovering files is never proof of authentication.
 const verified = new Map<string, { model: string } | CliProviderError>();
@@ -17,7 +23,7 @@ export async function probeGeminiLlm(options: GeminiProviderOptions = {}): Promi
     requireCliVersion(detected.version, "0.59.0", "Gemini CLI");
     const state = verified.get(keyFor(detected.binaryPath, detected.version));
     return { installed: true, ready: Boolean(state && !(state instanceof Error)), ...detected,
-      models: [], ...(state instanceof CliProviderError ? { failure: state.failure } : {}),
+      models: [GEMINI_DEFAULT_MODEL], defaultModel: GEMINI_DEFAULT_MODEL, ...(state instanceof CliProviderError ? { failure: state.failure } : {}),
       detail: state instanceof Error ? state.message : state ? "Last Gemini CLI request succeeded. The CLI selects its configured model." : "Gemini CLI is installed. Use Test to verify its existing sign-in and model access. To sign in, run `gemini` in a terminal." };
   } catch (error) {
     return { installed: !(error instanceof CliProviderError && error.failure === "not-installed"), ready: false, ...detected, models: [], failure: error instanceof CliProviderError ? error.failure : "request-failed", detail: error instanceof Error ? error.message : "Gemini could not be checked. Refresh providers to retry." };
@@ -61,9 +67,10 @@ export function createGeminiLlm(options: GeminiProviderOptions = {}): RunLlmApi 
         await writeFile(settingsPath, JSON.stringify(GEMINI_PROVIDER_SETTINGS), { mode: 0o600 });
         await writeFile(systemPath, input.system ?? "Answer only from the supplied context. Do not execute actions.", { mode: 0o600 });
         await writeFile(policyPath, '[[rule]]\ntoolName = "*"\ndecision = "deny"\npriority = 999\n', { mode: 0o600 });
-        let model = input.model ?? options.defaultModel ?? "gemini-default";
+        let model = input.model ?? options.defaultModel ?? GEMINI_DEFAULT_MODEL;
         const args = ["--prompt", "Answer the supplied request.", "--output-format", "stream-json", "--extensions", "none", "--allowed-mcp-server-names", "__openadminos_no_servers__", "--admin-policy", policyPath];
-        if (input.model ?? options.defaultModel) args.push("--model", model);
+        const requestedModel = input.model ?? options.defaultModel;
+        if (requestedModel && requestedModel !== GEMINI_DEFAULT_MODEL) args.push("--model", model);
         input.signal?.throwIfAborted();
         child = spawnProvider(detected.binaryPath, args, { ...env, GEMINI_CLI_SYSTEM_SETTINGS_PATH: settingsPath, GEMINI_SYSTEM_MD: systemPath }, folder);
         const events = new CliEvents<LlmStreamChunk>();

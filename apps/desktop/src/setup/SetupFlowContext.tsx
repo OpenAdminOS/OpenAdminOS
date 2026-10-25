@@ -78,7 +78,11 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       return Boolean(
         provider &&
           isProviderImplemented(provider.id) &&
-          provider.status === "connected",
+          (provider.status === "connected" ||
+            // The host accepts a fully configured Azure deployment at
+            // "available" (its probe has no connected state). Gating on
+            // "connected" alone made every Azure send loop into setup.
+            (provider.id === "azure-openai" && provider.status === "available")),
       );
     },
     [state.activeProviderId, state.providers],
