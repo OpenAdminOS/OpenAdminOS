@@ -22,6 +22,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- The macOS DMG install window now uses a light paper background, so the "OpenAdminOS" and "Applications" labels under the icons are readable. Finder always draws those labels in black when a window has a background picture.
 - Fix the sidebar jumping up and hiding its header when the tenant account menu opens. The menu now opens upward from the footer, and menu focus no longer scrolls the shell.
 - Investigative Chat answers are no longer accepted without tenant evidence. A model reply that checks no tenant data gets bounded repair prompts, then a deterministic answer with a visible notice. This affected CLI-agent providers most visibly, where a prose refusal could persist as a clean completed answer with sources attached.
 - Scope Chat conversations to the active tenant. Another tenant's conversations no longer appear in list or search, and the host refuses read, rename, pin, delete, and export across tenants. Multi-tenant-scope and legacy untenanted conversations stay visible under any tenant, as SPEC records. Switching tenants now drops the previous tenant's conversations and transcript from the shell immediately.
