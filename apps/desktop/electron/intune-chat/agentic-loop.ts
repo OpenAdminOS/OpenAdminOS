@@ -367,11 +367,17 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput): string {
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
     "You can investigate read-only tenant data by asking the host to run tools.",
-    ...input.plannedResources.slice(0, 6).map(resource => `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${(pathForResource(resource).select ?? input.tools.store.graphCacheFields(input.tenant.id, resource)).slice(0, 24).join(', ')}.`),
+    ...input.plannedResources.slice(0, 6).map(resource => {
+      const fields = [...new Set([...(pathForResource(resource).select ?? []), ...input.tools.store.graphCacheFields(input.tenant.id, resource)])];
+      return `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${fields.slice(0, 24).join(', ')}.`;
+    }),
     'Filters preserve JSON types: accountEnabled, securityEnabled and isEncrypted take boolean true or false. For a count, request limit:1 and select:["id"], then use totalCount from the filtered query, not the number of returned rows. A list is capped; say so when more rows match.',
 
     input.plannedResources.includes('managedDevices')
       ? 'managedDevices cache fields: operatingSystem (for example "Windows"), deviceName, complianceState, isEncrypted (boolean true = encrypted, false = not encrypted, null = unknown). Encryption is separate from compliance. For unencrypted Windows devices use query_cache with {"resource":"managedDevices","where":{"operatingSystem":"Windows","isEncrypted":false}}. Pass select as a top-level array of available field names, never inside where.'
+      : '',
+    input.plannedResources.includes('mobileApps')
+      ? 'mobileApps cache field @odata.type identifies the Intune app subtype and platform (for example #microsoft.graph.macOSPkgApp). For a platform app count, use query_cache with {"resource":"mobileApps","filters":[{"field":"@odata.type","op":"contains","value":"macOS"}],"select":["id"],"limit":1} and use totalCount.'
       : '',
 
     "Every tool call is visible to the admin and recorded with the final answer.",

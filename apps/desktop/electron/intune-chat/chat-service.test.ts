@@ -1561,7 +1561,11 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
   const graph: RunGraphApi = {listManagedDevices:async () => [], retireManagedDevice:async () => {throw new Error('Unexpected write');}, request:async ({path}) => {
     requests.push(path);
     if (path === '/deviceManagement/managedDevices') return {value:[{id:'a',deviceName:'Device A',complianceState:'noncompliant'},{id:'b',deviceName:'Device B',complianceState:'noncompliant'},{id:'c',deviceName:'Compliant device',complianceState:'compliant'}]};
-    if (path === '/deviceAppManagement/mobileApps') return {value:[{id:'app-a',displayName:'Managed app'}]};
+    if (path === '/deviceAppManagement/mobileApps') return {value:[
+      {id:'app-mac-pkg',displayName:'Mac PKG','@odata.type':'#microsoft.graph.macOSPkgApp'},
+      {id:'app-mac-dmg',displayName:'Mac DMG','@odata.type':'#microsoft.graph.macOSDmgApp'},
+      {id:'app-win',displayName:'Win32 app','@odata.type':'#microsoft.graph.win32LobApp'},
+    ]};
     if (path === '/deviceManagement/detectedApps') return {value:[{id:'detected-a',displayName:'Detected app A'},{id:'detected-b',displayName:'Detected app B'}]};
     return {value:[]};
   }};
@@ -1573,9 +1577,12 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
     assert.doesNotMatch(report.assistantMessage.content, /Compliant device/);
     assert.deepEqual(requests, ['/deviceManagement/managedDevices']);
     const apps = await store.streamIntuneChatMessage({content:'How many apps do I have'}, ()=>{});
-    assert.match(apps.assistantMessage.content, /1 Intune app catalog entries/);
+    assert.match(apps.assistantMessage.content, /3 Intune app catalog entries/);
     assert.match(apps.assistantMessage.content, /2 detected app inventory entries/);
     assert.deepEqual(requests.slice(1).sort(), ['/deviceAppManagement/mobileApps','/deviceManagement/detectedApps'].sort());
+    const macApps = await store.streamIntuneChatMessage({content:'how many macos apps?'}, ()=>{});
+    assert.match(macApps.assistantMessage.content, /2 macOS Intune app catalog entries/);
+    assert.deepEqual(macApps.assistantMessage.sources?.map(source => source.resource), ['mobileApps']);
     const agent = await store.streamIntuneChatMessage({content:'Tenant change audit',refreshIfStale:false}, ()=>{});
     assert.match(agent.assistantMessage.content, /installed read-only agent/);
     assert.doesNotMatch(agent.assistantMessage.content, /cannot perform tenant changes/);

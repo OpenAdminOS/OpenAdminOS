@@ -1,6 +1,6 @@
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import type { WebSearch } from "./web-search.js";
-import { voiceConversationContext, voiceInventoryAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
+import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -1553,7 +1553,10 @@ export class IntuneChatService {
       });
     }
     const planned = planChatContext(content);
-    if (voiceDeviceEvidenceIntent(content) && !planned.hasWriteIntent) planned.resources = ["managedDevices"];
+    const directResources = voiceDeviceEvidenceIntent(content)
+      ? ["managedDevices" as const]
+      : voiceResourcesForQuestion(content);
+    if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1652,7 +1655,12 @@ export class IntuneChatService {
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
 
-    const directDeviceAnswer = !planned.hasWriteIntent ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id), () => {}, entry => { (toolTrace ??= []).push(entry); }) : undefined;
+    const directDeviceAnswer = !planned.hasWriteIntent
+      ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
+        voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
+          this.graphAggregatesFor(store, tenant.id, [resource])[resource],
+        )
+      : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -2142,7 +2150,7 @@ export class IntuneChatService {
       });
     };
 
-    const directVoiceAnswer = await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+    const directVoiceAnswer = await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;

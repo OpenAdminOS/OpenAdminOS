@@ -891,7 +891,7 @@ export function pathForResource(resource: GraphCacheResourceKind): {
     case "detectedApps":
       return {
         path: "/deviceManagement/detectedApps",
-        select: ["id", "displayName", "version", "sizeInByte", "deviceCount", "publisher"],
+        select: ["id", "displayName", "version", "sizeInByte", "deviceCount", "publisher", "platform"],
       };
     case "managedAppPolicies":
       return {
@@ -1792,11 +1792,13 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) return { value };
   const keys = [
     "id",
+    "@odata.type",
     "displayName",
     "deviceName",
     "userPrincipalName",
     "mail",
     "operatingSystem",
+    "platform",
     "osVersion",
     "complianceState",
     "lastSyncDateTime",
@@ -1805,6 +1807,9 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
     "userType",
     "trustType",
     "isManaged",
+    "isAssigned",
+    "publishingState",
+    "publisher",
     "createdDateTime",
     "lastModifiedDateTime",
     "riskLevel",
@@ -1819,7 +1824,7 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
 }
 
 function buildBreakdowns(rows: unknown[]): Record<string, Record<string, number>> {
-  const fields = ["operatingSystem", "complianceState", "userType", "accountEnabled", "trustType"];
+  const fields = ["operatingSystem", "complianceState", "userType", "accountEnabled", "trustType", "platform", "@odata.type"];
   const out: Record<string, Record<string, number>> = {};
   for (const field of fields) {
     const counts: Record<string, number> = {};

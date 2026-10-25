@@ -1146,6 +1146,41 @@ describe("exact aggregate counts for how-many questions", () => {
     }
   });
 
+  it("breaks Intune apps down by Graph app type and platform", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-app-agg-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "mobileApps",
+        label: "Intune apps",
+        scopeSet: ["DeviceManagementApps.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [
+          { id: "mac-pkg-1", displayName: "Mac PKG 1", "@odata.type": "#microsoft.graph.macOSPkgApp" },
+          { id: "mac-pkg-2", displayName: "Mac PKG 2", "@odata.type": "#microsoft.graph.macOSPkgApp" },
+          { id: "mac-dmg-1", displayName: "Mac DMG", "@odata.type": "#microsoft.graph.macOSDmgApp" },
+          { id: "mac-office", displayName: "Mac Office", "@odata.type": "#microsoft.graph.macOSOfficeSuiteApp" },
+          { id: "win-1", displayName: "Win32", "@odata.type": "#microsoft.graph.win32LobApp" },
+          { id: "win-2", displayName: "WinGet", "@odata.type": "#microsoft.graph.winGetApp" },
+          { id: "ios-1", displayName: "iOS", "@odata.type": "#microsoft.graph.iosStoreApp" },
+          { id: "android-1", displayName: "Android", "@odata.type": "#microsoft.graph.androidLobApp" },
+        ],
+      });
+
+      const aggregate = store.aggregateGraphResource("tenant-1", "mobileApps");
+      assert.equal(aggregate.total, 8);
+      assert.equal(aggregate.breakdowns["@odata.type"]?.["#microsoft.graph.macOSPkgApp"], 2);
+      assert.equal(aggregate.breakdowns.appPlatform?.macOS, 4);
+      assert.equal(aggregate.breakdowns.appPlatform?.Windows, 2);
+      assert.equal(aggregate.breakdowns.appPlatform?.iOS, 1);
+      assert.equal(aggregate.breakdowns.appPlatform?.Android, 1);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the tenant-wide total reported by Graph even when it exceeds the cache", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-total-"));
     try {

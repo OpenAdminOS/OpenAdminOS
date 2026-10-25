@@ -1023,7 +1023,29 @@ export class IntelligenceSqliteStore {
       { field: "userType", expression: "json_extract(raw_json, '$.userType')" },
       { field: "accountEnabled", expression: "json_extract(raw_json, '$.accountEnabled')" },
       { field: "trustType", expression: "json_extract(raw_json, '$.trustType')" },
+      { field: "platform", expression: "json_extract(raw_json, '$.platform')" },
     ];
+    if (resource === "mobileApps") {
+      const odataType = "json_extract(raw_json, '$.\"@odata.type\"')";
+      columns.push(
+        { field: "@odata.type", expression: odataType },
+        {
+          field: "appPlatform",
+          expression: `CASE
+            WHEN ${odataType} IS NULL THEN NULL
+            WHEN lower(${odataType}) LIKE '%macos%' THEN 'macOS'
+            WHEN lower(${odataType}) LIKE '%android%' THEN 'Android'
+            WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
+            WHEN lower(${odataType}) LIKE '%win32%'
+              OR lower(${odataType}) LIKE '%windows%'
+              OR lower(${odataType}) LIKE '%winget%'
+              OR lower(${odataType}) LIKE '%microsoftstoreforbusiness%'
+              OR lower(${odataType}) LIKE '%officesuiteapp%' THEN 'Windows'
+            ELSE ${odataType}
+          END`,
+        },
+      );
+    }
     for (const column of columns) {
       const grouped = this.db
         .prepare(
@@ -2055,9 +2077,14 @@ export class IntelligenceSqliteStore {
   }
 
   graphCacheFieldTypes(tenantId: string, resource: GraphCacheResourceKind, field: string): string[] {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) return [];
+    const path = field === "@odata.type"
+      ? '$."@odata.type"'
+      : /^[A-Za-z_][A-Za-z0-9_]*$/.test(field)
+        ? `$.${field}`
+        : undefined;
+    if (!path) return [];
     return (this.db.prepare(`SELECT DISTINCT json_type(raw_json, ?) AS type FROM graph_resources WHERE tenant_id = ? AND resource = ?`)
-      .all(`$.${field}`, tenantId, resource) as unknown as Array<{ type: string | null }>).flatMap(row => row.type && row.type !== 'null' ? [row.type] : []);
+      .all(path, tenantId, resource) as unknown as Array<{ type: string | null }>).flatMap(row => row.type && row.type !== 'null' ? [row.type] : []);
   }
 
   queryGraphCache(input: {
@@ -4167,6 +4194,9 @@ function sqlScalar(value: unknown): string | number {
 
 function graphCacheFieldSql(field: string): string {
   const normalized = field.trim();
+  if (normalized === "@odata.type") {
+    return "json_extract(raw_json, '$.\"@odata.type\"')";
+  }
   const mapped: Record<string, string> = {
     graphId: "graph_id",
     id: "graph_id",

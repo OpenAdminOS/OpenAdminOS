@@ -49,6 +49,43 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("query_cache can count Intune apps by @odata.type for platform questions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 0);
+    try {
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "mobileApps",
+        label: "Intune apps",
+        scopeSet: ["DeviceManagementApps.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [
+          { id: "mac-pkg", displayName: "Mac PKG", "@odata.type": "#microsoft.graph.macOSPkgApp" },
+          { id: "mac-dmg", displayName: "Mac DMG", "@odata.type": "#microsoft.graph.macOSDmgApp" },
+          { id: "win", displayName: "Win32", "@odata.type": "#microsoft.graph.win32LobApp" },
+        ],
+      });
+
+      const count = await executeIntuneChatTool(toolContext(store), "query_cache", {
+        resource: "mobileApps",
+        filters: [{ field: "@odata.type", op: "contains", value: "macOS" }],
+        select: ["id", "@odata.type"],
+        limit: 1,
+      });
+
+      assert.equal(count.trace.error, undefined);
+      const result = count.result as {
+        totalCount: number;
+        rows: Array<{ row: Record<string, unknown> }>;
+      };
+      assert.equal(result.totalCount, 2);
+      assert.match(String(result.rows[0]!.row["@odata.type"]), /macOS/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("list_cached_resources staleness follows per-resource host TTLs", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
