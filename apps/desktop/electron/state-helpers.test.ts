@@ -56,8 +56,8 @@ it("cancelled paging and repeated continuation links fail instead of returning a
   await assert.rejects(fetchGraphCachePages(loop,{path:"/users"},undefined,true),/repeated/);
 });
 
-import { buildIntuneChatSources, executedResourcesForAnswer, isGraphCacheStatusStale, resourcesFromToolTrace, toolRefreshedResources } from "./state-helpers.js";
-import type { GraphCacheResourceStatus, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
+import { boundedConversationMemory, buildIntuneChatSources, CHAT_MEMORY_MAX_CHARS, executedResourcesForAnswer, isGraphCacheStatusStale, resourcesFromToolTrace, toolRefreshedResources } from "./state-helpers.js";
+import type { GraphCacheResourceStatus, IntuneChatMessage, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
 
 describe("chat sources come from executed tools, not the plan", () => {
   const traceEntry = (tool: IntuneChatToolTraceEntry["tool"], params: unknown, error?: string): IntuneChatToolTraceEntry => ({
@@ -157,6 +157,45 @@ describe("chat sources come from executed tools, not the plan", () => {
     assert.equal(isGraphCacheStatusStale({ ...status("deviceCompliancePolicies"), refreshedAt: at(23 * 60 * 60 * 1000) }), false);
     // Errored resources are retried, matching the single-tenant send path.
     assert.equal(isGraphCacheStatusStale({ ...status("managedDevices"), refreshedAt: at(60 * 1000), lastError: "HTTP 403" }), true);
+  });
+
+  it("bounds conversation memory to the last four turns under a hard cap", () => {
+    const message = (index: number, role: "user" | "assistant", content: string, status: IntuneChatMessage["status"] = "completed"): IntuneChatMessage => ({
+      id: `msg-${index}`,
+      conversationId: "chat-1",
+      role,
+      content,
+      status,
+      createdAt: `2026-08-01T10:0${index}:00.000Z`,
+    });
+    const history: IntuneChatMessage[] = [];
+    for (let turn = 1; turn <= 6; turn += 1) {
+      history.push(message(turn * 2 - 1, "user", `Question ${turn}`));
+      history.push(message(turn * 2, "assistant", `Answer ${turn}`));
+    }
+    history.push(message(99, "assistant", "partial junk", "failed"));
+
+    const memory = boundedConversationMemory(history);
+    assert.ok(memory);
+    assert.match(memory, /Question 6/);
+    assert.match(memory, /Answer 3/);
+    assert.doesNotMatch(memory, /Question 2/);
+    assert.doesNotMatch(memory, /partial junk/);
+    assert.ok(memory.length <= CHAT_MEMORY_MAX_CHARS);
+
+    const longHistory = [
+      message(1, "user", "x".repeat(5000)),
+      message(2, "assistant", "y".repeat(5000)),
+      message(3, "user", "latest question"),
+      message(4, "assistant", "latest answer"),
+    ];
+    const longMemory = boundedConversationMemory(longHistory);
+    assert.ok(longMemory);
+    assert.ok(longMemory.length <= CHAT_MEMORY_MAX_CHARS);
+    assert.match(longMemory, /latest answer/);
+
+    assert.equal(boundedConversationMemory([]), undefined);
+    assert.equal(boundedConversationMemory([message(1, "assistant", " ", "completed")]), undefined);
   });
 
   it("falls back to planned resources when no trace exists (deterministic path)", () => {

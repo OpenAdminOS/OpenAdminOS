@@ -216,6 +216,172 @@ describe("Intune Chat host service", () => {
     }
   });
 
+  it("blocks write prompts before any Graph refresh or model call", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
+          installedAgents: [
+            {
+              id: "offboarding-agent",
+              slug: "offboarding-agent",
+              name: "Offboarding agent",
+              description: "Builds a stale-device offboarding plan from Intune sync and Entra sign-in signals, then retires devices after typed confirmation.",
+              mode: "write",
+              category: "devices",
+              tier: "agent",
+              requiresEntraTier: "free",
+              scopes: ["DeviceManagementManagedDevices.Read.All"],
+              author: { name: "OpenAdminOS" },
+              version: "1.0.0",
+              installedAt: now,
+            },
+          ],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const graphRequests: string[] = [];
+    let modelCalls = 0;
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("retireManagedDevice should not run from chat."); },
+        async request(input) {
+          graphRequests.push(`${input.method} ${input.path}`);
+          return { value: [] };
+        },
+      }),
+      llmFactory: () => ({
+        available: true,
+        defaultModel: "mock-chat",
+        async complete() {
+          modelCalls += 1;
+          return { text: "must not be called", model: "mock-chat" };
+        },
+        async *stream() {
+          modelCalls += 1;
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      }),
+    });
+
+    try {
+      const result = await store.sendIntuneChatMessage({
+        content: "Retire stale devices that have not synced",
+      });
+      assert.match(result.assistantMessage.content, /cannot perform tenant changes directly from chat/);
+      assert.match(result.assistantMessage.content, /Offboarding agent/);
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.deepEqual(graphRequests, [], "write block must fire before cache refresh");
+      assert.equal(modelCalls, 0, "write block must fire before any model call");
+      assert.deepEqual(result.assistantMessage.sources, []);
+      assert.equal(result.assistantMessage.agentSuggestions?.[0]?.agentSlug, "offboarding-agent");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives follow-up questions the bounded prior turns as context", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const prompts: string[] = [];
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("retireManagedDevice should not run from chat."); },
+        async request() { return { value: [] }; },
+      }),
+      llmFactory: () => ({
+        available: true,
+        defaultModel: "mock-chat",
+        async complete(options) {
+          prompts.push(options.prompt);
+          return { text: "WIN-01 and MAC-01 have not synced recently.", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      }),
+    });
+
+    try {
+      const first = await store.sendIntuneChatMessage({
+        content: "Which stale devices have not synced recently?",
+        refreshIfStale: false,
+      });
+      const second = await store.sendIntuneChatMessage({
+        content: "Show only the Windows ones",
+        conversationId: first.conversation.id,
+        refreshIfStale: false,
+      });
+      assert.equal(second.conversation.id, first.conversation.id);
+      assert.ok(prompts.length >= 2);
+      const followUpPrompt = prompts.at(-1)!;
+      assert.match(followUpPrompt, /Conversation so far/);
+      assert.match(followUpPrompt, /User: Which stale devices have not synced recently\?/);
+      assert.match(followUpPrompt, /Assistant: WIN-01 and MAC-01 have not synced recently\./);
+      assert.match(followUpPrompt, /Current question: Show only the Windows ones/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("streams agentic single-tenant chat and persists the tool trace", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";

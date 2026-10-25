@@ -64,6 +64,7 @@ import {
   assertConversationAccess,
   assertConversationTenant,
   buildChatProgressSteps,
+  boundedConversationMemory,
   buildIntuneChatSources,
   executedResourcesForAnswer,
   toolRefreshedResources,
@@ -1559,6 +1560,9 @@ export class IntuneChatService {
       });
     }
 
+    const conversationMemory = boundedConversationMemory(
+      store.listMessages(conversation.id),
+    );
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -1570,7 +1574,11 @@ export class IntuneChatService {
     store.insertMessage(userMessage);
 
     let refreshResult: GraphCacheRefreshResult | undefined;
-    if (input.refreshIfStale !== false) {
+    // A write prompt is answered by the deterministic block below.
+    // Refreshing Graph data first only delays that answer (measured at
+    // tens of seconds live) and spends tenant reads on a reply that
+    // cannot use them.
+    if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
@@ -1638,9 +1646,12 @@ export class IntuneChatService {
       responseModel = undefined;
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
-      const modelQuestion = workspaceContext
-        ? `${content}\n\n${workspaceContext.promptBlock}`
+      const withMemory = conversationMemory
+        ? `Conversation so far (earliest first, may be truncated):\n${conversationMemory}\n\nCurrent question: ${content}`
         : content;
+      const modelQuestion = workspaceContext
+        ? `${withMemory}\n\n${workspaceContext.promptBlock}`
+        : withMemory;
       const buildDeterministicAnswer = async (
         notice?: string,
       ): Promise<{ content: string; model?: string }> => {
@@ -1846,6 +1857,9 @@ export class IntuneChatService {
     const voiceContext = options.voice
       ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
       : undefined;
+    const conversationMemory = options.voice
+      ? undefined
+      : boundedConversationMemory(store.listMessages(conversation.id));
     const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
@@ -1971,7 +1985,9 @@ export class IntuneChatService {
       cacheCheckStatus: "active",
     });
 
-    if (input.refreshIfStale !== false) {
+    // Same short-circuit as the non-streaming path: the write block
+    // answers without tenant data, so no refresh runs first.
+    if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
@@ -2111,7 +2127,11 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
-      const contextualQuestion = voiceContext?.history ?? content;
+      const contextualQuestion =
+        voiceContext?.history ??
+        (conversationMemory
+          ? `Conversation so far (earliest first, may be truncated):\n${conversationMemory}\n\nCurrent question: ${content}`
+          : content);
       const modelQuestion = workspaceContext
         ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
         : contextualQuestion;

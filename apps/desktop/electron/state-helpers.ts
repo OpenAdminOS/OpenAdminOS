@@ -1075,6 +1075,42 @@ export function stableSuggestionId(tenantId: string, agentSlug: string, text: st
 
 
 
+export const CHAT_MEMORY_MAX_TURNS = 4;
+export const CHAT_MEMORY_MAX_CHARS = 4000;
+const CHAT_MEMORY_MAX_MESSAGE_CHARS = 1000;
+
+/**
+ * Bounded plain-text memory for follow-up questions. The non-voice
+ * prompt used to contain only the current question, so "Show only the
+ * Windows ones" after a device answer had nothing to refer to. The
+ * window is the last {@link CHAT_MEMORY_MAX_TURNS} completed turns,
+ * each message truncated, under one hard character cap; older turns
+ * drop first. Voice has its own tighter context builder.
+ */
+export function boundedConversationMemory(
+  messages: readonly IntuneChatMessage[],
+): string | undefined {
+  const completed = messages.filter(
+    (message) => message.status === "completed" && message.content.trim().length > 0,
+  );
+  const windowed = completed.slice(-CHAT_MEMORY_MAX_TURNS * 2);
+  const lines = windowed.map((message) => {
+    const text = message.content.trim();
+    const bounded = text.length > CHAT_MEMORY_MAX_MESSAGE_CHARS
+      ? `${text.slice(0, CHAT_MEMORY_MAX_MESSAGE_CHARS)} [truncated]`
+      : text;
+    return `${message.role === "user" ? "User" : "Assistant"}: ${bounded}`;
+  });
+  while (lines.length > 1 && lines.join("\n").length > CHAT_MEMORY_MAX_CHARS) {
+    lines.shift();
+  }
+  if (lines.length === 0) return undefined;
+  const joined = lines.join("\n");
+  return joined.length > CHAT_MEMORY_MAX_CHARS
+    ? joined.slice(joined.length - CHAT_MEMORY_MAX_CHARS)
+    : joined;
+}
+
 /**
  * Resources an investigation actually read, derived from successful tool
  * trace entries. Sources must describe what ran, not what was planned:
