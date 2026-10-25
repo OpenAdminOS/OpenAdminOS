@@ -342,6 +342,8 @@ function IntuneChatContent() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
   const activeStreamIdRef = useRef<string | null>(null);
+  const activeTenantIdRef = useRef(state.activeTenantId);
+  activeTenantIdRef.current = state.activeTenantId;
   const initialQuestionConsumedRef = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
   const progressClearTimerRef = useRef<number | null>(null);
@@ -493,14 +495,28 @@ function IntuneChatContent() {
     const activeConversation = conversations.find(
       (conversation) => conversation.id === activeConversationId,
     );
+    // After a tenant switch the route can still name the previous
+    // tenant's conversation. Never keep (or reload) its transcript
+    // under the new tenant: clear it and let the not-found state show.
+    if (
+      activeConversation?.tenantId &&
+      state.activeTenantId &&
+      activeConversation.tenantId !== state.activeTenantId &&
+      activeConversation.scopeKind !== "multi-tenant"
+    ) {
+      setMessages([]);
+      return;
+    }
     const shouldRestoreScroll = restoreConversationScrollRef.current !== activeConversationId;
     if (shouldRestoreScroll) {
       restoreConversationScrollRef.current = activeConversationId;
       followLatestRef.current = false;
     }
+    let stale = false;
     void api
       .getIntuneChatMessages(activeConversationId)
       .then(async (nextMessages) => {
+        if (stale) return;
         setMessages(nextMessages);
         if (shouldRestoreScroll) {
           window.requestAnimationFrame(() => {
@@ -521,10 +537,15 @@ function IntuneChatContent() {
           }
         }
       })
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : String(caught)),
-      );
-  }, [activeConversationId, conversations, sending, errorReloadToken]);
+      .catch((caught) => {
+        if (stale) return;
+        setMessages([]);
+        setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [activeConversationId, conversations, sending, errorReloadToken, state.activeTenantId]);
 
   useEffect(() => {
     if (draftConversationRef.current === activeConversationId) return;
@@ -823,7 +844,7 @@ function IntuneChatContent() {
       setMessages([result.userMessage, result.assistantMessage]);
       setPendingConversation(result.conversation);
       upsertConversation(result.conversation);
-      openConversation(result.conversation.id, { replace: true });
+      if (activeTenantIdRef.current === state.activeTenantId) openConversation(result.conversation.id, { replace: true });
       await loadShell(result.conversation.id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -912,7 +933,7 @@ function IntuneChatContent() {
             setOptimisticDraft(null);
             setPendingConversation(event.conversation);
             upsertConversation(event.conversation);
-            openConversation(event.conversation.id, { replace: true });
+            if (activeTenantIdRef.current === state.activeTenantId) openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
             setMessages((current) => {
@@ -994,7 +1015,7 @@ function IntuneChatContent() {
       );
       setPendingConversation(result.conversation);
       upsertConversation(result.conversation);
-      openConversation(result.conversation.id, { replace: true });
+      if (activeTenantIdRef.current === state.activeTenantId) openConversation(result.conversation.id, { replace: true });
       setCacheStatus(result.cacheStatus);
       await loadShell(result.conversation.id);
     } catch (caught) {
@@ -1422,7 +1443,9 @@ function IntuneChatContent() {
       : scopeMode === "selected"
         ? `${selectedTenantIds.length} selected tenant${selectedTenantIds.length === 1 ? "" : "s"}`
         : activeTenant?.displayName ?? "No active tenant";
-  const latestCacheRefresh = newestTimestamp(
+  // Oldest, like the per-answer header: the stalest refreshed resource
+  // bounds how current the cached picture can be.
+  const latestCacheRefresh = oldestTimestamp(
     cacheStatus?.resources.flatMap((resource) => resource.refreshedAt ?? []) ?? [],
   );
   const homeFreshness = latestCacheRefresh
@@ -1498,9 +1521,11 @@ function IntuneChatContent() {
   const handleModelSelect = async (providerId: ProviderId, model: string) => {
     setError(null);
     try {
-      if (providerId !== state.activeProviderId) {
-        await setActiveProvider(providerId);
-      }
+      // Always persist the pick, even when it names the displayed
+      // provider: getAppState masks a missing persisted provider as
+      // the first live one, so re-picking the displayed provider is
+      // the recovery path that repairs the persisted id.
+      await setActiveProvider(providerId);
       await setActiveModel(providerId, model);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -4454,6 +4479,9 @@ function SuggestedAgentsBlock({
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  // The epoch is the store's stale-since-write marker, not a real
+  // refresh time; never render it as a 1970 date or a 20k-day age.
+  if (date.getTime() === 0) return "Before the last write (stale)";
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
@@ -4505,18 +4533,11 @@ function oldestTimestamp(values: string[]): string | undefined {
   }, undefined);
 }
 
-function newestTimestamp(values: string[]): string | undefined {
-  return values.reduce<string | undefined>((latest, value) => {
-    const time = Date.parse(value);
-    if (!Number.isFinite(time)) return latest;
-    if (!latest || time > Date.parse(latest)) return value;
-    return latest;
-  }, undefined);
-}
 
 function formatRelativeAge(value: string): string {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return value;
+  if (time === 0) return "before the last write";
   const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
   if (seconds < 45) return "just now";
   const minutes = Math.round(seconds / 60);

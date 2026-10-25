@@ -589,6 +589,25 @@ describe("IntuneChat trust presentation", () => {
     });
   });
 
+  it("re-persists the provider when picking the displayed provider's model", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge();
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.click(screen.getByLabelText(/Model:/));
+    await user.click(await screen.findByRole("menuitemradio", { name: /llama3\.1/ }));
+
+    await waitFor(() => {
+      expect(bridge.setActiveProvider).toHaveBeenCalledWith("ollama");
+      expect(bridge.setActiveModel).toHaveBeenCalledWith("ollama", "llama3.1");
+    });
+  });
+
   it("shows a setup action when no model is ready", async () => {
     const providers = mockProviders.map((provider) =>
       provider.id === "ollama"

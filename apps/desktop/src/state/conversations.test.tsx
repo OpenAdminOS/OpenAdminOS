@@ -4,7 +4,8 @@ import { useLocation, useNavigate } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import type { IntuneChatConversation } from "../shared/openAdminOS";
-import { makeMockBridge, renderWithAppState } from "../test/test-utils";
+import { createMockAppState, makeMockBridge, mockTenant, renderWithAppState } from "../test/test-utils";
+import { useAppState } from "./index";
 import {
   ConversationWorkspaceProvider,
   useConversations,
@@ -20,6 +21,45 @@ const conversation: IntuneChatConversation = {
 };
 
 describe("ConversationWorkspaceProvider", () => {
+  it("drops the previous tenant's conversations on tenant switch", async () => {
+    const user = userEvent.setup();
+    const tenantBConversation: IntuneChatConversation = {
+      ...conversation,
+      id: "conversation-tenant-2",
+      title: "Tenant two review",
+      tenantId: "tenant-2",
+    };
+    let bridgeRef: ReturnType<typeof makeMockBridge> | undefined;
+    const bridge = makeMockBridge(
+      {
+        listIntuneChatConversations: vi.fn(async () =>
+          (await bridgeRef!.getAppState()).activeTenantId === "tenant-2"
+            ? [tenantBConversation]
+            : [conversation],
+        ),
+        getIntuneChatMessages: vi.fn(async () => []),
+      },
+      createMockAppState({
+        tenants: [mockTenant, { ...mockTenant, id: "tenant-2", displayName: "Fabrikam" }],
+        activeTenantId: "tenant-1",
+      }),
+    );
+    bridgeRef = bridge;
+
+    renderConversationHarness(`/chat/${conversation.id}`, bridge);
+    expect(await screen.findByText("loaded")).toBeInTheDocument();
+    expect(screen.getByTestId("conversation-ids")).toHaveTextContent(conversation.id);
+    expect(screen.getByTestId("active-conversation")).toHaveTextContent(conversation.id);
+
+    await user.click(screen.getByRole("button", { name: "Switch to tenant 2" }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId("conversation-ids")).toHaveTextContent("conversation-tenant-2"),
+    );
+    expect(screen.getByTestId("conversation-ids")).not.toHaveTextContent(conversation.id);
+    expect(screen.getByTestId("active-conversation")).toHaveTextContent("none");
+  });
+
   it("reloads for tenant and search changes, not route changes", async () => {
     const user = userEvent.setup();
     const listIntuneChatConversations = vi.fn(async () => [conversation]);
@@ -125,8 +165,10 @@ function renderConversationHarness(
 function ConversationHarness() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { setActiveTenant } = useAppState();
   const {
     conversations,
+    activeConversation,
     shellLoaded,
     setConversationSearch,
     togglePinned,
@@ -138,6 +180,9 @@ function ConversationHarness() {
     <>
       <output data-testid="conversation-location">{location.pathname}</output>
       <output>{shellLoaded ? "loaded" : "loading"}</output>
+      <output data-testid="conversation-ids">{conversations.map((entry) => entry.id).join(",")}</output>
+      <output data-testid="active-conversation">{activeConversation?.id ?? "none"}</output>
+      <button type="button" onClick={() => void setActiveTenant("tenant-2")}>Switch to tenant 2</button>
       <button type="button" onClick={() => navigate("/runs")}>Open Runs</button>
       <button type="button" onClick={() => setConversationSearch("stale")}>Search conversations</button>
       <button type="button" onClick={() => navigate(`/chat/${conversation.id}`)}>Open conversation route</button>
