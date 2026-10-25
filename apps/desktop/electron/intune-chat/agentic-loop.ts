@@ -376,8 +376,8 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput): string {
     input.plannedResources.includes('managedDevices')
       ? 'managedDevices cache fields: operatingSystem (for example "Windows"), deviceName, complianceState, isEncrypted (boolean true = encrypted, false = not encrypted, null = unknown). Encryption is separate from compliance. For unencrypted Windows devices use query_cache with {"resource":"managedDevices","where":{"operatingSystem":"Windows","isEncrypted":false}}. Pass select as a top-level array of available field names, never inside where.'
       : '',
-    input.plannedResources.includes('mobileApps')
-      ? 'mobileApps cache field @odata.type identifies the Intune app subtype and platform (for example #microsoft.graph.macOSPkgApp). For a platform app count, use query_cache with {"resource":"mobileApps","filters":[{"field":"@odata.type","op":"contains","value":"macOS"}],"select":["id"],"limit":1} and use totalCount.'
+    input.plannedResources.some(resource => ['mobileApps', 'deviceCompliancePolicies', 'deviceConfigurations', 'managedAppPolicies', 'iosManagedAppProtections', 'androidManagedAppProtections', 'mobileAppConfigurations', 'deviceEnrollmentConfigurations', 'namedLocations'].includes(resource))
+      ? 'Cache field @odata.type identifies the Graph subtype for typed collections such as mobileApps and Intune policies (for example #microsoft.graph.macOSPkgApp and #microsoft.graph.macOSCompliancePolicy). For a subtype or platform count, use query_cache with a filter such as {"field":"@odata.type","op":"contains","value":"macOS"}, select:["id"], limit:1, and use totalCount.'
       : '',
 
     "Every tool call is visible to the admin and recorded with the final answer.",

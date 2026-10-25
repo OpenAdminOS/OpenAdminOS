@@ -1809,6 +1809,25 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
     "isManaged",
     "isAssigned",
     "publishingState",
+    "state",
+    "severity",
+    "classification",
+    "securityEnabled",
+    "groupTypes",
+    "platforms",
+    "signInAudience",
+    "servicePrincipalType",
+    "authenticationType",
+    "isVerified",
+    "conditionalAccessStatus",
+    "category",
+    "result",
+    "activityResult",
+    "runAsAccount",
+    "enrollmentState",
+    "featureUpdateVersion",
+    "encryptionState",
+    "visibility",
     "publisher",
     "createdDateTime",
     "lastModifiedDateTime",
@@ -1824,20 +1843,108 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
 }
 
 function buildBreakdowns(rows: unknown[]): Record<string, Record<string, number>> {
-  const fields = ["operatingSystem", "complianceState", "userType", "accountEnabled", "trustType", "platform", "@odata.type"];
+  const scalarFields = [
+    "operatingSystem",
+    "complianceState",
+    "userType",
+    "accountEnabled",
+    "trustType",
+    "platform",
+    "@odata.type",
+    "state",
+    "status",
+    "severity",
+    "classification",
+    "determination",
+    "serviceSource",
+    "detectionSource",
+    "securityEnabled",
+    "signInAudience",
+    "servicePrincipalType",
+    "authenticationType",
+    "isVerified",
+    "isDefault",
+    "isInitial",
+    "conditionalAccessStatus",
+    "clientAppUsed",
+    "isInteractive",
+    "riskLevelAggregated",
+    "riskLevelDuringSignIn",
+    "riskState",
+    "status.errorCode",
+    "category",
+    "result",
+    "operationType",
+    "loggedByService",
+    "activityType",
+    "activityOperationType",
+    "activityResult",
+    "componentName",
+    "runAsAccount",
+    "runAs32Bit",
+    "enforceSignatureCheck",
+    "enrollmentState",
+    "deploymentProfileAssignmentStatus",
+    "remediationState",
+    "enrollmentType",
+    "deploymentState",
+    "deviceSetupStatus",
+    "accountSetupStatus",
+    "featureUpdateVersion",
+    "assignmentFilterManagementType",
+    "encryptionState",
+    "visibility",
+    "controlCategory",
+    "actionType",
+    "service",
+    "implementationCost",
+    "userImpact",
+    "tier",
+    "deprecated",
+    "managedDeviceOwnerType",
+    "deviceEnrollmentType",
+    "managementState",
+    "isManaged",
+    "isAssigned",
+    "publishingState",
+  ];
+  const arrayFields = ["platforms", "groupTypes"];
   const out: Record<string, Record<string, number>> = {};
-  for (const field of fields) {
+  const scalarValue = (row: Record<string, unknown>, field: string): unknown =>
+    field === "status.errorCode" && isRecord(row.status)
+      ? row.status.errorCode
+      : row[field];
+  for (const field of scalarFields) {
     const counts: Record<string, number> = {};
+    let seen = false;
     for (const row of rows) {
       if (!isRecord(row)) continue;
-      const raw = row[field];
-      const key =
-        typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean"
-          ? String(raw)
-          : "unknown";
+      const raw = scalarValue(row, field);
+      if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean") {
+        continue;
+      }
+      seen = true;
+      const key = String(raw);
       counts[key] = (counts[key] ?? 0) + 1;
     }
-    if (Object.keys(counts).length > 0) out[field] = counts;
+    if (seen && Object.keys(counts).length > 0) out[field] = counts;
+  }
+  for (const field of arrayFields) {
+    const counts: Record<string, number> = {};
+    let seen = false;
+    for (const row of rows) {
+      if (!isRecord(row)) continue;
+      const values = Array.isArray(row[field]) ? (row[field] as unknown[]) : [row[field]];
+      for (const raw of values) {
+        if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean") {
+          continue;
+        }
+        seen = true;
+        const key = String(raw);
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+    }
+    if (seen && Object.keys(counts).length > 0) out[field] = counts;
   }
   return out;
 }

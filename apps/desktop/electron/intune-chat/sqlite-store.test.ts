@@ -1181,6 +1181,108 @@ describe("exact aggregate counts for how-many questions", () => {
     }
   });
 
+  it("breaks common filtered count dimensions down by resource", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-resource-agg-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      const seed = (
+        resource: Parameters<IntelligenceSqliteStore["replaceGraphResources"]>[0]["resource"],
+        label: string,
+        rows: Record<string, unknown>[],
+      ) =>
+        store.replaceGraphResources({
+          tenantId: "tenant-1",
+          resource,
+          label,
+          scopeSet: ["Read.All"],
+          refreshedAt: "2026-06-01T10:00:00.000Z",
+          rows,
+        });
+      seed("deviceCompliancePolicies", "Compliance policies", [
+        { id: "mac-1", "@odata.type": "#microsoft.graph.macOSCompliancePolicy" },
+        { id: "mac-2", "@odata.type": "#microsoft.graph.macOSCompliancePolicy" },
+        { id: "win-1", "@odata.type": "#microsoft.graph.windows10CompliancePolicy" },
+        { id: "ios-1", "@odata.type": "#microsoft.graph.iosCompliancePolicy" },
+      ]);
+      seed("deviceConfigurations", "Configuration profiles", [
+        { id: "kiosk-1", "@odata.type": "#microsoft.graph.windowsKioskConfiguration" },
+        { id: "shared-pc-1", "@odata.type": "#microsoft.graph.sharedPCConfiguration" },
+        { id: "mac-config-1", "@odata.type": "#microsoft.graph.macOSCustomConfiguration" },
+      ]);
+      seed("conditionalAccessPolicies", "Conditional Access policies", [
+        { id: "ca-1", state: "enabled" },
+        { id: "ca-2", state: "enabledForReportingButNotEnforced" },
+        { id: "ca-3", state: "enabledForReportingButNotEnforced" },
+      ]);
+      seed("groups", "Groups", [
+        { id: "g-1", securityEnabled: true, groupTypes: [] },
+        { id: "g-2", securityEnabled: true, groupTypes: ["DynamicMembership"] },
+        { id: "g-3", securityEnabled: false, groupTypes: ["Unified"] },
+      ]);
+      seed("configurationPolicies", "Settings catalog policies", [
+        { id: "cp-1", platforms: ["windows10", "macOS"], isAssigned: true },
+        { id: "cp-2", platforms: ["macOS"], isAssigned: false },
+        // Graph also returns Settings Catalog platforms as one enum string.
+        { id: "cp-3", platforms: "windows10", isAssigned: true },
+      ]);
+      seed("applications", "App registrations", [
+        { id: "a-1", signInAudience: "AzureADMyOrg" },
+        { id: "a-2", signInAudience: "AzureADMultipleOrgs" },
+      ]);
+      seed("securityAlerts", "Defender alerts", [
+        { id: "sa-1", severity: "high", status: "new" },
+        { id: "sa-2", severity: "high", status: "inProgress" },
+        { id: "sa-3", severity: "low", status: "resolved" },
+      ]);
+      seed("signIns", "Sign-ins", [
+        { id: "si-1", conditionalAccessStatus: "success", status: { errorCode: 0 } },
+        { id: "si-2", conditionalAccessStatus: "failure", status: { errorCode: 50126 } },
+        { id: "si-3", conditionalAccessStatus: "failure", status: { errorCode: 50126 } },
+      ]);
+
+      const policies = store.aggregateGraphResource("tenant-1", "deviceCompliancePolicies");
+      assert.equal(policies.breakdowns["@odata.type"]?.["#microsoft.graph.macOSCompliancePolicy"], 2);
+      assert.equal(policies.breakdowns.policyPlatform?.macOS, 2);
+      assert.equal(policies.breakdowns.policyPlatform?.Windows, 1);
+      assert.equal(policies.breakdowns.policyPlatform?.iOS, 1);
+      const configurations = store.aggregateGraphResource("tenant-1", "deviceConfigurations");
+      assert.equal(configurations.breakdowns.policyPlatform?.Windows, 2);
+      assert.equal(configurations.breakdowns.policyPlatform?.macOS, 1);
+      assert.equal(configurations.breakdowns.policyPlatform?.iOS, undefined);
+
+      const conditionalAccess = store.aggregateGraphResource(
+        "tenant-1",
+        "conditionalAccessPolicies",
+      );
+      assert.equal(conditionalAccess.breakdowns.state?.enabledForReportingButNotEnforced, 2);
+
+      const groups = store.aggregateGraphResource("tenant-1", "groups");
+      assert.equal(groups.breakdowns.securityEnabled?.["1"], 2);
+      assert.equal(groups.breakdowns.groupTypes?.DynamicMembership, 1);
+      assert.equal(groups.breakdowns.groupTypes?.Unified, 1);
+
+      const settingsCatalog = store.aggregateGraphResource("tenant-1", "configurationPolicies");
+      assert.equal(settingsCatalog.breakdowns.platforms?.macOS, 2);
+      assert.equal(settingsCatalog.breakdowns.platforms?.windows10, 2);
+      assert.equal(settingsCatalog.breakdowns.isAssigned?.["1"], 2);
+
+      assert.equal(
+        store.aggregateGraphResource("tenant-1", "applications").breakdowns.signInAudience
+          ?.AzureADMyOrg,
+        1,
+      );
+      const alerts = store.aggregateGraphResource("tenant-1", "securityAlerts");
+      assert.equal(alerts.breakdowns.severity?.high, 2);
+      assert.equal(alerts.breakdowns.status?.new, 1);
+      const signIns = store.aggregateGraphResource("tenant-1", "signIns");
+      assert.equal(signIns.breakdowns.conditionalAccessStatus?.failure, 2);
+      assert.equal(signIns.breakdowns["status.errorCode"]?.["50126"], 2);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("keeps the tenant-wide total reported by Graph even when it exceeds the cache", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-total-"));
     try {

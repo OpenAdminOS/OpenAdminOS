@@ -4,7 +4,12 @@ import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { GRAPH_CACHE_RESOURCE_KINDS, type AgentSummary } from "@openadminos/agent-sdk";
+import {
+  GRAPH_CACHE_RESOURCE_KINDS,
+  type AgentSummary,
+  type GraphCacheResourceKind,
+  type TenantRecord,
+} from "@openadminos/agent-sdk";
 
 import {
   DEFAULT_RESOURCE_STALENESS_MS,
@@ -13,6 +18,7 @@ import {
 import {
   GRAPH_CACHE_RESOURCES,
   MAX_PLANNED_RESOURCES,
+  buildAnswerPack,
   definitionForResource,
   graphCacheResourcesForWrite,
   matchAgentsToQuestion,
@@ -285,6 +291,79 @@ describe("agent matcher probe table (real registry)", () => {
 
     const compliancePolicies = matchAgentsToQuestion("Which device compliance policies exist?", agents);
     assert.equal(compliancePolicies[0]?.agentSlug, "compliance-overview");
+  });
+});
+
+describe("answer pack fallback breakdowns", () => {
+  it("counts common filtered dimensions and array values", () => {
+    const rows = Object.fromEntries(
+      GRAPH_CACHE_RESOURCE_KINDS.map((resource) => [resource, []]),
+    ) as unknown as Record<GraphCacheResourceKind, unknown[]>;
+    rows.conditionalAccessPolicies = [
+      { id: "ca-1", state: "enabledForReportingButNotEnforced" },
+      { id: "ca-2", state: "enabled" },
+    ];
+    rows.configurationPolicies = [
+      { id: "cp-1", platforms: ["windows10", "macOS"] },
+      { id: "cp-2", platforms: ["macOS"] },
+      { id: "cp-3", platforms: "windows10" },
+    ];
+    rows.groups = [
+      { id: "g-1", securityEnabled: true, groupTypes: ["DynamicMembership"] },
+      { id: "g-2", securityEnabled: false, groupTypes: ["Unified"] },
+    ];
+    rows.signIns = [
+      {
+        id: "si-1",
+        conditionalAccessStatus: "failure",
+        status: { errorCode: 50126, failureReason: "Invalid username or password" },
+      },
+    ];
+    const tenant: TenantRecord = {
+      id: "tenant-1",
+      displayName: "Tenant",
+      username: "admin@example.com",
+      homeAccountId: "home-1",
+      addedAt: "2026-06-01T00:00:00.000Z",
+    };
+    const status = (resource: GraphCacheResourceKind, count: number) => ({
+      resource,
+      label: resource,
+      rows: count,
+      scopeSet: ["Read.All"],
+      refreshedAt: "2026-06-01T10:00:00.000Z",
+    });
+    const pack = JSON.parse(
+      buildAnswerPack({
+        question: "How many report-only Conditional Access policies?",
+        tenant,
+        cacheStatus: [
+          status("conditionalAccessPolicies", 2),
+          status("configurationPolicies", 3),
+          status("groups", 2),
+          status("signIns", 1),
+        ],
+        rows,
+        hasWriteIntent: false,
+        agentSuggestions: [],
+      }),
+    ) as {
+      resources: Array<{
+        resource: string;
+        breakdowns: Record<string, Record<string, number>>;
+      }>;
+    };
+    const byResource = new Map(pack.resources.map((entry) => [entry.resource, entry.breakdowns]));
+    assert.equal(
+      byResource.get("conditionalAccessPolicies")?.state?.enabledForReportingButNotEnforced,
+      1,
+    );
+    assert.equal(byResource.get("configurationPolicies")?.platforms?.macOS, 2);
+    assert.equal(byResource.get("configurationPolicies")?.platforms?.windows10, 2);
+    assert.equal(byResource.get("groups")?.groupTypes?.DynamicMembership, 1);
+    assert.equal(byResource.get("groups")?.securityEnabled?.true, 1);
+    assert.equal(byResource.get("signIns")?.["status.errorCode"]?.["50126"], 1);
+    assert.equal(byResource.get("conditionalAccessPolicies")?.osVersion, undefined);
   });
 });
 

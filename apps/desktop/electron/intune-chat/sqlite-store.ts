@@ -1025,6 +1025,136 @@ export class IntelligenceSqliteStore {
       { field: "trustType", expression: "json_extract(raw_json, '$.trustType')" },
       { field: "platform", expression: "json_extract(raw_json, '$.platform')" },
     ];
+    const jsonField = (field: string) => ({
+      field,
+      expression: `json_extract(raw_json, '$.${field}')`,
+    });
+    const extraColumns: Partial<
+      Record<GraphCacheResourceKind, Array<{ field: string; expression: string }>>
+    > = {
+      managedDevices: [
+        jsonField("managedDeviceOwnerType"),
+        jsonField("deviceEnrollmentType"),
+        jsonField("managementState"),
+      ],
+      entraDevices: [jsonField("isManaged")],
+      groups: [jsonField("securityEnabled")],
+      conditionalAccessPolicies: [jsonField("state")],
+      mobileApps: [jsonField("isAssigned"), jsonField("publishingState")],
+      configurationPolicies: [jsonField("isAssigned")],
+      endpointSecurityIntents: [jsonField("isAssigned")],
+      deviceHealthScripts: [
+        jsonField("runAsAccount"),
+        jsonField("runAs32Bit"),
+        jsonField("enforceSignatureCheck"),
+      ],
+      deviceManagementScripts: [
+        jsonField("runAsAccount"),
+        jsonField("runAs32Bit"),
+        jsonField("enforceSignatureCheck"),
+      ],
+      windowsAutopilotDevices: [
+        jsonField("enrollmentState"),
+        jsonField("deploymentProfileAssignmentStatus"),
+        jsonField("remediationState"),
+      ],
+      autopilotEvents: [
+        jsonField("enrollmentType"),
+        jsonField("enrollmentState"),
+        jsonField("deploymentState"),
+        jsonField("deviceSetupStatus"),
+        jsonField("accountSetupStatus"),
+      ],
+      windowsFeatureUpdateProfiles: [jsonField("featureUpdateVersion")],
+      assignmentFilters: [jsonField("assignmentFilterManagementType")],
+      managedDeviceEncryptionStates: [jsonField("encryptionState")],
+      directoryAudits: [
+        jsonField("category"),
+        jsonField("result"),
+        jsonField("operationType"),
+        jsonField("loggedByService"),
+      ],
+      intuneAuditEvents: [
+        jsonField("category"),
+        jsonField("activityType"),
+        jsonField("activityOperationType"),
+        jsonField("activityResult"),
+        jsonField("componentName"),
+      ],
+      signIns: [
+        jsonField("conditionalAccessStatus"),
+        jsonField("clientAppUsed"),
+        jsonField("isInteractive"),
+        jsonField("riskLevelAggregated"),
+        jsonField("riskLevelDuringSignIn"),
+        jsonField("riskState"),
+        {
+          field: "status.errorCode",
+          expression: "json_extract(raw_json, '$.status.errorCode')",
+        },
+      ],
+      administrativeUnits: [jsonField("visibility")],
+      applications: [jsonField("signInAudience")],
+      servicePrincipals: [jsonField("servicePrincipalType")],
+      domains: [
+        jsonField("authenticationType"),
+        jsonField("isVerified"),
+        jsonField("isDefault"),
+        jsonField("isInitial"),
+      ],
+      securityAlerts: [
+        jsonField("severity"),
+        jsonField("status"),
+        jsonField("serviceSource"),
+        jsonField("detectionSource"),
+      ],
+      securityIncidents: [
+        jsonField("severity"),
+        jsonField("status"),
+        jsonField("classification"),
+        jsonField("determination"),
+      ],
+      secureScoreControlProfiles: [
+        jsonField("controlCategory"),
+        jsonField("actionType"),
+        jsonField("service"),
+        jsonField("implementationCost"),
+        jsonField("userImpact"),
+        jsonField("tier"),
+        jsonField("deprecated"),
+      ],
+    };
+    columns.push(...(extraColumns[resource] ?? []));
+
+    const typedResources = new Set<GraphCacheResourceKind>([
+      "deviceCompliancePolicies",
+      "deviceConfigurations",
+      "managedAppPolicies",
+      "iosManagedAppProtections",
+      "androidManagedAppProtections",
+      "mobileAppConfigurations",
+      "deviceEnrollmentConfigurations",
+      "namedLocations",
+    ]);
+    if (typedResources.has(resource)) {
+      const odataType = "json_extract(raw_json, '$.\"@odata.type\"')";
+      columns.push({ field: "@odata.type", expression: odataType });
+      if (resource !== "namedLocations" && resource !== "mobileAppConfigurations") {
+        columns.push({
+          field: "policyPlatform",
+          expression: `CASE
+            WHEN ${odataType} IS NULL THEN NULL
+            WHEN lower(${odataType}) LIKE '%macos%' THEN 'macOS'
+            WHEN lower(${odataType}) LIKE '%android%' THEN 'Android'
+            WHEN lower(${odataType}) LIKE '%windows%'
+              OR lower(${odataType}) LIKE '%sharedpc%' THEN 'Windows'
+            WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
+            WHEN lower(${odataType}) LIKE '%linux%' THEN 'Linux'
+            ELSE ${odataType}
+          END`,
+        });
+      }
+    }
     if (resource === "mobileApps") {
       const odataType = "json_extract(raw_json, '$.\"@odata.type\"')";
       columns.push(
@@ -1035,12 +1165,12 @@ export class IntelligenceSqliteStore {
             WHEN ${odataType} IS NULL THEN NULL
             WHEN lower(${odataType}) LIKE '%macos%' THEN 'macOS'
             WHEN lower(${odataType}) LIKE '%android%' THEN 'Android'
-            WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
             WHEN lower(${odataType}) LIKE '%win32%'
               OR lower(${odataType}) LIKE '%windows%'
               OR lower(${odataType}) LIKE '%winget%'
               OR lower(${odataType}) LIKE '%microsoftstoreforbusiness%'
               OR lower(${odataType}) LIKE '%officesuiteapp%' THEN 'Windows'
+            WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
             ELSE ${odataType}
           END`,
         },
@@ -1064,6 +1194,31 @@ export class IntelligenceSqliteStore {
         counts[String(entry.bucket)] = entry.count;
       }
       if (Object.keys(counts).length > 0) breakdowns[column.field] = counts;
+    }
+
+    const arrayColumns: Partial<Record<GraphCacheResourceKind, string[]>> = {
+      configurationPolicies: ["platforms"],
+      groups: ["groupTypes"],
+    };
+    for (const field of arrayColumns[resource] ?? []) {
+      const grouped = this.db
+        .prepare(
+          `SELECT je.value AS bucket, COUNT(*) AS count
+           FROM graph_resources, json_each(raw_json, '$.${field}') je
+           WHERE tenant_id = ? AND resource = ?
+             AND json_extract(raw_json, '$.${field}') IS NOT NULL
+           GROUP BY bucket`,
+        )
+        .all(tenantId, resource) as unknown as Array<{
+        bucket: string | number | null;
+        count: number;
+      }>;
+      const counts: Record<string, number> = {};
+      for (const entry of grouped) {
+        if (entry.bucket === null) continue;
+        counts[String(entry.bucket)] = entry.count;
+      }
+      if (Object.keys(counts).length > 0) breakdowns[field] = counts;
     }
 
     return { total: totalRow?.total ?? 0, breakdowns };
