@@ -11,6 +11,7 @@ import {
   GRAPH_CACHE_RESOURCES,
   MAX_PLANNED_RESOURCES,
   definitionForResource,
+  graphCacheResourcesForWrite,
   pathForResource,
   planChatContext,
   requiredScopesForResources,
@@ -26,6 +27,25 @@ describe("Graph cache resource registry", () => {
       assert.ok(request.path.startsWith("/"), `${resource} needs a Graph path`);
     }
     assert.equal(GRAPH_CACHE_RESOURCES.length, GRAPH_CACHE_RESOURCE_KINDS.length);
+  });
+
+  it("maps write scopes and action paths to cache resources to invalidate", () => {
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ scopes: ["DeviceManagementManagedDevices.PrivilegedOperations.All"] }).sort(),
+      ["detectedApps", "entraDevices", "managedDeviceEncryptionStates", "managedDevices"],
+    );
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ scopes: ["User.ReadWrite.All"] }).sort(),
+      ["groups", "users"],
+    );
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ paths: ["/users/abc/revokeSignInSessions"] }),
+      ["users"],
+    );
+    assert.equal(
+      graphCacheResourcesForWrite({ scopes: ["Mail.ReadWrite"] }).length,
+      GRAPH_CACHE_RESOURCE_KINDS.length,
+    );
   });
 
   it("maps the Entra and Defender resources to their delegated read scopes", () => {

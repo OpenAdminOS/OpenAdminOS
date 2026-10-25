@@ -915,6 +915,24 @@ export class IntelligenceSqliteStore {
       );
   }
 
+  /**
+   * Mark cached resources stale after a confirmed write changed tenant
+   * state. The next chat preflight refreshes them; rows stay readable
+   * in the meantime and answers surface their age honestly.
+   */
+  markGraphResourcesStale(tenantId: string, resources: GraphCacheResourceKind[]): number {
+    if (resources.length === 0) return 0;
+    const placeholders = resources.map(() => "?").join(", ");
+    const result = this.db
+      .prepare(
+        `UPDATE graph_cache_status
+         SET refreshed_at = '1970-01-01T00:00:00.000Z'
+         WHERE tenant_id = ? AND resource IN (${placeholders})`,
+      )
+      .run(tenantId, ...resources) as unknown as { changes?: number };
+    return result.changes ?? 0;
+  }
+
   getGraphCacheStatus(
     tenantId: string,
     definitions: GraphCacheResourceDefinition[],

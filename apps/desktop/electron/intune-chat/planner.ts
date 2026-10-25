@@ -528,6 +528,63 @@ export function planChatContext(question: string): PlannedChatContext {
   };
 }
 
+/**
+ * Cache resources a confirmed write can have changed. Derived from the
+ * write agent's scopes (manifest agents apply through runtime steps, so
+ * scopes are the stable signal) plus any concrete Graph action paths
+ * (system runs). Unknown writes invalidate everything: writes are rare
+ * and a stale answer after a confirmed change is the worse failure.
+ */
+export function graphCacheResourcesForWrite(input: {
+  scopes?: string[];
+  paths?: string[];
+}): GraphCacheResourceKind[] {
+  const out = new Set<GraphCacheResourceKind>();
+  const paths = input.paths ?? [];
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    const base = pathForResource(definition.resource).path;
+    if (paths.some((path) => path === base || path.startsWith(`${base}/`) || path.startsWith(`${base}(`))) {
+      out.add(definition.resource);
+    }
+  }
+  const scopes = input.scopes ?? [];
+  const hasWrite = (family: string) =>
+    scopes.some((scope) => scope.startsWith(family) && scope !== `${family}Read.All`);
+  if (
+    scopes.some((scope) => scope.includes("ManagedDevices.PrivilegedOperations")) ||
+    hasWrite("DeviceManagementManagedDevices.")
+  ) {
+    out.add("managedDevices");
+    out.add("entraDevices");
+    out.add("detectedApps");
+    out.add("managedDeviceEncryptionStates");
+  }
+  if (hasWrite("User.") || hasWrite("Directory.")) {
+    out.add("users");
+    out.add("groups");
+  }
+  if (hasWrite("Group.")) out.add("groups");
+  if (hasWrite("Device.")) out.add("entraDevices");
+  if (hasWrite("Policy.")) {
+    out.add("conditionalAccessPolicies");
+    out.add("authenticationMethodsPolicy");
+    out.add("authorizationPolicy");
+    out.add("crossTenantAccessPolicy");
+    out.add("namedLocations");
+  }
+  if (hasWrite("DeviceManagementConfiguration.") || hasWrite("DeviceManagementApps.")) {
+    out.add("deviceConfigurations");
+    out.add("configurationPolicies");
+    out.add("deviceCompliancePolicies");
+    out.add("mobileApps");
+    out.add("endpointSecurityIntents");
+  }
+  if (out.size === 0) {
+    for (const definition of GRAPH_CACHE_RESOURCES) out.add(definition.resource);
+  }
+  return [...out];
+}
+
 export function requiredScopesForResources(resources: GraphCacheResourceKind[]): string[] {
   const selected = new Set(resources);
   const scopes = new Set<string>();

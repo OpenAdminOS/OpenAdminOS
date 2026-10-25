@@ -30,6 +30,7 @@ import {
   withAgentCompatibility,
 } from "./agent-draft-helpers.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
+import { graphCacheResourcesForWrite } from "./intune-chat/planner.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { fingerprintRunOutput, stableStringify } from "./run-delivery-format.js";
 import {
@@ -767,6 +768,33 @@ export class RunService {
     }
   }
 
+  /**
+   * Confirmed writes mutate tenant state outside the chat cache. Mark
+   * the affected resources stale so the next chat question refreshes
+   * instead of answering from the pre-write snapshot until TTL expiry.
+   */
+  private invalidateGraphCacheAfterWrite(
+    runId: string,
+    tenantId: string,
+    input: { scopes?: string[]; paths?: string[] },
+  ): void {
+    try {
+      const store = this.host.intelligenceStore;
+      if (!store) return;
+      const resources = graphCacheResourcesForWrite(input);
+      const marked = store.markGraphResourcesStale(tenantId, resources);
+      if (marked > 0) {
+        void this.appendRunLog(
+          runId,
+          "info",
+          `Marked ${marked} cached Graph resources stale after the confirmed write. Chat will refresh them before the next answer.`,
+        );
+      }
+    } catch {
+      // Cache invalidation must never fail a completed write run.
+    }
+  }
+
   private async driveApply(input: {
     run: RunRecord;
     agent: AgentSummary;
@@ -804,23 +832,32 @@ export class RunService {
         if (stableStringify(fresh.plan.actions) !== stableStringify(input.plan.actions) || fresh.plan.confirmationPhrase !== input.plan.confirmationPhrase) throw new Error("The proposed actions changed since review. Nothing was applied. Run the assignment again to review a fresh proposal.");
         controller.signal.throwIfAborted();
       }
-      await executeApply({
-        signal: controller.signal,
-        run: input.run,
-        agent: input.agent,
-        providerId: input.providerId,
-        model: input.model,
-        plan: input.plan,
-        llm,
-        createGraph: selection.createGraph,
-        tenant: selection.tenantSession,
-        connectorConfigs: await this.host.readConnectorConfigs(),
-        connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
-        realWrites: true,
-        onProgress: (next) =>
-          this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
-      });
+      try {
+        await executeApply({
+          signal: controller.signal,
+          run: input.run,
+          agent: input.agent,
+          providerId: input.providerId,
+          model: input.model,
+          plan: input.plan,
+          llm,
+          createGraph: selection.createGraph,
+          tenant: selection.tenantSession,
+          connectorConfigs: await this.host.readConnectorConfigs(),
+          connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
+          confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
+          realWrites: true,
+          onProgress: (next) =>
+            this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
+        });
+      } finally {
+        // An apply that threw partway may still have committed earlier
+        // actions; marking stale is safe either way, so always invalidate.
+        this.invalidateGraphCacheAfterWrite(input.run.id, selection.tenantId, {
+          scopes: input.agent.scopes,
+          paths: input.plan.actions.flatMap((action) => action.request?.path ? [action.request.path] : []),
+        });
+      }
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
     } finally {
@@ -897,6 +934,12 @@ export class RunService {
             summary: `${noun} stopped at "${action.label}" after applying ${applied} of ${plan.actions.length} actions. Nothing after the failed action was attempted.`,
           };
           await this.persistRunSnapshot(run);
+          if (applied > 0) {
+            this.invalidateGraphCacheAfterWrite(run.id, selection.tenantId, {
+              paths: plan.actions.slice(0, applied).flatMap((appliedAction) =>
+                appliedAction.request?.path ? [appliedAction.request.path] : []),
+            });
+          }
           return;
         }
         applied += 1;
@@ -929,6 +972,12 @@ export class RunService {
         result: { appliedActions: applied, manualItems: manualCount },
       };
       await this.persistRunSnapshot(run);
+      if (applied > 0) {
+        this.invalidateGraphCacheAfterWrite(run.id, selection.tenantId, {
+          paths: plan.actions.flatMap((appliedAction) =>
+            appliedAction.request?.path ? [appliedAction.request.path] : []),
+        });
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.persistRunSnapshot({

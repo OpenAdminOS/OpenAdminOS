@@ -74,6 +74,34 @@ describe("Intune Chat SQLite store", () => {
     }
   });
 
+  it("marks only the written tenant's named resources stale after a write", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-invalidate-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      const base = {
+        label: "Managed devices",
+        scopeSet: ["DeviceManagementManagedDevices.ReadWrite.All"],
+        refreshedAt: "2026-08-01T10:00:00.000Z",
+        rows: [{ id: "device-1", deviceName: "WIN-01" }],
+      };
+      store.replaceGraphResources({ ...base, tenantId: "tenant-1", resource: "managedDevices" });
+      store.replaceGraphResources({ ...base, tenantId: "tenant-2", resource: "managedDevices" });
+
+      assert.equal(store.markGraphResourcesStale("tenant-1", ["managedDevices"]), 1);
+      assert.equal(store.markGraphResourcesStale("tenant-1", []), 0);
+
+      const tenant1 = store.getGraphCacheStatus("tenant-1", GRAPH_CACHE_RESOURCES)
+        .find((status) => status.resource === "managedDevices");
+      const tenant2 = store.getGraphCacheStatus("tenant-2", GRAPH_CACHE_RESOURCES)
+        .find((status) => status.resource === "managedDevices");
+      assert.equal(tenant1?.refreshedAt, "1970-01-01T00:00:00.000Z");
+      assert.equal(tenant2?.refreshedAt, "2026-08-01T10:00:00.000Z");
+      store.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("persists conversations, messages, cache rows, and self-training decisions", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-"));
     try {
