@@ -1613,7 +1613,10 @@ the day threshold, compute the cutoff from `generatedAt`, read matching
 include the threshold/match metadata in the answer pack.
 
 For large result sets the answer pack includes aggregate counts, grouped
-breakdowns, and representative rows. v0.2.2 reads at most 40 rows per planned
+breakdowns, and representative rows. The pack is one snapshot: its rows, cache
+status, and aggregates are captured together before any investigation runs, so a
+mid-investigation refresh cannot change the fallback pack's counts while its
+rows and freshness describe the earlier snapshot. v0.2.2 reads at most 40 rows per planned
 resource from SQLite/Graph and includes at most 20 compact sample rows per
 resource in the model prompt, with `selectedRows`, `includedSampleRows`, and
 `omittedCachedRows` metadata so the model can disclose bounded evidence rather
