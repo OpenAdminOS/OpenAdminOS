@@ -265,7 +265,12 @@ run, even if global defaults later change.
 Provider settings include an explicit smoke test action for connected providers;
 the test runs a tiny completion and reports the model and response time. This is
 intentionally visible because hosted/local provider trust is a core product
-decision, not hidden plumbing.
+decision, not hidden plumbing. Chat resolves the persisted active provider
+fail-closed: when it is missing from the live provider list, sending fails with
+an error naming the expected provider instead of silently substituting another
+provider or a no-op model. Providers whose CLI exposes no model list (Gemini)
+advertise a single default-model entry so they stay selectable in Chat; the
+sentinel is never passed to the CLI as a model name.
 
 Anthropic support is delivered through the user's locally installed Claude Code
 CLI (`claude`) rather than a stored Anthropic API key. OpenAdminOS probes the CLI
@@ -1064,11 +1069,13 @@ deltas arrive, while the host persists only the final completed, failed, or
 cancelled assistant message. The preload stream listener must remain registered
 until the terminal `completed`, `failed`, or `cancelled` stream event; cleaning
 it up when the IPC invoke promise resolves can drop tail events from very fast
-local model streams. This keeps the UI responsive without storing partial tenant
-answers as durable history. The composer exposes Stop while a chat answer is
-running. Stop aborts provider work through the host-owned stream controller
-where the provider supports cancellation, discards generated tail output, and
-persists a clear cancelled assistant entry instead of a partial answer.
+local model streams. A stream that fails mid-answer persists the partial text
+with the failure appended and status `failed`, so the admin can see how far it
+got; it is never presented as a completed answer. The composer exposes Stop
+while a chat answer is running. Stop aborts only that conversation's stream
+(each send carries its own stream id from renderer through the host
+controller), discards generated tail output, and persists a clear cancelled
+assistant entry without the partial text.
 
 The composer follows normal chat ergonomics: Enter sends the message, while
 Shift+Enter inserts a newline. The focused composer shows one visible accent
@@ -1094,12 +1101,21 @@ protocol with one fenced JSON tool call per iteration:
 only host-owned read tools, appends observations, and stops after at most eight
 iterations. Malformed tool JSON gets up to three repair prompts; another malformed
 response or the iteration cap produces a visible fallback notice and answers
-   through the deterministic planner path. The toolset is strictly read-only:
-   `list_cached_resources`, `query_cache`, `graph_get`, `refresh_resource`, and
-   `query_drift`.
+   through the deterministic planner path. A final answer to a question that
+   planned tenant resources is only accepted after at least one successful
+   tenant-evidence tool call; a prose-only reply gets bounded repair prompts
+   and then the same deterministic fallback with its notice, never a clean
+   completed answer. In a consented voice web-research session a `web_search`
+   attempt counts as evidence instead, and the service owns web-failure
+   honesty. The toolset is strictly read-only: `list_cached_resources`,
+   `query_cache`, `find_graph_endpoint`, `graph_get`, `refresh_resource`,
+   `query_drift`, and `web_search` (only when the voice session consented to
+   public web research).
 `graph_get` accepts only GET, validates paths against the chat Graph cache
 declarations and bundled Graph catalog read scopes, caps `$top` and returned rows
-at 50, and truncates large live payloads before they return to the model. Every
+at 50, follows `@odata.nextLink` paging within that row budget through validated
+`$skiptoken` re-requests, reports truncation, and names the missing scope with a
+reconnect recovery when Graph answers 403. Every
 tool call streams as a visible progress step and is persisted in `chat_tool_calls`
 with the completed assistant message; the renderer shows a collapsible "What
 ran" trace with tool name, parameters summary, result summary, duration, and
@@ -1234,9 +1250,10 @@ dashboard: history on the left, the active conversation and composer in the
 center, and only compact tenant/provider/freshness cues in the chat header.
 The chat header should not expose a global cache Refresh action; prompt-scoped
 refresh already happens during send, and broad cache maintenance belongs in
-Settings. Graph cache details, manual/periodic refresh controls, and
-self-training approval/reset workflows live in Settings -> Intune Chat so normal
-chat use stays uncluttered.
+Settings. Graph cache details and manual/periodic refresh controls live in
+Settings -> Data; investigation mode and self-training approval/reset
+workflows live in Settings -> Intune Chat, so normal chat use stays
+uncluttered.
 The history rail can collapse to a narrow icon/index strip when the admin wants
 more reading width, and each message exposes a compact copy action for prompts
 and responses. User prompts can also be loaded back into the composer for
@@ -1249,7 +1266,15 @@ that support aborts terminate their network/process work, and the host persists 
 Conversation management is local-first as well: admins can search conversation
 titles and message text, pin important investigations, rename conversations,
 export a local Markdown transcript with source metadata, and delete
-conversations from the local SQLite store. Deleting a conversation removes local
+conversations from the local SQLite store. Conversations are scoped to the
+active tenant: list and search show only the active tenant's conversations
+(plus multi-tenant-scope and legacy untenanted rows), and the host refuses
+read, rename, pin, delete, and export of another tenant's conversation by id.
+Follow-up questions receive bounded conversation memory: the last four
+completed turns as plain text under a hard character cap, with older turns
+dropped first. A prompt with write intent is answered by the deterministic
+write block before any cache refresh or model call, on both the streaming and
+non-streaming send paths. Deleting a conversation removes local
 messages and chat tool-call records only; it does not disconnect the tenant,
 clear Graph cache, or alter agent run history. Pinned conversations are grouped
 at the top of the chat history rail under a collapsible Pinned section, separate
@@ -1365,7 +1390,8 @@ Cache freshness is per resource, not a single interval: sign-in and audit
 data expires in minutes, device and user inventory in hours, and slow
 configuration such as Autopilot profiles in a day.
 
-Initial cache targets:
+Cache targets (45 resource kinds; the planner registry is the source of truth
+and tests assert every kind has a label, scope set, and request path):
 
 - `/deviceManagement/managedDevices`
 - `/devices`
@@ -1374,6 +1400,10 @@ Initial cache targets:
 - `/deviceManagement/deviceCompliancePolicies`
 - `/deviceManagement/deviceConfigurations`
 - `/deviceManagement/configurationPolicies`
+- `/auditLogs/signIns`
+- `/auditLogs/directoryAudits`
+- `/deviceManagement/auditEvents`
+- `/identity/conditionalAccess/policies`
 - `/deviceAppManagement/mobileApps`
 - `/deviceManagement/detectedApps`
 - `/deviceAppManagement/managedAppPolicies`
@@ -1395,10 +1425,19 @@ Initial cache targets:
 - `/deviceManagement/managedDeviceOverview`
 - `/deviceManagement/managedDeviceEncryptionStates`
 - `/deviceManagement/troubleshootingEvents`
-- `/auditLogs/signIns`
-- `/auditLogs/directoryAudits`
-- `/deviceManagement/auditEvents`
-- `/identity/conditionalAccess/policies`
+- `/identity/conditionalAccess/namedLocations`
+- `/policies/authenticationMethodsPolicy`
+- `/policies/authorizationPolicy`
+- `/policies/crossTenantAccessPolicy`
+- `/directoryRoles`
+- `/administrativeUnits`
+- `/applications`
+- `/servicePrincipals`
+- `/domains`
+- `/security/alerts_v2`
+- `/security/incidents`
+- `/security/secureScores`
+- `/security/secureScoreControlProfiles`
 
 Initial tenant connection requests the Graph PM-audited read scopes needed for
 these cache targets, including Intune configuration, apps, service config,
@@ -1409,7 +1448,12 @@ and surfaced in chat sources/settings instead of blocking unrelated cached
 resources. Completed assistant messages include a source-details disclosure for
 each used Graph resource with cache/live status, row count, page count, cap
 status, refresh time, Graph path, selected fields, query parameters, and safe
-error text where available.
+error text where available. Sources list only resources the answer actually
+read: investigative answers derive them from the executed tool trace,
+deterministic answers from the planned resources their answer pack was built
+from, and answers that read no tenant data (write blocks, failures, stopped
+responses) carry none. The answer header shows the oldest source age, because
+the stalest source bounds how current the answer can be.
 Autopilot event data is included as a separate source because live tenant checks
 can return Intune service-side 500s for `/deviceManagement/windowsAutopilotDeviceIdentities`
 even when the correct service-config read scope is present. Chat should surface
@@ -1417,8 +1461,12 @@ the identity source error while still using Autopilot events, troubleshooting
 events, and enrollment configuration data when available.
 
 Refresh modes are explicit: chat refreshes prompt-relevant resources as part of
-answering, while Settings -> Intune Chat lets admins manually refresh the active
-tenant cache or enable a per-tenant periodic refresh interval. Scheduled refresh
+answering, while Settings -> Data lets admins manually refresh the active
+tenant cache or enable a per-tenant periodic refresh interval. A confirmed
+write run marks the cache resources its scopes and action paths can have
+changed as stale for that tenant, so the next question refreshes them instead
+of answering from pre-write rows; an unrecognized write marks every resource
+stale. Scheduled refresh
 uses the same local app/OS scheduler surface as agent schedules while the user is
 signed in; it writes success/failure state to SQLite and never uploads cache
 contents.
@@ -1431,7 +1479,7 @@ only filtering the currently rendered page. It scans at most the newest 5,000
 snapshots and labels that boundary when reached. A capped Graph cache refresh
 never infers that unseen objects were removed; removal detection resumes only
 after a complete refresh, and the UI discloses partial source coverage.
-Settings -> Intune Chat can clear the active tenant's cached Graph rows and cache
+Settings -> Data can clear the active tenant's cached Graph rows and cache
 status through an explicit local-deletion modal. Clearing cache does not
 disconnect the tenant, change provider settings, remove chat history, or alter
 agent run history; the next chat refreshes required resources again.
@@ -1874,13 +1922,16 @@ v0.3 shipped with ten sidebar destinations and two equally-weighted primary para
 
 Chat is the primary paradigm. "Ask a question about your tenant in plain language" requires zero new vocabulary from a Microsoft admin. Agents are the packaged, repeatable form of the same work and get suggested *from* chat when a question matches an installed agent's domain. Agents remain a first-class nav item; they are no longer the default landing surface.
 
-Chat related-agent hints are deterministic and presentation-only. The renderer
-matches each sent question against installed agent name, category, description,
-simple bigrams, and a small local Microsoft admin synonym table. The matcher
-uses a conservative score threshold of 8 and requires either two matched
-tokens/bigrams or one strong name/category/synonym-domain hit. Hints render only
-after the assistant message completes, can be dismissed, never persist to chat
-messages, and never suggest the same agent twice in one conversation.
+Agent suggestions are computed once, by the host matcher, and persist on the
+assistant message. The matcher scores stemmed question terms against installed
+agent name/slug (weighted double) and description/category, adds category and
+write-intent signals, and requires real lexical evidence: a name/slug term or
+at least two matched terms. Write agents are suggested only when the question
+carries write intent, and their category must match the inferred question
+category. Cards render from the persisted suggestions only (the renderer runs
+no second matcher), show a read/write badge and the required scopes while
+collapsed, and can be dismissed per message. The probe table from the Chat
+audit runs as a maintained test against the shipped agent registry.
 
 ### Navigation (locked for the enterprise redesign)
 
