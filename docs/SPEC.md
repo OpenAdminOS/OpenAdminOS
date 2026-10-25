@@ -1383,8 +1383,13 @@ suggestions.
 Counts are never inferred from sample rows. Breakdowns are computed in
 SQL across every cached row, and `$count` with `ConsistencyLevel:
 eventual` is requested for the directory resources that support it, so a
-"how many" answer holds above the cache row limit. Where detail rows
-cover only part of the tenant, the answer must say so.
+"how many" answer holds above the cache row limit. Breakdown dimensions
+are catalogued per resource for the filters admins commonly count by,
+including Graph subtype and policy platform, Conditional Access state,
+group and app identity fields, security severity and status, sign-in
+outcomes, and array fields such as Settings Catalog platforms and group
+types. Array breakdowns can count one row in more than one bucket.
+Where detail rows cover only part of the tenant, the answer must say so.
 
 Cache freshness is per resource, not a single interval: sign-in and audit
 data expires in minutes, device and user inventory in hours, and slow
