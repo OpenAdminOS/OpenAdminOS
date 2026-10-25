@@ -60,6 +60,63 @@ describe("ConversationWorkspaceProvider", () => {
     expect(screen.getByTestId("active-conversation")).toHaveTextContent("none");
   });
 
+  it("discards a late reload from the previous tenant", async () => {
+    const user = userEvent.setup();
+    const tenantBConversation: IntuneChatConversation = {
+      ...conversation,
+      id: "conversation-tenant-2",
+      title: "Tenant two review",
+      tenantId: "tenant-2",
+    };
+    let bridgeRef: ReturnType<typeof makeMockBridge> | undefined;
+    let resolveSearch: ((value: IntuneChatConversation[]) => void) | undefined;
+    let searchCalls = 0;
+    const searchIntuneChatConversations = vi.fn(async () => {
+      searchCalls += 1;
+      if (searchCalls === 1) {
+        return new Promise<IntuneChatConversation[]>((resolve) => { resolveSearch = resolve; });
+      }
+      return (await bridgeRef!.getAppState()).activeTenantId === "tenant-2"
+        ? [tenantBConversation]
+        : [conversation];
+    });
+    const bridge = makeMockBridge(
+      {
+        listIntuneChatConversations: vi.fn(async () =>
+          (await bridgeRef!.getAppState()).activeTenantId === "tenant-2"
+            ? [tenantBConversation]
+            : [conversation],
+        ),
+        searchIntuneChatConversations,
+        getIntuneChatMessages: vi.fn(async () => []),
+      },
+      createMockAppState({
+        tenants: [mockTenant, { ...mockTenant, id: "tenant-2", displayName: "Fabrikam" }],
+        activeTenantId: "tenant-1",
+      }),
+    );
+    bridgeRef = bridge;
+
+    renderConversationHarness(`/chat/${conversation.id}`, bridge);
+    expect(await screen.findByText("loaded")).toBeInTheDocument();
+
+    // Start a tenant-1 search reload and leave it in flight.
+    await user.click(screen.getByRole("button", { name: "Search conversations" }));
+    await waitFor(() => expect(searchIntuneChatConversations).toHaveBeenCalled());
+
+    await user.click(screen.getByRole("button", { name: "Switch to tenant 2" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("conversation-ids")).toHaveTextContent("conversation-tenant-2"),
+    );
+
+    // The stale tenant-1 response lands after tenant 2's shell.
+    resolveSearch?.([conversation]);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.getByTestId("conversation-ids")).toHaveTextContent("conversation-tenant-2");
+    expect(screen.getByTestId("conversation-ids")).not.toHaveTextContent(conversation.id);
+    expect(screen.getByTestId("active-conversation")).toHaveTextContent("none");
+  });
+
   it("reloads for tenant and search changes, not route changes", async () => {
     const user = userEvent.setup();
     const listIntuneChatConversations = vi.fn(async () => [conversation]);

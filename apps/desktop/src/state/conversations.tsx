@@ -183,6 +183,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
     );
   }, []);
 
+  const reloadGenerationRef = useRef(0);
   const reloadConversations = useCallback(
     async (
       preferredActiveConversationId?: string | null,
@@ -190,13 +191,27 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
     ) => {
       const api = window.openAdminOS;
       if (!api) return undefined;
+      const generation = (reloadGenerationRef.current += 1);
+      const requestedTenantId = activeTenantIdRef.current;
       const query = (searchOverride ?? conversationSearchRef.current).trim();
-      const [nextConversations, nextCache] = await Promise.all([
+      const [loadedConversations, nextCache] = await Promise.all([
         query
           ? api.searchIntuneChatConversations(query)
           : api.listIntuneChatConversations(),
         api.getGraphCacheStatus().catch(() => null),
       ]);
+      // A reload started under the previous tenant (or superseded by a
+      // newer reload) must not restore that tenant's sidebar or cache
+      // status over the current tenant's shell.
+      if (
+        generation !== reloadGenerationRef.current ||
+        requestedTenantId !== activeTenantIdRef.current
+      ) {
+        return undefined;
+      }
+      const nextConversations = loadedConversations.filter((conversation) =>
+        conversationVisibleForTenant(conversation, activeTenantIdRef.current),
+      );
       const activeId = activeConversationIdRef.current;
       setConversations((current) => {
         if (!activeId) return nextConversations;
@@ -213,7 +228,14 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       setCacheStatus(nextCache);
       setShellLoaded(true);
       if (preferredActiveConversationId !== undefined) {
-        const nextId = preferredActiveConversationId ?? nextConversations[0]?.id ?? null;
+        const preferredVisible =
+          preferredActiveConversationId &&
+          nextConversations.some(
+            (conversation) => conversation.id === preferredActiveConversationId,
+          )
+            ? preferredActiveConversationId
+            : null;
+        const nextId = preferredVisible ?? nextConversations[0]?.id ?? null;
         openConversation(nextId, { replace: true });
       }
     },

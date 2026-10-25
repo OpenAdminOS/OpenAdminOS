@@ -483,6 +483,18 @@ function IntuneChatContent() {
     }
   }, [scopeMode, selectedTenantIds.length, state.activeTenantId]);
 
+  // Tenant switches clear the displayed transcript immediately, even
+  // mid-stream: the messages effect below is suspended while sending,
+  // and the previous tenant's answers must not stay on screen (or keep
+  // growing from stream callbacks) under the new tenant.
+  const displayedTenantRef = useRef(state.activeTenantId);
+  useEffect(() => {
+    if (displayedTenantRef.current === state.activeTenantId) return;
+    displayedTenantRef.current = state.activeTenantId;
+    setMessages([]);
+    setOptimisticDraft(null);
+  }, [state.activeTenantId]);
+
   useEffect(() => {
     const api = window.openAdminOS;
     if (sending || sendInFlightRef.current) {
@@ -918,6 +930,8 @@ function IntuneChatContent() {
     let reachedTerminal = false;
     const streamId = window.crypto.randomUUID();
     activeStreamIdRef.current = streamId;
+    const sendTenantId = state.activeTenantId;
+    const tenantStillActive = () => activeTenantIdRef.current === sendTenantId;
     try {
       const result = await api.streamIntuneChatMessage(
         {
@@ -928,6 +942,10 @@ function IntuneChatContent() {
           ...(workspaceContext ? { workspaceContext } : {}),
         },
         (event) => {
+          // After a tenant switch this stream belongs to the previous
+          // tenant's scope: let it finish host-side, but stop painting
+          // its tenant's data into the new tenant's shell.
+          if (!tenantStillActive()) return;
           if (event.type === "started") {
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
@@ -1013,11 +1031,13 @@ function IntuneChatContent() {
         },
         { streamId },
       );
-      setPendingConversation(result.conversation);
-      upsertConversation(result.conversation);
-      if (activeTenantIdRef.current === state.activeTenantId) openConversation(result.conversation.id, { replace: true });
-      setCacheStatus(result.cacheStatus);
-      await loadShell(result.conversation.id);
+      if (tenantStillActive()) {
+        setPendingConversation(result.conversation);
+        upsertConversation(result.conversation);
+        openConversation(result.conversation.id, { replace: true });
+        setCacheStatus(result.cacheStatus);
+        await loadShell(result.conversation.id);
+      }
     } catch (caught) {
       failed = true;
       setOptimisticDraft(null);
