@@ -252,12 +252,43 @@ export async function executeIntuneChatTool(
       tool === "graph_get" && result !== null && typeof result === "object"
         ? (result as Record<string, unknown>)
         : undefined;
+    const cacheSource = ((): IntuneChatToolTraceEntry["cacheSource"] => {
+      if (result === null || typeof result !== "object") return undefined;
+      const record = result as Record<string, unknown>;
+      if (tool === "query_cache" && record.snapshot && typeof record.snapshot === "object") {
+        const snapshot = record.snapshot as Record<string, unknown>;
+        if (typeof record.resource !== "string") return undefined;
+        return {
+          resource: record.resource,
+          rows: typeof snapshot.rows === "number" ? snapshot.rows : 0,
+          ...(typeof snapshot.refreshedAt === "string" ? { refreshedAt: snapshot.refreshedAt } : {}),
+          ...(typeof snapshot.pages === "number" ? { pages: snapshot.pages } : {}),
+          ...(typeof snapshot.pageLimitReached === "boolean"
+            ? { pageLimitReached: snapshot.pageLimitReached }
+            : {}),
+        };
+      }
+      if (tool === "refresh_resource" && record.ok === true && typeof record.resource === "string") {
+        return {
+          resource: record.resource,
+          rows: typeof record.rows === "number" ? record.rows : 0,
+          ...(typeof record.refreshedAt === "string" ? { refreshedAt: record.refreshedAt } : {}),
+          ...(typeof record.pages === "number" ? { pages: record.pages } : {}),
+          ...(typeof record.pageLimitReached === "boolean"
+            ? { pageLimitReached: record.pageLimitReached }
+            : {}),
+          fromRefresh: true,
+        };
+      }
+      return undefined;
+    })();
     const trace: IntuneChatToolTraceEntry = {
       id: `tool_${randomUUID()}`,
       tool,
       params: params ?? {},
       resultSummary: summarizeToolResult(tool, result),
       ...(tool === "web_search" ? { webSources: (result as WebSearchResult).sources } : {}),
+      ...(cacheSource ? { cacheSource } : {}),
       ...(graphRecord
         ? {
             graphSource: {

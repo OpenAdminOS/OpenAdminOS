@@ -1248,21 +1248,35 @@ export function buildIntuneChatSources(input: {
   // A deterministic fallback answered from its snapshot pack, so
   // letting the abandoned investigation's live read override its
   // sources misstates what the fallback actually used.
-  const liveGraphByResource = new Map<GraphCacheResourceKind, IntuneChatToolTraceEntry>();
-  const cacheReadResources = new Set<GraphCacheResourceKind>();
+  const liveGraphByResource = new Map<GraphCacheResourceKind, IntuneChatToolTraceEntry[]>();
+  const cacheReadsByResource = new Map<
+    GraphCacheResourceKind,
+    Array<NonNullable<IntuneChatToolTraceEntry["cacheSource"]>>
+  >();
   const knownResources = new Set(GRAPH_CACHE_RESOURCES.map((entry) => entry.resource));
   for (const entry of input.executedResources ? input.toolTrace ?? [] : []) {
     if (entry.error) continue;
-    if (entry.tool === "query_cache" || entry.tool === "refresh_resource") {
-      const resource = (entry.params as Record<string, unknown> | undefined)?.resource;
-      if (typeof resource === "string" && knownResources.has(resource as GraphCacheResourceKind)) {
-        cacheReadResources.add(resource as GraphCacheResourceKind);
-      }
+    if (entry.cacheSource && knownResources.has(entry.cacheSource.resource as GraphCacheResourceKind)) {
+      const resource = entry.cacheSource.resource as GraphCacheResourceKind;
+      const reads = cacheReadsByResource.get(resource) ?? [];
+      // Repeated reads of the same snapshot are one piece of
+      // evidence; a read before and after a refresh are two.
+      const duplicate = reads.some(
+        (read) =>
+          read.refreshedAt === entry.cacheSource!.refreshedAt &&
+          read.rows === entry.cacheSource!.rows,
+      );
+      if (!duplicate) reads.push(entry.cacheSource);
+      cacheReadsByResource.set(resource, reads);
       continue;
     }
     if (entry.tool !== "graph_get" || !entry.graphSource) continue;
     const resource = graphResourceForPath(entry.graphSource.path);
-    if (resource) liveGraphByResource.set(resource, entry);
+    if (resource) {
+      const entries = liveGraphByResource.get(resource) ?? [];
+      entries.push(entry);
+      liveGraphByResource.set(resource, entries);
+    }
   }
   return input.cacheStatus
     .filter((status) => visible.has(status.resource))
@@ -1283,31 +1297,51 @@ export function buildIntuneChatSources(input: {
         ...(request.query ? { query: request.query } : {}),
         ...(status.lastError ? { error: status.lastError } : {}),
       };
-      const liveEntry = liveGraphByResource.get(status.resource);
-      if (!liveEntry?.graphSource) return [cacheEntry];
-      const live = liveEntry.graphSource;
-      const select = live.query?.["$select"]
-        ?.split(",")
-        .map((field) => field.trim())
-        .filter(Boolean);
-      const liveSourceEntry = {
+      // Every distinct execution stays visible: a later refresh or a
+      // detail lookup must not rewrite the provenance of evidence an
+      // earlier read already supplied to the answer.
+      const cacheReadEntries = (cacheReadsByResource.get(status.resource) ?? []).map((read) => ({
         resource: status.resource,
         label: status.label,
-        rows: live.rows,
-        pages: live.pagesFetched,
-        pageLimitReached: live.truncated,
-        refreshedAt: liveEntry.completedAt,
-        source: "live" as const,
-        path: live.path,
-        ...(select && select.length > 0 ? { select } : {}),
-        ...(live.query ? { query: live.query } : {}),
-      };
-      // A live lookup for one row must not hide older cache evidence
-      // the same answer also read: keep both, so the oldest-source
-      // header stays honest.
-      return cacheReadResources.has(status.resource)
-        ? [cacheEntry, liveSourceEntry]
-        : [liveSourceEntry];
+        rows: read.rows,
+        pages: read.pages,
+        pageLimitReached: read.pageLimitReached,
+        refreshedAt: read.refreshedAt,
+        source: read.fromRefresh
+          ? "live" as const
+          : input.refreshedResources.has(status.resource) &&
+              read.refreshedAt !== undefined &&
+              read.refreshedAt === status.refreshedAt
+            ? "live" as const
+            : "cache" as const,
+        path: request.path,
+        ...(request.select ? { select: request.select } : {}),
+        ...(request.query ? { query: request.query } : {}),
+      }));
+      const liveEntries = (liveGraphByResource.get(status.resource) ?? [])
+        .filter((liveEntry) => liveEntry.graphSource)
+        .map((liveEntry) => {
+          const live = liveEntry.graphSource!;
+          const select = live.query?.["$select"]
+            ?.split(",")
+            .map((field) => field.trim())
+            .filter(Boolean);
+          return {
+            resource: status.resource,
+            label: status.label,
+            rows: live.rows,
+            pages: live.pagesFetched,
+            pageLimitReached: live.truncated,
+            refreshedAt: liveEntry.completedAt,
+            source: "live" as const,
+            path: live.path,
+            ...(select && select.length > 0 ? { select } : {}),
+            ...(live.query ? { query: live.query } : {}),
+          };
+        });
+      if (cacheReadEntries.length === 0 && liveEntries.length === 0) return [cacheEntry];
+      if (cacheReadEntries.length === 0) return liveEntries;
+      return [...cacheReadEntries, ...liveEntries];
     });
 }
 

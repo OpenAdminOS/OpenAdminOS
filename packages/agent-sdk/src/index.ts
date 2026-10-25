@@ -1001,6 +1001,20 @@ export interface IntuneChatToolTraceEntry {
     truncated?: boolean;
     totalCount?: number;
   };
+  /**
+   * Snapshot provenance captured when a cache tool ran. A later
+   * refresh in the same investigation replaces the stored snapshot,
+   * so completion-time cache status cannot describe what an earlier
+   * `query_cache` actually read.
+   */
+  cacheSource?: {
+    resource: string;
+    rows: number;
+    refreshedAt?: string;
+    pages?: number;
+    pageLimitReached?: boolean;
+    fromRefresh?: boolean;
+  };
   durationMs: number;
   createdAt: string;
   completedAt: string;

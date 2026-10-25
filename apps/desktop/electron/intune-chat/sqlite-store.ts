@@ -718,11 +718,14 @@ export class IntelligenceSqliteStore {
       const invalidatedAt = this.graphInvalidatedAt.get(
         `${input.tenantId}::${input.resource}`,
       );
+      // Equal timestamps stay stale: a fetch that started in the same
+      // millisecond as the invalidation cannot prove it read
+      // post-write state. The next refresh clears the marker.
       const statusRefreshedAt =
-        invalidatedAt && invalidatedAt > input.refreshedAt
+        invalidatedAt && invalidatedAt >= input.refreshedAt
           ? "1970-01-01T00:00:00.000Z"
           : input.refreshedAt;
-      if (invalidatedAt && invalidatedAt <= input.refreshedAt) {
+      if (invalidatedAt && invalidatedAt < input.refreshedAt) {
         this.graphInvalidatedAt.delete(`${input.tenantId}::${input.resource}`);
       }
       this.db

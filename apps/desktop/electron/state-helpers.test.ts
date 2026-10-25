@@ -167,11 +167,15 @@ describe("chat sources come from executed tools, not the plan", () => {
 
     // When the same answer also read the cache for this resource, the
     // live lookup must not hide that older evidence: both appear.
+    const cacheRead = {
+      ...traceEntry("query_cache", { resource: "users" }),
+      cacheSource: { resource: "users", rows: 500, refreshedAt: "2026-08-01T09:00:00.000Z" },
+    };
     const mixedSources = buildIntuneChatSources({
       cacheStatus,
       plannedResources: ["users"],
       executedResources: ["users"],
-      toolTrace: [traceEntry("query_cache", { resource: "users" }), graphTraceEntry()],
+      toolTrace: [cacheRead, graphTraceEntry()],
       refreshedResources: new Set(),
     });
     assert.equal(mixedSources.length, 2);
@@ -180,6 +184,64 @@ describe("chat sources come from executed tools, not the plan", () => {
       [
         ["cache", 500, "2026-08-01T09:00:00.000Z"],
         ["live", 1, "2026-08-01T10:00:01.000Z"],
+      ],
+    );
+
+    // A refresh during the investigation does not rewrite the
+    // provenance of the snapshot read before it: both snapshots stay.
+    const refreshedStatus = [{
+      ...cacheStatus[0]!,
+      rows: 2,
+      refreshedAt: "2026-08-01T10:00:01.000Z",
+    }];
+    const prePostRefresh = buildIntuneChatSources({
+      cacheStatus: refreshedStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [
+        {
+          ...traceEntry("query_cache", { resource: "users" }),
+          cacheSource: { resource: "users", rows: 1, refreshedAt: "2026-08-01T08:00:00.000Z" },
+        },
+        {
+          ...traceEntry("refresh_resource", { resource: "users" }),
+          cacheSource: {
+            resource: "users",
+            rows: 2,
+            refreshedAt: "2026-08-01T10:00:01.000Z",
+            fromRefresh: true,
+          },
+        },
+      ],
+      refreshedResources: new Set(["users"]),
+    });
+    assert.deepEqual(
+      prePostRefresh.map((source) => [source.source, source.rows, source.refreshedAt]),
+      [
+        ["cache", 1, "2026-08-01T08:00:00.000Z"],
+        ["live", 2, "2026-08-01T10:00:01.000Z"],
+      ],
+    );
+
+    // Distinct live lookups for one resource all stay visible, with
+    // their own truncation flags.
+    const detailLookup = {
+      ...traceEntry("graph_get", { path: "/users/user-1" }),
+      completedAt: "2026-08-01T10:00:02.000Z",
+      graphSource: { path: "/users/user-1", rows: 1, pagesFetched: 1, truncated: false },
+    };
+    const multiLive = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [graphTraceEntry(), detailLookup],
+      refreshedResources: new Set(),
+    });
+    assert.deepEqual(
+      multiLive.map((source) => [source.path, source.rows, source.pageLimitReached]),
+      [
+        ["/users", 1, true],
+        ["/users/user-1", 1, false],
       ],
     );
   });
