@@ -17,6 +17,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Removed
 
+- Remove the GitBook sync config now that docs.openadminos.com is served by the self-hosted docs site.
+
 ### Fixed
 
 ### Security
