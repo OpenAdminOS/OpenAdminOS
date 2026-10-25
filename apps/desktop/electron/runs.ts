@@ -882,6 +882,7 @@ export class RunService {
     let applied = 0;
     let selectionTenantId: string | undefined;
     const attemptedPaths: string[] = [];
+    let systemScopes: string[] = [];
     try {
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       if (!plan) throw new Error(`${noun} run has no plan.`);
@@ -889,6 +890,7 @@ export class RunService {
         input.run.rollback?.requiredScopes ??
         input.run.external?.requiredScopes ??
         [];
+      systemScopes = scopes;
       const selection = await this.host.buildGraph(input.run.tenantId, scopes, this.executionOptions(input.run, controller.signal));
       selectionTenantId = selection.tenantId;
       const graph = selection.createGraph((level, message, metadata) => {
@@ -989,6 +991,9 @@ export class RunService {
       // answer after a confirmed change is the worse failure.
       if (attemptedPaths.length > 0 && selectionTenantId) {
         this.invalidateGraphCacheAfterWrite(input.run.id, selectionTenantId, {
+          // Scopes carry the family signal paths cannot: deleting a
+          // managed device also changes the overview totals.
+          scopes: systemScopes,
           paths: attemptedPaths,
         });
       }

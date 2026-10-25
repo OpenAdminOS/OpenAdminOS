@@ -126,7 +126,7 @@ async function waitForTerminal(
 
 describe("rollback apply", () => {
   it("applies confirmed actions strictly in order and records each step", async () => {
-    const { service, persisted, requests } = makeHarness();
+    const { service, persisted, requests, invalidations } = makeHarness();
     const queued = await service.startRollbackRun({
       tenantId: "tenant-1",
       baselineId: "baseline-1",
@@ -154,6 +154,12 @@ describe("rollback apply", () => {
     );
     assert.match(run?.summary ?? "", /2 objects rolled back/);
     assert.match(run?.summary ?? "", /1 change still need/);
+    // System runs pass their write scopes to invalidation, so the
+    // scope family is stale-marked, not only the resources whose
+    // paths were attempted.
+    assert.equal(invalidations.length, 1);
+    assert.ok(invalidations[0]?.resources.includes("deviceCompliancePolicies"));
+    assert.ok(invalidations[0]?.resources.includes("assignmentFilters"));
   });
 
   it("stops at the first failed action and never fires later requests", async () => {
