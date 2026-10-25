@@ -707,6 +707,8 @@ describe("Intune Chat planner", () => {
       "Show me the stale devices. Can you retire them?",
       "Explain which devices are stale, then retire them.",
       "Describe the stale devices, then wipe them.",
+      "Explain which devices are stale, and retire them.",
+      "Explain how to identify stale devices, and retire them.",
     ];
     for (const question of writeQuestions) {
       assert.equal(

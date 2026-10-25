@@ -344,7 +344,7 @@ function matchesWriteIntentTermInSentence(lowerSentence: string, term: string): 
   // change their passwords?", "Which policies disable legacy
   // authentication and block risky sign-ins?"
   const imperative = new RegExp(
-    `(?:^(?:please\\s+)?${term}\\b)|(?:^(?:can you|could you|would you|i want to|i need to|let's)\\s+${term}\\b)|(?:\\bplease\\s+${term}\\b)|(?:\\band then\\s+${term}\\b)|(?:,\\s*then\\s+${term}\\b)|(?:[.!?;]\\s+(?:please\\s+)?${term}\\b)`,
+    `(?:^(?:please\\s+)?${term}\\b)|(?:^(?:can you|could you|would you|i want to|i need to|let's)\\s+${term}\\b)|(?:\\bplease\\s+${term}\\b)|(?:\\band then\\s+${term}\\b)|(?:,\\s*then\\s+${term}\\b)|(?:,\\s*and\\s+${term}\\b)|(?:[.!?;]\\s+(?:please\\s+)?${term}\\b)`,
   );
   if (imperative.test(question)) return true;
   // Coordinated imperatives after an imperative read verb are still
