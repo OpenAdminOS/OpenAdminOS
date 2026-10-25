@@ -1,7 +1,7 @@
 {
   "name": "@openadminos/desktop",
   "private": true,
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Open-source, local-first agents for Microsoft 365 admins.",
   "author": {
     "name": "OpenAdminOS",
@@ -35,9 +35,9 @@
     "@fontsource-variable/newsreader": "^5.3.0",
     "@microsoft/mxc-sdk": "0.6.1",
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "@openadminos/agent-sdk": "0.7.1",
-    "@openadminos/connector-whatsapp-web": "0.7.1",
-    "@openadminos/runtime": "0.7.1",
+    "@openadminos/agent-sdk": "0.7.2",
+    "@openadminos/connector-whatsapp-web": "0.7.2",
+    "@openadminos/runtime": "0.7.2",
     "electron-updater": "^6.6.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
@@ -98,8 +98,12 @@
         "to": "native/mxc-sdk/bin"
       },
       {
-        "from": "build/icon.png",
-        "to": "app-icon.png"
+        "from": "build/menu-bar-iconTemplate.png",
+        "to": "menu-bar-iconTemplate.png"
+      },
+      {
+        "from": "build/menu-bar-iconTemplate@2x.png",
+        "to": "menu-bar-iconTemplate@2x.png"
       }
     ],
     "publish": [

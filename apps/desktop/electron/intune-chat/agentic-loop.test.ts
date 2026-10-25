@@ -171,6 +171,153 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
+  it("repairs a prose answer that used no tenant evidence, then completes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const llm = scriptedLlm([
+        "I can't determine the count because the tenant query tool is unavailable in this session.",
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
+        '```json\n{"final":true,"answer":"WIN-01 is the relevant device."}\n```',
+      ]);
+      const result = await runAgenticChat(baseInput(store, llm));
+      assert.equal(result.ok, true, JSON.stringify(result));
+      assert.equal(result.answer, "WIN-01 is the relevant device.");
+      assert.equal(result.toolTrace.length, 1);
+      assert.equal(result.toolTrace[0]?.tool, "query_cache");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("falls back when the model never checks tenant data", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const prose = await runAgenticChat(baseInput(store, scriptedLlm([
+        "I can't verify that because no tenant query results were supplied.",
+      ])));
+      assert.equal(prose.ok, false);
+      assert.equal(prose.reason, "no-evidence");
+      assert.match(prose.fallbackNotice, /without checking tenant data/i);
+      assert.equal(prose.toolTrace.length, 0);
+
+      const explicitFinal = await runAgenticChat(baseInput(store, scriptedLlm([
+        '```json\n{"final":true,"answer":"9 devices are fine."}\n```',
+      ])));
+      assert.equal(explicitFinal.ok, false);
+      assert.equal(explicitFinal.reason, "no-evidence");
+      assert.equal(explicitFinal.toolTrace.length, 0);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count inventory alone or a never-cached query as evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const inventoryOnly = await runAgenticChat(baseInput(store, scriptedLlm([
+        '```json\n{"tool":"list_cached_resources","params":{}}\n```',
+        "WIN-01, WIN-02, and WIN-03 are noncompliant.",
+      ])));
+      assert.equal(inventoryOnly.ok, false, JSON.stringify(inventoryOnly));
+      assert.equal(inventoryOnly.reason, "no-evidence");
+
+      const neverCached = await runAgenticChat(baseInput(store, scriptedLlm([
+        '```json\n{"tool":"query_cache","params":{"resource":"users","limit":25}}\n```',
+        "There are 12 users in the tenant.",
+      ])));
+      assert.equal(neverCached.ok, false, JSON.stringify(neverCached));
+      assert.equal(neverCached.reason, "no-evidence");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count a failed refresh as tenant evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat({
+        ...baseInput(store, scriptedLlm([
+          '```json\n{"tool":"refresh_resource","params":{"resource":"managedDevices"}}\n```',
+          "All 47 devices are compliant.",
+        ])),
+        tools: {
+          ...toolContext(store),
+          refreshResource: async (resource) => ({
+            resource,
+            label: resource,
+            rows: 0,
+            refreshedAt: "2026-06-01T10:01:00.000Z",
+            ok: false,
+            error: "Microsoft Graph denied read access (HTTP 403).",
+          }),
+        },
+      });
+      assert.equal(result.ok, false, JSON.stringify(result));
+      assert.equal(result.reason, "no-evidence");
+      assert.match(result.toolTrace[0]?.error ?? "", /HTTP 403/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("counts web research as evidence only in a consented web session", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const script = () => scriptedLlm([
+        '```json\n{"tool":"web_search","params":{"query":"latest macOS version Apple"}}\n```',
+        "Apple publishes the current macOS versions on its support page.",
+      ]);
+      const webResult = await runAgenticChat({
+        ...baseInput(store, script()),
+        tools: {
+          ...toolContext(store),
+          webSearch: async () => ({
+            text: "Apple macOS guidance.",
+            sources: [{ title: "Apple releases", url: "https://support.apple.com/en-us/100100" }],
+            searchedAt: "2026-06-01T10:00:30.000Z",
+          }),
+        },
+      });
+      assert.equal(webResult.ok, true, JSON.stringify(webResult));
+      assert.equal(webResult.toolTrace[0]?.tool, "web_search");
+
+      // Without webSearch configured the tool errors, and that failed
+      // attempt must not bypass the tenant-evidence guard.
+      const noWeb = await runAgenticChat(baseInput(store, script()));
+      assert.equal(noWeb.ok, false);
+      assert.equal(noWeb.reason, "no-evidence");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("still allows a prose final when no tenant data was planned", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat({
+        ...baseInput(store, scriptedLlm(["Hello. What would you like to check?"])),
+        plannedResources: [],
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.answer, "Hello. What would you like to check?");
+      assert.equal(result.toolTrace.length, 0);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("respects cancellation between tool iterations", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
@@ -381,6 +528,51 @@ it('does not accept a false zero after an invalid filter, and permits a correcte
       assert.equal(repaired.ok, true);
       assert.equal(repaired.answer, 'WIN-01 is in the Windows inventory.');
     }
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+it('resolves a failed stale-sync cache query through the corrected operator query', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agentic-live-resolves-'));
+  const store = seededStore(dir);
+  const failedSyncQuery = JSON.stringify({
+    tool: 'query_cache',
+    params: { resource: 'managedDevices', where: { lastSyncDateTime: { approx: '2026-05-20' } } },
+  });
+  const correctedSyncQuery = JSON.stringify({
+    tool: 'query_cache',
+    params: { resource: 'managedDevices', where: { lastSyncDateTime: { lt: '2027-01-01' } } },
+  });
+  const liveGraph = {
+    listManagedDevices: async () => [],
+    retireManagedDevice: async () => { throw Error('Unexpected write'); },
+    request: async () => ({ value: [{ id: 'stale-1', deviceName: 'STALE-1', lastSyncDateTime: '2026-05-10T09:00:00.000Z' }] }),
+  };
+  try {
+    // The operator-object shape the model used for the stale-sync
+    // cutoff is accepted, so the corrected cache query succeeds and
+    // clears the earlier failure before the final answer.
+    const repaired = baseInput(store, scriptedLlm([
+      failedSyncQuery,
+      correctedSyncQuery,
+      'WIN-01 has not synced since 2026-06-01.',
+    ]));
+    repaired.tools.graphForScopes = async () => liveGraph;
+    const repairedResult = await runAgenticChat(repaired);
+    assert.equal(repairedResult.ok, true);
+    assert.equal(repairedResult.answer, 'WIN-01 has not synced since 2026-06-01.');
+
+    // A live read alone does not clear the guard: without a corrected
+    // cache query the failed lookup still blocks the final answer.
+    const liveOnly = baseInput(store, scriptedLlm([
+      failedSyncQuery,
+      JSON.stringify({ tool: 'graph_get', params: { path: '/deviceManagement/managedDevices', query: { $filter: "lastSyncDateTime lt 2026-05-20" } } }),
+      'There are zero stale devices.',
+      'There are zero stale devices.',
+    ]));
+    liveOnly.tools.graphForScopes = async () => liveGraph;
+    const blocked = await runAgenticChat(liveOnly);
+    assert.equal(blocked.ok, true);
+    assert.match(blocked.answer, /No verified count is available/);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 

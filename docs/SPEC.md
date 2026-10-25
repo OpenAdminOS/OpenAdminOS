@@ -322,7 +322,12 @@ run, even if global defaults later change.
 Provider settings include an explicit smoke test action for connected providers;
 the test runs a tiny completion and reports the model and response time. This is
 intentionally visible because hosted/local provider trust is a core product
-decision, not hidden plumbing.
+decision, not hidden plumbing. Chat resolves the persisted active provider
+fail-closed: when it is missing from the live provider list, sending fails with
+an error naming the expected provider instead of silently substituting another
+provider or a no-op model. Providers whose CLI exposes no model list (Gemini)
+advertise a single default-model entry so they stay selectable in Chat; the
+sentinel is never passed to the CLI as a model name.
 
 Anthropic support is delivered through the user's locally installed Claude Code
 CLI (`claude`) rather than a stored Anthropic API key. OpenAdminOS probes the CLI
@@ -347,13 +352,19 @@ send tenant context.
 
 Local-provider trust is endpoint-sensitive. Ollama is local only when the
 configured endpoint is loopback (`localhost`, `127.0.0.0/8`, IPv6 loopback, or
-IPv4-mapped loopback) or a Unix socket. If `OPENAGENTS_OLLAMA_URL` points at a
+IPv4-mapped loopback) or a Unix socket. The endpoint is `OPENAGENTS_OLLAMA_URL`
+when set, otherwise Ollama's own `OLLAMA_HOST` read the way the Ollama client
+reads it (a wildcard bind address is reached through `127.0.0.1`), otherwise
+`http://127.0.0.1:11434`. Retrieval embeddings follow `OLLAMA_HOST` only while
+it stays on loopback. Provider detection gives `/api/tags` 1.5 seconds and the
+per-model `/api/show` capability checks a separate 5 seconds, and caches each
+model's result by digest. If the resolved endpoint points at a
 LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
 provider summary flips to external/hosted-style trust messaging and Intune Chat
 requires hosted-provider confirmation before tenant context is sent.
 
 LM Studio support uses its local OpenAI-compatible server at
-`http://localhost:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
+`http://127.0.0.1:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
 development override. Like Ollama, LM Studio is local only when the configured
 HTTP endpoint resolves to loopback. A LAN, internet, wildcard, or invalid
 endpoint flips the provider to external trust messaging before tenant prompts
@@ -388,10 +399,17 @@ generic model error.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
-Desktop CLI provider discovery adds Homebrew and user-local executable directories
-to macOS child PATH so Finder/Dock launches can also resolve npm launchers' Node
-runtime. On Windows it adds the user npm and native CLI install folders, respects
-redirected AppData, and resolves official npm launchers without a command shell.
+Desktop CLI provider discovery appends known install folders to the child PATH
+on every platform, because Finder, Dock, and desktop-menu launches get a minimal
+PATH and a running Windows app never sees PATH changes. macOS and Linux add
+Homebrew (or Linuxbrew and Snap), `~/.local/bin`, `~/.npm-global/bin`, Volta,
+bun, mise, asdf, the fnm default alias, and every nvm Node version (newest
+first). Windows adds the user npm folder, `~/.local/bin`, WinGet Links, pnpm,
+Volta, Scoop, and bun, and respects redirected AppData. Entries already on PATH
+keep precedence. Official npm launchers are resolved without a command shell:
+to the package's Node entry point, or directly to Claude Code's native
+`bin/claude.exe`; pnpm and yarn global launchers are followed through the
+`%~dp0` path they reference, accepting only the official entry for that CLI.
 It does not execute shell startup files or inherit additional secrets. Claude's
 configuration directory remains unset unless explicitly configured: forcing even
 its default directory selects a different macOS Keychain credential namespace.
@@ -1121,11 +1139,13 @@ deltas arrive, while the host persists only the final completed, failed, or
 cancelled assistant message. The preload stream listener must remain registered
 until the terminal `completed`, `failed`, or `cancelled` stream event; cleaning
 it up when the IPC invoke promise resolves can drop tail events from very fast
-local model streams. This keeps the UI responsive without storing partial tenant
-answers as durable history. The composer exposes Stop while a chat answer is
-running. Stop aborts provider work through the host-owned stream controller
-where the provider supports cancellation, discards generated tail output, and
-persists a clear cancelled assistant entry instead of a partial answer.
+local model streams. A stream that fails mid-answer persists the partial text
+with the failure appended and status `failed`, so the admin can see how far it
+got; it is never presented as a completed answer. The composer exposes Stop
+while a chat answer is running. Stop aborts only that conversation's stream
+(each send carries its own stream id from renderer through the host
+controller), discards generated tail output, and persists a clear cancelled
+assistant entry without the partial text.
 
 The composer follows normal chat ergonomics: Enter sends the message, while
 Shift+Enter inserts a newline. The focused composer shows one visible accent
@@ -1151,12 +1171,28 @@ protocol with one fenced JSON tool call per iteration:
 only host-owned read tools, appends observations, and stops after at most eight
 iterations. Malformed tool JSON gets up to three repair prompts; another malformed
 response or the iteration cap produces a visible fallback notice and answers
-   through the deterministic planner path. The toolset is strictly read-only:
-   `list_cached_resources`, `query_cache`, `graph_get`, `refresh_resource`, and
-   `query_drift`.
+   through the deterministic planner path. A final answer to a question that
+   planned tenant resources is only accepted after at least one successful
+   tenant-evidence tool call; a prose-only reply gets bounded repair prompts
+   and then the same deterministic fallback with its notice, never a clean
+   completed answer. In a consented voice web-research session a `web_search`
+   attempt counts as evidence instead, and the service owns web-failure
+   honesty. The toolset is strictly read-only: `list_cached_resources`,
+   `query_cache`, `find_graph_endpoint`, `graph_get`, `refresh_resource`,
+   `query_drift`, and `web_search` (only when the voice session consented to
+   public web research).
 `graph_get` accepts only GET, validates paths against the chat Graph cache
 declarations and bundled Graph catalog read scopes, caps `$top` and returned rows
-at 50, and truncates large live payloads before they return to the model. Every
+at 50, follows `@odata.nextLink` paging within that row budget through validated
+`$skiptoken` re-requests, reports truncation, and names the missing scope with a
+reconnect recovery when Graph answers 403. Endpoints that reject `$top` (the
+managed device overview and authentication methods policy singletons, the
+fixed-page-size directory roles collection, and the license SKU inventory) are
+requested without a page size, and planner-declared cache paths, their canonical
+by-id templates, and explicitly verified membership templates pass the permission
+check with their declared scopes because the catalog lists least-privileged
+permissions only. Function, type-cast, and deeper descendant paths stay subject to
+the catalog check. Every
 tool call streams as a visible progress step and is persisted in `chat_tool_calls`
 with the completed assistant message; the renderer shows a collapsible "What
 ran" trace with tool name, parameters summary, result summary, duration, and
@@ -1176,10 +1212,11 @@ routing must not discard group, version, ownership or compound filters.
 `query_cache` validates fields against selected schema fields and keys actually
 present in the active tenant's snapshot, including optional fields absent from the
 first row. Unsupported fields, malformed filters and unsupported parameters are
-errors, never zero-match evidence. Tool results include snapshot coverage. An
-unresolved failed cache query blocks a model's final answer and cannot fall through
-malformed-output or iteration-limit fallback into an unsupported count. The host
-returns a clear lookup failure after bounded repair attempts. A valid empty result
+errors, never zero-match evidence. Comparison filters may arrive either as explicit
+`filters` entries or as operator objects inside `where` values. Tool results include
+snapshot coverage. An unresolved failed cache query blocks a model's final answer and
+cannot fall through malformed-output or iteration-limit fallback into an unsupported
+count. The host returns a clear lookup failure after bounded repair attempts. A valid empty result
 remains distinct from an unavailable snapshot. Security-incidents preload requests
 at most 50 records per page and follows continuation links.
 
@@ -1291,9 +1328,10 @@ dashboard: history on the left, the active conversation and composer in the
 center, and only compact tenant/provider/freshness cues in the chat header.
 The chat header should not expose a global cache Refresh action; prompt-scoped
 refresh already happens during send, and broad cache maintenance belongs in
-Settings. Graph cache details, manual/periodic refresh controls, and
-self-training approval/reset workflows live in Settings -> Intune Chat so normal
-chat use stays uncluttered.
+Settings. Graph cache details and manual/periodic refresh controls live in
+Settings -> Data; investigation mode and self-training approval/reset
+workflows live in Settings -> Intune Chat, so normal chat use stays
+uncluttered.
 The history rail can collapse to a narrow icon/index strip when the admin wants
 more reading width, and each message exposes a compact copy action for prompts
 and responses. User prompts can also be loaded back into the composer for
@@ -1306,7 +1344,15 @@ that support aborts terminate their network/process work, and the host persists 
 Conversation management is local-first as well: admins can search conversation
 titles and message text, pin important investigations, rename conversations,
 export a local Markdown transcript with source metadata, and delete
-conversations from the local SQLite store. Deleting a conversation removes local
+conversations from the local SQLite store. Conversations are scoped to the
+active tenant: list and search show only the active tenant's conversations
+(plus multi-tenant-scope and legacy untenanted rows), and the host refuses
+read, rename, pin, delete, and export of another tenant's conversation by id.
+Follow-up questions receive bounded conversation memory: the last four
+completed turns as plain text under a hard character cap, with older turns
+dropped first. A prompt with write intent is answered by the deterministic
+write block before any cache refresh or model call, on both the streaming and
+non-streaming send paths. Deleting a conversation removes local
 messages and chat tool-call records only; it does not disconnect the tenant,
 clear Graph cache, or alter agent run history. Pinned conversations are grouped
 at the top of the chat history rail under a collapsible Pinned section, separate
@@ -1415,14 +1461,20 @@ suggestions.
 Counts are never inferred from sample rows. Breakdowns are computed in
 SQL across every cached row, and `$count` with `ConsistencyLevel:
 eventual` is requested for the directory resources that support it, so a
-"how many" answer holds above the cache row limit. Where detail rows
-cover only part of the tenant, the answer must say so.
+"how many" answer holds above the cache row limit. Breakdown dimensions
+are catalogued per resource for the filters admins commonly count by,
+including Graph subtype and policy platform, Conditional Access state,
+group and app identity fields, security severity and status, sign-in
+outcomes, and array fields such as Settings Catalog platforms and group
+types. Array breakdowns can count one row in more than one bucket.
+Where detail rows cover only part of the tenant, the answer must say so.
 
 Cache freshness is per resource, not a single interval: sign-in and audit
 data expires in minutes, device and user inventory in hours, and slow
 configuration such as Autopilot profiles in a day.
 
-Initial cache targets:
+Cache targets (45 resource kinds; the planner registry is the source of truth
+and tests assert every kind has a label, scope set, and request path):
 
 - `/deviceManagement/managedDevices`
 - `/devices`
@@ -1431,6 +1483,10 @@ Initial cache targets:
 - `/deviceManagement/deviceCompliancePolicies`
 - `/deviceManagement/deviceConfigurations`
 - `/deviceManagement/configurationPolicies`
+- `/auditLogs/signIns`
+- `/auditLogs/directoryAudits`
+- `/deviceManagement/auditEvents`
+- `/identity/conditionalAccess/policies`
 - `/deviceAppManagement/mobileApps`
 - `/deviceManagement/detectedApps`
 - `/deviceAppManagement/managedAppPolicies`
@@ -1452,10 +1508,19 @@ Initial cache targets:
 - `/deviceManagement/managedDeviceOverview`
 - `/deviceManagement/managedDeviceEncryptionStates`
 - `/deviceManagement/troubleshootingEvents`
-- `/auditLogs/signIns`
-- `/auditLogs/directoryAudits`
-- `/deviceManagement/auditEvents`
-- `/identity/conditionalAccess/policies`
+- `/identity/conditionalAccess/namedLocations`
+- `/policies/authenticationMethodsPolicy`
+- `/policies/authorizationPolicy`
+- `/policies/crossTenantAccessPolicy`
+- `/directoryRoles`
+- `/administrativeUnits`
+- `/applications`
+- `/servicePrincipals`
+- `/domains`
+- `/security/alerts_v2`
+- `/security/incidents`
+- `/security/secureScores`
+- `/security/secureScoreControlProfiles`
 
 Initial tenant connection requests the Graph PM-audited read scopes needed for
 these cache targets, including Intune configuration, apps, service config,
@@ -1466,7 +1531,14 @@ and surfaced in chat sources/settings instead of blocking unrelated cached
 resources. Completed assistant messages include a source-details disclosure for
 each used Graph resource with cache/live status, row count, page count, cap
 status, refresh time, Graph path, selected fields, query parameters, and safe
-error text where available.
+error text where available. The disclosure is collapsed by default behind
+"How I checked"; tenant cache source rows are not repeated under the answer.
+Sources list only resources the answer actually
+read: investigative answers derive them from the executed tool trace,
+deterministic answers from the planned resources their answer pack was built
+from, and answers that read no tenant data (write blocks, failures, stopped
+responses) carry none. The answer header shows the oldest source age, because
+the stalest source bounds how current the answer can be.
 Autopilot event data is included as a separate source because live tenant checks
 can return Intune service-side 500s for `/deviceManagement/windowsAutopilotDeviceIdentities`
 even when the correct service-config read scope is present. Chat should surface
@@ -1474,8 +1546,12 @@ the identity source error while still using Autopilot events, troubleshooting
 events, and enrollment configuration data when available.
 
 Refresh modes are explicit: chat refreshes prompt-relevant resources as part of
-answering, while Settings -> Intune Chat lets admins manually refresh the active
-tenant cache or enable a per-tenant periodic refresh interval. Scheduled refresh
+answering, while Settings -> Data lets admins manually refresh the active
+tenant cache or enable a per-tenant periodic refresh interval. A confirmed
+write run marks the cache resources its scopes and action paths can have
+changed as stale for that tenant, so the next question refreshes them instead
+of answering from pre-write rows; an unrecognized write marks every resource
+stale. Scheduled refresh
 uses the same local app/OS scheduler surface as agent schedules while the user is
 signed in; it writes success/failure state to SQLite and never uploads cache
 contents.
@@ -1488,7 +1564,7 @@ only filtering the currently rendered page. It scans at most the newest 5,000
 snapshots and labels that boundary when reached. A capped Graph cache refresh
 never infers that unseen objects were removed; removal detection resumes only
 after a complete refresh, and the UI discloses partial source coverage.
-Settings -> Intune Chat can clear the active tenant's cached Graph rows and cache
+Settings -> Data can clear the active tenant's cached Graph rows and cache
 status through an explicit local-deletion modal. Clearing cache does not
 disconnect the tenant, change provider settings, remove chat history, or alter
 agent run history; the next chat refreshes required resources again.
@@ -1615,7 +1691,10 @@ the day threshold, compute the cutoff from `generatedAt`, read matching
 include the threshold/match metadata in the answer pack.
 
 For large result sets the answer pack includes aggregate counts, grouped
-breakdowns, and representative rows. v0.2.2 reads at most 40 rows per planned
+breakdowns, and representative rows. The pack is one snapshot: its rows, cache
+status, and aggregates are captured together before any investigation runs, so a
+mid-investigation refresh cannot change the fallback pack's counts while its
+rows and freshness describe the earlier snapshot. v0.2.2 reads at most 40 rows per planned
 resource from SQLite/Graph and includes at most 20 compact sample rows per
 resource in the model prompt, with `selectedRows`, `includedSampleRows`, and
 `omittedCachedRows` metadata so the model can disclose bounded evidence rather
@@ -1942,13 +2021,16 @@ v0.3 shipped with ten sidebar destinations and two equally-weighted primary para
 
 Chat is the primary paradigm. "Ask a question about your tenant in plain language" requires zero new vocabulary from a Microsoft admin. Agents are the packaged, repeatable form of the same work and get suggested *from* chat when a question matches an installed agent's domain. Agents remain a first-class nav item; they are no longer the default landing surface.
 
-Chat related-agent hints are deterministic and presentation-only. The renderer
-matches each sent question against installed agent name, category, description,
-simple bigrams, and a small local Microsoft admin synonym table. The matcher
-uses a conservative score threshold of 8 and requires either two matched
-tokens/bigrams or one strong name/category/synonym-domain hit. Hints render only
-after the assistant message completes, can be dismissed, never persist to chat
-messages, and never suggest the same agent twice in one conversation.
+Agent suggestions are computed once, by the host matcher, and persist on the
+assistant message. The matcher scores stemmed question terms against installed
+agent name/slug (weighted double) and description/category, adds category and
+write-intent signals, and requires real lexical evidence: a name/slug term or
+at least two matched terms. Write agents are suggested only when the question
+carries write intent, and their category must match the inferred question
+category. Cards render from the persisted suggestions only (the renderer runs
+no second matcher), show a read/write badge and the required scopes while
+collapsed, and can be dismissed per message. The probe table from the Chat
+audit runs as a maintained test against the shipped agent registry.
 
 ### Navigation (locked for the enterprise redesign)
 
@@ -2374,8 +2456,8 @@ These must exist and work well before any public release.
 
 ### Important (in v1.0, doesn't have to be perfect)
 
-- Scheduled runs are available for installed agents. The UI creates the per-agent recurrence; once at least one Microsoft tenant is connected, OpenAdminOS can register a per-user OS scheduler so due runs continue while the UI is closed. macOS uses `~/Library/LaunchAgents/com.openadminos.scheduler.plist`; Windows uses Task Scheduler. Jobs still run as the signed OpenAdminOS app for the logged-in user, use the persisted MSAL token cache, write results to local history, and do not run when the machine is off or no user session exists. The Schedules view prioritizes active schedules, next run, last run, and recent scheduled activity. OS registration and scheduler errors are shown as compact remediation notices only when the user needs to act.
-- A macOS-only menu bar companion is planned as an optional bundled surface inside the signed OpenAdminOS app package. It shows active tenant, provider trust, cache freshness, scheduler state, upcoming schedules, recent activity when there is actual work to inspect, and a compact read-only Intune Chat prompt entry point. It is not an error center: passive run failures, cache refresh errors, provider failures, and scheduler diagnostics stay in the full desktop app instead of being reported as issue cards in the popover. It must call the same host-owned services as the full app, persist to the same local SQLite store, and route write confirmations, hosted-provider first-use confirmation, tenant setup, provider setup, and long investigations to the full desktop window. The current implementation uses the OpenAdminOS app icon as the Electron Tray status item, a frameless `#/companion` renderer route with Ask as the primary flow plus compact schedule/activity sections, shared preload IPC, a `--menu-bar` launch mode, Settings -> General launch-at-login controls, and a generated nested Swift helper bundle at `OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app`. Packaged builds register that helper through Electron's macOS `loginItemService` settings so the helper starts OpenAdminOS in tray-only mode; development builds fall back to the main-app login item path. See `../vision.md`.
+- Scheduled runs are available for installed agents. The UI creates the per-agent recurrence; once at least one Microsoft tenant is connected, OpenAdminOS can register a per-user OS scheduler so due runs continue while the UI is closed. macOS uses `~/Library/LaunchAgents/com.openadminos.scheduler.plist`; Windows uses Task Scheduler. Jobs still run as the signed OpenAdminOS app for the logged-in user, use the persisted MSAL token cache, write results to local history, and do not run when the machine is off or no user session exists. The Schedules view prioritizes active schedules, next run, last run, and recent scheduled activity. OS registration and scheduler errors are shown as compact remediation notices only when the user needs to act. Only installed builds register or remove the OS scheduler: the LaunchAgent label and Windows task name are per user, so a development checkout that registered them would take over the installed app's scheduler and single-instance lock. On launch, an installed app repoints a LaunchAgent or scheduler task that runs a development checkout or a binary that no longer exists, and stops the copy it was running; a registration that launches another installed copy is left alone. On macOS the plist stays on disk only when launchd accepts it, so a failed registration surfaces as an error and is retried rather than reading as enabled.
+- A macOS-only menu bar companion is planned as an optional bundled surface inside the signed OpenAdminOS app package. It shows active tenant, provider trust, cache freshness, scheduler state, upcoming schedules, recent activity when there is actual work to inspect, and a compact read-only Intune Chat prompt entry point. It is not an error center: passive run failures, cache refresh errors, provider failures, and scheduler diagnostics stay in the full desktop app instead of being reported as issue cards in the popover. It must call the same host-owned services as the full app, persist to the same local SQLite store, and route write confirmations, hosted-provider first-use confirmation, tenant setup, provider setup, and long investigations to the full desktop window. The current implementation uses a monochrome template image of the oa mark (`build/menu-bar-iconTemplate.png` plus `@2x`) as the Electron Tray status item, so macOS tints it like other status items, a frameless `#/companion` renderer route with Ask as the primary flow plus compact schedule/activity sections, shared preload IPC, a `--menu-bar` launch mode, Settings -> General launch-at-login controls, and a generated nested Swift helper bundle at `OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app`. Packaged builds register that helper through Electron's macOS `loginItemService` settings so the helper starts OpenAdminOS in tray-only mode; development builds fall back to the main-app login item path. See `../vision.md`.
 - Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal are wired through this surface. Agents can save delivery rules that post terminal run reports to either the connector default target or a per-agent target where that connector supports one, with manual/scheduled, success/failure, and changed-only controls. Per-agent delivery rules autosave when the admin enables a connector, changes a target, or changes delivery checkboxes; starting a run waits for any in-flight delivery save so the run uses the latest rule. Saved delivery rules are explicit approval to post without another prompt. Connector delivery appends post-run activity steps so the run timeline shows sent, failed, or skipped delivery outcomes after the agent result is created. Connector delivery is queued locally when a run reaches a terminal state, retried with bounded backoff for transient failures, and processed again on app reopen or scheduler ticks. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
 - Agents should not hard-code routine Teams, WhatsApp, Outlook, Slack, Discord, or Signal posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to one connector, or to multiple targets.
 - Manual agent runs open a preflight review before queueing. It shows the active tenant, provider residency, model, mode, and Graph scopes. It blocks when no tenant is active, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.

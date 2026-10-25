@@ -39,7 +39,7 @@ describe("classifyLmStudioEndpoint", () => {
 describe("probeLmStudioLlm", () => {
   it("reads OpenAI-compatible model ids from /models", async () => {
     await withFetch(async (input) => {
-      assert.equal(String(input), "http://localhost:1234/v1/models");
+      assert.equal(String(input), "http://127.0.0.1:1234/v1/models");
       return jsonResponse({
         data: [{ id: "local-model-a" }, { id: "local-model-b" }],
       });

@@ -388,6 +388,10 @@ export interface DriftBaselineChangeRecord {
 export class IntelligenceSqliteStore {
   private readonly db: DatabaseSync;
   private readonly dbPath: string;
+  // Wall-clock time of the latest write invalidation per tenant and
+  // resource. A refresh whose fetch started before that moment holds
+  // pre-write rows, so its completion must not clear the stale marker.
+  private readonly graphInvalidatedAt = new Map<string, string>();
 
   constructor(dbPath: string) {
     const root = dirname(dbPath);
@@ -409,37 +413,40 @@ export class IntelligenceSqliteStore {
     this.db.close();
   }
 
-  listConversations(): IntuneChatConversation[] {
+  listConversations(tenantId?: string): IntuneChatConversation[] {
+    const scope = conversationTenantScope(tenantId, "chat_conversations");
     const rows = this.db
       .prepare(
         `SELECT id, title, tenant_id, scope_kind, scope_json, multi_tenant_job_id,
                 created_at, updated_at, pinned_at
          FROM chat_conversations
+         ${scope.where}
          ORDER BY pinned_at IS NULL, pinned_at DESC, updated_at DESC`,
       )
-      .all() as unknown as ConversationRow[];
+      .all(...scope.params) as unknown as ConversationRow[];
     return rows.map(readConversation);
   }
 
-  searchConversations(query: string): IntuneChatConversation[] {
+  searchConversations(query: string, tenantId?: string): IntuneChatConversation[] {
     const trimmed = query.trim();
-    if (!trimmed) return this.listConversations();
+    if (!trimmed) return this.listConversations(tenantId);
     const like = `%${escapeSqlLike(trimmed)}%`;
+    const scope = conversationTenantScope(tenantId, "c");
     const rows = this.db
       .prepare(
         `SELECT c.id, c.title, c.tenant_id, c.scope_kind, c.scope_json,
                 c.multi_tenant_job_id, c.created_at, c.updated_at, c.pinned_at
          FROM chat_conversations c
-         WHERE c.title LIKE ? ESCAPE '\\'
+         WHERE (c.title LIKE ? ESCAPE '\\'
             OR EXISTS (
               SELECT 1
               FROM chat_messages m
               WHERE m.conversation_id = c.id
                 AND m.content LIKE ? ESCAPE '\\'
-            )
+            ))${scope.and}
          ORDER BY c.pinned_at IS NULL, c.pinned_at DESC, c.updated_at DESC`,
       )
-      .all(like, like) as unknown as ConversationRow[];
+      .all(like, like, ...scope.params) as unknown as ConversationRow[];
     return rows.map(readConversation);
   }
 
@@ -705,6 +712,22 @@ export class IntelligenceSqliteStore {
           input.refreshedAt,
         );
       }
+      // A refresh that started before a write invalidation fetched
+      // pre-write rows. Keep them readable but leave the stale marker
+      // in place so the next preflight refreshes again.
+      const invalidatedAt = this.graphInvalidatedAt.get(
+        `${input.tenantId}::${input.resource}`,
+      );
+      // Equal timestamps stay stale: a fetch that started in the same
+      // millisecond as the invalidation cannot prove it read
+      // post-write state. The next refresh clears the marker.
+      const statusRefreshedAt =
+        invalidatedAt && invalidatedAt >= input.refreshedAt
+          ? "1970-01-01T00:00:00.000Z"
+          : input.refreshedAt;
+      if (invalidatedAt && invalidatedAt < input.refreshedAt) {
+        this.graphInvalidatedAt.delete(`${input.tenantId}::${input.resource}`);
+      }
       this.db
         .prepare(
           `INSERT INTO graph_cache_status (
@@ -729,7 +752,7 @@ export class IntelligenceSqliteStore {
           input.rows.length,
           input.pageCount ?? 1,
           input.pageLimitReached ? 1 : 0,
-          input.refreshedAt,
+          statusRefreshedAt,
           JSON.stringify(input.scopeSet),
           input.tenantTotal ?? null,
         );
@@ -912,6 +935,28 @@ export class IntelligenceSqliteStore {
       );
   }
 
+  /**
+   * Mark cached resources stale after a confirmed write changed tenant
+   * state. The next chat preflight refreshes them; rows stay readable
+   * in the meantime and answers surface their age honestly.
+   */
+  markGraphResourcesStale(tenantId: string, resources: GraphCacheResourceKind[]): number {
+    if (resources.length === 0) return 0;
+    const invalidatedAt = new Date().toISOString();
+    for (const resource of resources) {
+      this.graphInvalidatedAt.set(`${tenantId}::${resource}`, invalidatedAt);
+    }
+    const placeholders = resources.map(() => "?").join(", ");
+    const result = this.db
+      .prepare(
+        `UPDATE graph_cache_status
+         SET refreshed_at = '1970-01-01T00:00:00.000Z'
+         WHERE tenant_id = ? AND resource IN (${placeholders})`,
+      )
+      .run(tenantId, ...resources) as unknown as { changes?: number };
+    return result.changes ?? 0;
+  }
+
   getGraphCacheStatus(
     tenantId: string,
     definitions: GraphCacheResourceDefinition[],
@@ -978,7 +1023,159 @@ export class IntelligenceSqliteStore {
       { field: "userType", expression: "json_extract(raw_json, '$.userType')" },
       { field: "accountEnabled", expression: "json_extract(raw_json, '$.accountEnabled')" },
       { field: "trustType", expression: "json_extract(raw_json, '$.trustType')" },
+      { field: "platform", expression: "json_extract(raw_json, '$.platform')" },
     ];
+    const jsonField = (field: string) => ({
+      field,
+      expression: `json_extract(raw_json, '$.${field}')`,
+    });
+    const extraColumns: Partial<
+      Record<GraphCacheResourceKind, Array<{ field: string; expression: string }>>
+    > = {
+      managedDevices: [
+        jsonField("managedDeviceOwnerType"),
+        jsonField("deviceEnrollmentType"),
+        jsonField("managementState"),
+      ],
+      entraDevices: [jsonField("isManaged")],
+      groups: [jsonField("securityEnabled")],
+      conditionalAccessPolicies: [jsonField("state")],
+      mobileApps: [jsonField("isAssigned"), jsonField("publishingState")],
+      configurationPolicies: [jsonField("isAssigned")],
+      endpointSecurityIntents: [jsonField("isAssigned")],
+      deviceHealthScripts: [
+        jsonField("runAsAccount"),
+        jsonField("runAs32Bit"),
+        jsonField("enforceSignatureCheck"),
+      ],
+      deviceManagementScripts: [
+        jsonField("runAsAccount"),
+        jsonField("runAs32Bit"),
+        jsonField("enforceSignatureCheck"),
+      ],
+      windowsAutopilotDevices: [
+        jsonField("enrollmentState"),
+        jsonField("deploymentProfileAssignmentStatus"),
+        jsonField("remediationState"),
+      ],
+      autopilotEvents: [
+        jsonField("enrollmentType"),
+        jsonField("enrollmentState"),
+        jsonField("deploymentState"),
+        jsonField("deviceSetupStatus"),
+        jsonField("accountSetupStatus"),
+      ],
+      windowsFeatureUpdateProfiles: [jsonField("featureUpdateVersion")],
+      assignmentFilters: [jsonField("assignmentFilterManagementType")],
+      managedDeviceEncryptionStates: [jsonField("encryptionState")],
+      directoryAudits: [
+        jsonField("category"),
+        jsonField("result"),
+        jsonField("operationType"),
+        jsonField("loggedByService"),
+      ],
+      intuneAuditEvents: [
+        jsonField("category"),
+        jsonField("activityType"),
+        jsonField("activityOperationType"),
+        jsonField("activityResult"),
+        jsonField("componentName"),
+      ],
+      signIns: [
+        jsonField("conditionalAccessStatus"),
+        jsonField("clientAppUsed"),
+        jsonField("isInteractive"),
+        jsonField("riskLevelAggregated"),
+        jsonField("riskLevelDuringSignIn"),
+        jsonField("riskState"),
+        {
+          field: "status.errorCode",
+          expression: "json_extract(raw_json, '$.status.errorCode')",
+        },
+      ],
+      administrativeUnits: [jsonField("visibility")],
+      applications: [jsonField("signInAudience")],
+      servicePrincipals: [jsonField("servicePrincipalType")],
+      domains: [
+        jsonField("authenticationType"),
+        jsonField("isVerified"),
+        jsonField("isDefault"),
+        jsonField("isInitial"),
+      ],
+      securityAlerts: [
+        jsonField("severity"),
+        jsonField("status"),
+        jsonField("serviceSource"),
+        jsonField("detectionSource"),
+      ],
+      securityIncidents: [
+        jsonField("severity"),
+        jsonField("status"),
+        jsonField("classification"),
+        jsonField("determination"),
+      ],
+      secureScoreControlProfiles: [
+        jsonField("controlCategory"),
+        jsonField("actionType"),
+        jsonField("service"),
+        jsonField("implementationCost"),
+        jsonField("userImpact"),
+        jsonField("tier"),
+        jsonField("deprecated"),
+      ],
+    };
+    columns.push(...(extraColumns[resource] ?? []));
+
+    const typedResources = new Set<GraphCacheResourceKind>([
+      "deviceCompliancePolicies",
+      "deviceConfigurations",
+      "managedAppPolicies",
+      "iosManagedAppProtections",
+      "androidManagedAppProtections",
+      "mobileAppConfigurations",
+      "deviceEnrollmentConfigurations",
+      "namedLocations",
+    ]);
+    if (typedResources.has(resource)) {
+      const odataType = "json_extract(raw_json, '$.\"@odata.type\"')";
+      columns.push({ field: "@odata.type", expression: odataType });
+      if (resource !== "namedLocations" && resource !== "mobileAppConfigurations") {
+        columns.push({
+          field: "policyPlatform",
+          expression: `CASE
+            WHEN ${odataType} IS NULL THEN NULL
+            WHEN lower(${odataType}) LIKE '%macos%' THEN 'macOS'
+            WHEN lower(${odataType}) LIKE '%android%' THEN 'Android'
+            WHEN lower(${odataType}) LIKE '%windows%'
+              OR lower(${odataType}) LIKE '%sharedpc%' THEN 'Windows'
+            WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
+            WHEN lower(${odataType}) LIKE '%linux%' THEN 'Linux'
+            ELSE ${odataType}
+          END`,
+        });
+      }
+    }
+    if (resource === "mobileApps") {
+      const odataType = "json_extract(raw_json, '$.\"@odata.type\"')";
+      columns.push(
+        { field: "@odata.type", expression: odataType },
+        {
+          field: "appPlatform",
+          expression: `CASE
+            WHEN ${odataType} IS NULL THEN NULL
+            WHEN lower(${odataType}) LIKE '%macos%' THEN 'macOS'
+            WHEN lower(${odataType}) LIKE '%android%' THEN 'Android'
+            WHEN lower(${odataType}) LIKE '%win32%'
+              OR lower(${odataType}) LIKE '%windows%'
+              OR lower(${odataType}) LIKE '%winget%'
+              OR lower(${odataType}) LIKE '%microsoftstoreforbusiness%'
+              OR lower(${odataType}) LIKE '%officesuiteapp%' THEN 'Windows'
+            WHEN lower(${odataType}) LIKE '%ios%' THEN 'iOS'
+            ELSE ${odataType}
+          END`,
+        },
+      );
+    }
     for (const column of columns) {
       const grouped = this.db
         .prepare(
@@ -997,6 +1194,53 @@ export class IntelligenceSqliteStore {
         counts[String(entry.bucket)] = entry.count;
       }
       if (Object.keys(counts).length > 0) breakdowns[column.field] = counts;
+    }
+
+    const arrayColumns: Partial<Record<GraphCacheResourceKind, string[]>> = {
+      configurationPolicies: ["platforms"],
+      groups: ["groupTypes"],
+    };
+    for (const field of arrayColumns[resource] ?? []) {
+      // Graph returns these dimensions as JSON arrays, one enum string,
+      // or a comma-joined flags string depending on the resource. Read
+      // only the field value and split flags strings so every platform
+      // or group type lands in its own bucket.
+      const values = this.db
+        .prepare(
+          `SELECT json_extract(raw_json, '$.${field}') AS value
+           FROM graph_resources
+           WHERE tenant_id = ? AND resource = ?
+             AND json_extract(raw_json, '$.${field}') IS NOT NULL`,
+        )
+        .all(tenantId, resource) as unknown as Array<{
+        value: string | number | null;
+      }>;
+      const counts: Record<string, number> = {};
+      for (const entry of values) {
+        if (entry.value === null) continue;
+        let items: unknown[] = [entry.value];
+        if (typeof entry.value === "string") {
+          const trimmed = entry.value.trim();
+          if (trimmed.startsWith("[")) {
+            try {
+              const parsed = JSON.parse(trimmed) as unknown;
+              items = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              items = [entry.value];
+            }
+          } else {
+            items = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+          }
+        }
+        for (const item of items) {
+          if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean") {
+            continue;
+          }
+          const bucket = String(item);
+          counts[bucket] = (counts[bucket] ?? 0) + 1;
+        }
+      }
+      if (Object.keys(counts).length > 0) breakdowns[field] = counts;
     }
 
     return { total: totalRow?.total ?? 0, breakdowns };
@@ -2010,9 +2254,14 @@ export class IntelligenceSqliteStore {
   }
 
   graphCacheFieldTypes(tenantId: string, resource: GraphCacheResourceKind, field: string): string[] {
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(field)) return [];
+    const path = field === "@odata.type"
+      ? '$."@odata.type"'
+      : /^[A-Za-z_][A-Za-z0-9_]*$/.test(field)
+        ? `$.${field}`
+        : undefined;
+    if (!path) return [];
     return (this.db.prepare(`SELECT DISTINCT json_type(raw_json, ?) AS type FROM graph_resources WHERE tenant_id = ? AND resource = ?`)
-      .all(`$.${field}`, tenantId, resource) as unknown as Array<{ type: string | null }>).flatMap(row => row.type && row.type !== 'null' ? [row.type] : []);
+      .all(path, tenantId, resource) as unknown as Array<{ type: string | null }>).flatMap(row => row.type && row.type !== 'null' ? [row.type] : []);
   }
 
   queryGraphCache(input: {
@@ -3648,6 +3897,21 @@ export class IntelligenceSqliteStore {
   }
 }
 
+/**
+ * Tenant visibility for conversation lists. Single-tenant rows belong
+ * to their tenant; multi-tenant result conversations and legacy rows
+ * without a tenant stay visible, matching assertConversationTenant.
+ * Without a tenant id the store returns everything (internal callers).
+ */
+function conversationTenantScope(
+  tenantId: string | undefined,
+  alias: string,
+): { where: string; and: string; params: string[] } {
+  if (tenantId === undefined) return { where: "", and: "", params: [] };
+  const condition = `(${alias}.tenant_id IS NULL OR ${alias}.tenant_id = ? OR ${alias}.scope_kind = 'multi-tenant')`;
+  return { where: `WHERE ${condition}`, and: ` AND ${condition}`, params: [tenantId] };
+}
+
 function readConversation(row: ConversationRow): IntuneChatConversation {
   return {
     id: row.id,
@@ -4107,6 +4371,9 @@ function sqlScalar(value: unknown): string | number {
 
 function graphCacheFieldSql(field: string): string {
   const normalized = field.trim();
+  if (normalized === "@odata.type") {
+    return "json_extract(raw_json, '$.\"@odata.type\"')";
+  }
   const mapped: Record<string, string> = {
     graphId: "graph_id",
     id: "graph_id",

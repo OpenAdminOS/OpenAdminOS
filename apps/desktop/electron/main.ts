@@ -4,7 +4,7 @@ import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
-import { captureWebsiteDemo } from "./website-demo-capture.js";
+import { captureLandingShots } from "./landing-capture.js";
 import {
   NATIVE_THEME_COLORS,
   parseNativeAppearance,
@@ -33,7 +33,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { AppStateStore } from "./state.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import {
@@ -50,6 +50,12 @@ import {
   attachWindowStatePersistence,
   loadWindowState,
 } from "./window-state.js";
+import {
+  launchAgentState,
+  macosSchedulerPlist,
+  windowsTaskBinary,
+  windowsTaskState,
+} from "./scheduler-registration.js";
 import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
   AgentCommunitySubmissionMetadata,
@@ -172,6 +178,14 @@ const isScreenshotCaptureLaunch =
   !app.isPackaged && process.env.OPENADMINOS_SCREENSHOT_CAPTURE === "1";
 const screenshotCaptureUserData =
   process.env.OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA;
+// Website landing captures show realistic display values. Smoke tests and the
+// layout captures keep their deliberate fixtures (including the long model id).
+const isLandingCapture =
+  isScreenshotCaptureLaunch && process.env.OPENADMINOS_LANDING_CAPTURE === "1";
+const smokeModelName = isLandingCapture ? "gpt-oss:20b" : "test-smoke-local-model";
+const screenshotModelName = isLandingCapture
+  ? "gpt-oss:20b"
+  : "screenshot-local-model-with-a-deliberately-long-identifier";
 const screenshotCaptureOutDir = !app.isPackaged
   ? process.env.OPENADMINOS_SCREENSHOT_OUT_DIR
   : undefined;
@@ -327,17 +341,23 @@ function schedulerProgramArguments(): string[] {
   return [process.execPath, app.getAppPath(), BACKGROUND_SCHEDULER_ARG];
 }
 
-function escapePlistValue(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
 function macosSchedulerPlistPath(): string {
   return join(app.getPath("home"), "Library", "LaunchAgents", `${MACOS_SCHEDULER_LABEL}.plist`);
+}
+
+/**
+ * A stale agent (development checkout, or a binary that is gone) counts as
+ * not registered, so the next registration replaces it. An agent that
+ * launches another installed copy counts as registered and is kept.
+ */
+function macosLaunchAgentState(): ReturnType<typeof launchAgentState> {
+  let plist: string | undefined;
+  try {
+    plist = readFileSync(macosSchedulerPlistPath(), "utf8");
+  } catch {
+    plist = undefined;
+  }
+  return launchAgentState(plist, existsSync);
 }
 
 function writeMacosLaunchAgent(): void {
@@ -345,32 +365,11 @@ function writeMacosLaunchAgent(): void {
   const logDir = join(app.getPath("userData"), "logs");
   mkdirSync(dirname(plistPath), { recursive: true });
   mkdirSync(logDir, { recursive: true });
-
-  const programArguments = schedulerProgramArguments()
-    .map((arg) => `    <string>${escapePlistValue(arg)}</string>`)
-    .join("\n");
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${MACOS_SCHEDULER_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-${programArguments}
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>StartInterval</key>
-  <integer>60</integer>
-  <key>StandardOutPath</key>
-  <string>${escapePlistValue(join(logDir, "scheduler.log"))}</string>
-  <key>StandardErrorPath</key>
-  <string>${escapePlistValue(join(logDir, "scheduler.error.log"))}</string>
-</dict>
-</plist>
-`;
-
+  const plist = macosSchedulerPlist({
+    label: MACOS_SCHEDULER_LABEL,
+    programArguments: schedulerProgramArguments(),
+    logDir,
+  });
   writeFileSync(plistPath, plist, { encoding: "utf8", mode: 0o644 });
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
   const domain = uid === undefined ? "gui" : `gui/${uid}`;
@@ -379,10 +378,23 @@ ${programArguments}
   } catch {
     // The agent may not be loaded yet.
   }
-  execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "ignore" });
-  execFileSync("launchctl", ["enable", `${domain}/${MACOS_SCHEDULER_LABEL}`], {
-    stdio: "ignore",
-  });
+  try {
+    execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "ignore" });
+    execFileSync("launchctl", ["enable", `${domain}/${MACOS_SCHEDULER_LABEL}`], {
+      stdio: "ignore",
+    });
+  } catch (error) {
+    // Keep the plist on disk only when launchd accepted it. A plist that
+    // never loaded would read as registered, and nothing would retry it.
+    // Unload it too, in case bootstrap succeeded and only enable failed.
+    try {
+      execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" });
+    } catch {
+      // Not loaded.
+    }
+    rmSync(plistPath, { force: true });
+    throw error;
+  }
 }
 
 function removeMacosLaunchAgent(): void {
@@ -406,7 +418,7 @@ function seedIntuneChatSmokeState(userDataDir: string): void {
     JSON.stringify(
       {
         activeProviderId: "ollama",
-        activeModelByProviderId: { ollama: "test-smoke-local-model" },
+        activeModelByProviderId: { ollama: smokeModelName },
         installedAgents: [
           {
             id: "offboarding-agent",
@@ -566,7 +578,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
       {
         activeProviderId: "ollama",
         activeModelByProviderId: {
-          ollama: "screenshot-local-model-with-a-deliberately-long-identifier",
+          ollama: screenshotModelName,
         },
         installedAgents,
         runs: [
@@ -577,7 +589,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
             queuedAt: now,
             startedAt: now,
             providerId: "ollama",
-            model: "screenshot-local-model-with-a-deliberately-long-identifier",
+            model: screenshotModelName,
             tenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             summary: "Write plan is ready for review.",
             steps: [],
@@ -616,7 +628,11 @@ function seedScreenshotCaptureState(userDataDir: string): void {
           {
             id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo: European Endpoint Administration and Security",
-            username: isWebsiteCapture ? "admin@contoso.invalid" : "admin@contoso-demo.invalid",
+            username: isLandingCapture
+              ? "admin@contoso.com"
+              : isWebsiteCapture
+                ? "admin@contoso.invalid"
+                : "admin@contoso-demo.invalid",
             homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
             entraTier: "p2",
@@ -810,28 +826,45 @@ function officeRehearsalAnswer(prompt:string): string {
   return `REHEARSAL: Supplied compliance evidence changed between checks. Review collection freshness and the source run before deciding on remediation. The evidence does not establish policy causation. Sources: ${sources || "current collection"}.`;
 }
 
+// The landing capture shows investigative Chat the way a real model drives
+// it: read the cached Intune and Entra device rows, then answer from them.
+function landingInvestigationStep(prompt: string): string {
+  for (const resource of ["managedDevices", "entraDevices"]) {
+    if (!prompt.includes(`"resource":"${resource}"`)) {
+      return `\`\`\`json\n${JSON.stringify({ tool: "query_cache", params: { resource, limit: 25 } })}\n\`\`\``;
+    }
+  }
+  return JSON.stringify({
+    final: true,
+    answer: "WIN-01 is stale based on cached Intune and Entra device evidence.",
+  });
+}
+
 function createIntuneChatSmokeLlm(): RunLlmApi {
   return {
     available: true,
-    defaultModel: "test-smoke-local-model",
+    defaultModel: smokeModelName,
     async complete(options) {
-      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:"test-smoke-local-model"};
+      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:smokeModelName};
+      if (isLandingCapture && options.prompt.includes("Admin question:")) {
+        return { text: landingInvestigationStep(options.prompt), model: smokeModelName };
+      }
       return {
         text: "WIN-01 is stale based on cached Intune and Entra device evidence.",
-        model: "test-smoke-local-model",
+        model: smokeModelName,
       };
     },
     async *stream(options) {
       if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
         const text=officeRehearsalAnswer(options.prompt);
-        yield {delta:text,accumulated:text,done:true,model:"test-smoke-local-model"};return;
+        yield {delta:text,accumulated:text,done:true,model:smokeModelName};return;
       }
       if (options.prompt.includes("Hold response for cancellation smoke")) {
         yield {
           delta: "Partial response",
           accumulated: "Partial response",
           done: false,
-          model: "test-smoke-local-model",
+          model: smokeModelName,
         };
         const started = Date.now();
         while (!options.signal?.aborted && Date.now() - started < 5000) {
@@ -845,13 +878,13 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
         delta: "WIN-01 is stale",
         accumulated: "WIN-01 is stale",
         done: false,
-        model: "test-smoke-local-model",
+        model: smokeModelName,
       };
       yield {
         delta: " based on cached Intune and Entra device evidence.",
         accumulated: "WIN-01 is stale based on cached Intune and Entra device evidence.",
         done: true,
-        model: "test-smoke-local-model",
+        model: smokeModelName,
       };
     },
   };
@@ -863,9 +896,12 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
       ? {
           ...provider,
           status: "connected",
-          detail: "Deterministic local provider fixture for Electron smoke tests.",
-          models: ["test-smoke-local-model"],
-          defaultModel: "test-smoke-local-model",
+          // Landing captures show the text a connected local Ollama reports.
+          detail: isLandingCapture
+            ? "Running on http://localhost:11434"
+            : "Deterministic local provider fixture for Electron smoke tests.",
+          models: [smokeModelName],
+          defaultModel: smokeModelName,
         }
       : { ...provider },
   );
@@ -985,9 +1021,9 @@ async function runScreenshotCapture(): Promise<void> {
     return;
   }
 
-  if (process.env.OPENADMINOS_WEBSITE_CAPTURE === "1") {
-    await captureWebsiteDemo(window, screenshotCaptureOutDir, (route, waitFor, prepare) =>
-      runScreenshotCaptureStep(window, { kind: "route", route, waitFor, prepare, reducedMotion: true }),
+  if (isLandingCapture) {
+    await captureLandingShots(window, screenshotCaptureOutDir, (step) =>
+      runScreenshotCaptureStep(window, { kind: "route", ...step, reducedMotion: true }),
     );
     app.exit(0);
     return;
@@ -2147,15 +2183,57 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   };
 }
 
-function isWindowsSchedulerTaskRegistered(): boolean {
+/** The scheduler task definition, or undefined when the task does not exist. */
+function windowsSchedulerTaskXml(): string | undefined {
   try {
-    execFileSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK], {
+    return execFileSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK, "/XML"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function windowsSchedulerTaskState(): ReturnType<typeof windowsTaskState> {
+  return windowsTaskState(windowsSchedulerTaskXml(), existsSync);
+}
+
+function isWindowsImageRunning(imageName: string): boolean {
+  try {
+    const out = execFileSync(
+      "tasklist.exe",
+      ["/FI", `IMAGENAME eq ${imageName}`, "/FO", "CSV", "/NH"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
+    );
+    return out.toLowerCase().includes(`"${imageName.toLowerCase()}"`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Replaces a stale scheduler task. `schtasks /End` returns before the
+ * running copy exits, and that copy holds the single-instance lock, so
+ * wait (bounded) for its executable to stop before startup continues.
+ */
+function repairWindowsSchedulerTask(staleBinary: string | undefined): void {
+  try {
+    execFileSync("schtasks.exe", ["/End", "/TN", WINDOWS_SCHEDULER_TASK], {
       stdio: "ignore",
       windowsHide: true,
     });
-    return true;
   } catch {
-    return false;
+    // Not running.
+  }
+  registerWindowsSchedulerTask();
+  if (!staleBinary) return;
+  const imageName = win32.basename(staleBinary);
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + 3_000;
+  while (isWindowsImageRunning(imageName) && Date.now() < deadline) {
+    Atomics.wait(pause, 0, 0, 100);
   }
 }
 
@@ -2200,13 +2278,24 @@ async function getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings> {
     };
   }
 
+  // The LaunchAgent label and Windows task name are per user, not per
+  // copy. A development checkout that registered them would take over the
+  // installed app's scheduler and its single-instance lock.
+  if (!app.isPackaged) {
+    return {
+      supported: false,
+      enabled: false,
+      detail: "Background scheduling registers only from an installed build.",
+    };
+  }
+
   try {
     const hasTenant = store ? await store.hasConnectedTenant() : false;
     const status = store ? await store.getSchedulerStatus() : undefined;
     const enabled =
       process.platform === "darwin"
-        ? existsSync(macosSchedulerPlistPath())
-        : isWindowsSchedulerTaskRegistered();
+        ? macosLaunchAgentState() === "registered"
+        : windowsSchedulerTaskState() === "registered";
     return {
       supported: true,
       enabled,
@@ -2922,7 +3011,7 @@ function redactedDiagnosticText(value: unknown, maxLength: number): string {
 }
 
 async function setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings> {
-  if (process.platform === "linux") {
+  if (process.platform === "linux" || !app.isPackaged) {
     return getSchedulerLaunchSettings();
   }
 
@@ -5029,13 +5118,15 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
 }
 
 function createMenuBarIcon() {
+  // A template image: macOS tints the glyph to match the menu bar, like
+  // the other status items. The @2x file next to it is picked up
+  // automatically on Retina displays.
   const iconPath = app.isPackaged
-    ? join(process.resourcesPath, "app-icon.png")
-    : join(app.getAppPath(), "build/icon.png");
+    ? join(process.resourcesPath, "menu-bar-iconTemplate.png")
+    : join(app.getAppPath(), "build/menu-bar-iconTemplate.png");
   const image = nativeImage.createFromPath(iconPath);
-  const resized = image.resize({ width: 20, height: 20, quality: "best" });
-  resized.setTemplateImage(false);
-  return resized;
+  image.setTemplateImage(true);
+  return image;
 }
 
 function positionCompanionWindow(window: BrowserWindow): void {
@@ -6418,6 +6509,28 @@ function registerIpcHandlers() {
       return { canceled: false, filePath: result.filePath };
     }),
   );
+}
+
+// A scheduler registration written by a development checkout relaunches
+// it every minute. That copy holds the single-instance lock, so this launch
+// would hand off to it and show a blank dev window instead. Point such a
+// registration (or one whose binary is gone) at this copy before taking
+// the lock, and stop the other copy.
+if (app.isPackaged && !isBackgroundSchedulerLaunch) {
+  try {
+    if (process.platform === "darwin" && macosLaunchAgentState() === "stale") {
+      writeMacosLaunchAgent();
+      debugStartupLog("repointed scheduler LaunchAgent at this app");
+    } else if (process.platform === "win32") {
+      const xml = windowsSchedulerTaskXml();
+      if (windowsTaskState(xml, existsSync) === "stale") {
+        repairWindowsSchedulerTask(xml === undefined ? undefined : windowsTaskBinary(xml));
+        debugStartupLog("repointed scheduler task at this app");
+      }
+    }
+  } catch (error) {
+    console.warn("[scheduler] could not repoint the OS scheduler at this app:", error);
+  }
 }
 
 const gotLock = app.requestSingleInstanceLock();

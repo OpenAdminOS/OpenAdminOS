@@ -242,7 +242,48 @@ export function createOllamaLlm(options: OllamaProviderOptions = {}): RunLlmApi 
 }
 
 export function resolveOllamaEndpoint(endpoint?: string): string {
-  return (endpoint ?? process.env.OPENAGENTS_OLLAMA_URL ?? DEFAULT_OLLAMA_ENDPOINT).trim();
+  return (endpoint ?? ollamaEndpointOverride() ?? DEFAULT_OLLAMA_ENDPOINT).trim();
+}
+
+/** The non-default endpoint configured for this device, if any. */
+export function ollamaEndpointOverride(env: NodeJS.ProcessEnv = process.env): string | undefined {
+  return env.OPENAGENTS_OLLAMA_URL ?? ollamaHostEndpoint(env.OLLAMA_HOST);
+}
+
+/**
+ * Read Ollama's own OLLAMA_HOST setting the way the Ollama client does, so a
+ * server moved to another port is still found. A wildcard bind address
+ * (0.0.0.0 or ::) is reached through loopback. Returns undefined when unset
+ * or when it names the default endpoint.
+ */
+export function ollamaHostEndpoint(value: string | undefined): string | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  let scheme = "http";
+  let hostport = raw;
+  let defaultPort = "11434";
+  const separator = raw.indexOf("://");
+  if (separator >= 0) {
+    scheme = raw.slice(0, separator).toLowerCase();
+    hostport = raw.slice(separator + 3);
+    if (scheme === "http") defaultPort = "80";
+    else if (scheme === "https") defaultPort = "443";
+    else return undefined;
+  }
+  hostport = hostport.split("/")[0]!;
+  let host = hostport;
+  let port = defaultPort;
+  const bracketed = /^\[([^\]]*)\](?::(\d*))?$/.exec(hostport);
+  if (bracketed) {
+    host = bracketed[1]!;
+    port = bracketed[2] || defaultPort;
+  } else if (hostport.split(":").length === 2) {
+    [host, port] = hostport.split(":") as [string, string];
+    port ||= defaultPort;
+  }
+  if (!host || host === "0.0.0.0" || host === "::") host = "127.0.0.1";
+  const endpoint = `${scheme}://${host.includes(":") ? `[${host}]` : host}:${port}`;
+  return endpoint === DEFAULT_OLLAMA_ENDPOINT ? undefined : endpoint;
 }
 
 export function classifyOllamaEndpoint(endpoint: string): OllamaEndpointTrust {

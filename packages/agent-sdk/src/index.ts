@@ -988,6 +988,35 @@ export interface IntuneChatToolTraceEntry {
   params: unknown;
   resultSummary: string;
   webSources?: Array<{ title: string; url: string }>;
+  /**
+   * Execution-time provenance for a live `graph_get`, so answer sources
+   * describe what was actually read instead of inheriting the cache
+   * snapshot's row count and refresh time for the same resource.
+   */
+  graphSource?: {
+    path: string;
+    query?: Record<string, string>;
+    rows: number;
+    pagesFetched?: number;
+    truncated?: boolean;
+    totalCount?: number;
+  };
+  /**
+   * Snapshot provenance captured when a cache tool ran. A later
+   * refresh in the same investigation replaces the stored snapshot,
+   * so completion-time cache status cannot describe what an earlier
+   * `query_cache` actually read.
+   */
+  cacheSource?: {
+    resource: string;
+    rows: number;
+    refreshedAt?: string;
+    pages?: number;
+    pageLimitReached?: boolean;
+    fromRefresh?: boolean;
+    /** Snapshot warning at read time, for example a failed refresh. */
+    error?: string;
+  };
   durationMs: number;
   createdAt: string;
   completedAt: string;
@@ -2406,8 +2435,10 @@ export interface OpenAdminOSApi {
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
+    options?: { streamId?: string },
   ): Promise<SendIntuneChatMessageResult>;
-  cancelIntuneChatStream(): Promise<void>;
+  /** Cancels one stream when an id is given; omitting it cancels every active stream in this renderer (legacy). */
+  cancelIntuneChatStream(streamId?: string): Promise<void>;
   listTenantGroups(): Promise<TenantGroup[]>;
   saveTenantGroup(input: { id?: string; name: string; tenantIds: string[] }): Promise<TenantGroup>;
   deleteTenantGroup(id: string): Promise<void>;

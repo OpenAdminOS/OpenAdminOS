@@ -569,5 +569,7 @@ function ClearLocalDataModal({
 }
 
 function formatDateTime(value: string) {
+  // The epoch is the store's stale-since-write marker, not a real date.
+  if (new Date(value).getTime() === 0) return "Before the last write (stale)";
   return new Date(value).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
 }

@@ -21,8 +21,9 @@ app before uploading artifacts:
   `OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app`,
   including `Contents/Resources/OpenAdminOS.icns` and
   `CFBundleIconFile=OpenAdminOS`.
-- Menu bar status item icon resource:
-  `OpenAdminOS.app/Contents/Resources/app-icon.png`.
+- Menu bar status item template icons:
+  `OpenAdminOS.app/Contents/Resources/menu-bar-iconTemplate.png` and
+  `menu-bar-iconTemplate@2x.png`.
 The macOS release job runs on GitHub's `macos-26` image because the bundled
 Apple Foundation helper is built against `FoundationModels.framework`.
 

@@ -1857,7 +1857,9 @@ export function ChatSettingsSection() {
                     {resource.lastError
                       ? resource.lastError
                       : resource.refreshedAt
-                        ? formatDateTime(resource.refreshedAt)
+                        ? Date.parse(resource.refreshedAt) === 0
+                          ? "Stale since the last write"
+                          : formatDateTime(resource.refreshedAt)
                         : "Not refreshed"}
                   </div>
                 </div>
