@@ -1,69 +1,69 @@
 {
-  "updatedAt": "2026-10-25T13:00:47.316Z",
+  "updatedAt": "2026-10-25T22:00:47.371Z",
   "agents": {
     "find-inactive-devices": {
+      "installs": 32,
+      "installs7d": 4
+    },
+    "intune-device-posture-auditor": {
+      "installs": 9,
+      "installs7d": 3
+    },
+    "offboarding-agent": {
+      "installs": 19,
+      "installs7d": 1
+    },
+    "compliance-overview": {
+      "installs": 40,
+      "installs7d": 4
+    },
+    "os-update-posture": {
+      "installs": 20,
+      "installs7d": 3
+    },
+    "tenant-health-report": {
+      "installs": 29,
+      "installs7d": 3
+    },
+    "user-license-overview": {
+      "installs": 28,
+      "installs7d": 4
+    },
+    "conditional-access-explainer": {
+      "installs": 46,
+      "installs7d": 5
+    },
+    "dormant-app-registrations": {
       "installs": 31,
       "installs7d": 3
     },
-    "intune-device-posture-auditor": {
-      "installs": 8,
-      "installs7d": 2
-    },
-    "offboarding-agent": {
-      "installs": 18,
-      "installs7d": 0
-    },
-    "compliance-overview": {
-      "installs": 39,
-      "installs7d": 3
-    },
-    "os-update-posture": {
-      "installs": 19,
-      "installs7d": 2
-    },
-    "tenant-health-report": {
-      "installs": 28,
-      "installs7d": 2
-    },
-    "user-license-overview": {
-      "installs": 27,
-      "installs7d": 3
-    },
-    "conditional-access-explainer": {
-      "installs": 45,
-      "installs7d": 4
-    },
-    "dormant-app-registrations": {
-      "installs": 30,
-      "installs7d": 2
-    },
     "risky-sign-in-triage": {
-      "installs": 15,
-      "installs7d": 1
+      "installs": 16,
+      "installs7d": 2
     },
     "secure-score-prioritizer": {
-      "installs": 17,
-      "installs7d": 2
+      "installs": 18,
+      "installs7d": 3
     },
     "sign-in-failure-explainer": {
-      "installs": 22,
-      "installs7d": 2
+      "installs": 23,
+      "installs7d": 3
     },
     "stale-guest-cleanup": {
-      "installs": 18,
-      "installs7d": 2
+      "installs": 19,
+      "installs7d": 3
     },
     "tenant-change-audit": {
-      "installs": 15,
-      "installs7d": 1
+      "installs": 16,
+      "installs7d": 2
     },
     "team-evidence-review": {
-      "installs": 6,
-      "installs7d": 2
+      "installs": 8,
+      "installs7d": 4
     },
     "team-script-draft": {
-      "installs": 6,
-      "installs7d": 2
+      "installs": 7,
+      "installs7d": 3
     }
   }
 }
