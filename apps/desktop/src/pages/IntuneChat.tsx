@@ -3979,7 +3979,7 @@ function ChatMessageBubble({
           className="chat-answer text-[var(--color-text)]"
         />
       ) : null}
-      <AnswerSources sources={message.sources ?? []} trace={message.toolTrace ?? []} />
+      <AnswerSources trace={message.toolTrace ?? []} />
       {!progress ? (
         <div className={`-ml-1.5 mt-1 flex gap-0.5 transition-opacity ${latestAssistant ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
           <IconButton
@@ -4078,30 +4078,22 @@ function AnswerScopeDisclosure({
 }
 
 function AnswerSources({
-  sources,
   trace,
 }: {
-  sources: IntuneChatSource[];
   trace: IntuneChatToolTraceEntry[];
 }) {
+  // Tenant cache sources already live behind "How I checked" above the
+  // answer. Repeating every cache row count under the answer makes a
+  // simple response look like a diagnostics dump, so only public web
+  // citations stay visible here.
   const webSources = safeWebSources(trace);
-  if (sources.length === 0 && webSources.length === 0) return null;
+  if (webSources.length === 0) return null;
   return (
     <ol aria-label="Sources" className="mb-4 mt-1 list-none space-y-0.5 p-0 font-sans text-sm text-[var(--color-text-muted)]">
-      {sources.map((source, index) => (
-        <li key={`${source.resource}-${index}`} className="flex flex-wrap items-center gap-2 py-0.5">
-          <span className="inline-grid h-[17px] min-w-[17px] place-items-center rounded-[5px] bg-[var(--color-hover)] px-1 text-[11px] font-medium text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]">
-            {index + 1}
-          </span>
-          <span className="font-medium text-[var(--color-text-soft)]">{source.label}</span>
-          <span>· {source.rows.toLocaleString()} {source.rows === 1 ? "row" : "rows"}</span>
-          <span>· {source.refreshedAt ? formatRelativeAge(source.refreshedAt) : "not refreshed"}</span>
-        </li>
-      ))}
       {webSources.map((source, webIndex) => (
         <li key={source.url} className="flex min-w-0 items-center gap-2 py-0.5">
           <span className="inline-grid h-[17px] min-w-[17px] place-items-center rounded-[5px] bg-[var(--color-hover)] px-1 text-[11px] font-medium text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]">
-            {sources.length + webIndex + 1}
+            {webIndex + 1}
           </span>
           <a href={source.url} target="_blank" rel="noopener noreferrer" className="truncate rounded font-medium text-[var(--color-text-soft)] hover:text-[var(--color-text)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
             {source.title || new URL(source.url).hostname}

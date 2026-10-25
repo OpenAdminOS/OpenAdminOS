@@ -1153,6 +1153,7 @@ describe("IntuneChat conversation routes", () => {
       ]),
     });
 
+    const user = userEvent.setup();
     renderRoute(<IntuneChat />, {
       path: "/chat/:conversationId",
       route: "/chat/conversation-sources",
@@ -1162,5 +1163,10 @@ describe("IntuneChat conversation routes", () => {
     expect(await screen.findByText("Eight devices are noncompliant.")).toBeInTheDocument();
     expect(screen.getByText(/oldest data from 3 hours ago/)).toBeInTheDocument();
     expect(screen.queryByText(/data from just now/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Sources" })).not.toBeInTheDocument();
+    expect(screen.queryByText("· 9 rows")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("How I checked"));
+    expect(screen.getByText("Sources")).toBeVisible();
   });
 });
