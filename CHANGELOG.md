@@ -21,6 +21,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Nightly builds are no longer published for changes that only touch contributor tooling: docs generation, screenshot capture, smoke and script tests, contributor npm scripts, or GitHub display attributes.
+
 ### Security
 
 ## [0.7.2] - 2026-10-25
