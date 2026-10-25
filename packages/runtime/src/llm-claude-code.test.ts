@@ -2,7 +2,6 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   chmod,
-  mkdir,
   mkdtemp,
   readFile,
   rm,
@@ -16,6 +15,10 @@ import {
   createClaudeCodeProcessEnv,
   probeClaudeCodeLlm,
 } from "./llm-claude-code.js";
+
+// Claude Code ships a native executable on Windows, so a Node script cannot
+// stand in for it there. The fixture runs on macOS and Linux.
+const fakeCli = { skip: process.platform === "win32" };
 
 describe("createClaudeCodeProcessEnv", () => {
   it("keeps only CLI-required environment fields and Claude config overrides", () => {
@@ -49,7 +52,7 @@ describe("createClaudeCodeProcessEnv", () => {
 });
 
 describe("probeClaudeCodeLlm", () => {
-  it("checks binary version and Claude Code auth without running a completion", async () => {
+  it("checks binary version and Claude Code auth without running a completion", fakeCli, async () => {
     const fixture = await createFakeClaudeCodeBinary();
     try {
       const probe = await probeClaudeCodeLlm({
@@ -71,7 +74,7 @@ describe("probeClaudeCodeLlm", () => {
   });
 });
 
-it("uses the existing default Claude login without creating a config override", async () => {
+it("uses the existing default Claude login without creating a config override", fakeCli, async () => {
   const previous = process.env.CLAUDE_CONFIG_DIR;
   delete process.env.CLAUDE_CONFIG_DIR;
   const fixture = await createFakeClaudeCodeBinary(true);
@@ -89,7 +92,7 @@ it("uses the existing default Claude login without creating a config override", 
   }
 });
 
-it("preserves an explicitly configured Claude credential namespace", async () => {
+it("preserves an explicitly configured Claude credential namespace", fakeCli, async () => {
   const previous = process.env.CLAUDE_CONFIG_DIR;
   process.env.CLAUDE_CONFIG_DIR = "~/custom-claude";
   const fixture = await createFakeClaudeCodeBinary();
@@ -104,7 +107,7 @@ it("preserves an explicitly configured Claude credential namespace", async () =>
 });
 
 describe("createClaudeCodeLlm", () => {
-  it("preserves punctuation and argument boundaries in completions and streams", async () => {
+  it("preserves punctuation and argument boundaries in completions and streams", fakeCli, async () => {
     const fixture = await createFakeClaudeCodeBinary();
     try {
       const llm = createClaudeCodeLlm({
@@ -132,7 +135,7 @@ describe("createClaudeCodeLlm", () => {
     }
   });
 
-  it("runs print mode with tool use disabled and a scrubbed environment", async () => {
+  it("runs print mode with tool use disabled and a scrubbed environment", fakeCli, async () => {
     const fixture = await createFakeClaudeCodeBinary();
     try {
       const llm = createClaudeCodeLlm({
@@ -166,7 +169,7 @@ describe("createClaudeCodeLlm", () => {
     }
   });
 
-  it("parses stream-json assistant messages into accumulated chunks", async () => {
+  it("parses stream-json assistant messages into accumulated chunks", fakeCli, async () => {
     const fixture = await createFakeClaudeCodeBinary();
     try {
       const llm = createClaudeCodeLlm({
@@ -202,10 +205,7 @@ async function createFakeClaudeCodeBinary(defaultLogin = false): Promise<{
   cleanup(): Promise<void>;
 }> {
   const root = await mkdtemp(join(tmpdir(), "openadminos claude-test-"));
-  const binaryPath = join(
-    root,
-    process.platform === "win32" ? "claude.cmd" : "claude",
-  );
+  const binaryPath = join(root, "claude");
   const homePath = join(root, "claude-home");
   const callsPath = join(root, "calls.txt");
   const envPath = join(root, "env.txt");
@@ -233,26 +233,7 @@ if (args[0] === "--version") {
   console.log(JSON.stringify({type: "result", subtype: "success", result: "Hello", message: {model: "claude-sonnet-5"}, usage: {input_tokens: 3, output_tokens: 2}}));
 }
 `;
-  if (process.platform === "win32") {
-    const scriptPath = join(
-      root,
-      "node_modules",
-      "@anthropic-ai",
-      "claude-code",
-      "cli.js",
-    );
-    await mkdir(join(root, "node_modules", "@anthropic-ai", "claude-code"), {
-      recursive: true,
-    });
-    await writeFile(scriptPath, script, "utf8");
-    await writeFile(
-      binaryPath,
-      `@echo off\r\n"${process.execPath}" "${scriptPath}" %*\r\n`,
-      "utf8",
-    );
-  } else {
-    await writeFile(binaryPath, script, "utf8");
-  }
+  await writeFile(binaryPath, script, "utf8");
   await chmod(binaryPath, 0o755);
   return {
     binaryPath,
