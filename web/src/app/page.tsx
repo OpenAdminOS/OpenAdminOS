@@ -326,7 +326,7 @@ export default async function HomePage() {
                 Local model. Tenant data stays on this device.
               </p>
             </div>
-            <div className="pointer-events-none absolute -right-10 top-[62%] hidden w-80 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
+            <div className="pointer-events-none absolute -right-10 top-[68%] hidden w-80 rounded-[14px] bg-brand-raised p-4 shadow-(--shadow-pop) lg:block">
               <p className="flex items-center gap-1.5 text-xs text-brand-warn">
                 <span className="h-1.5 w-1.5 rounded-full bg-current" />
                 Awaiting confirmation
