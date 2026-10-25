@@ -527,6 +527,26 @@ function fieldsForResource(ctx: IntuneChatToolContext, resource: GraphCacheResou
  * a list", which is a far easier task and the difference between an 8B
  * model answering an unanticipated question and giving up.
  */
+/**
+ * Documented delegated scopes for a catalog endpoint. Function
+ * endpoints appear in the catalog both with and without trailing
+ * parentheses, and only one form carries permissions, so an
+ * undocumented parenthesized form inherits the plain form's scopes
+ * instead of reading as permission-free.
+ */
+function documentedScopesForEndpoint(endpoint: {
+  path: string;
+  scopesDelegated: string[];
+}): string[] {
+  if (endpoint.scopesDelegated.length > 0) return endpoint.scopesDelegated;
+  const aliasPath = endpoint.path.replace(/\([^)]*\)\/?$/, "");
+  if (aliasPath && aliasPath !== endpoint.path) {
+    const alias = lookupEndpoint("GET", aliasPath);
+    if (alias && alias.path !== endpoint.path) return alias.scopesDelegated;
+  }
+  return endpoint.scopesDelegated;
+}
+
 function findGraphEndpoint(params: unknown): unknown {
   const query = stringParam(params, "query");
   if (!query || query.trim().length === 0) {
@@ -536,7 +556,7 @@ function findGraphEndpoint(params: unknown): unknown {
   const limit = Math.max(1, Math.min(FIND_ENDPOINT_LIMIT_CAP, Math.trunc(requested)));
   const matches = searchEndpoints(query, { method: "GET", limit });
   const candidates = matches.map((endpoint) => {
-    const documented = endpoint.scopesDelegated;
+    const documented = documentedScopesForEndpoint(endpoint);
     const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
     // Mirror graph_get validation: planner-declared paths run with
     // their declared scopes even when the catalog's least-privileged
@@ -776,7 +796,7 @@ function validateGraphGetPath(path: string): {
         : "Unknown Microsoft Graph GET path.",
     );
   }
-  const documented = endpoint.scopesDelegated;
+  const documented = documentedScopesForEndpoint(endpoint);
   const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
   // Planner-declared cache paths carry host-verified scopes, consented
   // for cache refresh. The catalog lists least-privileged permissions

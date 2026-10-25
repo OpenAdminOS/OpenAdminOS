@@ -373,12 +373,17 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(requests, 2);
 
       // A function segment is not a by-id child: this one needs the
-      // ReadWrite scope Chat never requests.
-      const fn = await executeIntuneChatTool(ctx, "graph_get", {
-        path: "/deviceManagement/deviceCompliancePolicies/getDevicesScheduledToRetire",
-      });
-      assert.match(fn.trace.error ?? "", /does not request/);
-      assert.equal(requests, 2);
+      // ReadWrite scope Chat never requests. The parenthesized catalog
+      // spelling carries no permissions of its own and must inherit
+      // the plain form's instead of reading as permission-free.
+      for (const fnPath of [
+        "/deviceManagement/deviceCompliancePolicies/getDevicesScheduledToRetire",
+        "/deviceManagement/deviceCompliancePolicies/getDevicesScheduledToRetire()",
+      ]) {
+        const fn = await executeIntuneChatTool(ctx, "graph_get", { path: fnPath });
+        assert.match(fn.trace.error ?? "", /does not request/, fnPath);
+        assert.equal(requests, 2, fnPath);
+      }
 
       // A type-cast segment is not a by-id child either.
       const cast = await executeIntuneChatTool(ctx, "graph_get", {

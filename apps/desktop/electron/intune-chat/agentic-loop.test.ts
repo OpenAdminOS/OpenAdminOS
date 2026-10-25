@@ -534,21 +534,45 @@ it('does not accept a false zero after an invalid filter, and permits a correcte
 it('lets a successful live read of the same resource resolve a failed cache query', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agentic-live-resolves-'));
   const store = seededStore(dir);
+  const failedSyncQuery = JSON.stringify({
+    tool: 'query_cache',
+    params: { resource: 'managedDevices', where: { lastSyncDateTime: { approx: '2026-05-20' } } },
+  });
+  const liveGraph = {
+    listManagedDevices: async () => [],
+    retireManagedDevice: async () => { throw Error('Unexpected write'); },
+    request: async () => ({ value: [{ id: 'stale-1', deviceName: 'STALE-1', lastSyncDateTime: '2026-05-10T09:00:00.000Z' }] }),
+  };
   try {
-    const input = baseInput(store, scriptedLlm([
-      JSON.stringify({ tool: 'query_cache', params: { resource: 'managedDevices', where: { deviceEncryptionState: 'unencrypted' } } }),
-      JSON.stringify({ tool: 'graph_get', params: { path: '/deviceManagement/managedDevices', query: { $filter: "lastSyncDateTime lt 2026-05-20" } } }),
-      'STALE-1 has not synced since 2026-05-10.',
-      'STALE-1 has not synced since 2026-05-10.',
+    for (const path of [
+      '/deviceManagement/managedDevices',
+      'deviceManagement/managedDevices',
+      'https://graph.microsoft.com/beta/deviceManagement/managedDevices',
+    ]) {
+      const input = baseInput(store, scriptedLlm([
+        failedSyncQuery,
+        JSON.stringify({ tool: 'graph_get', params: { path, query: { $filter: "lastSyncDateTime lt 2026-05-20" } } }),
+        'STALE-1 has not synced since 2026-05-10.',
+        'STALE-1 has not synced since 2026-05-10.',
+      ]));
+      input.tools.graphForScopes = async () => liveGraph;
+      const result = await runAgenticChat(input);
+      assert.equal(result.ok, true, path);
+      assert.equal(result.answer, 'STALE-1 has not synced since 2026-05-10.', path);
+    }
+
+    // An unrelated narrow live read supplies no evidence about the
+    // failed predicate, so the guard stays in force.
+    const unrelated = baseInput(store, scriptedLlm([
+      failedSyncQuery,
+      JSON.stringify({ tool: 'graph_get', params: { path: '/deviceManagement/managedDevices', query: { $filter: "operatingSystem eq 'macOS'", $select: 'id' } } }),
+      'There are zero stale devices.',
+      'There are zero stale devices.',
     ]));
-    input.tools.graphForScopes = async () => ({
-      listManagedDevices: async () => [],
-      retireManagedDevice: async () => { throw Error('Unexpected write'); },
-      request: async () => ({ value: [{ id: 'stale-1', deviceName: 'STALE-1', lastSyncDateTime: '2026-05-10T09:00:00.000Z' }] }),
-    });
-    const result = await runAgenticChat(input);
-    assert.equal(result.ok, true);
-    assert.equal(result.answer, 'STALE-1 has not synced since 2026-05-10.');
+    unrelated.tools.graphForScopes = async () => liveGraph;
+    const blocked = await runAgenticChat(unrelated);
+    assert.equal(blocked.ok, true);
+    assert.match(blocked.answer, /No verified count is available/);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
