@@ -23,6 +23,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 ### Fixed
 
 - Fix a blank window on macOS when a development checkout had registered the background scheduler LaunchAgent. Only installed builds register the scheduler now, and an installed app repoints an agent that launches another copy before it starts.
+- The macOS menu bar icon is now a template image, so it follows the menu bar color like other status items.
 - Fix the sidebar jumping up and hiding its header when the tenant account menu opens. The menu now opens upward from the footer, and menu focus no longer scrolls the shell.
 - Investigative Chat answers are no longer accepted without tenant evidence. A model reply that checks no tenant data gets bounded repair prompts, then a deterministic answer with a visible notice. This affected CLI-agent providers most visibly, where a prose refusal could persist as a clean completed answer with sources attached.
 - Scope Chat conversations to the active tenant. Another tenant's conversations no longer appear in list or search, and the host refuses read, rename, pin, delete, and export across tenants. Multi-tenant-scope and legacy untenanted conversations stay visible under any tenant, as SPEC records. Switching tenants now drops the previous tenant's conversations and transcript from the shell immediately.

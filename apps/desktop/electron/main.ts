@@ -5026,13 +5026,15 @@ async function createCompanionWindow(): Promise<BrowserWindow> {
 }
 
 function createMenuBarIcon() {
+  // A template image: macOS tints the glyph to match the menu bar, like
+  // the other status items. The @2x file next to it is picked up
+  // automatically on Retina displays.
   const iconPath = app.isPackaged
-    ? join(process.resourcesPath, "app-icon.png")
-    : join(app.getAppPath(), "build/icon.png");
+    ? join(process.resourcesPath, "menu-bar-iconTemplate.png")
+    : join(app.getAppPath(), "build/menu-bar-iconTemplate.png");
   const image = nativeImage.createFromPath(iconPath);
-  const resized = image.resize({ width: 20, height: 20, quality: "best" });
-  resized.setTemplateImage(false);
-  return resized;
+  image.setTemplateImage(true);
+  return image;
 }
 
 function positionCompanionWindow(window: BrowserWindow): void {
