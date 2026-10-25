@@ -36,17 +36,50 @@ describe("Graph cache resource registry", () => {
   it("maps write scopes and action paths to cache resources to invalidate", () => {
     assert.deepEqual(
       graphCacheResourcesForWrite({ scopes: ["DeviceManagementManagedDevices.PrivilegedOperations.All"] }).sort(),
-      ["detectedApps", "entraDevices", "managedDeviceEncryptionStates", "managedDevices"],
+      [
+        "autopilotEvents",
+        "detectedApps",
+        "entraDevices",
+        "managedDeviceEncryptionStates",
+        "managedDeviceOverview",
+        "managedDevices",
+        "troubleshootingEvents",
+      ],
     );
     assert.deepEqual(
       graphCacheResourcesForWrite({ scopes: ["User.ReadWrite.All"] }).sort(),
       ["groups", "users"],
     );
-    // A mapped family plus an unmapped write family widens to every
-    // resource instead of silently keeping the unmapped area fresh.
+    // Every sibling resource in a scope family is covered, not a
+    // hand-picked subset.
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ scopes: ["DeviceManagementApps.ReadWrite.All"] }).sort(),
+      [
+        "androidManagedAppProtections",
+        "iosManagedAppProtections",
+        "managedAppPolicies",
+        "mobileAppConfigurations",
+        "mobileApps",
+      ],
+    );
+    const configurationWrite = graphCacheResourcesForWrite({
+      scopes: ["DeviceManagementConfiguration.ReadWrite.All"],
+    });
+    for (const expected of [
+      "deviceCompliancePolicies",
+      "groupPolicyConfigurations",
+      "assignmentFilters",
+      "windowsQualityUpdateProfiles",
+      "windowsFeatureUpdateProfiles",
+      "endpointSecurityIntents",
+    ] as const) {
+      assert.ok(configurationWrite.includes(expected), `expected ${expected} to be invalidated`);
+    }
+    // A write family no cache resource reads with widens to every
+    // resource instead of silently keeping its area fresh.
     assert.equal(
       graphCacheResourcesForWrite({
-        scopes: ["DeviceManagementManagedDevices.ReadWrite.All", "Application.ReadWrite.All"],
+        scopes: ["DeviceManagementManagedDevices.ReadWrite.All", "Mail.ReadWrite"],
       }).length,
       GRAPH_CACHE_RESOURCES.length,
     );

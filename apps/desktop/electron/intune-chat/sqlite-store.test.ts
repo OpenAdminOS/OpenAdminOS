@@ -641,6 +641,8 @@ describe("Intune Chat planner", () => {
       "How do I add a device to Autopilot?",
       "Which policies block legacy authentication?",
       "Add up the assigned licenses per department",
+      "Why do users need to change their passwords?",
+      "Which policies disable legacy authentication and block risky sign-ins?",
     ];
     for (const question of readQuestions) {
       assert.equal(

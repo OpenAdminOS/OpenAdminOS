@@ -309,8 +309,13 @@ function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
   const question = lowerQuestion.trim();
   // "Add up the licenses" asks for a sum, not a tenant change.
   if (term === "add" && /^add\s+up\b/.test(question)) return false;
+  // Anchored at the main clause only. Unanchored helper phrases
+  // ("need to", "and <verb>") also occur inside descriptive
+  // subordinate clauses of read questions: "Why do users need to
+  // change their passwords?", "Which policies disable legacy
+  // authentication and block risky sign-ins?"
   const imperative = new RegExp(
-    `(?:^(?:please\\s+)?${term}\\b)|(?:\\b(?:can you|could you|would you|please|go ahead and|i want to|i need to|want to|need to|let's)\\s+${term}\\b)|(?:\\b(?:and then|then|and)\\s+${term}\\b)`,
+    `(?:^(?:please\\s+)?${term}\\b)|(?:^(?:can you|could you|would you|i want to|i need to|let's)\\s+${term}\\b)|(?:\\bplease\\s+${term}\\b)`,
   );
   if (imperative.test(question)) return true;
   if (term === "update") return false;
@@ -594,57 +599,51 @@ export function graphCacheResourcesForWrite(input: {
     }
   }
   const scopes = input.scopes ?? [];
-  const hasWrite = (family: string) =>
-    scopes.some((scope) => scope.startsWith(family) && scope !== `${family}Read.All`);
-  if (
-    scopes.some((scope) => scope.includes("ManagedDevices.PrivilegedOperations")) ||
-    hasWrite("DeviceManagementManagedDevices.")
-  ) {
-    out.add("managedDevices");
+  // Derive affected resources from scope families generically: every
+  // cache resource whose own read scopes share a family root with a
+  // write scope can have changed. Hand-enumerated family lists kept
+  // missing sibling resources (app protection policies under
+  // DeviceManagementApps, update profiles under Configuration), and a
+  // nonempty-but-incomplete mapping suppresses the safe fallback.
+  const scopeRoot = (scope: string) => scope.split(".")[0] ?? scope;
+  const isWriteScope = (scope: string) =>
+    !/\.Read\.All$|\.Read$|\.Read\.Directory$/.test(scope);
+  const writeRoots = new Set(scopes.filter(isWriteScope).map(scopeRoot));
+  const resourceRoots = new Set(
+    GRAPH_CACHE_RESOURCES.flatMap((definition) =>
+      definition.scopes.map(scopeRoot),
+    ),
+  );
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    if (definition.scopes.some((scope) => writeRoots.has(scopeRoot(scope)))) {
+      out.add(definition.resource);
+    }
+  }
+  // Cross-effects the scope roots cannot express.
+  if (writeRoots.has("DeviceManagementManagedDevices")) {
     out.add("entraDevices");
-    out.add("detectedApps");
     out.add("managedDeviceEncryptionStates");
   }
-  if (hasWrite("User.") || hasWrite("Directory.")) {
+  if (writeRoots.has("User") || writeRoots.has("Directory")) {
     out.add("users");
     out.add("groups");
   }
-  if (hasWrite("Group.")) out.add("groups");
-  if (hasWrite("Device.")) out.add("entraDevices");
-  if (hasWrite("Policy.")) {
-    out.add("conditionalAccessPolicies");
-    out.add("authenticationMethodsPolicy");
-    out.add("authorizationPolicy");
-    out.add("crossTenantAccessPolicy");
-    out.add("namedLocations");
+  if (writeRoots.has("Group") || writeRoots.has("GroupMember")) {
+    out.add("groups");
+    out.add("users");
   }
-  if (hasWrite("DeviceManagementConfiguration.") || hasWrite("DeviceManagementApps.")) {
-    out.add("deviceConfigurations");
-    out.add("configurationPolicies");
-    out.add("deviceCompliancePolicies");
-    out.add("mobileApps");
-    out.add("endpointSecurityIntents");
-  }
-  // A write-looking scope from a family this mapper does not know
-  // (for example Application.ReadWrite.All on a user-authored agent)
-  // can have changed anything: widen to every resource instead of
-  // silently keeping the unmapped area fresh. Pure read scopes and
-  // scopes from mapped families do not widen.
-  const mappedFamilies = [
-    "DeviceManagementManagedDevices.",
-    "User.",
-    "Directory.",
-    "Group.",
-    "Device.",
-    "Policy.",
-    "DeviceManagementConfiguration.",
-    "DeviceManagementApps.",
-  ];
-  const hasUnmappedWriteScope = scopes.some((scope) => {
-    if (/\.Read\.All$|\.Read$/.test(scope)) return false;
-    if (mappedFamilies.some((family) => scope.startsWith(family))) return false;
-    return /ReadWrite|PrivilegedOperations|\.Write\b|Write\./.test(scope);
-  });
+  // A write scope whose family no cache resource reads with (and no
+  // cross-effect above covers) can have changed anything: widen to
+  // every resource instead of silently keeping its area fresh.
+  const coveredRoots = new Set([
+    ...resourceRoots,
+    "Directory",
+    "Group",
+    "GroupMember",
+  ]);
+  const hasUnmappedWriteScope = [...writeRoots].some(
+    (root) => !coveredRoots.has(root),
+  );
   if (out.size === 0 || hasUnmappedWriteScope) {
     for (const definition of GRAPH_CACHE_RESOURCES) out.add(definition.resource);
   }

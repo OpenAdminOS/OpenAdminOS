@@ -1241,8 +1241,12 @@ export function buildIntuneChatSources(input: {
   const visible = input.executedResources
     ? new Set(input.executedResources)
     : new Set(input.plannedResources);
+  // Live execution provenance describes investigative answers only.
+  // A deterministic fallback answered from its snapshot pack, so
+  // letting the abandoned investigation's live read override its
+  // sources misstates what the fallback actually used.
   const liveGraphByResource = new Map<GraphCacheResourceKind, IntuneChatToolTraceEntry>();
-  for (const entry of input.toolTrace ?? []) {
+  for (const entry of input.executedResources ? input.toolTrace ?? [] : []) {
     if (entry.tool !== "graph_get" || entry.error || !entry.graphSource) continue;
     const resource = graphResourceForPath(entry.graphSource.path);
     if (resource) liveGraphByResource.set(resource, entry);

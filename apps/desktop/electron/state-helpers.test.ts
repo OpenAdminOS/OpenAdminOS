@@ -152,6 +152,18 @@ describe("chat sources come from executed tools, not the plan", () => {
     assert.equal(sources[0]?.refreshedAt, "2026-08-01T10:00:01.000Z");
     assert.equal(sources[0]?.path, "/users");
     assert.deepEqual(sources[0]?.select, ["id", "displayName"]);
+
+    // The deterministic fallback (no executedResources) must describe
+    // its snapshot pack, not the abandoned investigation's live read.
+    const fallbackSources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      toolTrace: [graphTraceEntry()],
+      refreshedResources: new Set(),
+    });
+    assert.equal(fallbackSources[0]?.source, "cache");
+    assert.equal(fallbackSources[0]?.rows, 500);
+    assert.equal(fallbackSources[0]?.refreshedAt, "2026-08-01T09:00:00.000Z");
   });
 
   it("decides executed vs planned sources per answer mode", () => {
