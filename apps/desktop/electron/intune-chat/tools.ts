@@ -544,7 +544,7 @@ function findGraphEndpoint(params: unknown): unknown {
     const usable =
       documented.length === 0 ||
       consented.length > 0 ||
-      resourceScopesForPath(endpoint.path).length > 0;
+      plannerExemptionApplies(endpoint.path);
     return {
       path: endpoint.path,
       summary: endpoint.summary,
@@ -783,8 +783,10 @@ function validateGraphGetPath(path: string): {
   // only, so a broader declared scope (Policy.Read.All for the
   // authentication methods policy, GroupMember.Read.All for /groups)
   // can cover an endpoint the catalog check would otherwise refuse.
+  // The exemption is limited to the declared path and its by-id
+  // children; deeper descendants stay subject to the catalog check.
   const resourceScopes = resourceScopesForPath(path);
-  if (documented.length > 0 && consented.length === 0 && resourceScopes.length === 0) {
+  if (documented.length > 0 && consented.length === 0 && !plannerExemptionApplies(path)) {
     throw new Error(
       `This endpoint requires ${documented.slice(0, 3).join(" or ")}, which OpenAdminOS does not request. No tenant data was read.`,
     );
@@ -794,6 +796,28 @@ function validateGraphGetPath(path: string): {
   // does not cover, and that rejection is surfaced verbatim.
   const scopes = [...new Set([...consented, ...resourceScopes])].sort();
   return { scopes, summary: endpoint.summary };
+}
+
+/**
+ * Whether the planner-scope exemption applies to this path. The
+ * exemption exists because the catalog lists least-privileged scopes
+ * only while planner declarations carry broader verified scopes. It is
+ * limited to the declared collection or singleton itself and its
+ * direct by-id children, which share the declared scope family.
+ * Deeper descendants (for example group drives, which need Files.Read)
+ * stay subject to the catalog check.
+ */
+function plannerExemptionApplies(path: string): boolean {
+  const pathOnly = path.split("?")[0]!.toLowerCase().replace(/\/+$/, "");
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    const plannerPath = pathForResource(definition.resource).path.toLowerCase();
+    if (pathOnly === plannerPath) return true;
+    if (pathOnly.startsWith(`${plannerPath}/`)) {
+      const child = pathOnly.slice(plannerPath.length + 1);
+      if (child.length > 0 && !child.includes("/")) return true;
+    }
+  }
+  return false;
 }
 
 function resourceScopesForPath(path: string): string[] {

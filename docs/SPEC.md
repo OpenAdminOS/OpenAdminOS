@@ -1118,9 +1118,10 @@ at 50, follows `@odata.nextLink` paging within that row budget through validated
 reconnect recovery when Graph answers 403. Endpoints that reject `$top` (the
 managed device overview and authentication methods policy singletons, the
 fixed-page-size directory roles collection, and the license SKU inventory) are
-requested without a page size, and planner-declared cache paths pass the
-permission check with their declared scopes because the catalog lists
-least-privileged permissions only. Every
+requested without a page size, and planner-declared cache paths and their direct
+by-id children pass the permission check with their declared scopes because the
+catalog lists least-privileged permissions only. Deeper descendants of a planner
+path stay subject to the catalog check. Every
 tool call streams as a visible progress step and is persisted in `chat_tool_calls`
 with the completed assistant message; the renderer shows a collapsible "What
 ran" trace with tool name, parameters summary, result summary, duration, and
