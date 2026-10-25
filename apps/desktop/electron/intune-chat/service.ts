@@ -1636,6 +1636,13 @@ export class IntuneChatService {
         .filter((resource) => resource.ok)
         .map((resource) => resource.resource) ?? [],
     );
+    // Snapshot matching the rows just read for the deterministic
+    // pack. If an investigation later refreshes resources and then
+    // falls back, its sources must describe this pack, not the
+    // refreshed cache the fallback never used.
+    const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
+      ...GRAPH_CACHE_RESOURCES,
+    ]);
 
     let assistantContent: string;
     let usedDeterministic = false;
@@ -1725,7 +1732,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
               assistantContent = agentic.answer;
             } else {
@@ -1757,7 +1764,9 @@ export class IntuneChatService {
       model: responseModel,
       ...(engineNotice ? { engineNotice } : {}),
       sources: buildIntuneChatSources({
-        cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+        cacheStatus: usedDeterministic
+          ? packCacheStatus
+          : store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
         plannedResources: planned.resources,
         executedResources: executedResourcesForAnswer({
           toolTrace,
@@ -1765,7 +1774,9 @@ export class IntuneChatService {
           usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
         }),
         toolTrace,
-        refreshedResources: new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
+        refreshedResources: usedDeterministic
+          ? refreshedResources
+          : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
@@ -2104,6 +2115,13 @@ export class IntuneChatService {
         .filter((resource) => resource.ok)
         .map((resource) => resource.resource) ?? [],
     );
+    // Snapshot matching the rows just read for the deterministic
+    // pack. If an investigation later refreshes resources and then
+    // falls back, its sources must describe this pack, not the
+    // refreshed cache the fallback never used.
+    const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
+      ...GRAPH_CACHE_RESOURCES,
+    ]);
     let assistantContent = "";
     let usedDeterministic = false;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
@@ -2283,7 +2301,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
               sendProgress({
                 message: "Model response started.",
@@ -2396,7 +2414,9 @@ export class IntuneChatService {
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
       sources: buildIntuneChatSources({
-        cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+        cacheStatus: usedDeterministic
+          ? packCacheStatus
+          : store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
         plannedResources: planned.resources,
         executedResources: executedResourcesForAnswer({
           toolTrace,
@@ -2404,7 +2424,9 @@ export class IntuneChatService {
           usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
         }),
         toolTrace,
-        refreshedResources: new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
+        refreshedResources: usedDeterministic
+          ? refreshedResources
+          : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,

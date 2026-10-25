@@ -96,6 +96,31 @@ describe("Intune Chat SQLite store", () => {
         .find((status) => status.resource === "managedDevices");
       assert.equal(tenant1?.refreshedAt, "1970-01-01T00:00:00.000Z");
       assert.equal(tenant2?.refreshedAt, "2026-08-01T10:00:00.000Z");
+
+      // A refresh whose fetch started before the invalidation holds
+      // pre-write rows: completing it must not clear the stale marker.
+      store.replaceGraphResources({
+        ...base,
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        refreshedAt: new Date(Date.now() - 3_600_000).toISOString(),
+        rows: [{ id: "device-2", deviceName: "WIN-02" }],
+      });
+      const afterStaleRefresh = store.getGraphCacheStatus("tenant-1", [...GRAPH_CACHE_RESOURCES])
+        .find((status) => status.resource === "managedDevices");
+      assert.equal(afterStaleRefresh?.refreshedAt, "1970-01-01T00:00:00.000Z");
+      assert.equal(afterStaleRefresh?.rows, 1);
+
+      // A refresh started after the invalidation clears it normally.
+      store.replaceGraphResources({
+        ...base,
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        refreshedAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const afterFreshRefresh = store.getGraphCacheStatus("tenant-1", [...GRAPH_CACHE_RESOURCES])
+        .find((status) => status.resource === "managedDevices");
+      assert.notEqual(afterFreshRefresh?.refreshedAt, "1970-01-01T00:00:00.000Z");
       store.close();
     } finally {
       await rm(dir, { recursive: true, force: true });
@@ -650,6 +675,8 @@ describe("Intune Chat planner", () => {
       "Explain the update rings and how they deploy",
       "Compare the two assignment filters",
       "Audit the group membership changes last week",
+      "Explain how to disable an account and then delete it.",
+      "Describe how to retire a device and then wipe it",
     ];
     for (const question of readQuestions) {
       assert.equal(

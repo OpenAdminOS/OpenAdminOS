@@ -388,6 +388,10 @@ export interface DriftBaselineChangeRecord {
 export class IntelligenceSqliteStore {
   private readonly db: DatabaseSync;
   private readonly dbPath: string;
+  // Wall-clock time of the latest write invalidation per tenant and
+  // resource. A refresh whose fetch started before that moment holds
+  // pre-write rows, so its completion must not clear the stale marker.
+  private readonly graphInvalidatedAt = new Map<string, string>();
 
   constructor(dbPath: string) {
     const root = dirname(dbPath);
@@ -708,6 +712,19 @@ export class IntelligenceSqliteStore {
           input.refreshedAt,
         );
       }
+      // A refresh that started before a write invalidation fetched
+      // pre-write rows. Keep them readable but leave the stale marker
+      // in place so the next preflight refreshes again.
+      const invalidatedAt = this.graphInvalidatedAt.get(
+        `${input.tenantId}::${input.resource}`,
+      );
+      const statusRefreshedAt =
+        invalidatedAt && invalidatedAt > input.refreshedAt
+          ? "1970-01-01T00:00:00.000Z"
+          : input.refreshedAt;
+      if (invalidatedAt && invalidatedAt <= input.refreshedAt) {
+        this.graphInvalidatedAt.delete(`${input.tenantId}::${input.resource}`);
+      }
       this.db
         .prepare(
           `INSERT INTO graph_cache_status (
@@ -732,7 +749,7 @@ export class IntelligenceSqliteStore {
           input.rows.length,
           input.pageCount ?? 1,
           input.pageLimitReached ? 1 : 0,
-          input.refreshedAt,
+          statusRefreshedAt,
           JSON.stringify(input.scopeSet),
           input.tenantTotal ?? null,
         );
@@ -922,6 +939,10 @@ export class IntelligenceSqliteStore {
    */
   markGraphResourcesStale(tenantId: string, resources: GraphCacheResourceKind[]): number {
     if (resources.length === 0) return 0;
+    const invalidatedAt = new Date().toISOString();
+    for (const resource of resources) {
+      this.graphInvalidatedAt.set(`${tenantId}::${resource}`, invalidatedAt);
+    }
     const placeholders = resources.map(() => "?").join(", ");
     const result = this.db
       .prepare(

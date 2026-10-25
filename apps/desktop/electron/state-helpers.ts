@@ -1249,36 +1249,26 @@ export function buildIntuneChatSources(input: {
   // letting the abandoned investigation's live read override its
   // sources misstates what the fallback actually used.
   const liveGraphByResource = new Map<GraphCacheResourceKind, IntuneChatToolTraceEntry>();
+  const cacheReadResources = new Set<GraphCacheResourceKind>();
+  const knownResources = new Set(GRAPH_CACHE_RESOURCES.map((entry) => entry.resource));
   for (const entry of input.executedResources ? input.toolTrace ?? [] : []) {
-    if (entry.tool !== "graph_get" || entry.error || !entry.graphSource) continue;
+    if (entry.error) continue;
+    if (entry.tool === "query_cache" || entry.tool === "refresh_resource") {
+      const resource = (entry.params as Record<string, unknown> | undefined)?.resource;
+      if (typeof resource === "string" && knownResources.has(resource as GraphCacheResourceKind)) {
+        cacheReadResources.add(resource as GraphCacheResourceKind);
+      }
+      continue;
+    }
+    if (entry.tool !== "graph_get" || !entry.graphSource) continue;
     const resource = graphResourceForPath(entry.graphSource.path);
     if (resource) liveGraphByResource.set(resource, entry);
   }
   return input.cacheStatus
     .filter((status) => visible.has(status.resource))
-    .map((status) => {
+    .flatMap((status) => {
       const request = pathForResource(status.resource);
-      const liveEntry = liveGraphByResource.get(status.resource);
-      if (liveEntry?.graphSource) {
-        const live = liveEntry.graphSource;
-        const select = live.query?.["$select"]
-          ?.split(",")
-          .map((field) => field.trim())
-          .filter(Boolean);
-        return {
-          resource: status.resource,
-          label: status.label,
-          rows: live.rows,
-          pages: live.pagesFetched,
-          pageLimitReached: live.truncated,
-          refreshedAt: liveEntry.completedAt,
-          source: "live" as const,
-          path: live.path,
-          ...(select && select.length > 0 ? { select } : {}),
-          ...(live.query ? { query: live.query } : {}),
-        };
-      }
-      return {
+      const cacheEntry = {
         resource: status.resource,
         label: status.label,
         rows: status.rows,
@@ -1293,6 +1283,31 @@ export function buildIntuneChatSources(input: {
         ...(request.query ? { query: request.query } : {}),
         ...(status.lastError ? { error: status.lastError } : {}),
       };
+      const liveEntry = liveGraphByResource.get(status.resource);
+      if (!liveEntry?.graphSource) return [cacheEntry];
+      const live = liveEntry.graphSource;
+      const select = live.query?.["$select"]
+        ?.split(",")
+        .map((field) => field.trim())
+        .filter(Boolean);
+      const liveSourceEntry = {
+        resource: status.resource,
+        label: status.label,
+        rows: live.rows,
+        pages: live.pagesFetched,
+        pageLimitReached: live.truncated,
+        refreshedAt: liveEntry.completedAt,
+        source: "live" as const,
+        path: live.path,
+        ...(select && select.length > 0 ? { select } : {}),
+        ...(live.query ? { query: live.query } : {}),
+      };
+      // A live lookup for one row must not hide older cache evidence
+      // the same answer also read: keep both, so the oldest-source
+      // header stays honest.
+      return cacheReadResources.has(status.resource)
+        ? [cacheEntry, liveSourceEntry]
+        : [liveSourceEntry];
     });
 }
 

@@ -307,6 +307,10 @@ const READ_QUESTION_START =
 
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
   const question = lowerQuestion.trim();
+  // Explanatory prompts describe actions instead of requesting them:
+  // "Explain how to disable an account and then delete it." The
+  // chained-imperative pattern below would otherwise block them.
+  if (/^(?:explain|describe)\b/.test(question)) return false;
   // "Add up the licenses" asks for a sum, not a tenant change.
   if (term === "add" && /^add\s+up\b/.test(question)) return false;
   // Anchored at the main clause only. Unanchored helper phrases

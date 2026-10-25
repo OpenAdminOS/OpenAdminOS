@@ -164,6 +164,24 @@ describe("chat sources come from executed tools, not the plan", () => {
     assert.equal(fallbackSources[0]?.source, "cache");
     assert.equal(fallbackSources[0]?.rows, 500);
     assert.equal(fallbackSources[0]?.refreshedAt, "2026-08-01T09:00:00.000Z");
+
+    // When the same answer also read the cache for this resource, the
+    // live lookup must not hide that older evidence: both appear.
+    const mixedSources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [traceEntry("query_cache", { resource: "users" }), graphTraceEntry()],
+      refreshedResources: new Set(),
+    });
+    assert.equal(mixedSources.length, 2);
+    assert.deepEqual(
+      mixedSources.map((source) => [source.source, source.rows, source.refreshedAt]),
+      [
+        ["cache", 500, "2026-08-01T09:00:00.000Z"],
+        ["live", 1, "2026-08-01T10:00:01.000Z"],
+      ],
+    );
   });
 
   it("decides executed vs planned sources per answer mode", () => {
