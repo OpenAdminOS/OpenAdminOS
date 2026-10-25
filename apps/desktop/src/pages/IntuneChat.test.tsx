@@ -249,6 +249,15 @@ describe("IntuneChat shell conversation actions", () => {
       `/chat/${activeConversation.id}`,
     );
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+    // Stop cancels only this conversation's stream, by the id the send
+    // was started with.
+    const streamOptions = vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]?.[2];
+    expect(streamOptions?.streamId).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() =>
+      expect(bridge.cancelIntuneChatStream).toHaveBeenCalledWith(streamOptions?.streamId),
+    );
   });
 });
 
@@ -561,6 +570,44 @@ describe("IntuneChat trust presentation", () => {
     expect(screen.getByText("Local model. Tenant data stays on this device.")).toBeInTheDocument();
   });
 
+  it("activates the provider when picking another provider's model", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge();
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.click(screen.getByLabelText(/Model:/));
+    await user.click(await screen.findByRole("menuitemradio", { name: /gpt-5/ }));
+
+    await waitFor(() => {
+      expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
+      expect(bridge.setActiveModel).toHaveBeenCalledWith("openai", "gpt-5");
+    });
+  });
+
+  it("re-persists the provider when picking the displayed provider's model", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge();
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.click(screen.getByLabelText(/Model:/));
+    await user.click(await screen.findByRole("menuitemradio", { name: /llama3\.1/ }));
+
+    await waitFor(() => {
+      expect(bridge.setActiveProvider).toHaveBeenCalledWith("ollama");
+      expect(bridge.setActiveModel).toHaveBeenCalledWith("ollama", "llama3.1");
+    });
+  });
+
   it("shows a setup action when no model is ready", async () => {
     const providers = mockProviders.map((provider) =>
       provider.id === "ollama"
@@ -718,6 +765,10 @@ describe("IntuneChat related agent hint", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run agent" })).toBeInTheDocument();
+    // Mode badge and scopes are visible on the collapsed card, without
+    // opening Details.
+    expect(screen.getByText("Read agent")).toBeInTheDocument();
+    expect(screen.getByText("DeviceManagementManagedDevices.Read.All")).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "Dismiss suggested agent" }),
@@ -903,10 +954,13 @@ describe("IntuneChat conversation routes", () => {
     });
 
     await waitFor(() => expect(bridge.getIntuneChatMessages).toHaveBeenCalledWith("conversation-rename"));
+    await waitFor(() => expect(bridge.listIntuneChatConversations).toHaveBeenCalled());
     await user.keyboard("{F2}");
-    const titleInput = screen.getByRole("textbox", { name: "Conversation title" });
+    const titleInput = await screen.findByRole("textbox", { name: "Conversation title" });
     await user.clear(titleInput);
-    await user.type(titleInput, "Renamed title{Enter}");
+    await user.type(titleInput, "Renamed title");
+    expect(titleInput).toHaveValue("Renamed title");
+    await user.keyboard("{Enter}");
     await waitFor(() =>
       expect(bridge.renameIntuneChatConversation).toHaveBeenCalledWith(
         "conversation-rename",
@@ -949,7 +1003,7 @@ describe("IntuneChat conversation routes", () => {
     expect(screen.queryByRole("radio", { name: "Workspaces" })).not.toBeInTheDocument();
   });
 
-  it("keeps an engine notice out of the answer until details are expanded", async () => {
+  it("shows an engine notice next to the answer without expanding details", async () => {
     const conversation: IntuneChatConversation = {
       id: "conversation-notice",
       title: "Review devices",
@@ -982,8 +1036,137 @@ describe("IntuneChat conversation routes", () => {
     });
 
     expect(await screen.findByText("Two devices need review.")).toBeInTheDocument();
-    expect(screen.queryByText(notice)).not.toBeVisible();
+    expect(screen.getByText(notice)).toBeVisible();
     await user.click(screen.getByText("How I checked"));
     expect(screen.getByText(notice)).toBeVisible();
+  });
+
+  it("exposes the transcript as a log and focuses the composer on open", async () => {
+    const conversation: IntuneChatConversation = {
+      id: "conversation-log",
+      title: "Review devices",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async () => []),
+    });
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId",
+      route: "/chat/conversation-log",
+      bridge,
+    });
+
+    expect(await screen.findByRole("log", { name: "Conversation" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Ask about your Microsoft 365 tenant" }),
+    ).toHaveFocus();
+  });
+
+  it("renders recovery actions for a non-send error and reloads on request", async () => {
+    let groupCalls = 0;
+    const bridge = makeMockBridge({
+      listTenantGroups: vi.fn(async () => {
+        groupCalls += 1;
+        if (groupCalls === 1) throw new Error("Tenant groups are unavailable.");
+        return [];
+      }),
+    });
+    const user = userEvent.setup();
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    expect(await screen.findByText("The requested action could not be completed.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reload chat" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Open Settings" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Reload chat" }));
+    await vi.waitFor(() => expect(groupCalls).toBeGreaterThan(1));
+    await vi.waitFor(() =>
+      expect(screen.queryByText("The requested action could not be completed.")).not.toBeInTheDocument(),
+    );
+  });
+
+  it("lets a non-send error be dismissed in place", async () => {
+    const bridge = makeMockBridge({
+      listTenantGroups: vi.fn(async () => {
+        throw new Error("Tenant groups are unavailable.");
+      }),
+    });
+    const user = userEvent.setup();
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge,
+    });
+
+    expect(await screen.findByText("The requested action could not be completed.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss error" }));
+    expect(screen.queryByText("The requested action could not be completed.")).not.toBeInTheDocument();
+  });
+
+  it("shows the oldest source age in the answer header, not the newest", async () => {
+    const conversation: IntuneChatConversation = {
+      id: "conversation-sources",
+      title: "Review devices",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const now = Date.now();
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async () => [
+        {
+          id: "answer-1",
+          conversationId: conversation.id,
+          role: "assistant" as const,
+          content: "Eight devices are noncompliant.",
+          status: "completed" as const,
+          createdAt: conversation.updatedAt,
+          sources: [
+            {
+              resource: "managedDevices" as const,
+              label: "Managed devices",
+              rows: 9,
+              source: "cache" as const,
+              refreshedAt: new Date(now - 3 * 60 * 60 * 1000).toISOString(),
+            },
+            {
+              resource: "users" as const,
+              label: "Users",
+              rows: 4,
+              source: "live" as const,
+              refreshedAt: new Date(now - 30 * 1000).toISOString(),
+            },
+          ],
+        },
+      ]),
+    });
+
+    const user = userEvent.setup();
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId",
+      route: "/chat/conversation-sources",
+      bridge,
+    });
+
+    expect(await screen.findByText("Eight devices are noncompliant.")).toBeInTheDocument();
+    expect(screen.getByText(/oldest data from 3 hours ago/)).toBeInTheDocument();
+    expect(screen.queryByText(/data from just now/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Sources" })).not.toBeInTheDocument();
+    expect(screen.queryByText("· 9 rows")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("How I checked"));
+    expect(screen.getByText("Sources")).toBeVisible();
   });
 });

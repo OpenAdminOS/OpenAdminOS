@@ -15,7 +15,7 @@ import type {
 import { DEFAULT_SCOPE_METADATA } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import { unwrapGraphCollectionPage } from "../state-helpers.js";
+import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
   GRAPH_CACHE_RESOURCES,
   definitionForResource,
@@ -234,15 +234,93 @@ export async function executeIntuneChatTool(
   try {
     const result = await executeToolUnchecked(ctx, tool, params);
     const completedAtMs = Date.now();
+    // refresh_resource reports failure in its result body instead of
+    // throwing. Without this, the trace looked successful, the loop
+    // counted a failed refresh as tenant evidence, and source helpers
+    // labelled the resource live.
+    const softError =
+      tool === "refresh_resource" &&
+      result !== null &&
+      typeof result === "object" &&
+      (result as { ok?: unknown }).ok === false
+        ? String(
+            (result as { error?: unknown }).error ??
+              `Refresh failed for ${String((result as { resource?: unknown }).resource ?? "resource")}.`,
+          )
+        : undefined;
+    const graphRecord =
+      tool === "graph_get" && result !== null && typeof result === "object"
+        ? (result as Record<string, unknown>)
+        : undefined;
+    const cacheSource = ((): IntuneChatToolTraceEntry["cacheSource"] => {
+      if (result === null || typeof result !== "object") return undefined;
+      const record = result as Record<string, unknown>;
+      if (tool === "query_cache" && record.snapshot && typeof record.snapshot === "object") {
+        const snapshot = record.snapshot as Record<string, unknown>;
+        if (typeof record.resource !== "string") return undefined;
+        return {
+          resource: record.resource,
+          rows: typeof snapshot.rows === "number" ? snapshot.rows : 0,
+          ...(typeof snapshot.refreshedAt === "string" ? { refreshedAt: snapshot.refreshedAt } : {}),
+          ...(typeof snapshot.pages === "number" ? { pages: snapshot.pages } : {}),
+          ...(typeof snapshot.pageLimitReached === "boolean"
+            ? { pageLimitReached: snapshot.pageLimitReached }
+            : {}),
+          ...(typeof snapshot.lastError === "string" && snapshot.lastError
+            ? { error: snapshot.lastError }
+            : {}),
+        };
+      }
+      if (tool === "refresh_resource" && record.ok === true && typeof record.resource === "string") {
+        return {
+          resource: record.resource,
+          rows: typeof record.rows === "number" ? record.rows : 0,
+          ...(typeof record.refreshedAt === "string" ? { refreshedAt: record.refreshedAt } : {}),
+          ...(typeof record.pages === "number" ? { pages: record.pages } : {}),
+          ...(typeof record.pageLimitReached === "boolean"
+            ? { pageLimitReached: record.pageLimitReached }
+            : {}),
+          fromRefresh: true,
+        };
+      }
+      return undefined;
+    })();
     const trace: IntuneChatToolTraceEntry = {
       id: `tool_${randomUUID()}`,
       tool,
       params: params ?? {},
       resultSummary: summarizeToolResult(tool, result),
       ...(tool === "web_search" ? { webSources: (result as WebSearchResult).sources } : {}),
+      ...(cacheSource ? { cacheSource } : {}),
+      ...(graphRecord
+        ? {
+            graphSource: {
+              path: String(graphRecord.path ?? ""),
+              ...(graphRecord.query && typeof graphRecord.query === "object"
+                ? { query: graphRecord.query as Record<string, string> }
+                : {}),
+              rows:
+                typeof graphRecord.returnedRows === "number"
+                  ? graphRecord.returnedRows
+                  : Array.isArray(graphRecord.rows)
+                    ? graphRecord.rows.length
+                    : 1,
+              ...(typeof graphRecord.pagesFetched === "number"
+                ? { pagesFetched: graphRecord.pagesFetched }
+                : { pagesFetched: 1 }),
+              ...(typeof graphRecord.truncated === "boolean"
+                ? { truncated: graphRecord.truncated }
+                : {}),
+              ...(typeof graphRecord.totalCount === "number"
+                ? { totalCount: graphRecord.totalCount }
+                : {}),
+            },
+          }
+        : {}),
       durationMs: Math.max(0, completedAtMs - startedAtMs),
       createdAt,
       completedAt: new Date(completedAtMs).toISOString(),
+      ...(softError ? { error: softError } : {}),
     };
     return { result, trace };
   } catch (caught) {
@@ -294,8 +372,13 @@ function executeToolUnchecked(
 }
 
 function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unknown {
-  const staleAfterHours = numberParam(params, "staleAfterHours") ?? 6;
-  const staleAfterMs = Math.max(1, staleAfterHours) * 60 * 60 * 1000;
+  // Default staleness follows the host TTL per resource. A flat 6h rule
+  // told the model the opposite of host policy for fast (sign-ins) and
+  // slow (profiles) resources. An explicit staleAfterHours still wins.
+  const staleAfterHours = numberParam(params, "staleAfterHours");
+  const staleAfterMs = staleAfterHours !== undefined
+    ? Math.max(1, staleAfterHours) * 60 * 60 * 1000
+    : undefined;
   const nowMs = Date.now();
   const resources = ctx.store.getGraphCacheStatus(ctx.tenantId, [...GRAPH_CACHE_RESOURCES]);
   return {
@@ -309,7 +392,7 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         !resource.refreshedAt ||
         resource.rows === 0 ||
         !Number.isFinite(refreshedMs) ||
-        nowMs - refreshedMs > staleAfterMs;
+        nowMs - refreshedMs > (staleAfterMs ?? resourceStalenessMs(resource.resource));
       return {
         resource: resource.resource,
         label: resource.label,
@@ -490,16 +573,90 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     ...(Object.keys(query).length > 0 ? { query } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
+  // A live 403 almost always means the tenant was consented before this
+  // permission entered the requested set. Name the scope and the
+  // recovery, like cache refresh does, instead of surfacing a raw
+  // HTTP 403 the model and the admin cannot act on.
+  const requestPage = async (input: GraphRequestInput): Promise<unknown> => {
+    try {
+      return await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      if (!raw.includes("HTTP 403")) throw error;
+      const needed = validation.scopes.length > 0
+        ? validation.scopes.join(", ")
+        : "a read permission this tenant has not consented to";
+      throw new Error(
+        `Microsoft Graph denied read access for GET ${path}. This endpoint needs ${needed}. The tenant was likely connected before OpenAdminOS requested it. Reconnect the tenant to grant the current read permissions, then retry. Graph said: ${raw}`,
+      );
+    }
+  };
   ctx.signal?.throwIfAborted();
-  const response = await graph.request({ ...request, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+  const firstResponse = await requestPage(request);
+  // Follow server paging within the row cap: a first page smaller than
+  // the cap with a nextLink otherwise reads as complete tenant coverage.
+  const collected: unknown[] = [];
+  let page = unwrapGraphCollectionPage(firstResponse);
+  let pagesFetched = 1;
+  let totalCount = page.totalCount;
+  collected.push(...page.rows);
+  const seenContinuations = new Set<string>();
+  while (
+    page.nextLink &&
+    collected.length < GRAPH_GET_ROW_CAP &&
+    pagesFetched < GRAPH_GET_PAGE_CAP &&
+    !skuInventory
+  ) {
+    // Follow the complete continuation URL through the validated parser
+    // (host pinned to graph.microsoft.com, beta only) instead of
+    // extracting one parameter: Graph continuations may carry $skip or
+    // a changed query, and reconstructing from the original query
+    // silently re-reads the wrong page. The path must stay on the
+    // endpoint that was validated and consented for this call.
+    if (seenContinuations.has(page.nextLink)) break;
+    seenContinuations.add(page.nextLink);
+    let continuation: ReturnType<typeof graphCacheRequestFromNextLink>;
+    try {
+      continuation = graphCacheRequestFromNextLink(
+        page.nextLink,
+        Object.keys(headers).length > 0 ? headers : undefined,
+      );
+    } catch {
+      break;
+    }
+    if (continuation.path !== path) break;
+    ctx.signal?.throwIfAborted();
+    const nextResponse = await requestPage({
+      method: "GET",
+      path: continuation.path,
+      ...(continuation.query ? { query: continuation.query } : {}),
+      ...(continuation.headers ? { headers: continuation.headers } : {}),
+    });
+    page = unwrapGraphCollectionPage(nextResponse);
+    pagesFetched += 1;
+    if (totalCount === undefined) totalCount = page.totalCount;
+    collected.push(...page.rows);
+  }
+  const isCollection =
+    Array.isArray((firstResponse as { value?: unknown })?.value) || Array.isArray(firstResponse);
+  const response = isCollection && pagesFetched > 1
+    ? {
+        value: collected,
+        ...(page.nextLink ? { "@odata.nextLink": page.nextLink } : {}),
+        ...(totalCount !== undefined ? { "@odata.count": totalCount } : {}),
+      }
+    : firstResponse;
   return capGraphResponse({
     path,
     query,
     response,
     endpointSummary: validation.summary,
     scopes: validation.scopes,
+    pagesFetched,
   });
 }
+
+const GRAPH_GET_PAGE_CAP = 5;
 
 async function refreshResource(
   ctx: IntuneChatToolContext,
@@ -668,6 +825,7 @@ function capGraphResponse(input: {
   response: unknown;
   endpointSummary?: string;
   scopes: string[];
+  pagesFetched?: number;
 }): unknown {
   const page = unwrapGraphCollectionPage(input.response);
   const isCollection =
@@ -681,9 +839,13 @@ function capGraphResponse(input: {
         scopes: input.scopes,
         rowCountInPage: page.rows.length,
         returnedRows: Math.min(page.rows.length, GRAPH_GET_ROW_CAP),
+        ...(page.totalCount !== undefined ? { totalCount: page.totalCount } : {}),
+        ...(input.pagesFetched && input.pagesFetched > 1 ? { pagesFetched: input.pagesFetched } : {}),
         nextLinkPresent: Boolean(page.nextLink),
         truncated: page.rows.length > GRAPH_GET_ROW_CAP || Boolean(page.nextLink),
-        rows: page.rows.slice(0, GRAPH_GET_ROW_CAP).map(compactValue),
+        // Not .map(compactValue): map would pass the index as depth and
+        // truncate every row from the fifth onward to "[object truncated]".
+        rows: page.rows.slice(0, GRAPH_GET_ROW_CAP).map((row) => compactValue(row)),
       }
     : {
         path: input.path,

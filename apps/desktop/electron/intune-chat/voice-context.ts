@@ -138,6 +138,124 @@ export function clipVoiceText(text: string, bytes: number): string {
     .replace(/\uFFFD$/, "");
 }
 
+/** Exact platform-filtered app counts use app-type aggregates over all cached rows. */
+export function voiceAppPlatformCountAnswer(
+  question: string,
+  statuses: GraphCacheResourceStatus[],
+  aggregate: (
+    resource: GraphCacheResourceKind,
+  ) =>
+    | { total: number; breakdowns: Record<string, Record<string, number>> }
+    | undefined,
+): string | undefined {
+  const kind = classifyVoiceQuestion(question);
+  if (kind?.kind !== "app-platform-count" || !kind.appPlatform) return undefined;
+  const resource = kind.resources[0]!;
+  const platform = kind.appPlatform;
+  const name =
+    resource === "detectedApps"
+      ? `detected ${platform} app inventory entries`
+      : `${platform} Intune app catalog entries`;
+  const status = statuses.find((s) => s.resource === resource);
+  if (!status?.refreshedAt) {
+    return `I could not retrieve ${name}. Open Cache for connection and permission details; this does not mean there are none.`;
+  }
+  const data = aggregate(resource);
+  if (!data) return undefined;
+  const counted = appPlatformCount(data.breakdowns, platform, resource, data.total);
+  if (counted === undefined) return undefined;
+  if (counted.incomplete && counted.count === 0) return undefined;
+  const { count } = counted;
+  const partial =
+    counted.incomplete ||
+    status.pageLimitReached ||
+    (status.tenantTotal !== undefined && status.rows < status.tenantTotal);
+  const detail = partial
+    ? `The partial snapshot contains at least ${count} ${name}`
+    : `The snapshot contains ${count} ${name}`;
+  return `${detail}, refreshed ${status.refreshedAt}.${partial ? " Detail coverage is partial." : ""}${status.lastError ? " The latest refresh failed, so I cannot confirm the current count. Open Cache for details." : ""}`;
+}
+
+function appPlatformCount(
+  breakdowns: Record<string, Record<string, number>>,
+  platform: AppPlatform,
+  resource: GraphCacheResourceKind,
+  total: number,
+): { count: number; incomplete: boolean } | undefined {
+  if (total === 0) return { count: 0, incomplete: false };
+  const appPlatform = breakdowns.appPlatform;
+  if (appPlatform && Object.keys(appPlatform).length > 0) {
+    const accounted = Object.values(appPlatform).reduce((sum, count) => sum + count, 0);
+    const classified = new Set(["macOS", "Windows", "iOS", "Android"]);
+    const hasUnclassified = Object.entries(appPlatform).some(
+      ([bucket, count]) => count > 0 && !classified.has(bucket),
+    );
+    return {
+      count: appPlatform[platform] ?? 0,
+      incomplete: accounted < total || hasUnclassified,
+    };
+  }
+  if (resource === "detectedApps" && breakdowns.platform) {
+    const accounted = Object.values(breakdowns.platform).reduce(
+      (sum, count) => sum + count,
+      0,
+    );
+    const hasUnclassified = Object.entries(breakdowns.platform).some(
+      ([bucket, count]) => count > 0 && normalizeAppPlatform(bucket) === undefined,
+    );
+    return {
+      count: Object.entries(breakdowns.platform).reduce(
+        (sum, [bucket, count]) =>
+          normalizeAppPlatform(bucket) === platform ? sum + count : sum,
+        0,
+      ),
+      incomplete: accounted < total || hasUnclassified,
+    };
+  }
+  const odataTypes = breakdowns["@odata.type"];
+  if (!odataTypes) return undefined;
+  const accounted = Object.values(odataTypes).reduce((sum, count) => sum + count, 0);
+  const platforms: AppPlatform[] = ["macOS", "Windows", "iOS", "Android"];
+  const hasUnclassified = Object.entries(odataTypes).some(
+    ([bucket, count]) =>
+      count > 0 && !platforms.some((candidate) => appTypeMatchesPlatform(bucket, candidate)),
+  );
+  return {
+    count: Object.entries(odataTypes).reduce(
+      (sum, [bucket, count]) =>
+        appTypeMatchesPlatform(bucket, platform) ? sum + count : sum,
+      0,
+    ),
+    incomplete: accounted < total || hasUnclassified,
+  };
+}
+
+function appTypeMatchesPlatform(type: string, platform: AppPlatform): boolean {
+  const lower = type.toLowerCase();
+  switch (platform) {
+    case "macOS":
+      return lower.includes("macos");
+    case "Android":
+      return lower.includes("android");
+    case "iOS":
+      return lower.includes("ios");
+    case "Windows":
+      return !lower.includes("macos") &&
+        ["win32", "windows", "winget", "microsoftstoreforbusiness", "officesuiteapp"].some(
+          (token) => lower.includes(token),
+        );
+  }
+}
+
+function normalizeAppPlatform(value: string): AppPlatform | undefined {
+  const lower = value.toLowerCase();
+  if (lower.includes("mac")) return "macOS";
+  if (lower.includes("android")) return "Android";
+  if (lower.includes("ios") || lower.includes("iphone") || lower.includes("ipad")) return "iOS";
+  if (lower.includes("win")) return "Windows";
+  return undefined;
+}
+
 /** Common fleet summaries use SQL aggregates over all cached rows, never a sample. */
 export function voiceDeviceSummaryAnswer(
   question: string,
@@ -147,7 +265,7 @@ export function voiceDeviceSummaryAnswer(
     | undefined,
 ): string | undefined {
   const kind = classifyVoiceQuestion(question);
-  if (!kind || kind.kind === "inventory") return undefined;
+  if (!kind || (kind.kind !== "encryption" && kind.kind !== "versions")) return undefined;
   const encryption = kind.kind === "encryption";
   const status = statuses.find((s) => s.resource === "managedDevices");
   if (!status?.refreshedAt)
@@ -172,9 +290,11 @@ export function voiceDeviceSummaryAnswer(
     : `${prefix}no OS version data was reported.`;
 }
 
+type AppPlatform = "macOS" | "Windows" | "iOS" | "Android";
 type VoiceQuestion = {
-  kind: "inventory" | "encryption" | "versions";
+  kind: "inventory" | "encryption" | "versions" | "app-platform-count";
   resources: GraphCacheResourceKind[];
+  appPlatform?: AppPlatform;
 };
 export function voiceResourcesForQuestion(
   question: string,
@@ -196,6 +316,20 @@ function classifyVoiceQuestion(question: string): VoiceQuestion | undefined {
   if (directoryCount) {
     const resources: Record<string, GraphCacheResourceKind> = { users: "users", "user accounts": "users", groups: "groups", "app registrations": "applications", "conditional access policies": "conditionalAccessPolicies" };
     return { kind: "inventory", resources: [resources[directoryCount[1]!.toLowerCase()]!] };
+  }
+  const platformApps =
+    /^how many (?:(detected|installed|intune|managed) )?(macos|mac os|mac|windows|win32|ios|iphone|ipad|android) (?:(detected|installed|intune|managed) )?apps(?: do (?:i|we) have(?: in (?:my|our|the|this) tenant)?| are there(?: in (?:my|our|the|this) tenant)?)?$/i.exec(text) ??
+    /^how many (?:(detected|installed|intune|managed) )?apps (?:do (?:i|we) have )?(?:for|on) (macos|mac os|mac|windows|win32|ios|iphone|ipad|android)(?: devices)?(?: in (?:my|our|the|this) tenant)?$/i.exec(text);
+  if (platformApps) {
+    const qualifier = (platformApps[1] ?? platformApps[3] ?? "").toLowerCase();
+    const appPlatform = normalizeAppPlatform(platformApps[2]!);
+    if (appPlatform) {
+      return {
+        kind: "app-platform-count",
+        resources: /detected|installed/.test(qualifier) ? ["detectedApps"] : ["mobileApps"],
+        appPlatform,
+      };
+    }
   }
   const apps = /^how many (?:(intune|managed|detected|installed) )?apps(?: do (?:i|we) have(?: in (?:my|our|the) tenant)?| are there(?: in (?:my|our|the) tenant)?)?$/i.exec(text);
   if (apps) return { kind: "inventory", resources: /detected|installed/i.test(apps[1] ?? "") ? ["detectedApps"] : apps[1] ? ["mobileApps"] : ["mobileApps", "detectedApps"] };

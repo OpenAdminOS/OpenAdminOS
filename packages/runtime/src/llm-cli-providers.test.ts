@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, chmod } from "node:fs/promises
 import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { createCopilotLlm, probeCopilotLlm } from "./llm-copilot.js";
-import { createGeminiLlm, probeGeminiLlm } from "./llm-gemini.js";
+import { createGeminiLlm, GEMINI_DEFAULT_MODEL, probeGeminiLlm } from "./llm-gemini.js";
 import { cliProviderEnv, CliProviderError, cliFailure } from "./cli-provider.js";
 
 async function fixture(provider: "copilot" | "gemini", scenario = "ok") {
@@ -132,6 +132,19 @@ it("Gemini remains unverified until a successful request, and sign-in errors cle
     assert.equal((await probeGeminiLlm({ binaryPath: f.binaryPath })).ready, false);
     await assert.rejects(createGeminiLlm({ binaryPath: f.binaryPath }).complete({ prompt: "Test" }), (error: unknown) => error instanceof CliProviderError && error.failure === "signed-out" && !error.message.includes("SECRET"));
     assert.equal((await probeGeminiLlm({ binaryPath: f.binaryPath })).failure, "signed-out");
+  } finally { await f.cleanup(); }
+});
+
+it("Gemini probe advertises a selectable default model without forcing --model", async () => {
+  const f = await fixture("gemini");
+  try {
+    const probe = await probeGeminiLlm({ binaryPath: f.binaryPath });
+    assert.deepEqual(probe.models, [GEMINI_DEFAULT_MODEL]);
+    assert.equal(probe.defaultModel, GEMINI_DEFAULT_MODEL);
+    const answer = await createGeminiLlm({ binaryPath: f.binaryPath }).complete({ prompt: "Hi", model: GEMINI_DEFAULT_MODEL });
+    assert.equal(answer.text, "Hello 🌍");
+    const capture = await f.capture();
+    assert.equal(capture.args.includes("--model"), false);
   } finally { await f.cleanup(); }
 });
 

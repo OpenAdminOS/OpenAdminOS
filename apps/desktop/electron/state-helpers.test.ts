@@ -55,3 +55,350 @@ it("cancelled paging and repeated continuation links fail instead of returning a
   const loop = {request:async()=>({value:[],"@odata.nextLink":"https://graph.microsoft.com/beta/users?$skiptoken=same"})} as unknown as RunGraphApi;
   await assert.rejects(fetchGraphCachePages(loop,{path:"/users"},undefined,true),/repeated/);
 });
+
+import { boundedConversationMemory, buildIntuneChatSources, CHAT_MEMORY_MAX_CHARS, executedResourcesForAnswer, isGraphCacheStatusStale, resourcesFromToolTrace, toolRefreshedResources } from "./state-helpers.js";
+import type { GraphCacheResourceStatus, IntuneChatMessage, IntuneChatToolTraceEntry } from "@openadminos/agent-sdk";
+
+describe("chat sources come from executed tools, not the plan", () => {
+  const traceEntry = (tool: IntuneChatToolTraceEntry["tool"], params: unknown, error?: string): IntuneChatToolTraceEntry => ({
+    id: `trace-${tool}`,
+    tool,
+    params,
+    resultSummary: "ok",
+    durationMs: 1,
+    createdAt: "2026-08-01T10:00:00.000Z",
+    completedAt: "2026-08-01T10:00:01.000Z",
+    ...(error ? { error } : {}),
+  });
+  const graphTraceEntry = (): IntuneChatToolTraceEntry => ({
+    ...traceEntry("graph_get", { path: "/users", query: { $select: "id,displayName" } }),
+    graphSource: {
+      path: "/users",
+      query: { $select: "id,displayName", $top: "50" },
+      rows: 1,
+      pagesFetched: 1,
+      truncated: true,
+    },
+  });
+  const status = (resource: GraphCacheResourceStatus["resource"]): GraphCacheResourceStatus => ({
+    resource,
+    label: resource,
+    rows: 3,
+    refreshedAt: "2026-08-01T09:00:00.000Z",
+    scopeSet: [],
+  });
+
+  it("derives resources from successful trace entries only", () => {
+    const trace = [
+      traceEntry("list_cached_resources", {}),
+      traceEntry("query_cache", { resource: "managedDevices" }),
+      traceEntry("query_cache", { resource: "users" }, "boom"),
+      traceEntry("refresh_resource", { resource: "groups" }),
+      traceEntry("query_drift", { resource: "managedDevices" }),
+      traceEntry("graph_get", { path: "/users" }),
+      traceEntry("graph_get", { path: "/me" }),
+      traceEntry("web_search", { query: "public" }),
+      traceEntry("find_graph_endpoint", { query: "devices" }),
+    ];
+    assert.deepEqual(
+      [...resourcesFromToolTrace(trace)].sort(),
+      ["groups", "managedDevices", "users"],
+    );
+  });
+
+  it("shows executed resources as sources and drops planned-but-unused ones", () => {
+    const cacheStatus = [status("managedDevices"), status("users"), status("groups")];
+    const sources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["managedDevices", "users"],
+      executedResources: ["managedDevices", "groups"],
+      refreshedResources: new Set(),
+    });
+    assert.deepEqual(sources.map((source) => source.resource).sort(), ["groups", "managedDevices"]);
+  });
+
+  it("yields no sources when nothing was executed", () => {
+    const sources = buildIntuneChatSources({
+      cacheStatus: [status("managedDevices")],
+      plannedResources: ["managedDevices"],
+      executedResources: [],
+      refreshedResources: new Set(),
+    });
+    assert.deepEqual(sources, []);
+  });
+
+  it("describes live graph_get evidence from the execution, not the cache", () => {
+    const cacheStatus = [{
+      resource: "users" as const,
+      label: "Users",
+      rows: 500,
+      pages: 10,
+      pageLimitReached: false,
+      refreshedAt: "2026-08-01T09:00:00.000Z",
+      scopeSet: [],
+    }];
+    const sources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [graphTraceEntry()],
+      refreshedResources: new Set(),
+    });
+    assert.equal(sources.length, 1);
+    assert.equal(sources[0]?.source, "live");
+    assert.equal(sources[0]?.rows, 1);
+    assert.equal(sources[0]?.pages, 1);
+    assert.equal(sources[0]?.pageLimitReached, true);
+    assert.equal(sources[0]?.refreshedAt, "2026-08-01T10:00:01.000Z");
+    assert.equal(sources[0]?.path, "/users");
+    assert.deepEqual(sources[0]?.select, ["id", "displayName"]);
+
+    // The deterministic fallback (no executedResources) must describe
+    // its snapshot pack, not the abandoned investigation's live read.
+    const fallbackSources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      toolTrace: [graphTraceEntry()],
+      refreshedResources: new Set(),
+    });
+    assert.equal(fallbackSources[0]?.source, "cache");
+    assert.equal(fallbackSources[0]?.rows, 500);
+    assert.equal(fallbackSources[0]?.refreshedAt, "2026-08-01T09:00:00.000Z");
+
+    // When the same answer also read the cache for this resource, the
+    // live lookup must not hide that older evidence: both appear.
+    const cacheRead = {
+      ...traceEntry("query_cache", { resource: "users" }),
+      cacheSource: { resource: "users", rows: 500, refreshedAt: "2026-08-01T09:00:00.000Z" },
+    };
+    const mixedSources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [cacheRead, graphTraceEntry()],
+      refreshedResources: new Set(),
+    });
+    assert.equal(mixedSources.length, 2);
+    assert.deepEqual(
+      mixedSources.map((source) => [source.source, source.rows, source.refreshedAt]),
+      [
+        ["cache", 500, "2026-08-01T09:00:00.000Z"],
+        ["live", 1, "2026-08-01T10:00:01.000Z"],
+      ],
+    );
+
+    // A refresh during the investigation does not rewrite the
+    // provenance of the snapshot read before it: both snapshots stay.
+    const refreshedStatus = [{
+      ...cacheStatus[0]!,
+      rows: 2,
+      refreshedAt: "2026-08-01T10:00:01.000Z",
+    }];
+    const prePostRefresh = buildIntuneChatSources({
+      cacheStatus: refreshedStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [
+        {
+          ...traceEntry("query_cache", { resource: "users" }),
+          cacheSource: { resource: "users", rows: 1, refreshedAt: "2026-08-01T08:00:00.000Z" },
+        },
+        {
+          ...traceEntry("refresh_resource", { resource: "users" }),
+          cacheSource: {
+            resource: "users",
+            rows: 2,
+            refreshedAt: "2026-08-01T10:00:01.000Z",
+            fromRefresh: true,
+          },
+        },
+      ],
+      refreshedResources: new Set(["users"]),
+    });
+    assert.deepEqual(
+      prePostRefresh.map((source) => [source.source, source.rows, source.refreshedAt]),
+      [
+        ["cache", 1, "2026-08-01T08:00:00.000Z"],
+        ["live", 2, "2026-08-01T10:00:01.000Z"],
+      ],
+    );
+
+    // Distinct live lookups for one resource all stay visible, with
+    // their own truncation flags.
+    const detailLookup = {
+      ...traceEntry("graph_get", { path: "/users/user-1" }),
+      completedAt: "2026-08-01T10:00:02.000Z",
+      graphSource: { path: "/users/user-1", rows: 1, pagesFetched: 1, truncated: false },
+    };
+    const multiLive = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [graphTraceEntry(), detailLookup],
+      refreshedResources: new Set(),
+    });
+    assert.deepEqual(
+      multiLive.map((source) => [source.path, source.rows, source.pageLimitReached]),
+      [
+        ["/users", 1, true],
+        ["/users/user-1", 1, false],
+      ],
+    );
+
+    // A snapshot that survived a failed refresh keeps its warning on
+    // the per-read source entry.
+    const warnedSources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [
+        {
+          ...traceEntry("query_cache", { resource: "users" }),
+          cacheSource: {
+            resource: "users",
+            rows: 500,
+            refreshedAt: "2026-08-01T09:00:00.000Z",
+            error: "HTTP 403: reconnect the tenant",
+          },
+        },
+      ],
+      refreshedResources: new Set(),
+    });
+    assert.equal(warnedSources[0]?.error, "HTTP 403: reconnect the tenant");
+
+    // The warning also survives when the same snapshot was already
+    // read before the refresh failed: dedupe merges it in.
+    const warnedAfterReread = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [
+        {
+          ...traceEntry("query_cache", { resource: "users" }),
+          cacheSource: { resource: "users", rows: 500, refreshedAt: "2026-08-01T09:00:00.000Z" },
+        },
+        {
+          ...traceEntry("query_cache", { resource: "users" }),
+          cacheSource: {
+            resource: "users",
+            rows: 500,
+            refreshedAt: "2026-08-01T09:00:00.000Z",
+            error: "HTTP 403: reconnect the tenant",
+          },
+        },
+      ],
+      refreshedResources: new Set(),
+    });
+    assert.equal(warnedAfterReread.length, 1);
+    assert.equal(warnedAfterReread[0]?.error, "HTTP 403: reconnect the tenant");
+  });
+
+  it("decides executed vs planned sources per answer mode", () => {
+    const queried = [traceEntry("query_cache", { resource: "managedDevices" })];
+    const inventoryOnly = [traceEntry("list_cached_resources", {})];
+    const webOnly = [traceEntry("web_search", { query: "public" })];
+
+    assert.deepEqual(
+      [...(executedResourcesForAnswer({ toolTrace: queried, usedDeterministic: false, usedNoData: false }) ?? [])],
+      ["managedDevices"],
+    );
+    // Inventory-only answers read every resource's status; planned is honest.
+    assert.equal(executedResourcesForAnswer({ toolTrace: inventoryOnly, usedDeterministic: false, usedNoData: false }), undefined);
+    // Web-only answers must not claim tenant sources.
+    assert.deepEqual([...(executedResourcesForAnswer({ toolTrace: webOnly, usedDeterministic: false, usedNoData: false }) ?? [])], []);
+    // Deterministic answers are built from planned rows.
+    assert.equal(executedResourcesForAnswer({ toolTrace: queried, usedDeterministic: true, usedNoData: false }), undefined);
+    // Write blocks, named agents, and failures read no data for the answer.
+    assert.deepEqual([...(executedResourcesForAnswer({ toolTrace: queried, usedDeterministic: false, usedNoData: true }) ?? [])], []);
+    // No trace at all: planned fallback.
+    assert.equal(executedResourcesForAnswer({ toolTrace: undefined, usedDeterministic: false, usedNoData: false }), undefined);
+  });
+
+  it("collects resources refreshed by the refresh_resource tool", () => {
+    const trace = [
+      traceEntry("refresh_resource", { resource: "groups" }),
+      traceEntry("refresh_resource", { resource: "users" }, "boom"),
+      traceEntry("query_cache", { resource: "users" }),
+    ];
+    assert.deepEqual([...toolRefreshedResources(trace)], ["groups"]);
+  });
+
+  it("uses per-resource TTLs and retries errored resources (multi-tenant preflight)", () => {
+    const now = Date.now();
+    const at = (msAgo: number) => new Date(now - msAgo).toISOString();
+    // Sign-ins go stale after 15 minutes: 20 minutes old is stale even
+    // though a flat 6h rule would call it fresh.
+    assert.equal(isGraphCacheStatusStale({ ...status("signIns"), refreshedAt: at(20 * 60 * 1000) }), true);
+    // A 23h-old default-TTL resource (24h) is still fresh.
+    assert.equal(isGraphCacheStatusStale({ ...status("deviceCompliancePolicies"), refreshedAt: at(23 * 60 * 60 * 1000) }), false);
+    // Errored resources are retried, matching the single-tenant send path.
+    assert.equal(isGraphCacheStatusStale({ ...status("managedDevices"), refreshedAt: at(60 * 1000), lastError: "HTTP 403" }), true);
+  });
+
+  it("bounds conversation memory to the last four turns under a hard cap", () => {
+    const message = (index: number, role: "user" | "assistant", content: string, status: IntuneChatMessage["status"] = "completed"): IntuneChatMessage => ({
+      id: `msg-${index}`,
+      conversationId: "chat-1",
+      role,
+      content,
+      status,
+      createdAt: `2026-08-01T10:0${index}:00.000Z`,
+    });
+    const history: IntuneChatMessage[] = [];
+    for (let turn = 1; turn <= 6; turn += 1) {
+      history.push(message(turn * 2 - 1, "user", `Question ${turn}`));
+      history.push(message(turn * 2, "assistant", `Answer ${turn}`));
+    }
+    history.push(message(99, "assistant", "partial junk", "failed"));
+
+    const memory = boundedConversationMemory(history);
+    assert.ok(memory);
+    assert.match(memory, /Question 6/);
+    assert.match(memory, /Answer 3/);
+    assert.doesNotMatch(memory, /Question 2/);
+    assert.doesNotMatch(memory, /partial junk/);
+    assert.ok(memory.length <= CHAT_MEMORY_MAX_CHARS);
+
+    const longHistory = [
+      message(1, "user", "x".repeat(5000)),
+      message(2, "assistant", "y".repeat(5000)),
+      message(3, "user", "latest question"),
+      message(4, "assistant", "latest answer"),
+    ];
+    const longMemory = boundedConversationMemory(longHistory);
+    assert.ok(longMemory);
+    assert.ok(longMemory.length <= CHAT_MEMORY_MAX_CHARS);
+    assert.match(longMemory, /latest answer/);
+
+    assert.equal(boundedConversationMemory([]), undefined);
+    assert.equal(boundedConversationMemory([message(1, "assistant", " ", "completed")]), undefined);
+
+    // Failed or cancelled exchanges are not completed turns: their user
+    // prompts must not ride along just because the assistant side was
+    // filtered out.
+    const cancelled: IntuneChatMessage[] = [];
+    for (let turn = 1; turn <= 8; turn += 1) {
+      cancelled.push(message(100 + turn * 2 - 1, "user", `Abandoned prompt ${turn}`));
+      cancelled.push(message(100 + turn * 2, "assistant", "Stopped", "cancelled"));
+    }
+    const mixed = [
+      ...cancelled,
+      message(201, "user", "Kept question"),
+      message(202, "assistant", "Kept answer"),
+    ];
+    const mixedMemory = boundedConversationMemory(mixed);
+    assert.ok(mixedMemory);
+    assert.match(mixedMemory, /Kept question/);
+    assert.doesNotMatch(mixedMemory, /Abandoned prompt/);
+    assert.equal(boundedConversationMemory(cancelled), undefined);
+  });
+
+  it("falls back to planned resources when no trace exists (deterministic path)", () => {
+    const sources = buildIntuneChatSources({
+      cacheStatus: [status("managedDevices"), status("users")],
+      plannedResources: ["users"],
+      refreshedResources: new Set(),
+    });
+    assert.deepEqual(sources.map((source) => source.resource), ["users"]);
+  });
+});

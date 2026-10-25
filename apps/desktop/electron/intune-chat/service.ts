@@ -1,6 +1,6 @@
 import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-device-evidence.js";
 import type { WebSearch } from "./web-search.js";
-import { voiceConversationContext, voiceInventoryAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
+import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -61,9 +61,13 @@ import {
 
 import { assertAgentCompatible, withAgentCompatibility } from "../agent-draft-helpers.js";
 import {
+  assertConversationAccess,
   assertConversationTenant,
   buildChatProgressSteps,
+  boundedConversationMemory,
   buildIntuneChatSources,
+  executedResourcesForAnswer,
+  toolRefreshedResources,
   buildIntuneChatSystemPrompt,
   buildMultiTenantDossierMarkdown,
   buildMultiTenantSummary,
@@ -407,12 +411,45 @@ export class IntuneChatService {
     }
   }
 
+  private async activeTenantId(): Promise<string | undefined> {
+    return (await this.host.read()).activeTenantId;
+  }
+
+  /**
+   * Fail closed when the persisted provider id is not in the catalog.
+   * Substituting providers[0] would silently send tenant context to a
+   * provider the admin never selected.
+   */
+  private resolveActiveProvider(
+    providers: ProviderSummary[],
+    activeProviderId: ProviderId,
+  ): ProviderSummary {
+    const provider = providers.find((entry) => entry.id === activeProviderId);
+    if (!provider) {
+      throw new Error(
+        `The selected provider (${activeProviderId}) is no longer available. Open Settings and choose a connected provider.`,
+      );
+    }
+    return provider;
+  }
+
+  private async requireConversationAccess(conversationId: string): Promise<void> {
+    const store = this.host.requireIntelligenceStore();
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) {
+      throw new Error(`Chat conversation not found: ${conversationId}`);
+    }
+    assertConversationAccess(conversation, await this.activeTenantId());
+  }
+
   async listIntuneChatConversations(): Promise<IntuneChatConversation[]> {
-    return this.host.requireIntelligenceStore().listConversations();
+    const tenantId = (await this.activeTenantId()) ?? "";
+    return this.host.requireIntelligenceStore().listConversations(tenantId);
   }
 
   async searchIntuneChatConversations(query: string): Promise<IntuneChatConversation[]> {
-    return this.host.requireIntelligenceStore().searchConversations(query);
+    const tenantId = (await this.activeTenantId()) ?? "";
+    return this.host.requireIntelligenceStore().searchConversations(query, tenantId);
   }
 
   async renameIntuneChatConversation(
@@ -422,6 +459,7 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
+    await this.requireConversationAccess(conversationId);
     const normalizedTitle = normalizeChatConversationTitle(title);
     return this.host.requireIntelligenceStore().renameConversation(
       conversationId,
@@ -437,6 +475,7 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
+    await this.requireConversationAccess(conversationId);
     return this.host.requireIntelligenceStore().setConversationPinned(
       conversationId,
       pinned,
@@ -448,6 +487,7 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
+    await this.requireConversationAccess(conversationId);
     this.host.requireIntelligenceStore().deleteConversation(conversationId);
   }
 
@@ -455,7 +495,11 @@ export class IntuneChatService {
     if (!conversationId.trim()) {
       throw new Error("Conversation id is required.");
     }
-    return this.host.requireIntelligenceStore().listMessages(conversationId);
+    const store = this.host.requireIntelligenceStore();
+    const conversation = store.getConversation(conversationId);
+    if (!conversation) return [];
+    assertConversationAccess(conversation, await this.activeTenantId());
+    return store.listMessages(conversationId);
   }
 
   async listTenantGroups(): Promise<TenantGroup[]> {
@@ -508,12 +552,22 @@ export class IntuneChatService {
     if (!content) throw new Error("Multi-tenant chat prompt is required.");
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
+    // The write block short-circuits on every send path. Without this,
+    // a write prompt with all tenants selected fanned out a
+    // cross-tenant cache refresh and a read aggregation instead of
+    // the instant refusal single-tenant chat gives.
+    if (planChatContext(content).hasWriteIntent) {
+      throw new Error(
+        writeIntentBlockedMessage(
+          matchAgentsToQuestion(content, persisted.installedAgents),
+        ),
+      );
+    }
     const preflight = await this.buildMultiTenantPreflight(input);
     const providers = await this.host.listProviders();
     const activeTenant = this.host.resolveTenant(persisted);
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
     if (provider?.isLocal === false && input.hostedProviderConsent) {
       this.recordHostedProviderConsentSafely({
@@ -1042,9 +1096,8 @@ export class IntuneChatService {
     const resources = sanitizeGraphResources([...resourceSet]);
     const requiredScopes = requiredScopesForResources(resources);
     const providers = await this.host.listProviders();
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     const model = resolveProviderDefaultModel(
       provider,
       persisted.activeModelByProviderId,
@@ -1468,9 +1521,8 @@ export class IntuneChatService {
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
     const providers = await this.host.listProviders();
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     const selectedModel = resolveProviderDefaultModel(
       provider,
       persisted.activeModelByProviderId,
@@ -1501,7 +1553,10 @@ export class IntuneChatService {
       });
     }
     const planned = planChatContext(content);
-    if (voiceDeviceEvidenceIntent(content) && !planned.hasWriteIntent) planned.resources = ["managedDevices"];
+    const directResources = voiceDeviceEvidenceIntent(content)
+      ? ["managedDevices" as const]
+      : voiceResourcesForQuestion(content);
+    if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1519,6 +1574,9 @@ export class IntuneChatService {
       });
     }
 
+    const conversationMemory = boundedConversationMemory(
+      store.listMessages(conversation.id),
+    );
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -1530,7 +1588,11 @@ export class IntuneChatService {
     store.insertMessage(userMessage);
 
     let refreshResult: GraphCacheRefreshResult | undefined;
-    if (input.refreshIfStale !== false) {
+    // A write prompt is answered by the deterministic block below.
+    // Refreshing Graph data first only delays that answer (measured at
+    // tens of seconds live) and spends tenant reads on a reply that
+    // cannot use them.
+    if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
@@ -1577,20 +1639,28 @@ export class IntuneChatService {
         .filter((resource) => resource.ok)
         .map((resource) => resource.resource) ?? [],
     );
-    const sources = buildIntuneChatSources({
-      cacheStatus,
-      plannedResources: planned.resources,
-      refreshedResources,
-    });
+    // Snapshot matching the rows just read for the deterministic
+    // pack. If an investigation later refreshes resources and then
+    // falls back, its sources must describe this pack, not the
+    // refreshed cache the fallback never used.
+    const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
+      ...GRAPH_CACHE_RESOURCES,
+    ]);
 
     let assistantContent: string;
+    let usedDeterministic = false;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
     let engineNotice: string | undefined;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
 
-    const directDeviceAnswer = !planned.hasWriteIntent ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id), () => {}, entry => { (toolTrace ??= []).push(entry); }) : undefined;
+    const directDeviceAnswer = !planned.hasWriteIntent
+      ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
+        voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
+          this.graphAggregatesFor(store, tenant.id, [resource])[resource],
+        )
+      : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -1602,12 +1672,16 @@ export class IntuneChatService {
       responseModel = undefined;
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
-      const modelQuestion = workspaceContext
-        ? `${content}\n\n${workspaceContext.promptBlock}`
+      const withMemory = conversationMemory
+        ? `Conversation so far (earliest first, may be truncated):\n${conversationMemory}\n\nCurrent question: ${content}`
         : content;
+      const modelQuestion = workspaceContext
+        ? `${withMemory}\n\n${workspaceContext.promptBlock}`
+        : withMemory;
       const buildDeterministicAnswer = async (
         notice?: string,
       ): Promise<{ content: string; model?: string }> => {
+        usedDeterministic = true;
         engineNotice = notice;
         const answerPack = buildAnswerPack({
           question: modelQuestion,
@@ -1666,7 +1740,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
               assistantContent = agentic.answer;
             } else {
@@ -1697,7 +1771,21 @@ export class IntuneChatService {
       providerId,
       model: responseModel,
       ...(engineNotice ? { engineNotice } : {}),
-      sources,
+      sources: buildIntuneChatSources({
+        cacheStatus: usedDeterministic
+          ? packCacheStatus
+          : store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+        plannedResources: planned.resources,
+        executedResources: executedResourcesForAnswer({
+          toolTrace,
+          usedDeterministic,
+          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
+        }),
+        toolTrace,
+        refreshedResources: usedDeterministic
+          ? refreshedResources
+          : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
+      }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
@@ -1744,9 +1832,8 @@ export class IntuneChatService {
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
     const providers = await this.host.listProviders();
-    const provider =
-      providers.find((entry) => entry.id === persisted.activeProviderId) ?? providers[0];
-    const providerId = provider?.id ?? persisted.activeProviderId;
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const providerId = provider.id;
     options.signal?.throwIfAborted();
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");
@@ -1801,6 +1888,9 @@ export class IntuneChatService {
     const voiceContext = options.voice
       ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
       : undefined;
+    const conversationMemory = options.voice
+      ? undefined
+      : boundedConversationMemory(store.listMessages(conversation.id));
     const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
@@ -1856,6 +1946,7 @@ export class IntuneChatService {
         sources: buildIntuneChatSources({
           cacheStatus: currentCacheStatus,
           plannedResources: planned.resources,
+          executedResources: new Set(),
           refreshedResources: new Set(),
         }),
         error: "Stopped by user.",
@@ -1925,7 +2016,9 @@ export class IntuneChatService {
       cacheCheckStatus: "active",
     });
 
-    if (input.refreshIfStale !== false) {
+    // Same short-circuit as the non-streaming path: the write block
+    // answers without tenant data, so no refresh runs first.
+    if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
       const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
       const staleResources = planned.resources.filter((resource) => {
         const status = before.find((entry) => entry.resource === resource);
@@ -2030,13 +2123,15 @@ export class IntuneChatService {
         .filter((resource) => resource.ok)
         .map((resource) => resource.resource) ?? [],
     );
-    const sources = buildIntuneChatSources({
-      cacheStatus,
-      plannedResources: planned.resources,
-      refreshedResources,
-    });
-
+    // Snapshot matching the rows just read for the deterministic
+    // pack. If an investigation later refreshes resources and then
+    // falls back, its sources must describe this pack, not the
+    // refreshed cache the fallback never used.
+    const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
+      ...GRAPH_CACHE_RESOURCES,
+    ]);
     let assistantContent = "";
+    let usedDeterministic = false;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
     let engineNotice: string | undefined;
@@ -2055,7 +2150,7 @@ export class IntuneChatService {
       });
     };
 
-    const directVoiceAnswer = await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+    const directVoiceAnswer = await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -2070,11 +2165,16 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
-      const contextualQuestion = voiceContext?.history ?? content;
+      const contextualQuestion =
+        voiceContext?.history ??
+        (conversationMemory
+          ? `Conversation so far (earliest first, may be truncated):\n${conversationMemory}\n\nCurrent question: ${content}`
+          : content);
       const modelQuestion = workspaceContext
         ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
         : contextualQuestion;
       const streamDeterministicAnswer = async (notice?: string) => {
+        usedDeterministic = true;
         engineNotice = notice;
         let answerPack = buildAnswerPack({
           question: modelQuestion,
@@ -2209,7 +2309,7 @@ export class IntuneChatService {
             });
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
-            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, responseModel, agentic.ok);
+            if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
               sendProgress({
                 message: "Model response started.",
@@ -2240,6 +2340,8 @@ export class IntuneChatService {
                     ? "The reasoning model described a lookup without finishing it. No completed answer is available. Retry or open Chat to inspect the evidence."
                   : agentic.reason === "malformed-output"
                     ? "The selected reasoning model could not produce a valid tool request. Retry or select a model that supports tool use."
+                  : agentic.reason === "no-evidence"
+                    ? "The selected reasoning model answered without checking tenant data. No verified answer is available. Retry or open Chat to inspect the evidence."
                     : agentic.reason === "provider-unavailable"
                       ? "The selected reasoning model is unavailable. Check the provider connection and retry."
                       : "Nova reached its tool-call limit before finishing. Ask a more focused question or open Chat to inspect the evidence.";
@@ -2319,7 +2421,21 @@ export class IntuneChatService {
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
-      sources,
+      sources: buildIntuneChatSources({
+        cacheStatus: usedDeterministic
+          ? packCacheStatus
+          : store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+        plannedResources: planned.resources,
+        executedResources: executedResourcesForAnswer({
+          toolTrace,
+          usedDeterministic,
+          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
+        }),
+        toolTrace,
+        refreshedResources: usedDeterministic
+          ? refreshedResources
+          : new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
+      }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),

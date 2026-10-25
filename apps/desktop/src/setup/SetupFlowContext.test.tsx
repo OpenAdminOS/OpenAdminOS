@@ -86,6 +86,32 @@ describe("contextual tenant setup", () => {
     expect(screen.queryByRole("heading", { name: "Tenant connected" })).not.toBeInTheDocument();
   });
 
+  it("treats a configured Azure provider at available as ready, matching the host", async () => {
+    const providers = mockProviders.map((provider) =>
+      provider.id === "azure-openai"
+        ? { ...provider, status: "available" as const, models: ["gpt-4o"], defaultModel: "gpt-4o" }
+        : provider,
+    );
+    writePendingIntent(
+      createPendingIntent({
+        kind: "agent-run",
+        slug: "device-offboard",
+        providerId: "azure-openai",
+        model: "gpt-4o",
+        returnTo: "/runs/run-1",
+      }),
+    );
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "azure-openai", providers })),
+    });
+
+    expect(
+      await screen.findByRole("heading", { name: "Tenant connected" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Pick an LLM provider" })).not.toBeInTheDocument();
+  });
+
   it("connects with the OpenAdminOS registration by default", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });

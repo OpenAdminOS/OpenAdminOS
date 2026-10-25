@@ -216,6 +216,179 @@ describe("Intune Chat host service", () => {
     }
   });
 
+  it("blocks write prompts before any Graph refresh or model call", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
+          installedAgents: [
+            {
+              id: "offboarding-agent",
+              slug: "offboarding-agent",
+              name: "Offboarding agent",
+              description: "Builds a stale-device offboarding plan from Intune sync and Entra sign-in signals, then retires devices after typed confirmation.",
+              mode: "write",
+              category: "devices",
+              tier: "agent",
+              requiresEntraTier: "free",
+              scopes: ["DeviceManagementManagedDevices.Read.All"],
+              author: { name: "OpenAdminOS" },
+              version: "1.0.0",
+              installedAt: now,
+            },
+          ],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const graphRequests: string[] = [];
+    let modelCalls = 0;
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("retireManagedDevice should not run from chat."); },
+        async request(input) {
+          graphRequests.push(`${input.method} ${input.path}`);
+          return { value: [] };
+        },
+      }),
+      llmFactory: () => ({
+        available: true,
+        defaultModel: "mock-chat",
+        async complete() {
+          modelCalls += 1;
+          return { text: "must not be called", model: "mock-chat" };
+        },
+        async *stream() {
+          modelCalls += 1;
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      }),
+    });
+
+    try {
+      const result = await store.sendIntuneChatMessage({
+        content: "Retire stale devices that have not synced",
+      });
+      assert.match(result.assistantMessage.content, /cannot perform tenant changes directly from chat/);
+      assert.match(result.assistantMessage.content, /Offboarding agent/);
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.deepEqual(graphRequests, [], "write block must fire before cache refresh");
+      assert.equal(modelCalls, 0, "write block must fire before any model call");
+      assert.deepEqual(result.assistantMessage.sources, []);
+      assert.equal(result.assistantMessage.agentSuggestions?.[0]?.agentSlug, "offboarding-agent");
+
+      const grant = await store.sendIntuneChatMessage({
+        content: "Grant the finance group access to the VPN app",
+      });
+      assert.match(grant.assistantMessage.content, /cannot perform tenant changes directly from chat/);
+      assert.deepEqual(graphRequests, [], "grant prompt must also block before refresh");
+      assert.equal(modelCalls, 0, "grant prompt must also block before any model call");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("gives follow-up questions the bounded prior turns as context", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const prompts: string[] = [];
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("retireManagedDevice should not run from chat."); },
+        async request() { return { value: [] }; },
+      }),
+      llmFactory: () => ({
+        available: true,
+        defaultModel: "mock-chat",
+        async complete(options) {
+          prompts.push(options.prompt);
+          return { text: "WIN-01 and MAC-01 have not synced recently.", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      }),
+    });
+
+    try {
+      const first = await store.sendIntuneChatMessage({
+        content: "Which stale devices have not synced recently?",
+        refreshIfStale: false,
+      });
+      const second = await store.sendIntuneChatMessage({
+        content: "Show only the Windows ones",
+        conversationId: first.conversation.id,
+        refreshIfStale: false,
+      });
+      assert.equal(second.conversation.id, first.conversation.id);
+      assert.ok(prompts.length >= 2);
+      const followUpPrompt = prompts.at(-1)!;
+      assert.match(followUpPrompt, /Conversation so far/);
+      assert.match(followUpPrompt, /User: Which stale devices have not synced recently\?/);
+      assert.match(followUpPrompt, /Assistant: WIN-01 and MAC-01 have not synced recently\./);
+      assert.match(followUpPrompt, /Current question: Show only the Windows ones/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("streams agentic single-tenant chat and persists the tool trace", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";
@@ -294,7 +467,6 @@ describe("Intune Chat host service", () => {
       const result = await store.streamIntuneChatMessage(
         {
           content: "Which managed devices should I inspect?",
-          refreshIfStale: false,
         },
         (event) => eventTypes.push(event.type),
       );
@@ -570,6 +742,84 @@ describe("Intune Chat host service", () => {
       assert.equal(messages.length, 2);
       assert.equal(messages[0]?.role, "user");
       assert.equal(messages[1]?.role, "assistant");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks a multi-tenant write prompt before any tenant refresh", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+            {
+              id: "tenant-2",
+              displayName: "Fabrikam",
+              username: "admin@fabrikam.example",
+              homeAccountId: "home-account-2",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const graphRequests: string[] = [];
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("retireManagedDevice should not run from chat."); },
+        async request(input) {
+          graphRequests.push(input.path);
+          return { value: [] };
+        },
+      }),
+      llmFactory: () => ({
+        available: true,
+        defaultModel: "mock-chat",
+        async complete() {
+          return { text: "must not be called", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      }),
+    });
+
+    try {
+      await assert.rejects(
+        store.streamMultiTenantIntuneChat(
+          { prompt: "Retire noncompliant devices in every tenant", tenantScope: { kind: "all" } },
+          () => undefined,
+        ),
+        /cannot perform tenant changes directly from chat/,
+      );
+      assert.deepEqual(graphRequests, [], "write block must fire before any tenant refresh");
+      assert.equal((await store.listMultiTenantChatJobs()).length, 0);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -1057,6 +1307,49 @@ describe("Intune Chat host service", () => {
     }
   });
 
+  it("scopes conversation list, read, and mutations to the active tenant", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(statePath, JSON.stringify({
+      activeProviderId: "ollama",
+      installedAgents: [],
+      runs: [],
+      tenants: [
+        { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-account-1", addedAt: now },
+        { id: "tenant-2", displayName: "Fabrikam", username: "admin@fabrikam.example", homeAccountId: "home-account-2", addedAt: now },
+      ],
+      activeTenantId: "tenant-1",
+    }, null, 2), "utf8");
+    const seed = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+    seed.createConversation({ id: "chat_a", title: "Contoso devices", tenantId: "tenant-1", now });
+    seed.createConversation({ id: "chat_b", title: "Fabrikam devices", tenantId: "tenant-2", now });
+    seed.insertMessage({ id: "msg_b", conversationId: "chat_b", role: "user", content: "Fabrikam secret question", status: "completed", createdAt: now });
+    seed.close();
+
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => { throw new Error("graph must not run"); },
+      llmFactory: () => { throw new Error("llm must not run"); },
+    });
+    try {
+      assert.deepEqual((await store.listIntuneChatConversations()).map((entry) => entry.id), ["chat_a"]);
+      assert.deepEqual((await store.searchIntuneChatConversations("Fabrikam")).map((entry) => entry.id), []);
+      await assert.rejects(() => store.getIntuneChatMessages("chat_b"), /different tenant/);
+      await assert.rejects(() => store.renameIntuneChatConversation("chat_b", "Renamed"), /different tenant/);
+      await assert.rejects(() => store.setIntuneChatConversationPinned("chat_b", true), /different tenant/);
+      await assert.rejects(() => store.deleteIntuneChatConversation("chat_b"), /different tenant/);
+      const renamed = await store.renameIntuneChatConversation("chat_a", "Contoso renamed");
+      assert.equal(renamed.title, "Contoso renamed");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("allows hosted-provider chat with matching fresh consent", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";
@@ -1268,7 +1561,11 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
   const graph: RunGraphApi = {listManagedDevices:async () => [], retireManagedDevice:async () => {throw new Error('Unexpected write');}, request:async ({path}) => {
     requests.push(path);
     if (path === '/deviceManagement/managedDevices') return {value:[{id:'a',deviceName:'Device A',complianceState:'noncompliant'},{id:'b',deviceName:'Device B',complianceState:'noncompliant'},{id:'c',deviceName:'Compliant device',complianceState:'compliant'}]};
-    if (path === '/deviceAppManagement/mobileApps') return {value:[{id:'app-a',displayName:'Managed app'}]};
+    if (path === '/deviceAppManagement/mobileApps') return {value:[
+      {id:'app-mac-pkg',displayName:'Mac PKG','@odata.type':'#microsoft.graph.macOSPkgApp'},
+      {id:'app-mac-dmg',displayName:'Mac DMG','@odata.type':'#microsoft.graph.macOSDmgApp'},
+      {id:'app-win',displayName:'Win32 app','@odata.type':'#microsoft.graph.win32LobApp'},
+    ]};
     if (path === '/deviceManagement/detectedApps') return {value:[{id:'detected-a',displayName:'Detected app A'},{id:'detected-b',displayName:'Detected app B'}]};
     return {value:[]};
   }};
@@ -1280,9 +1577,12 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
     assert.doesNotMatch(report.assistantMessage.content, /Compliant device/);
     assert.deepEqual(requests, ['/deviceManagement/managedDevices']);
     const apps = await store.streamIntuneChatMessage({content:'How many apps do I have'}, ()=>{});
-    assert.match(apps.assistantMessage.content, /1 Intune app catalog entries/);
+    assert.match(apps.assistantMessage.content, /3 Intune app catalog entries/);
     assert.match(apps.assistantMessage.content, /2 detected app inventory entries/);
     assert.deepEqual(requests.slice(1).sort(), ['/deviceAppManagement/mobileApps','/deviceManagement/detectedApps'].sort());
+    const macApps = await store.streamIntuneChatMessage({content:'how many macos apps?'}, ()=>{});
+    assert.match(macApps.assistantMessage.content, /2 macOS Intune app catalog entries/);
+    assert.deepEqual(macApps.assistantMessage.sources?.map(source => source.resource), ['mobileApps']);
     const agent = await store.streamIntuneChatMessage({content:'Tenant change audit',refreshIfStale:false}, ()=>{});
     assert.match(agent.assistantMessage.content, /installed read-only agent/);
     assert.doesNotMatch(agent.assistantMessage.content, /cannot perform tenant changes/);

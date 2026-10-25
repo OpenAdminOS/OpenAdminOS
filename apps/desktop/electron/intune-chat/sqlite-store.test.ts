@@ -74,6 +74,59 @@ describe("Intune Chat SQLite store", () => {
     }
   });
 
+  it("marks only the written tenant's named resources stale after a write", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-invalidate-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      const base = {
+        label: "Managed devices",
+        scopeSet: ["DeviceManagementManagedDevices.ReadWrite.All"],
+        refreshedAt: "2026-08-01T10:00:00.000Z",
+        rows: [{ id: "device-1", deviceName: "WIN-01" }],
+      };
+      store.replaceGraphResources({ ...base, tenantId: "tenant-1", resource: "managedDevices" });
+      store.replaceGraphResources({ ...base, tenantId: "tenant-2", resource: "managedDevices" });
+
+      assert.equal(store.markGraphResourcesStale("tenant-1", ["managedDevices"]), 1);
+      assert.equal(store.markGraphResourcesStale("tenant-1", []), 0);
+
+      const tenant1 = store.getGraphCacheStatus("tenant-1", [...GRAPH_CACHE_RESOURCES])
+        .find((status) => status.resource === "managedDevices");
+      const tenant2 = store.getGraphCacheStatus("tenant-2", [...GRAPH_CACHE_RESOURCES])
+        .find((status) => status.resource === "managedDevices");
+      assert.equal(tenant1?.refreshedAt, "1970-01-01T00:00:00.000Z");
+      assert.equal(tenant2?.refreshedAt, "2026-08-01T10:00:00.000Z");
+
+      // A refresh whose fetch started before the invalidation holds
+      // pre-write rows: completing it must not clear the stale marker.
+      store.replaceGraphResources({
+        ...base,
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        refreshedAt: new Date(Date.now() - 3_600_000).toISOString(),
+        rows: [{ id: "device-2", deviceName: "WIN-02" }],
+      });
+      const afterStaleRefresh = store.getGraphCacheStatus("tenant-1", [...GRAPH_CACHE_RESOURCES])
+        .find((status) => status.resource === "managedDevices");
+      assert.equal(afterStaleRefresh?.refreshedAt, "1970-01-01T00:00:00.000Z");
+      assert.equal(afterStaleRefresh?.rows, 1);
+
+      // A refresh started after the invalidation clears it normally.
+      store.replaceGraphResources({
+        ...base,
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        refreshedAt: new Date(Date.now() + 60_000).toISOString(),
+      });
+      const afterFreshRefresh = store.getGraphCacheStatus("tenant-1", [...GRAPH_CACHE_RESOURCES])
+        .find((status) => status.resource === "managedDevices");
+      assert.notEqual(afterFreshRefresh?.refreshedAt, "1970-01-01T00:00:00.000Z");
+      store.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("persists conversations, messages, cache rows, and self-training decisions", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-"));
     try {
@@ -157,6 +210,33 @@ describe("Intune Chat SQLite store", () => {
         now: "2026-06-01T10:03:00.000Z",
       });
       assert.equal(store.listConversations()[0]?.id, conversation.id);
+      const otherTenantConversation = store.createConversation({
+        id: "chat_other_tenant",
+        title: "Other tenant Windows review",
+        tenantId: "tenant-2",
+        now: "2026-06-01T10:04:00.000Z",
+      });
+      const multiTenantConversation = store.createConversation({
+        id: "chat_multi",
+        title: "Cross tenant Windows summary",
+        tenantId: "tenant-2",
+        scopeKind: "multi-tenant",
+        now: "2026-06-01T10:05:00.000Z",
+      });
+      assert.deepEqual(
+        store.listConversations("tenant-1").map((entry) => entry.id).sort(),
+        [conversation.id, secondConversation.id, multiTenantConversation.id].sort(),
+      );
+      assert.equal(
+        store.searchConversations("Windows", "tenant-1").some((entry) => entry.id === otherTenantConversation.id),
+        false,
+      );
+      assert.equal(
+        store.searchConversations("Windows", "tenant-2")[0]?.id,
+        multiTenantConversation.id,
+      );
+      store.deleteConversation(otherTenantConversation.id);
+      store.deleteConversation(multiTenantConversation.id);
       store.deleteConversation(secondConversation.id);
       assert.equal(store.getConversation(secondConversation.id), undefined);
 
@@ -576,6 +656,29 @@ describe("Intune Chat planner", () => {
       "Which devices have BitLocker enabled?",
       "Which accounts were disabled last week?",
       "Show recently deleted devices.",
+      "Which devices have pending updates?",
+      "Show licenses granted to the finance group.",
+      "When was the compliance policy last updated?",
+      "Show devices that failed to update to Windows 11.",
+      "Which Conditional Access policies grant access without MFA?",
+      "Does the policy block legacy authentication?",
+      "Why did Windows fail to update the device?",
+      "How do I add a device to Autopilot?",
+      "Which policies block legacy authentication?",
+      "Add up the assigned licenses per department",
+      "Why do users need to change their passwords?",
+      "Which policies disable legacy authentication and block risky sign-ins?",
+      "What did the admin create and assign yesterday?",
+      "Summarize the change history for this policy",
+      "Give me the delete audit log",
+      "Describe how to configure BitLocker",
+      "Explain the update rings and how they deploy",
+      "Compare the two assignment filters",
+      "Audit the group membership changes last week",
+      "Explain how to disable an account and then delete it.",
+      "Describe how to retire a device and then wipe it",
+      "Please list policies that block legacy authentication",
+      "Show the policies that disable legacy authentication and block risky sign-ins",
     ];
     for (const question of readQuestions) {
       assert.equal(
@@ -588,6 +691,24 @@ describe("Intune Chat planner", () => {
       "Retire stale Intune devices that have not synced",
       "Disable the accounts of departed users",
       "Assign the sales app to the field team",
+      "Grant the finance group access to the VPN app",
+      "Update the compliance policy to require encryption",
+      "Rename the baseline policy for Windows laptops",
+      "Block sign-ins for the dormant guest accounts",
+      "Please retire the stale laptops in Berlin",
+      "Can you update the compliance policy to require encryption?",
+      "I need to delete the old Autopilot profile",
+      "Show me the devices and then retire the stale ones",
+      "Show me the devices and retire the stale ones",
+      "Can you show me the devices and retire the stale ones?",
+      "Show me the devices that have not synced in 90 days, and retire them",
+      "Show me the stale devices. Retire them.",
+      "Explain which devices are stale. Retire them.",
+      "Show me the stale devices. Can you retire them?",
+      "Explain which devices are stale, then retire them.",
+      "Describe the stale devices, then wipe them.",
+      "Explain which devices are stale, and retire them.",
+      "Explain how to identify stale devices, and retire them.",
     ];
     for (const question of writeQuestions) {
       assert.equal(
@@ -1019,6 +1140,145 @@ describe("exact aggregate counts for how-many questions", () => {
       assert.equal(aggregate.breakdowns.complianceState?.compliant, 380);
       assert.equal(aggregate.breakdowns.operatingSystem?.Windows, 400);
       assert.equal(aggregate.breakdowns.operatingSystem?.["macOS"], 100);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("breaks Intune apps down by Graph app type and platform", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-app-agg-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "mobileApps",
+        label: "Intune apps",
+        scopeSet: ["DeviceManagementApps.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [
+          { id: "mac-pkg-1", displayName: "Mac PKG 1", "@odata.type": "#microsoft.graph.macOSPkgApp" },
+          { id: "mac-pkg-2", displayName: "Mac PKG 2", "@odata.type": "#microsoft.graph.macOSPkgApp" },
+          { id: "mac-dmg-1", displayName: "Mac DMG", "@odata.type": "#microsoft.graph.macOSDmgApp" },
+          { id: "mac-office", displayName: "Mac Office", "@odata.type": "#microsoft.graph.macOSOfficeSuiteApp" },
+          { id: "win-1", displayName: "Win32", "@odata.type": "#microsoft.graph.win32LobApp" },
+          { id: "win-2", displayName: "WinGet", "@odata.type": "#microsoft.graph.winGetApp" },
+          { id: "ios-1", displayName: "iOS", "@odata.type": "#microsoft.graph.iosStoreApp" },
+          { id: "android-1", displayName: "Android", "@odata.type": "#microsoft.graph.androidLobApp" },
+        ],
+      });
+
+      const aggregate = store.aggregateGraphResource("tenant-1", "mobileApps");
+      assert.equal(aggregate.total, 8);
+      assert.equal(aggregate.breakdowns["@odata.type"]?.["#microsoft.graph.macOSPkgApp"], 2);
+      assert.equal(aggregate.breakdowns.appPlatform?.macOS, 4);
+      assert.equal(aggregate.breakdowns.appPlatform?.Windows, 2);
+      assert.equal(aggregate.breakdowns.appPlatform?.iOS, 1);
+      assert.equal(aggregate.breakdowns.appPlatform?.Android, 1);
+      store.close?.();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("breaks common filtered count dimensions down by resource", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-resource-agg-"));
+    try {
+      const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
+      const seed = (
+        resource: Parameters<IntelligenceSqliteStore["replaceGraphResources"]>[0]["resource"],
+        label: string,
+        rows: Record<string, unknown>[],
+      ) =>
+        store.replaceGraphResources({
+          tenantId: "tenant-1",
+          resource,
+          label,
+          scopeSet: ["Read.All"],
+          refreshedAt: "2026-06-01T10:00:00.000Z",
+          rows,
+        });
+      seed("deviceCompliancePolicies", "Compliance policies", [
+        { id: "mac-1", "@odata.type": "#microsoft.graph.macOSCompliancePolicy" },
+        { id: "mac-2", "@odata.type": "#microsoft.graph.macOSCompliancePolicy" },
+        { id: "win-1", "@odata.type": "#microsoft.graph.windows10CompliancePolicy" },
+        { id: "ios-1", "@odata.type": "#microsoft.graph.iosCompliancePolicy" },
+      ]);
+      seed("deviceConfigurations", "Configuration profiles", [
+        { id: "kiosk-1", "@odata.type": "#microsoft.graph.windowsKioskConfiguration" },
+        { id: "shared-pc-1", "@odata.type": "#microsoft.graph.sharedPCConfiguration" },
+        { id: "mac-config-1", "@odata.type": "#microsoft.graph.macOSCustomConfiguration" },
+      ]);
+      seed("conditionalAccessPolicies", "Conditional Access policies", [
+        { id: "ca-1", state: "enabled" },
+        { id: "ca-2", state: "enabledForReportingButNotEnforced" },
+        { id: "ca-3", state: "enabledForReportingButNotEnforced" },
+      ]);
+      seed("groups", "Groups", [
+        { id: "g-1", securityEnabled: true, groupTypes: [] },
+        { id: "g-2", securityEnabled: true, groupTypes: ["DynamicMembership"] },
+        { id: "g-3", securityEnabled: false, groupTypes: ["Unified"] },
+      ]);
+      seed("configurationPolicies", "Settings catalog policies", [
+        { id: "cp-1", platforms: ["windows10", "macOS"], isAssigned: true },
+        { id: "cp-2", platforms: ["macOS"], isAssigned: false },
+        // Graph also returns Settings Catalog platforms as one enum string.
+        { id: "cp-3", platforms: "windows10", isAssigned: true },
+        // Multi-value flags can also arrive as one comma-joined string.
+        { id: "cp-4", platforms: "windows10,macOS", isAssigned: false },
+      ]);
+      seed("applications", "App registrations", [
+        { id: "a-1", signInAudience: "AzureADMyOrg" },
+        { id: "a-2", signInAudience: "AzureADMultipleOrgs" },
+      ]);
+      seed("securityAlerts", "Defender alerts", [
+        { id: "sa-1", severity: "high", status: "new" },
+        { id: "sa-2", severity: "high", status: "inProgress" },
+        { id: "sa-3", severity: "low", status: "resolved" },
+      ]);
+      seed("signIns", "Sign-ins", [
+        { id: "si-1", conditionalAccessStatus: "success", status: { errorCode: 0 } },
+        { id: "si-2", conditionalAccessStatus: "failure", status: { errorCode: 50126 } },
+        { id: "si-3", conditionalAccessStatus: "failure", status: { errorCode: 50126 } },
+      ]);
+
+      const policies = store.aggregateGraphResource("tenant-1", "deviceCompliancePolicies");
+      assert.equal(policies.breakdowns["@odata.type"]?.["#microsoft.graph.macOSCompliancePolicy"], 2);
+      assert.equal(policies.breakdowns.policyPlatform?.macOS, 2);
+      assert.equal(policies.breakdowns.policyPlatform?.Windows, 1);
+      assert.equal(policies.breakdowns.policyPlatform?.iOS, 1);
+      const configurations = store.aggregateGraphResource("tenant-1", "deviceConfigurations");
+      assert.equal(configurations.breakdowns.policyPlatform?.Windows, 2);
+      assert.equal(configurations.breakdowns.policyPlatform?.macOS, 1);
+      assert.equal(configurations.breakdowns.policyPlatform?.iOS, undefined);
+
+      const conditionalAccess = store.aggregateGraphResource(
+        "tenant-1",
+        "conditionalAccessPolicies",
+      );
+      assert.equal(conditionalAccess.breakdowns.state?.enabledForReportingButNotEnforced, 2);
+
+      const groups = store.aggregateGraphResource("tenant-1", "groups");
+      assert.equal(groups.breakdowns.securityEnabled?.["1"], 2);
+      assert.equal(groups.breakdowns.groupTypes?.DynamicMembership, 1);
+      assert.equal(groups.breakdowns.groupTypes?.Unified, 1);
+
+      const settingsCatalog = store.aggregateGraphResource("tenant-1", "configurationPolicies");
+      assert.equal(settingsCatalog.breakdowns.platforms?.macOS, 3);
+      assert.equal(settingsCatalog.breakdowns.platforms?.windows10, 3);
+      assert.equal(settingsCatalog.breakdowns.isAssigned?.["1"], 2);
+
+      assert.equal(
+        store.aggregateGraphResource("tenant-1", "applications").breakdowns.signInAudience
+          ?.AzureADMyOrg,
+        1,
+      );
+      const alerts = store.aggregateGraphResource("tenant-1", "securityAlerts");
+      assert.equal(alerts.breakdowns.severity?.high, 2);
+      assert.equal(alerts.breakdowns.status?.new, 1);
+      const signIns = store.aggregateGraphResource("tenant-1", "signIns");
+      assert.equal(signIns.breakdowns.conditionalAccessStatus?.failure, 2);
+      assert.equal(signIns.breakdowns["status.errorCode"]?.["50126"], 2);
       store.close?.();
     } finally {
       await rm(dir, { recursive: true, force: true });

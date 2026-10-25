@@ -668,7 +668,7 @@ function CreateWorkspaceModal({
             name="workspace-title"
             value={title}
             onChange={(event) => onTitleChange(event.target.value)}
-            autoFocus
+            data-autofocus
             autoComplete="off"
             className="mt-2 h-10 w-full rounded-lg bg-[var(--color-bg-raised)] px-3 text-base text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] focus:ring-[var(--color-accent)]"
           />
