@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { launchAgentState, macosSchedulerPlist } from "./scheduler-launch-agent.js";
+import {
+  launchAgentState,
+  macosSchedulerPlist,
+  windowsTaskBinary,
+  windowsTaskState,
+} from "./scheduler-registration.js";
 
 const packaged = {
   label: "com.openadminos.scheduler",
@@ -78,4 +83,51 @@ test("an agent for another installed copy stays registered for a copy run from a
   );
   assert.equal(state, "registered");
   assert.deepEqual(seen, ["/Applications/A&B/OpenAdminOS.app/Contents/MacOS/OpenAdminOS"]);
+});
+
+// Shape of `schtasks /Query /TN "OpenAdminOS Scheduler" /XML`, with the Exec
+// block taken from a task a development checkout registered on Windows 11.
+function taskXml(command: string, args: string): string {
+  return `<?xml version="1.0" encoding="UTF-16"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <Actions Context="Author">
+    <Exec>
+      <Command>${command}</Command>
+      <Arguments>${args}</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+`;
+}
+
+test("a Windows task that runs a development checkout or a missing binary is stale", () => {
+  const dev = taskXml(
+    '"C:\\Users\\ugur\\AppData\\Local\\OpenAdminOS-review-061\\node_modules\\electron\\dist\\electron.exe"',
+    '"C:\\Users\\ugur\\AppData\\Local\\OpenAdminOS-review-061\\apps\\desktop" "--background-scheduler"',
+  );
+  assert.equal(windowsTaskState(dev, () => true), "stale");
+  assert.equal(
+    windowsTaskBinary(dev),
+    "C:\\Users\\ugur\\AppData\\Local\\OpenAdminOS-review-061\\node_modules\\electron\\dist\\electron.exe",
+  );
+  const installed = taskXml(
+    '"C:\\Users\\ugur\\AppData\\Local\\Programs\\OpenAdminOS\\OpenAdminOS.exe"',
+    '"--background-scheduler"',
+  );
+  assert.equal(windowsTaskState(installed, () => false), "stale");
+  assert.equal(windowsTaskState("<Task/>", () => true), "stale");
+  assert.equal(windowsTaskState(undefined, () => true), "missing");
+});
+
+test("a Windows task for an installed copy is registered", () => {
+  const seen: string[] = [];
+  const state = windowsTaskState(
+    taskXml('"C:\\Program Files\\R&amp;D\\OpenAdminOS\\OpenAdminOS.exe"', '"--background-scheduler"'),
+    (path) => {
+      seen.push(path);
+      return true;
+    },
+  );
+  assert.equal(state, "registered");
+  assert.deepEqual(seen, ["C:\\Program Files\\R&D\\OpenAdminOS\\OpenAdminOS.exe"]);
 });

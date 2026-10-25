@@ -33,7 +33,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { readFile, stat, writeFile } from "node:fs/promises";
 import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { dirname, join } from "node:path";
+import { dirname, join, win32 } from "node:path";
 import { AppStateStore } from "./state.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import {
@@ -50,7 +50,12 @@ import {
   attachWindowStatePersistence,
   loadWindowState,
 } from "./window-state.js";
-import { launchAgentState, macosSchedulerPlist } from "./scheduler-launch-agent.js";
+import {
+  launchAgentState,
+  macosSchedulerPlist,
+  windowsTaskBinary,
+  windowsTaskState,
+} from "./scheduler-registration.js";
 import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
   AgentCommunitySubmissionMetadata,
@@ -365,10 +370,17 @@ function writeMacosLaunchAgent(): void {
   } catch {
     // The agent may not be loaded yet.
   }
-  execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "ignore" });
-  execFileSync("launchctl", ["enable", `${domain}/${MACOS_SCHEDULER_LABEL}`], {
-    stdio: "ignore",
-  });
+  try {
+    execFileSync("launchctl", ["bootstrap", domain, plistPath], { stdio: "ignore" });
+    execFileSync("launchctl", ["enable", `${domain}/${MACOS_SCHEDULER_LABEL}`], {
+      stdio: "ignore",
+    });
+  } catch (error) {
+    // Keep the plist on disk only when launchd accepted it. A plist that
+    // never loaded would read as registered, and nothing would retry it.
+    rmSync(plistPath, { force: true });
+    throw error;
+  }
 }
 
 function removeMacosLaunchAgent(): void {
@@ -2133,15 +2145,57 @@ async function reportIssueSmokeScript(): Promise<Record<string, unknown>> {
   };
 }
 
-function isWindowsSchedulerTaskRegistered(): boolean {
+/** The scheduler task definition, or undefined when the task does not exist. */
+function windowsSchedulerTaskXml(): string | undefined {
   try {
-    execFileSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK], {
+    return execFileSync("schtasks.exe", ["/Query", "/TN", WINDOWS_SCHEDULER_TASK, "/XML"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      windowsHide: true,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+function windowsSchedulerTaskState(): ReturnType<typeof windowsTaskState> {
+  return windowsTaskState(windowsSchedulerTaskXml(), existsSync);
+}
+
+function isWindowsImageRunning(imageName: string): boolean {
+  try {
+    const out = execFileSync(
+      "tasklist.exe",
+      ["/FI", `IMAGENAME eq ${imageName}`, "/FO", "CSV", "/NH"],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], windowsHide: true },
+    );
+    return out.toLowerCase().includes(`"${imageName.toLowerCase()}"`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Replaces a stale scheduler task. `schtasks /End` returns before the
+ * running copy exits, and that copy holds the single-instance lock, so
+ * wait (bounded) for its executable to stop before startup continues.
+ */
+function repairWindowsSchedulerTask(staleBinary: string | undefined): void {
+  try {
+    execFileSync("schtasks.exe", ["/End", "/TN", WINDOWS_SCHEDULER_TASK], {
       stdio: "ignore",
       windowsHide: true,
     });
-    return true;
   } catch {
-    return false;
+    // Not running.
+  }
+  registerWindowsSchedulerTask();
+  if (!staleBinary) return;
+  const imageName = win32.basename(staleBinary);
+  const pause = new Int32Array(new SharedArrayBuffer(4));
+  const deadline = Date.now() + 3_000;
+  while (isWindowsImageRunning(imageName) && Date.now() < deadline) {
+    Atomics.wait(pause, 0, 0, 100);
   }
 }
 
@@ -2203,7 +2257,7 @@ async function getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings> {
     const enabled =
       process.platform === "darwin"
         ? macosLaunchAgentState() === "registered"
-        : isWindowsSchedulerTaskRegistered();
+        : windowsSchedulerTaskState() === "registered";
     return {
       supported: true,
       enabled,
@@ -6419,22 +6473,25 @@ function registerIpcHandlers() {
   );
 }
 
-// A LaunchAgent written by a development checkout relaunches it every
-// minute. That copy holds the single-instance lock, so this launch would
-// hand off to it and show a blank dev window instead. Point such an agent
-// (or one whose binary is gone) at this copy before taking the lock;
-// `launchctl bootout` stops the other copy.
-if (
-  app.isPackaged &&
-  process.platform === "darwin" &&
-  !isBackgroundSchedulerLaunch &&
-  macosLaunchAgentState() === "stale"
-) {
+// A scheduler registration written by a development checkout relaunches
+// it every minute. That copy holds the single-instance lock, so this launch
+// would hand off to it and show a blank dev window instead. Point such a
+// registration (or one whose binary is gone) at this copy before taking
+// the lock, and stop the other copy.
+if (app.isPackaged && !isBackgroundSchedulerLaunch) {
   try {
-    writeMacosLaunchAgent();
-    debugStartupLog("repointed scheduler LaunchAgent at this app");
+    if (process.platform === "darwin" && macosLaunchAgentState() === "stale") {
+      writeMacosLaunchAgent();
+      debugStartupLog("repointed scheduler LaunchAgent at this app");
+    } else if (process.platform === "win32") {
+      const xml = windowsSchedulerTaskXml();
+      if (windowsTaskState(xml, existsSync) === "stale") {
+        repairWindowsSchedulerTask(xml === undefined ? undefined : windowsTaskBinary(xml));
+        debugStartupLog("repointed scheduler task at this app");
+      }
+    }
   } catch (error) {
-    console.warn("[scheduler] could not repoint the LaunchAgent at this app:", error);
+    console.warn("[scheduler] could not repoint the OS scheduler at this app:", error);
   }
 }
 
