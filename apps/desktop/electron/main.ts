@@ -50,7 +50,7 @@ import {
   attachWindowStatePersistence,
   loadWindowState,
 } from "./window-state.js";
-import { macosSchedulerPlist, shouldRepointLaunchAgent } from "./scheduler-launch-agent.js";
+import { launchAgentState, macosSchedulerPlist } from "./scheduler-launch-agent.js";
 import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
   AgentCommunitySubmissionMetadata,
@@ -332,32 +332,32 @@ function macosSchedulerPlistPath(): string {
   return join(app.getPath("home"), "Library", "LaunchAgents", `${MACOS_SCHEDULER_LABEL}.plist`);
 }
 
-function expectedMacosSchedulerPlist(): string {
-  return macosSchedulerPlist({
-    label: MACOS_SCHEDULER_LABEL,
-    programArguments: schedulerProgramArguments(),
-    logDir: join(app.getPath("userData"), "logs"),
-  });
-}
-
 /**
- * True when the registered LaunchAgent launches this copy of the app. An
- * agent written by another copy (a moved bundle, or a development checkout)
- * does not count as enabled here, so the next registration rewrites it.
+ * A stale agent (development checkout, or a binary that is gone) counts as
+ * not registered, so the next registration replaces it. An agent that
+ * launches another installed copy counts as registered and is kept.
  */
-function isMacosLaunchAgentCurrent(): boolean {
+function macosLaunchAgentState(): ReturnType<typeof launchAgentState> {
+  let plist: string | undefined;
   try {
-    return readFileSync(macosSchedulerPlistPath(), "utf8") === expectedMacosSchedulerPlist();
+    plist = readFileSync(macosSchedulerPlistPath(), "utf8");
   } catch {
-    return false;
+    plist = undefined;
   }
+  return launchAgentState(plist, existsSync);
 }
 
 function writeMacosLaunchAgent(): void {
   const plistPath = macosSchedulerPlistPath();
+  const logDir = join(app.getPath("userData"), "logs");
   mkdirSync(dirname(plistPath), { recursive: true });
-  mkdirSync(join(app.getPath("userData"), "logs"), { recursive: true });
-  writeFileSync(plistPath, expectedMacosSchedulerPlist(), { encoding: "utf8", mode: 0o644 });
+  mkdirSync(logDir, { recursive: true });
+  const plist = macosSchedulerPlist({
+    label: MACOS_SCHEDULER_LABEL,
+    programArguments: schedulerProgramArguments(),
+    logDir,
+  });
+  writeFileSync(plistPath, plist, { encoding: "utf8", mode: 0o644 });
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
   const domain = uid === undefined ? "gui" : `gui/${uid}`;
   try {
@@ -2202,7 +2202,7 @@ async function getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings> {
     const status = store ? await store.getSchedulerStatus() : undefined;
     const enabled =
       process.platform === "darwin"
-        ? isMacosLaunchAgentCurrent()
+        ? macosLaunchAgentState() === "registered"
         : isWindowsSchedulerTaskRegistered();
     return {
       supported: true,
@@ -6428,15 +6428,11 @@ if (
   app.isPackaged &&
   process.platform === "darwin" &&
   !isBackgroundSchedulerLaunch &&
-  existsSync(macosSchedulerPlistPath()) &&
-  !isMacosLaunchAgentCurrent()
+  macosLaunchAgentState() === "stale"
 ) {
   try {
-    const existing = readFileSync(macosSchedulerPlistPath(), "utf8");
-    if (shouldRepointLaunchAgent(existing, existsSync)) {
-      writeMacosLaunchAgent();
-      debugStartupLog("repointed scheduler LaunchAgent at this app");
-    }
+    writeMacosLaunchAgent();
+    debugStartupLog("repointed scheduler LaunchAgent at this app");
   } catch (error) {
     console.warn("[scheduler] could not repoint the LaunchAgent at this app:", error);
   }

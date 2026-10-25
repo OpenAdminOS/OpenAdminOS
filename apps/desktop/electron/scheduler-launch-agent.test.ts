@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { macosSchedulerPlist, shouldRepointLaunchAgent } from "./scheduler-launch-agent.js";
+import { launchAgentState, macosSchedulerPlist } from "./scheduler-launch-agent.js";
 
 const packaged = {
   label: "com.openadminos.scheduler",
@@ -47,7 +47,7 @@ test("an agent written by a development checkout does not match the packaged app
   assert.equal(macosSchedulerPlist(packaged), macosSchedulerPlist({ ...packaged }));
 });
 
-test("repoints agents that run a development checkout or a missing binary", () => {
+test("an agent that runs a development checkout or a missing binary is stale", () => {
   const dev = macosSchedulerPlist({
     ...packaged,
     programArguments: [
@@ -56,14 +56,17 @@ test("repoints agents that run a development checkout or a missing binary", () =
       "--background-scheduler",
     ],
   });
-  assert.equal(shouldRepointLaunchAgent(dev, () => true), true);
-  assert.equal(shouldRepointLaunchAgent(macosSchedulerPlist(packaged), () => false), true);
-  assert.equal(shouldRepointLaunchAgent("not a plist", () => true), true);
+  assert.equal(launchAgentState(dev, () => true), "stale");
+  assert.equal(launchAgentState(macosSchedulerPlist(packaged), () => false), "stale");
+  assert.equal(launchAgentState("not a plist", () => true), "stale");
+  assert.equal(launchAgentState(undefined, () => true), "missing");
 });
 
-test("keeps an agent that launches another installed copy", () => {
+test("an agent for another installed copy stays registered for a copy run from a DMG", () => {
+  // A copy running from /Volumes sees the /Applications agent as registered,
+  // so saving a schedule there does not rewrite the agent to the DMG path.
   const seen: string[] = [];
-  const keep = shouldRepointLaunchAgent(
+  const state = launchAgentState(
     macosSchedulerPlist({
       ...packaged,
       programArguments: ["/Applications/A&B/OpenAdminOS.app/Contents/MacOS/OpenAdminOS", "--background-scheduler"],
@@ -73,6 +76,6 @@ test("keeps an agent that launches another installed copy", () => {
       return true;
     },
   );
-  assert.equal(keep, false);
+  assert.equal(state, "registered");
   assert.deepEqual(seen, ["/Applications/A&B/OpenAdminOS.app/Contents/MacOS/OpenAdminOS"]);
 });

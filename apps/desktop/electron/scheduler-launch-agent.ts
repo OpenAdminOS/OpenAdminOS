@@ -67,19 +67,20 @@ function launchAgentProgramArguments(plist: string): string[] {
 }
 
 /**
- * Whether an installed app should take over a scheduler LaunchAgent that
- * another copy wrote. Only agents that cannot be the installed scheduler
- * qualify: one that runs a development checkout (Electron plus an app
- * path) or one whose binary no longer exists. An agent that launches
- * another installed copy stays, so opening the app from a mounted DMG or
- * a translocated download does not move the scheduler off /Applications.
+ * Classifies the scheduler LaunchAgent on disk (`undefined` when there is
+ * none). "stale" covers agents that cannot be the installed scheduler: one
+ * that runs a development checkout (Electron plus an app path) or one whose
+ * binary no longer exists. Any other agent is "registered", even when it
+ * launches a different installed copy, so opening the app from a mounted
+ * DMG or a translocated download does not move the scheduler off
+ * /Applications.
  */
-export function shouldRepointLaunchAgent(
-  plist: string,
+export function launchAgentState(
+  plist: string | undefined,
   binaryExists: (path: string) => boolean,
-): boolean {
+): "missing" | "stale" | "registered" {
+  if (plist === undefined) return "missing";
   const [binary, ...rest] = launchAgentProgramArguments(plist);
-  if (!binary) return true;
-  if (rest.length !== 1) return true;
-  return !binaryExists(binary);
+  if (!binary || rest.length !== 1 || !binaryExists(binary)) return "stale";
+  return "registered";
 }
