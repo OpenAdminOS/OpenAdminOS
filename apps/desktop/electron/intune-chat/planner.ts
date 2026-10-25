@@ -303,7 +303,7 @@ const WRITE_INTENT_TERMS = [
 // keep the whole-word rule. "update" never falls back to whole-word: it
 // is also a product noun and an infinitive in read questions.
 const READ_QUESTION_START =
-  /^(?:which|what|why|how|when|where|who|does|do|did|is|are|was|were|has|have|show|list|tell|find|count|can|could)\b/;
+  /^(?:which|what|why|how|when|where|who|does|do|did|is|are|was|were|has|have|show|list|tell|find|count|can|could|summarize|describe|explain|give|compare|audit|outline|display|review|inspect|check)\b/;
 
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
   const question = lowerQuestion.trim();
@@ -315,7 +315,7 @@ function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
   // change their passwords?", "Which policies disable legacy
   // authentication and block risky sign-ins?"
   const imperative = new RegExp(
-    `(?:^(?:please\\s+)?${term}\\b)|(?:^(?:can you|could you|would you|i want to|i need to|let's)\\s+${term}\\b)|(?:\\bplease\\s+${term}\\b)`,
+    `(?:^(?:please\\s+)?${term}\\b)|(?:^(?:can you|could you|would you|i want to|i need to|let's)\\s+${term}\\b)|(?:\\bplease\\s+${term}\\b)|(?:\\band then\\s+${term}\\b)|(?:,\\s*then\\s+${term}\\b)`,
   );
   if (imperative.test(question)) return true;
   if (term === "update") return false;

@@ -1157,8 +1157,11 @@ export function resourcesFromToolTrace(
       }
       continue;
     }
-    if (entry.tool === "graph_get" && typeof params.path === "string") {
-      const resource = graphResourceForPath(params.path);
+    if (entry.tool === "graph_get") {
+      // Prefer the normalized execution path: params.path is the raw
+      // model-supplied value and can be a full URL or slashless.
+      const path = entry.graphSource?.path ?? (typeof params.path === "string" ? params.path : undefined);
+      const resource = path ? graphResourceForPath(path) : undefined;
       if (resource) resources.add(resource);
     }
   }

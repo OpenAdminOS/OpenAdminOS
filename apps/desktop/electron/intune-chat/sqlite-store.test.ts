@@ -643,6 +643,13 @@ describe("Intune Chat planner", () => {
       "Add up the assigned licenses per department",
       "Why do users need to change their passwords?",
       "Which policies disable legacy authentication and block risky sign-ins?",
+      "What did the admin create and assign yesterday?",
+      "Summarize the change history for this policy",
+      "Give me the delete audit log",
+      "Describe how to configure BitLocker",
+      "Explain the update rings and how they deploy",
+      "Compare the two assignment filters",
+      "Audit the group membership changes last week",
     ];
     for (const question of readQuestions) {
       assert.equal(
@@ -662,6 +669,7 @@ describe("Intune Chat planner", () => {
       "Please retire the stale laptops in Berlin",
       "Can you update the compliance policy to require encryption?",
       "I need to delete the old Autopilot profile",
+      "Show me the devices and then retire the stale ones",
     ];
     for (const question of writeQuestions) {
       assert.equal(
