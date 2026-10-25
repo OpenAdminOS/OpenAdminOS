@@ -1434,9 +1434,9 @@ export function buildAnswerPack(input: {
         refreshedAt: status.refreshedAt,
         lastError: status.lastError,
         sampleRows,
-        // Counted across every cached row, not just the sample above.
-        // Quote these for any "how many" question; counting sampleRows
-        // would undercount by the sampling ratio.
+        // SQL aggregates count every cached row; the fallback below
+        // counts selectedRows only. breakdownsCoverAllCachedRows says
+        // which one this block carries.
         breakdowns: aggregate?.breakdowns ?? buildBreakdowns(selectedRows),
         breakdownsCoverAllCachedRows: aggregate !== undefined,
       };
@@ -1934,7 +1934,11 @@ function buildBreakdowns(rows: unknown[]): Record<string, Record<string, number>
     let seen = false;
     for (const row of rows) {
       if (!isRecord(row)) continue;
-      const values = Array.isArray(row[field]) ? (row[field] as unknown[]) : [row[field]];
+      const values = Array.isArray(row[field])
+        ? (row[field] as unknown[])
+        : typeof row[field] === "string"
+          ? (row[field] as string).split(",").map((part) => part.trim()).filter(Boolean)
+          : [row[field]];
       for (const raw of values) {
         if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean") {
           continue;

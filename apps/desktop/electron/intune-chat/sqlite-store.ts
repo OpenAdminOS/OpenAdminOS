@@ -1201,22 +1201,44 @@ export class IntelligenceSqliteStore {
       groups: ["groupTypes"],
     };
     for (const field of arrayColumns[resource] ?? []) {
-      const grouped = this.db
+      // Graph returns these dimensions as JSON arrays, one enum string,
+      // or a comma-joined flags string depending on the resource. Read
+      // only the field value and split flags strings so every platform
+      // or group type lands in its own bucket.
+      const values = this.db
         .prepare(
-          `SELECT je.value AS bucket, COUNT(*) AS count
-           FROM graph_resources, json_each(raw_json, '$.${field}') je
+          `SELECT json_extract(raw_json, '$.${field}') AS value
+           FROM graph_resources
            WHERE tenant_id = ? AND resource = ?
-             AND json_extract(raw_json, '$.${field}') IS NOT NULL
-           GROUP BY bucket`,
+             AND json_extract(raw_json, '$.${field}') IS NOT NULL`,
         )
         .all(tenantId, resource) as unknown as Array<{
-        bucket: string | number | null;
-        count: number;
+        value: string | number | null;
       }>;
       const counts: Record<string, number> = {};
-      for (const entry of grouped) {
-        if (entry.bucket === null) continue;
-        counts[String(entry.bucket)] = entry.count;
+      for (const entry of values) {
+        if (entry.value === null) continue;
+        let items: unknown[] = [entry.value];
+        if (typeof entry.value === "string") {
+          const trimmed = entry.value.trim();
+          if (trimmed.startsWith("[")) {
+            try {
+              const parsed = JSON.parse(trimmed) as unknown;
+              items = Array.isArray(parsed) ? parsed : [parsed];
+            } catch {
+              items = [entry.value];
+            }
+          } else {
+            items = trimmed.split(",").map((part) => part.trim()).filter(Boolean);
+          }
+        }
+        for (const item of items) {
+          if (typeof item !== "string" && typeof item !== "number" && typeof item !== "boolean") {
+            continue;
+          }
+          const bucket = String(item);
+          counts[bucket] = (counts[bucket] ?? 0) + 1;
+        }
       }
       if (Object.keys(counts).length > 0) breakdowns[field] = counts;
     }

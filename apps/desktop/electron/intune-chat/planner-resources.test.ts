@@ -306,7 +306,7 @@ describe("answer pack fallback breakdowns", () => {
     rows.configurationPolicies = [
       { id: "cp-1", platforms: ["windows10", "macOS"] },
       { id: "cp-2", platforms: ["macOS"] },
-      { id: "cp-3", platforms: "windows10" },
+      { id: "cp-3", platforms: "windows10,macOS" },
     ];
     rows.groups = [
       { id: "g-1", securityEnabled: true, groupTypes: ["DynamicMembership"] },
@@ -358,12 +358,12 @@ describe("answer pack fallback breakdowns", () => {
       byResource.get("conditionalAccessPolicies")?.state?.enabledForReportingButNotEnforced,
       1,
     );
-    assert.equal(byResource.get("configurationPolicies")?.platforms?.macOS, 2);
+    assert.equal(byResource.get("configurationPolicies")?.platforms?.macOS, 3);
     assert.equal(byResource.get("configurationPolicies")?.platforms?.windows10, 2);
     assert.equal(byResource.get("groups")?.groupTypes?.DynamicMembership, 1);
     assert.equal(byResource.get("groups")?.securityEnabled?.true, 1);
     assert.equal(byResource.get("signIns")?.["status.errorCode"]?.["50126"], 1);
-    assert.equal(byResource.get("conditionalAccessPolicies")?.osVersion, undefined);
+    assert.equal(byResource.get("conditionalAccessPolicies")?.severity, undefined);
   });
 });
 

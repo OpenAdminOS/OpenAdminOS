@@ -1224,6 +1224,8 @@ describe("exact aggregate counts for how-many questions", () => {
         { id: "cp-2", platforms: ["macOS"], isAssigned: false },
         // Graph also returns Settings Catalog platforms as one enum string.
         { id: "cp-3", platforms: "windows10", isAssigned: true },
+        // Multi-value flags can also arrive as one comma-joined string.
+        { id: "cp-4", platforms: "windows10,macOS", isAssigned: false },
       ]);
       seed("applications", "App registrations", [
         { id: "a-1", signInAudience: "AzureADMyOrg" },
@@ -1262,8 +1264,8 @@ describe("exact aggregate counts for how-many questions", () => {
       assert.equal(groups.breakdowns.groupTypes?.Unified, 1);
 
       const settingsCatalog = store.aggregateGraphResource("tenant-1", "configurationPolicies");
-      assert.equal(settingsCatalog.breakdowns.platforms?.macOS, 2);
-      assert.equal(settingsCatalog.breakdowns.platforms?.windows10, 2);
+      assert.equal(settingsCatalog.breakdowns.platforms?.macOS, 3);
+      assert.equal(settingsCatalog.breakdowns.platforms?.windows10, 3);
       assert.equal(settingsCatalog.breakdowns.isAssigned?.["1"], 2);
 
       assert.equal(
