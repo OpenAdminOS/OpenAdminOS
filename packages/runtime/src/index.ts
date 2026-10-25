@@ -58,6 +58,8 @@ export {
   classifyOllamaEndpoint,
   createOllamaLlm,
   noopLlm,
+  ollamaEndpointOverride,
+  ollamaHostEndpoint,
   resolveOllamaEndpoint,
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";

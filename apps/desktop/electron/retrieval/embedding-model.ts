@@ -1,3 +1,4 @@
+import { classifyOllamaEndpoint, ollamaHostEndpoint } from "@openadminos/runtime";
 import { DEFAULT_INDEX_EMBEDDING_MODEL, assertLoopback } from "./retrieval.js";
 
 /**
@@ -18,7 +19,10 @@ import { DEFAULT_INDEX_EMBEDDING_MODEL, assertLoopback } from "./retrieval.js";
 export const DEFAULT_EMBEDDING_ENDPOINT = "http://127.0.0.1:11434";
 
 export function embeddingEndpoint(): string {
-  return process.env.OPENADMINOS_EMBEDDING_ENDPOINT ?? DEFAULT_EMBEDDING_ENDPOINT;
+  if (process.env.OPENADMINOS_EMBEDDING_ENDPOINT) return process.env.OPENADMINOS_EMBEDDING_ENDPOINT;
+  // Follow an Ollama moved with OLLAMA_HOST, but only while it stays on loopback.
+  const moved = ollamaHostEndpoint(process.env.OLLAMA_HOST);
+  return moved && classifyOllamaEndpoint(moved).isLocal ? moved : DEFAULT_EMBEDDING_ENDPOINT;
 }
 
 function normalizeModelName(name: string): string {
