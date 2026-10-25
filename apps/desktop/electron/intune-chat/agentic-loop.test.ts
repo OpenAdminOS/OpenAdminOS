@@ -531,12 +531,16 @@ it('does not accept a false zero after an invalid filter, and permits a correcte
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
-it('lets a successful live read of the same resource resolve a failed cache query', async () => {
+it('resolves a failed stale-sync cache query through the corrected operator query', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agentic-live-resolves-'));
   const store = seededStore(dir);
   const failedSyncQuery = JSON.stringify({
     tool: 'query_cache',
     params: { resource: 'managedDevices', where: { lastSyncDateTime: { approx: '2026-05-20' } } },
+  });
+  const correctedSyncQuery = JSON.stringify({
+    tool: 'query_cache',
+    params: { resource: 'managedDevices', where: { lastSyncDateTime: { lt: '2027-01-01' } } },
   });
   const liveGraph = {
     listManagedDevices: async () => [],
@@ -544,33 +548,29 @@ it('lets a successful live read of the same resource resolve a failed cache quer
     request: async () => ({ value: [{ id: 'stale-1', deviceName: 'STALE-1', lastSyncDateTime: '2026-05-10T09:00:00.000Z' }] }),
   };
   try {
-    for (const path of [
-      '/deviceManagement/managedDevices',
-      'deviceManagement/managedDevices',
-      'https://graph.microsoft.com/beta/deviceManagement/managedDevices',
-    ]) {
-      const input = baseInput(store, scriptedLlm([
-        failedSyncQuery,
-        JSON.stringify({ tool: 'graph_get', params: { path, query: { $filter: "lastSyncDateTime lt 2026-05-20" } } }),
-        'STALE-1 has not synced since 2026-05-10.',
-        'STALE-1 has not synced since 2026-05-10.',
-      ]));
-      input.tools.graphForScopes = async () => liveGraph;
-      const result = await runAgenticChat(input);
-      assert.equal(result.ok, true, path);
-      assert.equal(result.answer, 'STALE-1 has not synced since 2026-05-10.', path);
-    }
-
-    // An unrelated narrow live read supplies no evidence about the
-    // failed predicate, so the guard stays in force.
-    const unrelated = baseInput(store, scriptedLlm([
+    // The operator-object shape the model used for the stale-sync
+    // cutoff is accepted, so the corrected cache query succeeds and
+    // clears the earlier failure before the final answer.
+    const repaired = baseInput(store, scriptedLlm([
       failedSyncQuery,
-      JSON.stringify({ tool: 'graph_get', params: { path: '/deviceManagement/managedDevices', query: { $filter: "operatingSystem eq 'macOS'", $select: 'id' } } }),
+      correctedSyncQuery,
+      'WIN-01 has not synced since 2026-06-01.',
+    ]));
+    repaired.tools.graphForScopes = async () => liveGraph;
+    const repairedResult = await runAgenticChat(repaired);
+    assert.equal(repairedResult.ok, true);
+    assert.equal(repairedResult.answer, 'WIN-01 has not synced since 2026-06-01.');
+
+    // A live read alone does not clear the guard: without a corrected
+    // cache query the failed lookup still blocks the final answer.
+    const liveOnly = baseInput(store, scriptedLlm([
+      failedSyncQuery,
+      JSON.stringify({ tool: 'graph_get', params: { path: '/deviceManagement/managedDevices', query: { $filter: "lastSyncDateTime lt 2026-05-20" } } }),
       'There are zero stale devices.',
       'There are zero stale devices.',
     ]));
-    unrelated.tools.graphForScopes = async () => liveGraph;
-    const blocked = await runAgenticChat(unrelated);
+    liveOnly.tools.graphForScopes = async () => liveGraph;
+    const blocked = await runAgenticChat(liveOnly);
     assert.equal(blocked.ok, true);
     assert.match(blocked.answer, /No verified count is available/);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }

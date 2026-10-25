@@ -145,29 +145,6 @@ type ParsedModelAction =
   | { kind: "final"; answer: string }
   | { kind: "malformed"; reason: string };
 
-/** Field names a failed query_cache call referenced, for judging later replacement reads. */
-function failedQueryFields(params: unknown): string[] {
-  const fields = new Set<string>();
-  const record =
-    params && typeof params === "object" && !Array.isArray(params)
-      ? (params as Record<string, unknown>)
-      : {};
-  const where = record.where;
-  if (where && typeof where === "object" && !Array.isArray(where)) {
-    for (const field of Object.keys(where as Record<string, unknown>)) fields.add(field);
-  }
-  const filters = record.filters;
-  if (Array.isArray(filters)) {
-    for (const filter of filters) {
-      if (!filter || typeof filter !== "object" || Array.isArray(filter)) continue;
-      const entry = filter as Record<string, unknown>;
-      if (typeof entry.field === "string") fields.add(entry.field);
-      else for (const field of Object.keys(entry)) fields.add(field);
-    }
-  }
-  return [...fields];
-}
-
 export async function runAgenticChat(
   input: RunAgenticChatInput,
 ): Promise<RunAgenticChatResult> {
@@ -190,7 +167,7 @@ export async function runAgenticChat(
   let evidenceToolCalls = 0;
   let webSearchAttempts = 0;
   let responseModel = input.model;
-  const invalidQueries = new Map<string, { error: string; fields: string[] }>();
+  const invalidQueries = new Map<string, string>();
   const failedGraphFields = new Map<string, string[]>();
   let invalidFinals = 0;
   const blockedAnswer = (): RunAgenticChatResult => ({
@@ -327,7 +304,7 @@ export async function runAgenticChat(
     if (action.tool === "web_search" && input.tools.webSearch) webSearchAttempts += 1;
     if (action.tool === 'query_cache') {
       const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
-      if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', { error: execution.trace.error, fields: failedQueryFields(action.params) });
+      if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);
       else {
         invalidQueries.delete(resource); invalidQueries.delete('unknown');
         const graphKey = `graph:${pathForResource(resource as GraphCacheResourceKind).path}`;
@@ -338,38 +315,13 @@ export async function runAgenticChat(
       }
     }
     if (action.tool === 'graph_get') {
-      const params = action.params as { path?: string; query?: { $select?: string | string[]; $filter?: string } };
+      const params = action.params as { path?: string; query?: { $select?: string | string[] } };
       const key = `graph:${String(params?.path ?? 'unknown')}`;
       if (execution.trace.error) {
+        invalidQueries.set(key, execution.trace.error);
         const selection = params.query?.$select;
-        const fields = Array.isArray(selection) ? selection : typeof selection === 'string' ? selection.split(',').map(field => field.trim()) : [];
-        invalidQueries.set(key, { error: execution.trace.error, fields });
-        failedGraphFields.set(key, fields);
-      } else {
-        invalidQueries.delete(key); failedGraphFields.delete(key);
-        // A successful live read of a planner collection can supersede
-        // a failed cache query for the same resource, but only when it
-        // is a compatible replacement: complete (not truncated) and
-        // either unfiltered or filtered on a field the failed query
-        // referenced. An unrelated narrow live read must not clear
-        // the guard for evidence it never supplied. The execution
-        // trace carries the normalized path, so slashless and
-        // full-URL spellings resolve the same way.
-        const livePath = String(execution.trace.graphSource?.path || params?.path || '').split('?')[0]!.toLowerCase().replace(/\/+$/, '');
-        const resource = GRAPH_CACHE_RESOURCES.find(
-          entry => pathForResource(entry.resource).path.toLowerCase() === livePath,
-        )?.resource;
-        const failed = resource ? invalidQueries.get(resource) : undefined;
-        if (resource && failed) {
-          const liveFilter = typeof params.query?.$filter === 'string' ? params.query.$filter.toLowerCase() : '';
-          const compatible =
-            execution.trace.graphSource?.truncated !== true &&
-            (failed.fields.length === 0 ||
-              liveFilter === '' ||
-              failed.fields.some(field => liveFilter.includes(field.toLowerCase())));
-          if (compatible) invalidQueries.delete(resource);
-        }
-      }
+        failedGraphFields.set(key, Array.isArray(selection) ? selection : typeof selection === 'string' ? selection.split(',').map(field => field.trim()) : []);
+      } else { invalidQueries.delete(key); failedGraphFields.delete(key); }
     }
     input.onToolFinish?.({
       traceEntry: execution.trace,

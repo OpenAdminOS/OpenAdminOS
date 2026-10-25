@@ -1146,8 +1146,7 @@ errors, never zero-match evidence. Comparison filters may arrive either as expli
 `filters` entries or as operator objects inside `where` values. Tool results include
 snapshot coverage. An unresolved failed cache query blocks a model's final answer and
 cannot fall through malformed-output or iteration-limit fallback into an unsupported
-count; a later successful query or live read of the same resource resolves it. The
-host returns a clear lookup failure after bounded repair attempts. A valid empty result
+count. The host returns a clear lookup failure after bounded repair attempts. A valid empty result
 remains distinct from an unavailable snapshot. Security-incidents preload requests
 at most 50 records per page and follows continuation links.
 
