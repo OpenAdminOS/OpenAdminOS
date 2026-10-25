@@ -50,6 +50,7 @@ import {
   attachWindowStatePersistence,
   loadWindowState,
 } from "./window-state.js";
+import { macosSchedulerPlist, shouldRepointLaunchAgent } from "./scheduler-launch-agent.js";
 import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
   AgentCommunitySubmissionMetadata,
@@ -327,51 +328,36 @@ function schedulerProgramArguments(): string[] {
   return [process.execPath, app.getAppPath(), BACKGROUND_SCHEDULER_ARG];
 }
 
-function escapePlistValue(value: string): string {
-  return value
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
 function macosSchedulerPlistPath(): string {
   return join(app.getPath("home"), "Library", "LaunchAgents", `${MACOS_SCHEDULER_LABEL}.plist`);
 }
 
+function expectedMacosSchedulerPlist(): string {
+  return macosSchedulerPlist({
+    label: MACOS_SCHEDULER_LABEL,
+    programArguments: schedulerProgramArguments(),
+    logDir: join(app.getPath("userData"), "logs"),
+  });
+}
+
+/**
+ * True when the registered LaunchAgent launches this copy of the app. An
+ * agent written by another copy (a moved bundle, or a development checkout)
+ * does not count as enabled here, so the next registration rewrites it.
+ */
+function isMacosLaunchAgentCurrent(): boolean {
+  try {
+    return readFileSync(macosSchedulerPlistPath(), "utf8") === expectedMacosSchedulerPlist();
+  } catch {
+    return false;
+  }
+}
+
 function writeMacosLaunchAgent(): void {
   const plistPath = macosSchedulerPlistPath();
-  const logDir = join(app.getPath("userData"), "logs");
   mkdirSync(dirname(plistPath), { recursive: true });
-  mkdirSync(logDir, { recursive: true });
-
-  const programArguments = schedulerProgramArguments()
-    .map((arg) => `    <string>${escapePlistValue(arg)}</string>`)
-    .join("\n");
-  const plist = `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-  <key>Label</key>
-  <string>${MACOS_SCHEDULER_LABEL}</string>
-  <key>ProgramArguments</key>
-  <array>
-${programArguments}
-  </array>
-  <key>RunAtLoad</key>
-  <true/>
-  <key>StartInterval</key>
-  <integer>60</integer>
-  <key>StandardOutPath</key>
-  <string>${escapePlistValue(join(logDir, "scheduler.log"))}</string>
-  <key>StandardErrorPath</key>
-  <string>${escapePlistValue(join(logDir, "scheduler.error.log"))}</string>
-</dict>
-</plist>
-`;
-
-  writeFileSync(plistPath, plist, { encoding: "utf8", mode: 0o644 });
+  mkdirSync(join(app.getPath("userData"), "logs"), { recursive: true });
+  writeFileSync(plistPath, expectedMacosSchedulerPlist(), { encoding: "utf8", mode: 0o644 });
   const uid = typeof process.getuid === "function" ? process.getuid() : undefined;
   const domain = uid === undefined ? "gui" : `gui/${uid}`;
   try {
@@ -2200,12 +2186,23 @@ async function getSchedulerLaunchSettings(): Promise<SchedulerLaunchSettings> {
     };
   }
 
+  // The LaunchAgent label and Windows task name are per user, not per
+  // copy. A development checkout that registered them would take over the
+  // installed app's scheduler and its single-instance lock.
+  if (!app.isPackaged) {
+    return {
+      supported: false,
+      enabled: false,
+      detail: "Background scheduling registers only from an installed build.",
+    };
+  }
+
   try {
     const hasTenant = store ? await store.hasConnectedTenant() : false;
     const status = store ? await store.getSchedulerStatus() : undefined;
     const enabled =
       process.platform === "darwin"
-        ? existsSync(macosSchedulerPlistPath())
+        ? isMacosLaunchAgentCurrent()
         : isWindowsSchedulerTaskRegistered();
     return {
       supported: true,
@@ -2922,7 +2919,7 @@ function redactedDiagnosticText(value: unknown, maxLength: number): string {
 }
 
 async function setSchedulerLaunchEnabled(enabled: boolean): Promise<SchedulerLaunchSettings> {
-  if (process.platform === "linux") {
+  if (process.platform === "linux" || !app.isPackaged) {
     return getSchedulerLaunchSettings();
   }
 
@@ -6418,6 +6415,29 @@ function registerIpcHandlers() {
       return { canceled: false, filePath: result.filePath };
     }),
   );
+}
+
+// A LaunchAgent written by a development checkout relaunches it every
+// minute. That copy holds the single-instance lock, so this launch would
+// hand off to it and show a blank dev window instead. Point such an agent
+// (or one whose binary is gone) at this copy before taking the lock;
+// `launchctl bootout` stops the other copy.
+if (
+  app.isPackaged &&
+  process.platform === "darwin" &&
+  !isBackgroundSchedulerLaunch &&
+  existsSync(macosSchedulerPlistPath()) &&
+  !isMacosLaunchAgentCurrent()
+) {
+  try {
+    const existing = readFileSync(macosSchedulerPlistPath(), "utf8");
+    if (shouldRepointLaunchAgent(existing, existsSync)) {
+      writeMacosLaunchAgent();
+      debugStartupLog("repointed scheduler LaunchAgent at this app");
+    }
+  } catch (error) {
+    console.warn("[scheduler] could not repoint the LaunchAgent at this app:", error);
+  }
 }
 
 const gotLock = app.requestSingleInstanceLock();
