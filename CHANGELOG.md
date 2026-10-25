@@ -16,6 +16,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ## [0.7.2] - 2026-10-25
 
+A calmer desktop app, a Chat home that opens on a tenant briefing, and Chat answers backed by the tenant data they actually read.
+
 ### Added
 
 - Chat follow-up questions now receive the last four completed turns as bounded plain-text context, so "Show only the Windows ones" keeps its referent.
@@ -29,8 +31,6 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Restyle Agent Team, Agents, Runs, Changes, and Settings with quieter lists and headings, and add a Comfortable or Compact density setting.
 - Replace the four themes with System, Light (warm paper), Dark (graphite), and Midnight. New installs follow the operating system; saved themes migrate automatically.
 - Bundle the Geist and Newsreader fonts with the app (no network font loading) and introduce the new oa ligature logo across the app, installers, and website icons.
-
-### Removed
 
 ### Fixed
 
@@ -55,8 +55,6 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - The deterministic Chat fallback now computes its answer-pack aggregates from the same cache snapshot as its sample rows and source status. Previously, a refresh triggered during a failed investigation could change counts the fallback pack reported while its rows and freshness still described the pre-investigation snapshot.
 - `graph_get` no longer injects its default `$top` on endpoints that reject it (the managed device overview and authentication methods policy singletons, and the fixed-page-size directory roles collection), which previously failed those live reads with HTTP 400. Planner-declared paths and their direct by-id children also pass the endpoint permission check with their declared scopes, so live reads of `/groups` and the authentication methods policy are no longer refused by the least-privilege-only endpoint catalog. Deeper descendants of a planner path, such as group drives, still require their own consented permission.
 - Investigative Chat accepts comparison operators inside `query_cache` `where` values (for example a `lastSyncDateTime` less-than cutoff for stale-device questions) instead of refusing them as non-scalar. Previously a stale-device investigation could fail the same cache query twice over that shape, then answer "no verified count" instead of answering from the cached devices.
-
-### Security
 
 ## [0.7.1] - 2026-10-23
 
