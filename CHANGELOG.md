@@ -6,6 +6,18 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+### Changed
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.7.2] - 2026-10-25
+
+### Added
+
 - Chat follow-up questions now receive the last four completed turns as bounded plain-text context, so "Show only the Windows ones" keeps its referent.
 - Suggestion cards show a read/write badge and required scopes without expanding Details, and non-send Chat errors render Reload chat, Open Settings, and Dismiss actions in place.
 
