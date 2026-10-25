@@ -87,6 +87,14 @@ describe("Graph cache resource registry", () => {
       graphCacheResourcesForWrite({ paths: ["/users/abc/revokeSignInSessions"] }),
       ["users"],
     );
+    // One unmapped path in a mixed batch widens to everything: the
+    // mapped path must not suppress the conservative fallback.
+    assert.equal(
+      graphCacheResourcesForWrite({
+        paths: ["/users/abc", "/directory/deletedItems/xyz/restore"],
+      }).length,
+      GRAPH_CACHE_RESOURCES.length,
+    );
     assert.equal(
       graphCacheResourcesForWrite({ scopes: ["Mail.ReadWrite"] }).length,
       GRAPH_CACHE_RESOURCE_KINDS.length,

@@ -309,7 +309,9 @@ function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
   // Normalize a polite prefix first: "Please list policies that block
   // legacy authentication" is the same main clause as without it, and
   // must not fall through to the whole-word fallback.
-  const question = lowerQuestion.trim().replace(/^please\s+/, "");
+  const question = lowerQuestion
+    .trim()
+    .replace(/^(?:please\s+|can you\s+|could you\s+|would you\s+)+/, "");
   // Explanatory prompts describe actions instead of requesting them:
   // "Explain how to disable an account and then delete it." The
   // chained-imperative pattern below would otherwise block them.
@@ -334,11 +336,15 @@ function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
     /^(?:show|list|tell|find|count|give|summarize|compare|audit|outline|display|review|inspect|check)\b/;
   if (IMPERATIVE_READ_START.test(question)) {
     const coordinated = new RegExp(`\\band\\s+${term}\\b`).exec(question);
-    if (
-      coordinated &&
-      !/\b(?:that|which|who)\b/.test(question.slice(0, coordinated.index))
-    ) {
-      return true;
+    if (coordinated) {
+      const before = question.slice(0, coordinated.index);
+      // A comma before the conjunction starts an independent action
+      // clause even after a relative clause: "Show me the devices
+      // that have not synced in 90 days, and retire them."
+      const independentClause = /,\s*$/.test(before);
+      if (independentClause || !/\b(?:that|which|who)\b/.test(before)) {
+        return true;
+      }
     }
   }
   if (term === "update") return false;
@@ -615,12 +621,25 @@ export function graphCacheResourcesForWrite(input: {
 }): GraphCacheResourceKind[] {
   const out = new Set<GraphCacheResourceKind>();
   const paths = input.paths ?? [];
+  const pathMatchesResource = (path: string, resource: GraphCacheResourceKind) => {
+    const base = pathForResource(resource).path;
+    return path === base || path.startsWith(`${base}/`) || path.startsWith(`${base}(`);
+  };
   for (const definition of GRAPH_CACHE_RESOURCES) {
-    const base = pathForResource(definition.resource).path;
-    if (paths.some((path) => path === base || path.startsWith(`${base}/`) || path.startsWith(`${base}(`))) {
+    if (paths.some((path) => pathMatchesResource(path, definition.resource))) {
       out.add(definition.resource);
     }
   }
+  // A concrete write path that maps to no cache resource can still
+  // have changed cached state (restoring a deleted group changes
+  // group counts). One unmapped path in a mixed batch must widen
+  // invalidation, not hide behind the paths that did map.
+  const hasUnmappedPath = paths.some(
+    (path) =>
+      !GRAPH_CACHE_RESOURCES.some((definition) =>
+        pathMatchesResource(path, definition.resource),
+      ),
+  );
   const scopes = input.scopes ?? [];
   // Derive affected resources from scope families generically: every
   // cache resource whose own read scopes share a family root with a
@@ -667,7 +686,7 @@ export function graphCacheResourcesForWrite(input: {
   const hasUnmappedWriteScope = [...writeRoots].some(
     (root) => !coveredRoots.has(root),
   );
-  if (out.size === 0 || hasUnmappedWriteScope) {
+  if (out.size === 0 || hasUnmappedWriteScope || hasUnmappedPath) {
     for (const definition of GRAPH_CACHE_RESOURCES) out.add(definition.resource);
   }
   return [...out];

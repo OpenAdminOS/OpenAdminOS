@@ -700,6 +700,8 @@ describe("Intune Chat planner", () => {
       "I need to delete the old Autopilot profile",
       "Show me the devices and then retire the stale ones",
       "Show me the devices and retire the stale ones",
+      "Can you show me the devices and retire the stale ones?",
+      "Show me the devices that have not synced in 90 days, and retire them",
     ];
     for (const question of writeQuestions) {
       assert.equal(
