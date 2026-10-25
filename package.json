@@ -22,7 +22,7 @@
     "registry:index": "node scripts/generate-registry-index.mjs",
     "release:check": "node scripts/check-release-compatibility.mjs",
     "docs:generate": "npm run registry:index && node scripts/generate-gitbook-docs.mjs",
-    "docs:check": "npm run docs:generate && git diff --exit-code docs/gitbook agents/index.json .gitbook.yaml"
+    "docs:check": "npm run docs:generate && git diff --exit-code docs/gitbook web/content/docs agents/index.json .gitbook.yaml"
   },
   "engines": {
     "node": ">=22"

@@ -12,8 +12,10 @@ on:
       - "package.json"
       - "package-lock.json"
       - "packages/**"
+      - "scripts/docs-site-routes.mjs"
       - "scripts/generate-gitbook-docs.mjs"
       - "scripts/generate-registry-index.mjs"
+      - "web/content/docs/**"
   pull_request:
     paths:
       - ".github/workflows/docs.yml"
@@ -22,8 +24,10 @@ on:
       - "docs/**"
       - "package.json"
       - "package-lock.json"
+      - "scripts/docs-site-routes.mjs"
       - "scripts/generate-gitbook-docs.mjs"
       - "scripts/generate-registry-index.mjs"
+      - "web/content/docs/**"
 
 permissions:
   contents: write
@@ -65,8 +69,12 @@ jobs:
       - name: Verify docs are current on pull requests
         if: ${{ github.event_name == 'pull_request' }}
         run: |
-          git diff --exit-code docs/gitbook agents/index.json .gitbook.yaml || \
-            (echo "Generated docs are stale. Run npm run docs:generate and commit the result." && exit 1)
+          # git status also catches new, untracked pages (for example a new agent).
+          if [ -n "$(git status --porcelain -- docs/gitbook web/content/docs agents/index.json .gitbook.yaml)" ]; then
+            git status --short -- docs/gitbook web/content/docs agents/index.json .gitbook.yaml
+            echo "Generated docs are stale. Run npm run docs:generate and commit the result."
+            exit 1
+          fi
 
       - name: Open docs update PR
         if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
@@ -75,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          if git diff --quiet docs/gitbook agents/index.json .gitbook.yaml; then
+          if [ -z "$(git status --porcelain -- docs/gitbook web/content/docs agents/index.json .gitbook.yaml)" ]; then
             echo "Docs are already current."
             exit 0
           fi
@@ -85,8 +93,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          git add docs/gitbook agents/index.json .gitbook.yaml
-          git commit -m "docs: update generated GitBook pages"
+          git add docs/gitbook web/content/docs agents/index.json .gitbook.yaml
+          git commit -m "docs: update generated docs pages"
           git push -u origin "$branch"
 
           if gh pr list --head "$branch" --json number --jq '.[0].number' | grep -q '^[0-9]'; then
@@ -97,10 +105,10 @@ jobs:
           gh pr create \
             --base main \
             --head "$branch" \
-            --title "docs: update generated GitBook pages" \
+            --title "docs: update generated docs pages" \
             --body "Automated documentation update.
 
-          This PR was generated after a commit to main changed repository context used by the GitBook docs.
+          This PR was generated after a commit to main changed repository context used by the docs.
 
           Deterministic sources:
           - \`agents/index.json\`

@@ -16,7 +16,7 @@
 - [Changes and drift](features/changes.md)
 - [Agent Team](features/office.md)
 
-## Trust Model
+## Trust model
 
 - [Local-first guarantee](trust/local-first.md)
 - [Hosted providers](trust/hosted-providers.md)

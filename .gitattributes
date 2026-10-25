@@ -1,3 +1,6 @@
 # Preserve registry and manifest digest bytes on Windows checkouts.
 agents/index.json text eol=lf
 agents/**/manifest.yaml text eol=lf
+
+# Mirror of docs/gitbook written by scripts/generate-gitbook-docs.mjs.
+web/content/docs/** linguist-generated=true

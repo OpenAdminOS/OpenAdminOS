@@ -50,7 +50,7 @@ openadminos/
 ├── docs/
 │   ├── SPEC.md               # This file
 │   ├── ARCHITECTURE.md       # Deeper dive (write as needed)
-│   ├── gitbook/              # Public GitBook docs source
+│   ├── gitbook/              # Public docs source (docs.openadminos.com)
 │   └── mockups/              # HTML design reference
 ├── tasks/
 │   ├── todo.md               # Active work plan with acceptance criteria
@@ -87,7 +87,17 @@ No additional runtime dependency is introduced for this resolution.
 
 ### Public documentation model
 
-Public documentation is GitBook-synced from `docs/gitbook`, with the repository root `.gitbook.yaml` setting `root: ./docs/gitbook`. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the GitBook root.
+Public documentation lives in `docs/gitbook` and is published at `docs.openadminos.com` by the Next.js app in `web/`, the same Vercel project as the marketing site. GitBook (a paid plan, synced through the repository root `.gitbook.yaml`) served the docs until the self-hosted site replaced it; `.gitbook.yaml` stays in the repository until the DNS cutover is verified and is removed with the GitBook subscription. `docs/gitbook/SUMMARY.md` remains the source of the sidebar groups and page order. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the public docs root.
+
+The Vercel project's Root Directory is `web/`, so the build cannot read `docs/`. `npm run docs:generate` therefore mirrors every page listed in `SUMMARY.md` into `web/content/docs` and writes `web/content/docs/manifest.json` (navigation, page URLs, and redirects). `docs/gitbook` is the single source of truth; the mirror is generated, checked in, and verified by `npm run docs:check` and the Documentation workflow. A build-time fetch from GitHub (the `stats/` approach) was rejected for docs because it needs a token and network at build time and can drift from the deployed commit's own files.
+
+Docs URLs keep GitBook's published scheme: `<section slug>/<page slug>`, where the section slug comes from the `SUMMARY.md` group title and the page slug from the file name (a `README.md` takes its folder name), and the first page is the site root. Old file-path URLs (for example `/getting-started/installation`, which the desktop app and search engines know), section roots, and old folders permanently redirect to the published URL. `scripts/docs-site-routes.mjs` owns these rules and `scripts/docs-site-routes.test.mjs` covers them. Renaming a `SUMMARY.md` group or a docs file changes URLs, so add a redirect when doing either.
+
+Routing: `web/next.config.js` rewrites requests whose host is `docs.openadminos.com` to `web/src/app/docs-host`, which renders the docs at the domain root. Every other host (Vercel previews, local dev) serves the same pages under `/docs`; `www.openadminos.com/docs/*` redirects to the docs host. The docs host also serves its own `sitemap.xml`, `robots.txt`, `llms.txt`, and a Markdown export of each page at `<page>.md`, matching what GitBook offered. Pages are statically generated; Markdown is rendered at build time with `marked` (MIT, no dependencies). Code blocks are not syntax-colored, in line with the rule that color carries meaning only.
+
+The docs header carries the website's System, Light, and Dark theme toggle. The preference lives in `localStorage`, which is per host, so docs.openadminos.com and www.openadminos.com keep separate choices.
+
+Docs search is local: a static index (`/docs/search-index.json`) is built with the site and searched in the browser. No hosted search service, and queries never leave the browser. The docs pages make no third-party requests and do not load website analytics; adding analytics to the docs would need a privacy page update first.
 
 Agent documentation is deterministic. `npm run docs:generate` refreshes `agents/index.json` and regenerates GitBook pages under `docs/gitbook/generated` from `agents/*/manifest.yaml` plus the registry index. Generated pages include the agent catalog, per-agent pages, the Microsoft Graph scope matrix, the write safety matrix, and the LLM provider matrix. Generated pages should not be edited manually; update the manifest or generator instead. CI jobs that verify generated docs must check out full Git history because the generated `Last changed` fields use path-specific commit metadata.
 
@@ -261,7 +271,8 @@ repository-root `node_modules` to `web/node_modules` only when `VERCEL` is set.
 
 The public marketing website uses Plausible Analytics from `plausible.io` for
 aggregate website usage measurement. This is limited to the `web/` marketing
-pages. The desktop app must not load Plausible or send tenant data, prompts,
+pages; the docs routes served from `web/` (docs.openadminos.com and `/docs`)
+do not load it. The desktop app must not load Plausible or send tenant data, prompts,
 run results, analytics events, support diagnostics, tokens, provider credentials,
 or Microsoft Graph payloads through website analytics. Privacy copy must keep
 the website analytics boundary separate from the desktop app's no tenant telemetry
