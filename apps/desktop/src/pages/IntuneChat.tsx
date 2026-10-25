@@ -42,7 +42,6 @@ import {
   useUpdateStateOptional,
   type DataBoundary,
 } from "../state";
-import { suggestAgentForQuestion } from "../shared/agent-suggestions";
 import {
   type AgentSummary,
   resolveProviderDefaultModel,
@@ -172,16 +171,6 @@ type FailedChatRequest = {
   conversationId: string | null;
 };
 
-type RelatedAgentSuggestion = {
-  agent: AgentSummary;
-  score: number;
-};
-
-type RelatedAgentState = {
-  suggestionsByMessageId: Record<string, RelatedAgentSuggestion>;
-  suggestedSlugsByConversationId: Record<string, string[]>;
-};
-
 type UnifiedAgentSuggestion = {
   slug: string;
   name: string;
@@ -304,10 +293,6 @@ function IntuneChatContent() {
   const [chatProgress, setChatProgress] = useState<ChatProgressState | null>(null);
   const [progressAssistantMessageId, setProgressAssistantMessageId] = useState<string | null>(null);
   const [optimisticDraft, setOptimisticDraft] = useState<OptimisticChatDraft | null>(null);
-  const [relatedAgentState, setRelatedAgentState] = useState<RelatedAgentState>({
-    suggestionsByMessageId: {},
-    suggestedSlugsByConversationId: {},
-  });
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [hostedConsentPrompt, setHostedConsentPrompt] =
     useState<HostedChatConsentPrompt | null>(null);
@@ -840,45 +825,6 @@ function IntuneChatContent() {
   };
 
 
-  const recordRelatedAgentSuggestion = (
-    conversationId: string,
-    assistantMessageId: string,
-    suggestion: { agent: AgentSummary; score: number } | null,
-  ) => {
-    if (!suggestion) return;
-    setRelatedAgentState((current) => {
-      const existingSlugs = current.suggestedSlugsByConversationId[conversationId] ?? [];
-      if (
-        existingSlugs.includes(suggestion.agent.slug) ||
-        current.suggestionsByMessageId[assistantMessageId]
-      ) {
-        return current;
-      }
-      return {
-        suggestionsByMessageId: {
-          ...current.suggestionsByMessageId,
-          [assistantMessageId]: suggestion,
-        },
-        suggestedSlugsByConversationId: {
-          ...current.suggestedSlugsByConversationId,
-          [conversationId]: [...existingSlugs, suggestion.agent.slug],
-        },
-      };
-    });
-  };
-
-  const dismissRelatedAgentSuggestion = (assistantMessageId: string) => {
-    setRelatedAgentState((current) => {
-      if (!current.suggestionsByMessageId[assistantMessageId]) return current;
-      const nextSuggestions = { ...current.suggestionsByMessageId };
-      delete nextSuggestions[assistantMessageId];
-      return {
-        ...current,
-        suggestionsByMessageId: nextSuggestions,
-      };
-    });
-  };
-
   const executeSend = async (
     content: string,
     hostedProviderConsent?: HostedProviderConsentInput,
@@ -891,15 +837,6 @@ function IntuneChatContent() {
       conversationIdOverride === null
         ? null
         : conversationIdOverride ?? activeConversationId;
-    const previouslySuggestedSlugs = targetConversationId
-      ? relatedAgentState.suggestedSlugsByConversationId[targetConversationId] ?? []
-      : [];
-    const relatedAgentSuggestion = suggestAgentForQuestion(
-      content,
-      state.installedAgents.filter(
-        (agent) => !previouslySuggestedSlugs.includes(agent.slug),
-      ),
-    );
     const pendingConversationId = targetConversationId ?? `pending_${window.crypto.randomUUID()}`;
     const pendingUserId = `pending_user_${window.crypto.randomUUID()}`;
     const pendingAssistantId = `pending_assistant_${window.crypto.randomUUID()}`;
@@ -1033,11 +970,6 @@ function IntuneChatContent() {
             if (event.type === "completed") {
               reachedTerminal = true;
               dispatchSend({ type: "complete" });
-              recordRelatedAgentSuggestion(
-                event.result.conversation.id,
-                event.result.assistantMessage.id,
-                relatedAgentSuggestion,
-              );
             }
             if (event.type === "cancelled") {
               reachedTerminal = true;
@@ -1052,13 +984,6 @@ function IntuneChatContent() {
       upsertConversation(result.conversation);
       openConversation(result.conversation.id, { replace: true });
       setCacheStatus(result.cacheStatus);
-      if (result.assistantMessage.status === "completed") {
-        recordRelatedAgentSuggestion(
-          result.conversation.id,
-          result.assistantMessage.id,
-          relatedAgentSuggestion,
-        );
-      }
       await loadShell(result.conversation.id);
     } catch (caught) {
       failed = true;
@@ -1889,13 +1814,8 @@ function IntuneChatContent() {
               <div className="flex flex-1 flex-col">
                 {displayedMessages.map((message) => {
                   const job = multiTenantJobsByConversationId[message.conversationId];
-                  const relatedAgentSuggestion =
-                    message.role === "assistant" && message.status === "completed"
-                      ? relatedAgentState.suggestionsByMessageId[message.id]
-                      : undefined;
                   const suggestedAgents = mergeSuggestedAgents(
                     message.agentSuggestions,
-                    relatedAgentSuggestion,
                   );
                   const messageConversation =
                     conversations.find((entry) => entry.id === message.conversationId) ??
@@ -1928,7 +1848,6 @@ function IntuneChatContent() {
                           runningAgentSlug={runningAgentSlug}
                           onRun={(slug) => void handleRunAgent(slug, message.conversationId, message.id)}
                           onDismiss={() => {
-                            dismissRelatedAgentSuggestion(message.id);
                             setDismissedSuggestionMessageIds((current) => [...new Set([...current, message.id])]);
                           }}
                         />
@@ -4347,9 +4266,13 @@ function safeFileName(value: string): string {
   return cleaned || "intune-chat-conversation";
 }
 
+// The host matcher is the single source of agent suggestions. A second
+// renderer matcher used to score the same question with different rules
+// and no write-intent handling, so the two surfaces disagreed about
+// which agent fit. Cards now render only what the host attached to the
+// message, which also keeps them identical after a reload.
 function mergeSuggestedAgents(
   matched: IntuneChatAgentSuggestion[] | undefined,
-  related: RelatedAgentSuggestion | undefined,
 ): UnifiedAgentSuggestion[] {
   const suggestions = new Map<string, UnifiedAgentSuggestion>();
   for (const suggestion of matched ?? []) {
@@ -4362,15 +4285,6 @@ function mergeSuggestedAgents(
       matchedTerms: suggestion.matchedTerms,
       matchedConcepts: suggestion.matchedConcepts,
       matchedResources: suggestion.matchedResources,
-    });
-  }
-  if (related && !suggestions.has(related.agent.slug)) {
-    suggestions.set(related.agent.slug, {
-      slug: related.agent.slug,
-      name: formatAgentDisplayName(related.agent),
-      mode: related.agent.mode,
-      reason: related.agent.description,
-      scopes: related.agent.scopes,
     });
   }
   return [...suggestions.values()];
@@ -4398,11 +4312,21 @@ function SuggestedAgentsBlock({
             <div className="flex items-center gap-4">
               <div className="min-w-0 flex-1 leading-5">
                 <span className="font-medium text-[var(--color-text)]">{suggestion.name}</span>{" "}
+                <Badge tone={suggestion.mode === "write" ? "warning" : "info"}>
+                  {suggestion.mode === "write" ? "Write agent" : "Read agent"}
+                </Badge>{" "}
                 <span>
                   {suggestion.mode === "write"
                     ? `${suggestion.reason} Nothing changes until you review and confirm.`
                     : suggestion.reason}
                 </span>
+                {suggestion.scopes.length > 0 ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                    <span>Required scopes</span>
+                    {suggestion.scopes.slice(0, 3).map((scope) => <Badge key={scope}>{scope}</Badge>)}
+                    {suggestion.scopes.length > 3 ? <Badge>{suggestion.scopes.length - 3} more</Badge> : null}
+                  </div>
+                ) : null}
               </div>
               <Button
                 size="sm"
@@ -4455,11 +4379,10 @@ function SuggestedAgentsBlock({
                     ))}
                   </div>
                 ) : null}
-                {suggestion.scopes.length > 0 ? (
+                {suggestion.scopes.length > 3 ? (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span>Required scopes</span>
-                    {suggestion.scopes.slice(0, 4).map((scope) => <Badge key={scope}>{scope}</Badge>)}
-                    {suggestion.scopes.length > 4 ? <Badge>{suggestion.scopes.length - 4} more</Badge> : null}
+                    <span>All required scopes</span>
+                    {suggestion.scopes.map((scope) => <Badge key={scope}>{scope}</Badge>)}
                   </div>
                 ) : null}
                 {suggestion.mode === "write" ? (

@@ -737,6 +737,10 @@ describe("IntuneChat related agent hint", () => {
       ),
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run agent" })).toBeInTheDocument();
+    // Mode badge and scopes are visible on the collapsed card, without
+    // opening Details.
+    expect(screen.getByText("Read agent")).toBeInTheDocument();
+    expect(screen.getByText("DeviceManagementManagedDevices.Read.All")).toBeInTheDocument();
 
     await user.click(
       screen.getByRole("button", { name: "Dismiss suggested agent" }),
