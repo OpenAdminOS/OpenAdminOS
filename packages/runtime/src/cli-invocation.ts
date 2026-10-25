@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, extname, join, resolve, posix, win32, delimiter } from "node:path";
 import { homedir } from "node:os";
 import {
@@ -10,25 +10,20 @@ import {
 } from "node:child_process";
 
 /** Desktop launches can miss terminal PATH setup. Add standard install locations
- * without loading shell startup files or unrelated environment variables. */
+ * without loading shell startup files or unrelated environment variables.
+ * Entries already on PATH keep precedence; these are only appended. */
 export function cliProcessEnv(
   env: NodeJS.ProcessEnv,
   platform: NodeJS.Platform = process.platform,
   home: string = homedir(),
 ): NodeJS.ProcessEnv {
-  if (platform !== "darwin" && platform !== "win32") return env;
   const windows = platform === "win32";
   const pathKeys = Object.keys(env).filter((key) =>
     windows ? key.toLowerCase() === "path" : key === "PATH",
   );
   const separator = windows ? ";" : ":";
   const existing = pathKeys.map((key) => env[key] ?? "").join(separator);
-  const defaults = windows
-    ? [
-        win32.join(env.APPDATA || win32.join(home, "AppData", "Roaming"), "npm"),
-        win32.join(home, ".local", "bin"),
-      ]
-    : ["/opt/homebrew/bin", "/usr/local/bin", posix.join(home, ".local", "bin")];
+  const defaults = windows ? windowsCliFolders(env, home) : posixCliFolders(env, platform, home);
   const paths = (existing || (windows
     ? win32.join(env.SystemRoot || "C:\\Windows", "System32")
     : "/usr/bin:/bin:/usr/sbin:/sbin")).split(separator).concat(defaults);
@@ -42,6 +37,64 @@ export function cliProcessEnv(
     return true;
   }).join(separator);
   return result;
+}
+
+/** A Windows app keeps the PATH it started with, so a CLI installed while it
+ * runs (winget, scoop, pnpm, Volta, bun) is only found through these folders. */
+function windowsCliFolders(env: NodeJS.ProcessEnv, home: string): string[] {
+  const roaming = env.APPDATA || win32.join(home, "AppData", "Roaming");
+  const local = env.LOCALAPPDATA || win32.join(home, "AppData", "Local");
+  return [
+    win32.join(roaming, "npm"),
+    win32.join(home, ".local", "bin"),
+    win32.join(local, "Microsoft", "WinGet", "Links"),
+    win32.join(local, "pnpm"),
+    win32.join(local, "Volta", "bin"),
+    win32.join(home, "scoop", "shims"),
+    win32.join(home, ".bun", "bin"),
+  ];
+}
+
+/** Finder and desktop-menu launches get a minimal PATH. Cover package
+ * managers and Node version managers that admins use to install the CLIs. */
+function posixCliFolders(env: NodeJS.ProcessEnv, platform: NodeJS.Platform, home: string): string[] {
+  const system = platform === "darwin"
+    ? ["/opt/homebrew/bin", "/usr/local/bin"]
+    : ["/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", "/snap/bin"];
+  const fnm = platform === "darwin"
+    ? posix.join(home, "Library", "Application Support", "fnm")
+    : posix.join(env.XDG_DATA_HOME || posix.join(home, ".local", "share"), "fnm");
+  return [
+    ...system,
+    posix.join(home, ".local", "bin"),
+    ...(platform === "darwin" ? ["/opt/local/bin"] : []),
+    posix.join(home, ".npm-global", "bin"),
+    posix.join(home, ".volta", "bin"),
+    posix.join(home, ".bun", "bin"),
+    posix.join(home, ".local", "share", "mise", "shims"),
+    posix.join(home, ".asdf", "shims"),
+    posix.join(fnm, "aliases", "default", "bin"),
+    ...nvmNodeFolders(env.NVM_DIR || posix.join(home, ".nvm")),
+  ];
+}
+
+/** nvm installs each Node version's global CLIs separately; newest first. */
+function nvmNodeFolders(nvmDir: string): string[] {
+  const versions = posix.join(nvmDir, "versions", "node");
+  let names: string[];
+  try {
+    names = readdirSync(versions);
+  } catch {
+    return [];
+  }
+  const parse = (name: string) => name.replace(/^v/, "").split(".").map(Number);
+  return names
+    .filter((name) => /^v\d+\.\d+\.\d+$/.test(name))
+    .sort((a, b) => {
+      const [x, y] = [parse(a), parse(b)];
+      return (y[0]! - x[0]!) || (y[1]! - x[1]!) || (y[2]! - x[2]!);
+    })
+    .map((name) => posix.join(versions, name, "bin"));
 }
 
 /** Resolve Windows npm launchers to their Node entry point so prompts never cross cmd.exe. */
@@ -82,33 +135,58 @@ export function cliInvocation(
   if (!/\.(cmd|bat)$/i.test(target)) return { binary: target, args, env };
 
   const name = basename(target, extname(target)).toLowerCase();
-  const relative =
-    name === "claude"
-      ? "@anthropic-ai/claude-code/cli.js"
-      : name === "codex"
-        ? "@openai/codex/bin/codex.js"
-        : name === "copilot"
-          ? "@github/copilot/npm-loader.js"
-          : name === "gemini"
-            ? "@google/gemini-cli/bundle/gemini.js"
-            : undefined;
-  const folder = dirname(target);
-  const roots =
-    basename(folder).toLowerCase() === ".bin"
-      ? [dirname(folder)]
-      : [join(folder, "node_modules")];
-  const entry =
-    relative && roots.map((root) => join(root, relative)).find(existsSync);
+  const entry = npmLauncherEntry(target);
   if (!entry) {
     throw new Error(
       `Cannot launch ${name} through a custom Windows batch file. Install the official CLI or select its native .exe executable.`,
     );
   }
+  // Claude Code's npm package ships a native executable, not a Node script.
+  if (/\.exe$/i.test(entry)) return { binary: entry, args, env };
   return {
     binary: process.execPath,
     args: [entry, ...args],
     env: { ...env, ELECTRON_RUN_AS_NODE: "1" },
   };
+}
+
+/** Official npm `bin` targets, relative to `node_modules`. */
+const NPM_CLI_ENTRIES: Record<string, string> = {
+  claude: "@anthropic-ai/claude-code/bin/claude.exe",
+  codex: "@openai/codex/bin/codex.js",
+  copilot: "@github/copilot/npm-loader.js",
+  gemini: "@google/gemini-cli/bundle/gemini.js",
+};
+
+/**
+ * Find the official package entry behind an npm-style batch launcher. npm
+ * keeps `node_modules` next to the launcher; pnpm and yarn global installs
+ * keep it elsewhere, so fall back to the `%~dp0`-relative path the launcher
+ * itself references. Only the official entry for that CLI name is accepted.
+ */
+export function npmLauncherEntry(launcher: string): string | undefined {
+  const name = basename(launcher, extname(launcher)).toLowerCase();
+  const relative = NPM_CLI_ENTRIES[name];
+  if (!relative) return undefined;
+  const folder = dirname(launcher);
+  const root = basename(folder).toLowerCase() === ".bin" ? dirname(folder) : join(folder, "node_modules");
+  const direct = join(root, relative);
+  if (existsSync(direct)) return direct;
+
+  let script: string;
+  try {
+    script = readFileSync(launcher, "utf8");
+  } catch {
+    return undefined;
+  }
+  const suffix = `node_modules/${relative}`.toLowerCase();
+  for (const match of script.matchAll(/%~?dp0%?[\\/]?([^"%\r\n]+)/gi)) {
+    const referenced = match[1]!.trim();
+    if (!referenced.replace(/\\/g, "/").toLowerCase().endsWith(suffix)) continue;
+    const candidate = resolve(folder, ...referenced.split(/[\\/]+/));
+    if (existsSync(candidate)) return candidate;
+  }
+  return undefined;
 }
 
 export function cliArgs<

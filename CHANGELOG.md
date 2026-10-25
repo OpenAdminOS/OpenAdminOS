@@ -22,7 +22,11 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
-- Fix a blank window on macOS when a development checkout had registered the background scheduler LaunchAgent. Only installed builds register the scheduler now, and an installed app repoints an agent that launches another copy before it starts.
+- Claude Code installed with npm on Windows is detected again. Its npm package now ships a native executable, which the app launches directly.
+- The desktop app finds provider CLIs installed with nvm, fnm, Volta, bun, mise, asdf, pnpm, Scoop, or WinGet, including on Linux and in a Windows session where the CLI was installed after the app started.
+- Ollama detection no longer drops every model when capability checks are slow on a cold start, and Ollama moved with `OLLAMA_HOST` is found.
+- The macOS DMG install window now uses a light paper background, so the "OpenAdminOS" and "Applications" labels under the icons are readable. Finder always draws those labels in black when a window has a background picture.
+- Fix a blank window on macOS when a development checkout had registered the background scheduler LaunchAgent. Only installed builds register the scheduler now, and an installed app repoints an agent that runs a development checkout or a binary that no longer exists before it starts.
 - The macOS menu bar icon is now a template image, so it follows the menu bar color like other status items.
 - Fix the sidebar jumping up and hiding its header when the tenant account menu opens. The menu now opens upward from the footer, and menu focus no longer scrolls the shell.
 - Investigative Chat answers are no longer accepted without tenant evidence. A model reply that checks no tenant data gets bounded repair prompts, then a deterministic answer with a visible notice. This affected CLI-agent providers most visibly, where a prose refusal could persist as a clean completed answer with sources attached.

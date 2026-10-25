@@ -9,6 +9,7 @@ import {
   cliInvocation,
   cliProcessEnv,
   cliSpawn,
+  npmLauncherEntry,
 } from "./cli-invocation.js";
 import { CliProviderError, spawnProvider } from "./cli-provider.js";
 
@@ -32,8 +33,8 @@ it(
     const root = await mkdtemp(join(tmpdir(), "provider launch test "));
     try {
       for (const [name, entry] of [
-        ["claude", "@anthropic-ai/claude-code/cli.js"],
         ["codex", "@openai/codex/bin/codex.js"],
+        ["gemini", "@google/gemini-cli/bundle/gemini.js"],
       ]) {
         const launcher = join(root, `${name}.cmd`);
         const script = join(root, "node_modules", entry!);
@@ -72,16 +73,58 @@ it(
 it("adds macOS CLI and Node locations to a Finder PATH without loading shell configuration", () => {
   const source = { PATH: "/usr/bin:/bin", HOME: "/Users/admin" };
   const env = cliProcessEnv(source, "darwin", "/Users/admin");
-  assert.equal(env.PATH, "/usr/bin:/bin:/opt/homebrew/bin:/usr/local/bin:/Users/admin/.local/bin");
+  assert.deepEqual(env.PATH!.split(":"), [
+    "/usr/bin",
+    "/bin",
+    "/opt/homebrew/bin",
+    "/usr/local/bin",
+    "/Users/admin/.local/bin",
+    "/opt/local/bin",
+    "/Users/admin/.npm-global/bin",
+    "/Users/admin/.volta/bin",
+    "/Users/admin/.bun/bin",
+    "/Users/admin/.local/share/mise/shims",
+    "/Users/admin/.asdf/shims",
+    "/Users/admin/Library/Application Support/fnm/aliases/default/bin",
+  ]);
   assert.deepEqual(source, { PATH: "/usr/bin:/bin", HOME: "/Users/admin" });
   assert.equal(cliProcessEnv(env, "darwin", "/Users/admin").PATH, env.PATH);
-  assert.equal(cliProcessEnv(source, "linux"), source);
+});
+
+it("adds Linux desktop-launch locations and every nvm Node version, newest first", async () => {
+  const home = await mkdtemp(join(tmpdir(), "provider path test "));
+  try {
+    for (const version of ["v18.20.4", "v22.11.0", "v20.18.1", "system"]) {
+      await mkdir(join(home, ".nvm", "versions", "node", version, "bin"), { recursive: true });
+    }
+    const env = cliProcessEnv({ PATH: "/usr/bin:/bin" }, "linux", home);
+    const path = env.PATH!.split(":");
+    assert.deepEqual(path.slice(0, 6), ["/usr/bin", "/bin", "/usr/local/bin", "/home/linuxbrew/.linuxbrew/bin", "/snap/bin", join(home, ".local", "bin")]);
+    assert.ok(path.includes(join(home, ".local", "share", "fnm", "aliases", "default", "bin")));
+    assert.deepEqual(path.filter((entry) => entry.includes(".nvm")), [
+      join(home, ".nvm", "versions", "node", "v22.11.0", "bin"),
+      join(home, ".nvm", "versions", "node", "v20.18.1", "bin"),
+      join(home, ".nvm", "versions", "node", "v18.20.4", "bin"),
+    ]);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
 });
 
 it("finds Windows user installs with a stale PATH and preserves redirected AppData", () => {
-  const source = { Path: "C:\\Windows\\System32;C:\\Tools", APPDATA: "D:\\Profile\\Roaming" };
+  const source = { Path: "C:\\Windows\\System32;C:\\Tools", APPDATA: "D:\\Profile\\Roaming", LOCALAPPDATA: "D:\\Profile\\Local" };
   const env = cliProcessEnv(source, "win32", "C:\\Users\\admin");
-  assert.equal(env.PATH, "C:\\Windows\\System32;C:\\Tools;D:\\Profile\\Roaming\\npm;C:\\Users\\admin\\.local\\bin");
+  assert.deepEqual(env.PATH!.split(";"), [
+    "C:\\Windows\\System32",
+    "C:\\Tools",
+    "D:\\Profile\\Roaming\\npm",
+    "C:\\Users\\admin\\.local\\bin",
+    "D:\\Profile\\Local\\Microsoft\\WinGet\\Links",
+    "D:\\Profile\\Local\\pnpm",
+    "D:\\Profile\\Local\\Volta\\bin",
+    "C:\\Users\\admin\\scoop\\shims",
+    "C:\\Users\\admin\\.bun\\bin",
+  ]);
   assert.equal(env.Path, undefined);
   assert.equal(source.Path, "C:\\Windows\\System32;C:\\Tools");
   assert.deepEqual(cliProcessEnv(env, "win32", "C:\\Users\\admin"), env);
@@ -132,3 +175,40 @@ it(
     }
   },
 );
+
+it("maps npm launchers to the official entry, including Claude Code's native executable", async () => {
+  const root = await mkdtemp(join(tmpdir(), "provider shim test "));
+  try {
+    const native = join(root, "node_modules", "@anthropic-ai", "claude-code", "bin", "claude.exe");
+    await mkdir(dirname(native), { recursive: true });
+    await writeFile(native, "");
+    await writeFile(join(root, "claude.cmd"), "@exit /b 99\r\n");
+    assert.equal(npmLauncherEntry(join(root, "claude.cmd")), native);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+it("follows a pnpm or yarn global launcher to the official entry it references", async () => {
+  const root = await mkdtemp(join(tmpdir(), "provider shim test "));
+  try {
+    const entry = join(root, "global", "5", "node_modules", "@openai", "codex", "bin", "codex.js");
+    await mkdir(dirname(entry), { recursive: true });
+    await writeFile(entry, "");
+    await writeFile(
+      join(root, "codex.cmd"),
+      '@SETLOCAL\r\n@"%~dp0\\global\\5\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n',
+    );
+    assert.equal(npmLauncherEntry(join(root, "codex.cmd")), entry);
+
+    // A launcher that references anything other than the official entry is refused.
+    const other = join(root, "global", "5", "node_modules", "evil", "codex.js");
+    await mkdir(dirname(other), { recursive: true });
+    await writeFile(other, "");
+    await writeFile(join(root, "gemini.cmd"), '@"%~dp0\\global\\5\\node_modules\\evil\\codex.js" %*\r\n');
+    assert.equal(npmLauncherEntry(join(root, "gemini.cmd")), undefined);
+    assert.equal(npmLauncherEntry(join(root, "custom.cmd")), undefined);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

@@ -23,4 +23,7 @@ python3 -c "from PIL import Image; d='apps/desktop/build/'; a=Image.open(d+'back
 
 Commit generated assets so release builders need no rasterizer.
 The DMG background is 660 by 440; icon centers remain (170,230) and (490,230).
+Keep the DMG background light. When a Finder window has a background picture,
+Finder always draws icon labels in black, even in dark mode, so a dark
+background makes the "OpenAdminOS" and "Applications" labels unreadable.
 Historical concepts in `icon-concepts/` are not production assets.

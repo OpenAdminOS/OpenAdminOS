@@ -56,7 +56,7 @@ interface LmStudioChatResponse {
 }
 
 const DEFAULT_LM_STUDIO_TIMEOUT_MS = 180_000;
-const DEFAULT_LM_STUDIO_ENDPOINT = "http://localhost:1234/v1";
+const DEFAULT_LM_STUDIO_ENDPOINT = "http://127.0.0.1:1234/v1";
 
 export function createLmStudioLlm(
   options: LmStudioProviderOptions = {},
