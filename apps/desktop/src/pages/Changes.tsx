@@ -715,7 +715,9 @@ export default function Changes() {
   );
   const latestRefresh = cacheStatus?.resources
     .map((resource) => resource.refreshedAt)
-    .filter((value): value is string => Boolean(value))
+    .filter(
+      (value): value is string => Boolean(value) && Date.parse(value as string) !== 0,
+    )
     .sort()
     .at(-1);
   const refreshJob = cacheStatus?.preload;

@@ -1464,13 +1464,20 @@ function IntuneChatContent() {
         ? `${selectedTenantIds.length} selected tenant${selectedTenantIds.length === 1 ? "" : "s"}`
         : activeTenant?.displayName ?? "No active tenant";
   // Oldest, like the per-answer header: the stalest refreshed resource
-  // bounds how current the cached picture can be.
+  // bounds how current the cached picture can be. The epoch stale
+  // marker is excluded here so one resource invalidated by a write
+  // does not date the whole cache to before that write.
+  const refreshedValues =
+    cacheStatus?.resources.flatMap((resource) => resource.refreshedAt ?? []) ?? [];
+  const hasStaleMarkedResource = refreshedValues.some((value) => Date.parse(value) === 0);
   const latestCacheRefresh = oldestTimestamp(
-    cacheStatus?.resources.flatMap((resource) => resource.refreshedAt ?? []) ?? [],
+    refreshedValues.filter((value) => Date.parse(value) !== 0),
   );
   const homeFreshness = latestCacheRefresh
     ? `Graph data from ${formatRelativeAge(latestCacheRefresh)}`
-    : "Graph data has not been cached yet";
+    : hasStaleMarkedResource
+      ? "Graph data is stale since the last write"
+      : "Graph data has not been cached yet";
   const awaitingConfirmationRuns = state.runs.filter(
     (run) =>
       run.status === "awaiting-confirmation" &&
