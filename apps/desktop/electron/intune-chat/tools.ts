@@ -266,6 +266,9 @@ export async function executeIntuneChatTool(
           ...(typeof snapshot.pageLimitReached === "boolean"
             ? { pageLimitReached: snapshot.pageLimitReached }
             : {}),
+          ...(typeof snapshot.lastError === "string" && snapshot.lastError
+            ? { error: snapshot.lastError }
+            : {}),
         };
       }
       if (tool === "refresh_resource" && record.ok === true && typeof record.resource === "string") {

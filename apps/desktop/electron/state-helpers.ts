@@ -1317,6 +1317,7 @@ export function buildIntuneChatSources(input: {
         path: request.path,
         ...(request.select ? { select: request.select } : {}),
         ...(request.query ? { query: request.query } : {}),
+        ...(read.error ? { error: read.error } : {}),
       }));
       const liveEntries = (liveGraphByResource.get(status.resource) ?? [])
         .filter((liveEntry) => liveEntry.graphSource)

@@ -1014,6 +1014,8 @@ export interface IntuneChatToolTraceEntry {
     pages?: number;
     pageLimitReached?: boolean;
     fromRefresh?: boolean;
+    /** Snapshot warning at read time, for example a failed refresh. */
+    error?: string;
   };
   durationMs: number;
   createdAt: string;
