@@ -288,6 +288,14 @@ function IntuneChatContent() {
   const [stopping, setStopping] = useState(false);
   const [sendState, dispatchSend] = useReducer(chatSendReducer, initialChatSendState);
   const [failedRequest, setFailedRequest] = useState<FailedChatRequest | null>(null);
+  const [errorReloadToken, setErrorReloadToken] = useState(0);
+  const handleReloadAfterError = () => {
+    setError(null);
+    setErrorReloadToken((current) => current + 1);
+    void loadShell(activeConversationId ?? undefined).catch((caught) =>
+      setError(caught instanceof Error ? caught.message : String(caught)),
+    );
+  };
   const [runningAgentSlug, setRunningAgentSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatProgress, setChatProgress] = useState<ChatProgressState | null>(null);
@@ -333,6 +341,7 @@ function IntuneChatContent() {
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
+  const activeStreamIdRef = useRef<string | null>(null);
   const initialQuestionConsumedRef = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
   const progressClearTimerRef = useRef<number | null>(null);
@@ -433,7 +442,7 @@ function IntuneChatContent() {
       .catch((caught) =>
         setError(caught instanceof Error ? caught.message : String(caught)),
       );
-  }, []);
+  }, [errorReloadToken]);
 
   useEffect(() => {
     setAttachedWorkspaceId((current) =>
@@ -463,7 +472,7 @@ function IntuneChatContent() {
       .catch((caught) =>
         setError(caught instanceof Error ? caught.message : String(caught)),
       );
-  }, [attachedWorkspaceId]);
+  }, [attachedWorkspaceId, errorReloadToken]);
 
   useEffect(() => {
     if (scopeMode !== "selected" || selectedTenantIds.length > 0) return;
@@ -515,7 +524,7 @@ function IntuneChatContent() {
       .catch((caught) =>
         setError(caught instanceof Error ? caught.message : String(caught)),
       );
-  }, [activeConversationId, conversations, sending]);
+  }, [activeConversationId, conversations, sending, errorReloadToken]);
 
   useEffect(() => {
     if (draftConversationRef.current === activeConversationId) return;
@@ -622,7 +631,7 @@ function IntuneChatContent() {
     setError(null);
     setChatProgress(createStoppedChatProgress("Stopping response."));
     try {
-      await api.cancelIntuneChatStream();
+      await api.cancelIntuneChatStream(activeStreamIdRef.current ?? undefined);
     } catch (caught) {
       setStopping(false);
       dispatchSend({ type: "stop-failed" });
@@ -886,6 +895,8 @@ function IntuneChatContent() {
     let failed = false;
     let cancelled = false;
     let reachedTerminal = false;
+    const streamId = window.crypto.randomUUID();
+    activeStreamIdRef.current = streamId;
     try {
       const result = await api.streamIntuneChatMessage(
         {
@@ -979,6 +990,7 @@ function IntuneChatContent() {
             }
           }
         },
+        { streamId },
       );
       setPendingConversation(result.conversation);
       upsertConversation(result.conversation);
@@ -1025,6 +1037,7 @@ function IntuneChatContent() {
         ),
       );
     } finally {
+      if (activeStreamIdRef.current === streamId) activeStreamIdRef.current = null;
       sendInFlightRef.current = false;
       setSending(false);
       setStopping(false);
@@ -1675,6 +1688,10 @@ function IntuneChatContent() {
               notice={notice}
               retryLabel={failedRequest ? chatErrorCopy(error ?? "").action.label : undefined}
               onRetry={failedRequest ? () => void handleRetryFailedSend() : undefined}
+              onReload={handleReloadAfterError}
+              onOpenSettings={() => navigate("/settings/providers")}
+              onDismissError={() => setError(null)}
+              onDismissNotice={() => setNotice(null)}
             />
             {renderComposer("home")}
             {needsYouCount > 0 ? (
@@ -1766,6 +1783,8 @@ function IntuneChatContent() {
         <div
           ref={messagesScrollRef}
           onScroll={handleConversationScroll}
+          role="log"
+          aria-label="Conversation"
           className="min-h-0 flex-1 overflow-y-auto"
         >
           <div className="mx-auto flex min-h-full w-full max-w-[788px] flex-col px-6 pb-14 pt-[18px]">
@@ -1901,12 +1920,16 @@ function IntuneChatContent() {
               notice={notice}
               retryLabel={failedRequest ? chatErrorCopy(error ?? "").action.label : undefined}
               onRetry={failedRequest ? () => void handleRetryFailedSend() : undefined}
+              onReload={handleReloadAfterError}
+              onOpenSettings={() => navigate("/settings/providers")}
+              onDismissError={() => setError(null)}
+              onDismissNotice={() => setNotice(null)}
             />
             {renderComposer("docked")}
           </div>
         </div>
         <div aria-live="polite" aria-atomic="true" className="sr-only">
-          {sendState.phase === "failed" ? "" : sendState.announcement}
+          {sendState.phase === "failed" && error ? "" : sendState.announcement}
         </div>
       </section>
       {calmModals}
@@ -2184,6 +2207,7 @@ function ChatComposer({
           id={`intune-chat-composer-${placement}`}
           name={`intune-chat-composer-${placement}`}
           ref={textareaRef}
+          autoFocus
           rows={1}
           disabled={disabled}
           value={value}
@@ -2414,11 +2438,19 @@ function ChatNotices({
   notice,
   retryLabel,
   onRetry,
+  onReload,
+  onOpenSettings,
+  onDismissError,
+  onDismissNotice,
 }: {
   error: string | null;
   notice: string | null;
   retryLabel?: string;
   onRetry?: () => void;
+  onReload?: () => void;
+  onOpenSettings?: () => void;
+  onDismissError?: () => void;
+  onDismissNotice?: () => void;
 }) {
   return (
     <>
@@ -2430,12 +2462,27 @@ function ChatNotices({
               {chatErrorCopy(error).why ?? "Retry the action. If it still fails, review the provider and tenant connection in Settings."}
             </div>
           </div>
-          {onRetry ? <Button size="sm" variant="secondary" onClick={onRetry}>{retryLabel ?? "Retry"}</Button> : null}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {onRetry ? (
+              <Button size="sm" variant="secondary" onClick={onRetry}>{retryLabel ?? "Retry"}</Button>
+            ) : (
+              <>
+                {onReload ? <Button size="sm" variant="secondary" onClick={onReload}>Reload chat</Button> : null}
+                {onOpenSettings ? <Button size="sm" variant="ghost" onClick={onOpenSettings}>Open Settings</Button> : null}
+              </>
+            )}
+            {onDismissError ? (
+              <IconButton size="sm" label="Dismiss error" tooltip="Dismiss" icon={<IconClose size={12} />} onClick={onDismissError} />
+            ) : null}
+          </div>
         </div>
       ) : null}
       {notice ? (
-        <div role="status" className="mb-3 rounded-[10px] bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
-          {notice}
+        <div role="status" className="mb-3 flex items-start justify-between gap-4 rounded-[10px] bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+          <span className="min-w-0">{notice}</span>
+          {onDismissNotice ? (
+            <IconButton size="sm" label="Dismiss notice" tooltip="Dismiss" icon={<IconClose size={12} />} onClick={onDismissNotice} />
+          ) : null}
         </div>
       ) : null}
     </>
@@ -3930,9 +3977,10 @@ function AnswerScopeDisclosure({
   );
   const resourceNames = [...new Set(sources.map((source) => source.label))].join(", ");
   const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
-  const hasDetails = Boolean(notice || sources.length > 0 || trace.length > 0);
+  const hasDetails = Boolean(sources.length > 0 || trace.length > 0);
 
   return (
+    <>
     <details className="group/details mb-2.5">
       <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-md text-sm text-[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] [&::-webkit-details-marker]:hidden">
         {multiTenant ? (
@@ -3956,16 +4004,20 @@ function AnswerScopeDisclosure({
         </span>
       </summary>
       <div className="mt-2 border-l-2 border-[var(--color-border)] pl-3 text-sm text-[var(--color-text-soft)]">
-        {notice ? (
-          <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[var(--color-warning)]">
-            {notice}
-          </div>
-        ) : null}
         {sources.length > 0 ? <SourceDetails sources={sources} /> : null}
         {trace.length > 0 ? <ToolTraceDetails trace={trace} /> : null}
         {!hasDetails ? <div className="py-1">No source trace was stored for this answer.</div> : null}
       </div>
     </details>
+    {notice ? (
+      // A fallback or repair notice changes how much the answer can be
+      // trusted, so it stays visible next to the answer instead of
+      // hiding inside the collapsed details.
+      <div role="status" className="mb-2.5 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
+        {notice}
+      </div>
+    ) : null}
+    </>
   );
 }
 

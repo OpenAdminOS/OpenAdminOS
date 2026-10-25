@@ -429,7 +429,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
           <label className="block text-sm font-medium text-[var(--color-text-soft)]">
             Conversation title
             <input
-              autoFocus
+              data-autofocus
               name="conversation-title"
               value={renameTitle}
               onChange={(event) => setRenameTitle(event.target.value)}
