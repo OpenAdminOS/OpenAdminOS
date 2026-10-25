@@ -2406,8 +2406,10 @@ export interface OpenAdminOSApi {
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
+    options?: { streamId?: string },
   ): Promise<SendIntuneChatMessageResult>;
-  cancelIntuneChatStream(): Promise<void>;
+  /** Cancels one stream when an id is given; omitting it cancels every active stream in this renderer (legacy). */
+  cancelIntuneChatStream(streamId?: string): Promise<void>;
   listTenantGroups(): Promise<TenantGroup[]>;
   saveTenantGroup(input: { id?: string; name: string; tenantIds: string[] }): Promise<TenantGroup>;
   deleteTenantGroup(id: string): Promise<void>;

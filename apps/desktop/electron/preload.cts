@@ -98,8 +98,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-intune-chat-messages", conversationId),
   sendIntuneChatMessage: (input) =>
     ipcRenderer.invoke("openadminos:send-intune-chat-message", input),
-  streamIntuneChatMessage: (input, onEvent) => {
-    const streamId = crypto.randomUUID();
+  streamIntuneChatMessage: (input, onEvent, options) => {
+    const streamId = options?.streamId ?? crypto.randomUUID();
     let cleanedUp = false;
     let terminalEventSeen = false;
     activeIntuneChatStreamIds.add(streamId);
@@ -134,11 +134,14 @@ const api: OpenAdminOSApi = {
         }
       });
   },
-  cancelIntuneChatStream: async () => {
-    const streamIds = [...activeIntuneChatStreamIds];
+  cancelIntuneChatStream: async (streamId?: string) => {
+    // Scope cancellation to the caller's own stream when it names one.
+    // Cancelling every active stream let one surface's Stop kill an
+    // unrelated in-flight answer in the same renderer.
+    const streamIds = streamId ? [streamId] : [...activeIntuneChatStreamIds];
     await Promise.all(
-      streamIds.map((streamId) =>
-        ipcRenderer.invoke("openadminos:cancel-intune-chat-stream", streamId),
+      streamIds.map((id) =>
+        ipcRenderer.invoke("openadminos:cancel-intune-chat-stream", id),
       ),
     );
   },

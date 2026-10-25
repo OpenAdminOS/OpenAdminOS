@@ -53,6 +53,7 @@ export default function MenuBarCompanion() {
   const [busyAction, setBusyAction] = useState<"refresh" | "run-due" | null>(null);
   const [lastSnapshotAt, setLastSnapshotAt] = useState<Date | null>(null);
   const sendingRef = useRef(false);
+  const activeStreamIdRef = useRef<string | null>(null);
   const hasBridge = Boolean(window.openAdminOS);
 
   const loadSnapshot = useCallback(async () => {
@@ -141,6 +142,8 @@ export default function MenuBarCompanion() {
     };
 
     sendingRef.current = true;
+    const streamId = window.crypto.randomUUID();
+    activeStreamIdRef.current = streamId;
     setPrompt("");
     setNotice(null);
     setChat({
@@ -209,7 +212,7 @@ export default function MenuBarCompanion() {
           });
           void loadSnapshot();
         }
-      });
+      }, { streamId });
     } catch {
       setChat({
         phase: "idle",
@@ -219,12 +222,13 @@ export default function MenuBarCompanion() {
       });
       setNotice("Continue in the full app to use Chat.");
     } finally {
+      if (activeStreamIdRef.current === streamId) activeStreamIdRef.current = null;
       sendingRef.current = false;
     }
   };
 
   const stopChat = async () => {
-    await window.openAdminOS?.cancelIntuneChatStream();
+    await window.openAdminOS?.cancelIntuneChatStream(activeStreamIdRef.current ?? undefined);
   };
 
   const refreshCache = async () => {
