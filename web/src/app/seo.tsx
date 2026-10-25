@@ -7,12 +7,29 @@ export const GITHUB_URL = "https://github.com/OpenAdminOS/OpenAdminOS";
 export const DOCS_URL = "https://docs.openadminos.com/";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/openadminos/";
 export const SUPPORT_EMAIL = "support@openadminos.com";
-export const LEGAL_ENTITY_NAME = "OpenAdminOS";
+/** The company behind OpenAdminOS. The product name stays OpenAdminOS. */
+export const LEGAL_ENTITY_NAME = "Ugurlabs UG (haftungsbeschränkt)";
+/** Short form for running text, after the full name has been introduced. */
+export const LEGAL_ENTITY_SHORT_NAME = "Ugurlabs";
 export const MANAGING_DIRECTOR_NAME = "Ugur Koc";
+export const LEGAL_ENTITY_REGISTER = {
+  court: "Amtsgericht Düsseldorf",
+  // Non-breaking space: the register number should not wrap.
+  number: "HRB\u00a0113979",
+} as const;
+/** USt-IdNr. under § 27a UStG. */
+export const LEGAL_ENTITY_VAT_ID = "DE464886395";
+/**
+ * Trademark and relationship notice, shared by the footer, legal notice, and
+ * terms so the wording cannot drift. Ugurlabs is a Microsoft partner; the
+ * product itself is independent of Microsoft.
+ */
+export const MICROSOFT_NOTICE =
+  "Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks of the Microsoft group of companies. Ugurlabs is a member of the Microsoft AI Cloud Partner Program. OpenAdminOS is an independent product and is not made, endorsed, or sponsored by Microsoft.";
 export const LEGAL_ENTITY_ADDRESS = {
-  streetAddress: "Winterhuder Weg 29",
-  postalCode: "22085",
-  addressLocality: "Hamburg",
+  streetAddress: "Fährstraße 217",
+  postalCode: "40221",
+  addressLocality: "Düsseldorf",
   addressCountry: "DE",
 } as const;
 export const LEGAL_ENTITY_ADDRESS_LINES = [
@@ -97,6 +114,7 @@ export function organizationSchema() {
     name: SITE_NAME,
     alternateName: "Open Admin OS",
     legalName: LEGAL_ENTITY_NAME,
+    vatID: LEGAL_ENTITY_VAT_ID,
     employee: {
       "@type": "Person",
       name: MANAGING_DIRECTOR_NAME,
@@ -130,7 +148,7 @@ export function websiteSchema() {
 }
 
 export function softwareApplicationSchema(input?: {
-  version?: string;
+  version?: string | null;
   downloadUrl?: string;
   operatingSystem?: string;
   availability?: string;
@@ -142,7 +160,7 @@ export function softwareApplicationSchema(input?: {
     applicationCategory: "BusinessApplication",
     applicationSubCategory: "Microsoft 365 administration",
     operatingSystem: input?.operatingSystem ?? "Windows, macOS, Linux",
-    softwareVersion: input?.version,
+    softwareVersion: input?.version ?? undefined,
     description: HOME_DESCRIPTION,
     isAccessibleForFree: true,
     license: `${GITHUB_URL}/blob/main/LICENSE`,

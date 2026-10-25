@@ -30,12 +30,12 @@ export const metadata: Metadata = pageMetadata({
   path: "/benchmarks",
 });
 
-// The local model uses the site accent. Hosted models use neutral grays so
-// charts stay legible without introducing additional brand accents.
+// One theme-aware series color per model, assigned in a fixed order so a
+// model keeps its color on every chart (see --color-chart-* in globals.css).
 const COLOURS: Record<string, string> = {
-  "openadmin-8b": "var(--color-brand-accent)",
-  "claude-opus-5": "#c5cedd",
-  "gpt-5-6-sol": "#8190a7",
+  "openadmin-8b": "var(--color-chart-1)",
+  "claude-opus-5": "var(--color-chart-2)",
+  "gpt-5-6-sol": "var(--color-chart-3)",
 };
 
 const data = benchmarkData;
@@ -87,10 +87,10 @@ export default function BenchmarksPage() {
       />
 
       <section className="w-full max-w-7xl pt-10 sm:pt-16">
-        <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+        <p className="text-sm font-medium text-brand-faint">
           Measured, not claimed
         </p>
-        <h1 className="mt-3 max-w-3xl text-4xl font-semibold tracking-tight sm:text-5xl">
+        <h1 className="font-display mt-4 max-w-3xl text-balance text-[2.6rem] leading-[1.05] sm:text-[4rem]">
           A {data.taskCount}-task benchmark for the work admins actually do.
         </h1>
         <p className="mt-5 max-w-2xl text-base leading-7 text-brand-muted">
@@ -104,7 +104,7 @@ export default function BenchmarksPage() {
           {ranked.map((model) => (
             <div
               key={model.id}
-              className={`rounded-xl border bg-brand-surface p-5 ${
+              className={`rounded-[18px] border bg-brand-surface p-5 ${
                 model.kind === "own"
                   ? "border-brand-accent/45"
                   : "border-brand-line"
@@ -136,10 +136,10 @@ export default function BenchmarksPage() {
 
       <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             The index
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             Five sub-evaluations, one score.
           </h2>
           <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
@@ -160,7 +160,7 @@ export default function BenchmarksPage() {
                 className="grid gap-4 border-t border-brand-line pt-6 lg:grid-cols-[minmax(0,22rem)_1fr]"
               >
                 <div>
-                  <h3 className="text-base font-semibold">{category.name}</h3>
+                  <h3 className="font-display text-[1.35rem] leading-tight">{category.name}</h3>
                   <p className="mt-1.5 text-sm leading-5 text-brand-muted">
                     {category.blurb}
                   </p>
@@ -202,10 +202,10 @@ export default function BenchmarksPage() {
 
       <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             The trade-off
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             What the score costs you.
           </h2>
           <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
@@ -219,7 +219,7 @@ export default function BenchmarksPage() {
         </div>
 
         <div className="mt-10 grid gap-10 lg:grid-cols-2">
-          <div className="rounded-xl border border-brand-line bg-brand-surface p-5">
+          <div className="rounded-[18px] border border-brand-line bg-brand-surface p-5">
             <TradeoffChart
               data={data}
               colours={COLOURS}
@@ -230,7 +230,7 @@ export default function BenchmarksPage() {
               title="Benchmark score against median seconds per task"
             />
           </div>
-          <div className="rounded-xl border border-brand-line bg-brand-surface p-5">
+          <div className="rounded-[18px] border border-brand-line bg-brand-surface p-5">
             <TradeoffChart
               data={data}
               colours={COLOURS}
@@ -246,10 +246,10 @@ export default function BenchmarksPage() {
 
       <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             Where they diverge
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             Every task, in the order it was asked.
           </h2>
           <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
@@ -257,17 +257,17 @@ export default function BenchmarksPage() {
             exactly where a lead was won rather than taking a total on trust.
           </p>
         </div>
-        <div className="mt-8 rounded-xl border border-brand-line bg-brand-surface p-5">
+        <div className="mt-8 rounded-[18px] border border-brand-line bg-brand-surface p-5">
           <DivergenceChart data={data} colours={COLOURS} />
         </div>
       </section>
 
       <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             Specifications
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             What each model is.
           </h2>
           <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
@@ -340,10 +340,10 @@ export default function BenchmarksPage() {
       <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="grid gap-10 lg:grid-cols-[0.9fr_1.1fr]">
           <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+            <p className="text-sm font-medium text-brand-faint">
               Reading this honestly
             </p>
-            <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+            <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
               The frontier models are not bad at this.
             </h2>
             <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
@@ -356,14 +356,14 @@ export default function BenchmarksPage() {
             </p>
             <Link
               href="/download"
-              className="mt-6 inline-flex rounded-md bg-brand-ink px-4 py-2 text-sm font-semibold text-brand-bg transition hover:bg-brand-ink/90"
+              className="mt-6 inline-flex rounded-[10px] bg-brand-ink px-4 py-2 text-sm font-semibold text-brand-on-ink transition hover:bg-brand-ink-hover"
             >
               Download OpenAdminOS
             </Link>
           </div>
 
           <ul className="space-y-4 text-sm leading-6 text-brand-muted">
-            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
+            <li className="rounded-[14px] border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 The task set is ours.
               </span>{" "}
@@ -372,7 +372,7 @@ export default function BenchmarksPage() {
               behaviour we trained for, and another admin would weight these
               categories differently.
             </li>
-            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
+            <li className="rounded-[14px] border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 The hosted models were reached through their CLIs.
               </span>{" "}
@@ -380,7 +380,7 @@ export default function BenchmarksPage() {
               their own system prompts. This measures what an admin would
               experience rather than base weights.
             </li>
-            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
+            <li className="rounded-[14px] border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 Scorers are mechanical, and imperfect.
               </span>{" "}
@@ -389,7 +389,7 @@ export default function BenchmarksPage() {
               vocabulary; that work raised the hosted models&rsquo; scores, not
               ours.
             </li>
-            <li className="rounded-lg border border-brand-line bg-brand-surface p-4">
+            <li className="rounded-[14px] border border-brand-line bg-brand-surface p-4">
               <span className="font-semibold text-brand-ink">
                 Timing used {data.timedTaskCount} tasks, not {data.taskCount}.
               </span>{" "}
@@ -402,10 +402,10 @@ export default function BenchmarksPage() {
 
       <section className="w-full max-w-7xl border-t border-brand-line py-16">
         <div className="max-w-3xl">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             Reproduce it
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight sm:text-4xl">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             Run the same tasks yourself.
           </h2>
           <p className="mt-4 text-sm leading-6 text-brand-muted sm:text-base">
@@ -413,7 +413,7 @@ export default function BenchmarksPage() {
             repository. Measured {generated}.
           </p>
         </div>
-        <pre className="mt-6 overflow-x-auto rounded-xl border border-brand-line-strong bg-brand-raised p-5 text-xs leading-6 text-brand-muted">
+        <pre className="mt-6 overflow-x-auto rounded-[18px] border border-brand-line-strong bg-brand-raised p-5 text-xs leading-6 text-brand-muted">
           <code>{`ollama run openadminos/openadmin-8b
 
 node eval/run-external.mjs --label mine --cmd claude --model opus --limit ${data.taskCount}
@@ -423,7 +423,7 @@ node site-benchmarks/export-benchmark-data.mjs`}</code>
           href={`${GITHUB_URL}/tree/main/model`}
           target="_blank"
           rel="noreferrer"
-          className="mt-5 inline-flex text-sm font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
+          className="mt-5 inline-flex text-sm font-medium text-link"
         >
           Browse the evaluation pipeline on GitHub
         </Link>

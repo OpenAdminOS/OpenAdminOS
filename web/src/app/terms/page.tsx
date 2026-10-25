@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { type Metadata } from "next";
 
+import { MarketingShell } from "../MarketingShell";
+
 import {
   JsonLd,
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
+  LEGAL_ENTITY_SHORT_NAME,
+  MICROSOFT_NOTICE,
   SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
@@ -14,7 +18,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-06-04";
+const LAST_UPDATED = "2026-10-25";
 const TITLE = "Terms of use";
 const DESCRIPTION =
   "Terms that govern use of the OpenAdminOS desktop app, website, open-source runtime, and community agent registry.";
@@ -46,42 +50,23 @@ export default function TermsPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-brand-bg text-brand-ink">
+    <MarketingShell>
       <JsonLd data={structuredData} />
-      <div
-        aria-hidden
-        className="brand-page-glow pointer-events-none absolute inset-x-0 top-0 h-[600px]"
-      />
-
-      <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
-        >
-          <img
-            src="/icon.svg"
-            alt=""
-            aria-hidden
-            className="h-5 w-5 rounded-[4px]"
-          />
-          OpenAdminOS
-        </Link>
-      </header>
-
-      <main className="relative z-10 mx-auto w-full max-w-2xl flex-1 px-6 pb-24 pt-10 sm:px-10 sm:pt-14">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+      <article className="mx-auto max-w-2xl">
+        <h1 className="font-display text-balance text-[2.6rem] leading-[1.05] sm:text-[3.5rem]">
           Terms of use
         </h1>
         <p className="mt-2 text-sm text-brand-muted">
           Last updated: {LAST_UPDATED}
         </p>
 
-        <div className="mt-10 space-y-10 text-sm leading-relaxed text-brand-ink/75">
+        <div className="mt-10 space-y-10 text-[15px] leading-7 text-brand-muted">
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">Summary</h2>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">Summary</h2>
             <p className="mt-3">
-              OpenAdminOS is open-source software operated by{" "}
-              {LEGAL_ENTITY_NAME} and distributed under the MIT License. These
+              OpenAdminOS is open-source software provided by{" "}
+              {LEGAL_ENTITY_NAME} (&ldquo;{LEGAL_ENTITY_SHORT_NAME}&rdquo;)
+              and distributed under the MIT License. These
               terms govern your use of the desktop app and the website at
               openadminos.com. By installing the app or using the site, you
               agree to them.
@@ -89,7 +74,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               The software is provided as-is
             </h2>
             <p className="mt-3">
@@ -99,20 +84,20 @@ export default function TermsPage() {
                 href="https://github.com/OpenAdminOS/OpenAdminOS/blob/main/LICENSE"
                 target="_blank"
                 rel="noreferrer"
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
               . That license disclaims warranties and limits liability. To
               repeat the substance in plain English: the software is provided
               &ldquo;as is&rdquo;, without warranty of any kind, express or
-              implied. OpenAdminOS is not liable for any damages arising from
+              implied. {LEGAL_ENTITY_SHORT_NAME} is not liable for any damages arising from
               your use of it.
             </p>
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               You are responsible for what you run
             </h2>
             <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
@@ -131,7 +116,7 @@ export default function TermsPage() {
               </li>
               <li>
                 Community-contributed agents in the registry are not authored
-                or audited by OpenAdminOS. You install and run them at your own
+                or audited by {LEGAL_ENTITY_SHORT_NAME}. You install and run them at your own
                 discretion. Read the source before running any agent against
                 a production tenant.
               </li>
@@ -139,7 +124,7 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Third-party services
             </h2>
             <p className="mt-3">
@@ -147,14 +132,14 @@ export default function TermsPage() {
               credentials and with the language-model provider you select
               (local providers such as Ollama or LM Studio, or hosted
               providers such as Anthropic, OpenAI, or Azure OpenAI). Your use
-              of those services is governed by their own terms and pricing.
-              OpenAdminOS is not a party to your contract with Microsoft or with
+              of those services is governed by their own terms and pricing.{" "}
+              {LEGAL_ENTITY_SHORT_NAME} is not a party to your contract with Microsoft or with
               your chosen language-model provider.
             </p>
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Acceptable use
             </h2>
             <p className="mt-3">
@@ -166,14 +151,14 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Privacy
             </h2>
             <p className="mt-3">
               Use of the desktop app and website is also governed by the{" "}
               <Link
                 href="/privacy"
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 privacy policy
               </Link>
@@ -182,19 +167,17 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Microsoft trademarks
             </h2>
             <p className="mt-3">
-              Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks
-              of the Microsoft group of companies. OpenAdminOS is not affiliated
-              with, endorsed by, or sponsored by Microsoft. References to those
-              services describe compatibility and administration targets only.
+              {MICROSOFT_NOTICE} References to those services describe
+              compatibility and administration targets only.
             </p>
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Changes
             </h2>
             <p className="mt-3">
@@ -206,14 +189,14 @@ export default function TermsPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Contact
             </h2>
             <p className="mt-3">
               Questions about these terms or the website:{" "}
               <Link
                 href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 {SUPPORT_EMAIL}
               </Link>
@@ -230,7 +213,7 @@ export default function TermsPage() {
               Provider details are listed in the{" "}
               <Link
                 href="/legal-notice"
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 legal notice
               </Link>
@@ -242,39 +225,12 @@ export default function TermsPage() {
         <div className="mt-16 border-t border-brand-line pt-8 text-xs text-brand-muted">
           <Link
             href="/"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
+            className="underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             &larr; Back to OpenAdminOS
           </Link>
         </div>
-      </main>
-
-      <footer className="relative z-10 border-t border-brand-line bg-brand-surface/60 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-brand-muted">
-          &copy; {new Date().getFullYear()} OpenAdminOS
-          {" · "}
-          <Link
-            href="/privacy"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Privacy
-          </Link>
-          {" · "}
-          <Link
-            href="/terms"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Terms
-          </Link>
-          {" · "}
-          <Link
-            href="/legal-notice"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Legal notice
-          </Link>
-        </span>
-      </footer>
-    </div>
+      </article>
+    </MarketingShell>
   );
 }

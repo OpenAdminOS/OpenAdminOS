@@ -1,10 +1,14 @@
 import Link from "next/link";
 import { type Metadata } from "next";
 
+import { MarketingShell } from "../MarketingShell";
+
 import {
   JsonLd,
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
+  LEGAL_ENTITY_SHORT_NAME,
+  MANAGING_DIRECTOR_NAME,
   SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
@@ -14,7 +18,7 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-06-07";
+const LAST_UPDATED = "2026-10-24";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
   "How OpenAdminOS handles Microsoft 365 tenant data, authentication tokens, LLM prompts, registry install counts, and website analytics.";
@@ -46,44 +50,24 @@ export default function PrivacyPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-brand-bg text-brand-ink">
+    <MarketingShell>
       <JsonLd data={structuredData} />
-      <div
-        aria-hidden
-        className="brand-page-glow pointer-events-none absolute inset-x-0 top-0 h-[600px]"
-      />
-
-      <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
-        >
-          <img
-            src="/icon.svg"
-            alt=""
-            aria-hidden
-            className="h-5 w-5 rounded-[4px]"
-          />
-          OpenAdminOS
-        </Link>
-      </header>
-
-      <main className="relative z-10 mx-auto w-full max-w-2xl flex-1 px-6 pb-24 pt-10 sm:px-10 sm:pt-14">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+      <article className="mx-auto max-w-2xl">
+        <h1 className="font-display text-balance text-[2.6rem] leading-[1.05] sm:text-[3.5rem]">
           Privacy policy
         </h1>
         <p className="mt-2 text-sm text-brand-muted">
           Last updated: {LAST_UPDATED}
         </p>
 
-        <div className="mt-10 space-y-10 text-sm leading-relaxed text-brand-ink/75">
+        <div className="mt-10 space-y-10 text-[15px] leading-7 text-brand-muted">
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">Summary</h2>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">Summary</h2>
             <p className="mt-3">
               OpenAdminOS is a desktop app for Microsoft 365 administrators. It
               runs on your computer. Your Microsoft 365 tenant data, local
-              model prompts, run history, and crash logs are not sent to
-              OpenAdminOS.
+              model prompts, run history, and crash logs are not sent to{" "}
+              {LEGAL_ENTITY_NAME}, the company behind OpenAdminOS.
             </p>
             <p className="mt-3">
               When you choose a hosted language-model provider (Anthropic,
@@ -95,24 +79,27 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Who is responsible
             </h2>
             <p className="mt-3">
-              OpenAdminOS is an open-source project operated by{" "}
-              {LEGAL_ENTITY_NAME}. The source is at{" "}
+              The controller under the GDPR for this website and for the data
+              described in this policy is {LEGAL_ENTITY_NAME}{" "}
+              (&ldquo;{LEGAL_ENTITY_SHORT_NAME}&rdquo;, &ldquo;we&rdquo;),
+              represented by its managing director, {MANAGING_DIRECTOR_NAME}.
+              OpenAdminOS is our open-source product. The source is at{" "}
               <Link
                 href="https://github.com/OpenAdminOS/OpenAdminOS"
                 target="_blank"
                 rel="noreferrer"
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
               . You can reach support at{" "}
               <Link
                 href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 {SUPPORT_EMAIL}
               </Link>
@@ -129,7 +116,7 @@ export default function PrivacyPage() {
               The full provider disclosure is available in the{" "}
               <Link
                 href="/legal-notice"
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 legal notice
               </Link>
@@ -138,7 +125,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               What the desktop app does on your computer
             </h2>
             <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
@@ -151,8 +138,7 @@ export default function PrivacyPage() {
                 to the Graph permissions you consented to. Those tokens are
                 stored in your operating-system keychain (macOS Keychain,
                 Windows Credential Manager) and used only by the local app to
-                call Microsoft Graph. They are never transmitted to
-                OpenAdminOS.
+                call Microsoft Graph. They are never transmitted to us.
               </li>
               <li>
                 <span className="text-brand-ink">Microsoft Graph data.</span>{" "}
@@ -168,8 +154,8 @@ export default function PrivacyPage() {
                   Language-model prompts (local provider).
                 </span>{" "}
                 When you select a local LLM provider such as Ollama or LM
-                Studio, prompts and responses stay on your machine. OpenAdminOS
-                does not see them.
+                Studio, prompts and responses stay on your machine. We do not
+                see them.
               </li>
               <li>
                 <span className="text-brand-ink">
@@ -178,9 +164,9 @@ export default function PrivacyPage() {
                 When you select Anthropic, OpenAI, or Azure OpenAI, prompts
                 (which may contain tenant data) are sent over TLS to that
                 provider, under their privacy policy and your account with
-                them. The OpenAdminOS UI labels the selected provider and the
-                region the API is hosted in. OpenAdminOS does not receive a
-                copy of these prompts.
+                them. The app names the selected provider and marks it as
+                hosted before any prompt is sent. We do not receive a copy of
+                these prompts.
               </li>
               <li>
                 <span className="text-brand-ink">No tenant telemetry.</span> The
@@ -221,7 +207,7 @@ export default function PrivacyPage() {
                   href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                  className="text-link"
                 >
                   GitHub&rsquo;s privacy statement
                 </Link>{" "}
@@ -231,7 +217,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               What this website does
             </h2>
             <ul className="mt-3 list-disc space-y-3 pl-5 marker:text-brand-muted">
@@ -244,7 +230,7 @@ export default function PrivacyPage() {
                   href="https://vercel.com/legal/privacy-policy"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                  className="text-link"
                 >
                   Vercel&rsquo;s privacy policy
                 </Link>
@@ -259,7 +245,7 @@ export default function PrivacyPage() {
                   href="https://plausible.io/"
                   target="_blank"
                   rel="noreferrer"
-                  className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                  className="text-link"
                 >
                   Plausible Analytics
                 </Link>{" "}
@@ -273,7 +259,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Your rights
             </h2>
             <p className="mt-3">
@@ -289,7 +275,7 @@ export default function PrivacyPage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Changes to this policy
             </h2>
             <p className="mt-3">
@@ -304,39 +290,12 @@ export default function PrivacyPage() {
         <div className="mt-16 border-t border-brand-line pt-8 text-xs text-brand-muted">
           <Link
             href="/"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
+            className="underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             &larr; Back to OpenAdminOS
           </Link>
         </div>
-      </main>
-
-      <footer className="relative z-10 border-t border-brand-line bg-brand-surface/60 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-brand-muted">
-          &copy; {new Date().getFullYear()} OpenAdminOS
-          {" · "}
-          <Link
-            href="/privacy"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Privacy
-          </Link>
-          {" · "}
-          <Link
-            href="/terms"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Terms
-          </Link>
-          {" · "}
-          <Link
-            href="/legal-notice"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Legal notice
-          </Link>
-        </span>
-      </footer>
-    </div>
+      </article>
+    </MarketingShell>
   );
 }

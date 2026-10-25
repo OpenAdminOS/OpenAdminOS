@@ -130,11 +130,17 @@ The marketing site exposes provider identification at `/legal-notice`, linked
 from the footer alongside privacy and terms. `/impressum` remains a redirect
 alias. The page title uses the international label "Legal notice" while the page
 copy explicitly identifies it as the Impressum / provider identification under
-§ 5 DDG. The legal operator is OpenAdminOS, Winterhuder
-Weg 29, 22085 Hamburg, Germany, reachable at `support@openadminos.com`. The
-listed managing director is Ugur Koc. The register court/register number and VAT
-ID if issued still need confirmation before the provider identification is
-legally complete.
+§ 5 DDG. OpenAdminOS is the product; the company behind it and legal operator
+is Ugurlabs UG (haftungsbeschränkt), Fährstraße 217, 40221 Düsseldorf, Germany,
+registered at Amtsgericht Düsseldorf under HRB 113979, reachable at
+`support@openadminos.com`. The managing director is Ugur Koc. The privacy policy
+names the company as GDPR controller, the terms name it as the provider, and
+the footer copyright uses the company name. The details live once in
+`web/src/app/seo.tsx`, including the VAT ID (DE464886395, § 27a UStG), which is
+also in the organization structured data. One shared Microsoft notice in the
+footer, legal notice, and terms states that Ugurlabs is a member of the
+Microsoft AI Cloud Partner Program and that OpenAdminOS is an independent
+product, not made, endorsed, or sponsored by Microsoft.
 Marketing headers use a compact mobile stack menu below the desktop breakpoint.
 The trigger sits in the same row as the OpenAdminOS logo and the menu closes on
 outside click, Escape, or link activation.
@@ -150,42 +156,82 @@ items, because they target durable admin search and product-evaluation topics.
 The examples gallery at `/examples` is also a secondary marketing page, with
 copyable Build your own Agent prompts grouped by read investigations, confirmed
 write plans, and connector-backed delivery examples.
-The marketing homepage retains its hero, traction, testimonials,
-how-it-works, write-gate, benchmarks, open-source, FAQ, and download sections.
-The hero product area uses unedited screenshots captured from the built Electron
-app with an isolated synthetic-data profile. Invisible, keyboard-accessible
-hotspots are measured from the actual controls in each captured screen. Sidebar,
-settings sections, agent details, and selected dialogs navigate between those
-screens. The website must not re-create or approximate the desktop interface in
-HTML. Actions not represented by a captured screen explain that they require the
-desktop app; they do not simulate a successful write, installation, or connection.
-No external preview label, walkthrough, or reset toolbar is shown. The tenant
-selector offers Contoso, Dev Tenant, and Customer Tenant. Selecting a tenant
-preserves the current page and uses that tenant’s real captures throughout
-navigation. Tenant names and account identifiers use plain customer labels. Screenshots keep
-the actual app aspect ratio. Small screens can pan within the preview instead of
-receiving a different invented mobile UI. Screenshot transitions respect reduced
-motion. Agent Team opens in the expanded office with Chief of Staff, Policy Watcher,
-and Device Investigator. Its room animation is a muted recording of the built app,
-positioned over the matching room capture. The pause control switches to an actual
-paused capture; reduced-motion users see the static office. Playback stops when
-the preview is offscreen or the browser tab is hidden. The current Contoso
-populated Chat answer capture is also the no-JavaScript fallback.
+The marketing homepage (calm identity, 2026-10-23) follows the art direction
+of large AI product sites (researched: Anthropic, Claude Code, OpenAI, Cursor,
+Mistral, Cohere, Sierra, Harvey, Factory, Cognition, Linear, ElevenLabs,
+Decagon, Glean): product windows always sit on an art stage, the site owns a
+visual language, and credibility comes from real momentum rather than claims.
+Order: a release announcement bar; a split hero (serif headline left, deck and
+OS-aware download right); the real Chat capture in a window frame on a
+relief-map stage with two floating cards quoting real app strings; a
+works-with grid of model providers and model families (Ollama, LM Studio,
+Apple Foundation, Mistral, Muse by Meta, Claude Code, OpenAI Codex, GitHub
+Copilot, Google Gemini, Microsoft AI, Azure OpenAI, and a closing "Other local
+models" cell for anything run through Ollama or LM Studio; Microsoft tenant
+services are not listed
+there), with Simple Icons (CC0) marks for Ollama, LM Studio, Claude Code, and
+GitHub Copilot and the monochrome icon from Mistral's official brand kit;
+Microsoft, Apple, OpenAI, Google, and Meta entries stay as names because those
+vendors restrict third-party logo use (Meta requires brand review for every
+use of its logo); on hover each cell
+fills from the bottom with
+a shaded tint of that company's brand color; a
+two-tone lead and three isometric line figures (FIG 0.1 to 0.3) that draw
+themselves once on reveal; a product tour of real captures (Chat, Agents,
+Agent Team, Write confirmation, Models), shown as five tabs over one
+full-width capture on large screens and as an accordion with a sidebar-free
+crop below that, that auto-advances while visible unless reduced motion is
+set, pauses under the pointer or while keyboard focus is inside it, offers a
+Pause/Play button (WCAG 2.2.2), crossfades captures and stage art (the
+captures for the active theme are preloaded), and keeps one height so the page
+does not shift; a
+Security band with a local versus hosted data table and four guarantees; a
+write-confirmation spotlight on the real capture; a registry table; benchmark
+bars; open source stats, a changelog of the latest stable GitHub releases
+(nightlies and the documentation index are excluded; the section is omitted if
+GitHub is unavailable), and one named quote; FAQ; and a
+closing stage. Stage art is original: seeded relief maps generated by
+`web/scripts/stage-art` in sand, sage, slate, and clay with graphite dark
+variants, served from `web/public/art/`. Inner page intros use the same split
+header with an art strip in a page-specific tone. Product images are unedited
+desktop captures from `npm run screenshots:landing`: the app lays out at
+1280 x 800 and is captured at 2x (page zoom in a 2560 x 1600 window, run under
+Xvfb with X11 forced so a Wayland session cannot clamp the window), in light
+and dark, into `docs/screenshots/landing/`, then converted to WebP under
+`web/public/app/` and swapped with the site theme. The landing capture uses the
+website demo tenant (Contoso, three Agent Team teammates) and realistic display
+values (`gpt-oss:20b`, `admin@contoso.com`, the connected Ollama endpoint) in
+place of the smoke-test fixtures; smoke tests and the layout captures are
+unchanged. Captures are taken with no focused control and the pointer parked,
+so no focus rings or hover states appear. Crops scale a region of a capture
+and never redraw the interface. The earlier clickable screenshot viewer, its
+captures, and its interaction contract were removed with the calm redesign
+(decided 2026-10-25); the homepage shows only the landing captures.
 The traction strip and CTA star count only render
-real numbers: GitHub stars from the unauthenticated repo API and total release
-asset downloads across all releases (both revalidated hourly), plus the community
-agent count from the synced `public/stats/agents.json`. Downloads replace the
+real numbers: GitHub stars from the unauthenticated repo API (revalidated
+hourly), total release asset downloads across all releases (revalidated every
+15 minutes with the shared releases request), and the registry agent count from
+the synced `agents/index.json`. Downloads replace the
 aggregate agent installation count and match the README's total-downloads badge.
 When a source is unavailable its cell is omitted, never faked. Registry
-agent display metadata (names, descriptions, mode, scopes) is curated in
-`web/src/lib/stats/summary.ts` because repo-root `agents/index.json` is not
-available inside the `web/` Vercel build. Historical demo video assets are rendered offline from the top-level `remotion/`
+agent display metadata (names, mode, scopes) and the homepage "Registry
+agents" count both come from repo-root `agents/index.json`, which
+`web/scripts/sync-stats.mjs` copies (or, on Vercel, fetches at the deployed
+commit) into the gitignored `web/src/generated/` before dev, build, and
+typecheck, so the two numbers cannot disagree. The homepage changelog and the
+download total share one paginated GitHub releases request per render. The
+release announcement bar only appears when GitHub reported a version tag.
+The primary download button server-renders a platform-neutral "Download"
+link to `/download` (also the no-JavaScript state); after hydration a
+recognized Windows, macOS, or Linux desktop gets its installer directly, and
+phones, tablets, and ChromeOS are told plainly that OpenAdminOS is a desktop
+app. Benchmark charts use three fixed, theme-aware series colors
+(`--color-chart-1..3`: blue, orange, aqua) validated for colorblind and
+normal-vision separation on paper and graphite; labels stay in text colors.
+Scroll-reveal sections are shown in print, and reveal elements mounted after
+the first pass are picked up by a MutationObserver. Historical demo video assets are rendered offline from the top-level `remotion/`
 project (not part of the npm workspace, never installed on Vercel) and retained
-under `web/public/videos/`. The current homepage uses the clickable screenshot viewer
-instead. Its styling follows the Midnight desktop tokens and preserves
-the sidebar, tenant context, provider disclosure, and status-strip conventions.
-See `docs/brand/interactive-product-demo.md` for the interaction contract and
-verification notes.
+under `web/public/videos/`.
 Blog articles live as Markdown in `web/content/blog/`, are server-rendered into
 the Next.js blog routes at build time, are listed in the sitemap and `llms.txt`,
 use `BlogPosting` structured data, and answer real Microsoft 365 admin
@@ -1808,13 +1854,23 @@ chrome when that preference changes. Midnight remains an explicit dark theme.
 The preference stays on the device, is synchronized across renderer windows,
 and emits no telemetry. Saved `graphite` and `dark` values map to Dark;
 `off-white`, `sand`, and `light` map to Light; `midnight` remains Midnight.
-Unknown old values safely fall back to System. The public website uses the
-Midnight dark theme with one blue accent. Its
-base is `#0B1018`, cards use `#111826`, primary actions use light text-colored
-surfaces, and `#7AA2FF` is the only non-semantic accent. The hero shows a matching
-Midnight desktop capture inside a bordered, raised stage with a restrained blue
-glow. The animated change-review demo uses dark surfaces and reserves red for its
-destructive operation and typed confirmation state.
+Unknown old values safely fall back to System. The public website offers a
+header theme toggle that switches between Light and Dark, so every click
+changes what is shown; choosing the theme the operating system already uses
+clears the stored choice and the site follows the system again. All toggle
+instances read `data-theme` on `<html>`, so they stay in sync (other tabs via
+the storage event). The choice is stored in `localStorage` on the device (no
+cookie) and applied by an inline script before first paint, and without
+JavaScript the site follows `prefers-color-scheme`. Colors are `light-dark()`
+tokens keyed off `data-theme` on `<html>`; Lightning CSS (inside Tailwind v4)
+compiles them to plain-color variable toggles, so browsers without native
+`light-dark()` support still get the palette. It uses the same warm paper Light and graphite
+Dark palettes, ink-colored primary actions, Newsreader for headlines and Geist
+for the interface (self-hosted through `@fontsource-variable`, no runtime font
+requests), sentence case, and the `oa` mark with a Newsreader "OpenAdminOS"
+wordmark. Inverted ink bands re-scope the same tokens. Color is reserved for
+meaning: focus, local (success) versus hosted (warning), read versus write, and
+destructive red in the write-confirmation illustration.
 Semantic success, warning, danger, information, and reasoning colors remain
 separate from the brand accent. Destructive approval uses danger; typed
 confirmation and tenant/provider trust behavior are unchanged.
@@ -1827,10 +1883,11 @@ and companion surfaces consume these tokens. The Agent Team illustration is
 neutral, while activity and attention indicators retain semantic color.
 
 `web/src/styles/globals.css` is the production source of truth for the public
-website Midnight palette. The website uses `#0B1018` for the page, `#111826` and
-`#151E2D` for surfaces, `#222C3B` and `#33425A` for borders, `#E8EEF7` and
-`#9AA8BD` for text, and `#7AA2FF` as its single brand accent. Small accent text
-may use `#9DBBFF` for contrast. Semantic colors are limited to status meaning.
+website palette. Its `brand-*` tokens mirror the desktop Light values
+(`#FAF9F6` page, `#1F1D1A` ink, `#5C5852` and `#6F6A63` muted text) and switch
+to the desktop Dark values (`#17191D` page, `#F4F5F7` ink) under
+`prefers-color-scheme: dark`. Focus rings use the desktop focus blue. Shared
+class strings for buttons, eyebrows, and section titles live in `web/src/app/ui.ts`.
 
 - Light: warm paper surfaces with ink actions.
 - Dark: neutral graphite surfaces with paper actions.

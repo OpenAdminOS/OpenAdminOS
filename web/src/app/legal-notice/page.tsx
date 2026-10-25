@@ -1,12 +1,17 @@
 import Link from "next/link";
 import { type Metadata } from "next";
 
+import { MarketingShell } from "../MarketingShell";
+
 import {
   GITHUB_URL,
   JsonLd,
   LEGAL_ENTITY_ADDRESS_LINES,
   LEGAL_ENTITY_NAME,
+  LEGAL_ENTITY_REGISTER,
+  LEGAL_ENTITY_VAT_ID,
   MANAGING_DIRECTOR_NAME,
+  MICROSOFT_NOTICE,
   SUPPORT_EMAIL,
   breadcrumbSchema,
   organizationSchema,
@@ -16,10 +21,10 @@ import {
   websiteSchema,
 } from "../seo";
 
-const LAST_UPDATED = "2026-06-04";
+const LAST_UPDATED = "2026-10-25";
 const TITLE = "Legal notice";
 const DESCRIPTION =
-  "Provider identification, Impressum, and contact details for OpenAdminOS.";
+  "Provider identification, Impressum, and contact details for OpenAdminOS, a product of Ugurlabs UG (haftungsbeschränkt).";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -48,44 +53,25 @@ export default function LegalNoticePage() {
   };
 
   return (
-    <div className="relative flex min-h-screen flex-col bg-brand-bg text-brand-ink">
+    <MarketingShell>
       <JsonLd data={structuredData} />
-      <div
-        aria-hidden
-        className="brand-page-glow pointer-events-none absolute inset-x-0 top-0 h-[600px]"
-      />
-
-      <header className="relative z-10 flex items-center px-6 py-6 sm:px-10">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-sm font-semibold tracking-tight"
-        >
-          <img
-            src="/icon.svg"
-            alt=""
-            aria-hidden
-            className="h-5 w-5 rounded-[4px]"
-          />
-          OpenAdminOS
-        </Link>
-      </header>
-
-      <main className="relative z-10 mx-auto w-full max-w-2xl flex-1 px-6 pb-24 pt-10 sm:px-10 sm:pt-14">
-        <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">
+      <article className="mx-auto max-w-2xl">
+        <h1 className="font-display text-balance text-[2.6rem] leading-[1.05] sm:text-[3.5rem]">
           Legal notice
         </h1>
         <p className="mt-2 text-sm text-brand-muted">
           Last updated: {LAST_UPDATED}
         </p>
 
-        <div className="mt-10 space-y-10 text-sm leading-relaxed text-brand-ink/75">
+        <div className="mt-10 space-y-10 text-[15px] leading-7 text-brand-muted">
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Provider identification
             </h2>
             <p className="mt-3">
-              This page is the Impressum / provider identification for
-              OpenAdminOS under § 5 DDG.
+              This page is the Impressum / provider identification under § 5
+              DDG for openadminos.com and the OpenAdminOS desktop app.
+              OpenAdminOS is a product of {LEGAL_ENTITY_NAME}.
             </p>
             <address className="mt-3 not-italic text-brand-muted">
               {LEGAL_ENTITY_ADDRESS_LINES.map((line) => (
@@ -97,12 +83,12 @@ export default function LegalNoticePage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">Contact</h2>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">Contact</h2>
             <p className="mt-3">
               Email:{" "}
               <Link
                 href={`mailto:${SUPPORT_EMAIL}`}
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 {SUPPORT_EMAIL}
               </Link>
@@ -110,14 +96,34 @@ export default function LegalNoticePage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Managing director
             </h2>
             <p className="mt-3">{MANAGING_DIRECTOR_NAME}</p>
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
+              Commercial register
+            </h2>
+            <p className="mt-3">
+              Registered in the commercial register (Handelsregister) of the{" "}
+              {LEGAL_ENTITY_REGISTER.court} under {LEGAL_ENTITY_REGISTER.number}.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
+              VAT ID
+            </h2>
+            <p className="mt-3">
+              VAT identification number under § 27a of the German VAT Act
+              (UStG): {LEGAL_ENTITY_VAT_ID}
+            </p>
+          </section>
+
+          <section>
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Open-source project
             </h2>
             <p className="mt-3">
@@ -128,7 +134,7 @@ export default function LegalNoticePage() {
                 href={GITHUB_URL}
                 target="_blank"
                 rel="noreferrer"
-                className="text-brand-accent-text underline underline-offset-4 transition hover:text-brand-ink"
+                className="text-link"
               >
                 github.com/OpenAdminOS/OpenAdminOS
               </Link>
@@ -137,57 +143,22 @@ export default function LegalNoticePage() {
           </section>
 
           <section>
-            <h2 className="text-base font-semibold text-brand-ink">
+            <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">
               Microsoft trademarks
             </h2>
-            <p className="mt-3">
-              Microsoft 365, Intune, Entra, and Microsoft Graph are trademarks
-              of the Microsoft group of companies. OpenAdminOS is not
-              affiliated with, endorsed by, or sponsored by Microsoft.
-            </p>
+            <p className="mt-3">{MICROSOFT_NOTICE}</p>
           </section>
         </div>
 
         <div className="mt-16 border-t border-brand-line pt-8 text-xs text-brand-muted">
           <Link
             href="/"
-            className="underline-offset-4 transition hover:text-brand-accent-text hover:underline"
+            className="underline-offset-4 transition hover:text-brand-ink hover:underline"
           >
             &larr; Back to OpenAdminOS
           </Link>
         </div>
-      </main>
-
-      <footer className="relative z-10 border-t border-brand-line bg-brand-surface/60 px-6 py-8 text-center sm:px-10">
-        <span className="text-xs text-brand-muted">
-          &copy; {new Date().getFullYear()} OpenAdminOS
-          {" · "}
-          <Link
-            href="/privacy"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Privacy
-          </Link>
-          {" · "}
-          <Link
-            href="/terms"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Terms
-          </Link>
-          {" · "}
-          <Link
-            href="/legal-notice"
-            className="underline-offset-4 transition hover:text-brand-muted hover:underline"
-          >
-            Legal notice
-          </Link>
-        </span>
-      </footer>
-    </div>
+      </article>
+    </MarketingShell>
   );
 }
-
-// TODO(ugur): Add the register court/register number and VAT ID if issued.
-// These are generally required in a complete § 5 DDG provider identification
-// for a registered German UG.

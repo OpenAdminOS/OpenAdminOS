@@ -127,8 +127,7 @@ export function DivergenceChart({
               <text
                 x={x(n - 1) + 8}
                 y={labelY}
-                className="text-[11px] font-medium"
-                fill={colours[model.id]}
+                className="fill-brand-ink text-[11px] font-medium"
               >
                 {model.name} {final}
               </text>

@@ -1,281 +1,528 @@
 @import "tailwindcss";
 
+/*
+ * Calm shell identity, ported from docs/mockups/27-calm-shell.html and the
+ * desktop tokens in apps/desktop/src/styles/globals.css. Warm paper in light,
+ * graphite in dark, ink-colored primary actions. Color is reserved for
+ * meaning: focus, local vs hosted, read vs write, destructive.
+ */
 @theme {
-  --color-brand-bg: #0b1018;
-  --color-brand-surface: #111826;
-  --color-brand-raised: #151e2d;
-  --color-brand-card: #111826;
-  --color-brand-line: #222c3b;
-  --color-brand-line-strong: #33425a;
-  --color-brand-ink: #e8eef7;
-  --color-brand-muted: #9aa8bd;
-  --color-brand-accent: #7aa2ff;
-  --color-brand-accent-text: #9dbbff;
-  --color-brand-danger: #ff9da3;
-  --color-brand-danger-surface: #30151d;
-  --color-brand-danger-line: #71313d;
-  --font-sans: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    "Segoe UI", sans-serif, "Apple Color Emoji", "Segoe UI Emoji",
-    "Segoe UI Symbol", "Noto Color Emoji";
+  --color-brand-bg: light-dark(#faf9f6, #17191d);
+  --color-brand-surface: light-dark(#f2f0eb, #121418);
+  --color-brand-floor: light-dark(#f2efe9, #1a1d22);
+  --color-brand-bubble: light-dark(#eeebe5, #262a31);
+  --color-brand-raised: light-dark(#ffffff, #22262c);
+  --color-brand-card: light-dark(#ffffff, #1e2126);
+  --color-brand-hover: light-dark(rgba(31, 29, 26, 0.05), rgba(255, 255, 255, 0.05));
+  --color-brand-line: light-dark(rgba(31, 29, 26, 0.12), rgba(255, 255, 255, 0.12));
+  --color-brand-line-soft: light-dark(rgba(31, 29, 26, 0.065), rgba(255, 255, 255, 0.065));
+  --color-brand-line-strong: light-dark(rgba(31, 29, 26, 0.22), rgba(255, 255, 255, 0.24));
+  --color-brand-ink: light-dark(#1f1d1a, #f4f5f7);
+  --color-brand-ink-hover: light-dark(#37342f, #ffffff);
+  --color-brand-on-ink: light-dark(#faf9f6, #17191d);
+  --color-brand-muted: light-dark(#5c5852, #c2c7ce);
+  --color-brand-faint: light-dark(#6f6a63, #98a0ab);
+  --color-brand-dot: light-dark(rgba(31, 29, 26, 0.11), rgba(255, 255, 255, 0.09));
+  --color-brand-code: light-dark(rgba(31, 29, 26, 0.045), rgba(255, 255, 255, 0.055));
+  --color-brand-focus: light-dark(#2f6feb, #8fb4ff);
+  /* Legacy names kept so older markup resolves to the calm palette. */
+  --color-brand-accent: light-dark(#1f1d1a, #f4f5f7);
+  --color-brand-accent-text: light-dark(#1f1d1a, #f4f5f7);
+  --color-brand-ok: light-dark(#3a7246, #9cc88f);
+  --color-brand-ok-surface: light-dark(rgba(58, 114, 70, 0.08), rgba(156, 200, 143, 0.1));
+  --color-brand-warn: light-dark(#895a05, #e5c678);
+  --color-brand-warn-surface: light-dark(rgba(138, 91, 5, 0.08), rgba(229, 198, 120, 0.1));
+  --color-brand-danger: light-dark(#a8382b, #f1a0a0);
+  --color-brand-danger-surface: light-dark(rgba(168, 56, 43, 0.07), rgba(241, 160, 160, 0.1));
+  --color-brand-danger-line: light-dark(rgba(168, 56, 43, 0.3), rgba(241, 160, 160, 0.32));
+  --color-brand-on-danger: light-dark(#ffffff, #17191d);
+  --color-brand-info: light-dark(#345d83, #a3bfd9);
+  /*
+   * Chart series, in fixed order: blue, orange, aqua. Validated as a set for
+   * colorblind and normal-vision separation on both paper and graphite; each
+   * theme has its own steps. Labels stay in text tokens, never these.
+   */
+  --color-chart-1: light-dark(#2a78d6, #3987e5);
+  --color-chart-2: light-dark(#eb6834, #d95926);
+  --color-chart-3: light-dark(#1baf7a, #199e70);
+
+  --font-sans: "Geist Variable", "Geist", ui-sans-serif, system-ui,
+    -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: "Newsreader Variable", "Newsreader", "Iowan Old Style",
+    Charter, Georgia, serif;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, "SF Mono",
+    SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+
+  --shadow-frame: 0 0 0 1px
+      light-dark(rgba(31, 29, 26, 0.08), rgba(255, 255, 255, 0.1)),
+    0 2px 6px light-dark(rgba(31, 29, 26, 0.04), transparent),
+    0 30px 80px -24px light-dark(rgba(31, 29, 26, 0.22), rgba(0, 0, 0, 0.7));
+  --shadow-pop: 0 0 0 1px
+      light-dark(rgba(31, 29, 26, 0.07), rgba(255, 255, 255, 0.09)),
+    0 10px 32px light-dark(rgba(31, 29, 26, 0.12), rgba(0, 0, 0, 0.45));
+
+  --ease-calm: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
-.brand-grid {
-  background-image:
-    linear-gradient(
-      color-mix(in srgb, var(--color-brand-accent) 5%, transparent) 1px,
-      transparent 1px
-    ),
-    linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--color-brand-accent) 5%, transparent) 1px,
-      transparent 1px
-    );
-  background-size: 72px 72px;
-  mask-image: linear-gradient(to bottom, black, transparent 76%);
+/*
+ * Theme: light-dark() picks each color from the root color-scheme. The
+ * theme toggle sets data-theme on <html> before first paint; without it
+ * (no JavaScript) the site follows the system preference.
+ */
+:root {
+  color-scheme: light dark;
 }
 
-.brand-page-glow {
-  background: radial-gradient(
-    ellipse at top,
-    color-mix(in srgb, var(--color-brand-accent) 11%, transparent),
-    transparent 70%
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+}
+
+/*
+ * Inverted band: an ink-colored section inside a paper page (and the
+ * reverse in dark). Re-scopes the tokens so children keep using brand-*.
+ */
+.band-ink {
+  --color-brand-bg: light-dark(#1f1d1a, #f4f3ef);
+  --color-brand-surface: light-dark(#2a2723, #ebe8e2);
+  --color-brand-card: light-dark(#26231f, #ffffff);
+  --color-brand-raised: light-dark(#2e2b26, #ffffff);
+  --color-brand-floor: light-dark(#23201c, #ece9e3);
+  --color-brand-bubble: light-dark(#34302b, #e5e1da);
+  --color-brand-hover: light-dark(rgba(250, 249, 246, 0.06), rgba(31, 29, 26, 0.05));
+  --color-brand-line: light-dark(rgba(250, 249, 246, 0.14), rgba(31, 29, 26, 0.12));
+  --color-brand-line-soft: light-dark(rgba(250, 249, 246, 0.07), rgba(31, 29, 26, 0.065));
+  --color-brand-line-strong: light-dark(rgba(250, 249, 246, 0.26), rgba(31, 29, 26, 0.22));
+  --color-brand-ink: light-dark(#faf9f6, #1f1d1a);
+  --color-brand-ink-hover: light-dark(#ffffff, #37342f);
+  --color-brand-on-ink: light-dark(#1f1d1a, #faf9f6);
+  --color-brand-muted: light-dark(#cfcac2, #5c5852);
+  --color-brand-faint: light-dark(#a9a399, #6f6a63);
+  --color-brand-dot: light-dark(rgba(250, 249, 246, 0.1), rgba(31, 29, 26, 0.11));
+  --color-brand-code: light-dark(rgba(250, 249, 246, 0.07), rgba(31, 29, 26, 0.045));
+  --color-brand-focus: light-dark(#8fb4ff, #2f6feb);
+  --color-brand-accent: light-dark(#faf9f6, #1f1d1a);
+  --color-brand-accent-text: light-dark(#faf9f6, #1f1d1a);
+  --color-brand-ok: light-dark(#9cc88f, #3a7246);
+  --color-brand-ok-surface: light-dark(rgba(156, 200, 143, 0.12), rgba(58, 114, 70, 0.08));
+  --color-brand-warn: light-dark(#e5c678, #895a05);
+  --color-brand-warn-surface: light-dark(rgba(229, 198, 120, 0.12), rgba(138, 91, 5, 0.08));
+  --color-brand-danger: light-dark(#f1a0a0, #a8382b);
+  --color-brand-danger-surface: light-dark(rgba(241, 160, 160, 0.1), rgba(168, 56, 43, 0.07));
+  --color-brand-danger-line: light-dark(rgba(241, 160, 160, 0.32), rgba(168, 56, 43, 0.3));
+  background: var(--color-brand-bg);
+  color: var(--color-brand-ink);
+}
+
+@layer base {
+  html {
+    background: var(--color-brand-bg);
+    color: var(--color-brand-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--color-brand-focus) 22%, transparent);
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-brand-focus);
+    outline-offset: 2px;
+  }
+
+  /* Tailwind v4 resets buttons to the default cursor; clickable means pointer. */
+  button:not(:disabled),
+  [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+
+  code,
+  kbd,
+  pre {
+    font-family: var(--font-mono);
+  }
+}
+
+/* Headline type: Newsreader with optical sizing, as in the desktop. */
+.font-display {
+  font-family: var(--font-serif);
+  font-optical-sizing: auto;
+  font-weight: 420;
+  letter-spacing: -0.022em;
+}
+
+/* Dotted floor, borrowed from the Agent Team office. */
+.brand-dots {
+  background-image: radial-gradient(
+    var(--color-brand-dot) 1px,
+    transparent 1.2px
   );
+  background-size: 18px 18px;
 }
 
-.brand-product-glow {
-  background: radial-gradient(
-    ellipse at center,
-    color-mix(in srgb, var(--color-brand-accent) 17%, transparent),
-    transparent 68%
-  );
+.brand-dots-fade {
+  mask-image: radial-gradient(ellipse at 50% 30%, black 20%, transparent 72%);
 }
 
-@keyframes diff-row-in {
-  0% {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-
-  100% {
-    opacity: 1;
-    transform: translateY(0);
-  }
+/* Inline text link: ink with a quiet underline that firms up on hover. */
+.text-link {
+  color: var(--color-brand-ink);
+  text-decoration-line: underline;
+  text-decoration-color: var(--color-brand-line-strong);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+  transition: text-decoration-color 160ms ease;
 }
 
-@keyframes diff-badge-attention {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-
-  45% {
-    box-shadow: 0 0 0 4px
-      color-mix(in srgb, var(--color-brand-danger) 14%, transparent);
-  }
+.text-link:hover {
+  text-decoration-color: currentColor;
 }
 
-@keyframes diff-admin-input-type {
-  0%,
-  22% {
-    max-width: 0;
-  }
-
-  72%,
-  100% {
-    max-width: 17ch;
-  }
+/*
+ * Art stages: generated relief-map artwork (web/scripts/stage-art) behind
+ * product windows. Only the file for the active theme is fetched.
+ */
+.stage {
+  background-color: var(--stage-fallback, var(--color-brand-floor));
+  background-image: var(--stage-light);
+  background-position: center;
+  background-size: cover;
+  isolation: isolate;
+  position: relative;
 }
 
-@keyframes diff-confirm-caret {
-  0%,
-  48% {
-    opacity: 1;
-  }
-
-  49%,
-  100% {
-    opacity: 0;
-  }
+.stage::after {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .55 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  content: "";
+  inset: 0;
+  mix-blend-mode: multiply;
+  opacity: 0.16;
+  pointer-events: none;
+  position: absolute;
+  z-index: -1;
 }
 
-@keyframes diff-admin-cursor-click {
-  0%,
-  68% {
-    left: 0.75rem;
-    opacity: 0;
-    transform: scale(1);
-  }
-
-  76% {
-    left: calc(100% - 4.4rem);
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  84% {
-    left: calc(100% - 4.4rem);
-    opacity: 1;
-    transform: scale(0.88);
-  }
-
-  92% {
-    left: calc(100% - 4.4rem);
-    opacity: 1;
-    transform: scale(1);
-  }
-
-  100% {
-    left: calc(100% - 4.4rem);
-    opacity: 0;
-    transform: scale(1);
-  }
+.stage-sand {
+  --stage-light: url("/art/stage-sand-light.webp");
+  --stage-dark: url("/art/stage-sand-dark.webp");
+  --stage-fallback: light-dark(#e2dacb, #24262b);
 }
 
-@keyframes diff-button-click {
-  0%,
-  78%,
-  92%,
-  100% {
-    transform: translateY(0) scale(1);
+.stage-sage {
+  --stage-light: url("/art/stage-sage-light.webp");
+  --stage-dark: url("/art/stage-sage-dark.webp");
+  --stage-fallback: light-dark(#c9d1c0, #202823);
+}
+
+.stage-slate {
+  --stage-light: url("/art/stage-slate-light.webp");
+  --stage-dark: url("/art/stage-slate-dark.webp");
+  --stage-fallback: light-dark(#c4cdd6, #1e252e);
+}
+
+.stage-clay {
+  --stage-light: url("/art/stage-clay-light.webp");
+  --stage-dark: url("/art/stage-clay-dark.webp");
+  --stage-fallback: light-dark(#dec4ae, #2e231f);
+}
+
+/* Dark stage art, by explicit choice or, without JavaScript, by system preference. */
+:root[data-theme="dark"] .stage {
+  background-image: var(--stage-dark);
+}
+
+:root[data-theme="dark"] .stage::after {
+  mix-blend-mode: screen;
+  opacity: 0.06;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .stage {
+    background-image: var(--stage-dark);
   }
 
-  84% {
-    transform: translateY(1px) scale(0.96);
+  :root:not([data-theme]) .stage::after {
+    mix-blend-mode: screen;
+    opacity: 0.06;
   }
 }
 
-@keyframes diff-click-ripple {
-  0%,
-  78% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(0.2);
+/* Two-tone lead paragraph: the first sentence in ink, the rest muted. */
+.lead-two-tone {
+  color: var(--color-brand-faint);
+}
+
+.lead-two-tone strong {
+  color: var(--color-brand-ink);
+  font-weight: inherit;
+}
+
+@keyframes tour-progress {
+  from {
+    transform: scaleX(0);
   }
 
-  84% {
-    opacity: 0.42;
-    transform: translate(-50%, -50%) scale(0.2);
-  }
-
-  100% {
-    opacity: 0;
-    transform: translate(-50%, -50%) scale(1.8);
+  to {
+    transform: scaleX(1);
   }
 }
 
-.diff-row {
+.tour-progress {
+  animation: tour-progress linear both;
+  transform-origin: left;
+}
+
+/* Tour description: expands to its content height instead of popping open. */
+.tour-panel {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows 450ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 250ms ease;
+}
+
+.tour-panel.is-open {
+  grid-template-rows: 1fr;
   opacity: 1;
+  transition:
+    grid-template-rows 450ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 350ms ease 120ms;
 }
 
-.diff-demo-active .diff-row {
-  animation: diff-row-in 520ms ease-out both;
+/*
+ * Tour stage art and captures crossfade. The incoming layer fades in on top
+ * while the outgoing one stays opaque underneath, then drops out, so the
+ * switch never dips through to an empty frame. Captures share the app chrome,
+ * so they only fade: moving them would ghost the sidebar.
+ */
+.tour-layer {
+  inset: 0;
+  position: absolute;
 }
 
-.diff-demo-active .diff-row:nth-child(2) {
-  animation-delay: 120ms;
+.tour-layer,
+.tour-shot {
+  opacity: 0;
+  transition: opacity 0s linear 700ms;
 }
 
-.diff-demo-active .diff-row:nth-child(3) {
-  animation-delay: 240ms;
+.tour-layer.is-active,
+.tour-shot.is-active {
+  opacity: 1;
+  transition: opacity 500ms ease;
+  z-index: 1;
 }
 
-.diff-demo-active .diff-badge {
-  animation: diff-badge-attention 1.8s ease-in-out 2;
+.tour-layer.is-active {
+  transition-duration: 700ms;
 }
 
-.diff-confirm-input {
-  max-width: 0;
-  width: 17ch;
+/* Tour descriptions share one cell; the outgoing one fades before the next. */
+.tour-copy {
+  opacity: 0;
+  transition: opacity 200ms ease;
 }
 
-.diff-demo-active .diff-confirm-input {
-  animation: diff-admin-input-type 3s steps(17, end) 500ms forwards;
+.tour-copy.is-active {
+  opacity: 1;
+  transition: opacity 400ms ease 150ms;
 }
 
-.diff-confirm-caret {
-  animation: diff-confirm-caret 900ms step-end infinite;
+@keyframes caret-blink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+
+  50%,
+  100% {
+    opacity: 0;
+  }
 }
 
-.diff-confirm-button {
-  min-width: 5.75rem;
+.figure-caret {
+  animation: caret-blink 1.1s step-end infinite;
+}
+
+/*
+ * Homepage figures draw themselves once when their card is revealed. The
+ * hidden starting state only applies under .js-reveal, so the figures stay
+ * fully drawn without JavaScript or with reduced motion.
+ */
+@keyframes fig-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes fig-appear {
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.js-reveal [data-reveal] .fig-draw {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+}
+
+.js-reveal [data-reveal].is-revealed .fig-draw {
+  animation: fig-draw var(--fig-duration, 650ms) var(--ease-calm)
+    var(--fig-delay, 0ms) forwards;
+}
+
+.js-reveal [data-reveal] .fig-drop,
+.js-reveal [data-reveal] .fig-fade,
+.js-reveal [data-reveal] .fig-pop {
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.js-reveal [data-reveal] .fig-drop {
+  transform: translateY(-14px);
+}
+
+.js-reveal [data-reveal] .fig-pop {
+  transform: scale(0.6);
+}
+
+.js-reveal [data-reveal].is-revealed :is(.fig-drop, .fig-fade, .fig-pop) {
+  animation: fig-appear 520ms var(--ease-calm) var(--fig-delay, 0ms) forwards;
+}
+
+/* Works-with grid: a cell fills from the bottom with its company's color. */
+.brand-cell {
+  cursor: default;
+  isolation: isolate;
+  -webkit-user-select: none;
+  user-select: none;
   overflow: hidden;
   position: relative;
-  text-align: center;
+  transition: color 300ms ease;
+}
+
+.brand-cell::before {
+  background: linear-gradient(
+    to top,
+    color-mix(in srgb, var(--brand) 32%, transparent),
+    color-mix(in srgb, var(--brand) 8%, transparent)
+  );
+  content: "";
+  inset: 0;
+  position: absolute;
+  transform: scaleY(0);
+  transform-origin: bottom;
+  transition: transform 450ms var(--ease-calm);
+  z-index: -1;
+}
+
+.brand-cell:hover {
+  color: var(--color-brand-ink);
+}
+
+.brand-cell:hover::before {
+  transform: scaleY(1);
+}
+
+/* Scroll reveal. Content stays visible without JavaScript. */
+.js-reveal [data-reveal] {
+  opacity: 0;
+  transform: translateY(18px);
   transition:
-    background-color 240ms ease,
-    border-color 240ms ease,
-    color 240ms ease;
+    opacity 700ms var(--ease-calm),
+    transform 700ms var(--ease-calm);
 }
 
-.diff-demo-active .diff-confirm-button {
-  animation: diff-button-click 5.1s ease-in-out forwards;
+.js-reveal [data-reveal].is-revealed {
+  opacity: 1;
+  transform: none;
 }
 
-.diff-click-ripple {
-  background: color-mix(in srgb, var(--color-brand-danger) 38%, transparent);
-  border-radius: 999px;
-  height: 2.4rem;
-  left: 38%;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 52%;
-  transform: translate(-50%, -50%) scale(0.2);
-  width: 2.4rem;
-}
+/*
+ * Print and save-as-PDF show every section and figure in its finished state,
+ * whether or not it was scrolled into view.
+ */
+@media print {
+  .js-reveal [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
 
-.diff-demo-active .diff-click-ripple {
-  animation: diff-click-ripple 5.1s ease-in-out forwards;
-}
+  .js-reveal [data-reveal] .fig-draw {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
 
-.diff-demo-approved .diff-confirm-caret {
-  display: none;
-}
-
-.diff-demo-cursor {
-  filter: drop-shadow(0 5px 12px rgba(0, 0, 0, 0.45));
-  left: 0.75rem;
-  opacity: 0;
-  pointer-events: none;
-  position: absolute;
-  top: 0.7rem;
-  transform: scale(1);
-  width: 1.25rem;
-  z-index: 2;
-}
-
-.diff-demo-active .diff-demo-cursor {
-  animation: diff-admin-cursor-click 5.1s ease-in-out forwards;
+  .js-reveal [data-reveal] :is(.fig-drop, .fig-fade, .fig-pop) {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .diff-row,
-  .diff-badge,
-  .diff-confirm-input,
-  .diff-confirm-caret,
-  .diff-confirm-button,
-  .diff-click-ripple,
-  .diff-demo-cursor {
+  .js-reveal [data-reveal] {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+
+  .figure-caret,
+  .tour-progress {
     animation: none;
   }
 
-  .diff-confirm-input {
-    max-width: none;
+  .tour-panel,
+  .tour-panel.is-open,
+  .tour-layer,
+  .tour-layer.is-active,
+  .tour-shot,
+  .tour-shot.is-active,
+  .tour-copy,
+  .tour-copy.is-active {
+    transition: none;
   }
 
-  .diff-row,
-  .diff-demo-cursor,
-  .diff-click-ripple {
-    opacity: 1;
-  }
-
-  .diff-demo-cursor,
-  .diff-click-ripple {
-    display: none;
+  .brand-cell,
+  .brand-cell::before {
+    transition: none;
   }
 }
 
-html {
-  color-scheme: dark;
-  background: var(--color-brand-bg);
-  color: var(--color-brand-ink);
+/*
+ * Screenshots ship as a light and a dark file. Only the one for the active
+ * theme is displayed, and lazy images that stay hidden are not fetched.
+ */
+.theme-img-dark {
+  display: none;
+}
+
+:root[data-theme="dark"] .theme-img-light {
+  display: none;
+}
+
+:root[data-theme="dark"] .theme-img-dark {
+  display: block;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme]) .theme-img-light {
+    display: none;
+  }
+
+  :root:not([data-theme]) .theme-img-dark {
+    display: block;
+  }
+}
+
+/* The toggle needs JavaScript; without it the page follows the system. */
+:root:not([data-theme]) .theme-toggle {
+  display: none;
 }

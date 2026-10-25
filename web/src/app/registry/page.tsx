@@ -78,6 +78,7 @@ export default function RegistryPage() {
     <MarketingShell>
       <JsonLd data={structuredData} />
       <PageIntro
+        tone="sage"
         eyebrow="Agent registry"
         title="Community agents with declared tenant access."
         description={DESCRIPTION}
@@ -96,10 +97,10 @@ export default function RegistryPage() {
 
       <section className="mt-12 grid gap-5 border-t border-brand-line pt-12 md:grid-cols-[0.8fr_1.2fr]">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-brand-accent-text">
+          <p className="text-sm font-medium text-brand-faint">
             Manifest contract
           </p>
-          <h2 className="mt-3 text-3xl font-semibold tracking-tight">
+          <h2 className="font-display mt-4 text-balance text-[2rem] leading-[1.1] sm:text-[2.5rem]">
             The registry is inspectable before install.
           </h2>
         </div>
@@ -117,7 +118,7 @@ export default function RegistryPage() {
           </p>
           <Link
             href="/trust-model"
-            className="inline-flex font-medium text-brand-accent-text underline-offset-4 transition hover:text-brand-ink hover:underline"
+            className="inline-flex font-medium text-link"
           >
             See how registry trust is enforced
           </Link>
