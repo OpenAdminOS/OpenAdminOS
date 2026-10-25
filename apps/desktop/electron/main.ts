@@ -378,6 +378,12 @@ function writeMacosLaunchAgent(): void {
   } catch (error) {
     // Keep the plist on disk only when launchd accepted it. A plist that
     // never loaded would read as registered, and nothing would retry it.
+    // Unload it too, in case bootstrap succeeded and only enable failed.
+    try {
+      execFileSync("launchctl", ["bootout", domain, plistPath], { stdio: "ignore" });
+    } catch {
+      // Not loaded.
+    }
     rmSync(plistPath, { force: true });
     throw error;
   }
