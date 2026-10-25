@@ -1118,9 +1118,11 @@ at 50, follows `@odata.nextLink` paging within that row budget through validated
 reconnect recovery when Graph answers 403. Endpoints that reject `$top` (the
 managed device overview and authentication methods policy singletons, the
 fixed-page-size directory roles collection, and the license SKU inventory) are
-requested without a page size, and planner-declared cache paths pass the
-permission check with their declared scopes because the catalog lists
-least-privileged permissions only. Every
+requested without a page size, and planner-declared cache paths, their canonical
+by-id templates, and explicitly verified membership templates pass the permission
+check with their declared scopes because the catalog lists least-privileged
+permissions only. Function, type-cast, and deeper descendant paths stay subject to
+the catalog check. Every
 tool call streams as a visible progress step and is persisted in `chat_tool_calls`
 with the completed assistant message; the renderer shows a collapsible "What
 ran" trace with tool name, parameters summary, result summary, duration, and
@@ -1140,10 +1142,11 @@ routing must not discard group, version, ownership or compound filters.
 `query_cache` validates fields against selected schema fields and keys actually
 present in the active tenant's snapshot, including optional fields absent from the
 first row. Unsupported fields, malformed filters and unsupported parameters are
-errors, never zero-match evidence. Tool results include snapshot coverage. An
-unresolved failed cache query blocks a model's final answer and cannot fall through
-malformed-output or iteration-limit fallback into an unsupported count. The host
-returns a clear lookup failure after bounded repair attempts. A valid empty result
+errors, never zero-match evidence. Comparison filters may arrive either as explicit
+`filters` entries or as operator objects inside `where` values. Tool results include
+snapshot coverage. An unresolved failed cache query blocks a model's final answer and
+cannot fall through malformed-output or iteration-limit fallback into an unsupported
+count. The host returns a clear lookup failure after bounded repair attempts. A valid empty result
 remains distinct from an unavailable snapshot. Security-incidents preload requests
 at most 50 records per page and follows continuation links.
 

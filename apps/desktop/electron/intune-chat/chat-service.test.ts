@@ -733,6 +733,142 @@ describe("Intune Chat host service", () => {
     }
   });
 
+  it("keeps non-streaming fallback aggregates on the pre-investigation snapshot", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "agg-model-sync" },
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    // Same scenario as the streaming snapshot test, through the
+    // non-streaming send path: pre-answer refresh sees one user, the
+    // mid-investigation refresh sees three, and the deterministic
+    // fallback must still describe the one-user pack.
+    let usersCalls = 0;
+    const graph: RunGraphApi = {
+      async listManagedDevices() {
+        return [];
+      },
+      async retireManagedDevice() {
+        throw new Error("retireManagedDevice should not run from chat.");
+      },
+      async request(input) {
+        if (input.path === "/users") {
+          usersCalls += 1;
+          const user = (id: string) => ({
+            id,
+            displayName: id,
+            userPrincipalName: `${id}@contoso.example`,
+            accountEnabled: true,
+          });
+          return {
+            value:
+              usersCalls === 1
+                ? [user("user-1")]
+                : [user("user-1"), user("user-2"), user("user-3")],
+          };
+        }
+        return { value: [] };
+      },
+    };
+    let completeCalls = 0;
+    let fallbackPrompt = "";
+    const llm: RunLlmApi = {
+      available: true,
+      defaultModel: "agg-model-sync",
+      async complete(options) {
+        // The deterministic fallback also completes through this mock;
+        // its prompt carries the serialized answer pack.
+        if (options.prompt.includes('{\n  "question"')) {
+          fallbackPrompt = options.prompt;
+          return { text: "Deterministic answer.", model: "agg-model-sync" };
+        }
+        completeCalls += 1;
+        if (completeCalls === 1) {
+          return {
+            text: '```json\n{"tool":"refresh_resource","params":{"resource":"users"}}\n```',
+            model: "agg-model-sync",
+          };
+        }
+        return { text: "```json\n{\"tool\": \"query_ca\n```", model: "agg-model-sync" };
+      },
+      async *stream() {
+        yield {
+          delta: "",
+          accumulated: "",
+          done: true,
+          model: "agg-model-sync",
+        };
+      },
+    };
+
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => graph,
+      llmFactory: () => llm,
+    });
+
+    try {
+      await store.setChatInvestigationMode("always-agentic");
+      const result = await store.sendIntuneChatMessage({
+        content: "Which users should I review?",
+      });
+
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.equal(result.assistantMessage.content, "Deterministic answer.");
+      assert.ok(usersCalls >= 2, "users fetched before and during investigation");
+
+      const packStart = fallbackPrompt.indexOf('{\n  "question"');
+      assert.ok(packStart >= 0, "fallback prompt carries the answer pack");
+      const pack = JSON.parse(fallbackPrompt.slice(packStart)) as {
+        resources: Array<{
+          resource: string;
+          cachedRows: number;
+          breakdowns: Record<string, Record<string, number>>;
+        }>;
+      };
+      const users = pack.resources.find((block) => block.resource === "users");
+      assert.ok(users, "answer pack includes a users block");
+      assert.equal(users.cachedRows, 1);
+      const accountEnabledTotal = Object.values(
+        users.breakdowns.accountEnabled ?? {},
+      ).reduce((sum, count) => sum + count, 0);
+      assert.equal(
+        accountEnabledTotal,
+        1,
+        "breakdowns count the pre-investigation snapshot, not the refreshed cache",
+      );
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("runs a read-only multi-tenant compliance query with contained tenant failures", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
     const now = "2026-06-01T10:00:00.000Z";

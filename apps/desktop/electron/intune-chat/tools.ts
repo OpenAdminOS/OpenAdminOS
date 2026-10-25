@@ -527,6 +527,26 @@ function fieldsForResource(ctx: IntuneChatToolContext, resource: GraphCacheResou
  * a list", which is a far easier task and the difference between an 8B
  * model answering an unanticipated question and giving up.
  */
+/**
+ * Documented delegated scopes for a catalog endpoint. Function
+ * endpoints appear in the catalog both with and without trailing
+ * parentheses, and only one form carries permissions, so an
+ * undocumented parenthesized form inherits the plain form's scopes
+ * instead of reading as permission-free.
+ */
+function documentedScopesForEndpoint(endpoint: {
+  path: string;
+  scopesDelegated: string[];
+}): string[] {
+  if (endpoint.scopesDelegated.length > 0) return endpoint.scopesDelegated;
+  const aliasPath = endpoint.path.replace(/\([^)]*\)\/?$/, "");
+  if (aliasPath && aliasPath !== endpoint.path) {
+    const alias = lookupEndpoint("GET", aliasPath);
+    if (alias && alias.path !== endpoint.path) return alias.scopesDelegated;
+  }
+  return endpoint.scopesDelegated;
+}
+
 function findGraphEndpoint(params: unknown): unknown {
   const query = stringParam(params, "query");
   if (!query || query.trim().length === 0) {
@@ -536,7 +556,7 @@ function findGraphEndpoint(params: unknown): unknown {
   const limit = Math.max(1, Math.min(FIND_ENDPOINT_LIMIT_CAP, Math.trunc(requested)));
   const matches = searchEndpoints(query, { method: "GET", limit });
   const candidates = matches.map((endpoint) => {
-    const documented = endpoint.scopesDelegated;
+    const documented = documentedScopesForEndpoint(endpoint);
     const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
     // Mirror graph_get validation: planner-declared paths run with
     // their declared scopes even when the catalog's least-privileged
@@ -544,7 +564,7 @@ function findGraphEndpoint(params: unknown): unknown {
     const usable =
       documented.length === 0 ||
       consented.length > 0 ||
-      resourceScopesForPath(endpoint.path).length > 0;
+      plannerExemptionApplies(endpoint.path);
     return {
       path: endpoint.path,
       summary: endpoint.summary,
@@ -776,15 +796,17 @@ function validateGraphGetPath(path: string): {
         : "Unknown Microsoft Graph GET path.",
     );
   }
-  const documented = endpoint.scopesDelegated;
+  const documented = documentedScopesForEndpoint(endpoint);
   const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
   // Planner-declared cache paths carry host-verified scopes, consented
   // for cache refresh. The catalog lists least-privileged permissions
   // only, so a broader declared scope (Policy.Read.All for the
   // authentication methods policy, GroupMember.Read.All for /groups)
   // can cover an endpoint the catalog check would otherwise refuse.
+  // The exemption is limited to the declared path and its by-id
+  // children; deeper descendants stay subject to the catalog check.
   const resourceScopes = resourceScopesForPath(path);
-  if (documented.length > 0 && consented.length === 0 && resourceScopes.length === 0) {
+  if (documented.length > 0 && consented.length === 0 && !plannerExemptionApplies(endpoint.path)) {
     throw new Error(
       `This endpoint requires ${documented.slice(0, 3).join(" or ")}, which OpenAdminOS does not request. No tenant data was read.`,
     );
@@ -796,12 +818,49 @@ function validateGraphGetPath(path: string): {
   return { scopes, summary: endpoint.summary };
 }
 
+/**
+ * Deeper templates whose documented permission alternatives include an
+ * already-consented planner scope, verified against Microsoft Learn.
+ * memberOf and transitiveMemberOf list User.Read as least privileged
+ * (self only) and support User.Read.All, which Chat consents for the
+ * users cache, for reading another user's memberships.
+ */
+const PLANNER_SCOPE_OVERRIDE_TEMPLATES = new Set([
+  "/users/{user-id}/memberof",
+  "/users/{user-id}/transitivememberof",
+]);
+
+/**
+ * Whether the planner-scope exemption applies to a catalog template
+ * path. The exemption exists because the catalog lists
+ * least-privileged scopes only while planner declarations carry
+ * broader verified scopes. It covers the declared collection or
+ * singleton template itself and its canonical by-id template
+ * (a single placeholder segment), plus the explicit overrides above.
+ * Function and type-cast segments are literal template segments, not
+ * placeholders, so they stay subject to the catalog check, as do
+ * deeper descendants such as group drives.
+ */
+function plannerExemptionApplies(templatePath: string): boolean {
+  const template = templatePath.split("?")[0]!.toLowerCase().replace(/\/+$/, "");
+  if (PLANNER_SCOPE_OVERRIDE_TEMPLATES.has(template)) return true;
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    const plannerPath = pathForResource(definition.resource).path.toLowerCase();
+    if (template === plannerPath) return true;
+    if (template.startsWith(`${plannerPath}/{`)) {
+      const child = template.slice(plannerPath.length + 1);
+      if (/^\{[^/{}]+\}$/.test(child)) return true;
+    }
+  }
+  return false;
+}
+
 function resourceScopesForPath(path: string): string[] {
-  const pathOnly = path.split("?")[0]!;
+  const pathOnly = path.split("?")[0]!.toLowerCase();
   const scopes = new Set<string>();
   for (const definition of GRAPH_CACHE_RESOURCES) {
-    const request = pathForResource(definition.resource);
-    if (pathOnly === request.path || pathOnly.startsWith(`${request.path}/`)) {
+    const requestPath = pathForResource(definition.resource).path.toLowerCase();
+    if (pathOnly === requestPath || pathOnly.startsWith(`${requestPath}/`)) {
       for (const scope of definition.scopes) scopes.add(scope);
     }
   }
@@ -1056,11 +1115,40 @@ function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
   if (!record) return undefined;
   const predicates: GraphCacheQueryPredicate[] = [];
 
+  // A where value can also be an operator object such as
+  // { lastSyncDateTime: { lt: "2026-05-20" } }, the shape models reach
+  // for when a comparison does not fit the scalar map. Reading it as
+  // equality against an object only earned a scalar-values refusal and
+  // a repeated identical call, so expand it into predicates instead.
+  const pushWhereEntry = (field: string, value: unknown) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const ops = Object.entries(value as Record<string, unknown>);
+      if (ops.length === 0) {
+        throw new Error(`query_cache where for ${field} needs a value or an operator object.`);
+      }
+      for (const [rawOp, opValue] of ops) {
+        const op = rawOp.replace(/^\$/, "");
+        if (!isGraphCacheQueryOperator(op)) {
+          throw new Error(
+            `Unsupported query_cache operator: ${rawOp}. Use eq, neq, contains, startsWith, in, lt, lte, gt, or gte.`,
+          );
+        }
+        predicates.push({
+          field,
+          op,
+          value: opValue as GraphCacheQueryPredicate["value"],
+        });
+      }
+      return;
+    }
+    predicates.push({ field, op: "eq", value: value as GraphCacheQueryPredicate["value"] });
+  };
+
   const where = record.where;
   if (where !== undefined && (!where || typeof where !== "object" || Array.isArray(where))) throw new Error("query_cache where must be a field/value object.");
   if (where && typeof where === "object" && !Array.isArray(where)) {
     for (const [field, value] of Object.entries(where as Record<string, unknown>)) {
-      predicates.push({ field, op: "eq", value: value as GraphCacheQueryPredicate["value"] });
+      pushWhereEntry(field, value);
     }
   }
 
@@ -1088,11 +1176,7 @@ function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
       }
       // A bare {field: value} pair.
       for (const [field, value] of Object.entries(entry)) {
-        predicates.push({
-          field,
-          op: "eq",
-          value: value as GraphCacheQueryPredicate["value"],
-        });
+        pushWhereEntry(field, value);
       }
     }
   }

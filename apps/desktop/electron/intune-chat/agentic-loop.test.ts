@@ -531,6 +531,51 @@ it('does not accept a false zero after an invalid filter, and permits a correcte
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
 
+it('resolves a failed stale-sync cache query through the corrected operator query', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agentic-live-resolves-'));
+  const store = seededStore(dir);
+  const failedSyncQuery = JSON.stringify({
+    tool: 'query_cache',
+    params: { resource: 'managedDevices', where: { lastSyncDateTime: { approx: '2026-05-20' } } },
+  });
+  const correctedSyncQuery = JSON.stringify({
+    tool: 'query_cache',
+    params: { resource: 'managedDevices', where: { lastSyncDateTime: { lt: '2027-01-01' } } },
+  });
+  const liveGraph = {
+    listManagedDevices: async () => [],
+    retireManagedDevice: async () => { throw Error('Unexpected write'); },
+    request: async () => ({ value: [{ id: 'stale-1', deviceName: 'STALE-1', lastSyncDateTime: '2026-05-10T09:00:00.000Z' }] }),
+  };
+  try {
+    // The operator-object shape the model used for the stale-sync
+    // cutoff is accepted, so the corrected cache query succeeds and
+    // clears the earlier failure before the final answer.
+    const repaired = baseInput(store, scriptedLlm([
+      failedSyncQuery,
+      correctedSyncQuery,
+      'WIN-01 has not synced since 2026-06-01.',
+    ]));
+    repaired.tools.graphForScopes = async () => liveGraph;
+    const repairedResult = await runAgenticChat(repaired);
+    assert.equal(repairedResult.ok, true);
+    assert.equal(repairedResult.answer, 'WIN-01 has not synced since 2026-06-01.');
+
+    // A live read alone does not clear the guard: without a corrected
+    // cache query the failed lookup still blocks the final answer.
+    const liveOnly = baseInput(store, scriptedLlm([
+      failedSyncQuery,
+      JSON.stringify({ tool: 'graph_get', params: { path: '/deviceManagement/managedDevices', query: { $filter: "lastSyncDateTime lt 2026-05-20" } } }),
+      'There are zero stale devices.',
+      'There are zero stale devices.',
+    ]));
+    liveOnly.tools.graphForScopes = async () => liveGraph;
+    const blocked = await runAgenticChat(liveOnly);
+    assert.equal(blocked.ok, true);
+    assert.match(blocked.answer, /No verified count is available/);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 it('does not turn failed license reads into an empty-tenant answer from unrelated cached users', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agentic-failed-license-'));
   const store = seededStore(dir);
