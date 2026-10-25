@@ -191,3 +191,54 @@ test("nightly-app-changes lists app paths and skips commits a release already co
     rmSync(repo, { recursive: true, force: true });
   }
 });
+
+test("nightly-app-changes ignores contributor tooling, npm scripts, and linguist attributes", async () => {
+  const { execFileSync } = await import("node:child_process");
+  const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join, resolve } = await import("node:path");
+  const script = resolve("scripts/nightly-app-changes.sh");
+  const repo = mkdtempSync(join(tmpdir(), "nightly-app-tooling-"));
+  const git = (...args) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
+  const changes = (commit) =>
+    execFileSync("bash", [script, commit], { cwd: repo, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+  const commit = (path, content) => {
+    mkdirSync(join(repo, path, ".."), { recursive: true });
+    writeFileSync(join(repo, path), content);
+    git("add", "-A");
+    git("commit", "-qm", `change ${path}`);
+    return git("rev-parse", "HEAD");
+  };
+  const manifest = (scripts, version = "0.7.2") =>
+    `${JSON.stringify({ name: "openadminos", version, scripts }, null, 2)}\n`;
+  const nightly = (sha) => git("tag", `v0.7.3-nightly.${sha.slice(0, 8)}`, sha);
+  try {
+    git("init", "-q");
+    git("config", "user.email", "test@example.com");
+    git("config", "user.name", "test");
+    commit("package.json", manifest({ build: "npm run build -w app", test: "node --test" }));
+    commit(".gitattributes", "agents/index.json text eol=lf\n");
+    git("tag", "v0.7.2");
+
+    commit("scripts/smoke-chat.mjs", "smoke");
+    commit("scripts/release-scripts.test.mjs", "test");
+    commit("scripts/capture-screenshots.mjs", "capture");
+    commit("scripts/generate-gitbook-docs.mjs", "docs");
+    commit("package.json", manifest({ build: "npm run build -w app", test: "node --test", "docs:check": "x" }));
+    const tooling = commit(".gitattributes", "agents/index.json text eol=lf\nweb/content/** linguist-generated=true\n");
+    assert.equal(changes(tooling), "");
+
+    const buildScript = commit("package.json", manifest({ build: "npm run build -w app -- --x", test: "node --test", "docs:check": "x" }));
+    assert.equal(changes(buildScript), "package.json");
+    nightly(buildScript);
+
+    const eol = commit(".gitattributes", "agents/index.json text eol=crlf\nweb/content/** linguist-generated=true\n");
+    assert.equal(changes(eol), ".gitattributes");
+    nightly(eol);
+
+    const newScript = commit("scripts/build-helper.mjs", "build");
+    assert.equal(changes(newScript), "scripts/build-helper.mjs");
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});

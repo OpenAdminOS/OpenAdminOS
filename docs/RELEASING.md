@@ -280,6 +280,13 @@ How it runs:
    dispatches `release.yml` on `main` with `nightly_sha`. Comparing with the
    newest tag, not the parent commit, means a merge whose CI was cancelled by
    the hourly install-stats commit still ships in the next nightly.
+   Contributor tooling never triggers a nightly on its own: the scripts the
+   filter lists (docs generation, screenshot capture, smoke tests, QA setup,
+   script tests), root `package.json` changes outside the `build` and
+   `dist:desktop` scripts, version, workspaces, and engines, and
+   `.gitattributes` lines that only set `linguist-*` attributes. A new file
+   under `scripts/` counts as an app change until it is added to that list.
+   Code under `apps/` always counts, even when it only runs in development.
 2. The `meta` job checks that the commit is on `main` and computes the version
    with `scripts/release-version.mjs`.
 3. Each platform job runs `scripts/prepare-nightly-build.mjs`, which sets the
