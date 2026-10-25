@@ -155,6 +155,31 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("graph_get names the missing scope and recovery on a live 403", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store, {
+        graphForScopes: async () => ({
+          async listManagedDevices() { return []; },
+          async retireManagedDevice() { throw new Error("write should not run"); },
+          async request() {
+            throw new Error('Graph GET /users failed (HTTP 403): {"error":{"code":"Authorization_RequestDenied"}}');
+          },
+        }),
+      });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", { path: "/users" });
+      assert.ok(execution.trace.error, "expected a traced error");
+      assert.match(execution.trace.error, /denied read access for GET \/users/);
+      assert.match(execution.trace.error, /User\.Read\.All/);
+      assert.match(execution.trace.error, /Reconnect the tenant/);
+      assert.match(execution.trace.error, /HTTP 403/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("graph_get follows nextLink pages within the row cap", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);

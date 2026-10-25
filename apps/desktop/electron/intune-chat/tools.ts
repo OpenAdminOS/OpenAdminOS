@@ -495,8 +495,26 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     ...(Object.keys(query).length > 0 ? { query } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
+  // A live 403 almost always means the tenant was consented before this
+  // permission entered the requested set. Name the scope and the
+  // recovery, like cache refresh does, instead of surfacing a raw
+  // HTTP 403 the model and the admin cannot act on.
+  const requestPage = async (input: GraphRequestInput): Promise<unknown> => {
+    try {
+      return await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      if (!raw.includes("HTTP 403")) throw error;
+      const needed = validation.scopes.length > 0
+        ? validation.scopes.join(", ")
+        : "a read permission this tenant has not consented to";
+      throw new Error(
+        `Microsoft Graph denied read access for GET ${path}. This endpoint needs ${needed}. The tenant was likely connected before OpenAdminOS requested it. Reconnect the tenant to grant the current read permissions, then retry. Graph said: ${raw}`,
+      );
+    }
+  };
   ctx.signal?.throwIfAborted();
-  const firstResponse = await graph.request({ ...request, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+  const firstResponse = await requestPage(request);
   // Follow server paging within the row cap: a first page smaller than
   // the cap with a nextLink otherwise reads as complete tenant coverage.
   const collected: unknown[] = [];
@@ -513,10 +531,9 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     const skiptoken = skiptokenFromNextLink(page.nextLink);
     if (!skiptoken) break;
     ctx.signal?.throwIfAborted();
-    const nextResponse = await graph.request({
+    const nextResponse = await requestPage({
       ...request,
       query: { ...query, $skiptoken: skiptoken },
-      ...(ctx.signal ? { signal: ctx.signal } : {}),
     });
     page = unwrapGraphCollectionPage(nextResponse);
     pagesFetched += 1;
