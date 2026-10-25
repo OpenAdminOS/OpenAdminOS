@@ -879,6 +879,9 @@ export class RunService {
     const noun = isRollback ? "Rollback" : "Proposal";
     const controller = new AbortController();
     this.controllers.set(input.run.id, controller);
+    let applied = 0;
+    let selectionTenantId: string | undefined;
+    const attemptedPaths: string[] = [];
     try {
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       if (!plan) throw new Error(`${noun} run has no plan.`);
@@ -887,11 +890,11 @@ export class RunService {
         input.run.external?.requiredScopes ??
         [];
       const selection = await this.host.buildGraph(input.run.tenantId, scopes, this.executionOptions(input.run, controller.signal));
+      selectionTenantId = selection.tenantId;
       const graph = selection.createGraph((level, message, metadata) => {
         void this.appendRunLog(input.run.id, level, message, metadata);
       });
       let run = this.stampTenant(input.run, selection.tenantId);
-      let applied = 0;
       for (const [index, action] of plan.actions.entries()) {
         controller.signal.throwIfAborted();
         const startedAt = new Date().toISOString();
@@ -910,6 +913,7 @@ export class RunService {
             throw new Error(`${noun} action carries no Graph request.`);
           }
           controller.signal.throwIfAborted();
+          attemptedPaths.push(action.request.path);
           await graph.request({
             signal: controller.signal,
             method: action.request.method,
@@ -934,12 +938,6 @@ export class RunService {
             summary: `${noun} stopped at "${action.label}" after applying ${applied} of ${plan.actions.length} actions. Nothing after the failed action was attempted.`,
           };
           await this.persistRunSnapshot(run);
-          if (applied > 0) {
-            this.invalidateGraphCacheAfterWrite(run.id, selection.tenantId, {
-              paths: plan.actions.slice(0, applied).flatMap((appliedAction) =>
-                appliedAction.request?.path ? [appliedAction.request.path] : []),
-            });
-          }
           return;
         }
         applied += 1;
@@ -972,22 +970,28 @@ export class RunService {
         result: { appliedActions: applied, manualItems: manualCount },
       };
       await this.persistRunSnapshot(run);
-      if (applied > 0) {
-        this.invalidateGraphCacheAfterWrite(run.id, selection.tenantId, {
-          paths: plan.actions.flatMap((appliedAction) =>
-            appliedAction.request?.path ? [appliedAction.request.path] : []),
-        });
-      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await this.persistRunSnapshot({
         ...input.run,
         status: "failed",
         finishedAt: new Date().toISOString(),
-        summary: `${noun} failed before any action was applied: ${message}`,
+        summary:
+          applied > 0
+            ? `${noun} stopped after applying ${applied} of ${plan?.actions.length ?? applied} actions: ${message}`
+            : `${noun} failed before any action was applied: ${message}`,
         error: message,
       });
     } finally {
+      // Invalidate for every attempted request, including a cancel at
+      // the loop boundary and a request whose response was lost: the
+      // write may have committed server-side either way, and a stale
+      // answer after a confirmed change is the worse failure.
+      if (attemptedPaths.length > 0 && selectionTenantId) {
+        this.invalidateGraphCacheAfterWrite(input.run.id, selectionTenantId, {
+          paths: attemptedPaths,
+        });
+      }
       if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
   }

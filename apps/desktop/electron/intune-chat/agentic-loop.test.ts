@@ -215,6 +215,59 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
+  it("does not count inventory alone or a never-cached query as evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const inventoryOnly = await runAgenticChat(baseInput(store, scriptedLlm([
+        '```json\n{"tool":"list_cached_resources","params":{}}\n```',
+        "WIN-01, WIN-02, and WIN-03 are noncompliant.",
+      ])));
+      assert.equal(inventoryOnly.ok, false, JSON.stringify(inventoryOnly));
+      assert.equal(inventoryOnly.reason, "no-evidence");
+
+      const neverCached = await runAgenticChat(baseInput(store, scriptedLlm([
+        '```json\n{"tool":"query_cache","params":{"resource":"users","limit":25}}\n```',
+        "There are 12 users in the tenant.",
+      ])));
+      assert.equal(neverCached.ok, false, JSON.stringify(neverCached));
+      assert.equal(neverCached.reason, "no-evidence");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count a failed refresh as tenant evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const result = await runAgenticChat({
+        ...baseInput(store, scriptedLlm([
+          '```json\n{"tool":"refresh_resource","params":{"resource":"managedDevices"}}\n```',
+          "All 47 devices are compliant.",
+        ])),
+        tools: {
+          ...toolContext(store),
+          refreshResource: async (resource) => ({
+            resource,
+            label: resource,
+            rows: 0,
+            refreshedAt: "2026-06-01T10:01:00.000Z",
+            ok: false,
+            error: "Microsoft Graph denied read access (HTTP 403).",
+          }),
+        },
+      });
+      assert.equal(result.ok, false, JSON.stringify(result));
+      assert.equal(result.reason, "no-evidence");
+      assert.match(result.toolTrace[0]?.error ?? "", /HTTP 403/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("counts web research as evidence only in a consented web session", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);

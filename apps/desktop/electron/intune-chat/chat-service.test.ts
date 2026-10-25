@@ -300,6 +300,13 @@ describe("Intune Chat host service", () => {
       assert.equal(modelCalls, 0, "write block must fire before any model call");
       assert.deepEqual(result.assistantMessage.sources, []);
       assert.equal(result.assistantMessage.agentSuggestions?.[0]?.agentSlug, "offboarding-agent");
+
+      const grant = await store.sendIntuneChatMessage({
+        content: "Grant the finance group access to the VPN app",
+      });
+      assert.match(grant.assistantMessage.content, /cannot perform tenant changes directly from chat/);
+      assert.deepEqual(graphRequests, [], "grant prompt must also block before refresh");
+      assert.equal(modelCalls, 0, "grant prompt must also block before any model call");
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -460,7 +467,6 @@ describe("Intune Chat host service", () => {
       const result = await store.streamIntuneChatMessage(
         {
           content: "Which managed devices should I inspect?",
-          refreshIfStale: false,
         },
         (event) => eventTypes.push(event.type),
       );
@@ -736,6 +742,84 @@ describe("Intune Chat host service", () => {
       assert.equal(messages.length, 2);
       assert.equal(messages[0]?.role, "user");
       assert.equal(messages[1]?.role, "assistant");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("blocks a multi-tenant write prompt before any tenant refresh", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-host-"));
+    const now = "2026-06-01T10:00:00.000Z";
+    const statePath = join(dir, "state.json");
+    await writeFile(
+      statePath,
+      JSON.stringify(
+        {
+          activeProviderId: "ollama",
+          activeModelByProviderId: { ollama: "mock-chat" },
+          installedAgents: [],
+          runs: [],
+          tenants: [
+            {
+              id: "tenant-1",
+              displayName: "Contoso",
+              username: "admin@contoso.example",
+              homeAccountId: "home-account-1",
+              addedAt: now,
+            },
+            {
+              id: "tenant-2",
+              displayName: "Fabrikam",
+              username: "admin@fabrikam.example",
+              homeAccountId: "home-account-2",
+              addedAt: now,
+            },
+          ],
+          activeTenantId: "tenant-1",
+        },
+        null,
+        2,
+      ),
+      "utf8",
+    );
+
+    const graphRequests: string[] = [];
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("retireManagedDevice should not run from chat."); },
+        async request(input) {
+          graphRequests.push(input.path);
+          return { value: [] };
+        },
+      }),
+      llmFactory: () => ({
+        available: true,
+        defaultModel: "mock-chat",
+        async complete() {
+          return { text: "must not be called", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      }),
+    });
+
+    try {
+      await assert.rejects(
+        store.streamMultiTenantIntuneChat(
+          { prompt: "Retire noncompliant devices in every tenant", tenantScope: { kind: "all" } },
+          () => undefined,
+        ),
+        /cannot perform tenant changes directly from chat/,
+      );
+      assert.deepEqual(graphRequests, [], "write block must fire before any tenant refresh");
+      assert.equal((await store.listMultiTenantChatJobs()).length, 0);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });

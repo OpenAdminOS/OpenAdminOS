@@ -46,12 +46,30 @@ const MAX_UNFINISHED_RETRIES = 2;
  */
 const MAX_NO_EVIDENCE_RETRIES = 2;
 const EVIDENCE_TOOLS = new Set([
-  "list_cached_resources",
   "query_cache",
   "graph_get",
   "refresh_resource",
   "query_drift",
 ]);
+
+/**
+ * Whether a successful tool result actually read tenant evidence. The
+ * cache inventory alone is not evidence for a tenant-state claim, and
+ * a query against a resource that was never cached read nothing at
+ * all. A refreshed snapshot with zero rows is evidence: it is what
+ * "the tenant has none" may be concluded from, with coverage noted.
+ */
+function isEvidenceResult(tool: string, result: unknown): boolean {
+  if (!EVIDENCE_TOOLS.has(tool as never)) return false;
+  if (tool !== "query_cache") return true;
+  if (result === null || typeof result !== "object") return false;
+  const record = result as {
+    returnedRows?: unknown;
+    snapshot?: { refreshedAt?: unknown } | null;
+  };
+  if (typeof record.returnedRows === "number" && record.returnedRows > 0) return true;
+  return typeof record.snapshot?.refreshedAt === "string" && record.snapshot.refreshedAt.length > 0;
+}
 const DEFAULT_OBSERVATION_CHAR_BUDGET = 36_000;
 
 export const AGENTIC_TOOL_PROTOCOL = [
@@ -277,7 +295,7 @@ export async function runAgenticChat(
     });
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params);
     toolTrace.push(execution.trace);
-    if (!execution.trace.error && EVIDENCE_TOOLS.has(action.tool)) evidenceToolCalls += 1;
+    if (!execution.trace.error && isEvidenceResult(action.tool, execution.result)) evidenceToolCalls += 1;
     // In a consented web-research session, public evidence is
     // first-class and the service owns web-failure honesty (a failed
     // search converts the answer into a named failure there). Without

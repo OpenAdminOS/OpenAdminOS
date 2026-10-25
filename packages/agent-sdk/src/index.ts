@@ -988,6 +988,19 @@ export interface IntuneChatToolTraceEntry {
   params: unknown;
   resultSummary: string;
   webSources?: Array<{ title: string; url: string }>;
+  /**
+   * Execution-time provenance for a live `graph_get`, so answer sources
+   * describe what was actually read instead of inheriting the cache
+   * snapshot's row count and refresh time for the same resource.
+   */
+  graphSource?: {
+    path: string;
+    query?: Record<string, string>;
+    rows: number;
+    pagesFetched?: number;
+    truncated?: boolean;
+    totalCount?: number;
+  };
   durationMs: number;
   createdAt: string;
   completedAt: string;

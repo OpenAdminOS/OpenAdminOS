@@ -180,6 +180,67 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("traces a failed refresh_resource as an error, not as evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store, {
+        refreshResource: async (resource) => ({
+          resource,
+          label: resource,
+          rows: 0,
+          refreshedAt: "2026-06-01T10:01:00.000Z",
+          ok: false,
+          error: "Microsoft Graph denied read access (HTTP 403).",
+        }),
+      });
+      const execution = await executeIntuneChatTool(ctx, "refresh_resource", {
+        resource: "managedDevices",
+      });
+      assert.match(execution.trace.error ?? "", /HTTP 403/);
+      assert.match(execution.trace.resultSummary, /Refresh failed/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get follows a $skip continuation with its full query", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const requests: Array<{ path: string; query?: Record<string, string> }> = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("write should not run"); },
+        async request(input) {
+          requests.push({ path: input.path, query: input.query as Record<string, string> | undefined });
+          if (!input.query?.["$skip"]) {
+            return {
+              value: Array.from({ length: 10 }, (_, index) => ({ id: `user-${index}` })),
+              "@odata.nextLink": "https://graph.microsoft.com/beta/users?$skip=10&$select=id,displayName",
+            };
+          }
+          return { value: [{ id: "user-10" }, { id: "user-11" }] };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", { path: "/users" });
+      const result = execution.result as { returnedRows: number; rows: Array<{ id: string }> };
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1]?.query?.["$skip"], "10");
+      assert.equal(requests[1]?.query?.["$select"], "id,displayName");
+      assert.equal(result.returnedRows, 12);
+      assert.equal(result.rows.at(-1)?.id, "user-11");
+      const graphSource = (execution.trace as { graphSource?: { rows: number; pagesFetched?: number } }).graphSource;
+      assert.equal(graphSource?.rows, 12);
+      assert.equal(graphSource?.pagesFetched, 2);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("graph_get follows nextLink pages within the row cap", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);

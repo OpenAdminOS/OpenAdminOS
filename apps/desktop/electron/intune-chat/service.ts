@@ -552,6 +552,17 @@ export class IntuneChatService {
     if (!content) throw new Error("Multi-tenant chat prompt is required.");
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
+    // The write block short-circuits on every send path. Without this,
+    // a write prompt with all tenants selected fanned out a
+    // cross-tenant cache refresh and a read aggregation instead of
+    // the instant refusal single-tenant chat gives.
+    if (planChatContext(content).hasWriteIntent) {
+      throw new Error(
+        writeIntentBlockedMessage(
+          matchAgentsToQuestion(content, persisted.installedAgents),
+        ),
+      );
+    }
     const preflight = await this.buildMultiTenantPreflight(input);
     const providers = await this.host.listProviders();
     const activeTenant = this.host.resolveTenant(persisted);
@@ -1753,6 +1764,7 @@ export class IntuneChatService {
           usedDeterministic,
           usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
         }),
+        toolTrace,
         refreshedResources: new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
@@ -2391,6 +2403,7 @@ export class IntuneChatService {
           usedDeterministic,
           usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
         }),
+        toolTrace,
         refreshedResources: new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
       }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),

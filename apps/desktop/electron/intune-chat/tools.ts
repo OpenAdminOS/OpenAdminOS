@@ -15,7 +15,7 @@ import type {
 import { DEFAULT_SCOPE_METADATA } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import { resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
+import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
   GRAPH_CACHE_RESOURCES,
   definitionForResource,
@@ -234,15 +234,59 @@ export async function executeIntuneChatTool(
   try {
     const result = await executeToolUnchecked(ctx, tool, params);
     const completedAtMs = Date.now();
+    // refresh_resource reports failure in its result body instead of
+    // throwing. Without this, the trace looked successful, the loop
+    // counted a failed refresh as tenant evidence, and source helpers
+    // labelled the resource live.
+    const softError =
+      tool === "refresh_resource" &&
+      result !== null &&
+      typeof result === "object" &&
+      (result as { ok?: unknown }).ok === false
+        ? String(
+            (result as { error?: unknown }).error ??
+              `Refresh failed for ${String((result as { resource?: unknown }).resource ?? "resource")}.`,
+          )
+        : undefined;
+    const graphRecord =
+      tool === "graph_get" && result !== null && typeof result === "object"
+        ? (result as Record<string, unknown>)
+        : undefined;
     const trace: IntuneChatToolTraceEntry = {
       id: `tool_${randomUUID()}`,
       tool,
       params: params ?? {},
       resultSummary: summarizeToolResult(tool, result),
       ...(tool === "web_search" ? { webSources: (result as WebSearchResult).sources } : {}),
+      ...(graphRecord
+        ? {
+            graphSource: {
+              path: String(graphRecord.path ?? ""),
+              ...(graphRecord.query && typeof graphRecord.query === "object"
+                ? { query: graphRecord.query as Record<string, string> }
+                : {}),
+              rows:
+                typeof graphRecord.returnedRows === "number"
+                  ? graphRecord.returnedRows
+                  : Array.isArray(graphRecord.rows)
+                    ? graphRecord.rows.length
+                    : 1,
+              ...(typeof graphRecord.pagesFetched === "number"
+                ? { pagesFetched: graphRecord.pagesFetched }
+                : { pagesFetched: 1 }),
+              ...(typeof graphRecord.truncated === "boolean"
+                ? { truncated: graphRecord.truncated }
+                : {}),
+              ...(typeof graphRecord.totalCount === "number"
+                ? { totalCount: graphRecord.totalCount }
+                : {}),
+            },
+          }
+        : {}),
       durationMs: Math.max(0, completedAtMs - startedAtMs),
       createdAt,
       completedAt: new Date(completedAtMs).toISOString(),
+      ...(softError ? { error: softError } : {}),
     };
     return { result, trace };
   } catch (caught) {
@@ -522,18 +566,37 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
   let pagesFetched = 1;
   let totalCount = page.totalCount;
   collected.push(...page.rows);
+  const seenContinuations = new Set<string>();
   while (
     page.nextLink &&
     collected.length < GRAPH_GET_ROW_CAP &&
     pagesFetched < GRAPH_GET_PAGE_CAP &&
     !skuInventory
   ) {
-    const skiptoken = skiptokenFromNextLink(page.nextLink);
-    if (!skiptoken) break;
+    // Follow the complete continuation URL through the validated parser
+    // (host pinned to graph.microsoft.com, beta only) instead of
+    // extracting one parameter: Graph continuations may carry $skip or
+    // a changed query, and reconstructing from the original query
+    // silently re-reads the wrong page. The path must stay on the
+    // endpoint that was validated and consented for this call.
+    if (seenContinuations.has(page.nextLink)) break;
+    seenContinuations.add(page.nextLink);
+    let continuation: ReturnType<typeof graphCacheRequestFromNextLink>;
+    try {
+      continuation = graphCacheRequestFromNextLink(
+        page.nextLink,
+        Object.keys(headers).length > 0 ? headers : undefined,
+      );
+    } catch {
+      break;
+    }
+    if (continuation.path !== path) break;
     ctx.signal?.throwIfAborted();
     const nextResponse = await requestPage({
-      ...request,
-      query: { ...query, $skiptoken: skiptoken },
+      method: "GET",
+      path: continuation.path,
+      ...(continuation.query ? { query: continuation.query } : {}),
+      ...(continuation.headers ? { headers: continuation.headers } : {}),
     });
     page = unwrapGraphCollectionPage(nextResponse);
     pagesFetched += 1;
@@ -560,16 +623,6 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
 }
 
 const GRAPH_GET_PAGE_CAP = 5;
-
-function skiptokenFromNextLink(nextLink: string): string | undefined {
-  try {
-    const url = new URL(nextLink);
-    if (url.hostname !== "graph.microsoft.com") return undefined;
-    return url.searchParams.get("$skiptoken") ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
 
 async function refreshResource(
   ctx: IntuneChatToolContext,

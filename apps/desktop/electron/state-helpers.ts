@@ -1090,22 +1090,40 @@ const CHAT_MEMORY_MAX_MESSAGE_CHARS = 1000;
 export function boundedConversationMemory(
   messages: readonly IntuneChatMessage[],
 ): string | undefined {
-  const completed = messages.filter(
-    (message) => message.status === "completed" && message.content.trim().length > 0,
-  );
-  const windowed = completed.slice(-CHAT_MEMORY_MAX_TURNS * 2);
-  const lines = windowed.map((message) => {
+  // Build turns first. Filtering messages individually kept the user
+  // prompts of failed or cancelled exchanges (user rows stay
+  // "completed"), so eight abandoned prompts could ride along under a
+  // four-turn policy. Only exchanges whose assistant reply completed
+  // count as memory.
+  const turns: string[] = [];
+  const format = (message: IntuneChatMessage): string => {
     const text = message.content.trim();
     const bounded = text.length > CHAT_MEMORY_MAX_MESSAGE_CHARS
       ? `${text.slice(0, CHAT_MEMORY_MAX_MESSAGE_CHARS)} [truncated]`
       : text;
     return `${message.role === "user" ? "User" : "Assistant"}: ${bounded}`;
-  });
-  while (lines.length > 1 && lines.join("\n").length > CHAT_MEMORY_MAX_CHARS) {
-    lines.shift();
+  };
+  for (let index = 0; index < messages.length; index += 1) {
+    const user = messages[index]!;
+    if (user.role !== "user" || user.status !== "completed" || !user.content.trim()) continue;
+    const assistant = messages[index + 1];
+    if (
+      !assistant ||
+      assistant.role !== "assistant" ||
+      assistant.status !== "completed" ||
+      !assistant.content.trim()
+    ) {
+      continue;
+    }
+    turns.push(`${format(user)}\n${format(assistant)}`);
+    index += 1;
   }
-  if (lines.length === 0) return undefined;
-  const joined = lines.join("\n");
+  const windowed = turns.slice(-CHAT_MEMORY_MAX_TURNS);
+  while (windowed.length > 1 && windowed.join("\n").length > CHAT_MEMORY_MAX_CHARS) {
+    windowed.shift();
+  }
+  if (windowed.length === 0) return undefined;
+  const joined = windowed.join("\n");
   return joined.length > CHAT_MEMORY_MAX_CHARS
     ? joined.slice(joined.length - CHAT_MEMORY_MAX_CHARS)
     : joined;
@@ -1140,24 +1158,25 @@ export function resourcesFromToolTrace(
       continue;
     }
     if (entry.tool === "graph_get" && typeof params.path === "string") {
-      // Map the live path back to its cache resource by longest known
-      // base path, so /users/{id} credits the users resource.
-      let best: GraphCacheResourceKind | undefined;
-      let bestLength = -1;
-      for (const kind of known) {
-        const base = pathForResource(kind).path;
-        if (
-          (params.path === base || params.path.startsWith(`${base}/`)) &&
-          base.length > bestLength
-        ) {
-          best = kind;
-          bestLength = base.length;
-        }
-      }
-      if (best) resources.add(best);
+      const resource = graphResourceForPath(params.path);
+      if (resource) resources.add(resource);
     }
   }
   return resources;
+}
+
+/** Map a live Graph path back to its cache resource by longest known base path. */
+function graphResourceForPath(path: string): GraphCacheResourceKind | undefined {
+  let best: GraphCacheResourceKind | undefined;
+  let bestLength = -1;
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    const base = pathForResource(definition.resource).path;
+    if ((path === base || path.startsWith(`${base}/`)) && base.length > bestLength) {
+      best = definition.resource;
+      bestLength = base.length;
+    }
+  }
+  return best;
 }
 
 /** Resources the refresh_resource tool successfully refreshed mid-investigation. */
@@ -1210,15 +1229,48 @@ export function buildIntuneChatSources(input: {
    * the planned resources themselves.
    */
   executedResources?: Iterable<GraphCacheResourceKind>;
+  /**
+   * Execution trace. A resource read live through `graph_get` is
+   * described from that execution (rows returned, pages fetched,
+   * truncation, completion time), never from the cache snapshot that
+   * happens to share its resource kind.
+   */
+  toolTrace?: readonly IntuneChatToolTraceEntry[];
   refreshedResources: Set<GraphCacheResourceKind>;
 }): NonNullable<IntuneChatMessage["sources"]> {
   const visible = input.executedResources
     ? new Set(input.executedResources)
     : new Set(input.plannedResources);
+  const liveGraphByResource = new Map<GraphCacheResourceKind, IntuneChatToolTraceEntry>();
+  for (const entry of input.toolTrace ?? []) {
+    if (entry.tool !== "graph_get" || entry.error || !entry.graphSource) continue;
+    const resource = graphResourceForPath(entry.graphSource.path);
+    if (resource) liveGraphByResource.set(resource, entry);
+  }
   return input.cacheStatus
     .filter((status) => visible.has(status.resource))
     .map((status) => {
       const request = pathForResource(status.resource);
+      const liveEntry = liveGraphByResource.get(status.resource);
+      if (liveEntry?.graphSource) {
+        const live = liveEntry.graphSource;
+        const select = live.query?.["$select"]
+          ?.split(",")
+          .map((field) => field.trim())
+          .filter(Boolean);
+        return {
+          resource: status.resource,
+          label: status.label,
+          rows: live.rows,
+          pages: live.pagesFetched,
+          pageLimitReached: live.truncated,
+          refreshedAt: liveEntry.completedAt,
+          source: "live" as const,
+          path: live.path,
+          ...(select && select.length > 0 ? { select } : {}),
+          ...(live.query ? { query: live.query } : {}),
+        };
+      }
       return {
         resource: status.resource,
         label: status.label,

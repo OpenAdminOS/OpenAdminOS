@@ -635,6 +635,12 @@ describe("Intune Chat planner", () => {
       "Show licenses granted to the finance group.",
       "When was the compliance policy last updated?",
       "Show devices that failed to update to Windows 11.",
+      "Which Conditional Access policies grant access without MFA?",
+      "Does the policy block legacy authentication?",
+      "Why did Windows fail to update the device?",
+      "How do I add a device to Autopilot?",
+      "Which policies block legacy authentication?",
+      "Add up the assigned licenses per department",
     ];
     for (const question of readQuestions) {
       assert.equal(
@@ -651,6 +657,9 @@ describe("Intune Chat planner", () => {
       "Update the compliance policy to require encryption",
       "Rename the baseline policy for Windows laptops",
       "Block sign-ins for the dormant guest accounts",
+      "Please retire the stale laptops in Berlin",
+      "Can you update the compliance policy to require encryption?",
+      "I need to delete the old Autopilot profile",
     ];
     for (const question of writeQuestions) {
       assert.equal(

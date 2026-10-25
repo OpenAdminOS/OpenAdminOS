@@ -290,22 +290,47 @@ const WRITE_INTENT_TERMS = [
   "move",
 ] as const;
 
-// Write intent must match the imperative verb as a whole word. Substring
-// matching flagged read questions about state ("assigned", "enabled",
-// "deleted") and, since the block fires before refresh and model calls,
-// would suppress legitimate read answers entirely. "update" needs more
-// care: it is also the infinitive in read questions ("devices that
-// failed to update"), so it only counts in imperative position.
+// Write intent must match a requested action, not a verb that merely
+// appears in the question. Whole-word matching anywhere in the sentence
+// hard-blocked ordinary read questions whose clauses describe tenant
+// state: "Which Conditional Access policies grant access without MFA?",
+// "Does the policy block legacy authentication?", "Why did Windows fail
+// to update the device?" Since the block fires before refresh and model
+// calls, a false positive suppresses the read answer entirely. A verb
+// counts when it sits in imperative position (sentence start, after
+// please / can you / need to, or after "and then"); interrogative
+// questions without an imperative verb are reads. Declarative prompts
+// keep the whole-word rule. "update" never falls back to whole-word: it
+// is also a product noun and an infinitive in read questions.
+const READ_QUESTION_START =
+  /^(?:which|what|why|how|when|where|who|does|do|did|is|are|was|were|has|have|show|list|tell|find|count|can|could)\b/;
+
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
-  if (term === "update") {
-    return /(?:^|\bplease\s+|\bcan you\s+|\bcould you\s+)update\b|\bupdate\s+(?:the|this|that|all)\b/.test(
-      lowerQuestion.trim(),
-    );
-  }
-  return new RegExp(`\\b${term}\\b`).test(lowerQuestion);
+  const question = lowerQuestion.trim();
+  // "Add up the licenses" asks for a sum, not a tenant change.
+  if (term === "add" && /^add\s+up\b/.test(question)) return false;
+  const imperative = new RegExp(
+    `(?:^(?:please\\s+)?${term}\\b)|(?:\\b(?:can you|could you|would you|please|go ahead and|i want to|i need to|want to|need to|let's)\\s+${term}\\b)|(?:\\b(?:and then|then|and)\\s+${term}\\b)`,
+  );
+  if (imperative.test(question)) return true;
+  if (term === "update") return false;
+  if (READ_QUESTION_START.test(question)) return false;
+  return new RegExp(`\\b${term}\\b`).test(question);
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// Multi-word domain phrases name the subject of a question more
+// precisely than single terms: in "Which device compliance policies
+// exist?" both "device" and "compliance" match agent names, but the
+// phrase is a compliance question.
+const AGENT_CATEGORY_PHRASES: Record<AgentSummary["category"], string[]> = {
+  apps: ["app protection", "managed app", "app registration"],
+  compliance: ["compliance polic", "device compliance", "compliance state", "noncompliant"],
+  devices: ["managed device", "device inventory", "stale device", "inactive device"],
+  policies: ["conditional access", "configuration polic", "settings catalog", "endpoint security"],
+  updates: ["os update", "windows update", "feature update", "quality update"],
+};
 
 const AGENT_CATEGORY_LABELS: Record<AgentSummary["category"], string> = {
   apps: "app deployment",
@@ -600,7 +625,27 @@ export function graphCacheResourcesForWrite(input: {
     out.add("mobileApps");
     out.add("endpointSecurityIntents");
   }
-  if (out.size === 0) {
+  // A write-looking scope from a family this mapper does not know
+  // (for example Application.ReadWrite.All on a user-authored agent)
+  // can have changed anything: widen to every resource instead of
+  // silently keeping the unmapped area fresh. Pure read scopes and
+  // scopes from mapped families do not widen.
+  const mappedFamilies = [
+    "DeviceManagementManagedDevices.",
+    "User.",
+    "Directory.",
+    "Group.",
+    "Device.",
+    "Policy.",
+    "DeviceManagementConfiguration.",
+    "DeviceManagementApps.",
+  ];
+  const hasUnmappedWriteScope = scopes.some((scope) => {
+    if (/\.Read\.All$|\.Read$/.test(scope)) return false;
+    if (mappedFamilies.some((family) => scope.startsWith(family))) return false;
+    return /ReadWrite|PrivilegedOperations|\.Write\b|Write\./.test(scope);
+  });
+  if (out.size === 0 || hasUnmappedWriteScope) {
     for (const definition of GRAPH_CACHE_RESOURCES) out.add(definition.resource);
   }
   return [...out];
@@ -1150,25 +1195,53 @@ export function matchAgentsToQuestion(
       !(term === "update" && plan.hasWriteIntent && matchesWriteIntentTerm(lower, "update")),
   );
   const inferredCategories = inferQuestionAgentCategories(lower);
+  // Two passes so common words weigh less than distinctive ones. A
+  // generic term like "device" appears in most agent names and
+  // descriptions; counted flat, it outranked the actual subject of the
+  // question ("Which device compliance policies exist?" put device
+  // agents above the compliance overview).
+  const rawMatches = agents.map((agent) => {
+    const nameStems = agentWordStems(`${agent.name} ${agent.slug}`);
+    const bodyStems = agentWordStems(`${agent.description} ${agent.category}`);
+    const matches: Array<{ term: string; field: "name" | "body" }> = [];
+    for (const term of terms) {
+      const stem = stemAgentWord(term);
+      if (nameStems.some((candidate) => agentStemsMatch(stem, candidate))) {
+        matches.push({ term, field: "name" });
+      } else if (bodyStems.some((candidate) => agentStemsMatch(stem, candidate))) {
+        matches.push({ term, field: "body" });
+      }
+    }
+    return matches;
+  });
+  const documentFrequency = new Map<string, number>();
+  for (const matches of rawMatches) {
+    for (const term of new Set(matches.map((match) => match.term))) {
+      documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1);
+    }
+  }
+  const termWeight = (term: string): number => {
+    const frequency = documentFrequency.get(term) ?? 0;
+    return frequency <= 2 ? 1 : frequency <= 4 ? 0.75 : 0.4;
+  };
+  // A term most agents mention somewhere in their description is
+  // incidental there ("compliance" in a device agent's signal list),
+  // so description matches only score for distinctive terms. Name and
+  // slug matches always score: the name is the agent's own claim.
+  const bodyTermScores = (term: string): boolean =>
+    (documentFrequency.get(term) ?? 0) <= 5;
   const suggestions = agents
-    .map((agent) => {
-      const nameStems = agentWordStems(`${agent.name} ${agent.slug}`);
-      const bodyStems = agentWordStems(`${agent.description} ${agent.category}`);
+    .map((agent, agentIndex) => {
       let score = 0;
       let nameMatches = 0;
       const matchedTerms: string[] = [];
       const matchedConcepts: string[] = [];
       const matchedResources = resourcesForAgentCategory(agent.category, plan.resources);
-      for (const term of terms) {
-        const stem = stemAgentWord(term);
-        if (nameStems.some((candidate) => agentStemsMatch(stem, candidate))) {
-          score += 2;
-          nameMatches += 1;
-          matchedTerms.push(term);
-        } else if (bodyStems.some((candidate) => agentStemsMatch(stem, candidate))) {
-          score += 1;
-          matchedTerms.push(term);
-        }
+      for (const match of rawMatches[agentIndex] ?? []) {
+        if (match.field === "body" && !bodyTermScores(match.term)) continue;
+        score += (match.field === "name" ? 2 : 1) * termWeight(match.term);
+        if (match.field === "name") nameMatches += 1;
+        matchedTerms.push(match.term);
       }
       const matched = { agent, score, matchedTerms, matchedConcepts, matchedResources, nameMatches };
       if (agent.mode === "write" && !plan.hasWriteIntent) {
@@ -1191,6 +1264,13 @@ export function matchAgentsToQuestion(
           `${AGENT_CATEGORY_LABELS[agent.category]} investigation`,
         );
       }
+      const domainPhrase = AGENT_CATEGORY_PHRASES[agent.category].find((phrase) =>
+        lower.includes(phrase),
+      );
+      if (domainPhrase) {
+        score += 1.5;
+        matchedConcepts.push(`Domain phrase: ${domainPhrase}`);
+      }
       if (matchedResources.length > 0) {
         matchedConcepts.push(
           `Uses planned source${matchedResources.length === 1 ? "" : "s"}: ${matchedResources
@@ -1212,7 +1292,7 @@ export function matchAgentsToQuestion(
     // device question, a device offboarder on a guest-account request).
     .filter(
       (entry) =>
-        entry.score >= (entry.agent.mode === "write" ? 3 : 2) &&
+        entry.score >= (entry.agent.mode === "write" ? 3 : 1.75) &&
         (entry.nameMatches >= 1 || entry.matchedTerms.length >= 2),
     )
     .sort(

@@ -70,6 +70,16 @@ describe("chat sources come from executed tools, not the plan", () => {
     completedAt: "2026-08-01T10:00:01.000Z",
     ...(error ? { error } : {}),
   });
+  const graphTraceEntry = (): IntuneChatToolTraceEntry => ({
+    ...traceEntry("graph_get", { path: "/users", query: { $select: "id,displayName" } }),
+    graphSource: {
+      path: "/users",
+      query: { $select: "id,displayName", $top: "50" },
+      rows: 1,
+      pagesFetched: 1,
+      truncated: true,
+    },
+  });
   const status = (resource: GraphCacheResourceStatus["resource"]): GraphCacheResourceStatus => ({
     resource,
     label: resource,
@@ -115,6 +125,33 @@ describe("chat sources come from executed tools, not the plan", () => {
       refreshedResources: new Set(),
     });
     assert.deepEqual(sources, []);
+  });
+
+  it("describes live graph_get evidence from the execution, not the cache", () => {
+    const cacheStatus = [{
+      resource: "users" as const,
+      label: "Users",
+      rows: 500,
+      pages: 10,
+      pageLimitReached: false,
+      refreshedAt: "2026-08-01T09:00:00.000Z",
+      scopeSet: [],
+    }];
+    const sources = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [graphTraceEntry()],
+      refreshedResources: new Set(),
+    });
+    assert.equal(sources.length, 1);
+    assert.equal(sources[0]?.source, "live");
+    assert.equal(sources[0]?.rows, 1);
+    assert.equal(sources[0]?.pages, 1);
+    assert.equal(sources[0]?.pageLimitReached, true);
+    assert.equal(sources[0]?.refreshedAt, "2026-08-01T10:00:01.000Z");
+    assert.equal(sources[0]?.path, "/users");
+    assert.deepEqual(sources[0]?.select, ["id", "displayName"]);
   });
 
   it("decides executed vs planned sources per answer mode", () => {
@@ -196,6 +233,25 @@ describe("chat sources come from executed tools, not the plan", () => {
 
     assert.equal(boundedConversationMemory([]), undefined);
     assert.equal(boundedConversationMemory([message(1, "assistant", " ", "completed")]), undefined);
+
+    // Failed or cancelled exchanges are not completed turns: their user
+    // prompts must not ride along just because the assistant side was
+    // filtered out.
+    const cancelled: IntuneChatMessage[] = [];
+    for (let turn = 1; turn <= 8; turn += 1) {
+      cancelled.push(message(100 + turn * 2 - 1, "user", `Abandoned prompt ${turn}`));
+      cancelled.push(message(100 + turn * 2, "assistant", "Stopped", "cancelled"));
+    }
+    const mixed = [
+      ...cancelled,
+      message(201, "user", "Kept question"),
+      message(202, "assistant", "Kept answer"),
+    ];
+    const mixedMemory = boundedConversationMemory(mixed);
+    assert.ok(mixedMemory);
+    assert.match(mixedMemory, /Kept question/);
+    assert.doesNotMatch(mixedMemory, /Abandoned prompt/);
+    assert.equal(boundedConversationMemory(cancelled), undefined);
   });
 
   it("falls back to planned resources when no trace exists (deterministic path)", () => {

@@ -42,6 +42,14 @@ describe("Graph cache resource registry", () => {
       graphCacheResourcesForWrite({ scopes: ["User.ReadWrite.All"] }).sort(),
       ["groups", "users"],
     );
+    // A mapped family plus an unmapped write family widens to every
+    // resource instead of silently keeping the unmapped area fresh.
+    assert.equal(
+      graphCacheResourcesForWrite({
+        scopes: ["DeviceManagementManagedDevices.ReadWrite.All", "Application.ReadWrite.All"],
+      }).length,
+      GRAPH_CACHE_RESOURCES.length,
+    );
     assert.deepEqual(
       graphCacheResourcesForWrite({ paths: ["/users/abc/revokeSignInSessions"] }),
       ["users"],
@@ -233,6 +241,9 @@ describe("agent matcher probe table (real registry)", () => {
     const complianceCount = matchAgentsToQuestion("How many of my devices are noncompliant?", agents);
     assert.ok(slugs(complianceCount).includes("compliance-overview"));
     assert.ok(!slugs(complianceCount).includes("team-script-draft"));
+
+    const compliancePolicies = matchAgentsToQuestion("Which device compliance policies exist?", agents);
+    assert.equal(compliancePolicies[0]?.agentSlug, "compliance-overview");
   });
 });
 
