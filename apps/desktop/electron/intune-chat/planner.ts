@@ -306,10 +306,21 @@ const READ_QUESTION_START =
   /^(?:which|what|why|how|when|where|who|does|do|did|is|are|was|were|has|have|show|list|tell|find|count|can|could|summarize|describe|explain|give|compare|audit|outline|display|review|inspect|check)\b/;
 
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
+  // Classify per sentence and combine: an explanatory or read first
+  // sentence must not exempt a write command in a later one
+  // ("Explain which devices are stale. Retire them."), and polite
+  // prefixes reset at each sentence boundary ("Show me the stale
+  // devices. Can you retire them?").
+  return lowerQuestion
+    .split(/(?<=[.!?;])\s+/)
+    .some((sentence) => matchesWriteIntentTermInSentence(sentence, term));
+}
+
+function matchesWriteIntentTermInSentence(lowerSentence: string, term: string): boolean {
   // Normalize a polite prefix first: "Please list policies that block
   // legacy authentication" is the same main clause as without it, and
   // must not fall through to the whole-word fallback.
-  const question = lowerQuestion
+  const question = lowerSentence
     .trim()
     .replace(/^(?:please\s+|can you\s+|could you\s+|would you\s+)+/, "");
   // Explanatory prompts describe actions instead of requesting them:
