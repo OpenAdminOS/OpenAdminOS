@@ -147,6 +147,7 @@ export async function runAgenticChat(
   let unfinishedCount = 0;
   let noEvidenceCount = 0;
   let evidenceToolCalls = 0;
+  let webSearchAttempts = 0;
   let responseModel = input.model;
   const invalidQueries = new Map<string, string>();
   const failedGraphFields = new Map<string, string[]>();
@@ -229,7 +230,7 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: "That was a progress message, not a finished answer. Perform the required read-only tool call now, then answer the current question using its result. If blocked, explain the concrete blocker. No work continues after a final response; do not promise a future lookup." });
       continue;
     }
-    if (action.kind === "final" && input.plannedResources.length > 0 && evidenceToolCalls === 0 && invalidQueries.size === 0) {
+    if (action.kind === "final" && input.plannedResources.length > 0 && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
       noEvidenceCount += 1;
       if (noEvidenceCount > MAX_NO_EVIDENCE_RETRIES) {
         return {
@@ -277,6 +278,12 @@ export async function runAgenticChat(
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params);
     toolTrace.push(execution.trace);
     if (!execution.trace.error && EVIDENCE_TOOLS.has(action.tool)) evidenceToolCalls += 1;
+    // In a consented web-research session, public evidence is
+    // first-class and the service owns web-failure honesty (a failed
+    // search converts the answer into a named failure there). Without
+    // webSearch configured the tool only errors, and that must never
+    // bypass the tenant-evidence guard.
+    if (action.tool === "web_search" && input.tools.webSearch) webSearchAttempts += 1;
     if (action.tool === 'query_cache') {
       const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
       if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);

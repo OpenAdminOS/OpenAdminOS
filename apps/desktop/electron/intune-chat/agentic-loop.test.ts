@@ -215,6 +215,39 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
+  it("counts web research as evidence only in a consented web session", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const script = () => scriptedLlm([
+        '```json\n{"tool":"web_search","params":{"query":"latest macOS version Apple"}}\n```',
+        "Apple publishes the current macOS versions on its support page.",
+      ]);
+      const webResult = await runAgenticChat({
+        ...baseInput(store, script()),
+        tools: {
+          ...toolContext(store),
+          webSearch: async () => ({
+            text: "Apple macOS guidance.",
+            sources: [{ title: "Apple releases", url: "https://support.apple.com/en-us/100100" }],
+            searchedAt: "2026-06-01T10:00:30.000Z",
+          }),
+        },
+      });
+      assert.equal(webResult.ok, true, JSON.stringify(webResult));
+      assert.equal(webResult.toolTrace[0]?.tool, "web_search");
+
+      // Without webSearch configured the tool errors, and that failed
+      // attempt must not bypass the tenant-evidence guard.
+      const noWeb = await runAgenticChat(baseInput(store, script()));
+      assert.equal(noWeb.ok, false);
+      assert.equal(noWeb.reason, "no-evidence");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("still allows a prose final when no tenant data was planned", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);

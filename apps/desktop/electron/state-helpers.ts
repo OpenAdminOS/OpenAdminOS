@@ -6,6 +6,7 @@ import type {
   GraphCacheStatus,
   IntuneChatConversation,
   IntuneChatMessage,
+  IntuneChatToolTraceEntry,
   IntuneChatProgressStep,
   MultiTenantChatJob,
   MultiTenantDeviceRow,
@@ -295,11 +296,14 @@ export function isWindowsCompliancePrompt(prompt: string): boolean {
 
 
 export function isGraphCacheStatusStale(status: GraphCacheResourceStatus): boolean {
-  if (status.lastError) return false;
+  // Match the single-tenant send path: errored resources are retried,
+  // and staleness follows the per-resource TTL, not a flat 6h rule that
+  // contradicted host policy for fast and slow resources alike.
+  if (status.lastError) return true;
   if (!status.refreshedAt || status.rows === 0) return true;
   const refreshedMs = Date.parse(status.refreshedAt);
   if (!Number.isFinite(refreshedMs)) return true;
-  return Date.now() - refreshedMs > 6 * 60 * 60 * 1000;
+  return Date.now() - refreshedMs > resourceStalenessMs(status.resource);
 }
 
 
@@ -1071,13 +1075,112 @@ export function stableSuggestionId(tenantId: string, agentSlug: string, text: st
 
 
 
+/**
+ * Resources an investigation actually read, derived from successful tool
+ * trace entries. Sources must describe what ran, not what was planned:
+ * a refusal that never touched tenant data must not carry source badges,
+ * and a resource fetched mid-investigation must appear even when the
+ * planner never named it.
+ */
+export function resourcesFromToolTrace(
+  toolTrace: readonly IntuneChatToolTraceEntry[] | undefined,
+): Set<GraphCacheResourceKind> {
+  const known = new Set<GraphCacheResourceKind>(
+    GRAPH_CACHE_RESOURCES.map((entry) => entry.resource),
+  );
+  const resources = new Set<GraphCacheResourceKind>();
+  for (const entry of toolTrace ?? []) {
+    if (entry.error) continue;
+    const params = (entry.params ?? {}) as Record<string, unknown>;
+    if (
+      entry.tool === "query_cache" ||
+      entry.tool === "refresh_resource" ||
+      entry.tool === "query_drift"
+    ) {
+      const resource = params.resource;
+      if (typeof resource === "string" && known.has(resource as GraphCacheResourceKind)) {
+        resources.add(resource as GraphCacheResourceKind);
+      }
+      continue;
+    }
+    if (entry.tool === "graph_get" && typeof params.path === "string") {
+      // Map the live path back to its cache resource by longest known
+      // base path, so /users/{id} credits the users resource.
+      let best: GraphCacheResourceKind | undefined;
+      let bestLength = -1;
+      for (const kind of known) {
+        const base = pathForResource(kind).path;
+        if (
+          (params.path === base || params.path.startsWith(`${base}/`)) &&
+          base.length > bestLength
+        ) {
+          best = kind;
+          bestLength = base.length;
+        }
+      }
+      if (best) resources.add(best);
+    }
+  }
+  return resources;
+}
+
+/** Resources the refresh_resource tool successfully refreshed mid-investigation. */
+export function toolRefreshedResources(
+  toolTrace: readonly IntuneChatToolTraceEntry[] | undefined,
+): Set<GraphCacheResourceKind> {
+  const known = new Set<GraphCacheResourceKind>(
+    GRAPH_CACHE_RESOURCES.map((entry) => entry.resource),
+  );
+  const resources = new Set<GraphCacheResourceKind>();
+  for (const entry of toolTrace ?? []) {
+    if (entry.tool !== "refresh_resource" || entry.error) continue;
+    const resource = (entry.params as Record<string, unknown> | undefined)?.resource;
+    if (typeof resource === "string" && known.has(resource as GraphCacheResourceKind)) {
+      resources.add(resource as GraphCacheResourceKind);
+    }
+  }
+  return resources;
+}
+
+/**
+ * Which resources an answer may claim as sources. Returns undefined to
+ * mean "the planned resources", which is honest only when the answer
+ * pack was built from them (deterministic path) or the model read the
+ * full cache inventory. An empty set means no tenant sources at all.
+ */
+export function executedResourcesForAnswer(input: {
+  toolTrace?: readonly IntuneChatToolTraceEntry[];
+  usedDeterministic: boolean;
+  usedNoData: boolean;
+}): Set<GraphCacheResourceKind> | undefined {
+  if (input.usedNoData) return new Set();
+  if (input.usedDeterministic) return undefined;
+  if (!input.toolTrace || input.toolTrace.length === 0) return undefined;
+  const executed = resourcesFromToolTrace(input.toolTrace);
+  if (executed.size > 0) return executed;
+  const readInventory = input.toolTrace.some(
+    (entry) => entry.tool === "list_cached_resources" && !entry.error,
+  );
+  return readInventory ? undefined : new Set();
+}
+
 export function buildIntuneChatSources(input: {
   cacheStatus: GraphCacheStatus["resources"];
   plannedResources: GraphCacheResourceKind[];
+  /**
+   * When provided, sources are limited to what actually ran. An empty
+   * set deliberately yields no sources (refusals, write blocks). Omit
+   * only on the deterministic path, where the answer pack is built from
+   * the planned resources themselves.
+   */
+  executedResources?: Iterable<GraphCacheResourceKind>;
   refreshedResources: Set<GraphCacheResourceKind>;
 }): NonNullable<IntuneChatMessage["sources"]> {
+  const visible = input.executedResources
+    ? new Set(input.executedResources)
+    : new Set(input.plannedResources);
   return input.cacheStatus
-    .filter((status) => input.plannedResources.includes(status.resource))
+    .filter((status) => visible.has(status.resource))
     .map((status) => {
       const request = pathForResource(status.resource);
       return {

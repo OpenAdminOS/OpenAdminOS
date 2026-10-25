@@ -65,6 +65,8 @@ import {
   assertConversationTenant,
   buildChatProgressSteps,
   buildIntuneChatSources,
+  executedResourcesForAnswer,
+  toolRefreshedResources,
   buildIntuneChatSystemPrompt,
   buildMultiTenantDossierMarkdown,
   buildMultiTenantSummary,
@@ -1615,13 +1617,9 @@ export class IntuneChatService {
         .filter((resource) => resource.ok)
         .map((resource) => resource.resource) ?? [],
     );
-    const sources = buildIntuneChatSources({
-      cacheStatus,
-      plannedResources: planned.resources,
-      refreshedResources,
-    });
 
     let assistantContent: string;
+    let usedDeterministic = false;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
     let engineNotice: string | undefined;
@@ -1646,6 +1644,7 @@ export class IntuneChatService {
       const buildDeterministicAnswer = async (
         notice?: string,
       ): Promise<{ content: string; model?: string }> => {
+        usedDeterministic = true;
         engineNotice = notice;
         const answerPack = buildAnswerPack({
           question: modelQuestion,
@@ -1735,7 +1734,16 @@ export class IntuneChatService {
       providerId,
       model: responseModel,
       ...(engineNotice ? { engineNotice } : {}),
-      sources,
+      sources: buildIntuneChatSources({
+        cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+        plannedResources: planned.resources,
+        executedResources: executedResourcesForAnswer({
+          toolTrace,
+          usedDeterministic,
+          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
+        }),
+        refreshedResources: new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
+      }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),
@@ -1893,6 +1901,7 @@ export class IntuneChatService {
         sources: buildIntuneChatSources({
           cacheStatus: currentCacheStatus,
           plannedResources: planned.resources,
+          executedResources: new Set(),
           refreshedResources: new Set(),
         }),
         error: "Stopped by user.",
@@ -2067,13 +2076,8 @@ export class IntuneChatService {
         .filter((resource) => resource.ok)
         .map((resource) => resource.resource) ?? [],
     );
-    const sources = buildIntuneChatSources({
-      cacheStatus,
-      plannedResources: planned.resources,
-      refreshedResources,
-    });
-
     let assistantContent = "";
+    let usedDeterministic = false;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
     let assistantError: string | undefined;
     let engineNotice: string | undefined;
@@ -2112,6 +2116,7 @@ export class IntuneChatService {
         ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
         : contextualQuestion;
       const streamDeterministicAnswer = async (notice?: string) => {
+        usedDeterministic = true;
         engineNotice = notice;
         let answerPack = buildAnswerPack({
           question: modelQuestion,
@@ -2358,7 +2363,16 @@ export class IntuneChatService {
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
-      sources,
+      sources: buildIntuneChatSources({
+        cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+        plannedResources: planned.resources,
+        executedResources: executedResourcesForAnswer({
+          toolTrace,
+          usedDeterministic,
+          usedNoData: assistantStatus !== "completed" || Boolean(namedAgent) || planned.hasWriteIntent,
+        }),
+        refreshedResources: new Set([...refreshedResources, ...toolRefreshedResources(toolTrace)]),
+      }),
       ...(toolTrace && toolTrace.length > 0 ? { toolTrace } : {}),
       agentSuggestions,
       ...(assistantError ? { error: assistantError } : {}),

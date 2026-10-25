@@ -4003,7 +4003,10 @@ function AnswerScopeDisclosure({
   sources: IntuneChatSource[];
   trace: IntuneChatToolTraceEntry[];
 }) {
-  const refreshedAt = newestTimestamp(
+  // The stalest source bounds how current the answer can be. Showing
+  // the newest refresh let a header claim "data from just now" while the
+  // rows the answer used were hours old.
+  const refreshedAt = oldestTimestamp(
     sources.flatMap((source) => source.refreshedAt ?? []),
   );
   const resourceNames = [...new Set(sources.map((source) => source.label))].join(", ");
@@ -4024,7 +4027,7 @@ function AnswerScopeDisclosure({
         {refreshedAt ? (
           <>
             <span aria-hidden="true" className="opacity-60">·</span>
-            <span>data from {formatRelativeAge(refreshedAt)}</span>
+            <span>{sources.length > 1 ? "oldest data from " : "data from "}{formatRelativeAge(refreshedAt)}</span>
           </>
         ) : null}
         <span aria-hidden="true" className="opacity-60">·</span>
@@ -4516,6 +4519,15 @@ function matchComposerAgent(
 function suggestionLabel(prompt: string): string {
   // Keep whole words; the chip truncates visually with an ellipsis if needed.
   return prompt.replace(/[?.]$/, "");
+}
+
+function oldestTimestamp(values: string[]): string | undefined {
+  return values.reduce<string | undefined>((oldest, value) => {
+    const time = Date.parse(value);
+    if (!Number.isFinite(time)) return oldest;
+    if (!oldest || time < Date.parse(oldest)) return value;
+    return oldest;
+  }, undefined);
 }
 
 function newestTimestamp(values: string[]): string | undefined {

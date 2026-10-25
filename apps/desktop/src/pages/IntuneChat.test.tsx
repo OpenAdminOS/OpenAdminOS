@@ -1005,4 +1005,55 @@ describe("IntuneChat conversation routes", () => {
     await user.click(screen.getByText("How I checked"));
     expect(screen.getByText(notice)).toBeVisible();
   });
+
+  it("shows the oldest source age in the answer header, not the newest", async () => {
+    const conversation: IntuneChatConversation = {
+      id: "conversation-sources",
+      title: "Review devices",
+      createdAt: "2026-08-06T10:00:00.000Z",
+      updatedAt: "2026-08-06T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const now = Date.now();
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async () => [
+        {
+          id: "answer-1",
+          conversationId: conversation.id,
+          role: "assistant" as const,
+          content: "Eight devices are noncompliant.",
+          status: "completed" as const,
+          createdAt: conversation.updatedAt,
+          sources: [
+            {
+              resource: "managedDevices" as const,
+              label: "Managed devices",
+              rows: 9,
+              source: "cache" as const,
+              refreshedAt: new Date(now - 3 * 60 * 60 * 1000).toISOString(),
+            },
+            {
+              resource: "users" as const,
+              label: "Users",
+              rows: 4,
+              source: "live" as const,
+              refreshedAt: new Date(now - 30 * 1000).toISOString(),
+            },
+          ],
+        },
+      ]),
+    });
+
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId",
+      route: "/chat/conversation-sources",
+      bridge,
+    });
+
+    expect(await screen.findByText("Eight devices are noncompliant.")).toBeInTheDocument();
+    expect(screen.getByText(/oldest data from 3 hours ago/)).toBeInTheDocument();
+    expect(screen.queryByText(/data from just now/)).not.toBeInTheDocument();
+  });
 });
