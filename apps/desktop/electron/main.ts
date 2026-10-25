@@ -826,12 +826,29 @@ function officeRehearsalAnswer(prompt:string): string {
   return `REHEARSAL: Supplied compliance evidence changed between checks. Review collection freshness and the source run before deciding on remediation. The evidence does not establish policy causation. Sources: ${sources || "current collection"}.`;
 }
 
+// The landing capture shows investigative Chat the way a real model drives
+// it: read the cached Intune and Entra device rows, then answer from them.
+function landingInvestigationStep(prompt: string): string {
+  for (const resource of ["managedDevices", "entraDevices"]) {
+    if (!prompt.includes(`"resource":"${resource}"`)) {
+      return `\`\`\`json\n${JSON.stringify({ tool: "query_cache", params: { resource, limit: 25 } })}\n\`\`\``;
+    }
+  }
+  return JSON.stringify({
+    final: true,
+    answer: "WIN-01 is stale based on cached Intune and Entra device evidence.",
+  });
+}
+
 function createIntuneChatSmokeLlm(): RunLlmApi {
   return {
     available: true,
     defaultModel: smokeModelName,
     async complete(options) {
       if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:smokeModelName};
+      if (isLandingCapture && options.prompt.includes("Admin question:")) {
+        return { text: landingInvestigationStep(options.prompt), model: smokeModelName };
+      }
       return {
         text: "WIN-01 is stale based on cached Intune and Entra device evidence.",
         model: smokeModelName,
