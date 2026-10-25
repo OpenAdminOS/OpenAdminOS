@@ -17,6 +17,7 @@
     "smoke:office": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/smoke-office.mjs",
     "smoke:report-issue": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/smoke-report-issue.mjs",
     "screenshots": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/capture-screenshots.mjs",
+    "screenshots:landing": "npm run build:packages -w @openadminos/desktop && npm run build:electron -w @openadminos/desktop && node scripts/capture-screenshots.mjs --landing && npm --prefix web run landing-shots --if-present",
     "dist:desktop": "npm run dist -w @openadminos/desktop",
     "registry:index": "node scripts/generate-registry-index.mjs",
     "release:check": "node scripts/check-release-compatibility.mjs",

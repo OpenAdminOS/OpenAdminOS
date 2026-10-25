@@ -4,7 +4,7 @@ import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { officeFullscreen } from "./office-fullscreen.js";
 import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
-import { captureWebsiteDemo } from "./website-demo-capture.js";
+import { captureLandingShots } from "./landing-capture.js";
 import {
   NATIVE_THEME_COLORS,
   parseNativeAppearance,
@@ -178,6 +178,14 @@ const isScreenshotCaptureLaunch =
   !app.isPackaged && process.env.OPENADMINOS_SCREENSHOT_CAPTURE === "1";
 const screenshotCaptureUserData =
   process.env.OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA;
+// Website landing captures show realistic display values. Smoke tests and the
+// layout captures keep their deliberate fixtures (including the long model id).
+const isLandingCapture =
+  isScreenshotCaptureLaunch && process.env.OPENADMINOS_LANDING_CAPTURE === "1";
+const smokeModelName = isLandingCapture ? "gpt-oss:20b" : "test-smoke-local-model";
+const screenshotModelName = isLandingCapture
+  ? "gpt-oss:20b"
+  : "screenshot-local-model-with-a-deliberately-long-identifier";
 const screenshotCaptureOutDir = !app.isPackaged
   ? process.env.OPENADMINOS_SCREENSHOT_OUT_DIR
   : undefined;
@@ -410,7 +418,7 @@ function seedIntuneChatSmokeState(userDataDir: string): void {
     JSON.stringify(
       {
         activeProviderId: "ollama",
-        activeModelByProviderId: { ollama: "test-smoke-local-model" },
+        activeModelByProviderId: { ollama: smokeModelName },
         installedAgents: [
           {
             id: "offboarding-agent",
@@ -570,7 +578,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
       {
         activeProviderId: "ollama",
         activeModelByProviderId: {
-          ollama: "screenshot-local-model-with-a-deliberately-long-identifier",
+          ollama: screenshotModelName,
         },
         installedAgents,
         runs: [
@@ -581,7 +589,7 @@ function seedScreenshotCaptureState(userDataDir: string): void {
             queuedAt: now,
             startedAt: now,
             providerId: "ollama",
-            model: "screenshot-local-model-with-a-deliberately-long-identifier",
+            model: screenshotModelName,
             tenantId: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             summary: "Write plan is ready for review.",
             steps: [],
@@ -620,7 +628,11 @@ function seedScreenshotCaptureState(userDataDir: string): void {
           {
             id: isWebsiteCapture ? "contoso-tenant" : "contoso-demo-tenant",
             displayName: isWebsiteCapture ? "Contoso" : "Contoso Demo: European Endpoint Administration and Security",
-            username: isWebsiteCapture ? "admin@contoso.invalid" : "admin@contoso-demo.invalid",
+            username: isLandingCapture
+              ? "admin@contoso.com"
+              : isWebsiteCapture
+                ? "admin@contoso.invalid"
+                : "admin@contoso-demo.invalid",
             homeAccountId: isWebsiteCapture ? "contoso-home-account" : "contoso-demo-home-account",
             addedAt: now,
             entraTier: "p2",
@@ -814,28 +826,45 @@ function officeRehearsalAnswer(prompt:string): string {
   return `REHEARSAL: Supplied compliance evidence changed between checks. Review collection freshness and the source run before deciding on remediation. The evidence does not establish policy causation. Sources: ${sources || "current collection"}.`;
 }
 
+// The landing capture shows investigative Chat the way a real model drives
+// it: read the cached Intune and Entra device rows, then answer from them.
+function landingInvestigationStep(prompt: string): string {
+  for (const resource of ["managedDevices", "entraDevices"]) {
+    if (!prompt.includes(`"resource":"${resource}"`)) {
+      return `\`\`\`json\n${JSON.stringify({ tool: "query_cache", params: { resource, limit: 25 } })}\n\`\`\``;
+    }
+  }
+  return JSON.stringify({
+    final: true,
+    answer: "WIN-01 is stale based on cached Intune and Entra device evidence.",
+  });
+}
+
 function createIntuneChatSmokeLlm(): RunLlmApi {
   return {
     available: true,
-    defaultModel: "test-smoke-local-model",
+    defaultModel: smokeModelName,
     async complete(options) {
-      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:"test-smoke-local-model"};
+      if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") return {text:officeRehearsalAnswer(options.prompt),model:smokeModelName};
+      if (isLandingCapture && options.prompt.includes("Admin question:")) {
+        return { text: landingInvestigationStep(options.prompt), model: smokeModelName };
+      }
       return {
         text: "WIN-01 is stale based on cached Intune and Entra device evidence.",
-        model: "test-smoke-local-model",
+        model: smokeModelName,
       };
     },
     async *stream(options) {
       if (isScreenshotCaptureLaunch && process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
         const text=officeRehearsalAnswer(options.prompt);
-        yield {delta:text,accumulated:text,done:true,model:"test-smoke-local-model"};return;
+        yield {delta:text,accumulated:text,done:true,model:smokeModelName};return;
       }
       if (options.prompt.includes("Hold response for cancellation smoke")) {
         yield {
           delta: "Partial response",
           accumulated: "Partial response",
           done: false,
-          model: "test-smoke-local-model",
+          model: smokeModelName,
         };
         const started = Date.now();
         while (!options.signal?.aborted && Date.now() - started < 5000) {
@@ -849,13 +878,13 @@ function createIntuneChatSmokeLlm(): RunLlmApi {
         delta: "WIN-01 is stale",
         accumulated: "WIN-01 is stale",
         done: false,
-        model: "test-smoke-local-model",
+        model: smokeModelName,
       };
       yield {
         delta: " based on cached Intune and Entra device evidence.",
         accumulated: "WIN-01 is stale based on cached Intune and Entra device evidence.",
         done: true,
-        model: "test-smoke-local-model",
+        model: smokeModelName,
       };
     },
   };
@@ -867,9 +896,12 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
       ? {
           ...provider,
           status: "connected",
-          detail: "Deterministic local provider fixture for Electron smoke tests.",
-          models: ["test-smoke-local-model"],
-          defaultModel: "test-smoke-local-model",
+          // Landing captures show the text a connected local Ollama reports.
+          detail: isLandingCapture
+            ? "Running on http://localhost:11434"
+            : "Deterministic local provider fixture for Electron smoke tests.",
+          models: [smokeModelName],
+          defaultModel: smokeModelName,
         }
       : { ...provider },
   );
@@ -989,9 +1021,9 @@ async function runScreenshotCapture(): Promise<void> {
     return;
   }
 
-  if (process.env.OPENADMINOS_WEBSITE_CAPTURE === "1") {
-    await captureWebsiteDemo(window, screenshotCaptureOutDir, (route, waitFor, prepare) =>
-      runScreenshotCaptureStep(window, { kind: "route", route, waitFor, prepare, reducedMotion: true }),
+  if (isLandingCapture) {
+    await captureLandingShots(window, screenshotCaptureOutDir, (step) =>
+      runScreenshotCaptureStep(window, { kind: "route", ...step, reducedMotion: true }),
     );
     app.exit(0);
     return;
