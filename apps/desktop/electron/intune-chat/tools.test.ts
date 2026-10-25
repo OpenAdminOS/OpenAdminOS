@@ -49,6 +49,32 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("list_cached_resources staleness follows per-resource host TTLs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const anHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "signIns", label: "Sign-in logs",
+        scopeSet: ["AuditLog.Read.All"], refreshedAt: anHourAgo,
+        rows: [{ id: "sign-in-1" }],
+      });
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "deviceConfigurations", label: "Device configurations",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"], refreshedAt: twelveHoursAgo,
+        rows: [{ id: "profile-1" }],
+      });
+      const inventory = await executeIntuneChatTool(toolContext(store), "list_cached_resources", {});
+      const resources = (inventory.result as { resources: Array<{ resource: string; stale: boolean }> }).resources;
+      assert.equal(resources.find((entry) => entry.resource === "signIns")?.stale, true);
+      assert.equal(resources.find((entry) => entry.resource === "deviceConfigurations")?.stale, false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("graph_get rejects writes and unknown paths", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
@@ -123,6 +149,54 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(result.truncated, true);
       assert.equal(execution.trace.tool, "graph_get");
       assert.match(execution.trace.resultSummary, /live rows returned/i);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get follows nextLink pages within the row cap", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const seenSkiptokens: Array<string | undefined> = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("write should not run"); },
+        async request(input) {
+          const token = input.query?.$skiptoken;
+          seenSkiptokens.push(token);
+          const page = token === "page2" ? 2 : 1;
+          return {
+            value: Array.from({ length: 30 }, (_, index) => ({
+              id: `user-p${page}-${index}`,
+              displayName: `User P${page} ${index}`,
+            })),
+            "@odata.count": 75,
+            "@odata.nextLink": `https://graph.microsoft.com/beta/users?$skiptoken=page${page + 1}`,
+          };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/users",
+        query: { $select: "id,displayName", $count: "true" },
+      });
+      const result = execution.result as {
+        returnedRows: number;
+        truncated: boolean;
+        totalCount?: number;
+        pagesFetched?: number;
+        rows: Array<{ id: string }>;
+      };
+      assert.deepEqual(seenSkiptokens, [undefined, "page2"]);
+      assert.equal(result.returnedRows, 50);
+      assert.equal(result.truncated, true);
+      assert.equal(result.totalCount, 75);
+      assert.equal(result.pagesFetched, 2);
+      assert.equal(result.rows.length, 50);
+      assert.equal(result.rows[0]?.id, "user-p1-0");
+      assert.equal(result.rows[30]?.id, "user-p2-0");
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });

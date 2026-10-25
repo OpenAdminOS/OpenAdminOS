@@ -15,7 +15,7 @@ import type {
 import { DEFAULT_SCOPE_METADATA } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import { unwrapGraphCollectionPage } from "../state-helpers.js";
+import { resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
   GRAPH_CACHE_RESOURCES,
   definitionForResource,
@@ -294,8 +294,13 @@ function executeToolUnchecked(
 }
 
 function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unknown {
-  const staleAfterHours = numberParam(params, "staleAfterHours") ?? 6;
-  const staleAfterMs = Math.max(1, staleAfterHours) * 60 * 60 * 1000;
+  // Default staleness follows the host TTL per resource. A flat 6h rule
+  // told the model the opposite of host policy for fast (sign-ins) and
+  // slow (profiles) resources. An explicit staleAfterHours still wins.
+  const staleAfterHours = numberParam(params, "staleAfterHours");
+  const staleAfterMs = staleAfterHours !== undefined
+    ? Math.max(1, staleAfterHours) * 60 * 60 * 1000
+    : undefined;
   const nowMs = Date.now();
   const resources = ctx.store.getGraphCacheStatus(ctx.tenantId, [...GRAPH_CACHE_RESOURCES]);
   return {
@@ -309,7 +314,7 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         !resource.refreshedAt ||
         resource.rows === 0 ||
         !Number.isFinite(refreshedMs) ||
-        nowMs - refreshedMs > staleAfterMs;
+        nowMs - refreshedMs > (staleAfterMs ?? resourceStalenessMs(resource.resource));
       return {
         resource: resource.resource,
         label: resource.label,
@@ -491,14 +496,62 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
   ctx.signal?.throwIfAborted();
-  const response = await graph.request({ ...request, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+  const firstResponse = await graph.request({ ...request, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+  // Follow server paging within the row cap: a first page smaller than
+  // the cap with a nextLink otherwise reads as complete tenant coverage.
+  const collected: unknown[] = [];
+  let page = unwrapGraphCollectionPage(firstResponse);
+  let pagesFetched = 1;
+  let totalCount = page.totalCount;
+  collected.push(...page.rows);
+  while (
+    page.nextLink &&
+    collected.length < GRAPH_GET_ROW_CAP &&
+    pagesFetched < GRAPH_GET_PAGE_CAP &&
+    !skuInventory
+  ) {
+    const skiptoken = skiptokenFromNextLink(page.nextLink);
+    if (!skiptoken) break;
+    ctx.signal?.throwIfAborted();
+    const nextResponse = await graph.request({
+      ...request,
+      query: { ...query, $skiptoken: skiptoken },
+      ...(ctx.signal ? { signal: ctx.signal } : {}),
+    });
+    page = unwrapGraphCollectionPage(nextResponse);
+    pagesFetched += 1;
+    if (totalCount === undefined) totalCount = page.totalCount;
+    collected.push(...page.rows);
+  }
+  const isCollection =
+    Array.isArray((firstResponse as { value?: unknown })?.value) || Array.isArray(firstResponse);
+  const response = isCollection && pagesFetched > 1
+    ? {
+        value: collected,
+        ...(page.nextLink ? { "@odata.nextLink": page.nextLink } : {}),
+        ...(totalCount !== undefined ? { "@odata.count": totalCount } : {}),
+      }
+    : firstResponse;
   return capGraphResponse({
     path,
     query,
     response,
     endpointSummary: validation.summary,
     scopes: validation.scopes,
+    pagesFetched,
   });
+}
+
+const GRAPH_GET_PAGE_CAP = 5;
+
+function skiptokenFromNextLink(nextLink: string): string | undefined {
+  try {
+    const url = new URL(nextLink);
+    if (url.hostname !== "graph.microsoft.com") return undefined;
+    return url.searchParams.get("$skiptoken") ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 async function refreshResource(
@@ -668,6 +721,7 @@ function capGraphResponse(input: {
   response: unknown;
   endpointSummary?: string;
   scopes: string[];
+  pagesFetched?: number;
 }): unknown {
   const page = unwrapGraphCollectionPage(input.response);
   const isCollection =
@@ -681,9 +735,13 @@ function capGraphResponse(input: {
         scopes: input.scopes,
         rowCountInPage: page.rows.length,
         returnedRows: Math.min(page.rows.length, GRAPH_GET_ROW_CAP),
+        ...(page.totalCount !== undefined ? { totalCount: page.totalCount } : {}),
+        ...(input.pagesFetched && input.pagesFetched > 1 ? { pagesFetched: input.pagesFetched } : {}),
         nextLinkPresent: Boolean(page.nextLink),
         truncated: page.rows.length > GRAPH_GET_ROW_CAP || Boolean(page.nextLink),
-        rows: page.rows.slice(0, GRAPH_GET_ROW_CAP).map(compactValue),
+        // Not .map(compactValue): map would pass the index as depth and
+        // truncate every row from the fifth onward to "[object truncated]".
+        rows: page.rows.slice(0, GRAPH_GET_ROW_CAP).map((row) => compactValue(row)),
       }
     : {
         path: input.path,
