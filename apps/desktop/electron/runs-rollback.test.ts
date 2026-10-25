@@ -12,10 +12,13 @@ import { RunService, type RunPersistedState, type RunServiceHost } from "./runs.
 
 interface HarnessOptions {
   failOnRequestIndex?: number;
+  cancelAfterRequests?: number;
 }
 
 function makeHarness(options: HarnessOptions = {}) {
   const requests: GraphRequestInput[] = [];
+  const invalidations: Array<{ tenantId: string; resources: string[] }> = [];
+  let service: RunService | undefined;
   const persisted: RunPersistedState = {
     activeProviderId: "ollama",
     installedAgents: [],
@@ -47,6 +50,10 @@ function makeHarness(options: HarnessOptions = {}) {
         throw new Error("Graph responded with HTTP 400 for test purposes.");
       }
       requests.push(input);
+      if (options.cancelAfterRequests === requests.length) {
+        const runId = persisted.runs[0]?.id;
+        if (runId && service) void service.cancelRun(runId);
+      }
       return {};
     },
   };
@@ -75,10 +82,16 @@ function makeHarness(options: HarnessOptions = {}) {
     enqueueRunDeliveries: async () => undefined,
     processPendingRunDeliveries: async () => undefined,
     appVersion: "0.5.0-test",
-    intelligenceStore: undefined,
+    intelligenceStore: {
+      markGraphResourcesStale: (tenantId: string, resources: string[]) => {
+        invalidations.push({ tenantId, resources });
+        return resources.length;
+      },
+    },
   } as unknown as RunServiceHost;
+  service = new RunService(host);
 
-  return { service: new RunService(host), persisted, requests };
+  return { service, persisted, requests, invalidations };
 }
 
 function planWithActions(count: number) {
@@ -113,7 +126,7 @@ async function waitForTerminal(
 
 describe("rollback apply", () => {
   it("applies confirmed actions strictly in order and records each step", async () => {
-    const { service, persisted, requests } = makeHarness();
+    const { service, persisted, requests, invalidations } = makeHarness();
     const queued = await service.startRollbackRun({
       tenantId: "tenant-1",
       baselineId: "baseline-1",
@@ -141,6 +154,12 @@ describe("rollback apply", () => {
     );
     assert.match(run?.summary ?? "", /2 objects rolled back/);
     assert.match(run?.summary ?? "", /1 change still need/);
+    // System runs pass their write scopes to invalidation, so the
+    // scope family is stale-marked, not only the resources whose
+    // paths were attempted.
+    assert.equal(invalidations.length, 1);
+    assert.ok(invalidations[0]?.resources.includes("deviceCompliancePolicies"));
+    assert.ok(invalidations[0]?.resources.includes("assignmentFilters"));
   });
 
   it("stops at the first failed action and never fires later requests", async () => {
@@ -162,6 +181,45 @@ describe("rollback apply", () => {
       run?.steps.map((step) => step.status),
       ["completed", "failed"],
     );
+  });
+
+  it("invalidates attempted writes when cancelled between actions", async () => {
+    const { service, persisted, requests, invalidations } = makeHarness({ cancelAfterRequests: 1 });
+    const queued = await service.startRollbackRun({
+      tenantId: "tenant-1",
+      baselineId: "baseline-1",
+      plan: planWithActions(2),
+      requiredScopes: [],
+      manualCount: 0,
+    });
+    await service.confirmRun(queued.id, "ROLLBACK 2 OBJECTS");
+    for (let attempt = 0; attempt < 200 && invalidations.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    const run = persisted.runs.find((existing) => existing.id === queued.id);
+
+    assert.equal(requests.length, 1, "second request must not fire after cancel");
+    assert.ok(run?.status === "cancelled" || run?.status === "failed", `unexpected status ${run?.status}`);
+    assert.equal(invalidations.length, 1);
+    assert.equal(invalidations[0]?.tenantId, "tenant-1");
+    assert.ok(invalidations[0]?.resources.includes("deviceCompliancePolicies"));
+  });
+
+  it("invalidates a write whose response was lost on the first request", async () => {
+    const { service, persisted, invalidations } = makeHarness({ failOnRequestIndex: 0 });
+    const queued = await service.startRollbackRun({
+      tenantId: "tenant-1",
+      baselineId: "baseline-1",
+      plan: planWithActions(2),
+      requiredScopes: [],
+      manualCount: 0,
+    });
+    await service.confirmRun(queued.id, "ROLLBACK 2 OBJECTS");
+    const run = await waitForTerminal(persisted, queued.id);
+
+    assert.equal(run?.status, "failed");
+    assert.equal(invalidations.length, 1);
+    assert.ok(invalidations[0]?.resources.includes("deviceCompliancePolicies"));
   });
 
   it("refuses to queue a rollback with no automatable actions", async () => {

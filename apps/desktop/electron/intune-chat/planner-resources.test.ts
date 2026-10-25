@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { GRAPH_CACHE_RESOURCE_KINDS } from "@openadminos/agent-sdk";
+import {
+  GRAPH_CACHE_RESOURCE_KINDS,
+  type AgentSummary,
+  type GraphCacheResourceKind,
+  type TenantRecord,
+} from "@openadminos/agent-sdk";
 
 import {
   DEFAULT_RESOURCE_STALENESS_MS,
@@ -10,7 +18,10 @@ import {
 import {
   GRAPH_CACHE_RESOURCES,
   MAX_PLANNED_RESOURCES,
+  buildAnswerPack,
   definitionForResource,
+  graphCacheResourcesForWrite,
+  matchAgentsToQuestion,
   pathForResource,
   planChatContext,
   requiredScopesForResources,
@@ -26,6 +37,74 @@ describe("Graph cache resource registry", () => {
       assert.ok(request.path.startsWith("/"), `${resource} needs a Graph path`);
     }
     assert.equal(GRAPH_CACHE_RESOURCES.length, GRAPH_CACHE_RESOURCE_KINDS.length);
+  });
+
+  it("maps write scopes and action paths to cache resources to invalidate", () => {
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ scopes: ["DeviceManagementManagedDevices.PrivilegedOperations.All"] }).sort(),
+      [
+        "autopilotEvents",
+        "detectedApps",
+        "entraDevices",
+        "managedDeviceEncryptionStates",
+        "managedDeviceOverview",
+        "managedDevices",
+        "troubleshootingEvents",
+      ],
+    );
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ scopes: ["User.ReadWrite.All"] }).sort(),
+      ["groups", "users"],
+    );
+    // Every sibling resource in a scope family is covered, not a
+    // hand-picked subset.
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ scopes: ["DeviceManagementApps.ReadWrite.All"] }).sort(),
+      [
+        "androidManagedAppProtections",
+        "iosManagedAppProtections",
+        "managedAppPolicies",
+        "mobileAppConfigurations",
+        "mobileApps",
+      ],
+    );
+    const configurationWrite = graphCacheResourcesForWrite({
+      scopes: ["DeviceManagementConfiguration.ReadWrite.All"],
+    });
+    for (const expected of [
+      "deviceCompliancePolicies",
+      "groupPolicyConfigurations",
+      "assignmentFilters",
+      "windowsQualityUpdateProfiles",
+      "windowsFeatureUpdateProfiles",
+      "endpointSecurityIntents",
+    ] as const) {
+      assert.ok(configurationWrite.includes(expected), `expected ${expected} to be invalidated`);
+    }
+    // A write family no cache resource reads with widens to every
+    // resource instead of silently keeping its area fresh.
+    assert.equal(
+      graphCacheResourcesForWrite({
+        scopes: ["DeviceManagementManagedDevices.ReadWrite.All", "Mail.ReadWrite"],
+      }).length,
+      GRAPH_CACHE_RESOURCES.length,
+    );
+    assert.deepEqual(
+      graphCacheResourcesForWrite({ paths: ["/users/abc/revokeSignInSessions"] }),
+      ["users"],
+    );
+    // One unmapped path in a mixed batch widens to everything: the
+    // mapped path must not suppress the conservative fallback.
+    assert.equal(
+      graphCacheResourcesForWrite({
+        paths: ["/users/abc", "/directory/deletedItems/xyz/restore"],
+      }).length,
+      GRAPH_CACHE_RESOURCES.length,
+    );
+    assert.equal(
+      graphCacheResourcesForWrite({ scopes: ["Mail.ReadWrite"] }).length,
+      GRAPH_CACHE_RESOURCE_KINDS.length,
+    );
   });
 
   it("maps the Entra and Defender resources to their delegated read scopes", () => {
@@ -157,6 +236,134 @@ describe("planner keyword matching is anchored to word boundaries", () => {
       "policy compliance app autopilot update remediation sign-in audit assignment group user device defender secure score domain",
     );
     assert.ok(noisy.length <= MAX_PLANNED_RESOURCES);
+  });
+});
+
+describe("agent matcher probe table (real registry)", () => {
+  // The executed probe from tasks/chat-full-test-2026-10-24.md F7,
+  // kept as a maintained test against the shipped registry index so
+  // matcher regressions fail CI instead of surfacing as noisy cards.
+  async function registryAgents(): Promise<AgentSummary[]> {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const raw = await readFile(join(here, "../../../../agents/index.json"), "utf8");
+    const index = JSON.parse(raw) as { agents: Array<Record<string, unknown>> };
+    return index.agents.map(
+      (agent) => ({ ...agent, installedAt: "2026-06-01T10:00:00.000Z" }) as unknown as AgentSummary,
+    );
+  }
+
+  const slugs = (suggestions: ReturnType<typeof matchAgentsToQuestion>) =>
+    suggestions.map((suggestion) => suggestion.agentSlug);
+
+  it("routes the probe prompts to the expected agents", async () => {
+    const agents = await registryAgents();
+    assert.equal(agents.length, 16);
+
+    const inactive = matchAgentsToQuestion("Which devices have not synced in 45 days?", agents);
+    assert.equal(inactive[0]?.agentSlug, "find-inactive-devices");
+    assert.ok(!slugs(inactive).includes("team-script-draft"), "script helper must not ride a device question");
+
+    const guests = matchAgentsToQuestion("Disable stale guest accounts that have not signed in", agents);
+    assert.equal(guests[0]?.agentSlug, "stale-guest-cleanup");
+    assert.ok(!slugs(guests).includes("offboarding-agent"), "device offboarder must not match a guest-account request");
+
+    const guestsRead = matchAgentsToQuestion("Show stale guest accounts that have not signed in", agents);
+    assert.ok(!slugs(guestsRead).includes("offboarding-agent"));
+    assert.ok(guestsRead.every((suggestion) => suggestion.mode === "read"));
+
+    const signIns = matchAgentsToQuestion("Why are sign-ins failing for finance users?", agents);
+    assert.equal(signIns[0]?.agentSlug, "sign-in-failure-explainer");
+
+    const retire = matchAgentsToQuestion("Retire the 47 devices that are not encrypted", agents);
+    assert.equal(retire[0]?.agentSlug, "offboarding-agent");
+    assert.equal(retire[0]?.mode, "write");
+
+    assert.equal(planChatContext("Grant the finance group access to the VPN app").hasWriteIntent, true);
+    assert.equal(planChatContext("Update the compliance policy to require encryption").hasWriteIntent, true);
+
+    const updatePolicy = matchAgentsToQuestion("Update the compliance policy to require encryption", agents);
+    assert.equal(updatePolicy[0]?.agentSlug, "compliance-overview");
+    assert.ok(!slugs(updatePolicy).includes("os-update-posture"), "imperative update is an action, not the OS-update topic");
+
+    const complianceCount = matchAgentsToQuestion("How many of my devices are noncompliant?", agents);
+    assert.ok(slugs(complianceCount).includes("compliance-overview"));
+    assert.ok(!slugs(complianceCount).includes("team-script-draft"));
+
+    const compliancePolicies = matchAgentsToQuestion("Which device compliance policies exist?", agents);
+    assert.equal(compliancePolicies[0]?.agentSlug, "compliance-overview");
+  });
+});
+
+describe("answer pack fallback breakdowns", () => {
+  it("counts common filtered dimensions and array values", () => {
+    const rows = Object.fromEntries(
+      GRAPH_CACHE_RESOURCE_KINDS.map((resource) => [resource, []]),
+    ) as unknown as Record<GraphCacheResourceKind, unknown[]>;
+    rows.conditionalAccessPolicies = [
+      { id: "ca-1", state: "enabledForReportingButNotEnforced" },
+      { id: "ca-2", state: "enabled" },
+    ];
+    rows.configurationPolicies = [
+      { id: "cp-1", platforms: ["windows10", "macOS"] },
+      { id: "cp-2", platforms: ["macOS"] },
+      { id: "cp-3", platforms: "windows10,macOS" },
+    ];
+    rows.groups = [
+      { id: "g-1", securityEnabled: true, groupTypes: ["DynamicMembership"] },
+      { id: "g-2", securityEnabled: false, groupTypes: ["Unified"] },
+    ];
+    rows.signIns = [
+      {
+        id: "si-1",
+        conditionalAccessStatus: "failure",
+        status: { errorCode: 50126, failureReason: "Invalid username or password" },
+      },
+    ];
+    const tenant: TenantRecord = {
+      id: "tenant-1",
+      displayName: "Tenant",
+      username: "admin@example.com",
+      homeAccountId: "home-1",
+      addedAt: "2026-06-01T00:00:00.000Z",
+    };
+    const status = (resource: GraphCacheResourceKind, count: number) => ({
+      resource,
+      label: resource,
+      rows: count,
+      scopeSet: ["Read.All"],
+      refreshedAt: "2026-06-01T10:00:00.000Z",
+    });
+    const pack = JSON.parse(
+      buildAnswerPack({
+        question: "How many report-only Conditional Access policies?",
+        tenant,
+        cacheStatus: [
+          status("conditionalAccessPolicies", 2),
+          status("configurationPolicies", 3),
+          status("groups", 2),
+          status("signIns", 1),
+        ],
+        rows,
+        hasWriteIntent: false,
+        agentSuggestions: [],
+      }),
+    ) as {
+      resources: Array<{
+        resource: string;
+        breakdowns: Record<string, Record<string, number>>;
+      }>;
+    };
+    const byResource = new Map(pack.resources.map((entry) => [entry.resource, entry.breakdowns]));
+    assert.equal(
+      byResource.get("conditionalAccessPolicies")?.state?.enabledForReportingButNotEnforced,
+      1,
+    );
+    assert.equal(byResource.get("configurationPolicies")?.platforms?.macOS, 3);
+    assert.equal(byResource.get("configurationPolicies")?.platforms?.windows10, 2);
+    assert.equal(byResource.get("groups")?.groupTypes?.DynamicMembership, 1);
+    assert.equal(byResource.get("groups")?.securityEnabled?.true, 1);
+    assert.equal(byResource.get("signIns")?.["status.errorCode"]?.["50126"], 1);
+    assert.equal(byResource.get("conditionalAccessPolicies")?.severity, undefined);
   });
 });
 

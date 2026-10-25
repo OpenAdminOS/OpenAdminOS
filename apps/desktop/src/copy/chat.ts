@@ -10,7 +10,7 @@ export const CHAT_COPY = {
     sending: "Sending your question.",
     streaming: "Generating an answer.",
     complete: "Answer complete.",
-    stopped: "Response stopped. Partial output is preserved.",
+    stopped: "Response stopped.",
     failed: "The answer could not be completed.",
   },
 } as const;

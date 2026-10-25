@@ -1,5 +1,21 @@
 # Current active plan
 
+- [ ] Chat hardening mega PR (branch `fix/chat-hardening`, decision Ugur 2026-10-25: one PR for all findings) from the [2026-10-24 full Chat test](./chat-full-test-2026-10-24.md) including the live addendum.
+
+  Deliverables (one PR, staged commits): (0) diagnose and fix investigative Chat on the Codex provider; (1) evidence guard for tenant-data finals plus deterministic flip with visible notice on repeated protocol failure; (2) tenant-scoped conversations; (3) picker provider switch, Azure send gate, Gemini selectability, fail-closed provider resolution; (4) cache invalidation after confirmed write runs, `graph_get` paging, sources from executed traces, model-facing staleness aligned to host TTLs, named-scope 403s; (5) single agent matcher with read/write badge, expanded write-intent routing, bounded conversation memory; (6) actionable error notices, streaming live region, per-stream cancel, Node 22 pin with Node 26-safe test setup, SPEC and CHANGELOG reconciliation.
+
+  Product defaults taken (veto any): conversation list/search/read/mutate/export show the active tenant only (multi-tenant conversations keep their existing scope handling); Gemini becomes selectable via a default model entry instead of being hidden; conversation memory is the last 4 turns as plain text with a hard character cap; write-intent block short-circuits before cache refresh and model calls on every send path.
+
+  Acceptance criteria:
+  1. On every advertised provider, one investigative tenant question produces at least one investigative `chat_tool_calls` row, or the answer is deterministically generated with a visible engine notice. A prose-only model reply can no longer persist as a clean completed tenant answer (unit test at the loop boundary, plus provider contract test with a fake prose-only provider).
+  2. With tenant B active, tenant A conversations are absent from list and search, and read/rename/delete/pin/export by id are refused in the host (cross-tenant test). Follow-up send behavior unchanged.
+  3. Picking another provider's model in Chat activates that provider; the next message is stamped with the new provider (renderer test). A configured Azure provider can send from Chat without the setup loop. A missing persisted provider fails closed with a named error instead of falling back to `providers[0]` or a no-op LLM.
+  4. After a confirmed write run, affected cache resources are stale on the next question (host test). `graph_get` follows `@odata.nextLink` within its row budget and reports truncation. Answer sources list only resources actually read, and the header shows the oldest source age.
+  5. One matcher serves host and renderer; the executed probe table from the report passes as a maintained test (including no offboarding suggestion for the stale-guest read phrasing, sign-in question matches on both surfaces, grant/update requests route as write intent). Suggestion cards show a read/write badge and scopes collapsed.
+  6. A follow-up like "Show only the Windows ones." receives the prior turn context (host test on prompt assembly). Non-send Chat errors render a recovery action. The stopped/cancelled behavior stays byte-identical in outcome.
+  7. Gates green on Node 22: repo `npm run typecheck`, `npm test`, `npm run qa`, renderer suite, `npm run smoke:intune-chat`. Renderer suite also passes on Node 26. Separate evaluator agent plus GPT-6.1-Sol full-diff review with no open blocking findings before merge readiness is claimed.
+  8. Live retest on a dev build against ugurlabs.com: Codex compliance question answered from tools or deterministic notice path, picker switch honored, write prompt blocked in under 5 seconds without a cache refresh storm.
+
 ## Nightly update channel (branch `feature/nightly-channel`)
 
 Decisions (Ugur, 2026-10-23): build after every merge to `main`, channel name "Nightly", Linux packages attached to the prerelease but never published to apt. Design ported from TenuVault (`origin/main`, including #219).

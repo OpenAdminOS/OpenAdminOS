@@ -274,17 +274,117 @@ const WRITE_INTENT_TERMS = [
   "create",
   "change",
   "assign",
+  "grant",
+  "update",
+  "add",
+  "rename",
+  "block",
+  "lock",
+  "deploy",
+  "edit",
+  "modify",
+  "configure",
+  "deactivate",
+  "suspend",
+  "restore",
+  "move",
 ] as const;
 
-// Write intent must match the imperative verb as a whole word. Substring
-// matching flagged read questions about state ("assigned", "enabled",
-// "deleted") and, since the block now fires before any LLM call, would
-// suppress legitimate read answers entirely.
+// Write intent must match a requested action, not a verb that merely
+// appears in the question. Whole-word matching anywhere in the sentence
+// hard-blocked ordinary read questions whose clauses describe tenant
+// state: "Which Conditional Access policies grant access without MFA?",
+// "Does the policy block legacy authentication?", "Why did Windows fail
+// to update the device?" Since the block fires before refresh and model
+// calls, a false positive suppresses the read answer entirely. A verb
+// counts when it sits in imperative position (sentence start, after
+// please / can you / need to, or after "and then"); interrogative
+// questions without an imperative verb are reads. Declarative prompts
+// keep the whole-word rule. "update" never falls back to whole-word: it
+// is also a product noun and an infinitive in read questions.
+const READ_QUESTION_START =
+  /^(?:which|what|why|how|when|where|who|does|do|did|is|are|was|were|has|have|show|list|tell|find|count|can|could|summarize|describe|explain|give|compare|audit|outline|display|review|inspect|check)\b/;
+
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
-  return new RegExp(`\\b${term}\\b`).test(lowerQuestion);
+  // Classify per sentence and combine: an explanatory or read first
+  // sentence must not exempt a write command in a later one
+  // ("Explain which devices are stale. Retire them."), and polite
+  // prefixes reset at each sentence boundary ("Show me the stale
+  // devices. Can you retire them?").
+  return lowerQuestion
+    .split(/(?<=[.!?;])\s+/)
+    .some((sentence) => matchesWriteIntentTermInSentence(sentence, term));
+}
+
+function matchesWriteIntentTermInSentence(lowerSentence: string, term: string): boolean {
+  // Normalize a polite prefix first: "Please list policies that block
+  // legacy authentication" is the same main clause as without it, and
+  // must not fall through to the whole-word fallback.
+  const question = lowerSentence
+    .trim()
+    .replace(/^(?:please\s+|can you\s+|could you\s+|would you\s+)+/, "");
+  // Explanatory how-to prompts describe actions instead of
+  // requesting them: "Explain how to disable an account and then
+  // delete it." The exemption covers the how-to chain only; an
+  // independent clause after a comma is still a request: "Explain
+  // which devices are stale, then retire them."
+  if (
+    /^(?:explain|describe)\b/.test(question) &&
+    /\bhow to\b/.test(question) &&
+    !new RegExp(`,\\s*(?:and\\s+)?then\\s+${term}\\b`).test(question) &&
+    !new RegExp(`,\\s*and\\s+${term}\\b`).test(question)
+  ) {
+    return false;
+  }
+  // "Add up the licenses" asks for a sum, not a tenant change.
+  if (term === "add" && /^add\s+up\b/.test(question)) return false;
+  // Anchored at the main clause only. Unanchored helper phrases
+  // ("need to", "and <verb>") also occur inside descriptive
+  // subordinate clauses of read questions: "Why do users need to
+  // change their passwords?", "Which policies disable legacy
+  // authentication and block risky sign-ins?"
+  const imperative = new RegExp(
+    `(?:^(?:please\\s+)?${term}\\b)|(?:^(?:can you|could you|would you|i want to|i need to|let's)\\s+${term}\\b)|(?:\\bplease\\s+${term}\\b)|(?:\\band then\\s+${term}\\b)|(?:,\\s*then\\s+${term}\\b)|(?:,\\s*and\\s+${term}\\b)|(?:[.!?;]\\s+(?:please\\s+)?${term}\\b)`,
+  );
+  if (imperative.test(question)) return true;
+  // Coordinated imperatives after an imperative read verb are still
+  // requests: "Show me the devices and retire the stale ones." A
+  // relative clause before the conjunction makes the second verb
+  // descriptive instead: "Show the policies that disable legacy
+  // authentication and block risky sign-ins."
+  const IMPERATIVE_READ_START =
+    /^(?:show|list|tell|find|count|give|summarize|compare|audit|outline|display|review|inspect|check)\b/;
+  if (IMPERATIVE_READ_START.test(question)) {
+    const coordinated = new RegExp(`\\band\\s+${term}\\b`).exec(question);
+    if (coordinated) {
+      const before = question.slice(0, coordinated.index);
+      // A comma before the conjunction starts an independent action
+      // clause even after a relative clause: "Show me the devices
+      // that have not synced in 90 days, and retire them."
+      const independentClause = /,\s*$/.test(before);
+      if (independentClause || !/\b(?:that|which|who)\b/.test(before)) {
+        return true;
+      }
+    }
+  }
+  if (term === "update") return false;
+  if (READ_QUESTION_START.test(question)) return false;
+  return new RegExp(`\\b${term}\\b`).test(question);
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000;
+
+// Multi-word domain phrases name the subject of a question more
+// precisely than single terms: in "Which device compliance policies
+// exist?" both "device" and "compliance" match agent names, but the
+// phrase is a compliance question.
+const AGENT_CATEGORY_PHRASES: Record<AgentSummary["category"], string[]> = {
+  apps: ["app protection", "managed app", "app registration"],
+  compliance: ["compliance polic", "device compliance", "compliance state", "noncompliant"],
+  devices: ["managed device", "device inventory", "stale device", "inactive device"],
+  policies: ["conditional access", "configuration polic", "settings catalog", "endpoint security"],
+  updates: ["os update", "windows update", "feature update", "quality update"],
+};
 
 const AGENT_CATEGORY_LABELS: Record<AgentSummary["category"], string> = {
   apps: "app deployment",
@@ -528,6 +628,90 @@ export function planChatContext(question: string): PlannedChatContext {
   };
 }
 
+/**
+ * Cache resources a confirmed write can have changed. Derived from the
+ * write agent's scopes (manifest agents apply through runtime steps, so
+ * scopes are the stable signal) plus any concrete Graph action paths
+ * (system runs). Unknown writes invalidate everything: writes are rare
+ * and a stale answer after a confirmed change is the worse failure.
+ */
+export function graphCacheResourcesForWrite(input: {
+  scopes?: string[];
+  paths?: string[];
+}): GraphCacheResourceKind[] {
+  const out = new Set<GraphCacheResourceKind>();
+  const paths = input.paths ?? [];
+  const pathMatchesResource = (path: string, resource: GraphCacheResourceKind) => {
+    const base = pathForResource(resource).path;
+    return path === base || path.startsWith(`${base}/`) || path.startsWith(`${base}(`);
+  };
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    if (paths.some((path) => pathMatchesResource(path, definition.resource))) {
+      out.add(definition.resource);
+    }
+  }
+  // A concrete write path that maps to no cache resource can still
+  // have changed cached state (restoring a deleted group changes
+  // group counts). One unmapped path in a mixed batch must widen
+  // invalidation, not hide behind the paths that did map.
+  const hasUnmappedPath = paths.some(
+    (path) =>
+      !GRAPH_CACHE_RESOURCES.some((definition) =>
+        pathMatchesResource(path, definition.resource),
+      ),
+  );
+  const scopes = input.scopes ?? [];
+  // Derive affected resources from scope families generically: every
+  // cache resource whose own read scopes share a family root with a
+  // write scope can have changed. Hand-enumerated family lists kept
+  // missing sibling resources (app protection policies under
+  // DeviceManagementApps, update profiles under Configuration), and a
+  // nonempty-but-incomplete mapping suppresses the safe fallback.
+  const scopeRoot = (scope: string) => scope.split(".")[0] ?? scope;
+  const isWriteScope = (scope: string) =>
+    !/\.Read\.All$|\.Read$|\.Read\.Directory$/.test(scope);
+  const writeRoots = new Set(scopes.filter(isWriteScope).map(scopeRoot));
+  const resourceRoots = new Set(
+    GRAPH_CACHE_RESOURCES.flatMap((definition) =>
+      definition.scopes.map(scopeRoot),
+    ),
+  );
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    if (definition.scopes.some((scope) => writeRoots.has(scopeRoot(scope)))) {
+      out.add(definition.resource);
+    }
+  }
+  // Cross-effects the scope roots cannot express.
+  if (writeRoots.has("DeviceManagementManagedDevices")) {
+    out.add("entraDevices");
+    out.add("managedDeviceEncryptionStates");
+  }
+  if (writeRoots.has("User") || writeRoots.has("Directory")) {
+    out.add("users");
+    out.add("groups");
+  }
+  if (writeRoots.has("Group") || writeRoots.has("GroupMember")) {
+    out.add("groups");
+    out.add("users");
+  }
+  // A write scope whose family no cache resource reads with (and no
+  // cross-effect above covers) can have changed anything: widen to
+  // every resource instead of silently keeping its area fresh.
+  const coveredRoots = new Set([
+    ...resourceRoots,
+    "Directory",
+    "Group",
+    "GroupMember",
+  ]);
+  const hasUnmappedWriteScope = [...writeRoots].some(
+    (root) => !coveredRoots.has(root),
+  );
+  if (out.size === 0 || hasUnmappedWriteScope || hasUnmappedPath) {
+    for (const definition of GRAPH_CACHE_RESOURCES) out.add(definition.resource);
+  }
+  return [...out];
+}
+
 export function requiredScopesForResources(resources: GraphCacheResourceKind[]): string[] {
   const selected = new Set(resources);
   const scopes = new Set<string>();
@@ -707,7 +891,7 @@ export function pathForResource(resource: GraphCacheResourceKind): {
     case "detectedApps":
       return {
         path: "/deviceManagement/detectedApps",
-        select: ["id", "displayName", "version", "sizeInByte", "deviceCount", "publisher"],
+        select: ["id", "displayName", "version", "sizeInByte", "deviceCount", "publisher", "platform"],
       };
     case "managedAppPolicies":
       return {
@@ -969,52 +1153,184 @@ export function pathForResource(resource: GraphCacheResourceKind): {
   }
 }
 
+const AGENT_MATCH_STOP_TERMS = new Set([
+  "why",
+  "are",
+  "how",
+  "many",
+  "much",
+  "who",
+  "when",
+  "where",
+  "can",
+  "could",
+  "please",
+  "does",
+  "did",
+  "has",
+  "had",
+  "was",
+  "were",
+  "will",
+  "would",
+  "should",
+  "them",
+  "they",
+  "our",
+  "your",
+  "you",
+  "all",
+  "any",
+  "not",
+  "but",
+  "get",
+  "got",
+  "give",
+  "than",
+  "then",
+  "over",
+  "under",
+  "last",
+  "days",
+  "day",
+]);
+
+/**
+ * Light stemming for agent matching. Substring matching let stop words
+ * score inside unrelated words ("are" inside "Prepares") and missed
+ * plain inflections ("failing" never matched "failed sign-ins").
+ * Words match when their stems are equal, when one stem prefixes the
+ * other, or when they share a long prefix ("compliant"/"compliance").
+ */
+function stemAgentWord(word: string): string {
+  let stemmed = word.toLowerCase().replace(/'s$/, "");
+  if (stemmed.length > 5 && stemmed.startsWith("non")) stemmed = stemmed.slice(3);
+  if (stemmed.length > 4 && stemmed.endsWith("ies")) {
+    stemmed = `${stemmed.slice(0, -3)}y`;
+  } else if (stemmed.length > 5 && stemmed.endsWith("ing")) {
+    stemmed = stemmed.slice(0, -3);
+  } else if (stemmed.length > 4 && stemmed.endsWith("ed")) {
+    stemmed = stemmed.slice(0, -2);
+  } else if (stemmed.length > 4 && stemmed.endsWith("es")) {
+    stemmed = stemmed.slice(0, -2);
+  } else if (stemmed.length > 3 && stemmed.endsWith("s")) {
+    stemmed = stemmed.slice(0, -1);
+  }
+  return stemmed;
+}
+
+function agentWordStems(text: string): string[] {
+  const words = text
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/g)
+    .flatMap((word) => (word.includes("-") ? [word, ...word.split("-")] : [word]))
+    .filter((word) => word.length >= 2);
+  return [...new Set(words.map(stemAgentWord))];
+}
+
+function agentStemsMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  if (shorter.length >= 4 && longer.startsWith(shorter)) return true;
+  let shared = 0;
+  while (shared < shorter.length && a[shared] === b[shared]) shared += 1;
+  return shared >= 6;
+}
+
 export function matchAgentsToQuestion(
   question: string,
   agents: AgentSummary[],
 ): IntuneChatAgentSuggestion[] {
   const plan = planChatContext(question);
-  const terms = extractSearchTerms(question);
   const lower = question.toLowerCase();
   const writeIntentTerms = [...WRITE_INTENT_TERMS].filter((term) =>
     matchesWriteIntentTerm(lower, term),
   );
+  // An imperative "Update the compliance policy" names an action, not
+  // the OS-update topic. Keep the verb out of topic scoring so the
+  // object of the request drives the match; read questions about
+  // updates keep the term because the imperative rule did not fire.
+  const terms = extractSearchTerms(question).filter(
+    (term) =>
+      !AGENT_MATCH_STOP_TERMS.has(term) &&
+      !(term === "update" && plan.hasWriteIntent && matchesWriteIntentTerm(lower, "update")),
+  );
   const inferredCategories = inferQuestionAgentCategories(lower);
+  // Two passes so common words weigh less than distinctive ones. A
+  // generic term like "device" appears in most agent names and
+  // descriptions; counted flat, it outranked the actual subject of the
+  // question ("Which device compliance policies exist?" put device
+  // agents above the compliance overview).
+  const rawMatches = agents.map((agent) => {
+    const nameStems = agentWordStems(`${agent.name} ${agent.slug}`);
+    const bodyStems = agentWordStems(`${agent.description} ${agent.category}`);
+    const matches: Array<{ term: string; field: "name" | "body" }> = [];
+    for (const term of terms) {
+      const stem = stemAgentWord(term);
+      if (nameStems.some((candidate) => agentStemsMatch(stem, candidate))) {
+        matches.push({ term, field: "name" });
+      } else if (bodyStems.some((candidate) => agentStemsMatch(stem, candidate))) {
+        matches.push({ term, field: "body" });
+      }
+    }
+    return matches;
+  });
+  const documentFrequency = new Map<string, number>();
+  for (const matches of rawMatches) {
+    for (const term of new Set(matches.map((match) => match.term))) {
+      documentFrequency.set(term, (documentFrequency.get(term) ?? 0) + 1);
+    }
+  }
+  const termWeight = (term: string): number => {
+    const frequency = documentFrequency.get(term) ?? 0;
+    return frequency <= 2 ? 1 : frequency <= 4 ? 0.75 : 0.4;
+  };
+  // A term most agents mention somewhere in their description is
+  // incidental there ("compliance" in a device agent's signal list),
+  // so description matches only score for distinctive terms. Name and
+  // slug matches always score: the name is the agent's own claim.
+  const bodyTermScores = (term: string): boolean =>
+    (documentFrequency.get(term) ?? 0) <= 5;
   const suggestions = agents
-    .map((agent) => {
-      const haystack = `${agent.name} ${agent.slug} ${agent.description} ${agent.category} ${agent.mode}`.toLowerCase();
+    .map((agent, agentIndex) => {
       let score = 0;
+      let nameMatches = 0;
       const matchedTerms: string[] = [];
       const matchedConcepts: string[] = [];
       const matchedResources = resourcesForAgentCategory(agent.category, plan.resources);
-      for (const term of terms) {
-        if (haystack.includes(term)) {
-          score += 1;
-          matchedTerms.push(term);
-        }
+      for (const match of rawMatches[agentIndex] ?? []) {
+        if (match.field === "body" && !bodyTermScores(match.term)) continue;
+        score += (match.field === "name" ? 2 : 1) * termWeight(match.term);
+        if (match.field === "name") nameMatches += 1;
+        matchedTerms.push(match.term);
       }
+      const matched = { agent, score, matchedTerms, matchedConcepts, matchedResources, nameMatches };
       if (agent.mode === "write" && !plan.hasWriteIntent) {
-        return { agent, score: 0, matchedTerms, matchedConcepts, matchedResources };
+        return { ...matched, score: 0 };
       }
       if (
         agent.mode === "write" &&
         inferredCategories.size > 0 &&
         !inferredCategories.has(agent.category)
       ) {
-        return { agent, score: 0, matchedTerms, matchedConcepts, matchedResources };
+        return { ...matched, score: 0 };
       }
       if (agent.mode === "write" && writeIntentTerms.length > 0) {
         score += 2;
         matchedConcepts.push(`Write intent: ${writeIntentTerms.slice(0, 3).join(", ")}`);
-      }
-      if (agent.category === "devices" && matchesAny(lower, ["device", "intune", "stale", "sync", "offboard", "retire"])) {
-        score += 1;
       }
       if (inferredCategories.has(agent.category)) {
         score += 1;
         matchedConcepts.push(
           `${AGENT_CATEGORY_LABELS[agent.category]} investigation`,
         );
+      }
+      const domainPhrase = AGENT_CATEGORY_PHRASES[agent.category].find((phrase) =>
+        lower.includes(phrase),
+      );
+      if (domainPhrase) {
+        score += 1.5;
+        matchedConcepts.push(`Domain phrase: ${domainPhrase}`);
       }
       if (matchedResources.length > 0) {
         matchedConcepts.push(
@@ -1029,10 +1345,23 @@ export function matchAgentsToQuestion(
           `Prompt terms in agent metadata: ${matchedTerms.slice(0, 5).join(", ")}`,
         );
       }
-      return { agent, score, matchedTerms, matchedConcepts, matchedResources };
+      return { ...matched, score };
     })
-    .filter((entry) => entry.score >= (entry.agent.mode === "write" ? 3 : 2))
-    .sort((a, b) => b.score - a.score)
+    // A suggestion needs real lexical evidence: a name/slug term, or at
+    // least two metadata terms. Category and write-intent bonuses alone
+    // used to float unrelated agents (a script-drafting helper on every
+    // device question, a device offboarder on a guest-account request).
+    .filter(
+      (entry) =>
+        entry.score >= (entry.agent.mode === "write" ? 3 : 1.75) &&
+        (entry.nameMatches >= 1 || entry.matchedTerms.length >= 2),
+    )
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.matchedTerms.length - a.matchedTerms.length ||
+        a.agent.slug.localeCompare(b.agent.slug),
+    )
     .slice(0, 3);
 
   return suggestions.map(({ agent, score, matchedTerms, matchedConcepts, matchedResources }) => ({
@@ -1105,9 +1434,9 @@ export function buildAnswerPack(input: {
         refreshedAt: status.refreshedAt,
         lastError: status.lastError,
         sampleRows,
-        // Counted across every cached row, not just the sample above.
-        // Quote these for any "how many" question; counting sampleRows
-        // would undercount by the sampling ratio.
+        // SQL aggregates count every cached row; the fallback below
+        // counts selectedRows only. breakdownsCoverAllCachedRows says
+        // which one this block carries.
         breakdowns: aggregate?.breakdowns ?? buildBreakdowns(selectedRows),
         breakdownsCoverAllCachedRows: aggregate !== undefined,
       };
@@ -1372,6 +1701,19 @@ function inferQuestionAgentCategories(lowerQuestion: string): Set<AgentSummary["
       "scope tag",
       "rbac",
       "endpoint security",
+      // Identity questions route to the policy-category agents (sign-in
+      // explainer, risky sign-in triage, stale guest cleanup). Without
+      // these needles a sign-in question inferred no category at all
+      // and the write-agent category gate could not exclude the device
+      // offboarder from a guest-account request.
+      "sign-in",
+      "sign in",
+      "signin",
+      "signed in",
+      "authentication",
+      "mfa",
+      "guest",
+      "account",
     ])
   ) {
     categories.add("policies");
@@ -1450,11 +1792,13 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
   if (!isRecord(value)) return { value };
   const keys = [
     "id",
+    "@odata.type",
     "displayName",
     "deviceName",
     "userPrincipalName",
     "mail",
     "operatingSystem",
+    "platform",
     "osVersion",
     "complianceState",
     "lastSyncDateTime",
@@ -1463,6 +1807,28 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
     "userType",
     "trustType",
     "isManaged",
+    "isAssigned",
+    "publishingState",
+    "state",
+    "severity",
+    "classification",
+    "securityEnabled",
+    "groupTypes",
+    "platforms",
+    "signInAudience",
+    "servicePrincipalType",
+    "authenticationType",
+    "isVerified",
+    "conditionalAccessStatus",
+    "category",
+    "result",
+    "activityResult",
+    "runAsAccount",
+    "enrollmentState",
+    "featureUpdateVersion",
+    "encryptionState",
+    "visibility",
+    "publisher",
     "createdDateTime",
     "lastModifiedDateTime",
     "riskLevel",
@@ -1477,20 +1843,112 @@ function compactGraphObject(value: unknown): Record<string, unknown> {
 }
 
 function buildBreakdowns(rows: unknown[]): Record<string, Record<string, number>> {
-  const fields = ["operatingSystem", "complianceState", "userType", "accountEnabled", "trustType"];
+  const scalarFields = [
+    "operatingSystem",
+    "complianceState",
+    "userType",
+    "accountEnabled",
+    "trustType",
+    "platform",
+    "@odata.type",
+    "state",
+    "status",
+    "severity",
+    "classification",
+    "determination",
+    "serviceSource",
+    "detectionSource",
+    "securityEnabled",
+    "signInAudience",
+    "servicePrincipalType",
+    "authenticationType",
+    "isVerified",
+    "isDefault",
+    "isInitial",
+    "conditionalAccessStatus",
+    "clientAppUsed",
+    "isInteractive",
+    "riskLevelAggregated",
+    "riskLevelDuringSignIn",
+    "riskState",
+    "status.errorCode",
+    "category",
+    "result",
+    "operationType",
+    "loggedByService",
+    "activityType",
+    "activityOperationType",
+    "activityResult",
+    "componentName",
+    "runAsAccount",
+    "runAs32Bit",
+    "enforceSignatureCheck",
+    "enrollmentState",
+    "deploymentProfileAssignmentStatus",
+    "remediationState",
+    "enrollmentType",
+    "deploymentState",
+    "deviceSetupStatus",
+    "accountSetupStatus",
+    "featureUpdateVersion",
+    "assignmentFilterManagementType",
+    "encryptionState",
+    "visibility",
+    "controlCategory",
+    "actionType",
+    "service",
+    "implementationCost",
+    "userImpact",
+    "tier",
+    "deprecated",
+    "managedDeviceOwnerType",
+    "deviceEnrollmentType",
+    "managementState",
+    "isManaged",
+    "isAssigned",
+    "publishingState",
+  ];
+  const arrayFields = ["platforms", "groupTypes"];
   const out: Record<string, Record<string, number>> = {};
-  for (const field of fields) {
+  const scalarValue = (row: Record<string, unknown>, field: string): unknown =>
+    field === "status.errorCode" && isRecord(row.status)
+      ? row.status.errorCode
+      : row[field];
+  for (const field of scalarFields) {
     const counts: Record<string, number> = {};
+    let seen = false;
     for (const row of rows) {
       if (!isRecord(row)) continue;
-      const raw = row[field];
-      const key =
-        typeof raw === "string" || typeof raw === "number" || typeof raw === "boolean"
-          ? String(raw)
-          : "unknown";
+      const raw = scalarValue(row, field);
+      if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean") {
+        continue;
+      }
+      seen = true;
+      const key = String(raw);
       counts[key] = (counts[key] ?? 0) + 1;
     }
-    if (Object.keys(counts).length > 0) out[field] = counts;
+    if (seen && Object.keys(counts).length > 0) out[field] = counts;
+  }
+  for (const field of arrayFields) {
+    const counts: Record<string, number> = {};
+    let seen = false;
+    for (const row of rows) {
+      if (!isRecord(row)) continue;
+      const values = Array.isArray(row[field])
+        ? (row[field] as unknown[])
+        : typeof row[field] === "string"
+          ? (row[field] as string).split(",").map((part) => part.trim()).filter(Boolean)
+          : [row[field]];
+      for (const raw of values) {
+        if (typeof raw !== "string" && typeof raw !== "number" && typeof raw !== "boolean") {
+          continue;
+        }
+        seen = true;
+        const key = String(raw);
+        counts[key] = (counts[key] ?? 0) + 1;
+      }
+    }
+    if (seen && Object.keys(counts).length > 0) out[field] = counts;
   }
   return out;
 }

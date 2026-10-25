@@ -6,6 +6,7 @@ import type {
 } from "@openadminos/agent-sdk";
 import {
   voiceInventoryAnswer,
+  voiceAppPlatformCountAnswer,
   voiceResourcesForQuestion,
   voiceDeviceSummaryAnswer,
   voiceConversationContext,
@@ -206,4 +207,69 @@ it('answers app counts directly without conflating catalog entries and discovere
   assert.doesNotMatch(voiceInventoryAnswer('How many Intune apps do I have?', data)!, /detected/);
   assert.equal(voiceInventoryAnswer('How many apps do I have on Windows?',data), undefined);
   assert.match(voiceInventoryAnswer('How many apps do I have?',[])!, /could not retrieve/);
+});
+
+it('answers platform app counts directly from app-type aggregates', () => {
+  const data = [status({resource:'mobileApps',rows:8,tenantTotal:8})];
+  const aggregate = (resource: string) => resource === 'mobileApps' ? {
+    total: 8,
+    breakdowns: {
+      appPlatform: { macOS: 4, Windows: 2, iOS: 1, Android: 1 },
+      '@odata.type': { '#microsoft.graph.macOSPkgApp': 3, '#microsoft.graph.macOSDmgApp': 1 },
+    },
+  } : undefined;
+
+  assert.deepEqual(voiceResourcesForQuestion('how many macos apps?'), ['mobileApps']);
+  assert.match(
+    voiceAppPlatformCountAnswer('how many macos apps?', data, aggregate)!,
+    /4 macOS Intune app catalog entries/,
+  );
+  assert.match(
+    voiceAppPlatformCountAnswer('How many apps do I have on Windows?', data, aggregate)!,
+    /2 Windows Intune app catalog entries/,
+  );
+  assert.match(
+    voiceAppPlatformCountAnswer('how many macos apps?', [status({resource:'mobileApps',rows:8,tenantTotal:80,pageLimitReached:true})], aggregate)!,
+    /at least 4 macOS Intune app catalog entries.*partial/,
+  );
+  assert.match(
+    voiceAppPlatformCountAnswer('how many macos apps?', data, () => ({
+      total: 5,
+      breakdowns: { appPlatform: { macOS: 2, Windows: 1 } },
+    }))!,
+    /at least 2 macOS Intune app catalog entries.*partial/,
+  );
+  assert.equal(
+    voiceAppPlatformCountAnswer('how many macos apps?', data, () => ({
+      total: 5,
+      breakdowns: { appPlatform: { Windows: 2 } },
+    })),
+    undefined,
+  );
+  assert.match(
+    voiceAppPlatformCountAnswer('how many macos apps?', data, () => ({
+      total: 3,
+      breakdowns: { appPlatform: { macOS: 2, '#microsoft.graph.webApp': 1 } },
+    }))!,
+    /at least 2 macOS Intune app catalog entries.*partial/,
+  );
+  const detectedData = [status({resource:'detectedApps',rows:5,tenantTotal:5})];
+  const detectedAggregate = () => ({
+    total: 5,
+    breakdowns: { platform: { windows: 3, unknown: 2 } },
+  });
+  assert.equal(
+    voiceAppPlatformCountAnswer('how many detected macos apps?', detectedData, detectedAggregate),
+    undefined,
+  );
+  assert.match(
+    voiceAppPlatformCountAnswer('how many detected windows apps?', detectedData, detectedAggregate)!,
+    /at least 3 detected Windows app inventory entries.*partial/,
+  );
+  assert.match(voiceAppPlatformCountAnswer('how many macos apps?', [], aggregate)!, /could not retrieve/);
+  assert.match(
+    voiceAppPlatformCountAnswer('how many macos apps?', [status({resource:'mobileApps',rows:8,tenantTotal:8,lastError:'Forbidden'})], aggregate)!,
+    /latest refresh failed/,
+  );
+  assert.equal(voiceAppPlatformCountAnswer('how many macos apps are assigned to Finance?', data, aggregate), undefined);
 });

@@ -37,6 +37,39 @@ export const MAX_AGENTIC_ITERATIONS = 8;
  */
 const MAX_MALFORMED_RETRIES = 3;
 const MAX_UNFINISHED_RETRIES = 2;
+/**
+ * How many evidence-free finals to coach through before giving up.
+ * CLI-agent providers (Codex) intermittently answer in prose that the
+ * tenant tool is unavailable instead of emitting tool JSON; accepting
+ * that as a final answer shipped refusals with sources attached and
+ * reported loop success, so capability memory never flipped either.
+ */
+const MAX_NO_EVIDENCE_RETRIES = 2;
+const EVIDENCE_TOOLS = new Set([
+  "query_cache",
+  "graph_get",
+  "refresh_resource",
+  "query_drift",
+]);
+
+/**
+ * Whether a successful tool result actually read tenant evidence. The
+ * cache inventory alone is not evidence for a tenant-state claim, and
+ * a query against a resource that was never cached read nothing at
+ * all. A refreshed snapshot with zero rows is evidence: it is what
+ * "the tenant has none" may be concluded from, with coverage noted.
+ */
+function isEvidenceResult(tool: string, result: unknown): boolean {
+  if (!EVIDENCE_TOOLS.has(tool as never)) return false;
+  if (tool !== "query_cache") return true;
+  if (result === null || typeof result !== "object") return false;
+  const record = result as {
+    returnedRows?: unknown;
+    snapshot?: { refreshedAt?: unknown } | null;
+  };
+  if (typeof record.returnedRows === "number" && record.returnedRows > 0) return true;
+  return typeof record.snapshot?.refreshedAt === "string" && record.snapshot.refreshedAt.length > 0;
+}
 const DEFAULT_OBSERVATION_CHAR_BUDGET = 36_000;
 
 export const AGENTIC_TOOL_PROTOCOL = [
@@ -46,7 +79,8 @@ export const AGENTIC_TOOL_PROTOCOL = [
   "Every brace and bracket you open must be closed.",
   "If you do not know the Graph path for something, call find_graph_endpoint first rather than guessing a path.",
   "Do not call write tools. No write tools exist.",
-  "When you have enough evidence, either answer in plain prose or return:",
+  "Tenant rows are not supplied in this prompt and documentation is not tenant evidence. Call a tool before answering any question about tenant state.",
+  "When you have enough evidence, return:",
   '```json\n{"final":true,"answer":"..."}\n```',
 ].join("\n");
 
@@ -94,7 +128,7 @@ export type RunAgenticChatResult =
     }
   | {
       ok: false;
-      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer";
+      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer" | "no-evidence";
       fallbackNotice: string;
       toolTrace: IntuneChatToolTraceEntry[];
       iterations: number;
@@ -129,6 +163,9 @@ export async function runAgenticChat(
   const toolTrace: IntuneChatToolTraceEntry[] = [];
   let malformedCount = 0;
   let unfinishedCount = 0;
+  let noEvidenceCount = 0;
+  let evidenceToolCalls = 0;
+  let webSearchAttempts = 0;
   let responseModel = input.model;
   const invalidQueries = new Map<string, string>();
   const failedGraphFields = new Map<string, string[]>();
@@ -145,7 +182,7 @@ export async function runAgenticChat(
   // actual tool calls made, and losing the investigation to a fallback.
   let iteration = 0;
   let attempts = 0;
-  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + 1;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES + 1;
   while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
@@ -211,6 +248,28 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: "That was a progress message, not a finished answer. Perform the required read-only tool call now, then answer the current question using its result. If blocked, explain the concrete blocker. No work continues after a final response; do not promise a future lookup." });
       continue;
     }
+    if (action.kind === "final" && input.plannedResources.length > 0 && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
+      noEvidenceCount += 1;
+      if (noEvidenceCount > MAX_NO_EVIDENCE_RETRIES) {
+        return {
+          ok: false,
+          reason: "no-evidence",
+          fallbackNotice: "Investigative mode returned an answer without checking tenant data. Deterministic retrieval was used instead.",
+          toolTrace,
+          iterations: iteration,
+          ...(responseModel ? { model: responseModel } : {}),
+        };
+      }
+      turns.push({
+        role: "repair",
+        content: [
+          "That answer used no tenant evidence. The tenant query tools are available in this session: they run on the host when you request them with the JSON protocol. Tenant rows are not in this prompt and documentation does not describe this tenant.",
+          "Call a tool now with exactly one fenced JSON block, for example:",
+          '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":25}}\n```',
+        ].join("\n"),
+      });
+      continue;
+    }
     malformedCount = 0;
     iteration += 1;
     if (action.kind === "final") {
@@ -236,6 +295,13 @@ export async function runAgenticChat(
     });
     const execution = await executeIntuneChatTool(input.tools, action.tool, action.params);
     toolTrace.push(execution.trace);
+    if (!execution.trace.error && isEvidenceResult(action.tool, execution.result)) evidenceToolCalls += 1;
+    // In a consented web-research session, public evidence is
+    // first-class and the service owns web-failure honesty (a failed
+    // search converts the answer into a named failure there). Without
+    // webSearch configured the tool only errors, and that must never
+    // bypass the tenant-evidence guard.
+    if (action.tool === "web_search" && input.tools.webSearch) webSearchAttempts += 1;
     if (action.tool === 'query_cache') {
       const resource = String((action.params as Record<string, unknown>)?.resource ?? 'unknown');
       if (execution.trace.error) invalidQueries.set(GRAPH_CACHE_RESOURCES.some(entry => entry.resource === resource) ? resource : 'unknown', execution.trace.error);
@@ -301,11 +367,17 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput): string {
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
     "You can investigate read-only tenant data by asking the host to run tools.",
-    ...input.plannedResources.slice(0, 6).map(resource => `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${(pathForResource(resource).select ?? input.tools.store.graphCacheFields(input.tenant.id, resource)).slice(0, 24).join(', ')}.`),
+    ...input.plannedResources.slice(0, 6).map(resource => {
+      const fields = [...new Set([...(pathForResource(resource).select ?? []), ...input.tools.store.graphCacheFields(input.tenant.id, resource)])];
+      return `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${fields.slice(0, 24).join(', ')}.`;
+    }),
     'Filters preserve JSON types: accountEnabled, securityEnabled and isEncrypted take boolean true or false. For a count, request limit:1 and select:["id"], then use totalCount from the filtered query, not the number of returned rows. A list is capped; say so when more rows match.',
 
     input.plannedResources.includes('managedDevices')
       ? 'managedDevices cache fields: operatingSystem (for example "Windows"), deviceName, complianceState, isEncrypted (boolean true = encrypted, false = not encrypted, null = unknown). Encryption is separate from compliance. For unencrypted Windows devices use query_cache with {"resource":"managedDevices","where":{"operatingSystem":"Windows","isEncrypted":false}}. Pass select as a top-level array of available field names, never inside where.'
+      : '',
+    input.plannedResources.some(resource => ['mobileApps', 'deviceCompliancePolicies', 'deviceConfigurations', 'managedAppPolicies', 'iosManagedAppProtections', 'androidManagedAppProtections', 'mobileAppConfigurations', 'deviceEnrollmentConfigurations', 'namedLocations'].includes(resource))
+      ? 'Cache field @odata.type identifies the Graph subtype for typed collections such as mobileApps and Intune policies (for example #microsoft.graph.macOSPkgApp and #microsoft.graph.macOSCompliancePolicy). For a subtype or platform count, use query_cache with a filter such as {"field":"@odata.type","op":"contains","value":"macOS"}, select:["id"], limit:1, and use totalCount.'
       : '',
 
     "Every tool call is visible to the admin and recorded with the final answer.",

@@ -29,8 +29,16 @@ export const providerIds = new Set<ProviderId>(
 export interface OllamaTagsResponse {
   models?: Array<{
     name?: string;
+    digest?: string;
   }>;
 }
+
+// Capabilities never change for a given model digest, so a refresh does not
+// need to ask again. Keyed by endpoint, name, and digest.
+const ollamaCompletionSupport = new Map<string, boolean>();
+const OLLAMA_TAGS_TIMEOUT_MS = 1500;
+// /api/show can be slow while Ollama is cold-starting or holds many models.
+const OLLAMA_SHOW_TIMEOUT_MS = 5000;
 
 
 
@@ -42,7 +50,7 @@ export function isProviderId(value: unknown): value is ProviderId {
 
 export async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 1500);
+  const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
   const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyOllamaEndpoint(endpoint);
   const trustedProvider = endpointTrust.isLocal
@@ -72,30 +80,37 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
     }
 
     const payload = (await response.json()) as OllamaTagsResponse;
-    const installedModels =
-      payload.models
-        ?.map((model) => model.name)
-        .filter((name): name is string => Boolean(name)) ?? [];
+    clearTimeout(timeout);
+    const installed =
+      payload.models?.filter((model): model is { name: string; digest?: string } => Boolean(model.name)) ?? [];
+    const installedModels = installed.map((model) => model.name);
     // /api/tags also includes embedding-only models. Ask Ollama instead of
     // guessing capabilities from names, which can be arbitrary local aliases.
     let unverified = false;
-    const supported = await Promise.all(installedModels.map(async (model) => {
+    const showController = new AbortController();
+    const showTimeout = setTimeout(() => showController.abort(), OLLAMA_SHOW_TIMEOUT_MS);
+    const supported = await Promise.all(installed.map(async ({ name: model, digest }) => {
+      const key = digest ? `${endpoint}\0${model}\0${digest}` : undefined;
+      const known = key ? ollamaCompletionSupport.get(key) : undefined;
+      if (known !== undefined) return known;
       try {
         const details = await fetch(`${endpoint}/api/show`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ model }),
-          signal: controller.signal,
+          signal: showController.signal,
         });
         if (!details.ok) throw new Error("Model details unavailable");
         const data = await details.json() as { capabilities?: unknown };
         if (!Array.isArray(data.capabilities)) throw new Error("Model capabilities unavailable");
-        return data.capabilities.includes("completion");
+        const completion = data.capabilities.includes("completion");
+        if (key) ollamaCompletionSupport.set(key, completion);
+        return completion;
       } catch {
         unverified = true;
         return false;
       }
-    }));
+    })).finally(() => clearTimeout(showTimeout));
     const models = installedModels.filter((_, i) => supported[i]);
 
     return {

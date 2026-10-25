@@ -5,51 +5,44 @@
   their CENTER, so:
     OpenAdminOS.app  centered at (170, 230)  -> spans x 106-234, y 166-294
     Applications     centered at (490, 230)  -> spans x 426-554, y 166-294
+  Finder draws the icon labels itself, just below each icon (~y 300-320).
+  With a background picture Finder always uses light-appearance label text
+  (black), even when macOS is in dark mode, so this background must stay
+  light (paper theme). Keep the band under the icons free of artwork.
   Everything else (headline, arrow, footer) lives in this SVG.
 -->
 <svg xmlns="http://www.w3.org/2000/svg" width="660" height="440" viewBox="0 0 660 440">
-  <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#1f1d1a"/>
-      <stop offset="1" stop-color="#1f1d1a"/>
-    </linearGradient>
-    <pattern id="grid" width="24" height="24" patternUnits="userSpaceOnUse">
-      <path d="M24 0H0V24" fill="none" stroke="#1c222c" stroke-width="0.5" opacity="0.4"/>
-    </pattern>
-  </defs>
-
-  <rect width="660" height="440" fill="url(#bg)"/>
-  <rect width="660" height="440" fill="url(#grid)"/>
+  <rect width="660" height="440" fill="#faf9f6"/>
 
   <!-- Top brand strip -->
-  <g transform="translate(32 28) scale(0.3125)" fill="none" stroke="#faf9f6" stroke-width="7" stroke-linecap="round">
+  <g transform="translate(32 28) scale(0.3125)" fill="none" stroke="#1f1d1a" stroke-width="7" stroke-linecap="round">
     <circle cx="17" cy="32" r="11.5"/>
     <circle cx="46" cy="32" r="11.5"/>
     <path d="M57.5 20.5v23"/>
   </g>
-  <text x="58" y="42" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500" fill="#faf9f6">OpenAdminOS</text>
-  <line x1="32" y1="52" x2="628" y2="52" stroke="#1c222c" stroke-width="1"/>
+  <text x="58" y="42" font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" font-size="12" font-weight="500" fill="#1f1d1a">OpenAdminOS</text>
+  <line x1="32" y1="52" x2="628" y2="52" stroke="#e7e4dd" stroke-width="1"/>
 
   <!-- Headline -->
-  <g font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#faf9f6">
+  <g font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#1f1d1a">
     <text x="330" y="120" text-anchor="middle" font-size="22" font-weight="600" letter-spacing="-0.01em">
       Drag OpenAdminOS to Applications
     </text>
-    <text x="330" y="150" text-anchor="middle" font-size="13" fill="#a8b0bd" font-weight="400">
+    <text x="330" y="150" text-anchor="middle" font-size="13" fill="#5c5852" font-weight="400">
       Then eject this disk and launch from your Applications folder.
     </text>
   </g>
 
   <!-- Arrow between icon slots, aligned with icon vertical centers at y=230 -->
-  <g stroke="#faf9f6" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.5" stroke-dasharray="4 4">
+  <g stroke="#1f1d1a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.4" stroke-dasharray="4 4">
     <line x1="254" y1="230" x2="406" y2="230"/>
   </g>
-  <g stroke="#faf9f6" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.5">
+  <g stroke="#1f1d1a" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="0.4">
     <polyline points="392,218 408,230 392,242"/>
   </g>
 
   <!-- Footer tagline -->
-  <g font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#a8b0bb" font-size="11">
+  <g font-family="Geist, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" fill="#5c5852" font-size="11">
     <text x="330" y="400" text-anchor="middle">Local-first agents for Microsoft 365 admins</text>
   </g>
 </svg>

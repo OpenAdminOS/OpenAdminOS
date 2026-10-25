@@ -49,6 +49,107 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("query_cache can count Intune apps by @odata.type for platform questions", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 0);
+    try {
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "mobileApps",
+        label: "Intune apps",
+        scopeSet: ["DeviceManagementApps.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [
+          { id: "mac-pkg", displayName: "Mac PKG", "@odata.type": "#microsoft.graph.macOSPkgApp" },
+          { id: "mac-dmg", displayName: "Mac DMG", "@odata.type": "#microsoft.graph.macOSDmgApp" },
+          { id: "win", displayName: "Win32", "@odata.type": "#microsoft.graph.win32LobApp" },
+        ],
+      });
+
+      const count = await executeIntuneChatTool(toolContext(store), "query_cache", {
+        resource: "mobileApps",
+        filters: [{ field: "@odata.type", op: "contains", value: "macOS" }],
+        select: ["id", "@odata.type"],
+        limit: 1,
+      });
+
+      assert.equal(count.trace.error, undefined);
+      const result = count.result as {
+        totalCount: number;
+        rows: Array<{ row: Record<string, unknown> }>;
+      };
+      assert.equal(result.totalCount, 2);
+      assert.match(String(result.rows[0]!.row["@odata.type"]), /macOS/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("query_cache accepts operator objects in where for comparison filters", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 0);
+    try {
+      store.replaceGraphResources({
+        tenantId: "tenant-1",
+        resource: "managedDevices",
+        label: "Intune managed devices",
+        scopeSet: ["DeviceManagementManagedDevices.Read.All"],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [
+          { id: "stale-1", deviceName: "STALE-1", operatingSystem: "Windows", lastSyncDateTime: "2026-05-10T09:00:00.000Z" },
+          { id: "fresh-1", deviceName: "FRESH-1", operatingSystem: "Windows", lastSyncDateTime: "2026-05-30T09:00:00.000Z" },
+          { id: "fresh-2", deviceName: "FRESH-2", operatingSystem: "macOS", lastSyncDateTime: "2026-05-31T09:00:00.000Z" },
+        ],
+      });
+      const ctx = toolContext(store);
+      // The shape models reach for when a comparison does not fit the
+      // scalar where map: an operator object per field.
+      const stale = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        where: { lastSyncDateTime: { lt: "2026-05-20" } },
+        limit: 25,
+      });
+      assert.equal(stale.trace.error, undefined);
+      assert.equal((stale.result as { totalCount: number }).totalCount, 1);
+
+      const wrongOp = await executeIntuneChatTool(ctx, "query_cache", {
+        resource: "managedDevices",
+        where: { lastSyncDateTime: { approx: "2026-05-20" } },
+      });
+      assert.match(wrongOp.trace.error ?? "", /Unsupported query_cache operator: approx/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("list_cached_resources staleness follows per-resource host TTLs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const anHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const twelveHoursAgo = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString();
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "signIns", label: "Sign-in logs",
+        scopeSet: ["AuditLog.Read.All"], refreshedAt: anHourAgo,
+        rows: [{ id: "sign-in-1" }],
+      });
+      store.replaceGraphResources({
+        tenantId: "tenant-1", resource: "deviceConfigurations", label: "Device configurations",
+        scopeSet: ["DeviceManagementConfiguration.Read.All"], refreshedAt: twelveHoursAgo,
+        rows: [{ id: "profile-1" }],
+      });
+      const inventory = await executeIntuneChatTool(toolContext(store), "list_cached_resources", {});
+      const resources = (inventory.result as { resources: Array<{ resource: string; stale: boolean }> }).resources;
+      assert.equal(resources.find((entry) => entry.resource === "signIns")?.stale, true);
+      assert.equal(resources.find((entry) => entry.resource === "deviceConfigurations")?.stale, false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("graph_get rejects writes and unknown paths", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
@@ -123,6 +224,362 @@ describe("Intune Chat read-only tools", () => {
       assert.equal(result.truncated, true);
       assert.equal(execution.trace.tool, "graph_get");
       assert.match(execution.trace.resultSummary, /live rows returned/i);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get omits $top on endpoints that reject it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      // Verified against live Graph via Lokka: the managedDeviceOverview
+      // and authenticationMethodsPolicy singletons and the fixed-page-size
+      // directoryRoles collection answer 400 to any $top, so the host must
+      // not inject its default page size there.
+      const noTopPaths = new Map<string, unknown>([
+        ["/deviceManagement/managedDeviceOverview", { "@odata.type": "#microsoft.graph.managedDeviceOverview", enrolledDeviceCount: 3 }],
+        ["/policies/authenticationMethodsPolicy", { id: "authenticationMethodsPolicy", displayName: "Authentication Methods Policy" }],
+        ["/directoryRoles", { value: [{ id: "role-1", displayName: "Global Administrator", roleTemplateId: "template-1" }] }],
+      ]);
+      const graphRequests: Array<{ path: string; top?: string }> = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() {
+          return [];
+        },
+        async retireManagedDevice() {
+          throw new Error("write should not run");
+        },
+        async request(input) {
+          graphRequests.push({ path: input.path, top: input.query?.$top });
+          if (input.query?.$top !== undefined) {
+            throw new Error(`HTTP 400: $top is not valid for ${input.path}`);
+          }
+          return noTopPaths.get(input.path) ?? { value: [] };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+
+      for (const path of noTopPaths.keys()) {
+        const execution = await executeIntuneChatTool(ctx, "graph_get", { path });
+        assert.equal(execution.trace.error, undefined, `${path} should not error`);
+      }
+      assert.deepEqual(
+        graphRequests.map((request) => [request.path, request.top]),
+        [...noTopPaths.keys()].map((path) => [path, undefined]),
+      );
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get allows planner paths whose declared scope is broader than the catalog minimum", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      // The bundled catalog lists least-privileged scopes only, so
+      // /groups (GroupMember.Read.All declared) and the authentication
+      // methods policy (Policy.Read.All declared, documented as a
+      // higher-privileged permission) read as unconsented there. Both
+      // are planner cache paths refreshed with those scopes, so
+      // graph_get must reach Graph instead of refusing up front.
+      const scopedRequests: Array<{ scopes: string[]; path: string }> = [];
+      let currentScopes: string[] = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() {
+          return [];
+        },
+        async retireManagedDevice() {
+          throw new Error("write should not run");
+        },
+        async request(input) {
+          scopedRequests.push({ scopes: currentScopes, path: input.path });
+          return { value: [{ id: "row-1" }] };
+        },
+      };
+      const ctx = toolContext(store, {
+        graphForScopes: async (scopes) => {
+          currentScopes = scopes;
+          return graph;
+        },
+      });
+
+      const groups = await executeIntuneChatTool(ctx, "graph_get", { path: "/groups" });
+      assert.equal(groups.trace.error, undefined);
+      const authn = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/policies/authenticationMethodsPolicy",
+      });
+      assert.equal(authn.trace.error, undefined);
+      assert.ok(scopedRequests[0]?.scopes.includes("GroupMember.Read.All"));
+      assert.ok(scopedRequests[1]?.scopes.includes("Policy.Read.All"));
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get refuses deeper descendants of planner paths that need other scopes", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      // The planner exemption covers the declared collection and its
+      // by-id children. Deeper descendants such as group drives need
+      // Files.Read, which Chat never requests, so they must be refused
+      // before any Graph call even though /groups itself is exempt.
+      let requests = 0;
+      const graph: RunGraphApi = {
+        async listManagedDevices() {
+          return [];
+        },
+        async retireManagedDevice() {
+          throw new Error("write should not run");
+        },
+        async request() {
+          requests += 1;
+          return { value: [{ id: "drive-1" }] };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/groups/11111111-2222-3333-4444-555555555555/drives",
+      });
+      assert.match(execution.trace.error ?? "", /does not request/);
+      assert.equal(requests, 0);
+
+      // The by-id child of the same collection stays allowed with the
+      // declared scope.
+      let byIdScopes: string[] = [];
+      const byIdCtx = toolContext(store, {
+        graphForScopes: async (scopes) => {
+          byIdScopes = scopes;
+          return graph;
+        },
+      });
+      const byId = await executeIntuneChatTool(byIdCtx, "graph_get", {
+        path: "/groups/11111111-2222-3333-4444-555555555555",
+      });
+      assert.equal(byId.trace.error, undefined);
+      assert.ok(byIdScopes.includes("GroupMember.Read.All"));
+      assert.equal(requests, 1);
+
+      // Mixed-case paths still attribute the declared scope.
+      const upper = await executeIntuneChatTool(byIdCtx, "graph_get", {
+        path: "/GROUPS/11111111-2222-3333-4444-555555555555",
+      });
+      assert.equal(upper.trace.error, undefined);
+      assert.ok(byIdScopes.includes("GroupMember.Read.All"));
+      assert.equal(requests, 2);
+
+      // A function segment is not a by-id child: this one needs the
+      // ReadWrite scope Chat never requests. The parenthesized catalog
+      // spelling carries no permissions of its own and must inherit
+      // the plain form's instead of reading as permission-free.
+      for (const fnPath of [
+        "/deviceManagement/deviceCompliancePolicies/getDevicesScheduledToRetire",
+        "/deviceManagement/deviceCompliancePolicies/getDevicesScheduledToRetire()",
+      ]) {
+        const fn = await executeIntuneChatTool(ctx, "graph_get", { path: fnPath });
+        assert.match(fn.trace.error ?? "", /does not request/, fnPath);
+        assert.equal(requests, 2, fnPath);
+      }
+
+      // A type-cast segment is not a by-id child either.
+      const cast = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/applications/microsoft.graph.agentIdentityBlueprint",
+      });
+      assert.match(cast.trace.error ?? "", /does not request/);
+      assert.equal(requests, 2);
+
+      // Verified deeper reads: another user's memberships are covered
+      // by the already-consented User.Read.All even though the catalog
+      // lists only the self-only User.Read least-privileged scope.
+      let memberScopes: string[] = [];
+      const memberCtx = toolContext(store, {
+        graphForScopes: async (scopes) => {
+          memberScopes = scopes;
+          return graph;
+        },
+      });
+      const memberOf = await executeIntuneChatTool(memberCtx, "graph_get", {
+        path: "/users/11111111-2222-3333-4444-555555555555/memberOf",
+      });
+      assert.equal(memberOf.trace.error, undefined);
+      assert.ok(memberScopes.includes("User.Read.All"));
+      const transitive = await executeIntuneChatTool(memberCtx, "graph_get", {
+        path: "/users/11111111-2222-3333-4444-555555555555/transitiveMemberOf",
+      });
+      assert.equal(transitive.trace.error, undefined);
+      assert.equal(requests, 4);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get pages directoryRoles without a client page size", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const requests: Array<{ path: string; query?: Record<string, string> }> = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("write should not run"); },
+        async request(input) {
+          requests.push({ path: input.path, query: input.query as Record<string, string> | undefined });
+          if (!input.query?.$skiptoken) {
+            return {
+              value: [{ id: "role-1" }, { id: "role-2" }],
+              "@odata.nextLink": "https://graph.microsoft.com/beta/directoryRoles?$skiptoken=page-2",
+            };
+          }
+          return { value: [{ id: "role-3" }] };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", { path: "/directoryRoles" });
+      const result = execution.result as { returnedRows: number; truncated: boolean };
+      assert.equal(execution.trace.error, undefined);
+      assert.equal(requests.length, 2);
+      assert.equal(requests[0]?.query?.$top, undefined);
+      assert.equal(requests[1]?.query?.$skiptoken, "page-2");
+      assert.equal(result.returnedRows, 3);
+      assert.equal(result.truncated, false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get names the missing scope and recovery on a live 403", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store, {
+        graphForScopes: async () => ({
+          async listManagedDevices() { return []; },
+          async retireManagedDevice() { throw new Error("write should not run"); },
+          async request() {
+            throw new Error('Graph GET /users failed (HTTP 403): {"error":{"code":"Authorization_RequestDenied"}}');
+          },
+        }),
+      });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", { path: "/users" });
+      assert.ok(execution.trace.error, "expected a traced error");
+      assert.match(execution.trace.error, /denied read access for GET \/users/);
+      assert.match(execution.trace.error, /User\.Read\.All/);
+      assert.match(execution.trace.error, /Reconnect the tenant/);
+      assert.match(execution.trace.error, /HTTP 403/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("traces a failed refresh_resource as an error, not as evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store, {
+        refreshResource: async (resource) => ({
+          resource,
+          label: resource,
+          rows: 0,
+          refreshedAt: "2026-06-01T10:01:00.000Z",
+          ok: false,
+          error: "Microsoft Graph denied read access (HTTP 403).",
+        }),
+      });
+      const execution = await executeIntuneChatTool(ctx, "refresh_resource", {
+        resource: "managedDevices",
+      });
+      assert.match(execution.trace.error ?? "", /HTTP 403/);
+      assert.match(execution.trace.resultSummary, /Refresh failed/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get follows a $skip continuation with its full query", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const requests: Array<{ path: string; query?: Record<string, string> }> = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("write should not run"); },
+        async request(input) {
+          requests.push({ path: input.path, query: input.query as Record<string, string> | undefined });
+          if (!input.query?.["$skip"]) {
+            return {
+              value: Array.from({ length: 10 }, (_, index) => ({ id: `user-${index}` })),
+              "@odata.nextLink": "https://graph.microsoft.com/beta/users?$skip=10&$select=id,displayName",
+            };
+          }
+          return { value: [{ id: "user-10" }, { id: "user-11" }] };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", { path: "/users" });
+      const result = execution.result as { returnedRows: number; rows: Array<{ id: string }> };
+      assert.equal(requests.length, 2);
+      assert.equal(requests[1]?.query?.["$skip"], "10");
+      assert.equal(requests[1]?.query?.["$select"], "id,displayName");
+      assert.equal(result.returnedRows, 12);
+      assert.equal(result.rows.at(-1)?.id, "user-11");
+      const graphSource = (execution.trace as { graphSource?: { rows: number; pagesFetched?: number } }).graphSource;
+      assert.equal(graphSource?.rows, 12);
+      assert.equal(graphSource?.pagesFetched, 2);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get follows nextLink pages within the row cap", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      const seenSkiptokens: Array<string | undefined> = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() { return []; },
+        async retireManagedDevice() { throw new Error("write should not run"); },
+        async request(input) {
+          const token = input.query?.$skiptoken;
+          seenSkiptokens.push(token);
+          const page = token === "page2" ? 2 : 1;
+          return {
+            value: Array.from({ length: 30 }, (_, index) => ({
+              id: `user-p${page}-${index}`,
+              displayName: `User P${page} ${index}`,
+            })),
+            "@odata.count": 75,
+            "@odata.nextLink": `https://graph.microsoft.com/beta/users?$skiptoken=page${page + 1}`,
+          };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+      const execution = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/users",
+        query: { $select: "id,displayName", $count: "true" },
+      });
+      const result = execution.result as {
+        returnedRows: number;
+        truncated: boolean;
+        totalCount?: number;
+        pagesFetched?: number;
+        rows: Array<{ id: string }>;
+      };
+      assert.deepEqual(seenSkiptokens, [undefined, "page2"]);
+      assert.equal(result.returnedRows, 50);
+      assert.equal(result.truncated, true);
+      assert.equal(result.totalCount, 75);
+      assert.equal(result.pagesFetched, 2);
+      assert.equal(result.rows.length, 50);
+      assert.equal(result.rows[0]?.id, "user-p1-0");
+      assert.equal(result.rows[30]?.id, "user-p2-0");
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -391,6 +848,41 @@ describe("Graph endpoint discovery and reachability", () => {
         result.candidates.some((entry) => entry.path.includes("namedLocations")),
         `expected a namedLocations path, got ${result.candidates.map((c) => c.path).join(", ")}`,
       );
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("marks planner paths usable when their declared scope covers the catalog minimum", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store);
+      // /groups and the authentication methods policy are usable through
+      // graph_get with planner-declared scopes, so discovery must not
+      // steer the model away from them as unconsented.
+      const groups = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "groups",
+      });
+      const groupCandidates = (
+        groups.result as { candidates: Array<{ path: string; usable: boolean }> }
+      ).candidates;
+      const groupsEntry = groupCandidates.find((entry) => entry.path === "/groups");
+      assert.ok(groupsEntry, `expected /groups, got ${groupCandidates.map((c) => c.path).join(", ")}`);
+      assert.equal(groupsEntry.usable, true);
+
+      const authn = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "authentication methods policy",
+      });
+      const authnCandidates = (
+        authn.result as { candidates: Array<{ path: string; usable: boolean }> }
+      ).candidates;
+      const authnEntry = authnCandidates.find(
+        (entry) => entry.path === "/policies/authenticationMethodsPolicy",
+      );
+      assert.ok(authnEntry, `expected the policy path, got ${authnCandidates.map((c) => c.path).join(", ")}`);
+      assert.equal(authnEntry.usable, true);
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });

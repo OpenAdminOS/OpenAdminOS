@@ -42,7 +42,6 @@ import {
   useUpdateStateOptional,
   type DataBoundary,
 } from "../state";
-import { suggestAgentForQuestion } from "../shared/agent-suggestions";
 import {
   type AgentSummary,
   resolveProviderDefaultModel,
@@ -172,16 +171,6 @@ type FailedChatRequest = {
   conversationId: string | null;
 };
 
-type RelatedAgentSuggestion = {
-  agent: AgentSummary;
-  score: number;
-};
-
-type RelatedAgentState = {
-  suggestionsByMessageId: Record<string, RelatedAgentSuggestion>;
-  suggestedSlugsByConversationId: Record<string, string[]>;
-};
-
 type UnifiedAgentSuggestion = {
   slug: string;
   name: string;
@@ -262,6 +251,7 @@ function IntuneChatContent() {
     startRun,
     refresh,
     loading,
+    setActiveProvider,
     setActiveModel,
   } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
@@ -298,15 +288,19 @@ function IntuneChatContent() {
   const [stopping, setStopping] = useState(false);
   const [sendState, dispatchSend] = useReducer(chatSendReducer, initialChatSendState);
   const [failedRequest, setFailedRequest] = useState<FailedChatRequest | null>(null);
+  const [errorReloadToken, setErrorReloadToken] = useState(0);
+  const handleReloadAfterError = () => {
+    setError(null);
+    setErrorReloadToken((current) => current + 1);
+    void loadShell(activeConversationId ?? undefined).catch((caught) =>
+      setError(caught instanceof Error ? caught.message : String(caught)),
+    );
+  };
   const [runningAgentSlug, setRunningAgentSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [chatProgress, setChatProgress] = useState<ChatProgressState | null>(null);
   const [progressAssistantMessageId, setProgressAssistantMessageId] = useState<string | null>(null);
   const [optimisticDraft, setOptimisticDraft] = useState<OptimisticChatDraft | null>(null);
-  const [relatedAgentState, setRelatedAgentState] = useState<RelatedAgentState>({
-    suggestionsByMessageId: {},
-    suggestedSlugsByConversationId: {},
-  });
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [hostedConsentPrompt, setHostedConsentPrompt] =
     useState<HostedChatConsentPrompt | null>(null);
@@ -347,6 +341,9 @@ function IntuneChatContent() {
   const messagesScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
+  const activeStreamIdRef = useRef<string | null>(null);
+  const activeTenantIdRef = useRef(state.activeTenantId);
+  activeTenantIdRef.current = state.activeTenantId;
   const initialQuestionConsumedRef = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
   const progressClearTimerRef = useRef<number | null>(null);
@@ -447,7 +444,7 @@ function IntuneChatContent() {
       .catch((caught) =>
         setError(caught instanceof Error ? caught.message : String(caught)),
       );
-  }, []);
+  }, [errorReloadToken]);
 
   useEffect(() => {
     setAttachedWorkspaceId((current) =>
@@ -477,7 +474,7 @@ function IntuneChatContent() {
       .catch((caught) =>
         setError(caught instanceof Error ? caught.message : String(caught)),
       );
-  }, [attachedWorkspaceId]);
+  }, [attachedWorkspaceId, errorReloadToken]);
 
   useEffect(() => {
     if (scopeMode !== "selected" || selectedTenantIds.length > 0) return;
@@ -485,6 +482,18 @@ function IntuneChatContent() {
       setSelectedTenantIds([state.activeTenantId]);
     }
   }, [scopeMode, selectedTenantIds.length, state.activeTenantId]);
+
+  // Tenant switches clear the displayed transcript immediately, even
+  // mid-stream: the messages effect below is suspended while sending,
+  // and the previous tenant's answers must not stay on screen (or keep
+  // growing from stream callbacks) under the new tenant.
+  const displayedTenantRef = useRef(state.activeTenantId);
+  useEffect(() => {
+    if (displayedTenantRef.current === state.activeTenantId) return;
+    displayedTenantRef.current = state.activeTenantId;
+    setMessages([]);
+    setOptimisticDraft(null);
+  }, [state.activeTenantId]);
 
   useEffect(() => {
     const api = window.openAdminOS;
@@ -498,14 +507,28 @@ function IntuneChatContent() {
     const activeConversation = conversations.find(
       (conversation) => conversation.id === activeConversationId,
     );
+    // After a tenant switch the route can still name the previous
+    // tenant's conversation. Never keep (or reload) its transcript
+    // under the new tenant: clear it and let the not-found state show.
+    if (
+      activeConversation?.tenantId &&
+      state.activeTenantId &&
+      activeConversation.tenantId !== state.activeTenantId &&
+      activeConversation.scopeKind !== "multi-tenant"
+    ) {
+      setMessages([]);
+      return;
+    }
     const shouldRestoreScroll = restoreConversationScrollRef.current !== activeConversationId;
     if (shouldRestoreScroll) {
       restoreConversationScrollRef.current = activeConversationId;
       followLatestRef.current = false;
     }
+    let stale = false;
     void api
       .getIntuneChatMessages(activeConversationId)
       .then(async (nextMessages) => {
+        if (stale) return;
         setMessages(nextMessages);
         if (shouldRestoreScroll) {
           window.requestAnimationFrame(() => {
@@ -526,10 +549,15 @@ function IntuneChatContent() {
           }
         }
       })
-      .catch((caught) =>
-        setError(caught instanceof Error ? caught.message : String(caught)),
-      );
-  }, [activeConversationId, conversations, sending]);
+      .catch((caught) => {
+        if (stale) return;
+        setMessages([]);
+        setError(caught instanceof Error ? caught.message : String(caught));
+      });
+    return () => {
+      stale = true;
+    };
+  }, [activeConversationId, conversations, sending, errorReloadToken, state.activeTenantId]);
 
   useEffect(() => {
     if (draftConversationRef.current === activeConversationId) return;
@@ -636,7 +664,7 @@ function IntuneChatContent() {
     setError(null);
     setChatProgress(createStoppedChatProgress("Stopping response."));
     try {
-      await api.cancelIntuneChatStream();
+      await api.cancelIntuneChatStream(activeStreamIdRef.current ?? undefined);
     } catch (caught) {
       setStopping(false);
       dispatchSend({ type: "stop-failed" });
@@ -828,7 +856,7 @@ function IntuneChatContent() {
       setMessages([result.userMessage, result.assistantMessage]);
       setPendingConversation(result.conversation);
       upsertConversation(result.conversation);
-      openConversation(result.conversation.id, { replace: true });
+      if (activeTenantIdRef.current === state.activeTenantId) openConversation(result.conversation.id, { replace: true });
       await loadShell(result.conversation.id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -838,45 +866,6 @@ function IntuneChatContent() {
     }
   };
 
-
-  const recordRelatedAgentSuggestion = (
-    conversationId: string,
-    assistantMessageId: string,
-    suggestion: { agent: AgentSummary; score: number } | null,
-  ) => {
-    if (!suggestion) return;
-    setRelatedAgentState((current) => {
-      const existingSlugs = current.suggestedSlugsByConversationId[conversationId] ?? [];
-      if (
-        existingSlugs.includes(suggestion.agent.slug) ||
-        current.suggestionsByMessageId[assistantMessageId]
-      ) {
-        return current;
-      }
-      return {
-        suggestionsByMessageId: {
-          ...current.suggestionsByMessageId,
-          [assistantMessageId]: suggestion,
-        },
-        suggestedSlugsByConversationId: {
-          ...current.suggestedSlugsByConversationId,
-          [conversationId]: [...existingSlugs, suggestion.agent.slug],
-        },
-      };
-    });
-  };
-
-  const dismissRelatedAgentSuggestion = (assistantMessageId: string) => {
-    setRelatedAgentState((current) => {
-      if (!current.suggestionsByMessageId[assistantMessageId]) return current;
-      const nextSuggestions = { ...current.suggestionsByMessageId };
-      delete nextSuggestions[assistantMessageId];
-      return {
-        ...current,
-        suggestionsByMessageId: nextSuggestions,
-      };
-    });
-  };
 
   const executeSend = async (
     content: string,
@@ -890,15 +879,6 @@ function IntuneChatContent() {
       conversationIdOverride === null
         ? null
         : conversationIdOverride ?? activeConversationId;
-    const previouslySuggestedSlugs = targetConversationId
-      ? relatedAgentState.suggestedSlugsByConversationId[targetConversationId] ?? []
-      : [];
-    const relatedAgentSuggestion = suggestAgentForQuestion(
-      content,
-      state.installedAgents.filter(
-        (agent) => !previouslySuggestedSlugs.includes(agent.slug),
-      ),
-    );
     const pendingConversationId = targetConversationId ?? `pending_${window.crypto.randomUUID()}`;
     const pendingUserId = `pending_user_${window.crypto.randomUUID()}`;
     const pendingAssistantId = `pending_assistant_${window.crypto.randomUUID()}`;
@@ -948,6 +928,10 @@ function IntuneChatContent() {
     let failed = false;
     let cancelled = false;
     let reachedTerminal = false;
+    const streamId = window.crypto.randomUUID();
+    activeStreamIdRef.current = streamId;
+    const sendTenantId = state.activeTenantId;
+    const tenantStillActive = () => activeTenantIdRef.current === sendTenantId;
     try {
       const result = await api.streamIntuneChatMessage(
         {
@@ -958,12 +942,16 @@ function IntuneChatContent() {
           ...(workspaceContext ? { workspaceContext } : {}),
         },
         (event) => {
+          // After a tenant switch this stream belongs to the previous
+          // tenant's scope: let it finish host-side, but stop painting
+          // its tenant's data into the new tenant's shell.
+          if (!tenantStillActive()) return;
           if (event.type === "started") {
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
             setPendingConversation(event.conversation);
             upsertConversation(event.conversation);
-            openConversation(event.conversation.id, { replace: true });
+            if (activeTenantIdRef.current === state.activeTenantId) openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
             setMessages((current) => {
@@ -1032,11 +1020,6 @@ function IntuneChatContent() {
             if (event.type === "completed") {
               reachedTerminal = true;
               dispatchSend({ type: "complete" });
-              recordRelatedAgentSuggestion(
-                event.result.conversation.id,
-                event.result.assistantMessage.id,
-                relatedAgentSuggestion,
-              );
             }
             if (event.type === "cancelled") {
               reachedTerminal = true;
@@ -1046,21 +1029,21 @@ function IntuneChatContent() {
             }
           }
         },
+        { streamId },
       );
-      setPendingConversation(result.conversation);
-      upsertConversation(result.conversation);
-      openConversation(result.conversation.id, { replace: true });
-      setCacheStatus(result.cacheStatus);
-      if (result.assistantMessage.status === "completed") {
-        recordRelatedAgentSuggestion(
-          result.conversation.id,
-          result.assistantMessage.id,
-          relatedAgentSuggestion,
-        );
+      if (tenantStillActive()) {
+        setPendingConversation(result.conversation);
+        upsertConversation(result.conversation);
+        openConversation(result.conversation.id, { replace: true });
+        setCacheStatus(result.cacheStatus);
+        await loadShell(result.conversation.id);
       }
-      await loadShell(result.conversation.id);
     } catch (caught) {
       failed = true;
+      // A rejection that lands after a tenant switch must not restore
+      // the previous tenant prompt, error, or transcript into the new
+      // tenant composer. The finally block still resets send state.
+      if (!tenantStillActive()) return;
       setOptimisticDraft(null);
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
       if (!reachedTerminal) dispatchSend({ type: "fail" });
@@ -1099,6 +1082,7 @@ function IntuneChatContent() {
         ),
       );
     } finally {
+      if (activeStreamIdRef.current === streamId) activeStreamIdRef.current = null;
       sendInFlightRef.current = false;
       setSending(false);
       setStopping(false);
@@ -1483,12 +1467,21 @@ function IntuneChatContent() {
       : scopeMode === "selected"
         ? `${selectedTenantIds.length} selected tenant${selectedTenantIds.length === 1 ? "" : "s"}`
         : activeTenant?.displayName ?? "No active tenant";
-  const latestCacheRefresh = newestTimestamp(
-    cacheStatus?.resources.flatMap((resource) => resource.refreshedAt ?? []) ?? [],
+  // Oldest, like the per-answer header: the stalest refreshed resource
+  // bounds how current the cached picture can be. The epoch stale
+  // marker is excluded here so one resource invalidated by a write
+  // does not date the whole cache to before that write.
+  const refreshedValues =
+    cacheStatus?.resources.flatMap((resource) => resource.refreshedAt ?? []) ?? [];
+  const hasStaleMarkedResource = refreshedValues.some((value) => Date.parse(value) === 0);
+  const latestCacheRefresh = oldestTimestamp(
+    refreshedValues.filter((value) => Date.parse(value) !== 0),
   );
   const homeFreshness = latestCacheRefresh
     ? `Graph data from ${formatRelativeAge(latestCacheRefresh)}`
-    : "Graph data has not been cached yet";
+    : hasStaleMarkedResource
+      ? "Graph data is stale since the last write"
+      : "Graph data has not been cached yet";
   const awaitingConfirmationRuns = state.runs.filter(
     (run) =>
       run.status === "awaiting-confirmation" &&
@@ -1559,6 +1552,11 @@ function IntuneChatContent() {
   const handleModelSelect = async (providerId: ProviderId, model: string) => {
     setError(null);
     try {
+      // Always persist the pick, even when it names the displayed
+      // provider: getAppState masks a missing persisted provider as
+      // the first live one, so re-picking the displayed provider is
+      // the recovery path that repairs the persisted id.
+      await setActiveProvider(providerId);
       await setActiveModel(providerId, model);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : String(caught));
@@ -1746,6 +1744,10 @@ function IntuneChatContent() {
               notice={notice}
               retryLabel={failedRequest ? chatErrorCopy(error ?? "").action.label : undefined}
               onRetry={failedRequest ? () => void handleRetryFailedSend() : undefined}
+              onReload={handleReloadAfterError}
+              onOpenSettings={() => navigate("/settings/providers")}
+              onDismissError={() => setError(null)}
+              onDismissNotice={() => setNotice(null)}
             />
             {renderComposer("home")}
             {needsYouCount > 0 ? (
@@ -1837,6 +1839,8 @@ function IntuneChatContent() {
         <div
           ref={messagesScrollRef}
           onScroll={handleConversationScroll}
+          role="log"
+          aria-label="Conversation"
           className="min-h-0 flex-1 overflow-y-auto"
         >
           <div className="mx-auto flex min-h-full w-full max-w-[788px] flex-col px-6 pb-14 pt-[18px]">
@@ -1885,13 +1889,8 @@ function IntuneChatContent() {
               <div className="flex flex-1 flex-col">
                 {displayedMessages.map((message) => {
                   const job = multiTenantJobsByConversationId[message.conversationId];
-                  const relatedAgentSuggestion =
-                    message.role === "assistant" && message.status === "completed"
-                      ? relatedAgentState.suggestionsByMessageId[message.id]
-                      : undefined;
                   const suggestedAgents = mergeSuggestedAgents(
                     message.agentSuggestions,
-                    relatedAgentSuggestion,
                   );
                   const messageConversation =
                     conversations.find((entry) => entry.id === message.conversationId) ??
@@ -1924,7 +1923,6 @@ function IntuneChatContent() {
                           runningAgentSlug={runningAgentSlug}
                           onRun={(slug) => void handleRunAgent(slug, message.conversationId, message.id)}
                           onDismiss={() => {
-                            dismissRelatedAgentSuggestion(message.id);
                             setDismissedSuggestionMessageIds((current) => [...new Set([...current, message.id])]);
                           }}
                         />
@@ -1978,12 +1976,16 @@ function IntuneChatContent() {
               notice={notice}
               retryLabel={failedRequest ? chatErrorCopy(error ?? "").action.label : undefined}
               onRetry={failedRequest ? () => void handleRetryFailedSend() : undefined}
+              onReload={handleReloadAfterError}
+              onOpenSettings={() => navigate("/settings/providers")}
+              onDismissError={() => setError(null)}
+              onDismissNotice={() => setNotice(null)}
             />
             {renderComposer("docked")}
           </div>
         </div>
         <div aria-live="polite" aria-atomic="true" className="sr-only">
-          {sendState.phase === "failed" ? "" : sendState.announcement}
+          {sendState.phase === "failed" && error ? "" : sendState.announcement}
         </div>
       </section>
       {calmModals}
@@ -2261,6 +2263,7 @@ function ChatComposer({
           id={`intune-chat-composer-${placement}`}
           name={`intune-chat-composer-${placement}`}
           ref={textareaRef}
+          autoFocus
           rows={1}
           disabled={disabled}
           value={value}
@@ -2491,11 +2494,19 @@ function ChatNotices({
   notice,
   retryLabel,
   onRetry,
+  onReload,
+  onOpenSettings,
+  onDismissError,
+  onDismissNotice,
 }: {
   error: string | null;
   notice: string | null;
   retryLabel?: string;
   onRetry?: () => void;
+  onReload?: () => void;
+  onOpenSettings?: () => void;
+  onDismissError?: () => void;
+  onDismissNotice?: () => void;
 }) {
   return (
     <>
@@ -2507,12 +2518,27 @@ function ChatNotices({
               {chatErrorCopy(error).why ?? "Retry the action. If it still fails, review the provider and tenant connection in Settings."}
             </div>
           </div>
-          {onRetry ? <Button size="sm" variant="secondary" onClick={onRetry}>{retryLabel ?? "Retry"}</Button> : null}
+          <div className="flex shrink-0 items-center gap-1.5">
+            {onRetry ? (
+              <Button size="sm" variant="secondary" onClick={onRetry}>{retryLabel ?? "Retry"}</Button>
+            ) : (
+              <>
+                {onReload ? <Button size="sm" variant="secondary" onClick={onReload}>Reload chat</Button> : null}
+                {onOpenSettings ? <Button size="sm" variant="ghost" onClick={onOpenSettings}>Open Settings</Button> : null}
+              </>
+            )}
+            {onDismissError ? (
+              <IconButton size="sm" label="Dismiss error" tooltip="Dismiss" icon={<IconClose size={12} />} onClick={onDismissError} />
+            ) : null}
+          </div>
         </div>
       ) : null}
       {notice ? (
-        <div role="status" className="mb-3 rounded-[10px] bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
-          {notice}
+        <div role="status" className="mb-3 flex items-start justify-between gap-4 rounded-[10px] bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
+          <span className="min-w-0">{notice}</span>
+          {onDismissNotice ? (
+            <IconButton size="sm" label="Dismiss notice" tooltip="Dismiss" icon={<IconClose size={12} />} onClick={onDismissNotice} />
+          ) : null}
         </div>
       ) : null}
     </>
@@ -3953,7 +3979,7 @@ function ChatMessageBubble({
           className="chat-answer text-[var(--color-text)]"
         />
       ) : null}
-      <AnswerSources sources={message.sources ?? []} trace={message.toolTrace ?? []} />
+      <AnswerSources trace={message.toolTrace ?? []} />
       {!progress ? (
         <div className={`-ml-1.5 mt-1 flex gap-0.5 transition-opacity ${latestAssistant ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
           <IconButton
@@ -3999,14 +4025,18 @@ function AnswerScopeDisclosure({
   sources: IntuneChatSource[];
   trace: IntuneChatToolTraceEntry[];
 }) {
-  const refreshedAt = newestTimestamp(
+  // The stalest source bounds how current the answer can be. Showing
+  // the newest refresh let a header claim "data from just now" while the
+  // rows the answer used were hours old.
+  const refreshedAt = oldestTimestamp(
     sources.flatMap((source) => source.refreshedAt ?? []),
   );
   const resourceNames = [...new Set(sources.map((source) => source.label))].join(", ");
   const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
-  const hasDetails = Boolean(notice || sources.length > 0 || trace.length > 0);
+  const hasDetails = Boolean(sources.length > 0 || trace.length > 0);
 
   return (
+    <>
     <details className="group/details mb-2.5">
       <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-md text-sm text-[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] [&::-webkit-details-marker]:hidden">
         {multiTenant ? (
@@ -4020,7 +4050,7 @@ function AnswerScopeDisclosure({
         {refreshedAt ? (
           <>
             <span aria-hidden="true" className="opacity-60">·</span>
-            <span>data from {formatRelativeAge(refreshedAt)}</span>
+            <span>{sources.length > 1 ? "oldest data from " : "data from "}{formatRelativeAge(refreshedAt)}</span>
           </>
         ) : null}
         <span aria-hidden="true" className="opacity-60">·</span>
@@ -4030,44 +4060,40 @@ function AnswerScopeDisclosure({
         </span>
       </summary>
       <div className="mt-2 border-l-2 border-[var(--color-border)] pl-3 text-sm text-[var(--color-text-soft)]">
-        {notice ? (
-          <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[var(--color-warning)]">
-            {notice}
-          </div>
-        ) : null}
         {sources.length > 0 ? <SourceDetails sources={sources} /> : null}
         {trace.length > 0 ? <ToolTraceDetails trace={trace} /> : null}
         {!hasDetails ? <div className="py-1">No source trace was stored for this answer.</div> : null}
       </div>
     </details>
+    {notice ? (
+      // A fallback or repair notice changes how much the answer can be
+      // trusted, so it stays visible next to the answer instead of
+      // hiding inside the collapsed details.
+      <div role="status" className="mb-2.5 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
+        {notice}
+      </div>
+    ) : null}
+    </>
   );
 }
 
 function AnswerSources({
-  sources,
   trace,
 }: {
-  sources: IntuneChatSource[];
   trace: IntuneChatToolTraceEntry[];
 }) {
+  // Tenant cache sources already live behind "How I checked" above the
+  // answer. Repeating every cache row count under the answer makes a
+  // simple response look like a diagnostics dump, so only public web
+  // citations stay visible here.
   const webSources = safeWebSources(trace);
-  if (sources.length === 0 && webSources.length === 0) return null;
+  if (webSources.length === 0) return null;
   return (
     <ol aria-label="Sources" className="mb-4 mt-1 list-none space-y-0.5 p-0 font-sans text-sm text-[var(--color-text-muted)]">
-      {sources.map((source, index) => (
-        <li key={`${source.resource}-${index}`} className="flex flex-wrap items-center gap-2 py-0.5">
-          <span className="inline-grid h-[17px] min-w-[17px] place-items-center rounded-[5px] bg-[var(--color-hover)] px-1 text-[11px] font-medium text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]">
-            {index + 1}
-          </span>
-          <span className="font-medium text-[var(--color-text-soft)]">{source.label}</span>
-          <span>· {source.rows.toLocaleString()} {source.rows === 1 ? "row" : "rows"}</span>
-          <span>· {source.refreshedAt ? formatRelativeAge(source.refreshedAt) : "not refreshed"}</span>
-        </li>
-      ))}
       {webSources.map((source, webIndex) => (
         <li key={source.url} className="flex min-w-0 items-center gap-2 py-0.5">
           <span className="inline-grid h-[17px] min-w-[17px] place-items-center rounded-[5px] bg-[var(--color-hover)] px-1 text-[11px] font-medium text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]">
-            {sources.length + webIndex + 1}
+            {webIndex + 1}
           </span>
           <a href={source.url} target="_blank" rel="noopener noreferrer" className="truncate rounded font-medium text-[var(--color-text-soft)] hover:text-[var(--color-text)] hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
             {source.title || new URL(source.url).hostname}
@@ -4084,9 +4110,9 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
       <div>
         <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">Sources</div>
         <div className="grid gap-2">
-          {sources.map((source) => (
+          {sources.map((source, index) => (
             <div
-              key={source.resource}
+              key={`${source.resource}-${source.source}-${index}`}
               className="rounded-md bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4340,9 +4366,13 @@ function safeFileName(value: string): string {
   return cleaned || "intune-chat-conversation";
 }
 
+// The host matcher is the single source of agent suggestions. A second
+// renderer matcher used to score the same question with different rules
+// and no write-intent handling, so the two surfaces disagreed about
+// which agent fit. Cards now render only what the host attached to the
+// message, which also keeps them identical after a reload.
 function mergeSuggestedAgents(
   matched: IntuneChatAgentSuggestion[] | undefined,
-  related: RelatedAgentSuggestion | undefined,
 ): UnifiedAgentSuggestion[] {
   const suggestions = new Map<string, UnifiedAgentSuggestion>();
   for (const suggestion of matched ?? []) {
@@ -4355,15 +4385,6 @@ function mergeSuggestedAgents(
       matchedTerms: suggestion.matchedTerms,
       matchedConcepts: suggestion.matchedConcepts,
       matchedResources: suggestion.matchedResources,
-    });
-  }
-  if (related && !suggestions.has(related.agent.slug)) {
-    suggestions.set(related.agent.slug, {
-      slug: related.agent.slug,
-      name: formatAgentDisplayName(related.agent),
-      mode: related.agent.mode,
-      reason: related.agent.description,
-      scopes: related.agent.scopes,
     });
   }
   return [...suggestions.values()];
@@ -4391,11 +4412,21 @@ function SuggestedAgentsBlock({
             <div className="flex items-center gap-4">
               <div className="min-w-0 flex-1 leading-5">
                 <span className="font-medium text-[var(--color-text)]">{suggestion.name}</span>{" "}
+                <Badge tone={suggestion.mode === "write" ? "warning" : "info"}>
+                  {suggestion.mode === "write" ? "Write agent" : "Read agent"}
+                </Badge>{" "}
                 <span>
                   {suggestion.mode === "write"
                     ? `${suggestion.reason} Nothing changes until you review and confirm.`
                     : suggestion.reason}
                 </span>
+                {suggestion.scopes.length > 0 ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                    <span>Required scopes</span>
+                    {suggestion.scopes.slice(0, 3).map((scope) => <Badge key={scope}>{scope}</Badge>)}
+                    {suggestion.scopes.length > 3 ? <Badge>{suggestion.scopes.length - 3} more</Badge> : null}
+                  </div>
+                ) : null}
               </div>
               <Button
                 size="sm"
@@ -4448,11 +4479,10 @@ function SuggestedAgentsBlock({
                     ))}
                   </div>
                 ) : null}
-                {suggestion.scopes.length > 0 ? (
+                {suggestion.scopes.length > 3 ? (
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                    <span>Required scopes</span>
-                    {suggestion.scopes.slice(0, 4).map((scope) => <Badge key={scope}>{scope}</Badge>)}
-                    {suggestion.scopes.length > 4 ? <Badge>{suggestion.scopes.length - 4} more</Badge> : null}
+                    <span>All required scopes</span>
+                    {suggestion.scopes.map((scope) => <Badge key={scope}>{scope}</Badge>)}
                   </div>
                 ) : null}
                 {suggestion.mode === "write" ? (
@@ -4472,6 +4502,9 @@ function SuggestedAgentsBlock({
 function formatDateTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
+  // The epoch is the store's stale-since-write marker, not a real
+  // refresh time; never render it as a 1970 date or a 20k-day age.
+  if (date.getTime() === 0) return "Before the last write (stale)";
   return new Intl.DateTimeFormat(undefined, {
     month: "short",
     day: "numeric",
@@ -4514,18 +4547,20 @@ function suggestionLabel(prompt: string): string {
   return prompt.replace(/[?.]$/, "");
 }
 
-function newestTimestamp(values: string[]): string | undefined {
-  return values.reduce<string | undefined>((latest, value) => {
+function oldestTimestamp(values: string[]): string | undefined {
+  return values.reduce<string | undefined>((oldest, value) => {
     const time = Date.parse(value);
-    if (!Number.isFinite(time)) return latest;
-    if (!latest || time > Date.parse(latest)) return value;
-    return latest;
+    if (!Number.isFinite(time)) return oldest;
+    if (!oldest || time < Date.parse(oldest)) return value;
+    return oldest;
   }, undefined);
 }
+
 
 function formatRelativeAge(value: string): string {
   const time = Date.parse(value);
   if (!Number.isFinite(time)) return value;
+  if (time === 0) return "before the last write";
   const seconds = Math.max(0, Math.round((Date.now() - time) / 1000));
   if (seconds < 45) return "just now";
   const minutes = Math.round(seconds / 60);

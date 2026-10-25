@@ -1,69 +1,69 @@
 {
-  "updatedAt": "2026-10-22T16:00:47.520Z",
+  "updatedAt": "2026-10-25T13:00:47.316Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 30,
-      "installs7d": 2
+      "installs": 31,
+      "installs7d": 3
     },
     "intune-device-posture-auditor": {
-      "installs": 7,
-      "installs7d": 1
+      "installs": 8,
+      "installs7d": 2
     },
     "offboarding-agent": {
       "installs": 18,
       "installs7d": 0
     },
     "compliance-overview": {
-      "installs": 38,
-      "installs7d": 2
-    },
-    "os-update-posture": {
-      "installs": 18,
-      "installs7d": 1
-    },
-    "tenant-health-report": {
-      "installs": 27,
-      "installs7d": 1
-    },
-    "user-license-overview": {
-      "installs": 26,
-      "installs7d": 2
-    },
-    "conditional-access-explainer": {
-      "installs": 44,
+      "installs": 39,
       "installs7d": 3
     },
+    "os-update-posture": {
+      "installs": 19,
+      "installs7d": 2
+    },
+    "tenant-health-report": {
+      "installs": 28,
+      "installs7d": 2
+    },
+    "user-license-overview": {
+      "installs": 27,
+      "installs7d": 3
+    },
+    "conditional-access-explainer": {
+      "installs": 45,
+      "installs7d": 4
+    },
     "dormant-app-registrations": {
-      "installs": 29,
-      "installs7d": 1
+      "installs": 30,
+      "installs7d": 2
     },
     "risky-sign-in-triage": {
-      "installs": 14,
-      "installs7d": 0
+      "installs": 15,
+      "installs7d": 1
     },
     "secure-score-prioritizer": {
-      "installs": 16,
-      "installs7d": 1
+      "installs": 17,
+      "installs7d": 2
     },
     "sign-in-failure-explainer": {
-      "installs": 21,
-      "installs7d": 1
+      "installs": 22,
+      "installs7d": 2
     },
     "stale-guest-cleanup": {
-      "installs": 17,
-      "installs7d": 1
+      "installs": 18,
+      "installs7d": 2
     },
     "tenant-change-audit": {
-      "installs": 14,
-      "installs7d": 0
+      "installs": 15,
+      "installs7d": 1
     },
     "team-evidence-review": {
-      "installs": 5,
-      "installs7d": 1
+      "installs": 6,
+      "installs7d": 2
     },
     "team-script-draft": {
-      "installs": 5,
-      "installs7d": 1
+      "installs": 6,
+      "installs7d": 2
     }
   }
 }

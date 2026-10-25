@@ -30,6 +30,7 @@ import {
   withAgentCompatibility,
 } from "./agent-draft-helpers.js";
 import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
+import { graphCacheResourcesForWrite } from "./intune-chat/planner.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { fingerprintRunOutput, stableStringify } from "./run-delivery-format.js";
 import {
@@ -767,6 +768,33 @@ export class RunService {
     }
   }
 
+  /**
+   * Confirmed writes mutate tenant state outside the chat cache. Mark
+   * the affected resources stale so the next chat question refreshes
+   * instead of answering from the pre-write snapshot until TTL expiry.
+   */
+  private invalidateGraphCacheAfterWrite(
+    runId: string,
+    tenantId: string,
+    input: { scopes?: string[]; paths?: string[] },
+  ): void {
+    try {
+      const store = this.host.intelligenceStore;
+      if (!store) return;
+      const resources = graphCacheResourcesForWrite(input);
+      const marked = store.markGraphResourcesStale(tenantId, resources);
+      if (marked > 0) {
+        void this.appendRunLog(
+          runId,
+          "info",
+          `Marked ${marked} cached Graph resources stale after the confirmed write. Chat will refresh them before the next answer.`,
+        );
+      }
+    } catch {
+      // Cache invalidation must never fail a completed write run.
+    }
+  }
+
   private async driveApply(input: {
     run: RunRecord;
     agent: AgentSummary;
@@ -804,23 +832,32 @@ export class RunService {
         if (stableStringify(fresh.plan.actions) !== stableStringify(input.plan.actions) || fresh.plan.confirmationPhrase !== input.plan.confirmationPhrase) throw new Error("The proposed actions changed since review. Nothing was applied. Run the assignment again to review a fresh proposal.");
         controller.signal.throwIfAborted();
       }
-      await executeApply({
-        signal: controller.signal,
-        run: input.run,
-        agent: input.agent,
-        providerId: input.providerId,
-        model: input.model,
-        plan: input.plan,
-        llm,
-        createGraph: selection.createGraph,
-        tenant: selection.tenantSession,
-        connectorConfigs: await this.host.readConnectorConfigs(),
-        connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
-        confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
-        realWrites: true,
-        onProgress: (next) =>
-          this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
-      });
+      try {
+        await executeApply({
+          signal: controller.signal,
+          run: input.run,
+          agent: input.agent,
+          providerId: input.providerId,
+          model: input.model,
+          plan: input.plan,
+          llm,
+          createGraph: selection.createGraph,
+          tenant: selection.tenantSession,
+          connectorConfigs: await this.host.readConnectorConfigs(),
+          connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
+          confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
+          realWrites: true,
+          onProgress: (next) =>
+            this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
+        });
+      } finally {
+        // An apply that threw partway may still have committed earlier
+        // actions; marking stale is safe either way, so always invalidate.
+        this.invalidateGraphCacheAfterWrite(input.run.id, selection.tenantId, {
+          scopes: input.agent.scopes,
+          paths: input.plan.actions.flatMap((action) => action.request?.path ? [action.request.path] : []),
+        });
+      }
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
     } finally {
@@ -842,6 +879,10 @@ export class RunService {
     const noun = isRollback ? "Rollback" : "Proposal";
     const controller = new AbortController();
     this.controllers.set(input.run.id, controller);
+    let applied = 0;
+    let selectionTenantId: string | undefined;
+    const attemptedPaths: string[] = [];
+    let systemScopes: string[] = [];
     try {
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       if (!plan) throw new Error(`${noun} run has no plan.`);
@@ -849,12 +890,13 @@ export class RunService {
         input.run.rollback?.requiredScopes ??
         input.run.external?.requiredScopes ??
         [];
+      systemScopes = scopes;
       const selection = await this.host.buildGraph(input.run.tenantId, scopes, this.executionOptions(input.run, controller.signal));
+      selectionTenantId = selection.tenantId;
       const graph = selection.createGraph((level, message, metadata) => {
         void this.appendRunLog(input.run.id, level, message, metadata);
       });
       let run = this.stampTenant(input.run, selection.tenantId);
-      let applied = 0;
       for (const [index, action] of plan.actions.entries()) {
         controller.signal.throwIfAborted();
         const startedAt = new Date().toISOString();
@@ -873,6 +915,7 @@ export class RunService {
             throw new Error(`${noun} action carries no Graph request.`);
           }
           controller.signal.throwIfAborted();
+          attemptedPaths.push(action.request.path);
           await graph.request({
             signal: controller.signal,
             method: action.request.method,
@@ -935,10 +978,25 @@ export class RunService {
         ...input.run,
         status: "failed",
         finishedAt: new Date().toISOString(),
-        summary: `${noun} failed before any action was applied: ${message}`,
+        summary:
+          applied > 0
+            ? `${noun} stopped after applying ${applied} of ${plan?.actions.length ?? applied} actions: ${message}`
+            : `${noun} failed before any action was applied: ${message}`,
         error: message,
       });
     } finally {
+      // Invalidate for every attempted request, including a cancel at
+      // the loop boundary and a request whose response was lost: the
+      // write may have committed server-side either way, and a stale
+      // answer after a confirmed change is the worse failure.
+      if (attemptedPaths.length > 0 && selectionTenantId) {
+        this.invalidateGraphCacheAfterWrite(input.run.id, selectionTenantId, {
+          // Scopes carry the family signal paths cannot: deleting a
+          // managed device also changes the overview totals.
+          scopes: systemScopes,
+          paths: attemptedPaths,
+        });
+      }
       if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
   }
