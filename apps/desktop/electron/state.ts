@@ -35,6 +35,7 @@ import {
   noopLlm,
   parseAgentTemplate,
   probeAzureOpenAi,
+  ollamaEndpointOverride,
   removeAccount,
   runInteractiveFlow,
   setAgentUpdatesDir,
@@ -1387,7 +1388,7 @@ export class AppStateStore {
         return { tenants: persisted.tenants, agents: persisted.installedAgents, runs: persisted.runs, providers,
           providerConfigKeys: Object.fromEntries(providers.map(provider => [provider.id,
             createHash("sha256").update(JSON.stringify({ config: provider.id === "azure-openai" ? persisted.providerConfigs?.azureOpenAI : undefined,
-              endpoint: provider.id === "ollama" ? process.env.OPENAGENTS_OLLAMA_URL : provider.id === "lm-studio" ? process.env.OPENADMINOS_LM_STUDIO_URL : undefined })).digest("hex")])) };
+              endpoint: provider.id === "ollama" ? ollamaEndpointOverride() : provider.id === "lm-studio" ? process.env.OPENADMINOS_LM_STUDIO_URL : undefined })).digest("hex")])) };
 
       },
       startRun: (slug, options) => this.startRun(slug, options),

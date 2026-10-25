@@ -309,7 +309,7 @@ function claudeCodeBinaryCandidates(preferredBinaryPath?: string): string[] {
     preferredBinaryPath,
     process.env.OPENADMINOS_CLAUDE_CODE_BINARY,
     "claude",
-    join(homedir(), ".local", "bin", process.platform === "win32" ? "claude.cmd" : "claude"),
+    join(homedir(), ".local", "bin", process.platform === "win32" ? "claude.exe" : "claude"),
     process.platform === "darwin" ? "/opt/homebrew/bin/claude" : undefined,
     process.platform === "darwin" ? "/usr/local/bin/claude" : undefined,
   ];

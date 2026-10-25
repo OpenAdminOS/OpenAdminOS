@@ -295,13 +295,19 @@ send tenant context.
 
 Local-provider trust is endpoint-sensitive. Ollama is local only when the
 configured endpoint is loopback (`localhost`, `127.0.0.0/8`, IPv6 loopback, or
-IPv4-mapped loopback) or a Unix socket. If `OPENAGENTS_OLLAMA_URL` points at a
+IPv4-mapped loopback) or a Unix socket. The endpoint is `OPENAGENTS_OLLAMA_URL`
+when set, otherwise Ollama's own `OLLAMA_HOST` read the way the Ollama client
+reads it (a wildcard bind address is reached through `127.0.0.1`), otherwise
+`http://127.0.0.1:11434`. Retrieval embeddings follow `OLLAMA_HOST` only while
+it stays on loopback. Provider detection gives `/api/tags` 1.5 seconds and the
+per-model `/api/show` capability checks a separate 5 seconds, and caches each
+model's result by digest. If the resolved endpoint points at a
 LAN, internet, wildcard, invalid, or otherwise non-loopback endpoint, the
 provider summary flips to external/hosted-style trust messaging and Intune Chat
 requires hosted-provider confirmation before tenant context is sent.
 
 LM Studio support uses its local OpenAI-compatible server at
-`http://localhost:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
+`http://127.0.0.1:1234/v1` by default, with `OPENADMINOS_LM_STUDIO_URL` as the
 development override. Like Ollama, LM Studio is local only when the configured
 HTTP endpoint resolves to loopback. A LAN, internet, wildcard, or invalid
 endpoint flips the provider to external trust messaging before tenant prompts
@@ -336,10 +342,17 @@ generic model error.
 
 Per-agent model overrides are required: an agent's manifest can specify a preferred model and the user can override it.
 
-Desktop CLI provider discovery adds Homebrew and user-local executable directories
-to macOS child PATH so Finder/Dock launches can also resolve npm launchers' Node
-runtime. On Windows it adds the user npm and native CLI install folders, respects
-redirected AppData, and resolves official npm launchers without a command shell.
+Desktop CLI provider discovery appends known install folders to the child PATH
+on every platform, because Finder, Dock, and desktop-menu launches get a minimal
+PATH and a running Windows app never sees PATH changes. macOS and Linux add
+Homebrew (or Linuxbrew and Snap), `~/.local/bin`, `~/.npm-global/bin`, Volta,
+bun, mise, asdf, the fnm default alias, and every nvm Node version (newest
+first). Windows adds the user npm folder, `~/.local/bin`, WinGet Links, pnpm,
+Volta, Scoop, and bun, and respects redirected AppData. Entries already on PATH
+keep precedence. Official npm launchers are resolved without a command shell:
+to the package's Node entry point, or directly to Claude Code's native
+`bin/claude.exe`; pnpm and yarn global launchers are followed through the
+`%~dp0` path they reference, accepting only the official entry for that CLI.
 It does not execute shell startup files or inherit additional secrets. Claude's
 configuration directory remains unset unless explicitly configured: forcing even
 its default directory selects a different macOS Keychain credential namespace.

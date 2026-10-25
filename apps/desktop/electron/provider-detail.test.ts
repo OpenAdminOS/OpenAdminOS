@@ -47,3 +47,24 @@ it("does not present an unverified model as ready", async () => {
   assert.equal(result.status, "error");
   assert.match(result.detail ?? "", /capabilities could not be verified/);
 });
+it("waits past the reachability timeout for slow capability checks", async () => {
+  mock.method(globalThis, "fetch", async (url: string) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "slow-writer" }] });
+    await new Promise((resolve) => setTimeout(resolve, 1_800));
+    return Response.json({ capabilities: ["completion"] });
+  });
+  const result = await checkOllama(provider);
+  assert.equal(result.status, "connected");
+  assert.deepEqual(result.models, ["slow-writer"]);
+});
+it("reuses capability results for an unchanged model digest", async () => {
+  let shows = 0;
+  mock.method(globalThis, "fetch", async (url: string) => {
+    if (url.endsWith("/api/tags")) return Response.json({ models: [{ name: "cached-writer", digest: "sha256:abc" }] });
+    shows += 1;
+    return Response.json({ capabilities: ["completion"] });
+  });
+  assert.deepEqual((await checkOllama(provider)).models, ["cached-writer"]);
+  assert.deepEqual((await checkOllama(provider)).models, ["cached-writer"]);
+  assert.equal(shows, 1);
+});
