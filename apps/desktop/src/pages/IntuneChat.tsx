@@ -1040,6 +1040,10 @@ function IntuneChatContent() {
       }
     } catch (caught) {
       failed = true;
+      // A rejection that lands after a tenant switch must not restore
+      // the previous tenant prompt, error, or transcript into the new
+      // tenant composer. The finally block still resets send state.
+      if (!tenantStillActive()) return;
       setOptimisticDraft(null);
       const errorMessage = caught instanceof Error ? caught.message : String(caught);
       if (!reachedTerminal) dispatchSend({ type: "fail" });
@@ -4114,9 +4118,9 @@ function SourceDetails({ sources }: { sources: IntuneChatSource[] }) {
       <div>
         <div className="mb-2 text-xs font-medium text-[var(--color-text-muted)]">Sources</div>
         <div className="grid gap-2">
-          {sources.map((source) => (
+          {sources.map((source, index) => (
             <div
-              key={source.resource}
+              key={`${source.resource}-${source.source}-${index}`}
               className="rounded-md bg-[var(--color-bg)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
