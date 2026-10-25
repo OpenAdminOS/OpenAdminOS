@@ -192,6 +192,96 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
+  it("graph_get omits $top on endpoints that reject it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      // Verified against live Graph via Lokka: the managedDeviceOverview
+      // and authenticationMethodsPolicy singletons and the fixed-page-size
+      // directoryRoles collection answer 400 to any $top, so the host must
+      // not inject its default page size there.
+      const noTopPaths = new Map<string, unknown>([
+        ["/deviceManagement/managedDeviceOverview", { "@odata.type": "#microsoft.graph.managedDeviceOverview", enrolledDeviceCount: 3 }],
+        ["/policies/authenticationMethodsPolicy", { id: "authenticationMethodsPolicy", displayName: "Authentication Methods Policy" }],
+        ["/directoryRoles", { value: [{ id: "role-1", displayName: "Global Administrator", roleTemplateId: "template-1" }] }],
+      ]);
+      const graphRequests: Array<{ path: string; top?: string }> = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() {
+          return [];
+        },
+        async retireManagedDevice() {
+          throw new Error("write should not run");
+        },
+        async request(input) {
+          graphRequests.push({ path: input.path, top: input.query?.$top });
+          if (input.query?.$top !== undefined) {
+            throw new Error(`HTTP 400: $top is not valid for ${input.path}`);
+          }
+          return noTopPaths.get(input.path) ?? { value: [] };
+        },
+      };
+      const ctx = toolContext(store, { graphForScopes: async () => graph });
+
+      for (const path of noTopPaths.keys()) {
+        const execution = await executeIntuneChatTool(ctx, "graph_get", { path });
+        assert.equal(execution.trace.error, undefined, `${path} should not error`);
+      }
+      assert.deepEqual(
+        graphRequests.map((request) => [request.path, request.top]),
+        [...noTopPaths.keys()].map((path) => [path, undefined]),
+      );
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("graph_get allows planner paths whose declared scope is broader than the catalog minimum", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
+    const store = seededStore(dir, 1);
+    try {
+      // The bundled catalog lists least-privileged scopes only, so
+      // /groups (GroupMember.Read.All declared) and the authentication
+      // methods policy (Policy.Read.All declared, documented as a
+      // higher-privileged permission) read as unconsented there. Both
+      // are planner cache paths refreshed with those scopes, so
+      // graph_get must reach Graph instead of refusing up front.
+      const scopedRequests: Array<{ scopes: string[]; path: string }> = [];
+      let currentScopes: string[] = [];
+      const graph: RunGraphApi = {
+        async listManagedDevices() {
+          return [];
+        },
+        async retireManagedDevice() {
+          throw new Error("write should not run");
+        },
+        async request(input) {
+          scopedRequests.push({ scopes: currentScopes, path: input.path });
+          return { value: [{ id: "row-1" }] };
+        },
+      };
+      const ctx = toolContext(store, {
+        graphForScopes: async (scopes) => {
+          currentScopes = scopes;
+          return graph;
+        },
+      });
+
+      const groups = await executeIntuneChatTool(ctx, "graph_get", { path: "/groups" });
+      assert.equal(groups.trace.error, undefined);
+      const authn = await executeIntuneChatTool(ctx, "graph_get", {
+        path: "/policies/authenticationMethodsPolicy",
+      });
+      assert.equal(authn.trace.error, undefined);
+      assert.ok(scopedRequests[0]?.scopes.includes("GroupMember.Read.All"));
+      assert.ok(scopedRequests[1]?.scopes.includes("Policy.Read.All"));
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("graph_get names the missing scope and recovery on a live 403", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
