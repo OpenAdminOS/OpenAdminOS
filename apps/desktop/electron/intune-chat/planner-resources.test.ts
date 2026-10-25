@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
+import { fileURLToPath } from "node:url";
 
-import { GRAPH_CACHE_RESOURCE_KINDS } from "@openadminos/agent-sdk";
+import { GRAPH_CACHE_RESOURCE_KINDS, type AgentSummary } from "@openadminos/agent-sdk";
 
 import {
   DEFAULT_RESOURCE_STALENESS_MS,
@@ -12,6 +15,7 @@ import {
   MAX_PLANNED_RESOURCES,
   definitionForResource,
   graphCacheResourcesForWrite,
+  matchAgentsToQuestion,
   pathForResource,
   planChatContext,
   requiredScopesForResources,
@@ -177,6 +181,58 @@ describe("planner keyword matching is anchored to word boundaries", () => {
       "policy compliance app autopilot update remediation sign-in audit assignment group user device defender secure score domain",
     );
     assert.ok(noisy.length <= MAX_PLANNED_RESOURCES);
+  });
+});
+
+describe("agent matcher probe table (real registry)", () => {
+  // The executed probe from tasks/chat-full-test-2026-10-24.md F7,
+  // kept as a maintained test against the shipped registry index so
+  // matcher regressions fail CI instead of surfacing as noisy cards.
+  async function registryAgents(): Promise<AgentSummary[]> {
+    const here = dirname(fileURLToPath(import.meta.url));
+    const raw = await readFile(join(here, "../../../../agents/index.json"), "utf8");
+    const index = JSON.parse(raw) as { agents: Array<Record<string, unknown>> };
+    return index.agents.map(
+      (agent) => ({ ...agent, installedAt: "2026-06-01T10:00:00.000Z" }) as unknown as AgentSummary,
+    );
+  }
+
+  const slugs = (suggestions: ReturnType<typeof matchAgentsToQuestion>) =>
+    suggestions.map((suggestion) => suggestion.agentSlug);
+
+  it("routes the probe prompts to the expected agents", async () => {
+    const agents = await registryAgents();
+    assert.equal(agents.length, 16);
+
+    const inactive = matchAgentsToQuestion("Which devices have not synced in 45 days?", agents);
+    assert.equal(inactive[0]?.agentSlug, "find-inactive-devices");
+    assert.ok(!slugs(inactive).includes("team-script-draft"), "script helper must not ride a device question");
+
+    const guests = matchAgentsToQuestion("Disable stale guest accounts that have not signed in", agents);
+    assert.equal(guests[0]?.agentSlug, "stale-guest-cleanup");
+    assert.ok(!slugs(guests).includes("offboarding-agent"), "device offboarder must not match a guest-account request");
+
+    const guestsRead = matchAgentsToQuestion("Show stale guest accounts that have not signed in", agents);
+    assert.ok(!slugs(guestsRead).includes("offboarding-agent"));
+    assert.ok(guestsRead.every((suggestion) => suggestion.mode === "read"));
+
+    const signIns = matchAgentsToQuestion("Why are sign-ins failing for finance users?", agents);
+    assert.equal(signIns[0]?.agentSlug, "sign-in-failure-explainer");
+
+    const retire = matchAgentsToQuestion("Retire the 47 devices that are not encrypted", agents);
+    assert.equal(retire[0]?.agentSlug, "offboarding-agent");
+    assert.equal(retire[0]?.mode, "write");
+
+    assert.equal(planChatContext("Grant the finance group access to the VPN app").hasWriteIntent, true);
+    assert.equal(planChatContext("Update the compliance policy to require encryption").hasWriteIntent, true);
+
+    const updatePolicy = matchAgentsToQuestion("Update the compliance policy to require encryption", agents);
+    assert.equal(updatePolicy[0]?.agentSlug, "compliance-overview");
+    assert.ok(!slugs(updatePolicy).includes("os-update-posture"), "imperative update is an action, not the OS-update topic");
+
+    const complianceCount = matchAgentsToQuestion("How many of my devices are noncompliant?", agents);
+    assert.ok(slugs(complianceCount).includes("compliance-overview"));
+    assert.ok(!slugs(complianceCount).includes("team-script-draft"));
   });
 });
 

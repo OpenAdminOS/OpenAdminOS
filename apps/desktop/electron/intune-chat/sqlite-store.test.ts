@@ -90,9 +90,9 @@ describe("Intune Chat SQLite store", () => {
       assert.equal(store.markGraphResourcesStale("tenant-1", ["managedDevices"]), 1);
       assert.equal(store.markGraphResourcesStale("tenant-1", []), 0);
 
-      const tenant1 = store.getGraphCacheStatus("tenant-1", GRAPH_CACHE_RESOURCES)
+      const tenant1 = store.getGraphCacheStatus("tenant-1", [...GRAPH_CACHE_RESOURCES])
         .find((status) => status.resource === "managedDevices");
-      const tenant2 = store.getGraphCacheStatus("tenant-2", GRAPH_CACHE_RESOURCES)
+      const tenant2 = store.getGraphCacheStatus("tenant-2", [...GRAPH_CACHE_RESOURCES])
         .find((status) => status.resource === "managedDevices");
       assert.equal(tenant1?.refreshedAt, "1970-01-01T00:00:00.000Z");
       assert.equal(tenant2?.refreshedAt, "2026-08-01T10:00:00.000Z");
@@ -631,6 +631,10 @@ describe("Intune Chat planner", () => {
       "Which devices have BitLocker enabled?",
       "Which accounts were disabled last week?",
       "Show recently deleted devices.",
+      "Which devices have pending updates?",
+      "Show licenses granted to the finance group.",
+      "When was the compliance policy last updated?",
+      "Show devices that failed to update to Windows 11.",
     ];
     for (const question of readQuestions) {
       assert.equal(
@@ -643,6 +647,10 @@ describe("Intune Chat planner", () => {
       "Retire stale Intune devices that have not synced",
       "Disable the accounts of departed users",
       "Assign the sales app to the field team",
+      "Grant the finance group access to the VPN app",
+      "Update the compliance policy to require encryption",
+      "Rename the baseline policy for Windows laptops",
+      "Block sign-ins for the dormant guest accounts",
     ];
     for (const question of writeQuestions) {
       assert.equal(

@@ -274,13 +274,34 @@ const WRITE_INTENT_TERMS = [
   "create",
   "change",
   "assign",
+  "grant",
+  "update",
+  "add",
+  "rename",
+  "block",
+  "lock",
+  "deploy",
+  "edit",
+  "modify",
+  "configure",
+  "deactivate",
+  "suspend",
+  "restore",
+  "move",
 ] as const;
 
 // Write intent must match the imperative verb as a whole word. Substring
 // matching flagged read questions about state ("assigned", "enabled",
-// "deleted") and, since the block now fires before any LLM call, would
-// suppress legitimate read answers entirely.
+// "deleted") and, since the block fires before refresh and model calls,
+// would suppress legitimate read answers entirely. "update" needs more
+// care: it is also the infinitive in read questions ("devices that
+// failed to update"), so it only counts in imperative position.
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
+  if (term === "update") {
+    return /(?:^|\bplease\s+|\bcan you\s+|\bcould you\s+)update\b|\bupdate\s+(?:the|this|that|all)\b/.test(
+      lowerQuestion.trim(),
+    );
+  }
   return new RegExp(`\\b${term}\\b`).test(lowerQuestion);
 }
 
@@ -1026,46 +1047,143 @@ export function pathForResource(resource: GraphCacheResourceKind): {
   }
 }
 
+const AGENT_MATCH_STOP_TERMS = new Set([
+  "why",
+  "are",
+  "how",
+  "many",
+  "much",
+  "who",
+  "when",
+  "where",
+  "can",
+  "could",
+  "please",
+  "does",
+  "did",
+  "has",
+  "had",
+  "was",
+  "were",
+  "will",
+  "would",
+  "should",
+  "them",
+  "they",
+  "our",
+  "your",
+  "you",
+  "all",
+  "any",
+  "not",
+  "but",
+  "get",
+  "got",
+  "give",
+  "than",
+  "then",
+  "over",
+  "under",
+  "last",
+  "days",
+  "day",
+]);
+
+/**
+ * Light stemming for agent matching. Substring matching let stop words
+ * score inside unrelated words ("are" inside "Prepares") and missed
+ * plain inflections ("failing" never matched "failed sign-ins").
+ * Words match when their stems are equal, when one stem prefixes the
+ * other, or when they share a long prefix ("compliant"/"compliance").
+ */
+function stemAgentWord(word: string): string {
+  let stemmed = word.toLowerCase().replace(/'s$/, "");
+  if (stemmed.length > 5 && stemmed.startsWith("non")) stemmed = stemmed.slice(3);
+  if (stemmed.length > 4 && stemmed.endsWith("ies")) {
+    stemmed = `${stemmed.slice(0, -3)}y`;
+  } else if (stemmed.length > 5 && stemmed.endsWith("ing")) {
+    stemmed = stemmed.slice(0, -3);
+  } else if (stemmed.length > 4 && stemmed.endsWith("ed")) {
+    stemmed = stemmed.slice(0, -2);
+  } else if (stemmed.length > 4 && stemmed.endsWith("es")) {
+    stemmed = stemmed.slice(0, -2);
+  } else if (stemmed.length > 3 && stemmed.endsWith("s")) {
+    stemmed = stemmed.slice(0, -1);
+  }
+  return stemmed;
+}
+
+function agentWordStems(text: string): string[] {
+  const words = text
+    .toLowerCase()
+    .split(/[^a-z0-9-]+/g)
+    .flatMap((word) => (word.includes("-") ? [word, ...word.split("-")] : [word]))
+    .filter((word) => word.length >= 2);
+  return [...new Set(words.map(stemAgentWord))];
+}
+
+function agentStemsMatch(a: string, b: string): boolean {
+  if (a === b) return true;
+  const [shorter, longer] = a.length <= b.length ? [a, b] : [b, a];
+  if (shorter.length >= 4 && longer.startsWith(shorter)) return true;
+  let shared = 0;
+  while (shared < shorter.length && a[shared] === b[shared]) shared += 1;
+  return shared >= 6;
+}
+
 export function matchAgentsToQuestion(
   question: string,
   agents: AgentSummary[],
 ): IntuneChatAgentSuggestion[] {
   const plan = planChatContext(question);
-  const terms = extractSearchTerms(question);
   const lower = question.toLowerCase();
   const writeIntentTerms = [...WRITE_INTENT_TERMS].filter((term) =>
     matchesWriteIntentTerm(lower, term),
   );
+  // An imperative "Update the compliance policy" names an action, not
+  // the OS-update topic. Keep the verb out of topic scoring so the
+  // object of the request drives the match; read questions about
+  // updates keep the term because the imperative rule did not fire.
+  const terms = extractSearchTerms(question).filter(
+    (term) =>
+      !AGENT_MATCH_STOP_TERMS.has(term) &&
+      !(term === "update" && plan.hasWriteIntent && matchesWriteIntentTerm(lower, "update")),
+  );
   const inferredCategories = inferQuestionAgentCategories(lower);
   const suggestions = agents
     .map((agent) => {
-      const haystack = `${agent.name} ${agent.slug} ${agent.description} ${agent.category} ${agent.mode}`.toLowerCase();
+      const nameStems = agentWordStems(`${agent.name} ${agent.slug}`);
+      const bodyStems = agentWordStems(`${agent.description} ${agent.category}`);
       let score = 0;
+      let nameMatches = 0;
       const matchedTerms: string[] = [];
       const matchedConcepts: string[] = [];
       const matchedResources = resourcesForAgentCategory(agent.category, plan.resources);
       for (const term of terms) {
-        if (haystack.includes(term)) {
+        const stem = stemAgentWord(term);
+        if (nameStems.some((candidate) => agentStemsMatch(stem, candidate))) {
+          score += 2;
+          nameMatches += 1;
+          matchedTerms.push(term);
+        } else if (bodyStems.some((candidate) => agentStemsMatch(stem, candidate))) {
           score += 1;
           matchedTerms.push(term);
         }
       }
+      const matched = { agent, score, matchedTerms, matchedConcepts, matchedResources, nameMatches };
       if (agent.mode === "write" && !plan.hasWriteIntent) {
-        return { agent, score: 0, matchedTerms, matchedConcepts, matchedResources };
+        return { ...matched, score: 0 };
       }
       if (
         agent.mode === "write" &&
         inferredCategories.size > 0 &&
         !inferredCategories.has(agent.category)
       ) {
-        return { agent, score: 0, matchedTerms, matchedConcepts, matchedResources };
+        return { ...matched, score: 0 };
       }
       if (agent.mode === "write" && writeIntentTerms.length > 0) {
         score += 2;
         matchedConcepts.push(`Write intent: ${writeIntentTerms.slice(0, 3).join(", ")}`);
-      }
-      if (agent.category === "devices" && matchesAny(lower, ["device", "intune", "stale", "sync", "offboard", "retire"])) {
-        score += 1;
       }
       if (inferredCategories.has(agent.category)) {
         score += 1;
@@ -1086,10 +1204,23 @@ export function matchAgentsToQuestion(
           `Prompt terms in agent metadata: ${matchedTerms.slice(0, 5).join(", ")}`,
         );
       }
-      return { agent, score, matchedTerms, matchedConcepts, matchedResources };
+      return { ...matched, score };
     })
-    .filter((entry) => entry.score >= (entry.agent.mode === "write" ? 3 : 2))
-    .sort((a, b) => b.score - a.score)
+    // A suggestion needs real lexical evidence: a name/slug term, or at
+    // least two metadata terms. Category and write-intent bonuses alone
+    // used to float unrelated agents (a script-drafting helper on every
+    // device question, a device offboarder on a guest-account request).
+    .filter(
+      (entry) =>
+        entry.score >= (entry.agent.mode === "write" ? 3 : 2) &&
+        (entry.nameMatches >= 1 || entry.matchedTerms.length >= 2),
+    )
+    .sort(
+      (a, b) =>
+        b.score - a.score ||
+        b.matchedTerms.length - a.matchedTerms.length ||
+        a.agent.slug.localeCompare(b.agent.slug),
+    )
     .slice(0, 3);
 
   return suggestions.map(({ agent, score, matchedTerms, matchedConcepts, matchedResources }) => ({
@@ -1429,6 +1560,19 @@ function inferQuestionAgentCategories(lowerQuestion: string): Set<AgentSummary["
       "scope tag",
       "rbac",
       "endpoint security",
+      // Identity questions route to the policy-category agents (sign-in
+      // explainer, risky sign-in triage, stale guest cleanup). Without
+      // these needles a sign-in question inferred no category at all
+      // and the write-agent category gate could not exclude the device
+      // offboarder from a guest-account request.
+      "sign-in",
+      "sign in",
+      "signin",
+      "signed in",
+      "authentication",
+      "mfa",
+      "guest",
+      "account",
     ])
   ) {
     categories.add("policies");
