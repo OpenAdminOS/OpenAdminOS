@@ -1115,7 +1115,12 @@ response or the iteration cap produces a visible fallback notice and answers
 declarations and bundled Graph catalog read scopes, caps `$top` and returned rows
 at 50, follows `@odata.nextLink` paging within that row budget through validated
 `$skiptoken` re-requests, reports truncation, and names the missing scope with a
-reconnect recovery when Graph answers 403. Every
+reconnect recovery when Graph answers 403. Endpoints that reject `$top` (the
+managed device overview and authentication methods policy singletons, the
+fixed-page-size directory roles collection, and the license SKU inventory) are
+requested without a page size, and planner-declared cache paths pass the
+permission check with their declared scopes because the catalog lists
+least-privileged permissions only. Every
 tool call streams as a visible progress step and is persisted in `chat_tool_calls`
 with the completed assistant message; the renderer shows a collapsible "What
 ran" trace with tool name, parameters summary, result summary, duration, and
@@ -1613,7 +1618,10 @@ the day threshold, compute the cutoff from `generatedAt`, read matching
 include the threshold/match metadata in the answer pack.
 
 For large result sets the answer pack includes aggregate counts, grouped
-breakdowns, and representative rows. v0.2.2 reads at most 40 rows per planned
+breakdowns, and representative rows. The pack is one snapshot: its rows, cache
+status, and aggregates are captured together before any investigation runs, so a
+mid-investigation refresh cannot change the fallback pack's counts while its
+rows and freshness describe the earlier snapshot. v0.2.2 reads at most 40 rows per planned
 resource from SQLite/Graph and includes at most 20 compact sample rows per
 resource in the model prompt, with `selectedRows`, `includedSampleRows`, and
 `omittedCachedRows` metadata so the model can disclose bounded evidence rather

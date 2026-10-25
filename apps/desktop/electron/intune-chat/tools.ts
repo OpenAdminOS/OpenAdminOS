@@ -31,6 +31,17 @@ class InvalidCacheQueryError extends Error {}
 
 export const QUERY_CACHE_ROW_CAP = 50;
 export const GRAPH_GET_ROW_CAP = 50;
+
+// Graph endpoints that reject $top with HTTP 400, verified live: the
+// managedDeviceOverview and authenticationMethodsPolicy singletons and
+// the fixed-page-size directoryRoles collection. graph_get must not
+// inject its default page size there; the response row cap still
+// applies to whatever these endpoints return.
+const NO_TOP_GRAPH_PATHS = new Set([
+  "/devicemanagement/manageddeviceoverview",
+  "/policies/authenticationmethodspolicy",
+  "/directoryroles",
+]);
 export const GRAPH_GET_PAYLOAD_BYTE_CAP = 24_000;
 export const QUERY_DRIFT_ROW_CAP = 50;
 const QUERY_DRIFT_SCAN_LIMIT = 500;
@@ -527,7 +538,13 @@ function findGraphEndpoint(params: unknown): unknown {
   const candidates = matches.map((endpoint) => {
     const documented = endpoint.scopesDelegated;
     const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
-    const usable = documented.length === 0 || consented.length > 0;
+    // Mirror graph_get validation: planner-declared paths run with
+    // their declared scopes even when the catalog's least-privileged
+    // list does not intersect the consented set.
+    const usable =
+      documented.length === 0 ||
+      consented.length > 0 ||
+      resourceScopesForPath(endpoint.path).length > 0;
     return {
       path: endpoint.path,
       summary: endpoint.summary,
@@ -563,8 +580,8 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     throw new Error("GET /subscribedSkus supports only $select. Retrieve the license inventory without $top or $filter, then calculate seat availability from prepaidUnits and consumedUnits.");
   }
   const query = cappedGraphQuery(queryInput);
-  // This collection does not support $top. The response cap still applies.
-  if (skuInventory) delete query.$top;
+  // These endpoints do not support $top. The response cap still applies.
+  if (skuInventory || NO_TOP_GRAPH_PATHS.has(path.toLowerCase().replace(/\/+$/, ""))) delete query.$top;
   const headers = graphHeaders(objectParam(params, "headers"));
   const graph = await ctx.graphForScopes(validation.scopes);
   const request: GraphRequestInput = {
@@ -761,7 +778,13 @@ function validateGraphGetPath(path: string): {
   }
   const documented = endpoint.scopesDelegated;
   const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
-  if (documented.length > 0 && consented.length === 0) {
+  // Planner-declared cache paths carry host-verified scopes, consented
+  // for cache refresh. The catalog lists least-privileged permissions
+  // only, so a broader declared scope (Policy.Read.All for the
+  // authentication methods policy, GroupMember.Read.All for /groups)
+  // can cover an endpoint the catalog check would otherwise refuse.
+  const resourceScopes = resourceScopesForPath(path);
+  if (documented.length > 0 && consented.length === 0 && resourceScopes.length === 0) {
     throw new Error(
       `This endpoint requires ${documented.slice(0, 3).join(" or ")}, which OpenAdminOS does not request. No tenant data was read.`,
     );
@@ -769,7 +792,6 @@ function validateGraphGetPath(path: string): {
   // Where the catalog documents no permissions, fall back to the token
   // already held for this tenant. Graph rejects anything the consent
   // does not cover, and that rejection is surfaced verbatim.
-  const resourceScopes = resourceScopesForPath(path);
   const scopes = [...new Set([...consented, ...resourceScopes])].sort();
   return { scopes, summary: endpoint.summary };
 }

@@ -34,6 +34,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Replace the two divergent agent matchers with one tuned host matcher. Sign-in questions match again, the device offboarder no longer matches guest-account requests, and grant/update requests route as write intent. Write prompts are blocked before any cache refresh or model call.
 - Scope Stop to the stream it belongs to, so one surface cannot cancel another surface's in-flight answer. The stopped announcement no longer claims partial output is preserved.
 - Pin Node 22 for contributors and make the renderer test setup install an in-memory Storage on Node 26, where the experimental storage global otherwise breaks every renderer test.
+- The deterministic Chat fallback now computes its answer-pack aggregates from the same cache snapshot as its sample rows and source status. Previously, a refresh triggered during a failed investigation could change counts the fallback pack reported while its rows and freshness still described the pre-investigation snapshot.
+- `graph_get` no longer injects its default `$top` on endpoints that reject it (the managed device overview and authentication methods policy singletons, and the fixed-page-size directory roles collection), which previously failed those live reads with HTTP 400. Planner-declared paths also pass the endpoint permission check with their declared scopes, so live reads of `/groups` and the authentication methods policy are no longer refused by the least-privilege-only endpoint catalog.
 
 ### Security
 

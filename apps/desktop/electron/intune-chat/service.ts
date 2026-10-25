@@ -1641,11 +1641,16 @@ export class IntuneChatService {
     );
     // Snapshot matching the rows just read for the deterministic
     // pack. If an investigation later refreshes resources and then
-    // falls back, its sources must describe this pack, not the
-    // refreshed cache the fallback never used.
+    // falls back, its sources and aggregates must describe this pack,
+    // not the refreshed cache the fallback never used.
     const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
       ...GRAPH_CACHE_RESOURCES,
     ]);
+    const packAggregates = this.graphAggregatesFor(
+      store,
+      tenant.id,
+      planned.resources,
+    );
 
     let assistantContent: string;
     let usedDeterministic = false;
@@ -1688,7 +1693,7 @@ export class IntuneChatService {
           tenant,
           cacheStatus,
           rows,
-          aggregates: this.graphAggregatesFor(store, tenant.id, planned.resources),
+          aggregates: packAggregates,
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,
@@ -2125,11 +2130,16 @@ export class IntuneChatService {
     );
     // Snapshot matching the rows just read for the deterministic
     // pack. If an investigation later refreshes resources and then
-    // falls back, its sources must describe this pack, not the
-    // refreshed cache the fallback never used.
+    // falls back, its sources and aggregates must describe this pack,
+    // not the refreshed cache the fallback never used.
     const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
       ...GRAPH_CACHE_RESOURCES,
     ]);
+    const packAggregates = this.graphAggregatesFor(
+      store,
+      tenant.id,
+      planned.resources,
+    );
     let assistantContent = "";
     let usedDeterministic = false;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
@@ -2181,7 +2191,7 @@ export class IntuneChatService {
           tenant,
           cacheStatus,
           rows,
-          aggregates: this.graphAggregatesFor(store, tenant.id, planned.resources),
+          aggregates: packAggregates,
           hasWriteIntent: false,
           agentSuggestions,
           generatedAt: answerGeneratedAt,
