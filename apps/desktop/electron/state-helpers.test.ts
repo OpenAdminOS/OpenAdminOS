@@ -265,6 +265,32 @@ describe("chat sources come from executed tools, not the plan", () => {
       refreshedResources: new Set(),
     });
     assert.equal(warnedSources[0]?.error, "HTTP 403: reconnect the tenant");
+
+    // The warning also survives when the same snapshot was already
+    // read before the refresh failed: dedupe merges it in.
+    const warnedAfterReread = buildIntuneChatSources({
+      cacheStatus,
+      plannedResources: ["users"],
+      executedResources: ["users"],
+      toolTrace: [
+        {
+          ...traceEntry("query_cache", { resource: "users" }),
+          cacheSource: { resource: "users", rows: 500, refreshedAt: "2026-08-01T09:00:00.000Z" },
+        },
+        {
+          ...traceEntry("query_cache", { resource: "users" }),
+          cacheSource: {
+            resource: "users",
+            rows: 500,
+            refreshedAt: "2026-08-01T09:00:00.000Z",
+            error: "HTTP 403: reconnect the tenant",
+          },
+        },
+      ],
+      refreshedResources: new Set(),
+    });
+    assert.equal(warnedAfterReread.length, 1);
+    assert.equal(warnedAfterReread[0]?.error, "HTTP 403: reconnect the tenant");
   });
 
   it("decides executed vs planned sources per answer mode", () => {

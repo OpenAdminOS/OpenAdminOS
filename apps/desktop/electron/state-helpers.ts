@@ -1260,13 +1260,20 @@ export function buildIntuneChatSources(input: {
       const resource = entry.cacheSource.resource as GraphCacheResourceKind;
       const reads = cacheReadsByResource.get(resource) ?? [];
       // Repeated reads of the same snapshot are one piece of
-      // evidence; a read before and after a refresh are two.
-      const duplicate = reads.some(
+      // evidence; a read before and after a refresh are two. A later
+      // read of the same snapshot can still add a warning the first
+      // read did not have (the refresh between them failed), so merge
+      // it instead of discarding the read outright.
+      const duplicateIndex = reads.findIndex(
         (read) =>
           read.refreshedAt === entry.cacheSource!.refreshedAt &&
           read.rows === entry.cacheSource!.rows,
       );
-      if (!duplicate) reads.push(entry.cacheSource);
+      if (duplicateIndex === -1) {
+        reads.push(entry.cacheSource);
+      } else if (entry.cacheSource.error && !reads[duplicateIndex]!.error) {
+        reads[duplicateIndex] = { ...reads[duplicateIndex]!, error: entry.cacheSource.error };
+      }
       cacheReadsByResource.set(resource, reads);
       continue;
     }

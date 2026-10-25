@@ -306,7 +306,10 @@ const READ_QUESTION_START =
   /^(?:which|what|why|how|when|where|who|does|do|did|is|are|was|were|has|have|show|list|tell|find|count|can|could|summarize|describe|explain|give|compare|audit|outline|display|review|inspect|check)\b/;
 
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
-  const question = lowerQuestion.trim();
+  // Normalize a polite prefix first: "Please list policies that block
+  // legacy authentication" is the same main clause as without it, and
+  // must not fall through to the whole-word fallback.
+  const question = lowerQuestion.trim().replace(/^please\s+/, "");
   // Explanatory prompts describe actions instead of requesting them:
   // "Explain how to disable an account and then delete it." The
   // chained-imperative pattern below would otherwise block them.
@@ -322,6 +325,22 @@ function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
     `(?:^(?:please\\s+)?${term}\\b)|(?:^(?:can you|could you|would you|i want to|i need to|let's)\\s+${term}\\b)|(?:\\bplease\\s+${term}\\b)|(?:\\band then\\s+${term}\\b)|(?:,\\s*then\\s+${term}\\b)`,
   );
   if (imperative.test(question)) return true;
+  // Coordinated imperatives after an imperative read verb are still
+  // requests: "Show me the devices and retire the stale ones." A
+  // relative clause before the conjunction makes the second verb
+  // descriptive instead: "Show the policies that disable legacy
+  // authentication and block risky sign-ins."
+  const IMPERATIVE_READ_START =
+    /^(?:show|list|tell|find|count|give|summarize|compare|audit|outline|display|review|inspect|check)\b/;
+  if (IMPERATIVE_READ_START.test(question)) {
+    const coordinated = new RegExp(`\\band\\s+${term}\\b`).exec(question);
+    if (
+      coordinated &&
+      !/\b(?:that|which|who)\b/.test(question.slice(0, coordinated.index))
+    ) {
+      return true;
+    }
+  }
   if (term === "update") return false;
   if (READ_QUESTION_START.test(question)) return false;
   return new RegExp(`\\b${term}\\b`).test(question);
