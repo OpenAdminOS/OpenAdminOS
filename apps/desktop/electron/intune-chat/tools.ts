@@ -538,7 +538,13 @@ function findGraphEndpoint(params: unknown): unknown {
   const candidates = matches.map((endpoint) => {
     const documented = endpoint.scopesDelegated;
     const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
-    const usable = documented.length === 0 || consented.length > 0;
+    // Mirror graph_get validation: planner-declared paths run with
+    // their declared scopes even when the catalog's least-privileged
+    // list does not intersect the consented set.
+    const usable =
+      documented.length === 0 ||
+      consented.length > 0 ||
+      resourceScopesForPath(endpoint.path).length > 0;
     return {
       path: endpoint.path,
       summary: endpoint.summary,
@@ -575,7 +581,7 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
   }
   const query = cappedGraphQuery(queryInput);
   // These endpoints do not support $top. The response cap still applies.
-  if (skuInventory || NO_TOP_GRAPH_PATHS.has(path.toLowerCase())) delete query.$top;
+  if (skuInventory || NO_TOP_GRAPH_PATHS.has(path.toLowerCase().replace(/\/+$/, ""))) delete query.$top;
   const headers = graphHeaders(objectParam(params, "headers"));
   const graph = await ctx.graphForScopes(validation.scopes);
   const request: GraphRequestInput = {

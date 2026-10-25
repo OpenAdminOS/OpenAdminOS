@@ -684,6 +684,41 @@ describe("Graph endpoint discovery and reachability", () => {
     }
   });
 
+  it("marks planner paths usable when their declared scope covers the catalog minimum", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-"));
+    const store = seededStore(dir, 1);
+    try {
+      const ctx = toolContext(store);
+      // /groups and the authentication methods policy are usable through
+      // graph_get with planner-declared scopes, so discovery must not
+      // steer the model away from them as unconsented.
+      const groups = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "groups",
+      });
+      const groupCandidates = (
+        groups.result as { candidates: Array<{ path: string; usable: boolean }> }
+      ).candidates;
+      const groupsEntry = groupCandidates.find((entry) => entry.path === "/groups");
+      assert.ok(groupsEntry, `expected /groups, got ${groupCandidates.map((c) => c.path).join(", ")}`);
+      assert.equal(groupsEntry.usable, true);
+
+      const authn = await executeIntuneChatTool(ctx, "find_graph_endpoint", {
+        query: "authentication methods policy",
+      });
+      const authnCandidates = (
+        authn.result as { candidates: Array<{ path: string; usable: boolean }> }
+      ).candidates;
+      const authnEntry = authnCandidates.find(
+        (entry) => entry.path === "/policies/authenticationMethodsPolicy",
+      );
+      assert.ok(authnEntry, `expected the policy path, got ${authnCandidates.map((c) => c.path).join(", ")}`);
+      assert.equal(authnEntry.usable, true);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("caps how many candidates are returned", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-find-cap-"));
     const store = seededStore(dir, 1);
