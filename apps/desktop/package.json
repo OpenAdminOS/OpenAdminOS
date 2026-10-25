@@ -98,8 +98,12 @@
         "to": "native/mxc-sdk/bin"
       },
       {
-        "from": "build/icon.png",
-        "to": "app-icon.png"
+        "from": "build/menu-bar-iconTemplate.png",
+        "to": "menu-bar-iconTemplate.png"
+      },
+      {
+        "from": "build/menu-bar-iconTemplate@2x.png",
+        "to": "menu-bar-iconTemplate@2x.png"
       }
     ],
     "publish": [
