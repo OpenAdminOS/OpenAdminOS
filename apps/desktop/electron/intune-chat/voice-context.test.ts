@@ -246,6 +246,26 @@ it('answers platform app counts directly from app-type aggregates', () => {
     })),
     undefined,
   );
+  assert.match(
+    voiceAppPlatformCountAnswer('how many macos apps?', data, () => ({
+      total: 3,
+      breakdowns: { appPlatform: { macOS: 2, '#microsoft.graph.webApp': 1 } },
+    }))!,
+    /at least 2 macOS Intune app catalog entries.*partial/,
+  );
+  const detectedData = [status({resource:'detectedApps',rows:5,tenantTotal:5})];
+  const detectedAggregate = () => ({
+    total: 5,
+    breakdowns: { platform: { windows: 3, unknown: 2 } },
+  });
+  assert.equal(
+    voiceAppPlatformCountAnswer('how many detected macos apps?', detectedData, detectedAggregate),
+    undefined,
+  );
+  assert.match(
+    voiceAppPlatformCountAnswer('how many detected windows apps?', detectedData, detectedAggregate)!,
+    /at least 3 detected Windows app inventory entries.*partial/,
+  );
   assert.match(voiceAppPlatformCountAnswer('how many macos apps?', [], aggregate)!, /could not retrieve/);
   assert.match(
     voiceAppPlatformCountAnswer('how many macos apps?', [status({resource:'mobileApps',rows:8,tenantTotal:8,lastError:'Forbidden'})], aggregate)!,

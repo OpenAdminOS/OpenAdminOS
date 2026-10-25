@@ -200,25 +200,33 @@ function appPlatformCount(
       (sum, count) => sum + count,
       0,
     );
+    const hasUnclassified = Object.entries(breakdowns.platform).some(
+      ([bucket, count]) => count > 0 && normalizeAppPlatform(bucket) === undefined,
+    );
     return {
       count: Object.entries(breakdowns.platform).reduce(
         (sum, [bucket, count]) =>
           normalizeAppPlatform(bucket) === platform ? sum + count : sum,
         0,
       ),
-      incomplete: accounted < total,
+      incomplete: accounted < total || hasUnclassified,
     };
   }
   const odataTypes = breakdowns["@odata.type"];
   if (!odataTypes) return undefined;
   const accounted = Object.values(odataTypes).reduce((sum, count) => sum + count, 0);
+  const platforms: AppPlatform[] = ["macOS", "Windows", "iOS", "Android"];
+  const hasUnclassified = Object.entries(odataTypes).some(
+    ([bucket, count]) =>
+      count > 0 && !platforms.some((candidate) => appTypeMatchesPlatform(bucket, candidate)),
+  );
   return {
     count: Object.entries(odataTypes).reduce(
       (sum, [bucket, count]) =>
         appTypeMatchesPlatform(bucket, platform) ? sum + count : sum,
       0,
     ),
-    incomplete: accounted < total,
+    incomplete: accounted < total || hasUnclassified,
   };
 }
 
