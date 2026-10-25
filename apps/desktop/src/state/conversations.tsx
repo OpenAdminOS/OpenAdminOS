@@ -83,6 +83,24 @@ function routeWorkspaceId(pathname: string): string | null {
   return match ? decodeURIComponent(match[1]!) : null;
 }
 
+/**
+ * Whether a conversation may be shown under the given active tenant.
+ * Mirrors the host rule from the tenant-scoping fix: the tenant's own
+ * conversations, multi-tenant-scope conversations, and legacy rows
+ * without a tenant are visible; another tenant's are not.
+ */
+function conversationVisibleForTenant(
+  conversation: IntuneChatConversation,
+  activeTenantId: string | null | undefined,
+): boolean {
+  return (
+    conversation.scopeKind === "multi-tenant" ||
+    !conversation.tenantId ||
+    !activeTenantId ||
+    conversation.tenantId === activeTenantId
+  );
+}
+
 export function ConversationWorkspaceProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -96,6 +114,8 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
   const [activeConversationId, setActiveConversationId] =
     useState<string | null>(initialConversationId);
   const activeConversationIdRef = useRef<string | null>(initialConversationId);
+  const activeTenantIdRef = useRef(state.activeTenantId);
+  activeTenantIdRef.current = state.activeTenantId;
   const locationRef = useRef(location);
   const [shellLoaded, setShellLoaded] = useState(false);
   const [conversationSearch, setConversationSearch] = useState("");
@@ -154,6 +174,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
   );
 
   const upsertConversation = useCallback((conversation: IntuneChatConversation) => {
+    if (!conversationVisibleForTenant(conversation, activeTenantIdRef.current)) return;
     setPendingConversation(conversation);
     setConversations((current) =>
       current.some((entry) => entry.id === conversation.id)
@@ -162,6 +183,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
     );
   }, []);
 
+  const reloadGenerationRef = useRef(0);
   const reloadConversations = useCallback(
     async (
       preferredActiveConversationId?: string | null,
@@ -169,25 +191,51 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
     ) => {
       const api = window.openAdminOS;
       if (!api) return undefined;
+      const generation = (reloadGenerationRef.current += 1);
+      const requestedTenantId = activeTenantIdRef.current;
       const query = (searchOverride ?? conversationSearchRef.current).trim();
-      const [nextConversations, nextCache] = await Promise.all([
+      const [loadedConversations, nextCache] = await Promise.all([
         query
           ? api.searchIntuneChatConversations(query)
           : api.listIntuneChatConversations(),
         api.getGraphCacheStatus().catch(() => null),
       ]);
+      // A reload started under the previous tenant (or superseded by a
+      // newer reload) must not restore that tenant's sidebar or cache
+      // status over the current tenant's shell.
+      if (
+        generation !== reloadGenerationRef.current ||
+        requestedTenantId !== activeTenantIdRef.current
+      ) {
+        return undefined;
+      }
+      const nextConversations = loadedConversations.filter((conversation) =>
+        conversationVisibleForTenant(conversation, activeTenantIdRef.current),
+      );
       const activeId = activeConversationIdRef.current;
       setConversations((current) => {
         if (!activeId) return nextConversations;
         const active = current.find((conversation) => conversation.id === activeId);
-        return active && !nextConversations.some((conversation) => conversation.id === activeId)
+        // Reinserting the open conversation across a tenant switch put
+        // the previous tenant's conversation back into the new tenant's
+        // shell (and kept its transcript addressable by route).
+        return active &&
+          conversationVisibleForTenant(active, activeTenantIdRef.current) &&
+          !nextConversations.some((conversation) => conversation.id === activeId)
           ? [active, ...nextConversations]
           : nextConversations;
       });
       setCacheStatus(nextCache);
       setShellLoaded(true);
       if (preferredActiveConversationId !== undefined) {
-        const nextId = preferredActiveConversationId ?? nextConversations[0]?.id ?? null;
+        const preferredVisible =
+          preferredActiveConversationId &&
+          nextConversations.some(
+            (conversation) => conversation.id === preferredActiveConversationId,
+          )
+            ? preferredActiveConversationId
+            : null;
+        const nextId = preferredVisible ?? nextConversations[0]?.id ?? null;
         openConversation(nextId, { replace: true });
       }
     },
@@ -223,6 +271,13 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
   useEffect(() => {
     setShellLoaded(false);
     setPendingConversation(null);
+    // Drop the previous tenant's conversations immediately on switch;
+    // waiting for the reload left them listed and openable in between.
+    setConversations((current) =>
+      current.filter((conversation) =>
+        conversationVisibleForTenant(conversation, state.activeTenantId),
+      ),
+    );
     void Promise.all([reloadConversations(), reloadWorkspaces()]).catch((error: unknown) => {
       toast.error(conversationActionError("Loading conversations", error));
     });
@@ -241,9 +296,15 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
     return () => window.clearTimeout(timer);
   }, [conversationSearch, reloadConversations, toast]);
 
-  const activeConversation =
+  const activeConversation = (
     conversations.find((conversation) => conversation.id === activeConversationId) ??
-    (pendingConversation?.id === activeConversationId ? pendingConversation : undefined);
+    (pendingConversation?.id === activeConversationId ? pendingConversation : undefined)
+  ) as IntuneChatConversation | undefined;
+  const visibleActiveConversation =
+    activeConversation &&
+    conversationVisibleForTenant(activeConversation, state.activeTenantId)
+      ? activeConversation
+      : undefined;
   const tenantWorkspaces = useMemo(
     () =>
       state.activeTenantId
@@ -310,7 +371,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       conversations,
       pendingConversation,
       activeConversationId,
-      activeConversation,
+      activeConversation: visibleActiveConversation,
       shellLoaded,
       conversationSearch,
       workspaceSearch,
@@ -344,7 +405,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
       moveToWorkspace,
     }),
     [
-      activeConversation,
+      visibleActiveConversation,
       activeConversationId,
       allWorkspaces,
       cacheStatus,
@@ -429,7 +490,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
           <label className="block text-sm font-medium text-[var(--color-text-soft)]">
             Conversation title
             <input
-              autoFocus
+              data-autofocus
               name="conversation-title"
               value={renameTitle}
               onChange={(event) => setRenameTitle(event.target.value)}

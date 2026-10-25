@@ -6,10 +6,14 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Chat follow-up questions now receive the last four completed turns as bounded plain-text context, so "Show only the Windows ones" keeps its referent.
+- Suggestion cards show a read/write badge and required scopes without expanding Details, and non-send Chat errors render Reload chat, Open Settings, and Dismiss actions in place.
+
 ### Changed
 
 - Redesign the desktop app around a calmer layout: one sidebar with conversations and workspaces, a top bar that always shows the active tenant and where data goes (local, hosted, or no model), and a Chat home that opens on a tenant briefing with the items that need you.
 - Rebuild the Chat composer and answers: scope and model live inside the composer, type `/` to run an installed agent (write agents still go to confirmation), and answers show their tenant, sources, and data age. Answers use a serif font by default; switch to sans in Settings.
+- Chat answers keep tenant cache source details behind "How I checked" instead of repeating source row counts under every answer.
 - Restyle Agent Team, Agents, Runs, Changes, and Settings with quieter lists and headings, and add a Comfortable or Compact density setting.
 - Replace the four themes with System, Light (warm paper), Dark (graphite), and Midnight. New installs follow the operating system; saved themes migrate automatically.
 - Bundle the Geist and Newsreader fonts with the app (no network font loading) and introduce the new oa ligature logo across the app, installers, and website icons.
@@ -21,7 +25,27 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Claude Code installed with npm on Windows is detected again. Its npm package now ships a native executable, which the app launches directly.
+- The desktop app finds provider CLIs installed with nvm, fnm, Volta, bun, mise, asdf, pnpm, Scoop, or WinGet, including on Linux and in a Windows session where the CLI was installed after the app started.
+- Ollama detection no longer drops every model when capability checks are slow on a cold start, and Ollama moved with `OLLAMA_HOST` is found.
+- The macOS DMG install window now uses a light paper background, so the "OpenAdminOS" and "Applications" labels under the icons are readable. Finder always draws those labels in black when a window has a background picture.
+- Fix a blank window when a development checkout had registered the background scheduler (macOS LaunchAgent or Windows scheduled task). Only installed builds register the scheduler now, and an installed app repoints a registration that runs a development checkout or a binary that no longer exists before it starts.
+- The macOS menu bar icon is now a template image, so it follows the menu bar color like other status items.
 - Fix the sidebar jumping up and hiding its header when the tenant account menu opens. The menu now opens upward from the footer, and menu focus no longer scrolls the shell.
+- Investigative Chat answers are no longer accepted without tenant evidence. A model reply that checks no tenant data gets bounded repair prompts, then a deterministic answer with a visible notice. This affected CLI-agent providers most visibly, where a prose refusal could persist as a clean completed answer with sources attached.
+- Scope Chat conversations to the active tenant. Another tenant's conversations no longer appear in list or search, and the host refuses read, rename, pin, delete, and export across tenants. Multi-tenant-scope and legacy untenanted conversations stay visible under any tenant, as SPEC records. Switching tenants now drops the previous tenant's conversations and transcript from the shell immediately.
+- Fix the Chat model picker so picking another provider's model activates that provider, let a configured Azure OpenAI provider send from Chat, make Gemini selectable, and fail closed with a named error when the persisted provider is unavailable instead of substituting another provider.
+- Answer sources now list only resources the answer actually read, derived from the executed tool trace, and the header shows the oldest source age. Refusals, write blocks, failures, and stopped responses carry no source badges.
+- Chat can count Intune apps by Graph app type from the cached snapshot, so simple platform questions such as "how many macos apps?" return the cached macOS app count instead of refusing for missing context.
+- Filtered "how many" questions now have resource-specific cached breakdowns for common dimensions such as Intune policy type and platform, Conditional Access state, group types, alert severity, sign-in outcomes, app registration audience, and Settings Catalog platforms.
+- Confirmed write runs now mark the affected Graph cache resources stale for that tenant, so the next question refreshes them instead of answering from pre-write rows.
+- `graph_get` follows Graph paging within its row budget, reports truncation, returns rows beyond the fourth without truncating them to a placeholder, and names the missing scope with a reconnect recovery on a live 403. Model-facing and multi-tenant staleness checks now use the per-resource host TTLs.
+- Replace the two divergent agent matchers with one tuned host matcher. Sign-in questions match again, the device offboarder no longer matches guest-account requests, and grant/update requests route as write intent. Write prompts are blocked before any cache refresh or model call.
+- Scope Stop to the stream it belongs to, so one surface cannot cancel another surface's in-flight answer. The stopped announcement no longer claims partial output is preserved.
+- Pin Node 22 for contributors and make the renderer test setup install an in-memory Storage on Node 26, where the experimental storage global otherwise breaks every renderer test.
+- The deterministic Chat fallback now computes its answer-pack aggregates from the same cache snapshot as its sample rows and source status. Previously, a refresh triggered during a failed investigation could change counts the fallback pack reported while its rows and freshness still described the pre-investigation snapshot.
+- `graph_get` no longer injects its default `$top` on endpoints that reject it (the managed device overview and authentication methods policy singletons, and the fixed-page-size directory roles collection), which previously failed those live reads with HTTP 400. Planner-declared paths and their direct by-id children also pass the endpoint permission check with their declared scopes, so live reads of `/groups` and the authentication methods policy are no longer refused by the least-privilege-only endpoint catalog. Deeper descendants of a planner path, such as group drives, still require their own consented permission.
+- Investigative Chat accepts comparison operators inside `query_cache` `where` values (for example a `lastSyncDateTime` less-than cutoff for stale-device questions) instead of refusing them as non-scalar. Previously a stale-device investigation could fail the same cache query twice over that shape, then answer "no verified count" instead of answering from the cached devices.
 
 ### Security
 

@@ -58,6 +58,10 @@ export function Drawer({
     });
     const frame = window.requestAnimationFrame(() => {
       const drawer = drawerRef.current;
+      const active = document.activeElement;
+      if (drawer && active instanceof HTMLElement && active !== drawer && drawer.contains(active)) {
+        return;
+      }
       const first = drawer?.querySelector<HTMLElement>(focusableSelector);
       (first ?? drawer)?.focus();
     });

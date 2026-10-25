@@ -50,6 +50,13 @@ export function Modal({
     });
     const frame = window.requestAnimationFrame(() => {
       const dialog = dialogRef.current;
+      // A fast user may already have focused a field in the dialog;
+      // stealing focus back to the preferred control ate their first
+      // keystrokes (and made modal form tests timing-fragile).
+      const active = document.activeElement;
+      if (dialog && active instanceof HTMLElement && active !== dialog && dialog.contains(active)) {
+        return;
+      }
       const preferred =
         dialog?.querySelector<HTMLElement>("[data-autofocus]:not([disabled])") ??
         dialog?.querySelector<HTMLElement>(focusableSelector);

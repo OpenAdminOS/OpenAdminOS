@@ -648,13 +648,15 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          app_icon="$(find apps/desktop/release -path '*/OpenAdminOS.app/Contents/Resources/app-icon.png' -type f -print -quit)"
-          if [ -z "$app_icon" ]; then
-            echo "::error::OpenAdminOS app icon resource for the menu bar status item was not found."
-            find apps/desktop/release -maxdepth 6 -type f | sort
-            exit 1
-          fi
-          file "$app_icon"
+          for icon_name in menu-bar-iconTemplate.png menu-bar-iconTemplate@2x.png; do
+            menu_bar_icon="$(find apps/desktop/release -path "*/OpenAdminOS.app/Contents/Resources/$icon_name" -type f -print -quit)"
+            if [ -z "$menu_bar_icon" ]; then
+              echo "::error::Menu bar status item icon $icon_name was not found."
+              find apps/desktop/release -maxdepth 6 -type f | sort
+              exit 1
+            fi
+            file "$menu_bar_icon"
+          done
           helper_app="$(find apps/desktop/release -path '*/OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app' -type d -print -quit)"
           if [ -z "$helper_app" ]; then
             echo "::error::Menu bar login helper was not found in the packaged app bundle."

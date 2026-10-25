@@ -28,6 +28,41 @@ if (!window.matchMedia) {
   });
 }
 
+// Node 26 ships an experimental Web Storage global that shadows the
+// jsdom one and stays undefined unless --localstorage-file is passed,
+// which broke every renderer test locally while CI (Node 22) stayed
+// green. Install a small in-memory Storage when the environment one is
+// unusable so the suite runs on both.
+function ensureStorage(name: "localStorage" | "sessionStorage") {
+  let usable = false;
+  try {
+    usable = typeof window[name]?.clear === "function";
+    if (usable) window[name].getItem("__oa_probe__");
+  } catch {
+    usable = false;
+  }
+  if (usable) return;
+  const data = new Map<string, string>();
+  const storage: Storage = {
+    get length() {
+      return data.size;
+    },
+    clear: () => data.clear(),
+    getItem: (key: string) => data.get(key) ?? null,
+    key: (index: number) => [...data.keys()][index] ?? null,
+    removeItem: (key: string) => {
+      data.delete(key);
+    },
+    setItem: (key: string, value: string) => {
+      data.set(key, String(value));
+    },
+  };
+  Object.defineProperty(window, name, { configurable: true, value: storage });
+}
+
+ensureStorage("localStorage");
+ensureStorage("sessionStorage");
+
 afterEach(() => {
   cleanup();
   window.localStorage.clear();

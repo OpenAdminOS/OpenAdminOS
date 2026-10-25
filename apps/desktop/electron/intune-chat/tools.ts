@@ -15,7 +15,7 @@ import type {
 import { DEFAULT_SCOPE_METADATA } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import { unwrapGraphCollectionPage } from "../state-helpers.js";
+import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
   GRAPH_CACHE_RESOURCES,
   definitionForResource,
@@ -31,6 +31,17 @@ class InvalidCacheQueryError extends Error {}
 
 export const QUERY_CACHE_ROW_CAP = 50;
 export const GRAPH_GET_ROW_CAP = 50;
+
+// Graph endpoints that reject $top with HTTP 400, verified live: the
+// managedDeviceOverview and authenticationMethodsPolicy singletons and
+// the fixed-page-size directoryRoles collection. graph_get must not
+// inject its default page size there; the response row cap still
+// applies to whatever these endpoints return.
+const NO_TOP_GRAPH_PATHS = new Set([
+  "/devicemanagement/manageddeviceoverview",
+  "/policies/authenticationmethodspolicy",
+  "/directoryroles",
+]);
 export const GRAPH_GET_PAYLOAD_BYTE_CAP = 24_000;
 export const QUERY_DRIFT_ROW_CAP = 50;
 const QUERY_DRIFT_SCAN_LIMIT = 500;
@@ -234,15 +245,93 @@ export async function executeIntuneChatTool(
   try {
     const result = await executeToolUnchecked(ctx, tool, params);
     const completedAtMs = Date.now();
+    // refresh_resource reports failure in its result body instead of
+    // throwing. Without this, the trace looked successful, the loop
+    // counted a failed refresh as tenant evidence, and source helpers
+    // labelled the resource live.
+    const softError =
+      tool === "refresh_resource" &&
+      result !== null &&
+      typeof result === "object" &&
+      (result as { ok?: unknown }).ok === false
+        ? String(
+            (result as { error?: unknown }).error ??
+              `Refresh failed for ${String((result as { resource?: unknown }).resource ?? "resource")}.`,
+          )
+        : undefined;
+    const graphRecord =
+      tool === "graph_get" && result !== null && typeof result === "object"
+        ? (result as Record<string, unknown>)
+        : undefined;
+    const cacheSource = ((): IntuneChatToolTraceEntry["cacheSource"] => {
+      if (result === null || typeof result !== "object") return undefined;
+      const record = result as Record<string, unknown>;
+      if (tool === "query_cache" && record.snapshot && typeof record.snapshot === "object") {
+        const snapshot = record.snapshot as Record<string, unknown>;
+        if (typeof record.resource !== "string") return undefined;
+        return {
+          resource: record.resource,
+          rows: typeof snapshot.rows === "number" ? snapshot.rows : 0,
+          ...(typeof snapshot.refreshedAt === "string" ? { refreshedAt: snapshot.refreshedAt } : {}),
+          ...(typeof snapshot.pages === "number" ? { pages: snapshot.pages } : {}),
+          ...(typeof snapshot.pageLimitReached === "boolean"
+            ? { pageLimitReached: snapshot.pageLimitReached }
+            : {}),
+          ...(typeof snapshot.lastError === "string" && snapshot.lastError
+            ? { error: snapshot.lastError }
+            : {}),
+        };
+      }
+      if (tool === "refresh_resource" && record.ok === true && typeof record.resource === "string") {
+        return {
+          resource: record.resource,
+          rows: typeof record.rows === "number" ? record.rows : 0,
+          ...(typeof record.refreshedAt === "string" ? { refreshedAt: record.refreshedAt } : {}),
+          ...(typeof record.pages === "number" ? { pages: record.pages } : {}),
+          ...(typeof record.pageLimitReached === "boolean"
+            ? { pageLimitReached: record.pageLimitReached }
+            : {}),
+          fromRefresh: true,
+        };
+      }
+      return undefined;
+    })();
     const trace: IntuneChatToolTraceEntry = {
       id: `tool_${randomUUID()}`,
       tool,
       params: params ?? {},
       resultSummary: summarizeToolResult(tool, result),
       ...(tool === "web_search" ? { webSources: (result as WebSearchResult).sources } : {}),
+      ...(cacheSource ? { cacheSource } : {}),
+      ...(graphRecord
+        ? {
+            graphSource: {
+              path: String(graphRecord.path ?? ""),
+              ...(graphRecord.query && typeof graphRecord.query === "object"
+                ? { query: graphRecord.query as Record<string, string> }
+                : {}),
+              rows:
+                typeof graphRecord.returnedRows === "number"
+                  ? graphRecord.returnedRows
+                  : Array.isArray(graphRecord.rows)
+                    ? graphRecord.rows.length
+                    : 1,
+              ...(typeof graphRecord.pagesFetched === "number"
+                ? { pagesFetched: graphRecord.pagesFetched }
+                : { pagesFetched: 1 }),
+              ...(typeof graphRecord.truncated === "boolean"
+                ? { truncated: graphRecord.truncated }
+                : {}),
+              ...(typeof graphRecord.totalCount === "number"
+                ? { totalCount: graphRecord.totalCount }
+                : {}),
+            },
+          }
+        : {}),
       durationMs: Math.max(0, completedAtMs - startedAtMs),
       createdAt,
       completedAt: new Date(completedAtMs).toISOString(),
+      ...(softError ? { error: softError } : {}),
     };
     return { result, trace };
   } catch (caught) {
@@ -294,8 +383,13 @@ function executeToolUnchecked(
 }
 
 function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unknown {
-  const staleAfterHours = numberParam(params, "staleAfterHours") ?? 6;
-  const staleAfterMs = Math.max(1, staleAfterHours) * 60 * 60 * 1000;
+  // Default staleness follows the host TTL per resource. A flat 6h rule
+  // told the model the opposite of host policy for fast (sign-ins) and
+  // slow (profiles) resources. An explicit staleAfterHours still wins.
+  const staleAfterHours = numberParam(params, "staleAfterHours");
+  const staleAfterMs = staleAfterHours !== undefined
+    ? Math.max(1, staleAfterHours) * 60 * 60 * 1000
+    : undefined;
   const nowMs = Date.now();
   const resources = ctx.store.getGraphCacheStatus(ctx.tenantId, [...GRAPH_CACHE_RESOURCES]);
   return {
@@ -309,7 +403,7 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
         !resource.refreshedAt ||
         resource.rows === 0 ||
         !Number.isFinite(refreshedMs) ||
-        nowMs - refreshedMs > staleAfterMs;
+        nowMs - refreshedMs > (staleAfterMs ?? resourceStalenessMs(resource.resource));
       return {
         resource: resource.resource,
         label: resource.label,
@@ -433,6 +527,26 @@ function fieldsForResource(ctx: IntuneChatToolContext, resource: GraphCacheResou
  * a list", which is a far easier task and the difference between an 8B
  * model answering an unanticipated question and giving up.
  */
+/**
+ * Documented delegated scopes for a catalog endpoint. Function
+ * endpoints appear in the catalog both with and without trailing
+ * parentheses, and only one form carries permissions, so an
+ * undocumented parenthesized form inherits the plain form's scopes
+ * instead of reading as permission-free.
+ */
+function documentedScopesForEndpoint(endpoint: {
+  path: string;
+  scopesDelegated: string[];
+}): string[] {
+  if (endpoint.scopesDelegated.length > 0) return endpoint.scopesDelegated;
+  const aliasPath = endpoint.path.replace(/\([^)]*\)\/?$/, "");
+  if (aliasPath && aliasPath !== endpoint.path) {
+    const alias = lookupEndpoint("GET", aliasPath);
+    if (alias && alias.path !== endpoint.path) return alias.scopesDelegated;
+  }
+  return endpoint.scopesDelegated;
+}
+
 function findGraphEndpoint(params: unknown): unknown {
   const query = stringParam(params, "query");
   if (!query || query.trim().length === 0) {
@@ -442,9 +556,15 @@ function findGraphEndpoint(params: unknown): unknown {
   const limit = Math.max(1, Math.min(FIND_ENDPOINT_LIMIT_CAP, Math.trunc(requested)));
   const matches = searchEndpoints(query, { method: "GET", limit });
   const candidates = matches.map((endpoint) => {
-    const documented = endpoint.scopesDelegated;
+    const documented = documentedScopesForEndpoint(endpoint);
     const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
-    const usable = documented.length === 0 || consented.length > 0;
+    // Mirror graph_get validation: planner-declared paths run with
+    // their declared scopes even when the catalog's least-privileged
+    // list does not intersect the consented set.
+    const usable =
+      documented.length === 0 ||
+      consented.length > 0 ||
+      plannerExemptionApplies(endpoint.path);
     return {
       path: endpoint.path,
       summary: endpoint.summary,
@@ -480,8 +600,8 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     throw new Error("GET /subscribedSkus supports only $select. Retrieve the license inventory without $top or $filter, then calculate seat availability from prepaidUnits and consumedUnits.");
   }
   const query = cappedGraphQuery(queryInput);
-  // This collection does not support $top. The response cap still applies.
-  if (skuInventory) delete query.$top;
+  // These endpoints do not support $top. The response cap still applies.
+  if (skuInventory || NO_TOP_GRAPH_PATHS.has(path.toLowerCase().replace(/\/+$/, ""))) delete query.$top;
   const headers = graphHeaders(objectParam(params, "headers"));
   const graph = await ctx.graphForScopes(validation.scopes);
   const request: GraphRequestInput = {
@@ -490,16 +610,90 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     ...(Object.keys(query).length > 0 ? { query } : {}),
     ...(Object.keys(headers).length > 0 ? { headers } : {}),
   };
+  // A live 403 almost always means the tenant was consented before this
+  // permission entered the requested set. Name the scope and the
+  // recovery, like cache refresh does, instead of surfacing a raw
+  // HTTP 403 the model and the admin cannot act on.
+  const requestPage = async (input: GraphRequestInput): Promise<unknown> => {
+    try {
+      return await graph.request({ ...input, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+    } catch (error) {
+      const raw = error instanceof Error ? error.message : String(error);
+      if (!raw.includes("HTTP 403")) throw error;
+      const needed = validation.scopes.length > 0
+        ? validation.scopes.join(", ")
+        : "a read permission this tenant has not consented to";
+      throw new Error(
+        `Microsoft Graph denied read access for GET ${path}. This endpoint needs ${needed}. The tenant was likely connected before OpenAdminOS requested it. Reconnect the tenant to grant the current read permissions, then retry. Graph said: ${raw}`,
+      );
+    }
+  };
   ctx.signal?.throwIfAborted();
-  const response = await graph.request({ ...request, ...(ctx.signal ? { signal: ctx.signal } : {}) });
+  const firstResponse = await requestPage(request);
+  // Follow server paging within the row cap: a first page smaller than
+  // the cap with a nextLink otherwise reads as complete tenant coverage.
+  const collected: unknown[] = [];
+  let page = unwrapGraphCollectionPage(firstResponse);
+  let pagesFetched = 1;
+  let totalCount = page.totalCount;
+  collected.push(...page.rows);
+  const seenContinuations = new Set<string>();
+  while (
+    page.nextLink &&
+    collected.length < GRAPH_GET_ROW_CAP &&
+    pagesFetched < GRAPH_GET_PAGE_CAP &&
+    !skuInventory
+  ) {
+    // Follow the complete continuation URL through the validated parser
+    // (host pinned to graph.microsoft.com, beta only) instead of
+    // extracting one parameter: Graph continuations may carry $skip or
+    // a changed query, and reconstructing from the original query
+    // silently re-reads the wrong page. The path must stay on the
+    // endpoint that was validated and consented for this call.
+    if (seenContinuations.has(page.nextLink)) break;
+    seenContinuations.add(page.nextLink);
+    let continuation: ReturnType<typeof graphCacheRequestFromNextLink>;
+    try {
+      continuation = graphCacheRequestFromNextLink(
+        page.nextLink,
+        Object.keys(headers).length > 0 ? headers : undefined,
+      );
+    } catch {
+      break;
+    }
+    if (continuation.path !== path) break;
+    ctx.signal?.throwIfAborted();
+    const nextResponse = await requestPage({
+      method: "GET",
+      path: continuation.path,
+      ...(continuation.query ? { query: continuation.query } : {}),
+      ...(continuation.headers ? { headers: continuation.headers } : {}),
+    });
+    page = unwrapGraphCollectionPage(nextResponse);
+    pagesFetched += 1;
+    if (totalCount === undefined) totalCount = page.totalCount;
+    collected.push(...page.rows);
+  }
+  const isCollection =
+    Array.isArray((firstResponse as { value?: unknown })?.value) || Array.isArray(firstResponse);
+  const response = isCollection && pagesFetched > 1
+    ? {
+        value: collected,
+        ...(page.nextLink ? { "@odata.nextLink": page.nextLink } : {}),
+        ...(totalCount !== undefined ? { "@odata.count": totalCount } : {}),
+      }
+    : firstResponse;
   return capGraphResponse({
     path,
     query,
     response,
     endpointSummary: validation.summary,
     scopes: validation.scopes,
+    pagesFetched,
   });
 }
+
+const GRAPH_GET_PAGE_CAP = 5;
 
 async function refreshResource(
   ctx: IntuneChatToolContext,
@@ -602,9 +796,17 @@ function validateGraphGetPath(path: string): {
         : "Unknown Microsoft Graph GET path.",
     );
   }
-  const documented = endpoint.scopesDelegated;
+  const documented = documentedScopesForEndpoint(endpoint);
   const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
-  if (documented.length > 0 && consented.length === 0) {
+  // Planner-declared cache paths carry host-verified scopes, consented
+  // for cache refresh. The catalog lists least-privileged permissions
+  // only, so a broader declared scope (Policy.Read.All for the
+  // authentication methods policy, GroupMember.Read.All for /groups)
+  // can cover an endpoint the catalog check would otherwise refuse.
+  // The exemption is limited to the declared path and its by-id
+  // children; deeper descendants stay subject to the catalog check.
+  const resourceScopes = resourceScopesForPath(path);
+  if (documented.length > 0 && consented.length === 0 && !plannerExemptionApplies(endpoint.path)) {
     throw new Error(
       `This endpoint requires ${documented.slice(0, 3).join(" or ")}, which OpenAdminOS does not request. No tenant data was read.`,
     );
@@ -612,17 +814,53 @@ function validateGraphGetPath(path: string): {
   // Where the catalog documents no permissions, fall back to the token
   // already held for this tenant. Graph rejects anything the consent
   // does not cover, and that rejection is surfaced verbatim.
-  const resourceScopes = resourceScopesForPath(path);
   const scopes = [...new Set([...consented, ...resourceScopes])].sort();
   return { scopes, summary: endpoint.summary };
 }
 
+/**
+ * Deeper templates whose documented permission alternatives include an
+ * already-consented planner scope, verified against Microsoft Learn.
+ * memberOf and transitiveMemberOf list User.Read as least privileged
+ * (self only) and support User.Read.All, which Chat consents for the
+ * users cache, for reading another user's memberships.
+ */
+const PLANNER_SCOPE_OVERRIDE_TEMPLATES = new Set([
+  "/users/{user-id}/memberof",
+  "/users/{user-id}/transitivememberof",
+]);
+
+/**
+ * Whether the planner-scope exemption applies to a catalog template
+ * path. The exemption exists because the catalog lists
+ * least-privileged scopes only while planner declarations carry
+ * broader verified scopes. It covers the declared collection or
+ * singleton template itself and its canonical by-id template
+ * (a single placeholder segment), plus the explicit overrides above.
+ * Function and type-cast segments are literal template segments, not
+ * placeholders, so they stay subject to the catalog check, as do
+ * deeper descendants such as group drives.
+ */
+function plannerExemptionApplies(templatePath: string): boolean {
+  const template = templatePath.split("?")[0]!.toLowerCase().replace(/\/+$/, "");
+  if (PLANNER_SCOPE_OVERRIDE_TEMPLATES.has(template)) return true;
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    const plannerPath = pathForResource(definition.resource).path.toLowerCase();
+    if (template === plannerPath) return true;
+    if (template.startsWith(`${plannerPath}/{`)) {
+      const child = template.slice(plannerPath.length + 1);
+      if (/^\{[^/{}]+\}$/.test(child)) return true;
+    }
+  }
+  return false;
+}
+
 function resourceScopesForPath(path: string): string[] {
-  const pathOnly = path.split("?")[0]!;
+  const pathOnly = path.split("?")[0]!.toLowerCase();
   const scopes = new Set<string>();
   for (const definition of GRAPH_CACHE_RESOURCES) {
-    const request = pathForResource(definition.resource);
-    if (pathOnly === request.path || pathOnly.startsWith(`${request.path}/`)) {
+    const requestPath = pathForResource(definition.resource).path.toLowerCase();
+    if (pathOnly === requestPath || pathOnly.startsWith(`${requestPath}/`)) {
       for (const scope of definition.scopes) scopes.add(scope);
     }
   }
@@ -668,6 +906,7 @@ function capGraphResponse(input: {
   response: unknown;
   endpointSummary?: string;
   scopes: string[];
+  pagesFetched?: number;
 }): unknown {
   const page = unwrapGraphCollectionPage(input.response);
   const isCollection =
@@ -681,9 +920,13 @@ function capGraphResponse(input: {
         scopes: input.scopes,
         rowCountInPage: page.rows.length,
         returnedRows: Math.min(page.rows.length, GRAPH_GET_ROW_CAP),
+        ...(page.totalCount !== undefined ? { totalCount: page.totalCount } : {}),
+        ...(input.pagesFetched && input.pagesFetched > 1 ? { pagesFetched: input.pagesFetched } : {}),
         nextLinkPresent: Boolean(page.nextLink),
         truncated: page.rows.length > GRAPH_GET_ROW_CAP || Boolean(page.nextLink),
-        rows: page.rows.slice(0, GRAPH_GET_ROW_CAP).map(compactValue),
+        // Not .map(compactValue): map would pass the index as depth and
+        // truncate every row from the fifth onward to "[object truncated]".
+        rows: page.rows.slice(0, GRAPH_GET_ROW_CAP).map((row) => compactValue(row)),
       }
     : {
         path: input.path,
@@ -872,11 +1115,40 @@ function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
   if (!record) return undefined;
   const predicates: GraphCacheQueryPredicate[] = [];
 
+  // A where value can also be an operator object such as
+  // { lastSyncDateTime: { lt: "2026-05-20" } }, the shape models reach
+  // for when a comparison does not fit the scalar map. Reading it as
+  // equality against an object only earned a scalar-values refusal and
+  // a repeated identical call, so expand it into predicates instead.
+  const pushWhereEntry = (field: string, value: unknown) => {
+    if (value && typeof value === "object" && !Array.isArray(value)) {
+      const ops = Object.entries(value as Record<string, unknown>);
+      if (ops.length === 0) {
+        throw new Error(`query_cache where for ${field} needs a value or an operator object.`);
+      }
+      for (const [rawOp, opValue] of ops) {
+        const op = rawOp.replace(/^\$/, "");
+        if (!isGraphCacheQueryOperator(op)) {
+          throw new Error(
+            `Unsupported query_cache operator: ${rawOp}. Use eq, neq, contains, startsWith, in, lt, lte, gt, or gte.`,
+          );
+        }
+        predicates.push({
+          field,
+          op,
+          value: opValue as GraphCacheQueryPredicate["value"],
+        });
+      }
+      return;
+    }
+    predicates.push({ field, op: "eq", value: value as GraphCacheQueryPredicate["value"] });
+  };
+
   const where = record.where;
   if (where !== undefined && (!where || typeof where !== "object" || Array.isArray(where))) throw new Error("query_cache where must be a field/value object.");
   if (where && typeof where === "object" && !Array.isArray(where)) {
     for (const [field, value] of Object.entries(where as Record<string, unknown>)) {
-      predicates.push({ field, op: "eq", value: value as GraphCacheQueryPredicate["value"] });
+      pushWhereEntry(field, value);
     }
   }
 
@@ -904,11 +1176,7 @@ function filtersParam(params: unknown): GraphCacheQueryPredicate[] | undefined {
       }
       // A bare {field: value} pair.
       for (const [field, value] of Object.entries(entry)) {
-        predicates.push({
-          field,
-          op: "eq",
-          value: value as GraphCacheQueryPredicate["value"],
-        });
+        pushWhereEntry(field, value);
       }
     }
   }

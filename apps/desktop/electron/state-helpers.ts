@@ -6,6 +6,7 @@ import type {
   GraphCacheStatus,
   IntuneChatConversation,
   IntuneChatMessage,
+  IntuneChatToolTraceEntry,
   IntuneChatProgressStep,
   MultiTenantChatJob,
   MultiTenantDeviceRow,
@@ -295,11 +296,14 @@ export function isWindowsCompliancePrompt(prompt: string): boolean {
 
 
 export function isGraphCacheStatusStale(status: GraphCacheResourceStatus): boolean {
-  if (status.lastError) return false;
+  // Match the single-tenant send path: errored resources are retried,
+  // and staleness follows the per-resource TTL, not a flat 6h rule that
+  // contradicted host policy for fast and slow resources alike.
+  if (status.lastError) return true;
   if (!status.refreshedAt || status.rows === 0) return true;
   const refreshedMs = Date.parse(status.refreshedAt);
   if (!Number.isFinite(refreshedMs)) return true;
-  return Date.now() - refreshedMs > 6 * 60 * 60 * 1000;
+  return Date.now() - refreshedMs > resourceStalenessMs(status.resource);
 }
 
 
@@ -580,6 +584,27 @@ export function summarizeMultiTenantResult(
       ? ` Caveats: ${caveats.join("; ")}.`
       : " No tenant failures were recorded.";
   return `Across ${summary.tenantsScanned} tenant${summary.tenantsScanned === 1 ? "" : "s"}, cached Intune data shows ${summary.windowsDevices} Windows devices: ${summary.compliant} compliant, ${summary.nonCompliant} non-compliant, and ${summary.unknown} unknown.${caveatText}`;
+}
+
+
+
+/**
+ * Read/mutation access to an existing conversation. Multi-tenant result
+ * conversations stay readable; single-tenant conversations require the
+ * owning tenant to be active. Legacy rows without a tenant pass, the
+ * same tolerance assertConversationTenant applies to follow-up sends.
+ */
+export function assertConversationAccess(
+  conversation: IntuneChatConversation,
+  activeTenantId: string | undefined,
+): void {
+  if (conversation.scopeKind === "multi-tenant") return;
+  if (!conversation.tenantId) return;
+  if (conversation.tenantId !== activeTenantId) {
+    throw new Error(
+      "This conversation belongs to a different tenant. Switch to that tenant or start a new conversation.",
+    );
+  }
 }
 
 
@@ -1001,7 +1026,7 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicRese
     "If the context is missing, stale, partial, or has Graph errors, say that plainly.",
     "Do not invent tenant state, counts, users, devices, policies, or remediation results.",
     "A tool returning zero rows means zero matched that query, not that the tenant has none. Never state that a tenant has none of something on the strength of an empty result; check the unfiltered count first.",
-    "For any question about how many, use tenantTotal when present, otherwise the breakdowns, which are counted over every cached row. Never count the sampleRows: they are a small illustrative subset, and counting them undercounts.",
+    "For any question about how many, use tenantTotal for unfiltered totals when present, otherwise the breakdown that matches the asked dimension: operatingSystem, complianceState, state, severity, securityEnabled, signInAudience, @odata.type, policyPlatform, appPlatform, platforms, or another named breakdown. Breakdowns are counted over every cached row only when breakdownsCoverAllCachedRows is true; when it is false, they describe selectedRows only, so do not quote them as tenant-wide counts. Boolean buckets may be labelled true/false or 1/0. Never count the sampleRows: they are a small illustrative subset, and counting them undercounts. Array breakdowns such as platforms and groupTypes can count one row in more than one bucket.",
     "When cachedRows is below tenantTotal, or pageLimitReached is true, say that the detail rows cover only part of the tenant.",
     "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",
     isLocalProvider
@@ -1050,16 +1075,221 @@ export function stableSuggestionId(tenantId: string, agentSlug: string, text: st
 
 
 
+export const CHAT_MEMORY_MAX_TURNS = 4;
+export const CHAT_MEMORY_MAX_CHARS = 4000;
+const CHAT_MEMORY_MAX_MESSAGE_CHARS = 1000;
+
+/**
+ * Bounded plain-text memory for follow-up questions. The non-voice
+ * prompt used to contain only the current question, so "Show only the
+ * Windows ones" after a device answer had nothing to refer to. The
+ * window is the last {@link CHAT_MEMORY_MAX_TURNS} completed turns,
+ * each message truncated, under one hard character cap; older turns
+ * drop first. Voice has its own tighter context builder.
+ */
+export function boundedConversationMemory(
+  messages: readonly IntuneChatMessage[],
+): string | undefined {
+  // Build turns first. Filtering messages individually kept the user
+  // prompts of failed or cancelled exchanges (user rows stay
+  // "completed"), so eight abandoned prompts could ride along under a
+  // four-turn policy. Only exchanges whose assistant reply completed
+  // count as memory.
+  const turns: string[] = [];
+  const format = (message: IntuneChatMessage): string => {
+    const text = message.content.trim();
+    const bounded = text.length > CHAT_MEMORY_MAX_MESSAGE_CHARS
+      ? `${text.slice(0, CHAT_MEMORY_MAX_MESSAGE_CHARS)} [truncated]`
+      : text;
+    return `${message.role === "user" ? "User" : "Assistant"}: ${bounded}`;
+  };
+  for (let index = 0; index < messages.length; index += 1) {
+    const user = messages[index]!;
+    if (user.role !== "user" || user.status !== "completed" || !user.content.trim()) continue;
+    const assistant = messages[index + 1];
+    if (
+      !assistant ||
+      assistant.role !== "assistant" ||
+      assistant.status !== "completed" ||
+      !assistant.content.trim()
+    ) {
+      continue;
+    }
+    turns.push(`${format(user)}\n${format(assistant)}`);
+    index += 1;
+  }
+  const windowed = turns.slice(-CHAT_MEMORY_MAX_TURNS);
+  while (windowed.length > 1 && windowed.join("\n").length > CHAT_MEMORY_MAX_CHARS) {
+    windowed.shift();
+  }
+  if (windowed.length === 0) return undefined;
+  const joined = windowed.join("\n");
+  return joined.length > CHAT_MEMORY_MAX_CHARS
+    ? joined.slice(joined.length - CHAT_MEMORY_MAX_CHARS)
+    : joined;
+}
+
+/**
+ * Resources an investigation actually read, derived from successful tool
+ * trace entries. Sources must describe what ran, not what was planned:
+ * a refusal that never touched tenant data must not carry source badges,
+ * and a resource fetched mid-investigation must appear even when the
+ * planner never named it.
+ */
+export function resourcesFromToolTrace(
+  toolTrace: readonly IntuneChatToolTraceEntry[] | undefined,
+): Set<GraphCacheResourceKind> {
+  const known = new Set<GraphCacheResourceKind>(
+    GRAPH_CACHE_RESOURCES.map((entry) => entry.resource),
+  );
+  const resources = new Set<GraphCacheResourceKind>();
+  for (const entry of toolTrace ?? []) {
+    if (entry.error) continue;
+    const params = (entry.params ?? {}) as Record<string, unknown>;
+    if (
+      entry.tool === "query_cache" ||
+      entry.tool === "refresh_resource" ||
+      entry.tool === "query_drift"
+    ) {
+      const resource = params.resource;
+      if (typeof resource === "string" && known.has(resource as GraphCacheResourceKind)) {
+        resources.add(resource as GraphCacheResourceKind);
+      }
+      continue;
+    }
+    if (entry.tool === "graph_get") {
+      // Prefer the normalized execution path: params.path is the raw
+      // model-supplied value and can be a full URL or slashless.
+      const path = entry.graphSource?.path ?? (typeof params.path === "string" ? params.path : undefined);
+      const resource = path ? graphResourceForPath(path) : undefined;
+      if (resource) resources.add(resource);
+    }
+  }
+  return resources;
+}
+
+/** Map a live Graph path back to its cache resource by longest known base path. */
+function graphResourceForPath(path: string): GraphCacheResourceKind | undefined {
+  let best: GraphCacheResourceKind | undefined;
+  let bestLength = -1;
+  for (const definition of GRAPH_CACHE_RESOURCES) {
+    const base = pathForResource(definition.resource).path;
+    if ((path === base || path.startsWith(`${base}/`)) && base.length > bestLength) {
+      best = definition.resource;
+      bestLength = base.length;
+    }
+  }
+  return best;
+}
+
+/** Resources the refresh_resource tool successfully refreshed mid-investigation. */
+export function toolRefreshedResources(
+  toolTrace: readonly IntuneChatToolTraceEntry[] | undefined,
+): Set<GraphCacheResourceKind> {
+  const known = new Set<GraphCacheResourceKind>(
+    GRAPH_CACHE_RESOURCES.map((entry) => entry.resource),
+  );
+  const resources = new Set<GraphCacheResourceKind>();
+  for (const entry of toolTrace ?? []) {
+    if (entry.tool !== "refresh_resource" || entry.error) continue;
+    const resource = (entry.params as Record<string, unknown> | undefined)?.resource;
+    if (typeof resource === "string" && known.has(resource as GraphCacheResourceKind)) {
+      resources.add(resource as GraphCacheResourceKind);
+    }
+  }
+  return resources;
+}
+
+/**
+ * Which resources an answer may claim as sources. Returns undefined to
+ * mean "the planned resources", which is honest only when the answer
+ * pack was built from them (deterministic path) or the model read the
+ * full cache inventory. An empty set means no tenant sources at all.
+ */
+export function executedResourcesForAnswer(input: {
+  toolTrace?: readonly IntuneChatToolTraceEntry[];
+  usedDeterministic: boolean;
+  usedNoData: boolean;
+}): Set<GraphCacheResourceKind> | undefined {
+  if (input.usedNoData) return new Set();
+  if (input.usedDeterministic) return undefined;
+  if (!input.toolTrace || input.toolTrace.length === 0) return undefined;
+  const executed = resourcesFromToolTrace(input.toolTrace);
+  if (executed.size > 0) return executed;
+  const readInventory = input.toolTrace.some(
+    (entry) => entry.tool === "list_cached_resources" && !entry.error,
+  );
+  return readInventory ? undefined : new Set();
+}
+
 export function buildIntuneChatSources(input: {
   cacheStatus: GraphCacheStatus["resources"];
   plannedResources: GraphCacheResourceKind[];
+  /**
+   * When provided, sources are limited to what actually ran. An empty
+   * set deliberately yields no sources (refusals, write blocks). Omit
+   * only on the deterministic path, where the answer pack is built from
+   * the planned resources themselves.
+   */
+  executedResources?: Iterable<GraphCacheResourceKind>;
+  /**
+   * Execution trace. A resource read live through `graph_get` is
+   * described from that execution (rows returned, pages fetched,
+   * truncation, completion time), never from the cache snapshot that
+   * happens to share its resource kind.
+   */
+  toolTrace?: readonly IntuneChatToolTraceEntry[];
   refreshedResources: Set<GraphCacheResourceKind>;
 }): NonNullable<IntuneChatMessage["sources"]> {
+  const visible = input.executedResources
+    ? new Set(input.executedResources)
+    : new Set(input.plannedResources);
+  // Live execution provenance describes investigative answers only.
+  // A deterministic fallback answered from its snapshot pack, so
+  // letting the abandoned investigation's live read override its
+  // sources misstates what the fallback actually used.
+  const liveGraphByResource = new Map<GraphCacheResourceKind, IntuneChatToolTraceEntry[]>();
+  const cacheReadsByResource = new Map<
+    GraphCacheResourceKind,
+    Array<NonNullable<IntuneChatToolTraceEntry["cacheSource"]>>
+  >();
+  const knownResources = new Set(GRAPH_CACHE_RESOURCES.map((entry) => entry.resource));
+  for (const entry of input.executedResources ? input.toolTrace ?? [] : []) {
+    if (entry.error) continue;
+    if (entry.cacheSource && knownResources.has(entry.cacheSource.resource as GraphCacheResourceKind)) {
+      const resource = entry.cacheSource.resource as GraphCacheResourceKind;
+      const reads = cacheReadsByResource.get(resource) ?? [];
+      // Repeated reads of the same snapshot are one piece of
+      // evidence; a read before and after a refresh are two. A later
+      // read of the same snapshot can still add a warning the first
+      // read did not have (the refresh between them failed), so merge
+      // it instead of discarding the read outright.
+      const duplicateIndex = reads.findIndex(
+        (read) =>
+          read.refreshedAt === entry.cacheSource!.refreshedAt &&
+          read.rows === entry.cacheSource!.rows,
+      );
+      if (duplicateIndex === -1) {
+        reads.push(entry.cacheSource);
+      } else if (entry.cacheSource.error && !reads[duplicateIndex]!.error) {
+        reads[duplicateIndex] = { ...reads[duplicateIndex]!, error: entry.cacheSource.error };
+      }
+      cacheReadsByResource.set(resource, reads);
+      continue;
+    }
+    if (entry.tool !== "graph_get" || !entry.graphSource) continue;
+    const resource = graphResourceForPath(entry.graphSource.path);
+    if (resource) {
+      const entries = liveGraphByResource.get(resource) ?? [];
+      entries.push(entry);
+      liveGraphByResource.set(resource, entries);
+    }
+  }
   return input.cacheStatus
-    .filter((status) => input.plannedResources.includes(status.resource))
-    .map((status) => {
+    .filter((status) => visible.has(status.resource))
+    .flatMap((status) => {
       const request = pathForResource(status.resource);
-      return {
+      const cacheEntry = {
         resource: status.resource,
         label: status.label,
         rows: status.rows,
@@ -1074,6 +1304,52 @@ export function buildIntuneChatSources(input: {
         ...(request.query ? { query: request.query } : {}),
         ...(status.lastError ? { error: status.lastError } : {}),
       };
+      // Every distinct execution stays visible: a later refresh or a
+      // detail lookup must not rewrite the provenance of evidence an
+      // earlier read already supplied to the answer.
+      const cacheReadEntries = (cacheReadsByResource.get(status.resource) ?? []).map((read) => ({
+        resource: status.resource,
+        label: status.label,
+        rows: read.rows,
+        pages: read.pages,
+        pageLimitReached: read.pageLimitReached,
+        refreshedAt: read.refreshedAt,
+        source: read.fromRefresh
+          ? "live" as const
+          : input.refreshedResources.has(status.resource) &&
+              read.refreshedAt !== undefined &&
+              read.refreshedAt === status.refreshedAt
+            ? "live" as const
+            : "cache" as const,
+        path: request.path,
+        ...(request.select ? { select: request.select } : {}),
+        ...(request.query ? { query: request.query } : {}),
+        ...(read.error ? { error: read.error } : {}),
+      }));
+      const liveEntries = (liveGraphByResource.get(status.resource) ?? [])
+        .filter((liveEntry) => liveEntry.graphSource)
+        .map((liveEntry) => {
+          const live = liveEntry.graphSource!;
+          const select = live.query?.["$select"]
+            ?.split(",")
+            .map((field) => field.trim())
+            .filter(Boolean);
+          return {
+            resource: status.resource,
+            label: status.label,
+            rows: live.rows,
+            pages: live.pagesFetched,
+            pageLimitReached: live.truncated,
+            refreshedAt: liveEntry.completedAt,
+            source: "live" as const,
+            path: live.path,
+            ...(select && select.length > 0 ? { select } : {}),
+            ...(live.query ? { query: live.query } : {}),
+          };
+        });
+      if (cacheReadEntries.length === 0 && liveEntries.length === 0) return [cacheEntry];
+      if (cacheReadEntries.length === 0) return liveEntries;
+      return [...cacheReadEntries, ...liveEntries];
     });
 }
 

@@ -58,6 +58,8 @@ export {
   classifyOllamaEndpoint,
   createOllamaLlm,
   noopLlm,
+  ollamaEndpointOverride,
+  ollamaHostEndpoint,
   resolveOllamaEndpoint,
   type OllamaEndpointTrust,
 } from "./llm-ollama.js";
@@ -1224,5 +1226,5 @@ function toAgentDefinition(agent: AgentSummary): RunContext["agent"] {
 }
 
 export { createCopilotLlm, probeCopilotLlm } from "./llm-copilot.js";
-export { createGeminiLlm, probeGeminiLlm } from "./llm-gemini.js";
+export { createGeminiLlm, GEMINI_DEFAULT_MODEL, probeGeminiLlm } from "./llm-gemini.js";
 export type { CliProbe, CliFailure } from "./cli-provider.js";

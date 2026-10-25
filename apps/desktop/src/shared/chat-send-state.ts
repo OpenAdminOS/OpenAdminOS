@@ -43,7 +43,7 @@ const announcements: Record<ChatSendPhase, string> = {
   streaming: "Generating an answer.",
   stopping: "Stopping the response.",
   complete: "Answer complete.",
-  stopped: "Response stopped. Partial output is preserved.",
+  stopped: "Response stopped.",
   failed: "The answer could not be completed.",
   retrying: "Retrying your question.",
 };
