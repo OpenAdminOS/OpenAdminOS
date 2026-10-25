@@ -323,10 +323,19 @@ function matchesWriteIntentTermInSentence(lowerSentence: string, term: string): 
   const question = lowerSentence
     .trim()
     .replace(/^(?:please\s+|can you\s+|could you\s+|would you\s+)+/, "");
-  // Explanatory prompts describe actions instead of requesting them:
-  // "Explain how to disable an account and then delete it." The
-  // chained-imperative pattern below would otherwise block them.
-  if (/^(?:explain|describe)\b/.test(question)) return false;
+  // Explanatory how-to prompts describe actions instead of
+  // requesting them: "Explain how to disable an account and then
+  // delete it." The exemption covers the how-to chain only; an
+  // independent clause after a comma is still a request: "Explain
+  // which devices are stale, then retire them."
+  if (
+    /^(?:explain|describe)\b/.test(question) &&
+    /\bhow to\b/.test(question) &&
+    !new RegExp(`,\\s*(?:and\\s+)?then\\s+${term}\\b`).test(question) &&
+    !new RegExp(`,\\s*and\\s+${term}\\b`).test(question)
+  ) {
+    return false;
+  }
   // "Add up the licenses" asks for a sum, not a tenant change.
   if (term === "add" && /^add\s+up\b/.test(question)) return false;
   // Anchored at the main clause only. Unanchored helper phrases
