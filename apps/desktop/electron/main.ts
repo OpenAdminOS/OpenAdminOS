@@ -88,6 +88,7 @@ import type {
   DriftTimelineInput,
   ExportAuditLogInput,
   GraphCacheResourceKind,
+  PermissionAreaId,
   ImportMultiTenantResultToWorkspacesInput,
   MultiTenantChatStreamEvent,
   PendingConnectorDecision,
@@ -122,7 +123,7 @@ import type {
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
-import { providerCatalog } from "@openadminos/agent-sdk";
+import { PERMISSION_AREAS, providerCatalog } from "@openadminos/agent-sdk";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -4518,25 +4519,38 @@ function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
   if (!isPlainRecord(value)) {
     throw new Error("Connect tenant options must be an object.");
   }
-  if (value.appRegistration === undefined) return {};
-  if (!isPlainRecord(value.appRegistration)) {
-    throw new Error("appRegistration must be an object.");
-  }
-  const registration = value.appRegistration;
-  const options: ConnectTenantOptions = {
-    appRegistration: {
+  const options: ConnectTenantOptions = {};
+  if (value.appRegistration !== undefined) {
+    if (!isPlainRecord(value.appRegistration)) {
+      throw new Error("appRegistration must be an object.");
+    }
+    const registration = value.appRegistration;
+    options.appRegistration = {
       clientId: requireBoundedString(registration.clientId, "clientId", 64),
-    },
-  };
-  if (
-    registration.directoryTenantId !== undefined &&
-    registration.directoryTenantId !== ""
-  ) {
-    options.appRegistration!.directoryTenantId = requireBoundedString(
-      registration.directoryTenantId,
-      "directoryTenantId",
-      128,
-    );
+    };
+    if (
+      registration.directoryTenantId !== undefined &&
+      registration.directoryTenantId !== ""
+    ) {
+      options.appRegistration.directoryTenantId = requireBoundedString(
+        registration.directoryTenantId,
+        "directoryTenantId",
+        128,
+      );
+    }
+  }
+  if (value.permissionAreaIds !== undefined) {
+    if (!Array.isArray(value.permissionAreaIds)) {
+      throw new Error("permissionAreaIds must be an array.");
+    }
+    const validIds = new Set(PERMISSION_AREAS.map((area) => area.id));
+    options.permissionAreaIds = value.permissionAreaIds.map((areaId, index) => {
+      const id = requireBoundedString(areaId, `permissionAreaIds[${index}]`, 32);
+      if (!validIds.has(id as PermissionAreaId)) {
+        throw new Error(`permissionAreaIds[${index}] is invalid.`);
+      }
+      return id as PermissionAreaId;
+    });
   }
   return options;
 }
@@ -6418,6 +6432,20 @@ function registerIpcHandlers() {
     void registerSchedulerIfReady("tenant");
     return state;
   }));
+  ipcMain.handle(
+    "openadminos:add-tenant-access",
+    handleTrusted((_event, tenantId: unknown, areaId: unknown) => {
+      const validIds = new Set(PERMISSION_AREAS.map((area) => area.id));
+      const checkedAreaId = requireBoundedString(areaId, "areaId", 32);
+      if (!validIds.has(checkedAreaId as PermissionAreaId)) {
+        throw new Error("Permission area is invalid.");
+      }
+      return store.addTenantAccess(
+        requireBoundedString(tenantId, "tenantId", 256),
+        checkedAreaId as PermissionAreaId,
+      );
+    }),
+  );
   ipcMain.handle("openadminos:add-sample-tenant", handleTrusted(() =>
     store.addSampleTenant(),
   ));

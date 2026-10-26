@@ -8,6 +8,7 @@ import {
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
+  mergeGrantedScopes,
   resolveProviderDefaultModel,
   resolveRunModel,
   type AgentSummary,
@@ -1063,7 +1064,26 @@ export class RunService {
       const nextRuns = exists
         ? persisted.runs.map((existing) => (existing.id === nextRun.id ? nextRun : existing))
         : [nextRun, ...persisted.runs];
-      await this.host.write({ ...persisted, runs: nextRuns });
+      const completedAgent =
+        !wasTerminal && nextRun.status === "completed"
+          ? persisted.installedAgents.find(
+              (agent) => agent.slug === nextRun.agentSlug,
+            )
+          : undefined;
+      const nextTenants = completedAgent
+        ? persisted.tenants.map((tenant) =>
+            tenant.id === nextRun.tenantId && tenant.kind !== "sample"
+              ? {
+                  ...tenant,
+                  grantedScopes: mergeGrantedScopes(
+                    tenant,
+                    completedAgent.scopes,
+                  ),
+                }
+              : tenant,
+          )
+        : persisted.tenants;
+      await this.host.write({ ...persisted, runs: nextRuns, tenants: nextTenants });
       if (!wasTerminal && isNowTerminal) {
         this.host.notifyRunFinished(nextRun);
       }

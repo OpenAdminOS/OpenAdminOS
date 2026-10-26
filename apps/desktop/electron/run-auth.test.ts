@@ -60,3 +60,28 @@ it("scheduled Teams and Outlook deliveries never open an unattended sign-in", as
   assert.match((await internal.deliverRunToOutlook(run)).error ?? "", /Scheduled notification needs Microsoft sign-in/);
   assert.equal(browserCalls, 0);
 });
+
+it("Chat and cache Graph access never widens consent beyond the tenant's granted scopes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-granted-auth-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(filePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [],
+    activeTenantId: "tenant-1", tenants: [{ id: "tenant-1", displayName: "Test", username: "test@example.com", homeAccountId: "test", addedAt: new Date().toISOString(),
+      grantedScopes: ["User.Read.All", "GroupMember.Read.All", "Directory.Read.All", "Organization.Read.All"] }] }));
+  let browserCalls = 0;
+  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
+    tokenStore: { read: async () => "", write: async () => undefined },
+    openBrowser: async () => { browserCalls += 1; },
+  });
+  Object.defineProperty(store, "msalClientForTenant", { value: () => ({
+    getTokenCache: () => ({ getAccountByHomeId: async () => null }),
+  }) });
+  try {
+    const internal = store as unknown as { buildGraph(tenant: string, scopes: string[]): Promise<{ createGraph(log: () => void): RunGraphApi }> };
+    const selection = await internal.buildGraph("tenant-1", ["Policy.Read.All"]);
+    await assert.rejects(
+      selection.createGraph(() => undefined).request({ method: "GET", path: "/identity/conditionalAccess/policies" }),
+      /Policy\.Read\.All, which was not granted for Test\. Add the access in Settings, Tenants\./,
+    );
+    assert.equal(browserCalls, 0);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
