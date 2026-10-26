@@ -282,11 +282,15 @@ How it runs:
    the hourly install-stats commit still ships in the next nightly.
    Contributor tooling never triggers a nightly on its own: the scripts the
    filter lists (docs generation, screenshot capture, smoke tests, QA setup,
-   script tests), root `package.json` changes outside the `build` and
+   script tests, and the release tooling that decides, describes, or checks a
+   release: this filter, nightly release notes, release prep, and the
+   compatibility check), root `package.json` changes outside the `build` and
    `dist:desktop` scripts, version, workspaces, and engines, and
    `.gitattributes` lines that only set `linguist-*` attributes. A new file
    under `scripts/` counts as an app change until it is added to that list.
-   Code under `apps/` always counts, even when it only runs in development.
+   Code under `apps/` always counts, even when it only runs in development,
+   and so do `prepare-nightly-build.mjs` and `release-version.mjs`, which
+   change what a nightly ships.
 2. The `meta` job checks that the commit is on `main` and computes the version
    with `scripts/release-version.mjs`.
 3. Each platform job runs `scripts/prepare-nightly-build.mjs`, which sets the

@@ -224,6 +224,10 @@ test("nightly-app-changes ignores contributor tooling, npm scripts, and linguist
     commit("scripts/release-scripts.test.mjs", "test");
     commit("scripts/capture-screenshots.mjs", "capture");
     commit("scripts/generate-gitbook-docs.mjs", "docs");
+    commit("scripts/nightly-app-changes.sh", "filter");
+    commit("scripts/nightly-release-notes.mjs", "notes");
+    commit("scripts/prepare-release.mjs", "prep");
+    commit("scripts/check-release-compatibility.mjs", "check");
     commit("package.json", manifest({ build: "npm run build -w app", test: "node --test", "docs:check": "x" }));
     const tooling = commit(".gitattributes", "agents/index.json text eol=lf\nweb/content/** linguist-generated=true\n");
     assert.equal(changes(tooling), "");
@@ -238,6 +242,11 @@ test("nightly-app-changes ignores contributor tooling, npm scripts, and linguist
 
     const newScript = commit("scripts/build-helper.mjs", "build");
     assert.equal(changes(newScript), "scripts/build-helper.mjs");
+    nightly(newScript);
+
+    // Nightly builds patch the app with this script, so it still counts.
+    const nightlyBuild = commit("scripts/prepare-nightly-build.mjs", "patch");
+    assert.equal(changes(nightlyBuild), "scripts/prepare-nightly-build.mjs");
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }
