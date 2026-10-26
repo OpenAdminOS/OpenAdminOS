@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-10-26T15:00:47.620Z",
+  "updatedAt": "2026-10-26T17:00:47.789Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 33,
@@ -62,8 +62,8 @@
       "installs7d": 5
     },
     "team-script-draft": {
-      "installs": 8,
-      "installs7d": 3
+      "installs": 9,
+      "installs7d": 4
     }
   }
 }
