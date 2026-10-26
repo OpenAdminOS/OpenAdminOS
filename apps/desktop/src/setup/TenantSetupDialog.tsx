@@ -16,16 +16,26 @@ import {
   IconWarning,
 } from "../components/icons";
 import { SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
+import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   ConnectTenantOptions,
+  PermissionAreaId,
   ProviderId,
   ProviderSummary,
   RequestedScope,
   TenantRecord,
 } from "../shared/openAdminOS";
+import { PERMISSION_AREAS } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import type { PendingIntent } from "./pending-intent";
 import { groupRequestedScopes } from "./scope-groups";
+import {
+  DEFAULT_REGISTRATION_DISPLAY_NAME,
+  generateRegistrationSetup,
+  REGISTRATION_DISPLAY_NAME_MAX_LENGTH,
+  validateRegistrationDisplayName,
+  type RegistrationSetupOutput,
+} from "./registration-script";
 
 export type SetupStage =
   | "first-run"
@@ -146,7 +156,13 @@ export function TenantSetupDialog({
       {stage === "ready" && (
         <ReadyStep
           tenant={activeTenant}
-          delegatedPermissionCount={scopes ? scopes.length + 3 : undefined}
+          delegatedPermissionCount={
+            activeTenant?.grantedScopes
+              ? activeTenant.grantedScopes.length + 3
+              : scopes
+                ? scopes.length + 3
+                : undefined
+          }
           intent={intent}
           agentName={agentName}
           onCancel={onClose}
@@ -253,6 +269,84 @@ function PermissionsStep({
   const [customOpen, setCustomOpen] = useState(initialCustomOpen);
   const [clientId, setClientId] = useState("");
   const [directoryTenantId, setDirectoryTenantId] = useState("");
+  const [selectedAreaIds, setSelectedAreaIds] = useState<Set<PermissionAreaId>>(
+    () => new Set(PERMISSION_AREAS.map((area) => area.id)),
+  );
+  const [registrationDisplayName, setRegistrationDisplayName] = useState(
+    DEFAULT_REGISTRATION_DISPLAY_NAME,
+  );
+  const [registrationSetup, setRegistrationSetup] =
+    useState<RegistrationSetupOutput | null>(null);
+  const [registrationSetupError, setRegistrationSetupError] = useState<string | null>(null);
+  const [registrationSetupStatus, setRegistrationSetupStatus] = useState<string | null>(null);
+  const [registrationActionError, setRegistrationActionError] = useState<string | null>(null);
+  const selectedGroups = groups.filter(
+    (group) => group.id === "other" || selectedAreaIds.has(group.id),
+  );
+  const selectedScopeCount = selectedGroups.reduce(
+    (total, group) => total + group.scopes.length,
+    0,
+  );
+  const selectedAreaIdList = PERMISSION_AREAS.filter((area) =>
+    selectedAreaIds.has(area.id),
+  ).map((area) => area.id);
+  const toggleArea = (areaId: PermissionAreaId) => {
+    const area = PERMISSION_AREAS.find((candidate) => candidate.id === areaId);
+    if (area?.required) return;
+    setSelectedAreaIds((current) => {
+      const next = new Set(current);
+      if (next.has(areaId)) next.delete(areaId);
+      else next.add(areaId);
+      return next;
+    });
+    setRegistrationSetup(null);
+    setRegistrationSetupStatus(null);
+    setRegistrationActionError(null);
+  };
+  const generateSetup = () => {
+    const validationError = validateRegistrationDisplayName(registrationDisplayName);
+    if (validationError) {
+      setRegistrationSetupError(validationError);
+      setRegistrationSetup(null);
+      return;
+    }
+    setRegistrationSetupError(null);
+    setRegistrationSetupStatus(null);
+    setRegistrationActionError(null);
+    setRegistrationSetup(
+      generateRegistrationSetup(registrationDisplayName, selectedAreaIdList),
+    );
+  };
+  const copyRegistrationText = async (text: string, label: string) => {
+    try {
+      await copyTextToClipboard(text);
+      setRegistrationActionError(null);
+      setRegistrationSetupStatus(`${label} copied.`);
+    } catch (caught) {
+      setRegistrationActionError(
+        caught instanceof Error ? caught.message : `${label} could not be copied.`,
+      );
+    }
+  };
+  const saveRegistrationScript = async () => {
+    if (!registrationSetup) return;
+    try {
+      if (!window.openAdminOS) {
+        throw new Error("Saving scripts is unavailable in browser development.");
+      }
+      const result = await window.openAdminOS.saveTextFile({
+        suggestedName: "OpenAdminOS-registration-setup.ps1",
+        content: registrationSetup.script,
+        filters: [{ name: "PowerShell script", extensions: ["ps1"] }],
+      });
+      setRegistrationActionError(null);
+      if (!result.canceled) setRegistrationSetupStatus("Script saved.");
+    } catch (caught) {
+      setRegistrationActionError(
+        caught instanceof Error ? caught.message : "The script could not be saved.",
+      );
+    }
+  };
   return (
     <>
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-6">
@@ -291,7 +385,7 @@ function PermissionsStep({
             </div>
             {scopes && (
               <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
-                {scopes.length} scopes
+                {selectedScopeCount} scopes selected
               </span>
             )}
           </div>
@@ -307,9 +401,18 @@ function PermissionsStep({
                 {scopesError}
               </div>
             )}
-            {groups.map((group) => (
-              <ScopeDisclosure key={group.id} group={group} defaultOpen={false} />
-            ))}
+            {groups.map((group) => {
+              const areaId = group.id === "other" ? undefined : group.id;
+              return (
+                <ScopeDisclosure
+                  key={group.id}
+                  group={group}
+                  defaultOpen={false}
+                  checked={!areaId || selectedAreaIds.has(areaId)}
+                  onCheckedChange={areaId ? () => toggleArea(areaId) : undefined}
+                />
+              );
+            })}
           </div>
         </div>
 
@@ -332,6 +435,79 @@ function PermissionsStep({
               <p className="text-xs leading-5 text-[var(--color-text-muted)]">
                 {SETUP_COPY.ownRegistrationNoSecret}
               </p>
+              <section className="rounded-lg bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
+                <h4 className="text-sm font-medium text-[var(--color-text)]">
+                  Generate a setup script for your admin
+                </h4>
+                <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+                  The script creates a tenant-owned public client registration for the selected areas. Review it before sending it to your Entra administrator.
+                </p>
+                <label className="mt-3 block text-sm text-[var(--color-text-soft)]">
+                  Application display name
+                  <input
+                    name="registration-display-name"
+                    autoComplete="off"
+                    value={registrationDisplayName}
+                    maxLength={REGISTRATION_DISPLAY_NAME_MAX_LENGTH}
+                    onChange={(event) => {
+                      setRegistrationDisplayName(event.target.value);
+                      setRegistrationSetup(null);
+                      setRegistrationSetupError(null);
+                      setRegistrationActionError(null);
+                    }}
+                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  />
+                </label>
+                {registrationSetupError && (
+                  <p role="alert" className="mt-2 text-xs text-[var(--color-danger)]">
+                    {registrationSetupError}
+                  </p>
+                )}
+                <Button className="mt-3" size="sm" variant="secondary" onClick={generateSetup}>
+                  Generate setup script
+                </Button>
+                {registrationSetup && (
+                  <div className="mt-3 space-y-3">
+                    <label className="block text-xs text-[var(--color-text-muted)]">
+                      PowerShell script
+                      <textarea
+                        readOnly
+                        aria-label="PowerShell setup script"
+                        value={registrationSetup.script}
+                        rows={8}
+                        spellCheck={false}
+                        translate="no"
+                        className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 font-mono text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+                      />
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.script, "Script")}>Copy script</Button>
+                      <Button size="sm" variant="secondary" onClick={() => void saveRegistrationScript()}>Save script</Button>
+                    </div>
+                    <label className="block text-xs text-[var(--color-text-muted)]">
+                      Message for your admin
+                      <textarea
+                        readOnly
+                        aria-label="Message for your admin"
+                        value={registrationSetup.message}
+                        rows={5}
+                        className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+                      />
+                    </label>
+                    <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.message, "Message")}>Copy message</Button>
+                    {registrationSetupStatus && (
+                      <p role="status" className="text-xs text-[var(--color-success)]">
+                        {registrationSetupStatus}
+                      </p>
+                    )}
+                    {registrationActionError && (
+                      <p role="alert" className="text-xs text-[var(--color-danger)]">
+                        {registrationActionError}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </section>
               <label className="block text-sm text-[var(--color-text-soft)]">
                 {SETUP_COPY.clientIdLabel}
                 <input
@@ -398,8 +574,9 @@ function PermissionsStep({
             (customOpen && clientId.trim().length === 0)
           }
           onClick={() =>
-            onConnect(
-              customOpen
+            onConnect({
+              permissionAreaIds: selectedAreaIdList,
+              ...(customOpen
                 ? {
                     appRegistration: {
                       clientId: clientId.trim(),
@@ -408,11 +585,11 @@ function PermissionsStep({
                         : {}),
                     },
                   }
-                : undefined,
-            )
+                : {}),
+            })
           }
         >
-          {customOpen ? SETUP_COPY.useOwnRegistration : SETUP_COPY.approve}
+          Approve {selectedScopeCount} read scopes and continue to Microsoft
         </Button>
       </DialogFooter>
     </>
@@ -422,35 +599,55 @@ function PermissionsStep({
 function ScopeDisclosure({
   group,
   defaultOpen,
+  checked,
+  onCheckedChange,
 }: {
   group: ReturnType<typeof groupRequestedScopes>[number];
   defaultOpen: boolean;
+  checked: boolean;
+  onCheckedChange?: () => void;
 }) {
   const [expanded, setExpanded] = useState(defaultOpen);
   const panelId = `setup-scope-group-${group.id}`;
+  const checkboxId = `setup-scope-checkbox-${group.id}`;
   return (
     <div className="overflow-hidden rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-controls={panelId}
-        onClick={() => setExpanded((value) => !value)}
-        className="flex min-h-12 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
-      >
-        <span className="min-w-0 flex-1">
+      <div className="flex min-h-12 items-center gap-3 px-4 py-3">
+        <input
+          type="checkbox"
+          id={checkboxId}
+          aria-label={group.title}
+          checked={checked}
+          disabled={group.required || !onCheckedChange}
+          onChange={onCheckedChange}
+          className="h-4 w-4 shrink-0 accent-[var(--color-accent)] disabled:opacity-60"
+        />
+        <label
+          htmlFor={checkboxId}
+          className={`min-w-0 flex-1 ${onCheckedChange && !group.required ? "cursor-pointer" : "cursor-not-allowed"}`}
+        >
           <span className="block text-base font-medium text-[var(--color-text)]">
             {group.title} · {group.scopes.length} read scope{group.scopes.length === 1 ? "" : "s"}
           </span>
           <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">
             {group.summary}
           </span>
-        </span>
-        <IconChevronDown
-          size={14}
-          aria-hidden="true"
-          className={`shrink-0 text-[var(--color-text-muted)] transition-transform ${expanded ? "rotate-180" : ""}`}
-        />
-      </button>
+        </label>
+        <button
+          type="button"
+          aria-label={`Review ${group.title} scopes`}
+          aria-expanded={expanded}
+          aria-controls={panelId}
+          onClick={() => setExpanded((value) => !value)}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
+        >
+          <IconChevronDown
+            size={14}
+            aria-hidden="true"
+            className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+          />
+        </button>
+      </div>
       <div
         id={panelId}
         hidden={!expanded}

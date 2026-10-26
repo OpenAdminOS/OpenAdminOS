@@ -137,7 +137,9 @@ describe("IntuneChat guest exploration", () => {
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", {
+        name: /Approve \d+ read scopes and continue to Microsoft/,
+      }),
     );
     expect(
       await screen.findByRole("button", { name: "Send your question" }),
