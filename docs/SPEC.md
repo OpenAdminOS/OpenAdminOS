@@ -2100,11 +2100,32 @@ Removed from navigation:
 - **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent shell boundary. `/` redirects to `/chat`.
 - **Report issue**: available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
-### First run and contextual activation (updated for v0.5)
+### First run and contextual activation (updated 2026-10-26)
 
 Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`.
 
 **v0.5 decision (2026-08-29):** a launch with zero connected tenants opens the shared setup dialog automatically (permissions review, then Microsoft sign-in, then provider selection when no provider is connected), so a fresh install starts guided instead of presenting an inert chat screen. The dialog is dismissible and auto-opens at most once per launch; a restored pending intent takes precedence; the menu-bar companion window and renderer-only development never auto-open. Once at least one tenant exists, setup returns to being purely contextual. Users can still dismiss the dialog and inspect Chat, Agents, Changes, and Settings, select a suggested question, and edit a local draft before granting tenant access. The empty-state heading, explanation, and suggested questions stay centered as one block immediately above the composer rather than floating in the middle of the transcript area.
+
+**Superseded 2026-10-26: first-run choice and sample tenant.** The auto-opened permissions dialog asked every new user for admin consent before they had seen anything work, and many Intune admins cannot grant consent or create app registrations. A launch with zero tenants (same conditions as before: no restored pending intent, not the companion window, not renderer-only development) now opens a first-run choice instead, at most once per launch and dismissible. Options, in this order:
+
+1. **Try with sample data**: adds the sample tenant and makes it active. No Microsoft sign-in.
+2. **Connect your tenant**: the shared setup dialog below, with the OpenAdminOS app registration.
+3. **Use your organization's app registration**: the same dialog, opened on the own-registration form.
+
+**Sample tenant.** A built-in, fictional "Contoso (sample data)" tenant (`TenantRecord.kind = "sample"`, fixed id `openadminos-sample-tenant`, `.invalid` addresses only). It is a real tenant scope for hard constraint 3, so every surface keeps its normal tenant checks. A local fake Graph backend serves a curated, deterministic dataset whose timestamps are materialized relative to the current time, with planted findings for the Chat home prompts and the bundled read agents (stale and noncompliant devices, unencrypted Windows devices, inactive guests, disabled and report-only Conditional Access policies, expiring and expired app secrets, failed installs, risky sign-ins). Chat, cache preload, read agents, run history, and Changes run their production code paths against it. Rules:
+
+- No MSAL client, token, or browser sign-in is ever created for the sample tenant. Removing it deletes its runs and cache like any tenant and skips Microsoft account removal.
+- It is always labeled: a "Sample data" badge on the tenant chip, switcher, and answer scope line, a persistent notice above the Chat composer with a Connect action, and a "Sample data" marker on exports and shared results.
+- Write agents keep the full diff review and typed confirmation. Confirmed writes change an in-memory copy of the sample data only and the result says the change was simulated.
+- Schedules, Agent Team personas, Workspaces, and connector deliveries are refused on the sample tenant with a one-line reason and a Connect action.
+- Agent schedules follow the active tenant, so scheduled runs are skipped while the sample tenant is active. The schedules surface says so and offers to switch back to the most recently used connected tenant.
+- Removing the sample tenant resets its in-memory data, so simulated changes do not survive a remove and re-add.
+- With no LLM provider ready, Chat on the sample tenant answers every suggested question with a computed answer (an exact count plus the most relevant rows) derived from the current sample data, then any existing deterministic direct answer, and otherwise asks for a provider and lists suggested questions. Each such answer says that a provider adds explained answers. Real tenants keep requiring a provider. With a provider, the sample tenant behaves normally; its data is fictional, so hosted providers carry no tenant-data exposure, and the existing hosted-provider copy still applies.
+- Connecting a real tenant makes it active and leaves the sample tenant in place until the user removes it.
+
+**Connect flow wording (2026-10-26).** The permissions stage states that permissions are delegated: OpenAdminOS reads only what both the consented scopes and the signed-in admin's role allow, so Intune RBAC roles and scope tags still apply. The own-registration form says no client secret is used, so there is nothing secret to store on the device. After sign-in, the connected stage reports what now exists in the customer tenant in Entra terms: the enterprise application name, its application (client) ID, and the delegated permission count (default read scopes plus openid, profile, and offline_access), computed from the scope list rather than hard-coded. A custom registration reports its own client ID.
+
+Planned next (not yet built): a permission-area picker for the connect flow (Intune, Entra, Security), a generated registration script that an admin with app-registration rights can run, and an "Authentication and permissions" docs page for security reviewers. Separate app registrations per team or agent remain a later architecture change.
 
 Setup opens only when an action needs tenant context: sending Chat, starting or rerunning an agent, opening tenant Changes from its empty state, refreshing tenant cache data, or explicitly choosing Connect tenant. The shared setup dialog follows this order:
 
@@ -2442,7 +2463,7 @@ Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent 
 
 These must exist and work well before any public release.
 
-1. **Guided first-run activation**: the real Chat-first shell opens immediately, and a zero-tenant launch auto-opens the setup dialog (see §4a). Tenant permissions, browser sign-in, and provider readiness otherwise appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
+1. **Guided first-run activation**: the real Chat-first shell opens immediately, and a zero-tenant launch offers sample data, tenant connection, or an organization app registration (see §4a). Tenant permissions, browser sign-in, and provider readiness otherwise appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
 2. **MSAL consent flow**: Lawyer-grade transparency about Graph scopes requested. Read scopes only by default; write scopes requested per-agent at install time.
 3. **LLM provider configuration**: All 5 providers, test connection, model dropdowns populated by querying the provider, per-agent overrides.
 4. **Diff confirmation for write agents**: Side-by-side before/after, scope summary, typed confirmation for destructive actions.
@@ -2573,6 +2594,9 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `20-mcp-gateway.html` | v0.5 gateway settings, pairing, connected clients, and pending external proposals | ✅ Done |
 | `22-office.html` | Office room, original persona avatars, and assignment briefing | ✅ Done |
 | `21-telemetry.html` | v0.5 opt-in usage telemetry with the exact payload preview | ✅ Done |
+| `27-calm-shell.html` | Calm shell desktop redesign | ✅ Done |
+| `28-logo-explorations.html` | Logo concepts; concept A (oa ligature) shipped | ✅ Done |
+| `29-first-run.html` | First-run choice, sample tenant, and connected-stage summary | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
 

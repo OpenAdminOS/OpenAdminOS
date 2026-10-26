@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>29 · First run and sample tenant · OpenAdminOS</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
+  <!--
+    First run without a mandatory Microsoft sign-in.
+
+    Problem: a fresh install used to open the tenant setup dialog straight away
+    (21 read scopes needing admin consent, browser sign-in, provider choice).
+    Admins without consent rights never saw the product work.
+
+    This mockup shows:
+      A. First-run choice: sample data, connect your tenant, or your organization's app registration.
+      B. Chat on the sample tenant: badge in the tenant chip, persistent notice, evidence-only
+         answer when no LLM provider is ready.
+      C. Tenant switcher with the sample tenant next to a real one.
+      D. Connect flow: delegated-permission note on the review stage.
+      E. Connected stage: what now exists in Entra, in Entra's own terms.
+
+    Uses the calm-shell tokens from 27-calm-shell.html. Standalone on purpose.
+    The mockbar at the top is not part of the app.
+  -->
+  <style>
+    :root {
+      --font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-serif: "Newsreader", "Iowan Old Style", Charter, Georgia, serif;
+      --font-code: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --fs-small: 13px; --fs-ui: 14px; --fs-read: 16px; --fs-answer: 17.5px; --fs-title: 24px;
+      --ease: cubic-bezier(.2, .8, .2, 1);
+    }
+    [data-theme="light"] {
+      --bg: #FAF9F6; --sidebar: #F2F0EB; --surface: #FFFFFF; --raised: #FFFFFF; --bubble: #EEEBE5;
+      --hover: rgba(31,29,26,.05); --active: rgba(31,29,26,.085);
+      --line: rgba(31,29,26,.12); --line-soft: rgba(31,29,26,.065);
+      --text: #1F1D1A; --text-2: #5C5852; --text-3: #78736B;
+      --ink: #1F1D1A; --ink-hover: #37342F; --on-ink: #FAF9F6; --focus: #2F6FEB;
+      --ok: #3E7A4B; --warn: #8A5B05; --warn-soft: rgba(138,91,5,.08);
+      --danger: #A8382B; --danger-soft: rgba(168,56,43,.07);
+      --code-bg: rgba(31,29,26,.045); --scrim: rgba(28,25,22,.26);
+      --shadow-composer: 0 0 0 1px rgba(31,29,26,.09), 0 2px 4px rgba(31,29,26,.03), 0 10px 30px rgba(31,29,26,.06);
+      --shadow-pop: 0 0 0 1px rgba(31,29,26,.07), 0 10px 32px rgba(31,29,26,.14);
+      --shadow-dialog: 0 0 0 1px rgba(31,29,26,.06), 0 24px 64px rgba(31,29,26,.2);
+      color-scheme: light;
+    }
+    [data-theme="dark"] {
+      --bg: #17191D; --sidebar: #121418; --surface: #1E2126; --raised: #22262C; --bubble: #262A31;
+      --hover: rgba(255,255,255,.05); --active: rgba(255,255,255,.085);
+      --line: rgba(255,255,255,.12); --line-soft: rgba(255,255,255,.065);
+      --text: #F4F5F7; --text-2: #C2C7CE; --text-3: #98A0AB;
+      --ink: #F4F5F7; --ink-hover: #FFFFFF; --on-ink: #17191D; --focus: #8FB4FF;
+      --ok: #9CC88F; --warn: #E5C678; --warn-soft: rgba(229,198,120,.1);
+      --danger: #F1A0A0; --danger-soft: rgba(241,160,160,.1);
+      --code-bg: rgba(255,255,255,.055); --scrim: rgba(0,0,0,.55);
+      --shadow-composer: 0 0 0 1px rgba(255,255,255,.1), 0 8px 24px rgba(0,0,0,.25);
+      --shadow-pop: 0 0 0 1px rgba(255,255,255,.09), 0 12px 36px rgba(0,0,0,.45);
+      --shadow-dialog: 0 0 0 1px rgba(255,255,255,.09), 0 24px 70px rgba(0,0,0,.55);
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font: 400 var(--fs-ui)/1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
+    code, .mono { font-family: var(--font-code); font-size: .92em; }
+    code { background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
+
+    .mockbar { position: sticky; top: 0; z-index: 10; display: flex; gap: 8px; align-items: center; padding: 10px 24px; background: var(--sidebar); border-bottom: 1px solid var(--line); font-size: var(--fs-small); color: var(--text-2); }
+    .mockbar strong { color: var(--text); font-weight: 600; margin-right: auto; }
+    .mockbar button { font: inherit; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
+
+    .page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
+    .section { margin: 0 0 56px; }
+    .section > h2 { font: 500 var(--fs-title)/1.25 var(--font-serif); margin: 0 0 4px; }
+    .section > p.lede { margin: 0 0 18px; color: var(--text-2); max-width: 760px; }
+
+    /* App frame */
+    .frame { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--bg); box-shadow: var(--shadow-pop); }
+    .app { display: grid; grid-template-columns: 232px 1fr; min-height: 620px; position: relative; }
+    .side { background: var(--sidebar); border-right: 1px solid var(--line-soft); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
+    .brand { display: flex; align-items: center; gap: 8px; padding: 4px 8px 14px; font-weight: 600; }
+    .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; font: 600 11px var(--font-ui); letter-spacing: -.5px; }
+    .nav { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 8px; color: var(--text-2); }
+    .nav.on { background: var(--active); color: var(--text); font-weight: 500; }
+    .side .spacer { flex: 1; }
+
+    .tenant-chip { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-soft); background: var(--surface); }
+    .tile { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font: 600 12px var(--font-ui); color: #fff; flex: none; }
+    .tile.sample { background: repeating-linear-gradient(135deg, var(--warn) 0 5px, color-mix(in srgb, var(--warn) 78%, var(--bg)) 5px 10px); }
+    .tile.real { background: #4E6E9E; }
+    .tile.none { background: var(--bubble); color: var(--text-3); }
+    .tenant-chip .name { font-weight: 500; line-height: 1.2; }
+    .tenant-chip .sub { font-size: 12px; color: var(--text-3); }
+    .badge { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-weight: 500; padding: 1px 7px; border-radius: 999px; }
+    .badge.sample { color: var(--warn); background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
+    .badge.local { color: var(--ok); background: color-mix(in srgb, var(--ok) 9%, transparent); }
+
+    .main { display: flex; flex-direction: column; min-width: 0; }
+    .topline { display: flex; align-items: center; gap: 10px; height: 46px; padding: 0 20px; border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-small); }
+    .topline .grow { flex: 1; }
+    .col { width: 100%; max-width: 720px; margin: 0 auto; padding: 28px 24px 0; flex: 1; }
+
+    .user-msg { margin-left: auto; max-width: 78%; background: var(--bubble); padding: 10px 14px; border-radius: 14px; width: fit-content; }
+    .answer { margin-top: 22px; font: 400 var(--fs-answer)/1.6 var(--font-serif); }
+    .answer .scope { font: 400 12.5px/1.4 var(--font-ui); color: var(--text-3); display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+    .answer p { margin: 0 0 12px; }
+    table { width: 100%; border-collapse: collapse; font: 400 13.5px/1.4 var(--font-ui); margin: 6px 0 12px; }
+    th { text-align: left; font-weight: 500; color: var(--text-2); border-bottom: 1px solid var(--line); padding: 8px 10px 8px 0; }
+    td { border-bottom: 1px solid var(--line-soft); padding: 8px 10px 8px 0; }
+    .no-llm { font: 400 13px/1.45 var(--font-ui); color: var(--text-2); border-left: 2px solid var(--line); padding: 2px 0 2px 10px; margin-top: 4px; }
+    .no-llm a { color: var(--text); }
+
+    .notice { display: flex; align-items: center; gap: 10px; max-width: 720px; margin: 18px auto 8px; padding: 9px 12px; border-radius: 10px; background: var(--warn-soft); border: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); color: var(--text); font-size: var(--fs-small); width: calc(100% - 48px); }
+    .notice .grow { flex: 1; }
+    .composer { max-width: 720px; width: calc(100% - 48px); margin: 0 auto 10px; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-composer); padding: 12px 14px 10px; }
+    .composer .ph { color: var(--text-3); min-height: 24px; }
+    .composer .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--text-2); }
+    .composer .row .grow { flex: 1; }
+    .send { width: 30px; height: 30px; border-radius: 9px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; }
+    .trust { text-align: center; font-size: 12px; color: var(--text-3); margin: 0 0 14px; }
+
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 9px; font: 500 var(--fs-small) var(--font-ui); border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
+    .btn.primary { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
+    .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
+    .btn.small { height: 26px; padding: 0 9px; font-size: 12.5px; }
+    a.link { color: var(--text); text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 3px; }
+
+    /* Dialogs */
+    .scrim { position: absolute; inset: 0; background: var(--scrim); display: grid; place-items: center; padding: 24px; }
+    .dialog { width: 100%; max-width: 560px; background: var(--raised); border-radius: 16px; box-shadow: var(--shadow-dialog); overflow: hidden; }
+    .dialog header { padding: 20px 22px 6px; }
+    .dialog h3 { margin: 0; font: 500 21px/1.3 var(--font-serif); }
+    .dialog header p { margin: 4px 0 0; color: var(--text-2); }
+    .dialog .body { padding: 12px 22px 6px; }
+    .dialog footer { display: flex; align-items: center; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--line-soft); margin-top: 10px; }
+    .dialog footer .grow { flex: 1; }
+    .fine { font-size: 12.5px; color: var(--text-3); }
+
+    .choice { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: start; padding: 14px; border: 1px solid var(--line); border-radius: 12px; margin-bottom: 10px; background: var(--surface); }
+    .choice.primary { border-color: color-mix(in srgb, var(--ink) 45%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 20%, transparent); }
+    .choice .ico { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; background: var(--bubble); color: var(--text-2); }
+    .choice .t { font-weight: 600; }
+    .choice .d { color: var(--text-2); font-size: var(--fs-small); margin-top: 2px; }
+    .choice .meta { color: var(--text-3); font-size: 12px; margin-top: 6px; display: flex; gap: 12px; flex-wrap: wrap; }
+
+    .group { border: 1px solid var(--line-soft); border-radius: 10px; padding: 10px 12px; margin-bottom: 8px; display: flex; gap: 10px; align-items: baseline; }
+    .group .t { font-weight: 500; }
+    .group .d { color: var(--text-2); font-size: 12.5px; }
+    .group .n { margin-left: auto; color: var(--text-3); font-size: 12px; white-space: nowrap; }
+    .callout { border-radius: 10px; padding: 10px 12px; font-size: var(--fs-small); color: var(--text-2); background: var(--code-bg); margin: 10px 0 0; }
+    .callout strong { color: var(--text); font-weight: 600; }
+
+    .facts { display: grid; grid-template-columns: 150px 1fr; gap: 6px 14px; font-size: var(--fs-small); margin: 12px 0 2px; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 10px; }
+    .facts dt { color: var(--text-3); }
+    .facts dd { margin: 0; }
+    .ok-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 8px; }
+
+    /* Switcher */
+    .pop { position: absolute; left: 12px; bottom: 74px; width: 300px; background: var(--raised); border-radius: 12px; box-shadow: var(--shadow-pop); padding: 6px; }
+    .pop .item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; }
+    .pop .item.on { background: var(--active); }
+    .pop .item .grow { flex: 1; min-width: 0; }
+    .pop .item .sub { font-size: 12px; color: var(--text-3); }
+    .pop hr { border: 0; border-top: 1px solid var(--line-soft); margin: 6px 4px; }
+    .pop .act { padding: 7px 8px; border-radius: 8px; color: var(--text-2); font-size: var(--fs-small); }
+    .pop .act.danger { color: var(--danger); }
+
+    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    .solo { background: var(--bg); padding: 28px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 14px; }
+    .solo .dialog { box-shadow: var(--shadow-pop); }
+    .notes { margin-top: 14px; font-size: var(--fs-small); color: var(--text-2); }
+    .notes li { margin-bottom: 4px; }
+    @media (max-width: 960px) { .grid2 { grid-template-columns: 1fr; } .app { grid-template-columns: 1fr; } .side { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="mockbar">
+    <strong>29 · First run and sample tenant</strong>
+    <span>Theme</span>
+    <button type="button" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">Light / dark</button>
+  </div>
+
+  <div class="page">
+
+    <!-- A -->
+    <section class="section">
+      <h2>A. First run: three ways in, one of them instant</h2>
+      <p class="lede">Shown once per launch while no tenant exists, in place of the old auto-opened permissions dialog. Closing it leaves the guest shell as before. Sample data comes first because it needs nothing from the admin or their tenant.</p>
+      <div class="frame">
+        <div class="app">
+          <aside class="side">
+            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
+            <div class="nav on">Chat</div><div class="nav">Agent Team</div><div class="nav">Agents</div><div class="nav">Runs</div><div class="nav">Changes</div>
+            <div class="spacer"></div>
+            <div class="tenant-chip"><span class="tile none">?</span><div><div class="name">No tenant</div><div class="sub">Connect or try sample data</div></div></div>
+          </aside>
+          <div class="main"><div class="topline">Chat</div><div class="col"></div></div>
+          <div class="scrim">
+            <div class="dialog" role="dialog" aria-labelledby="fr-title">
+              <header>
+                <h3 id="fr-title">Start with OpenAdminOS</h3>
+                <p>You can look around with sample data first and connect your tenant later.</p>
+              </header>
+              <div class="body">
+                <div class="choice primary">
+                  <span class="ico" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+                  </span>
+                  <div>
+                    <div class="t">Try with sample data</div>
+                    <div class="d">Explore a fictional Contoso tenant. No Microsoft sign-in. Nothing leaves this device unless you pick a hosted provider.</div>
+                    <div class="meta"><span>120 devices · 80 users · 8 CA policies</span><span>Remove it any time</span></div>
+                  </div>
+                  <button class="btn primary">Open sample tenant</button>
+                </div>
+                <div class="choice">
+                  <span class="ico" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
+                  </span>
+                  <div>
+                    <div class="t">Connect your tenant</div>
+                    <div class="d">Sign in with the OpenAdminOS app. A Global Administrator or Privileged Role Administrator approves read-only access once.</div>
+                  </div>
+                  <button class="btn">Connect</button>
+                </div>
+                <div class="choice">
+                  <span class="ico" aria-hidden="true">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4v5c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V7z"/></svg>
+                  </span>
+                  <div>
+                    <div class="t">Use your organization's app registration</div>
+                    <div class="d">For tenants that block third-party apps. You enter the client ID your admin created.</div>
+                  </div>
+                  <button class="btn">Set up</button>
+                </div>
+              </div>
+              <footer>
+                <span class="fine grow">Hosted providers and tenant permissions are explained before anything is sent.</span>
+                <button class="btn ghost">Not now</button>
+              </footer>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- B -->
+    <section class="section">
+      <h2>B. Chat on the sample tenant</h2>
+      <p class="lede">The tenant chip, the notice above the composer, and every answer's scope line say "Sample data". With no LLM provider ready, Chat still answers from the computed evidence and says what a provider would add. With a provider, answers are normal.</p>
+      <div class="frame">
+        <div class="app">
+          <aside class="side">
+            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
+            <div class="nav on">Chat</div><div class="nav">Agent Team</div><div class="nav">Agents</div><div class="nav">Runs</div><div class="nav">Changes</div>
+            <div class="spacer"></div>
+            <div class="tenant-chip"><span class="tile sample">C</span><div><div class="name">Contoso</div><div class="sub"><span class="badge sample">Sample data</span></div></div></div>
+          </aside>
+          <div class="main">
+            <div class="topline"><span>Stale devices</span><span class="grow"></span><span class="badge sample">Sample data</span></div>
+            <div class="col">
+              <div class="user-msg">Which managed devices have not synced in the last 7 days?</div>
+              <div class="answer">
+                <div class="scope"><span class="badge sample">Sample data</span><span>Contoso · Intune managed devices · cached 2 min ago</span></div>
+                <p>14 of 120 managed devices have not synced in the last 7 days. 9 are Windows, 3 macOS, 2 iOS.</p>
+                <table>
+                  <thead><tr><th>Device</th><th>OS</th><th>Last sync</th><th>Compliance</th><th>Primary user</th></tr></thead>
+                  <tbody>
+                    <tr><td>CTS-LT-0417</td><td>Windows 11</td><td>41 days ago</td><td>Noncompliant</td><td class="mono">megan.b@contoso-sample.invalid</td></tr>
+                    <tr><td>CTS-LT-0388</td><td>Windows 11</td><td>23 days ago</td><td>Compliant</td><td class="mono">diego.s@contoso-sample.invalid</td></tr>
+                    <tr><td>CTS-MB-0092</td><td>macOS 15</td><td>12 days ago</td><td>In grace period</td><td class="mono">lee.g@contoso-sample.invalid</td></tr>
+                  </tbody>
+                </table>
+                <div class="no-llm">Shown without an LLM summary. <a href="#">Pick a provider in Settings</a> to get explained answers.</div>
+              </div>
+            </div>
+            <div class="notice"><span class="grow"><strong>Sample data.</strong> Answers describe the fictional Contoso tenant. Connect your tenant to see your own.</span><button class="btn small">Connect your tenant</button></div>
+            <div class="composer">
+              <div class="ph">Ask about devices, users, apps, policies, sign-ins, or identity</div>
+              <div class="row"><span>No provider · evidence only</span><span class="grow"></span><span class="send">↑</span></div>
+            </div>
+            <p class="trust">Sample tenant · Nothing leaves this device</p>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Schedules, Agent Team personas, workspaces and connector deliveries are refused on the sample tenant with a one-line reason and a Connect action.</li>
+        <li>Write agents run their full diff review and typed confirmation. Changes apply to an in-memory copy of the sample data and the result says "Simulated on sample data".</li>
+        <li>Exports and shared results carry a "Sample data" marker.</li>
+      </ul>
+    </section>
+
+    <!-- C -->
+    <section class="section">
+      <h2>C. Tenant switcher with a sample and a real tenant</h2>
+      <p class="lede">The sample tenant keeps its striped tile and badge next to real tenants. Connecting a real tenant makes it active but does not remove the sample.</p>
+      <div class="frame">
+        <div class="app" style="min-height: 420px;">
+          <aside class="side">
+            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
+            <div class="nav on">Chat</div><div class="nav">Agent Team</div><div class="nav">Agents</div>
+            <div class="spacer"></div>
+            <div class="tenant-chip"><span class="tile real">F</span><div><div class="name">fabrikam.com</div><div class="sub">admin@fabrikam.com</div></div></div>
+          </aside>
+          <div class="main"><div class="topline">Chat</div><div class="col"></div></div>
+          <div class="pop">
+            <div class="item on"><span class="tile real">F</span><div class="grow"><div>fabrikam.com</div><div class="sub">admin@fabrikam.com</div></div><span aria-label="Active">✓</span></div>
+            <div class="item"><span class="tile sample">C</span><div class="grow"><div>Contoso <span class="badge sample">Sample data</span></div><div class="sub">Fictional tenant on this device</div></div></div>
+            <hr>
+            <div class="act">Connect another tenant</div>
+            <div class="act danger">Remove sample tenant</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- D + E -->
+    <section class="section">
+      <h2>D and E. Connecting a real tenant</h2>
+      <p class="lede">The review stage says plainly that permissions are delegated. The connected stage reports what was added to the tenant, using Entra's name for it, so an admin can find it under Enterprise applications.</p>
+      <div class="grid2">
+        <div class="solo">
+          <div class="dialog">
+            <header><h3>Connect a Microsoft 365 tenant</h3><p>Review the read access OpenAdminOS requests before Microsoft sign-in.</p></header>
+            <div class="body">
+              <div class="group"><span class="t">Devices and configuration</span><span class="n">6 read scopes</span></div>
+              <div class="group"><span class="t">Apps</span><span class="n">2 read scopes</span></div>
+              <div class="group"><span class="t">Users, groups, and directory</span><span class="n">4 read scopes</span></div>
+              <div class="group"><span class="t">Identity and access</span><span class="n">3 read scopes</span></div>
+              <div class="group"><span class="t">Security and sign-ins</span><span class="n">6 read scopes</span></div>
+              <div class="callout"><strong>Delegated permissions.</strong> OpenAdminOS can only read what both these permissions and your own admin role allow. Intune RBAC roles and scope tags still apply.</div>
+              <div class="callout">No client secret is used. OpenAdminOS signs in as a public client (Authorization Code with PKCE), so there is no secret to store on this device.</div>
+            </div>
+            <footer><button class="btn ghost">Cancel</button><span class="grow"></span><button class="btn primary">Approve and continue to Microsoft</button></footer>
+          </div>
+        </div>
+        <div class="solo">
+          <div class="dialog">
+            <header><h3><span class="ok-dot" aria-hidden="true"></span>Tenant connected</h3><p>fabrikam.com is now the active tenant.</p></header>
+            <div class="body">
+              <p style="margin: 0;">The enterprise application OpenAdminOS is now in fabrikam.com with 24 delegated Microsoft Graph permissions, all read-only. Find it in Entra admin center under Enterprise applications.</p>
+              <dl class="facts">
+                <dt>Enterprise application</dt><dd>OpenAdminOS</dd>
+                <dt>Application (client) ID</dt><dd class="mono">d1de0a94-f67a-421d-8804-a235955ffd69</dd>
+                <dt>Permissions</dt><dd>21 read scopes + openid, profile, offline_access</dd>
+                <dt>Signed in as</dt><dd>admin@fabrikam.com</dd>
+              </dl>
+              <p class="fine" style="margin-top: 10px;">The sample tenant is still available in the tenant switcher. Remove it there when you no longer need it.</p>
+            </div>
+            <footer><span class="grow"></span><button class="btn primary">Done</button></footer>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</body>
+</html>
