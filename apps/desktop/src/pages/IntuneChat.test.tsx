@@ -30,6 +30,40 @@ function LocationProbe() {
 }
 
 describe("IntuneChat guest exploration", () => {
+  it("keeps sample data labeled above the composer", async () => {
+    const user = userEvent.setup();
+    renderRoute(<IntuneChat />, {
+      path: "/chat/:conversationId?",
+      route: "/chat",
+      bridge: makeMockBridge(
+        {},
+        createMockAppState({
+          tenants: [
+            {
+              id: "openadminos-sample-tenant",
+              kind: "sample",
+              displayName: "Contoso (sample data)",
+              username: "admin@contoso-sample.invalid",
+              homeAccountId: "openadminos-sample-account",
+              addedAt: "2026-10-26T12:00:00.000Z",
+            },
+          ],
+          activeTenantId: "openadminos-sample-tenant",
+        }),
+      ),
+    });
+
+    expect(
+      await screen.findByText(
+        "Sample data. Answers describe the fictional Contoso tenant. Connect your tenant to see your own.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Connect your tenant" }));
+    expect(
+      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+    ).toBeInTheDocument();
+  });
+
   it("lets a user draft from a suggestion and asks for setup only on Send", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge(

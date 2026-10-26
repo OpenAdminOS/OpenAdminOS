@@ -3,6 +3,7 @@ import type { RunRecord } from "./openAdminOS.js";
 export interface RunReportContext {
   agentName?: string;
   tenantName?: string;
+  sampleData?: boolean;
 }
 
 export function runReportPlaintext(
@@ -18,6 +19,7 @@ export function runReportPlaintext(
     `Duration: ${formatDuration(run)}`,
     `Provider: ${run.providerId ?? "Not available"}${run.model ? ` (${run.model})` : ""}`,
     `Tenant: ${tenant}`,
+    ...(ctx.sampleData ? ["Data: Sample data from the fictional Contoso tenant"] : []),
   ];
 
   if (run.summary) {
@@ -61,6 +63,7 @@ export function runReportMarkdown(
     `**Duration:** ${formatDuration(run)}`,
     `**Provider:** ${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`,
     `**Tenant:** ${tenant}`,
+    ...(ctx.sampleData ? ["**Data:** Sample data from the fictional Contoso tenant"] : []),
   ];
 
   if (run.summary) {
@@ -105,8 +108,21 @@ export function aiGeneratedNote(run: RunRecord): string | undefined {
   return `This report includes AI-generated text, produced in OpenAdminOS with ${source}.`;
 }
 
-export function runReportJson(run: RunRecord): string {
-  return JSON.stringify(run, null, 2);
+export function runReportJson(
+  run: RunRecord,
+  ctx: RunReportContext = {},
+): string {
+  return JSON.stringify(
+    ctx.sampleData
+      ? {
+          sampleData: true,
+          sampleDataNotice: "Fictional Contoso tenant data",
+          run,
+        }
+      : run,
+    null,
+    2,
+  );
 }
 
 function formatDuration(run: RunRecord): string {

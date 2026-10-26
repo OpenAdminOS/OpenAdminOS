@@ -25,7 +25,7 @@ function entraTierLabel(tier: "free" | "p1" | "p2" | "unknown" | undefined): str
 
 export function TenantSwitcher() {
   const navigate = useNavigate();
-  const { state, setActiveTenant, disconnectTenant } = useAppState();
+  const { state, addSampleTenant, setActiveTenant, disconnectTenant } = useAppState();
   const { openSetup } = useSetupFlow();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -33,6 +33,7 @@ export function TenantSwitcher() {
   const [pendingDisconnect, setPendingDisconnect] = useState<{
     tenantId: string;
     displayName: string;
+    sample: boolean;
   } | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const activeTenant = state.activeTenantId
@@ -82,7 +83,11 @@ export function TenantSwitcher() {
     setBusy(true);
     try {
       await disconnectTenant(pendingDisconnect.tenantId);
-      toast.success(`${pendingDisconnect.displayName} disconnected.`);
+      toast.success(
+        pendingDisconnect.sample
+          ? "Sample tenant removed."
+          : `${pendingDisconnect.displayName} disconnected.`,
+      );
       setPendingDisconnect(null);
     } catch (error) {
       const detail = userFacingErrorReason(
@@ -97,7 +102,9 @@ export function TenantSwitcher() {
   };
 
   const tooltip = activeTenant
-    ? `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.`
+    ? activeTenant.kind === "sample"
+      ? "Fictional Contoso sample data. No Microsoft sign-in."
+      : `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.`
     : state.tenants.length > 0
       ? "No active tenant. Choose a connected tenant."
       : "No tenant connected. Open setup to connect one.";
@@ -108,13 +115,7 @@ export function TenantSwitcher() {
         <Tooltip content={tooltip} side="bottom">
           <button
             type="button"
-            onClick={() => {
-              if (state.tenants.length === 0) {
-                openSetup();
-                return;
-              }
-              setOpen((current) => !current);
-            }}
+            onClick={() => setOpen((current) => !current)}
             aria-haspopup="menu"
             aria-expanded={open}
             aria-label={
@@ -136,6 +137,9 @@ export function TenantSwitcher() {
             <span className="min-w-0 truncate font-medium">
               {activeTenant?.displayName ?? "No tenant"}
             </span>
+            {activeTenant?.kind === "sample" ? (
+              <Pill tone="warning">Sample data</Pill>
+            ) : null}
             <IconChevronDown size={11} className="shrink-0 text-[var(--color-text-muted)]" />
           </button>
         </Tooltip>
@@ -174,18 +178,18 @@ export function TenantSwitcher() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-base font-medium text-[var(--color-text)]">{tenant.displayName}</span>
                         <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
-                          {domain} · {entraTierLabel(tenant.entraTier)}
+                          {tenant.kind === "sample" ? "Fictional tenant" : `${domain} · ${entraTierLabel(tenant.entraTier)}`}
                         </span>
                       </span>
                       {active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
                     </button>
                     <button
                       type="button"
-                      aria-label={`Disconnect ${tenant.displayName}`}
-                      title={`Disconnect ${tenant.displayName}`}
+                      aria-label={tenant.kind === "sample" ? "Remove sample tenant" : `Disconnect ${tenant.displayName}`}
+                      title={tenant.kind === "sample" ? "Remove sample tenant" : `Disconnect ${tenant.displayName}`}
                       disabled={busy}
                       onClick={() => {
-                        setPendingDisconnect({ tenantId: tenant.id, displayName: tenant.displayName });
+                        setPendingDisconnect({ tenantId: tenant.id, displayName: tenant.displayName, sample: tenant.kind === "sample" });
                         setOpen(false);
                       }}
                       className="mr-1.5 rounded-[7px] p-1.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)] group-hover:opacity-100"
@@ -197,6 +201,29 @@ export function TenantSwitcher() {
               })
             )}
             <div className="my-1 h-px bg-[var(--color-border-soft)]" />
+            {!state.tenants.some((tenant) => tenant.kind === "sample") ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={() => {
+                  setBusy(true);
+                  void addSampleTenant()
+                    .then(() => setOpen(false))
+                    .catch((error) =>
+                      toast.error(
+                        error instanceof Error
+                          ? error.message
+                          : "The sample tenant could not be added.",
+                      ),
+                    )
+                    .finally(() => setBusy(false));
+                }}
+                className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+              >
+                <IconPlus size={12} /> Try with sample data
+              </button>
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -225,19 +252,25 @@ export function TenantSwitcher() {
 
       <Modal open={pendingDisconnect !== null} onClose={() => { if (!busy) setPendingDisconnect(null); }} size="md">
         <ModalHeader
-          title="Disconnect tenant"
+          title={pendingDisconnect?.sample ? "Remove sample tenant" : "Disconnect tenant"}
           subtitle={pendingDisconnect?.displayName}
-          badge={<Pill tone="danger">Local credentials</Pill>}
+          badge={
+            <Pill tone={pendingDisconnect?.sample ? "warning" : "danger"}>
+              {pendingDisconnect?.sample ? "Sample data" : "Local credentials"}
+            </Pill>
+          }
           onClose={() => setPendingDisconnect(null)}
         />
         <div className="space-y-4 p-6">
           <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-            Cached credentials for this tenant will be removed from this machine. You can reconnect the tenant later.
+            {pendingDisconnect?.sample
+              ? "The fictional tenant, its runs, chats, workspaces, and cached rows will be deleted from this device. You can add it again later."
+              : "Cached credentials for this tenant will be removed from this machine. You can reconnect the tenant later."}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" disabled={busy} onClick={() => setPendingDisconnect(null)}>Cancel</Button>
             <Button variant="danger" disabled={busy} onClick={() => void disconnect()}>
-              {busy ? "Disconnecting" : "Disconnect"}
+              {busy ? "Removing" : pendingDisconnect?.sample ? "Remove sample tenant" : "Disconnect"}
             </Button>
           </div>
         </div>

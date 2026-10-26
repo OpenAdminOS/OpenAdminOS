@@ -8,6 +8,7 @@ import {
   StatusDot,
   Switch,
 } from "./ui";
+import { SampleSchedulesPausedNotice } from "./SampleSchedulesPausedNotice";
 
 const PRESETS = [
   { id: "900", label: "15m", seconds: 15 * 60 },
@@ -84,6 +85,7 @@ export function AgentScheduleCard({
 
   return (
     <div className="space-y-4">
+      <SampleSchedulesPausedNotice />
       <Switch
         checked={enabled}
         disabled={busy || (!enabled && draftSeconds < 60)}

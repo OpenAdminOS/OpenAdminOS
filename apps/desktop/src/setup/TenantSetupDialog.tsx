@@ -6,6 +6,7 @@ import { Badge, StatusDot } from "../components/ui";
 import { ProviderNotReadyCard } from "../components/provider-setup/ProviderNotReadyCard";
 import { TrustBanner } from "../components/TrustBanner";
 import {
+  IconArrowRight,
   IconCheck,
   IconChevronDown,
   IconCloud,
@@ -27,6 +28,8 @@ import type { PendingIntent } from "./pending-intent";
 import { groupRequestedScopes } from "./scope-groups";
 
 export type SetupStage =
+  | "first-run"
+  | "own-registration"
   | "permissions"
   | "waiting"
   | "timeout"
@@ -47,6 +50,9 @@ export function TenantSetupDialog({
   activeProviderId,
   onClose,
   onConnect,
+  onAddSampleTenant,
+  onChooseConnect,
+  onChooseOwnRegistration,
   onKeepWaiting,
   onTryAgain,
   onSelectProvider,
@@ -65,6 +71,9 @@ export function TenantSetupDialog({
   activeProviderId: ProviderId;
   onClose: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
+  onAddSampleTenant: () => void;
+  onChooseConnect: () => void;
+  onChooseOwnRegistration: () => void;
   onKeepWaiting: () => void;
   onTryAgain: () => void;
   onSelectProvider: (id: ProviderId) => void;
@@ -83,6 +92,14 @@ export function TenantSetupDialog({
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement}
       </div>
+      {stage === "first-run" && (
+        <FirstRunStep
+          onAddSampleTenant={onAddSampleTenant}
+          onChooseConnect={onChooseConnect}
+          onChooseOwnRegistration={onChooseOwnRegistration}
+          onCancel={onClose}
+        />
+      )}
       {stage === "permissions" && (
         <PermissionsStep
           intent={intent}
@@ -91,6 +108,17 @@ export function TenantSetupDialog({
           scopesError={scopesError}
           onCancel={onClose}
           onConnect={onConnect}
+        />
+      )}
+      {stage === "own-registration" && (
+        <PermissionsStep
+          intent={intent}
+          agentName={agentName}
+          scopes={scopes}
+          scopesError={scopesError}
+          onCancel={onClose}
+          onConnect={onConnect}
+          initialCustomOpen
         />
       )}
       {stage === "waiting" && <WaitingStep onCancel={onClose} />}
@@ -118,6 +146,7 @@ export function TenantSetupDialog({
       {stage === "ready" && (
         <ReadyStep
           tenant={activeTenant}
+          delegatedPermissionCount={scopes ? scopes.length + 3 : undefined}
           intent={intent}
           agentName={agentName}
           onCancel={onClose}
@@ -128,6 +157,79 @@ export function TenantSetupDialog({
   );
 }
 
+function FirstRunStep({
+  onAddSampleTenant,
+  onChooseConnect,
+  onChooseOwnRegistration,
+  onCancel,
+}: {
+  onAddSampleTenant: () => void;
+  onChooseConnect: () => void;
+  onChooseOwnRegistration: () => void;
+  onCancel: () => void;
+}) {
+  const options = [
+    {
+      label: SETUP_COPY.sampleAction,
+      description: SETUP_COPY.sampleDescription,
+      action: onAddSampleTenant,
+      primary: true,
+    },
+    {
+      label: SETUP_COPY.connectAction,
+      description: SETUP_COPY.connectDescription,
+      action: onChooseConnect,
+      primary: false,
+    },
+    {
+      label: SETUP_COPY.ownRegistrationAction,
+      description: SETUP_COPY.ownRegistrationDescription,
+      action: onChooseOwnRegistration,
+      primary: false,
+    },
+  ];
+  return (
+    <>
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-6">
+        {options.map((option) => (
+          <section
+            key={option.label}
+            className={`rounded-xl p-4 ring-1 ${
+              option.primary
+                ? "bg-[var(--color-accent-soft)] ring-[var(--color-accent)]/30"
+                : "bg-[var(--color-surface)] ring-[var(--color-border-soft)]"
+            }`}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <h3 className="text-base font-medium text-[var(--color-text)]">
+                  {option.label}
+                </h3>
+                <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
+                  {option.description}
+                </p>
+              </div>
+              <Button
+                data-autofocus={option.primary || undefined}
+                variant={option.primary ? "primary" : "secondary"}
+                size="sm"
+                aria-label={option.label}
+                onClick={option.action}
+                trailingIcon={<IconArrowRight size={12} />}
+              >
+                {option.primary ? "Open" : "Choose"}
+              </Button>
+            </div>
+          </section>
+        ))}
+      </div>
+      <DialogFooter>
+        <Button variant="ghost" onClick={onCancel}>Not now</Button>
+      </DialogFooter>
+    </>
+  );
+}
+
 function PermissionsStep({
   intent,
   agentName,
@@ -135,6 +237,7 @@ function PermissionsStep({
   scopesError,
   onCancel,
   onConnect,
+  initialCustomOpen = false,
 }: {
   intent: PendingIntent | null;
   agentName?: string;
@@ -142,11 +245,12 @@ function PermissionsStep({
   scopesError: string | null;
   onCancel: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
+  initialCustomOpen?: boolean;
 }) {
   const groups = useMemo(() => groupRequestedScopes(scopes ?? []), [scopes]);
   // Bring-your-own app registration: closed by default so the common
   // path stays one button, but always visible as an option.
-  const [customOpen, setCustomOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(initialCustomOpen);
   const [clientId, setClientId] = useState("");
   const [directoryTenantId, setDirectoryTenantId] = useState("");
   return (
@@ -221,6 +325,7 @@ function PermissionsStep({
         <div className="mt-5 space-y-2 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-xs leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           <p>{SETUP_COPY.readOnlyNote}</p>
           <p>{SETUP_COPY.signInScopesNote}</p>
+          <p>{SETUP_COPY.delegatedPermissionsNote}</p>
           <p>{SETUP_COPY.betaNote}</p>
         </div>
 
@@ -239,6 +344,8 @@ function PermissionsStep({
               <label className="block text-sm text-[var(--color-text-soft)]">
                 {SETUP_COPY.clientIdLabel}
                 <input
+                  name="tenant-client-id"
+                  autoComplete="off"
                   value={clientId}
                   onChange={(event) => setClientId(event.target.value)}
                   placeholder="00000000-0000-0000-0000-000000000000"
@@ -252,6 +359,8 @@ function PermissionsStep({
               <label className="block text-sm text-[var(--color-text-soft)]">
                 {SETUP_COPY.directoryIdLabel}
                 <input
+                  name="tenant-directory-id"
+                  autoComplete="off"
                   value={directoryTenantId}
                   onChange={(event) => setDirectoryTenantId(event.target.value)}
                   placeholder="contoso.onmicrosoft.com"
@@ -530,17 +639,25 @@ function ProviderStep({
 
 function ReadyStep({
   tenant,
+  delegatedPermissionCount,
   intent,
   agentName,
   onCancel,
   onResume,
 }: {
   tenant: TenantRecord | undefined;
+  delegatedPermissionCount: number | undefined;
   intent: PendingIntent | null;
   agentName?: string;
   onCancel: () => void;
   onResume: () => void;
 }) {
+  const registrationSummary = tenant?.appRegistration?.kind === "custom"
+    ? `Signed in with your app registration ${tenant.appRegistration.clientId}.`
+    : tenant?.appRegistration?.kind === "openadminos"
+      ? `The enterprise application OpenAdminOS (app ID ${tenant.appRegistration.clientId}) is now in ${tenant.displayName} with ${delegatedPermissionCount === undefined ? "delegated" : `${delegatedPermissionCount} delegated`} Microsoft Graph permissions, all read-only. Find it in Entra admin center under Enterprise applications.`
+      : "The tenant is connected and active. You can keep exploring or start a tenant-backed action.";
+
   return (
     <>
       <div className="min-h-[280px] flex-1 p-6">
@@ -556,10 +673,13 @@ function ReadyStep({
           <Badge tone="success"><StatusDot tone="success" /> Active</Badge>
         </div>
         <p className="mt-5 text-base leading-6 text-[var(--color-text-soft)]">
-          {intent
-            ? "Your original action is ready. Continuing sends it through the normal tenant, provider, and confirmation checks."
-            : "The tenant is connected and active. You can keep exploring or start a tenant-backed action."}
+          {registrationSummary}
         </p>
+        {intent && (
+          <p className="mt-3 text-sm leading-5 text-[var(--color-text-muted)]">
+            Your original action is ready. Continuing sends it through the normal tenant, provider, and confirmation checks.
+          </p>
+        )}
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>{intent ? "Cancel" : "Close"}</Button>
@@ -586,6 +706,7 @@ function intentNeedsProvider(intent: PendingIntent | null): boolean {
 }
 
 function dialogTitle(stage: SetupStage): string {
+  if (stage === "first-run") return SETUP_COPY.firstRunTitle;
   if (stage === "provider") return SETUP_COPY.providerTitle;
   if (stage === "ready") return SETUP_COPY.connectedTitle;
   return SETUP_COPY.title;
@@ -593,6 +714,10 @@ function dialogTitle(stage: SetupStage): string {
 
 function dialogSubtitle(stage: SetupStage): string {
   switch (stage) {
+    case "first-run":
+      return SETUP_COPY.firstRunSubtitle;
+    case "own-registration":
+      return SETUP_COPY.subtitle;
     case "permissions":
       return SETUP_COPY.subtitle;
     case "waiting":
@@ -610,6 +735,10 @@ function dialogSubtitle(stage: SetupStage): string {
 
 function setupAnnouncement(stage: SetupStage, tenant: TenantRecord | undefined): string {
   switch (stage) {
+    case "first-run":
+      return "Choose how to start OpenAdminOS.";
+    case "own-registration":
+      return "Your own app registration form is ready.";
     case "waiting":
       return "Waiting for Microsoft sign-in.";
     case "timeout":

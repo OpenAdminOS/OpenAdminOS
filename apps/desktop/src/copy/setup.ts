@@ -1,6 +1,17 @@
 import type { PendingIntent } from "../setup/pending-intent";
 
 export const SETUP_COPY = {
+  firstRunTitle: "Choose how to start",
+  firstRunSubtitle: "Open sample data now, or connect a Microsoft 365 tenant.",
+  sampleAction: "Try with sample data",
+  sampleDescription:
+    "Explore a fictional Contoso tenant. No Microsoft sign-in. Nothing leaves this device unless you pick a hosted provider.",
+  connectAction: "Connect your tenant",
+  connectDescription:
+    "Sign in with the OpenAdminOS app. A Global Administrator or Privileged Role Administrator approves read-only access once.",
+  ownRegistrationAction: "Use your organization's app registration",
+  ownRegistrationDescription:
+    "For tenants that block third-party apps. You enter the client ID your admin created.",
   title: "Connect a Microsoft 365 tenant",
   subtitle: "Review the read access OpenAdminOS requests before Microsoft sign-in.",
   dailyRole:
@@ -44,7 +55,9 @@ export const SETUP_COPY = {
   ownRegistrationBody:
     "For organizations that do not allow third-party multi-tenant apps. Register a public client (mobile and desktop) in Entra with the redirect URI http://localhost, then enter its details below.",
   ownRegistrationNoSecret:
-    "No client secret is needed or accepted. OpenAdminOS signs in as a public client using Authorization Code with PKCE, so a secret could not be kept safe in a desktop app.",
+    "No client secret is used. OpenAdminOS signs in as a public client (Authorization Code with PKCE), so there is no secret to store on this device.",
+  delegatedPermissionsNote:
+    "Delegated permissions: OpenAdminOS can only read what both these permissions and your own admin role allow. Intune RBAC roles and scope tags still apply.",
   clientIdLabel: "Application (client) ID",
   clientIdHint: "The GUID from your app registration overview.",
   directoryIdLabel: "Directory (tenant) ID",

@@ -8,6 +8,7 @@ import {
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
+import { SampleSchedulesPausedNotice } from "../components/SampleSchedulesPausedNotice";
 import { useToast } from "../components/Toast";
 import {
   IconChevronDown,
@@ -84,6 +85,7 @@ export default function AgentsHome() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
+  const schedulesPaused = activeTenant?.kind === "sample";
 
   const installedBySlug = useMemo(
     () => new Map(state.installedAgents.map((agent) => [agent.slug, agent])),
@@ -126,6 +128,7 @@ export default function AgentsHome() {
 
   const runScheduledBatch = useCallback(
     async (agents: AgentSummary[], mode: "due" | "all") => {
+      if (schedulesPaused) return;
       if (agents.length === 0) {
         toast.info(mode === "due" ? "No schedules are due." : "No schedules are enabled.");
         return;
@@ -155,7 +158,7 @@ export default function AgentsHome() {
         setBulkRunning(null);
       }
     },
-    [requireTenantAndProvider, startRun, toast],
+    [requireTenantAndProvider, schedulesPaused, startRun, toast],
   );
 
   useEffect(() => {
@@ -443,14 +446,14 @@ export default function AgentsHome() {
                 {
                   id: "run-due",
                   label: bulkRunning === "due" ? "Queueing due schedules" : `Run due now (${dueAgents.length})`,
-                  disabled: bulkRunning !== null || dueAgents.length === 0,
+                  disabled: schedulesPaused || bulkRunning !== null || dueAgents.length === 0,
                   icon: <IconPlay size={13} />,
                   onSelect: () => void runScheduledBatch(dueAgents, "due"),
                 },
                 {
                   id: "run-all",
                   label: bulkRunning === "all" ? "Queueing schedules" : "Run all scheduled",
-                  disabled: bulkRunning !== null || scheduledAgents.length === 0,
+                  disabled: schedulesPaused || bulkRunning !== null || scheduledAgents.length === 0,
                   icon: <IconPlay size={13} />,
                   onSelect: () => void runScheduledBatch(scheduledAgents, "all"),
                 },
@@ -462,6 +465,7 @@ export default function AgentsHome() {
           <span>{rows.length} of {sourceRows.length} {source === "hub" ? "hub" : "installed"} agents</span>
           {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
         </div>
+        {scheduledOnly ? <SampleSchedulesPausedNotice className="mb-3" /> : null}
         {scheduledOnly && scheduledAgents.length > 0 && schedulerRegistered === false ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             <span>Background scheduling is off. Schedules run only while OpenAdminOS is open.</span>

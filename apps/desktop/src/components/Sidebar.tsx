@@ -578,7 +578,11 @@ function AccountRow({
             <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-raised)] text-xs font-semibold text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">{initials}</span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-[var(--color-text)]">{activeTenant?.username ?? "No tenant"}</span>
-              <span className="block text-xs text-[var(--color-text-muted)]">{tenantCount} tenant{tenantCount === 1 ? "" : "s"}</span>
+              <span className="block text-xs text-[var(--color-text-muted)]">
+                {activeTenant?.kind === "sample"
+                  ? "Sample data"
+                  : `${tenantCount} tenant${tenantCount === 1 ? "" : "s"}`}
+              </span>
             </span>
             <IconChevronRight size={11} className="text-[var(--color-text-muted)]" />
           </button>
