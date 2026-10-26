@@ -96,6 +96,13 @@
           "children": []
         },
         {
+          "title": "Authentication and permissions",
+          "source": "trust/authentication.md",
+          "route": "trust-model/authentication",
+          "path": "trust-model/authentication",
+          "children": []
+        },
+        {
           "title": "Hosted providers",
           "source": "trust/hosted-providers.md",
           "route": "trust-model/hosted-providers",
@@ -360,6 +367,10 @@
     {
       "source": "trust/local-first",
       "destination": "trust-model/local-first"
+    },
+    {
+      "source": "trust/authentication",
+      "destination": "trust-model/authentication"
     },
     {
       "source": "trust/hosted-providers",
