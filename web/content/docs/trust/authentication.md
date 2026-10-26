@@ -16,7 +16,7 @@ This page describes how OpenAdminOS authenticates to a Microsoft 365 tenant. It 
 | Where the user signs in | The system browser, on Microsoft's own sign-in page. OpenAdminOS never sees the password or MFA challenge. |
 | Redirect | `http://localhost` loopback on a random free port. The listener accepts one response and closes on success, cancel, or a five-minute timeout. |
 | Permission type | Delegated only. OpenAdminOS has no application permissions and cannot act without a signed-in admin. |
-| Default permissions | Read-only Microsoft Graph scopes, plus the standard `openid`, `profile`, and `offline_access` sign-in scopes. |
+| Default permissions | Read-only Microsoft Graph scopes for the areas you choose, plus the standard `openid`, `profile`, and `offline_access` sign-in scopes. |
 | Write permissions | None by default. Each write agent requests its own scope when it is installed or first run, with its own Microsoft consent screen. |
 | Graph endpoint | `https://graph.microsoft.com/beta`. Tokens are sent only to Microsoft. |
 | Token storage | MSAL token cache on the device, encrypted with the operating system's secure storage (Keychain on macOS, DPAPI on Windows, libsecret on Linux). |
@@ -51,11 +51,27 @@ Organizations that do not allow third-party multi-tenant applications can create
 
 Do not create a client secret. OpenAdminOS signs in as a public client, so there is no secret to store on the device. Each custom registration gets its own token cache, separate from the default application's.
 
-## Consent Prompts
+### Setup script for your Entra administrator
 
-The default read scopes are requested together at first sign-in, so Chat and the bundled read agents do not raise further consent prompts later. Microsoft's consent screen lists every scope. The connect dialog in OpenAdminOS shows the same list, grouped by area, with the reason each scope is needed, before the browser opens.
+If you cannot create app registrations yourself, choose **Use your organization's app registration** and then **Generate setup script**. Enter a display name that follows your naming convention and select the areas. OpenAdminOS generates a PowerShell script for the Microsoft Graph PowerShell SDK, plus a short message to send with it. The script:
 
-OpenAdminOS never widens scopes during a Chat answer. A request for data outside the consented scopes is refused by name instead of raising an unexpected consent prompt.
+1. Explains each change it makes in a comment block at the top.
+2. Signs in with `Application.ReadWrite.All` and `DelegatedPermissionGrant.ReadWrite.All`, which the administrator running it must hold.
+3. Stops without changes if an application with the same display name already exists.
+4. Creates a single-tenant public client registration with the `http://localhost` redirect URI.
+5. Adds the delegated Microsoft Graph scopes for the selected areas, looking up their permission IDs in the tenant at run time.
+6. Creates the enterprise application and grants tenant-wide admin consent for the same scopes.
+7. Prints the application (client) ID and directory (tenant) ID to enter in OpenAdminOS.
+
+The script never creates a client secret or certificate. Generation happens on your device and does not use an LLM.
+
+## Permission Areas
+
+The connect dialog groups the read scopes into areas: Devices and configuration, Apps, Users groups and directory, Identity and access, and Security and sign-ins. All areas are selected by default. Clear the ones your team should not read, for example Security and sign-ins for an Intune team. Users, groups, and directory is always included, because tenant identity, users, and groups are used by every area. Microsoft's consent screen then lists only the scopes for the selected areas.
+
+OpenAdminOS records which scopes were granted for each tenant. Chat and the cache only read from granted areas. A question that needs another area is answered with a message naming it, without calling Microsoft Graph and without raising a consent prompt. To add an area later, use Add access in Settings, Tenants. Starting an agent that needs an area not yet granted asks Microsoft for consent for its scopes, and its run review says so first. Scheduled runs never open a sign-in.
+
+Chat and cache refreshes may ask you to sign in again when a session has expired, but only for scopes already granted.
 
 ## Disconnecting And Revoking
 
