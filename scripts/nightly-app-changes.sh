@@ -34,7 +34,9 @@ echo "Comparing with $base." >&2
 # Paths that never change the installed app. Everything else, including
 # agents/, packages/, apps/ and build scripts, does. The scripts listed here
 # are contributor tooling (docs generation, screenshot capture, smoke tests,
-# QA setup, script tests); a new script counts until it is added here.
+# QA setup, script tests) and release tooling that decides, describes, or
+# checks a release without changing what it builds. A new script counts
+# until it is added here.
 changed="$(git diff --name-only "$base" "$commit" -- . \
   ':(exclude)stats' \
   ':(exclude)web' \
@@ -46,8 +48,12 @@ changed="$(git diff --name-only "$base" "$commit" -- . \
   ':(exclude,glob)*.md' \
   ':(exclude)scripts/*.test.mjs' \
   ':(exclude)scripts/capture-screenshots.mjs' \
+  ':(exclude)scripts/check-release-compatibility.mjs' \
   ':(exclude)scripts/docs-site-routes.mjs' \
   ':(exclude)scripts/generate-gitbook-docs.mjs' \
+  ':(exclude)scripts/nightly-app-changes.sh' \
+  ':(exclude)scripts/nightly-release-notes.mjs' \
+  ':(exclude)scripts/prepare-release.mjs' \
   ':(exclude)scripts/publish-docs-index.mjs' \
   ':(exclude)scripts/render-office-rehearsal.mjs' \
   ':(exclude)scripts/setup-qa.sh' \
