@@ -1116,10 +1116,25 @@ export class RunService {
 
       const wasTerminal = previous ? isTerminalRunStatus(previous.status) : false;
       const isNowTerminal = isTerminalRunStatus(run.status);
-      const nextRun =
+      let nextRun =
         isNowTerminal && run.status === "completed" && run.trigger === "schedule"
           ? this.withScheduleChangeState(run, persisted.runs)
           : run;
+      const sampleWrite =
+        isNowTerminal &&
+        run.status === "completed" &&
+        persisted.tenants.some(
+          (tenant) => tenant.id === run.tenantId && tenant.kind === "sample",
+        ) &&
+        persisted.installedAgents.some(
+          (agent) => agent.slug === run.agentSlug && agent.mode === "write",
+        );
+      if (sampleWrite && !nextRun.summary?.includes("simulated on sample data")) {
+        nextRun = {
+          ...nextRun,
+          summary: `${nextRun.summary ?? "Run completed."} The change was simulated on sample data.`,
+        };
+      }
       const exists = previous !== undefined;
       const nextRuns = exists
         ? persisted.runs.map((existing) => (existing.id === nextRun.id ? nextRun : existing))

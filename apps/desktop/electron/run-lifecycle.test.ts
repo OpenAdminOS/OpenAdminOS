@@ -90,6 +90,70 @@ describe("run lifecycle", () => {
     assert.equal(h.state().runs[0]?.status, "awaiting-confirmation");
     assert.equal(h.requests.length, 0);
   });
+
+  it("does not mark a sample read run as a simulated change when a plan is present", async () => {
+    const h = harness();
+    const agent = {
+      id: "read-agent",
+      slug: "read-agent",
+      name: "Read agent",
+      mode: "read",
+    } as AgentSummary;
+    const run = {
+      id: "sample-read",
+      agentSlug: agent.slug,
+      tenantId: "openadminos-sample-tenant",
+      status: "completed",
+      queuedAt: new Date().toISOString(),
+      summary: "Read completed.",
+      plan: { summary: "Diagnostic plan", confirmationPhrase: "", actions: [] },
+      steps: [],
+      logs: [],
+    } as RunRecord;
+    await h.host.write({
+      ...h.state(),
+      installedAgents: [agent],
+      tenants: [{ id: run.tenantId, kind: "sample" }] as RunPersistedState["tenants"],
+    });
+
+    await h.service.persistRunSnapshot(run);
+
+    assert.equal(h.state().runs[0]?.summary, "Read completed.");
+  });
+
+  it("marks a confirmed sample write run as a simulated change", async () => {
+    const h = harness();
+    const agent = {
+      id: "write-agent",
+      slug: "write-agent",
+      name: "Write agent",
+      mode: "write",
+    } as AgentSummary;
+    const run = {
+      id: "sample-write",
+      agentSlug: agent.slug,
+      tenantId: "openadminos-sample-tenant",
+      status: "completed",
+      queuedAt: new Date().toISOString(),
+      confirmedAt: new Date().toISOString(),
+      summary: "Write completed.",
+      plan: { summary: "Retire one device", confirmationPhrase: "RETIRE 1 DEVICE", actions: [] },
+      steps: [],
+      logs: [],
+    } as RunRecord;
+    await h.host.write({
+      ...h.state(),
+      installedAgents: [agent],
+      tenants: [{ id: run.tenantId, kind: "sample" }] as RunPersistedState["tenants"],
+    });
+
+    await h.service.persistRunSnapshot(run);
+
+    assert.equal(
+      h.state().runs[0]?.summary,
+      "Write completed. The change was simulated on sample data.",
+    );
+  });
 });
 
 it('coalesces a streaming burst and persists its terminal state without a per-token backlog', async () => {

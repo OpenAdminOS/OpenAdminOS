@@ -624,6 +624,9 @@ export function formatTeamsDeliveryMessage(
     "",
     `**Status:** ${status}`,
     `**Tenant:** ${tenant.displayName}`,
+    ...(tenant.kind === "sample"
+      ? ["**Data:** Sample data from the fictional Contoso tenant"]
+      : []),
     `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `**Queued:** ${run.queuedAt}`,
   ];
@@ -664,6 +667,9 @@ export function formatWhatsAppDeliveryMessage(
     `Agent: ${agent.name}`,
     `Status: ${status}`,
     `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    ...(tenant?.kind === "sample"
+      ? ["Data: Sample data from the fictional Contoso tenant"]
+      : []),
     `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `Queued: ${run.queuedAt}`,
   ];
@@ -704,6 +710,9 @@ export function formatOutlookDeliveryMessage(
     "",
     `**Status:** ${status}`,
     `**Tenant:** ${tenant.displayName}`,
+    ...(tenant.kind === "sample"
+      ? ["**Data:** Sample data from the fictional Contoso tenant"]
+      : []),
     `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `**Queued:** ${run.queuedAt}`,
   ];
@@ -747,6 +756,9 @@ export function formatChatDeliveryMessage(
     `*Agent:* ${agent.name}`,
     `*Status:* ${status}`,
     `*Tenant:* ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    ...(tenant?.kind === "sample"
+      ? ["*Data:* Sample data from the fictional Contoso tenant"]
+      : []),
     `*Trigger:* ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `*Queued:* ${run.queuedAt}`,
   ];
@@ -788,6 +800,9 @@ export function formatPlainDeliveryMessage(
     `Agent: ${agent.name}`,
     `Status: ${status}`,
     `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    ...(tenant?.kind === "sample"
+      ? ["Data: Sample data from the fictional Contoso tenant"]
+      : []),
     `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `Queued: ${run.queuedAt}`,
   ];
