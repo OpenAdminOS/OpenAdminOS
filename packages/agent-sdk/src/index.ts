@@ -1,3 +1,7 @@
+import type { PermissionAreaId } from "./permission-areas.js";
+
+export * from "./permission-areas.js";
+
 export type ProviderId =
   | "ollama"
   | "apple-foundation"
@@ -528,30 +532,6 @@ export interface StartRunOptions {
   };
 }
 
-export const DEFAULT_GRAPH_READ_SCOPE_NAMES = [
-  "DeviceManagementManagedDevices.Read.All",
-  "DeviceManagementConfiguration.Read.All",
-  "DeviceManagementApps.Read.All",
-  "DeviceManagementServiceConfig.Read.All",
-  "DeviceManagementScripts.Read.All",
-  "DeviceManagementRBAC.Read.All",
-  "Device.Read.All",
-  "GroupMember.Read.All",
-  "Organization.Read.All",
-  "Directory.Read.All",
-  "User.Read.All",
-  "Policy.Read.All",
-  "Application.Read.All",
-  "AuditLog.Read.All",
-  "IdentityRiskyUser.Read.All",
-  "SecurityEvents.Read.All",
-  "RoleManagement.Read.Directory",
-  "AdministrativeUnit.Read.All",
-  "Domain.Read.All",
-  "SecurityAlert.Read.All",
-  "SecurityIncident.Read.All",
-] as const;
-
 /**
  * One Microsoft Graph permission scope the host will request, surfaced
  * to the renderer so the pre-consent scope preview can list exactly
@@ -606,6 +586,12 @@ export interface TenantRecord {
    * the app default.
    */
   appRegistration?: TenantAppRegistration;
+  /**
+   * Microsoft Graph delegated scopes granted for this tenant. Absent means
+   * the full default read set for tenants connected before permission areas
+   * were introduced. The sample tenant always exposes every area.
+   */
+  grantedScopes?: string[];
 }
 
 /**
@@ -636,6 +622,8 @@ export interface ConnectTenantOptions {
    * app. `directoryTenantId` is required only for single-tenant apps.
    */
   appRegistration?: { clientId: string; directoryTenantId?: string };
+  /** Permission areas selected in the pre-consent review. */
+  permissionAreaIds?: PermissionAreaId[];
 }
 
 /** A subscribed SKU surfaced in the Settings → Tenants license panel. */
@@ -1104,6 +1092,8 @@ export interface GraphCacheResourceStatus {
   pageLimitReached?: boolean;
   refreshedAt?: string;
   scopeSet: string[];
+  /** Permission area required before this resource can be cached. */
+  notGrantedArea?: string;
   lastError?: string;
   /**
    * Total this resource holds in the tenant, as reported by Graph via
@@ -2754,6 +2744,7 @@ export interface OpenAdminOSApi {
    */
   getRequestedScopes(): Promise<RequestedScope[]>;
   connectTenant(options?: ConnectTenantOptions): Promise<AppState>;
+  addTenantAccess(tenantId: string, areaId: PermissionAreaId): Promise<AppState>;
   /** Add or reactivate the built-in fictional tenant. This is idempotent. */
   addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;

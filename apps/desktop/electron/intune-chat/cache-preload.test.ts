@@ -157,3 +157,71 @@ it('preloads incidents within their 50-row endpoint limit and follows the next p
     assert.fail('Incident preload did not complete');
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+it("skips cache resources outside the tenant granted set", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "ungranted-preload-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeTenantId: "tenant-1",
+      activeProviderId: "ollama",
+      tenants: [
+        {
+          id: "tenant-1",
+          displayName: "Directory only",
+          homeAccountId: "test",
+          username: "test@example.invalid",
+          addedAt: new Date().toISOString(),
+          grantedScopes: [
+            "User.Read.All",
+            "GroupMember.Read.All",
+            "Directory.Read.All",
+            "Organization.Read.All",
+          ],
+        },
+      ],
+      installedAgents: [],
+      runs: [],
+    }),
+  );
+  const graphPaths: string[] = [];
+  const store = new AppStateStore({
+    filePath,
+    userDataPath: dir,
+    statsApiUrl: "",
+    tokenStore: { read: async () => "", write: async () => {} },
+    graphFactory: () => ({
+      request: async (input: { path?: string }) => {
+        graphPaths.push(input.path ?? "unknown");
+        return { value: [] };
+      },
+    } as unknown as RunGraphApi),
+  });
+  try {
+    await store.startGraphCachePreload({
+      tenantId: "tenant-1",
+      resources: ["managedDevices"],
+    });
+    for (let attempt = 0; attempt < 50; attempt += 1) {
+      const status = await store.getGraphCacheStatus("tenant-1");
+      if (status.preload?.status !== "running") {
+        assert.equal(
+          graphPaths.includes("/deviceManagement/managedDevices"),
+          false,
+        );
+        assert.equal(status.preload?.total, 0);
+        const managedDevices = status.resources.find(
+          (resource) => resource.resource === "managedDevices",
+        );
+        assert.equal(managedDevices?.notGrantedArea, "Devices and configuration");
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.fail("Ungrant preload did not finish");
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

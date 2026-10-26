@@ -9,6 +9,7 @@ type FirstRunCaptureAction =
   | "wait-first-run"
   | "add-sample-chat"
   | "open-sample-switcher"
+  | "open-connect-permissions"
   | "open-own-registration"
   | "close-setup"
   | "open-paused-schedules";
@@ -31,6 +32,9 @@ export async function captureFirstRunShots(
 
   await runStep(window, "open-sample-switcher");
   await captureThemes(window, outDir, "sample-switcher");
+
+  await runStep(window, "open-connect-permissions");
+  await captureThemes(window, outDir, "connect-permissions");
 
   await runStep(window, "open-own-registration");
   await captureThemes(window, outDir, "own-registration");
@@ -102,7 +106,8 @@ async function setCaptureTheme(
       localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)});
       window.dispatchEvent(new StorageEvent("storage", { key: "openadminos:appearance:v1" }));
       await document.fonts.ready;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // Theme colors transition; wait past the transition before capturing.
+      await new Promise((resolve) => setTimeout(resolve, 1500));
     })()`,
     true,
   );
@@ -260,7 +265,24 @@ async function firstRunCaptureStepScript(
     return;
   }
 
+  if (action === "open-connect-permissions") {
+    const connect = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
+    ).find((button) => button.textContent?.trim() === "Connect tenant");
+    if (!connect) throw new Error("Connect tenant menu item was not found.");
+    connect.click();
+    await waitFor(
+      () => bodyText().includes("Connect a Microsoft 365 tenant"),
+      "tenant setup dialog",
+    );
+    await delay(250);
+    return;
+  }
+
   if (action === "open-own-registration") {
+    if (bodyText().includes("Connect a Microsoft 365 tenant")) {
+      await clickButton("Connect with your own app registration");
+    } else {
     const connect = Array.from(
       document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
     ).find((button) => button.textContent?.trim() === "Connect tenant");
@@ -271,6 +293,7 @@ async function firstRunCaptureStepScript(
       "tenant setup dialog",
     );
     await clickButton("Connect with your own app registration");
+    }
     await waitFor(
       () =>
         Boolean(document.querySelector('input[name="tenant-client-id"]')) &&

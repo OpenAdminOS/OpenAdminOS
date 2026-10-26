@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Choose which permission areas OpenAdminOS may read when connecting a tenant (devices and configuration, apps, identity, security and sign-ins), and add areas later from Settings. Chat and the cache stay within the granted areas.
+- Generate a PowerShell setup script for your Entra administrator that creates your organization's own OpenAdminOS app registration with only the selected areas, explains every change it makes, and never creates a secret.
 - First run offers three ways in: try a built-in sample tenant (fictional Contoso data, no Microsoft sign-in), connect your tenant, or use your organization's app registration. The sample tenant is labeled everywhere, answers the suggested Chat questions even without an LLM provider, and can be removed at any time.
 - A docs page on authentication and permissions for security reviewers: public-client sign-in with PKCE, delegated-only permissions, the enterprise application a tenant receives, token storage, and revocation.
 - `npm run screenshots:landing` captures the website's app screenshots: the demo tenant at 1280 x 800 and 2x, in light and dark, with realistic display values. It replaces the old clickable-demo capture.

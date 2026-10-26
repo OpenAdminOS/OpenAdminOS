@@ -284,7 +284,9 @@ describe("Settings provider section", () => {
     expect(bridge.refreshGraphCache).not.toHaveBeenCalled();
 
     await user.click(
-      screen.getByRole("button", { name: "Approve and continue to Microsoft" }),
+      screen.getByRole("button", {
+        name: /Approve \d+ read scopes and continue to Microsoft/,
+      }),
     );
     expect(
       await screen.findByRole("button", { name: "Continue refresh" }),
@@ -723,5 +725,41 @@ describe("Settings provider section", () => {
     expect(
       screen.getByRole("dialog", { name: /Disconnect Contoso IT/i }),
     ).toBeInTheDocument();
+  });
+
+  it("shows granted areas and adds a missing area through reviewed consent", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const tenant = {
+      ...base.tenants[0]!,
+      grantedScopes: [
+        "User.Read.All",
+        "GroupMember.Read.All",
+        "Directory.Read.All",
+        "Organization.Read.All",
+      ],
+    };
+    const state = createMockAppState({ tenants: [tenant] });
+    const addTenantAccess = vi.fn(async () => state);
+    const bridge = makeMockBridge({ addTenantAccess }, state);
+
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/tenants",
+      bridge,
+    });
+
+    expect(await screen.findByText("Users, groups, and directory")).toBeInTheDocument();
+    await user.click(
+      screen.getByRole("button", { name: "Add Devices and configuration access" }),
+    );
+    expect(
+      screen.getByRole("dialog", { name: "Add Devices and configuration access" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("6 delegated read scopes")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Continue to Microsoft" }));
+    await waitFor(() =>
+      expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", "devices"),
+    );
   });
 });

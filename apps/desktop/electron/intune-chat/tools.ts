@@ -12,8 +12,6 @@ import type {
   RunGraphApi,
 } from "@openadminos/agent-sdk";
 
-import { DEFAULT_SCOPE_METADATA } from "@openadminos/runtime";
-
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
@@ -62,6 +60,7 @@ export interface IntuneChatToolContext {
   signal?: AbortSignal;
   tenantId: string;
   store: IntelligenceSqliteStore;
+  grantedScopes: ReadonlySet<string>;
   graphForScopes(scopes: string[]): Promise<RunGraphApi>;
   refreshResource(resource: GraphCacheResourceKind): Promise<GraphCacheRefreshResourceResult>;
   getDriftTimeline(input: DriftTimelineInput): Promise<DriftTimelineResult>;
@@ -372,7 +371,7 @@ function executeToolUnchecked(
     case "query_cache":
       return Promise.resolve(queryCache(ctx, params));
     case "find_graph_endpoint":
-      return Promise.resolve(findGraphEndpoint(params));
+      return Promise.resolve(findGraphEndpoint(ctx, params));
     case "graph_get":
       return graphGet(ctx, params);
     case "refresh_resource":
@@ -391,7 +390,10 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
     ? Math.max(1, staleAfterHours) * 60 * 60 * 1000
     : undefined;
   const nowMs = Date.now();
-  const resources = ctx.store.getGraphCacheStatus(ctx.tenantId, [...GRAPH_CACHE_RESOURCES]);
+  const definitions = GRAPH_CACHE_RESOURCES.filter((definition) =>
+    definition.scopes.every((scope) => ctx.grantedScopes.has(scope)),
+  );
+  const resources = ctx.store.getGraphCacheStatus(ctx.tenantId, definitions);
   return {
     tenantId: ctx.tenantId,
     staleAfterHours,
@@ -420,6 +422,7 @@ function listCachedResources(ctx: IntuneChatToolContext, params: unknown): unkno
 
 function queryCache(ctx: IntuneChatToolContext, params: unknown): unknown {
   const resource = resourceParam(params, "resource");
+  assertResourceGranted(ctx, resource);
   let filters: GraphCacheQueryPredicate[] | undefined;
   let sort: ReturnType<typeof sortParam>;
   let selectedFields: string[] | undefined;
@@ -547,7 +550,7 @@ function documentedScopesForEndpoint(endpoint: {
   return endpoint.scopesDelegated;
 }
 
-function findGraphEndpoint(params: unknown): unknown {
+function findGraphEndpoint(ctx: IntuneChatToolContext, params: unknown): unknown {
   const query = stringParam(params, "query");
   if (!query || query.trim().length === 0) {
     throw new Error("find_graph_endpoint requires a query describing the data needed.");
@@ -557,14 +560,16 @@ function findGraphEndpoint(params: unknown): unknown {
   const matches = searchEndpoints(query, { method: "GET", limit });
   const candidates = matches.map((endpoint) => {
     const documented = documentedScopesForEndpoint(endpoint);
-    const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
+    const consented = documented.filter((scope) => ctx.grantedScopes.has(scope));
+    const resourceScopes = resourceScopesForPath(endpoint.path);
     // Mirror graph_get validation: planner-declared paths run with
     // their declared scopes even when the catalog's least-privileged
     // list does not intersect the consented set.
     const usable =
       documented.length === 0 ||
       consented.length > 0 ||
-      plannerExemptionApplies(endpoint.path);
+      (plannerExemptionApplies(endpoint.path) &&
+        resourceScopes.every((scope) => ctx.grantedScopes.has(scope)));
     return {
       path: endpoint.path,
       summary: endpoint.summary,
@@ -593,7 +598,7 @@ async function graphGet(ctx: IntuneChatToolContext, params: unknown): Promise<un
     throw new Error("graph_get is read-only. Only GET is accepted.");
   }
   const path = normalizeGraphPath(stringParam(params, "path"));
-  const validation = validateGraphGetPath(path);
+  const validation = validateGraphGetPath(path, ctx.grantedScopes);
   const queryInput = objectParam(params, "query");
   const skuInventory = path.toLowerCase() === "/subscribedskus";
   if (skuInventory && Object.keys(queryInput ?? {}).some((key) => key !== "$select")) {
@@ -700,6 +705,7 @@ async function refreshResource(
   params: unknown,
 ): Promise<unknown> {
   const resource = resourceParam(params, "resource");
+  assertResourceGranted(ctx, resource);
   const result = await ctx.refreshResource(resource);
   return {
     resource: result.resource,
@@ -760,9 +766,6 @@ async function queryDrift(
   });
 }
 
-/** Read scopes this app asks a tenant to consent to. */
-const CONSENTED_SCOPES = new Set(DEFAULT_SCOPE_METADATA.map((entry) => entry.name));
-
 /**
  * Decide whether a Graph GET may be attempted, and with which scopes.
  *
@@ -781,7 +784,10 @@ const CONSENTED_SCOPES = new Set(DEFAULT_SCOPE_METADATA.map((entry) => entry.nam
  * the consented set, because asking for more would trigger an
  * interactive consent prompt in the middle of an answer.
  */
-function validateGraphGetPath(path: string): {
+function validateGraphGetPath(
+  path: string,
+  grantedScopes: ReadonlySet<string>,
+): {
   scopes: string[];
   summary?: string;
 } {
@@ -797,7 +803,7 @@ function validateGraphGetPath(path: string): {
     );
   }
   const documented = documentedScopesForEndpoint(endpoint);
-  const consented = documented.filter((scope) => CONSENTED_SCOPES.has(scope));
+  const consented = documented.filter((scope) => grantedScopes.has(scope));
   // Planner-declared cache paths carry host-verified scopes, consented
   // for cache refresh. The catalog lists least-privileged permissions
   // only, so a broader declared scope (Policy.Read.All for the
@@ -806,9 +812,21 @@ function validateGraphGetPath(path: string): {
   // The exemption is limited to the declared path and its by-id
   // children; deeper descendants stay subject to the catalog check.
   const resourceScopes = resourceScopesForPath(path);
-  if (documented.length > 0 && consented.length === 0 && !plannerExemptionApplies(endpoint.path)) {
+  const missingResourceScopes = resourceScopes.filter(
+    (scope) => !grantedScopes.has(scope),
+  );
+  if (missingResourceScopes.length > 0) {
     throw new Error(
-      `This endpoint requires ${documented.slice(0, 3).join(" or ")}, which OpenAdminOS does not request. No tenant data was read.`,
+      `This endpoint requires ${missingResourceScopes.join(" or ")}, which was not granted for this tenant. No tenant data was read.`,
+    );
+  }
+  const exemptionGranted =
+    plannerExemptionApplies(endpoint.path) &&
+    resourceScopes.length > 0 &&
+    resourceScopes.every((scope) => grantedScopes.has(scope));
+  if (documented.length > 0 && consented.length === 0 && !exemptionGranted) {
+    throw new Error(
+      `This endpoint requires ${documented.slice(0, 3).join(" or ")}, which was not granted for this tenant. No tenant data was read.`,
     );
   }
   // Where the catalog documents no permissions, fall back to the token
@@ -816,6 +834,21 @@ function validateGraphGetPath(path: string): {
   // does not cover, and that rejection is surfaced verbatim.
   const scopes = [...new Set([...consented, ...resourceScopes])].sort();
   return { scopes, summary: endpoint.summary };
+}
+
+function assertResourceGranted(
+  ctx: IntuneChatToolContext,
+  resource: GraphCacheResourceKind,
+): void {
+  const definition = definitionForResource(resource);
+  const missing = definition.scopes.filter(
+    (scope) => !ctx.grantedScopes.has(scope),
+  );
+  if (missing.length > 0) {
+    throw new Error(
+      `${definition.label} needs ${missing.join(", ")}, which was not granted for this tenant.`,
+    );
+  }
 }
 
 /**
