@@ -4,7 +4,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import type { GraphCacheResourceKind, RunGraphApi } from "@openadminos/agent-sdk";
+import {
+  DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  type GraphCacheResourceKind,
+  type RunGraphApi,
+} from "@openadminos/agent-sdk";
 
 import { executeIntuneChatTool } from "./tools.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -345,7 +349,7 @@ describe("Intune Chat read-only tools", () => {
       const execution = await executeIntuneChatTool(ctx, "graph_get", {
         path: "/groups/11111111-2222-3333-4444-555555555555/drives",
       });
-      assert.match(execution.trace.error ?? "", /does not request/);
+      assert.match(execution.trace.error ?? "", /was not granted/);
       assert.equal(requests, 0);
 
       // The by-id child of the same collection stays allowed with the
@@ -381,7 +385,7 @@ describe("Intune Chat read-only tools", () => {
         "/deviceManagement/deviceCompliancePolicies/getDevicesScheduledToRetire()",
       ]) {
         const fn = await executeIntuneChatTool(ctx, "graph_get", { path: fnPath });
-        assert.match(fn.trace.error ?? "", /does not request/, fnPath);
+        assert.match(fn.trace.error ?? "", /was not granted/, fnPath);
         assert.equal(requests, 2, fnPath);
       }
 
@@ -389,7 +393,7 @@ describe("Intune Chat read-only tools", () => {
       const cast = await executeIntuneChatTool(ctx, "graph_get", {
         path: "/applications/microsoft.graph.agentIdentityBlueprint",
       });
-      assert.match(cast.trace.error ?? "", /does not request/);
+      assert.match(cast.trace.error ?? "", /was not granted/);
       assert.equal(requests, 2);
 
       // Verified deeper reads: another user's memberships are covered
@@ -769,6 +773,7 @@ function toolContext(
   return {
     tenantId: "tenant-1",
     store,
+    grantedScopes: new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES),
     graphForScopes:
       overrides.graphForScopes ??
       (async () => ({
@@ -966,7 +971,7 @@ describe("Graph endpoint discovery and reachability", () => {
       });
 
       assert.ok(result.trace.error, "reading mail must be refused");
-      assert.match(result.trace.error ?? "", /does not request/);
+      assert.match(result.trace.error ?? "", /was not granted/);
       assert.equal(called, false, "no Graph call may be made for a refused endpoint");
     } finally {
       store.close();

@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
 
-import type { ProviderSummary } from "@openadminos/agent-sdk";
+import {
+  DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  grantedScopeSet,
+  type ProviderSummary,
+} from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { AppStateStore } from "./state.js";
@@ -48,6 +52,11 @@ describe("upgrade compatibility", () => {
       const state = await store.getAppState();
       assert.equal(state.activeTenantId, "tenant-v030");
       assert.equal(state.tenants[0]?.displayName, "Legacy tenant");
+      assert.deepEqual(
+        [...grantedScopeSet(state.tenants[0]!)],
+        [...DEFAULT_GRAPH_READ_SCOPE_NAMES],
+      );
+      assert.deepEqual(state.tenants[1]?.grantedScopes, ["User.Read.All"]);
       assert.equal(state.installedAgents[0]?.slug, "legacy-agent");
       assert.equal(state.runs[0]?.id, "run-v030");
       assert.equal(state.activeModelByProviderId?.ollama, "legacy-model");
@@ -62,6 +71,8 @@ describe("upgrade compatibility", () => {
       await store.setRegistryInstallCountsEnabled(false);
       const persisted = JSON.parse(await readFile(statePath, "utf8")) as typeof v030State;
       assert.equal(persisted.tenants[0]?.id, "tenant-v030");
+      assert.equal(persisted.tenants[0]?.grantedScopes, undefined);
+      assert.deepEqual(persisted.tenants[1]?.grantedScopes, ["User.Read.All"]);
       assert.equal(persisted.runs[0]?.id, "run-v030");
       assert.equal(persisted.installedAgents[0]?.settings?.staleDays, 90);
       assert.equal(persisted.connectors?.teams?.config?.teamId, "legacy-team");
@@ -193,6 +204,15 @@ const v030State = {
       addedAt: "2026-07-05T00:00:00.000Z",
       lastUsedAt: "2026-07-05T00:00:00.000Z",
       entraTier: "p1",
+    },
+    {
+      id: "tenant-scoped",
+      displayName: "Scoped tenant",
+      username: "admin@scoped.example",
+      homeAccountId: "home-scoped",
+      addedAt: "2026-07-05T00:00:00.000Z",
+      lastUsedAt: "2026-07-05T00:00:00.000Z",
+      grantedScopes: ["User.Read.All"],
     },
   ],
   activeTenantId: "tenant-v030",

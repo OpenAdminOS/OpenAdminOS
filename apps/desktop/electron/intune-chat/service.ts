@@ -7,6 +7,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  grantedScopeSet,
+  missingPermissionAreasForScopes,
+  permissionAreaForScope,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
   graphAccessDenialText,
@@ -116,6 +119,7 @@ import {
   planChatContext,
   requiredScopesForResources,
   selfTrainingCandidateFromPrompt,
+  type PlannedChatContext,
 } from "./planner.js";
 import { executeIntuneChatTool, type IntuneChatToolContext } from "./tools.js";
 import { answerPilotChatMessage } from "./pilot-chat.js";
@@ -125,6 +129,26 @@ type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
   promptBlock: string;
 };
+
+function restrictPlannedResourcesForTenant(
+  planned: PlannedChatContext,
+  tenant: TenantRecord,
+): string | undefined {
+  const originalResources = [...planned.resources];
+  const granted = grantedScopeSet(tenant);
+  planned.resources = originalResources.filter((resource) =>
+    definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
+  );
+  if (originalResources.length === 0 || planned.resources.length > 0) {
+    return undefined;
+  }
+  const missingAreas = missingPermissionAreasForScopes(
+    requiredScopesForResources(originalResources),
+    granted,
+  );
+  const areaTitle = missingAreas[0]?.title ?? "additional Microsoft Graph";
+  return `This question needs ${areaTitle} access, which was not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+}
 
 type GraphCacheRefreshProgressEvent =
   | {
@@ -226,7 +250,10 @@ export class IntuneChatService {
       throw new Error("A cache preload is already running for this tenant.");
     if (options.resources?.length === 0)
       throw new Error("Select at least one resource to preload.");
-    const resources = sanitizeGraphResources(options.resources);
+    const granted = grantedScopeSet(tenant);
+    const resources = sanitizeGraphResources(options.resources).filter((resource) =>
+      definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
+    );
     const controller = new AbortController();
     const job: import("@openadminos/agent-sdk").GraphCachePreloadJob = {
       tenantId: tenant.id,
@@ -1264,10 +1291,15 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     return {
       tenantId: resolvedTenant.id,
-      resources: store.getGraphCacheStatus(
-        resolvedTenant.id,
-        [...GRAPH_CACHE_RESOURCES],
-      ),
+      resources: store
+        .getGraphCacheStatus(resolvedTenant.id, [...GRAPH_CACHE_RESOURCES])
+        .map((status) => {
+          const missingScope = status.scopeSet.find(
+            (scope) => !grantedScopeSet(resolvedTenant).has(scope),
+          );
+          const area = missingScope ? permissionAreaForScope(missingScope) : undefined;
+          return area ? { ...status, notGrantedArea: area.title } : status;
+        }),
       schedule: store.getGraphCacheRefreshSchedule(resolvedTenant.id),
       preload: this.preloadJobs.get(resolvedTenant.id)?.job,
     };
@@ -1353,9 +1385,20 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted, options.tenantId);
-    const resources = sanitizeGraphResources(options.resources);
+    const granted = grantedScopeSet(tenant);
+    const resources = sanitizeGraphResources(options.resources).filter((resource) =>
+      definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
+    );
     const scopes = requiredScopesForResources(resources);
     const startedAt = new Date().toISOString();
+    if (resources.length === 0) {
+      return {
+        tenantId: tenant.id,
+        startedAt,
+        finishedAt: new Date().toISOString(),
+        resources: [],
+      };
+    }
     const log = (level: RunLogLevel, message: string, metadata?: Record<string, unknown>) => {
       console.info("[intune-chat][graph]", level, message, metadata ?? "");
     };
@@ -1598,6 +1641,7 @@ export class IntuneChatService {
       ? ["managedDevices" as const]
       : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
+    const accessBlockedMessage = restrictPlannedResourcesForTenant(planned, tenant);
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1701,8 +1745,8 @@ export class IntuneChatService {
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
 
-    const directDeviceAnswer = !planned.hasWriteIntent
-      ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
+    const directDeviceAnswer = !planned.hasWriteIntent && !accessBlockedMessage
+      ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
         )
@@ -1713,6 +1757,9 @@ export class IntuneChatService {
       responseModel = undefined;
     } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
+    } else if (accessBlockedMessage) {
+      assistantContent = accessBlockedMessage;
+      responseModel = undefined;
     } else if (directDeviceAnswer !== undefined) {
       assistantContent = directDeviceAnswer;
       responseModel = undefined;
@@ -1778,7 +1825,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: this.buildChatToolContext(tenant.id),
+              tools: this.buildChatToolContext(tenant),
               plannedResources: planned.resources,
               agentSuggestions,
               generatedAt: answerGeneratedAt,
@@ -1952,6 +1999,7 @@ export class IntuneChatService {
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
+    const accessBlockedMessage = restrictPlannedResourcesForTenant(planned, tenant);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2212,7 +2260,9 @@ export class IntuneChatService {
       });
     };
 
-    const directVoiceAnswer = await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+    const directVoiceAnswer = accessBlockedMessage
+      ? undefined
+      : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -2220,6 +2270,10 @@ export class IntuneChatService {
       emitDelta(assistantContent);
     } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
+      emitDelta(assistantContent);
+    } else if (accessBlockedMessage) {
+      assistantContent = accessBlockedMessage;
+      responseModel = undefined;
       emitDelta(assistantContent);
     } else if (directVoiceAnswer !== undefined) {
       assistantContent = directVoiceAnswer;
@@ -2311,7 +2365,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant.id, options.signal), webSearch: options.webSearch },
+              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
               agentSuggestions: options.voice ? [] : agentSuggestions,
@@ -2573,7 +2627,9 @@ export class IntuneChatService {
     if (!match) {
       throw new Error(`Tool is not available through the gateway: ${name}`);
     }
-    const ctx = this.buildChatToolContext(tenantId);
+    const persisted = await this.host.read();
+    const tenant = this.host.resolveTenant(persisted, tenantId);
+    const ctx = this.buildChatToolContext(tenant);
     const execution = await executeIntuneChatTool(ctx, match, params);
     if (execution.trace.error) {
       throw new Error(execution.trace.error);
@@ -2601,7 +2657,8 @@ export class IntuneChatService {
     }
   }
 
-  private buildChatToolContext(tenantId: string, signal?: AbortSignal): IntuneChatToolContext {
+  private buildChatToolContext(tenant: TenantRecord, signal?: AbortSignal): IntuneChatToolContext {
+    const tenantId = tenant.id;
     const store = this.host.requireIntelligenceStore();
     const log = (
       level: RunLogLevel,
@@ -2614,6 +2671,7 @@ export class IntuneChatService {
       tenantId,
       store,
       signal,
+      grantedScopes: grantedScopeSet(tenant),
       graphForScopes: async (scopes) => {
         const uniqueScopes = [...new Set(scopes)].sort();
         return this.host.graphFactory

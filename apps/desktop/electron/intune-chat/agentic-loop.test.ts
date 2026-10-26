@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import type { RunGraphApi, RunLlmApi, TenantRecord } from "@openadminos/agent-sdk";
+import {
+  DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  type RunGraphApi,
+  type RunLlmApi,
+  type TenantRecord,
+} from "@openadminos/agent-sdk";
 
 import { MAX_AGENTIC_ITERATIONS, runAgenticChat } from "./agentic-loop.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -450,6 +455,7 @@ function toolContext(store: IntelligenceSqliteStore): IntuneChatToolContext {
   return {
     tenantId: "tenant-1",
     store,
+    grantedScopes: new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES),
     graphForScopes: async () => ({
       async listManagedDevices() {
         return [];

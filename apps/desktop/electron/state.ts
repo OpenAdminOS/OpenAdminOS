@@ -75,6 +75,7 @@ import type {
   StartRunOptions,
   TenantAppRegistration,
   ConnectTenantOptions,
+  PermissionAreaId,
   TenantRecord,
   TenantSession,
   AzureOpenAIProviderConfig,
@@ -148,9 +149,16 @@ import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
+  grantedScopeSet,
+  intersectGrantedScopes,
+  mergeGrantedScopes,
+  normalizeGraphScopeName,
+  normalizePermissionAreaIds,
+  permissionAreaById,
   providerCatalog,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
+  scopesForPermissionAreas,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSchedule,
@@ -532,6 +540,9 @@ function driftPruneReason(
   const days = policy.keepDays ?? DEFAULT_DRIFT_RETENTION_SETTINGS.keepDays ?? 180;
   return `Pruned ${snapshots} and ${versions} older than ${days.toLocaleString()} days. Current object state was kept.`;
 }
+
+/** OpenID Connect scopes MSAL adds to every sign-in; never admin-consent permissions. */
+const OIDC_SCOPES = new Set(["openid", "profile", "offline_access", "email"]);
 
 const AUDIT_LOG_SCHEMA_VERSION = 1;
 const AUDIT_CHAIN_START_HASH = "0".repeat(64);
@@ -5388,10 +5399,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
       : { kind: "openadminos", clientId: defaultClientId() };
     const client = this.msalClientFor(registration);
+    const permissionAreaIds = normalizePermissionAreaIds(options.permissionAreaIds);
+    const requestedScopeNames = scopesForPermissionAreas(permissionAreaIds);
+    const scopes = requestedScopeNames.map(
+      (scope) => `https://graph.microsoft.com/${scope}`,
+    );
     let result;
     try {
       result = await this.interactiveSignIn({
         client,
+        scopes,
         openBrowser: this.openBrowser,
         signal: controller.signal,
         timeoutMs: 300_000,
@@ -5425,6 +5442,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: account.username,
       addedAt,
       lastUsedAt: addedAt,
+      grantedScopes: intersectGrantedScopes(result.scopes, requestedScopeNames),
       ...(registration ? { appRegistration: registration } : {}),
     };
 
@@ -5457,6 +5475,51 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await this.setActiveTenant(tenant.id);
     }
 
+    return this.getAppState();
+  }
+
+  async addTenantAccess(
+    tenantId: string,
+    areaId: PermissionAreaId,
+  ): Promise<AppState> {
+    const persisted = await this.read();
+    const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
+    if (!tenant) {
+      throw new Error("Tenant not found. Refresh Settings and try again.");
+    }
+    if (tenant.kind === "sample") {
+      throw new Error("The sample tenant already includes every permission area.");
+    }
+    const area = permissionAreaById(areaId);
+    if (!area) throw new Error("Permission area is invalid.");
+    const client = this.msalClientForTenant(tenant);
+    const requestedScopes = [...area.scopes];
+    let result;
+    try {
+      result = await runInteractiveFlow({
+        client,
+        scopes: requestedScopes.map(
+          (scope) => `https://graph.microsoft.com/${scope}`,
+        ),
+        openBrowser: this.openBrowser,
+        timeoutMs: 300_000,
+      });
+    } catch (error) {
+      throw new Error(humanizeMsalError(error));
+    }
+    const newlyGranted = intersectGrantedScopes(result.scopes, requestedScopes);
+    await this.serialize(async () => {
+      const current = await this.read();
+      const tenants = current.tenants.map((entry) =>
+        entry.id === tenantId
+          ? {
+              ...entry,
+              grantedScopes: mergeGrantedScopes(entry, newlyGranted),
+            }
+          : entry,
+      );
+      await this.write({ ...current, tenants });
+    });
     return this.getAppState();
   }
 
@@ -5876,18 +5939,36 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) => {
-        execution?.signal.throwIfAborted();
-        if (execution && !execution.allowInteractive) {
-          throw new Error("Scheduled run needs Microsoft sign-in or additional permissions. Run the agent manually and complete sign-in, then retry the schedule.");
+      acquireInteractive: async (requestedScopes: string[]) => {
+        if (execution) {
+          execution.signal.throwIfAborted();
+          if (!execution.allowInteractive) {
+            throw new Error("Scheduled run needs Microsoft sign-in or additional permissions. Run the agent manually and complete sign-in, then retry the schedule.");
+          }
+          await execution.onAuthRequired();
+        } else {
+          // Chat and cache refresh may re-authenticate an expired session,
+          // but never widen consent: only already granted scopes can reach
+          // an interactive request from these paths.
+          const granted = grantedScopeSet(tenant);
+          const ungranted = requestedScopes
+            .map(normalizeGraphScopeName)
+            .filter((scope) => !OIDC_SCOPES.has(scope) && !granted.has(scope));
+          if (ungranted.length > 0) {
+            throw new Error(
+              `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Settings, Tenants.`,
+            );
+          }
         }
-        await execution?.onAuthRequired();
-        // Per-capability incremental consent. Pops a browser sign-in when
-        // a connector or agent requests scopes the cached refresh token
-        // cannot satisfy. The user re-consents to the additional
-        // scopes; subsequent silent acquisitions for the same scope set
-        // succeed from cache.
-        return await runInteractiveFlow({ client, scopes, openBrowser, signal: execution?.signal });
+        // Re-authentication, or per-capability incremental consent for
+        // manually started agents. Subsequent silent acquisitions for the
+        // same scope set succeed from cache.
+        return await runInteractiveFlow({
+          client,
+          scopes: requestedScopes,
+          openBrowser,
+          signal: execution?.signal,
+        });
       },
     });
     // When the agent declares Graph scopes, route the tokenProvider
@@ -5905,6 +5986,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             const result = await acquireTokenSilent({
               client,
               homeAccountId: tenant.homeAccountId,
+              scopes: [...grantedScopeSet(tenant)],
             });
             return { accessToken: result.accessToken, scopes: result.scopes };
           };
