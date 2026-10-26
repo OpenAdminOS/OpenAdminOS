@@ -1,69 +1,69 @@
 {
-  "updatedAt": "2026-10-26T13:00:47.296Z",
+  "updatedAt": "2026-10-26T15:00:47.620Z",
   "agents": {
     "find-inactive-devices": {
-      "installs": 32,
-      "installs7d": 4
+      "installs": 33,
+      "installs7d": 5
     },
     "intune-device-posture-auditor": {
-      "installs": 9,
-      "installs7d": 3
+      "installs": 10,
+      "installs7d": 4
     },
     "offboarding-agent": {
-      "installs": 19,
-      "installs7d": 1
+      "installs": 20,
+      "installs7d": 2
     },
     "compliance-overview": {
       "installs": 42,
       "installs7d": 6
     },
     "os-update-posture": {
-      "installs": 20,
-      "installs7d": 3
+      "installs": 21,
+      "installs7d": 4
     },
     "tenant-health-report": {
       "installs": 30,
       "installs7d": 4
     },
     "user-license-overview": {
-      "installs": 29,
-      "installs7d": 5
+      "installs": 30,
+      "installs7d": 6
     },
     "conditional-access-explainer": {
       "installs": 48,
       "installs7d": 7
     },
     "dormant-app-registrations": {
-      "installs": 31,
-      "installs7d": 3
+      "installs": 32,
+      "installs7d": 4
     },
     "risky-sign-in-triage": {
-      "installs": 16,
-      "installs7d": 2
+      "installs": 18,
+      "installs7d": 4
     },
     "secure-score-prioritizer": {
-      "installs": 19,
-      "installs7d": 4
+      "installs": 20,
+      "installs7d": 5
     },
     "sign-in-failure-explainer": {
-      "installs": 23,
-      "installs7d": 3
-    },
-    "stale-guest-cleanup": {
-      "installs": 19,
-      "installs7d": 3
-    },
-    "tenant-change-audit": {
-      "installs": 16,
-      "installs7d": 2
-    },
-    "team-evidence-review": {
-      "installs": 9,
+      "installs": 24,
       "installs7d": 4
     },
+    "stale-guest-cleanup": {
+      "installs": 20,
+      "installs7d": 4
+    },
+    "tenant-change-audit": {
+      "installs": 17,
+      "installs7d": 3
+    },
+    "team-evidence-review": {
+      "installs": 10,
+      "installs7d": 5
+    },
     "team-script-draft": {
-      "installs": 7,
-      "installs7d": 2
+      "installs": 8,
+      "installs7d": 3
     }
   }
 }
