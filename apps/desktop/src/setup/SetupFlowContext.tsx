@@ -45,6 +45,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     state,
     loading,
     connectTenant,
+    addSampleTenant,
     cancelConnectTenant,
     getRequestedScopes,
     setActiveProvider,
@@ -57,6 +58,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const [scopesError, setScopesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectedTenant, setConnectedTenant] = useState<TenantRecord | undefined>();
+  const [retrySample, setRetrySample] = useState(false);
   const attemptIdRef = useRef(0);
   const restoredRef = useRef(false);
 
@@ -107,6 +109,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       attemptIdRef.current += 1;
       setIntent(nextIntent);
       setError(null);
+      setRetrySample(false);
       setConnectedTenant(activeTenant);
       if (nextIntent) writePendingIntent(nextIntent);
       else clearPendingIntent();
@@ -122,7 +125,9 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
             : "ready");
       setStage(nextStage);
       setOpen(true);
-      if (nextStage === "permissions") void loadScopes();
+      if (nextStage === "permissions" || nextStage === "own-registration") {
+        void loadScopes();
+      }
     },
     [activeTenant, loadScopes, providerReadyForIntent],
   );
@@ -135,17 +140,15 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       beginFlow(restored);
       return;
     }
-    // First run: a launch with zero connected tenants opens the setup flow
-    // unprompted, so a fresh install starts with permissions and Microsoft
-    // sign-in instead of an inert chat screen. Once a tenant exists, setup
-    // stays contextual. Skipped for the menu-bar companion window and
-    // renderer-only development, where tenant auth is unavailable.
+    // First run: offer sample data before asking for Microsoft sign-in.
+    // The choice appears at most once per renderer launch and remains
+    // dismissible so the guest shell is still available.
     if (
       window.openAdminOS &&
       state.tenants.length === 0 &&
       !location.pathname.startsWith("/companion")
     ) {
-      beginFlow(null, "permissions");
+      beginFlow(null, "first-run");
     }
   }, [beginFlow, loading, location.pathname, state.tenants.length]);
 
@@ -193,6 +196,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     setOpen(false);
     setIntent(null);
     setError(null);
+    setRetrySample(false);
     clearPendingIntent();
     if (wasWaiting) void cancelConnectTenant();
   }, [cancelConnectTenant, stage]);
@@ -201,6 +205,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     const attemptId = attemptIdRef.current + 1;
     attemptIdRef.current = attemptId;
     setError(null);
+    setRetrySample(false);
     setStage("waiting");
     try {
       const tenant = await connectTenant(options);
@@ -224,11 +229,29 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     }
   }, [connectTenant, intent, providerReadyForIntent, toast]);
 
+  const startSample = useCallback(async () => {
+    attemptIdRef.current += 1;
+    setError(null);
+    setRetrySample(true);
+    try {
+      const tenant = await addSampleTenant();
+      setConnectedTenant(tenant);
+      setIntent(null);
+      setOpen(false);
+      setRetrySample(false);
+      clearPendingIntent();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+      setStage("error");
+    }
+  }, [addSampleTenant]);
+
   const tryAgain = useCallback(async () => {
     attemptIdRef.current += 1;
     await cancelConnectTenant().catch(() => undefined);
-    void startConnect();
-  }, [cancelConnectTenant, startConnect]);
+    if (retrySample) void startSample();
+    else void startConnect();
+  }, [cancelConnectTenant, retrySample, startConnect, startSample]);
 
   const selectProvider = useCallback(
     async (id: ProviderId) => {
@@ -303,6 +326,9 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         activeProviderId={state.activeProviderId}
         onClose={closeFlow}
         onConnect={(options) => void startConnect(options)}
+        onAddSampleTenant={() => void startSample()}
+        onChooseConnect={() => beginFlow(null, "permissions")}
+        onChooseOwnRegistration={() => beginFlow(null, "own-registration")}
         onKeepWaiting={() => setStage("waiting")}
         onTryAgain={() => void tryAgain()}
         onSelectProvider={(id) => void selectProvider(id)}

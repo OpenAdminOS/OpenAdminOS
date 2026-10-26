@@ -87,73 +87,10 @@ import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
 import { MarkdownPreview } from "../components/MarkdownPreview";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
+import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
 import Workspaces from "./Workspaces";
 
-const promptGroups = [
-  {
-    label: "Devices",
-    prompts: [
-      "Which managed devices have not synced in the last 7 days?",
-      "Which devices are stale in Intune but still active in Entra?",
-      "Which devices are both stale and noncompliant?",
-      "Which Windows devices are not encrypted?",
-    ],
-  },
-  {
-    label: "Users",
-    prompts: [
-      "Which user accounts are disabled?",
-      "Which guest users have not signed in recently?",
-      "Which users are linked to noncompliant managed devices?",
-      "Which users appear in recent directory audit events?",
-    ],
-  },
-  {
-    label: "Apps",
-    prompts: [
-      "Which required apps are assigned but not installed on targeted devices?",
-      "Which app deployments appear tied to the primary user?",
-      "Which superseded apps are still detected on devices?",
-      "Which app assignments target empty or stale groups?",
-    ],
-  },
-  {
-    label: "Policies",
-    prompts: [
-      "Which compliance policies were modified most recently?",
-      "Which Conditional Access policies are disabled or report-only?",
-      "Which configuration policies have the highest setting counts?",
-      "Which policies changed recently?",
-    ],
-  },
-  {
-    label: "Sign-ins",
-    prompts: [
-      "Which recent sign-ins failed because of Conditional Access?",
-      "Which users have repeated failed sign-ins?",
-      "Which risky sign-ins need review?",
-      "Which applications have the most sign-in failures?",
-    ],
-  },
-  {
-    label: "Identity",
-    prompts: [
-      "Which Entra devices are not managed in Intune?",
-      "Which app registration secrets or certificates expire soon?",
-      "Which users hold privileged directory roles?",
-      "Which Conditional Access policies exclude guest or external identities?",
-    ],
-  },
-  {
-    label: "Security",
-    prompts: [
-      "Which high-severity Defender incidents are open?",
-      "Which Defender alerts were raised this week?",
-      "How has Secure Score changed over the last 90 days?",
-      "Which Secure Score improvement actions rank highest?",
-    ],
-  },
-];
+const promptGroups = CHAT_PROMPT_GROUPS;
 
 type ChatProgressState = {
   message: string;
@@ -254,7 +191,7 @@ function IntuneChatContent() {
     setActiveProvider,
     setActiveModel,
   } = useAppState();
-  const { requireTenantAndProvider } = useSetupFlow();
+  const { requireTenant, requireTenantAndProvider, openSetup } = useSetupFlow();
   const shellChrome = useShellChromeOptional();
   const dataBoundaryContext = useDataBoundaryOptional();
   const updateContext = useUpdateStateOptional();
@@ -684,7 +621,7 @@ function IntuneChatContent() {
         ? conversationIdOverride
         : activeConversationId;
     if (
-      !requireTenantAndProvider(
+      !(activeTenant?.kind === "sample" ? requireTenant : requireTenantAndProvider)(
         createPendingIntent({
           kind: "chat-send",
           conversationId: targetConversationId,
@@ -1615,6 +1552,7 @@ function IntuneChatContent() {
       onModelSelect={(providerId, model) => void handleModelSelect(providerId, model)}
       onOpenProviders={() => navigate("/settings/providers")}
       dataBoundary={dataBoundary}
+      onConnectTenant={openSetup}
     />
   );
 
@@ -2088,6 +2026,7 @@ function ChatComposer({
   onModelSelect,
   onOpenProviders,
   dataBoundary,
+  onConnectTenant,
 }: {
   placement: "home" | "docked";
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -2109,6 +2048,7 @@ function ChatComposer({
   onModelSelect: (providerId: ProviderId, model: string) => void;
   onOpenProviders: () => void;
   dataBoundary: DataBoundary;
+  onConnectTenant: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activePickerIndex, setActivePickerIndex] = useState(0);
@@ -2251,6 +2191,18 @@ function ChatComposer({
       ) : null}
 
       <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
+        {activeTenant?.kind === "sample" ? (
+          <div role="note" className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+            <span>Sample data. Answers describe the fictional Contoso tenant. Connect your tenant to see your own.</span>
+            <button
+              type="button"
+              onClick={onConnectTenant}
+              className="rounded font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+            >
+              Connect your tenant
+            </button>
+          </div>
+        ) : null}
         {!activeTenant ? (
           <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
             {SETUP_COPY.guestChatHint}

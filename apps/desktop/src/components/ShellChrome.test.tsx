@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -94,6 +94,65 @@ describe("shell chrome", () => {
     );
     await user.click(screen.getByRole("menuitemradio", { name: /Contoso IT/ }));
     expect(setActiveTenant).toHaveBeenCalledWith("tenant-1");
+  });
+
+  it("labels the active sample tenant in the top bar", async () => {
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge(
+        {},
+        createMockAppState({
+          tenants: [
+            {
+              id: "openadminos-sample-tenant",
+              kind: "sample",
+              displayName: "Contoso (sample data)",
+              username: "admin@contoso-sample.invalid",
+              homeAccountId: "openadminos-sample-account",
+              addedAt: "2026-10-26T12:00:00.000Z",
+            },
+          ],
+          activeTenantId: "openadminos-sample-tenant",
+        }),
+      ),
+    });
+
+    const tenantButton = await screen.findByRole("button", {
+        name: /Switch tenant, Contoso \(sample data\)/,
+      });
+    expect(tenantButton).toBeInTheDocument();
+    expect(within(tenantButton).getByText("Sample data")).toBeInTheDocument();
+  });
+
+  it("offers sample data from the tenant menu when no tenant exists", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const addSampleTenant = vi.fn(async () =>
+      createMockAppState({
+        tenants: [
+          {
+            id: "openadminos-sample-tenant",
+            kind: "sample",
+            displayName: "Contoso (sample data)",
+            username: "admin@contoso-sample.invalid",
+            homeAccountId: "openadminos-sample-account",
+            addedAt: "2026-10-26T12:00:00.000Z",
+          },
+        ],
+        activeTenantId: "openadminos-sample-tenant",
+      }),
+    );
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({ addSampleTenant }, emptyState),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Close" }));
+    await user.click(screen.getByRole("button", { name: "Connect a tenant" }));
+    await user.click(screen.getByRole("menuitem", { name: "Try with sample data" }));
+    expect(addSampleTenant).toHaveBeenCalledOnce();
   });
 
   it("surfaces tenant switch and updater retry failures", async () => {

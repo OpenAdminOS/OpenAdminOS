@@ -68,6 +68,60 @@ describe("contextual tenant setup", () => {
     expect(screen.getByRole("button", { name: "Open Changes" })).toBeInTheDocument();
   });
 
+  it("shows the OpenAdminOS enterprise application summary alongside a pending intent", async () => {
+    writePendingIntent(
+      createPendingIntent({ kind: "view-changes", returnTo: "/changes" }),
+    );
+    const tenant = {
+      ...createMockAppState().tenants[0]!,
+      appRegistration: {
+        kind: "openadminos" as const,
+        clientId: "11111111-2222-4333-8444-555555555555",
+      },
+    };
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge(
+        { getRequestedScopes: vi.fn(() => new Promise<never>(() => undefined)) },
+        createMockAppState({ tenants: [tenant] }),
+      ),
+    });
+
+    expect(
+      await screen.findByText(/The enterprise application OpenAdminOS \(app ID 11111111-2222-4333-8444-555555555555\)/),
+    ).toHaveTextContent("with delegated Microsoft Graph permissions, all read-only");
+    expect(screen.queryByText(/with 3 delegated Microsoft Graph permissions/)).not.toBeInTheDocument();
+    expect(
+      screen.getByText(/Your original action is ready\. Continuing sends it through the normal tenant/),
+    ).toBeInTheDocument();
+  });
+
+  it("shows the custom registration summary alongside a pending intent", async () => {
+    writePendingIntent(
+      createPendingIntent({ kind: "view-changes", returnTo: "/changes" }),
+    );
+    const tenant = {
+      ...createMockAppState().tenants[0]!,
+      appRegistration: {
+        kind: "custom" as const,
+        clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      },
+    };
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({ tenants: [tenant] })),
+    });
+
+    expect(
+      await screen.findByText(
+        "Signed in with your app registration aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Your original action is ready\. Continuing sends it through the normal tenant/),
+    ).toBeInTheDocument();
+  });
+
   it("checks the provider pinned to a restored run instead of the active provider", async () => {
     writePendingIntent(
       createPendingIntent({
@@ -122,10 +176,46 @@ describe("contextual tenant setup", () => {
     });
 
     await user.click(
+      await screen.findByRole("button", { name: "Connect your tenant" }),
+    );
+    await user.click(
       await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
     );
     // No options means the default app identity.
     expect(connectTenant).toHaveBeenCalledWith(undefined);
+  });
+
+  it("shows the loaded delegated permission count after an OpenAdminOS connection", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const tenant = {
+      ...createMockAppState().tenants[0]!,
+      appRegistration: {
+        kind: "openadminos" as const,
+        clientId: "11111111-2222-4333-8444-555555555555",
+      },
+    };
+    const connectedState = createMockAppState({ tenants: [tenant] });
+    const bridge = makeMockBridge(
+      {
+        getRequestedScopes: vi.fn(async () => [
+          { name: "Device.Read.All", mode: "read" as const, rationale: "Read devices" },
+          { name: "User.Read.All", mode: "read" as const, rationale: "Read users" },
+        ]),
+        connectTenant: vi.fn(async () => connectedState),
+      },
+      emptyState,
+    );
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+
+    await user.click(await screen.findByRole("button", { name: "Connect your tenant" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+    );
+
+    expect(
+      await screen.findByText(/with 5 delegated Microsoft Graph permissions, all read-only/),
+    ).toBeInTheDocument();
   });
 
   it("connects with a custom app registration when the admin supplies one", async () => {
@@ -139,7 +229,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(
       await screen.findByRole("button", {
-        name: "Connect with your own app registration",
+        name: "Use your organization's app registration",
       }),
     );
     await user.type(
@@ -171,14 +261,18 @@ describe("contextual tenant setup", () => {
     });
     await user.click(
       await screen.findByRole("button", {
-        name: "Connect with your own app registration",
+        name: "Use your organization's app registration",
       }),
     );
     expect(screen.queryByLabelText(/secret/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/No client secret is needed or accepted/i)).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "No client secret is used. OpenAdminOS signs in as a public client (Authorization Code with PKCE), so there is no secret to store on this device.",
+      ),
+    ).toBeInTheDocument();
   });
 
-  it("opens setup automatically when a launch has no connected tenants", async () => {
+  it("opens the first-run choice automatically when a launch has no connected tenants", async () => {
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     renderWithAppState(<div>App content</div>, {
       route: "/chat",
@@ -186,8 +280,49 @@ describe("contextual tenant setup", () => {
     });
 
     expect(
-      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+      await screen.findByRole("heading", { name: "Choose how to start" }),
     ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Try with sample data" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect your tenant" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Use your organization's app registration" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent),
+    ).toEqual([
+      "Try with sample data",
+      "Connect your tenant",
+      "Use your organization's app registration",
+    ]);
+  });
+
+  it("adds sample data from the first-run choice", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const addSampleTenant = vi.fn(async () =>
+      createMockAppState({
+        tenants: [
+          {
+            id: "openadminos-sample-tenant",
+            kind: "sample",
+            displayName: "Contoso (sample data)",
+            username: "admin@contoso-sample.invalid",
+            homeAccountId: "openadminos-sample-account",
+            addedAt: "2026-10-26T12:00:00.000Z",
+          },
+        ],
+        activeTenantId: "openadminos-sample-tenant",
+      }),
+    );
+    const bridge = makeMockBridge({ addSampleTenant }, emptyState);
+    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+
+    await user.click(
+      await screen.findByRole("button", { name: "Try with sample data" }),
+    );
+
+    await waitFor(() => expect(addSampleTenant).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("heading", { name: "Choose how to start" })).not.toBeInTheDocument();
   });
 
   it("stays contextual when a tenant is already connected", async () => {
@@ -197,7 +332,7 @@ describe("contextual tenant setup", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(
-      screen.queryByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+      screen.queryByRole("heading", { name: "Choose how to start" }),
     ).not.toBeInTheDocument();
   });
 
@@ -217,6 +352,9 @@ describe("contextual tenant setup", () => {
       bridge: makeMockBridge({}, emptyState),
     });
 
+    await user.click(
+      await screen.findByRole("button", { name: "Connect your tenant" }),
+    );
     await user.click(
       await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
     );
