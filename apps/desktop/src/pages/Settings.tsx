@@ -36,6 +36,10 @@ import {
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  PERMISSION_AREAS,
+  grantedPermissionAreas,
+  type PermissionAreaDefinition,
+  type PermissionAreaId,
   type AuditLogExportFormat,
   type AzureOpenAIProviderConfig,
   type ChatInvestigationMode,
@@ -49,6 +53,7 @@ import {
   type ProviderId,
   type ProviderTestResult,
   type ProviderSummary,
+  type RequestedScope,
   type ReleaseDiagnostics,
   type RetrievalStatus,
   type RunHistoryPruneResult,
@@ -75,6 +80,7 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import {
   SETTINGS_ITEMS,
   SETTINGS_SECTIONS,
+  SETUP_COPY,
   searchSettings,
   userFacingErrorReason,
   type SettingsItemId,
@@ -175,6 +181,7 @@ export default function Settings() {
     setActiveProvider,
     setActiveModel,
     setActiveTenant,
+    addTenantAccess,
     disconnectTenant,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
@@ -492,6 +499,7 @@ export default function Settings() {
                 activeTenantId={state.activeTenantId}
                 error={null}
                 onSetActive={setActiveTenant}
+                onAddAccess={addTenantAccess}
                 onDisconnect={disconnectTenant}
               />
             </SettingsPageSection>
@@ -1187,12 +1195,14 @@ function TenantsSection({
   activeTenantId,
   error,
   onSetActive,
+  onAddAccess,
   onDisconnect,
 }: {
   tenants: TenantRecord[];
   activeTenantId?: string;
   error: string | null;
   onSetActive: (id: string) => Promise<void>;
+  onAddAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
   return (
@@ -1217,6 +1227,7 @@ function TenantsSection({
               tenant={tenant}
               isActive={tenant.id === activeTenantId}
               onSetActive={onSetActive}
+              onAddAccess={onAddAccess}
               onDisconnect={onDisconnect}
             />
           ))
@@ -1230,17 +1241,29 @@ function TenantRow({
   tenant,
   isActive,
   onSetActive,
+  onAddAccess,
   onDisconnect,
 }: {
   tenant: TenantRecord;
   isActive: boolean;
   onSetActive: (id: string) => Promise<void>;
+  onAddAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
   const { openSetup } = useSetupFlow();
+  const { getRequestedScopes } = useAppState();
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
+  const [accessArea, setAccessArea] = useState<PermissionAreaDefinition | null>(null);
+  const [addingAccess, setAddingAccess] = useState(false);
+  const [accessError, setAccessError] = useState<string | null>(null);
+  const [accessScopeDetails, setAccessScopeDetails] = useState<RequestedScope[]>([]);
+  const grantedAreas = grantedPermissionAreas(tenant);
+  const grantedAreaIds = new Set(grantedAreas.map((area) => area.id));
+  const missingAreas = PERMISSION_AREAS.filter(
+    (area) => !grantedAreaIds.has(area.id),
+  );
   const entraLicenseName =
     tenant.entraTier && tenant.entraTier !== "unknown"
       ? tenant.entraTier === "free"
@@ -1313,6 +1336,115 @@ function TenantRow({
           ]}
         />
       </div>
+      {tenant.kind !== "sample" && (
+        <div className="border-b border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-4 py-3 last:border-b-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mr-1 text-xs font-medium text-[var(--color-text-muted)]">
+              Granted areas
+            </span>
+            {grantedAreas.map((area) => (
+              <Badge key={area.id} tone="neutral">{area.title}</Badge>
+            ))}
+          </div>
+          {missingAreas.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="mr-1 text-xs text-[var(--color-text-muted)]">
+                Additional access
+              </span>
+              {missingAreas.map((area) => (
+                <UiButton
+                  key={area.id}
+                  size="sm"
+                  variant="secondary"
+                  aria-label={`Add ${area.title} access`}
+                  onClick={() => {
+                    setAccessError(null);
+                    setAccessArea(area);
+                    void getRequestedScopes()
+                      .then(setAccessScopeDetails)
+                      .catch(() => setAccessScopeDetails([]));
+                  }}
+                >
+                  Add access: {area.title}
+                </UiButton>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <Modal
+        open={accessArea !== null}
+        onClose={() => {
+          if (!addingAccess) setAccessArea(null);
+        }}
+        size="md"
+      >
+        <ModalHeader
+          title={accessArea ? `Add ${accessArea.title} access` : "Add access"}
+          subtitle={`Review delegated access for ${tenant.displayName}`}
+          onClose={() => {
+            if (!addingAccess) setAccessArea(null);
+          }}
+        />
+        {accessArea && (
+          <div className="space-y-4 p-6">
+            <p className="text-sm leading-6 text-[var(--color-text-soft)]">
+              {accessArea.summary}
+            </p>
+            <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
+              <div className="text-xs font-medium text-[var(--color-text-muted)]">
+                {accessArea.scopes.length} delegated read scopes
+              </div>
+              <ul className="mt-2 space-y-2">
+                {accessArea.scopes.map((scope) => (
+                  <li key={scope}>
+                    <div className="break-all font-mono text-xs text-[var(--color-text-soft)]">
+                      {scope}
+                    </div>
+                    {accessScopeDetails.find((entry) => entry.name === scope)?.rationale && (
+                      <p className="mt-0.5 text-xs leading-5 text-[var(--color-text-muted)]">
+                        {accessScopeDetails.find((entry) => entry.name === scope)?.rationale}
+                      </p>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="space-y-1 text-xs leading-5 text-[var(--color-text-muted)]">
+              <p>Microsoft opens in your system browser for interactive consent.</p>
+              <p>{SETUP_COPY.readOnlyNote}</p>
+              <p>{SETUP_COPY.signInScopesNote}</p>
+              <p>{SETUP_COPY.delegatedPermissionsNote}</p>
+            </div>
+            {accessError && (
+              <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">
+                {accessError}
+              </div>
+            )}
+            <div className="flex justify-end gap-2">
+              <Button variant="ghost" disabled={addingAccess} onClick={() => setAccessArea(null)}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabled={addingAccess}
+                onClick={() => {
+                  setAddingAccess(true);
+                  setAccessError(null);
+                  void onAddAccess(tenant.id, accessArea.id)
+                    .then(() => setAccessArea(null))
+                    .catch((caught) =>
+                      setAccessError(caught instanceof Error ? caught.message : String(caught)),
+                    )
+                    .finally(() => setAddingAccess(false));
+                }}
+              >
+                {addingAccess ? "Waiting for Microsoft" : "Continue to Microsoft"}
+              </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
       <Modal
       open={confirmDisconnect}
       onClose={() => {
