@@ -14,13 +14,15 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Preview a write agent with Dry run to review its full plan without changing the tenant, then use Run for real to prepare a fresh plan for confirmation.
 - Write confirmation highlights high-risk actions and unusually large plans, requires acknowledgement of danger flags, and keeps the risk review in run history.
 - Schedule previews show expected monthly runs and model usage from recent local history before you enable or change an interval.
-
+- First run offers three ways in: try a built-in sample tenant (fictional Contoso data, no Microsoft sign-in), connect your tenant, or use your organization's app registration. The sample tenant is labeled everywhere, answers the suggested Chat questions even without an LLM provider, and can be removed at any time.
+- A docs page on authentication and permissions for security reviewers: public-client sign-in with PKCE, delegated-only permissions, the enterprise application a tenant receives, token storage, and revocation.
 - `npm run screenshots:landing` captures the website's app screenshots: the demo tenant at 1280 x 800 and 2x, in light and dark, with realistic display values. It replaces the old clickable-demo capture.
 
 ### Changed
 
 - Record the open-core commercial model in the spec: the desktop app stays MIT, and a separate paid hosted team service (Frankfurt, end-to-end encrypted) adds approvals, roles, audit forwarding, a private registry, SSO, and SCIM. Also record the direction for iOS and Android companion apps. No application behavior changed.
 - Treat tenant records and carried evidence as untrusted model input to reduce the risk of embedded instructions influencing a run, while keeping write confirmation required.
+- After connecting a tenant, the setup dialog names the enterprise application added to the tenant, its client ID, and its delegated permission count, and the permissions step explains that Intune RBAC roles and scope tags still apply.
 - Rework openadminos.com in the calm identity (paper light, graphite dark, self-hosted Geist and Newsreader, oa wordmark) and rewrite the homepage around real screenshots of the redesigned app.
 - Recapture the homepage screenshots at 1280 x 800 and 2x with the demo tenant, and show the product tour as tabs over a full-width screenshot, so the app is readable on the page.
 - Website fixes: the product tour pauses on keyboard focus and has a Pause button, benchmark charts use distinct colors in both themes, the download button no longer offers the macOS build before it knows your platform (and phones are told it is a desktop app), the theme toggle always changes the theme and stays in sync, and print shows every section.
