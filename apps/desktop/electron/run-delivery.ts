@@ -406,6 +406,16 @@ export class RunDeliveryService {
     if (!run || !isTerminalRunStatus(run.status)) {
       return { retryable: false };
     }
+    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    const tenant = tenantId
+      ? persisted.tenants.find((candidate) => candidate.id === tenantId)
+      : undefined;
+    if (tenant?.kind === "sample") {
+      const message =
+        "Connector deliveries are not available on the sample tenant. Connect your tenant to deliver run results.";
+      await this.host.appendRunLog(item.runId, "warn", message);
+      return { retryable: false, error: message };
+    }
     try {
       switch (item.connectorId) {
         case "teams":

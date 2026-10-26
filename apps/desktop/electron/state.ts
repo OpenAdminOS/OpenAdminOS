@@ -176,6 +176,13 @@ import { defaultUpdateChannel } from "../src/shared/update-channel.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { searchEndpoints } from "./graph-catalog.js";
+import { createSampleGraph } from "./sample-tenant/graph.js";
+import {
+  SAMPLE_TENANT_HOME_ACCOUNT_ID,
+  SAMPLE_TENANT_ID,
+  SAMPLE_TENANT_NAME,
+  SAMPLE_TENANT_USERNAME,
+} from "./sample-tenant/dataset.js";
 
 import {
   DEFAULT_REGISTRY_SOURCE,
@@ -504,6 +511,23 @@ function driftPruneReason(
 const AUDIT_LOG_SCHEMA_VERSION = 1;
 const AUDIT_CHAIN_START_HASH = "0".repeat(64);
 
+function sampleRelevantLicenses(): NonNullable<TenantRecord["relevantLicenses"]> {
+  return [
+    {
+      skuPartNumber: "SPE_E5",
+      displayName: "Microsoft 365 E5",
+      enabledUnits: 80,
+      consumedUnits: 70,
+    },
+    {
+      skuPartNumber: "EMSPREMIUM",
+      displayName: "Enterprise Mobility + Security E5",
+      enabledUnits: 80,
+      consumedUnits: 65,
+    },
+  ];
+}
+
 type AuditLogEventSource =
   | "run-history"
   | "connector-audit"
@@ -680,7 +704,20 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
     });
   }
 
-  return events.sort(compareAuditEvents);
+  return events
+    .map((event) => {
+      const tenant = event.tenantId ? tenantById.get(event.tenantId) : undefined;
+      if (tenant?.kind !== "sample") return event;
+      return {
+        ...event,
+        details: {
+          ...event.details,
+          sampleData: true,
+          sampleDataNotice: "Fictional Contoso tenant data",
+        },
+      };
+    })
+    .sort(compareAuditEvents);
 }
 
 function runAuditDetails(
@@ -754,11 +791,15 @@ function actorForTenant(
     };
   }
   return {
-    kind: "connected-admin",
+    kind: tenant.kind === "sample" ? "local-admin" : "connected-admin",
     tenantId: tenant.id,
     tenantName: tenant.displayName,
-    username: tenant.username,
-    homeAccountId: tenant.homeAccountId,
+    ...(tenant.kind !== "sample"
+      ? {
+          username: tenant.username,
+          homeAccountId: tenant.homeAccountId,
+        }
+      : {}),
   };
 }
 
@@ -1145,6 +1186,7 @@ export class AppStateStore {
     | undefined;
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
+  private sampleGraph = createSampleGraph();
   private tenantConnectController: AbortController | undefined;
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
@@ -1406,7 +1448,23 @@ export class AppStateStore {
       changed: () => this.emitStateChanged("office-changed"),
     });
   }
-  saveOfficePersona(input: unknown) { return this.officeService.save(input); }
+  async saveOfficePersona(input: unknown) {
+    if (input && typeof input === "object" && !Array.isArray(input)) {
+      const tenantId = (input as { tenantId?: unknown }).tenantId;
+      const persisted = await this.read();
+      if (
+        typeof tenantId === "string" &&
+        persisted.tenants.some(
+          (tenant) => tenant.id === tenantId && tenant.kind === "sample",
+        )
+      ) {
+        throw new Error(
+          "Agent Team personas are not available on the sample tenant. Connect your tenant to assign this teammate.",
+        );
+      }
+    }
+    return this.officeService.save(input);
+  }
   deleteOfficePersona(id: string) { return this.officeService.remove(id); }
   startOfficePersona(id: string) { return this.officeService.start(id); }
   stopOfficePersona(id: string) { return this.officeService.stop(id); }
@@ -1814,6 +1872,7 @@ export class AppStateStore {
   }
 
   private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
+    if (tenant.kind === "sample") return this.sampleTenantSession();
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     return createTenantSession({
@@ -1974,7 +2033,24 @@ export class AppStateStore {
 
   /** The MSAL client that issued this tenant's tokens. */
   private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
+    if (tenant.kind === "sample") {
+      throw new Error(
+        "The sample tenant has no Microsoft sign-in. Connect your tenant to use this.",
+      );
+    }
     return this.msalClientFor(tenant.appRegistration);
+  }
+
+  private sampleTenantSession(): TenantSession {
+    return {
+      tenantId: SAMPLE_TENANT_ID,
+      username: SAMPLE_TENANT_USERNAME,
+      acquireTokenForScopes: async () => {
+        throw new Error(
+          "The sample tenant has no Microsoft sign-in. Connect your tenant to use this.",
+        );
+      },
+    };
   }
 
   private requireIntelligenceStore(): IntelligenceSqliteStore {
@@ -2698,6 +2774,13 @@ export class AppStateStore {
   async setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,
   ): Promise<GraphCacheRefreshScheduleSettings> {
+    const persisted = await this.read();
+    const tenant = this.resolveTenant(persisted, input.tenantId);
+    if (tenant.kind === "sample" && input.enabled) {
+      throw new Error(
+        "Schedules are not available on the sample tenant. Connect your tenant to schedule cache refreshes.",
+      );
+    }
     return this.chatService.setGraphCacheRefreshSchedule(input);
   }
 
@@ -3054,6 +3137,11 @@ export class AppStateStore {
   async createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceDetail> {
     const persisted = await this.read();
     const tenant = this.resolveTenant(persisted, input.tenantId);
+    if (tenant.kind === "sample") {
+      throw new Error(
+        "Workspaces are not available on the sample tenant. Connect your tenant to create a workspace.",
+      );
+    }
     return this.requireIntelligenceStore().createWorkspace({
       id: `wksp_${randomUUID()}`,
       tenantId: tenant.id,
@@ -3197,6 +3285,12 @@ export class AppStateStore {
       if (!resolvedTenantIds.has(mapping.tenantId)) {
         throw new Error(`Tenant ${mapping.tenantId} is not part of this multi-tenant result.`);
       }
+      const tenant = this.resolveTenant(persisted, mapping.tenantId);
+      if (tenant.kind === "sample") {
+        throw new Error(
+          "Workspaces are not available on the sample tenant. Connect your tenant to create a workspace.",
+        );
+      }
       if (mapping.workspaceId) {
         const workspace = store.getWorkspace(
           mapping.workspaceId,
@@ -3264,6 +3358,11 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
+    if (tenant?.kind === "sample") {
+      throw new Error(
+        "Connectors are not available on the sample tenant. Connect your tenant to test this connector.",
+      );
+    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         "No tenant connected. Connect a Microsoft 365 tenant before testing connectors.",
@@ -3483,6 +3582,11 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
+    if (tenant?.kind === "sample") {
+      throw new Error(
+        "Connectors are not available on the sample tenant. Connect your tenant to use this connector.",
+      );
+    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         "No tenant connected. Connect a Microsoft 365 tenant before invoking connectors.",
@@ -3545,6 +3649,11 @@ export class AppStateStore {
     const tenant = persisted.tenants.find(t => t.id === input.tenantId);
     const factory = findConnectorFactory(input.connectorId);
     if (!tenant || !factory) throw new Error("Tenant or connector is unavailable.");
+    if (tenant.kind === "sample") {
+      throw new Error(
+        "Connector deliveries are not available on the sample tenant. Connect your tenant to send this message.",
+      );
+    }
     const config = persisted.connectors?.[input.connectorId]?.config ?? {};
     if (JSON.stringify(config) !== JSON.stringify(input.config)) throw new Error("Connector settings changed. Review a new preview before sending.");
     const instance = await factory.build({ tenant: this.createTenantSessionForRecord(tenant),
@@ -3803,6 +3912,14 @@ export class AppStateStore {
 
     await this.serialize(async () => {
       const persisted = await this.read();
+      const activeTenant = persisted.activeTenantId
+        ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+        : undefined;
+      if (activeTenant?.kind === "sample" && schedule?.enabled) {
+        throw new Error(
+          "Schedules are not available on the sample tenant. Connect your tenant to schedule this agent.",
+        );
+      }
       const idx = persisted.installedAgents.findIndex(
         (agent) => agent.slug === slug || agent.id === slug,
       );
@@ -3848,6 +3965,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentTeamsDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentTeamsDelivery(slug, delivery);
   }
 
@@ -3855,6 +3973,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentWhatsAppWebDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentWhatsAppWebDelivery(slug, delivery);
   }
 
@@ -3862,6 +3981,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentOutlookDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentOutlookDelivery(slug, delivery);
   }
 
@@ -3869,6 +3989,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSlackDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSlackDelivery(slug, delivery);
   }
 
@@ -3876,6 +3997,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentDiscordDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentDiscordDelivery(slug, delivery);
   }
 
@@ -3883,7 +4005,23 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSignalDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSignalDelivery(slug, delivery);
+  }
+
+  private async assertSampleDeliveryAllowed(
+    delivery: { enabled: boolean } | null,
+  ): Promise<void> {
+    if (!delivery?.enabled) return;
+    const persisted = await this.read();
+    const activeTenant = persisted.activeTenantId
+      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+      : undefined;
+    if (activeTenant?.kind === "sample") {
+      throw new Error(
+        "Connector deliveries are not available on the sample tenant. Connect your tenant to deliver run results.",
+      );
+    }
   }
 
   /**
@@ -3896,6 +4034,25 @@ export class AppStateStore {
   async fireDueSchedules(): Promise<void> {
     const persisted = await this.read();
     const nowMs = Date.now();
+    const activeTenant = persisted.activeTenantId
+      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+      : undefined;
+    if (activeTenant?.kind === "sample") {
+      const dueCount = persisted.installedAgents.filter((agent) => {
+        const schedule = agent.schedule;
+        if (!schedule?.enabled) return false;
+        const lastFired = schedule.lastScheduledRunAt
+          ? new Date(schedule.lastScheduledRunAt).getTime()
+          : scheduleFallbackAnchor(agent.installedAt, nowMs);
+        return nowMs >= lastFired + schedule.intervalSeconds * 1000;
+      }).length;
+      if (dueCount > 0) {
+        console.info(
+          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because the sample tenant is active`,
+        );
+      }
+      return;
+    }
 
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
@@ -5166,6 +5323,54 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return this.getAppState();
   }
 
+  async addSampleTenant(): Promise<AppState> {
+    const addedAt = new Date().toISOString();
+    let created = false;
+    const sample: TenantRecord = {
+      id: SAMPLE_TENANT_ID,
+      kind: "sample",
+      displayName: SAMPLE_TENANT_NAME,
+      username: SAMPLE_TENANT_USERNAME,
+      homeAccountId: SAMPLE_TENANT_HOME_ACCOUNT_ID,
+      addedAt,
+      lastUsedAt: addedAt,
+      entraTier: "p2",
+      entraTierDetectedAt: addedAt,
+      relevantLicenses: sampleRelevantLicenses(),
+    };
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const existing = persisted.tenants.find((tenant) => tenant.id === SAMPLE_TENANT_ID);
+      created = !existing;
+      if (created) this.sampleGraph = createSampleGraph();
+      const nextTenants = existing
+        ? persisted.tenants.map((tenant) =>
+            tenant.id === SAMPLE_TENANT_ID
+              ? (() => {
+                  const { appRegistration: _, ...sampleState } = tenant;
+                  return { ...sampleState, ...sample, addedAt: tenant.addedAt };
+                })()
+              : tenant,
+          )
+        : [...persisted.tenants, sample];
+      await this.write({
+        ...persisted,
+        tenants: nextTenants,
+        activeTenantId: SAMPLE_TENANT_ID,
+      });
+    });
+    if (created) {
+      void this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID }).catch(
+        (error) =>
+          console.warn(
+            "[sample-tenant] cache preload did not start",
+            error instanceof Error ? error.message : String(error),
+          ),
+      );
+    }
+    return this.getAppState();
+  }
+
   cancelConnectTenant(): void {
     this.tenantConnectController?.abort();
     this.tenantConnectController = undefined;
@@ -5195,6 +5400,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     tenant: TenantRecord,
     options: { force?: boolean } = {},
   ): Promise<void> {
+    if (tenant.kind === "sample") {
+      const detectedAt = new Date().toISOString();
+      await this.serialize(async () => {
+        const persisted = await this.read();
+        const tenants = persisted.tenants.map((entry) =>
+          entry.id === tenant.id
+            ? {
+                ...entry,
+                entraTier: "p2" as const,
+                entraTierDetectedAt: detectedAt,
+                relevantLicenses: sampleRelevantLicenses(),
+              }
+            : entry,
+        );
+        await this.write({ ...persisted, tenants });
+      });
+      return;
+    }
     const DAY_MS = 24 * 60 * 60 * 1000;
     const recent =
       tenant.entraTier &&
@@ -5253,12 +5476,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async setActiveTenant(id: string): Promise<AppState> {
     await this.serialize(async () => {
       const persisted = await this.read();
-      const exists = persisted.tenants.some((tenant) => tenant.id === id);
-      if (!exists) {
+      if (!persisted.tenants.some((tenant) => tenant.id === id)) {
         throw new Error(`Tenant not found: ${id}`);
       }
+      const lastUsedAt = new Date().toISOString();
       await this.write({
         ...persisted,
+        tenants: persisted.tenants.map((tenant) =>
+          tenant.id === id ? { ...tenant, lastUsedAt } : tenant,
+        ),
         activeTenantId: id,
       });
     });
@@ -5266,11 +5492,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async disconnectTenant(id: string): Promise<AppState> {
+    await this.cancelGraphCachePreload(id).catch(() => undefined);
     for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
     await this.serialize(async () => {
       const persisted = await this.read();
       const target = persisted.tenants.find((tenant) => tenant.id === id);
-      if (target) {
+      if (target && target.kind !== "sample") {
         try {
           await removeAccount({
             client: this.msalClientForTenant(target),
@@ -5303,6 +5530,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       this.intelligenceStore?.purgeTenant(id);
       await this.write(next);
+      if (target?.kind === "sample") this.sampleGraph = createSampleGraph();
     });
     await this.officeService.purgeTenant(id);
 
@@ -5438,6 +5666,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
       );
     }
+    const scopes = (agentScopes ?? []).filter((scope) => scope.length > 0);
+    if (tenant.kind === "sample") {
+      const tenantSession = this.sampleTenantSession();
+      return {
+        createGraph: (log) =>
+          this.graphFactory
+            ? this.graphFactory({ tenantId: tenant.id, scopes, log })
+            : this.sampleGraph,
+        tenantId: tenant.id,
+        tenantSession,
+      };
+    }
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const tenantSession = createTenantSession({
@@ -5465,7 +5705,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // interactive consent on the first run that requires a new one.
     // Connectors already do this for their declared scopes; agents now
     // get the same treatment.
-    const scopes = (agentScopes ?? []).filter((s) => s.length > 0);
     const tokenProvider =
       scopes.length > 0
         ? async () => await tenantSession.acquireTokenForScopes(scopes)
@@ -5494,6 +5733,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private async enqueueRunDeliveries(run: RunRecord): Promise<void> {
+    const persisted = await this.read();
+    if (
+      run.tenantId &&
+      persisted.tenants.some(
+        (tenant) => tenant.id === run.tenantId && tenant.kind === "sample",
+      )
+    ) {
+      return;
+    }
     return this.runDeliveryService.enqueueRunDeliveries(run);
   }
 
@@ -5570,7 +5818,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // use the OpenAdminOS registration.
       const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : []).map(
         (tenant) =>
-          isPlainRecordValue(tenant) && tenant.appRegistration === undefined
+          isPlainRecordValue(tenant) &&
+          tenant.kind !== "sample" &&
+          tenant.appRegistration === undefined
             ? {
                 ...tenant,
                 appRegistration: {
