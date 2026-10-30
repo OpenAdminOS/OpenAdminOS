@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
+import { SampleSchedulesPausedNotice } from "../components/SampleSchedulesPausedNotice";
 import { useToast } from "../components/Toast";
 import {
   IconCheck,
@@ -45,6 +46,9 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
     .filter((agent) => agent.schedule?.enabled !== true)
     .sort((a, b) => a.name.localeCompare(b.name));
   const dueAgents = scheduledAgents.filter((agent) => nextRunTime(agent) <= Date.now());
+  const schedulesPaused = state.tenants.some(
+    (tenant) => tenant.id === state.activeTenantId && tenant.kind === "sample",
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -74,6 +78,7 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
     agents: AgentSummary[],
     mode: "due" | "all",
   ) => {
+    if (schedulesPaused) return;
     if (agents.length === 0) {
       toast.info(mode === "due" ? "No schedules are due." : "No schedules are enabled.");
       return;
@@ -104,7 +109,7 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
     } finally {
       setBulkRunning(null);
     }
-  }, [requireTenantAndProvider, startRun, toast]);
+  }, [requireTenantAndProvider, schedulesPaused, startRun, toast]);
 
   useEffect(() => {
     const routeState = location.state as { resumePendingIntent?: PendingIntent } | null;
@@ -128,7 +133,7 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
       <Button
         variant="secondary"
         leadingIcon={<IconPlay size={14} />}
-        disabled={bulkRunning !== null || dueAgents.length === 0}
+        disabled={schedulesPaused || bulkRunning !== null || dueAgents.length === 0}
         onClick={() => {
           void runScheduledBatch(dueAgents, "due");
         }}
@@ -138,7 +143,7 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
       <Button
         variant="secondary"
         leadingIcon={<IconPlay size={14} />}
-        disabled={bulkRunning !== null || scheduledAgents.length === 0}
+        disabled={schedulesPaused || bulkRunning !== null || scheduledAgents.length === 0}
         onClick={() => {
           void runScheduledBatch(scheduledAgents, "all");
         }}
@@ -157,6 +162,7 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
 
   const content = (
     <div className="space-y-6">
+        <SampleSchedulesPausedNotice />
         {scheduledAgents.length > 0 && schedulerRegistered === false && (
           <ScheduleNotice
             tone="warning"

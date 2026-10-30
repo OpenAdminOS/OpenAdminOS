@@ -342,6 +342,7 @@ export function ConversationWorkspaceProvider({ children }: { children: ReactNod
           tenantName: tenant?.displayName,
           providerName: provider?.name,
           cacheSummary: conversationCacheSummary(cacheStatus),
+          sampleData: tenant?.kind === "sample",
         }),
         filters: [{ name: "Markdown", extensions: ["md"] }],
       });

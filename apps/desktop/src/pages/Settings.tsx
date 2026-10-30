@@ -1219,18 +1219,25 @@ function TenantRow({
             <span title={tenant.displayName} className="min-w-0 max-w-full truncate text-base font-medium text-[var(--color-text)]">
               {tenant.displayName}
             </span>
+            {tenant.kind === "sample" ? <Badge tone="warning">Sample data</Badge> : null}
             {isActive ? <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone="success" />Active</span> : null}
           </div>
           <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
-            {domain} · {entraLicenseName ?? "Entra tier not available"}
+            {tenant.kind === "sample"
+              ? "Fictional tenant stored on this device"
+              : `${domain} · ${entraLicenseName ?? "Entra tier not available"}`}
           </div>
         </div>
-        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={licenses.map((license) => license.displayName).join(", ")}>
-          {licenses.length > 0
+        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample inventory" : licenses.map((license) => license.displayName).join(", ")}>
+          {tenant.kind === "sample"
+            ? "Built-in sample inventory"
+            : licenses.length > 0
             ? licenses.map((license) => license.displayName).join(", ")
             : "No license details"}
         </div>
-        <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
+        {tenant.kind !== "sample" ? (
+          <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
+        ) : null}
         {!isActive ? (
           <UiButton variant="secondary" size="sm" onClick={() => void onSetActive(tenant.id)}>
             Set active
@@ -1242,7 +1249,7 @@ function TenantRow({
           items={[
             {
               id: "disconnect",
-              label: "Disconnect",
+              label: tenant.kind === "sample" ? "Remove" : "Disconnect",
               danger: true,
               onSelect: () => {
                 setDisconnectError(null);
@@ -1260,22 +1267,23 @@ function TenantRow({
       size="md"
     >
       <ModalHeader
-        title={`Disconnect ${tenant.displayName}`}
-        subtitle="Remove the connection and its local tenant data"
-        badge={<Badge tone="danger">Permanent local deletion</Badge>}
+        title={tenant.kind === "sample" ? "Remove sample tenant" : `Disconnect ${tenant.displayName}`}
+        subtitle={tenant.kind === "sample" ? "Delete the fictional tenant and its local data" : "Remove the connection and its local tenant data"}
+        badge={<Badge tone={tenant.kind === "sample" ? "warning" : "danger"}>Permanent local deletion</Badge>}
         onClose={() => {
           if (!disconnecting) setConfirmDisconnect(false);
         }}
       />
       <div className="space-y-4 p-6">
         <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          This removes the Microsoft sign-in connection and permanently deletes this
-          tenant&apos;s local Graph cache, change history, chats, workspaces, run history,
-          learning records, and queued deliveries from this device.
+          {tenant.kind === "sample"
+            ? "This permanently deletes the fictional tenant's local Graph cache, change history, chats, run history, and learning records from this device."
+            : "This removes the Microsoft sign-in connection and permanently deletes this tenant's local Graph cache, change history, chats, workspaces, run history, learning records, and queued deliveries from this device."}
         </div>
         <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
-          Microsoft 365 data in the tenant is not changed. Reconnecting later starts with
-          an empty local cache.
+          {tenant.kind === "sample"
+            ? "You can add the built-in sample tenant again later."
+            : "Microsoft 365 data in the tenant is not changed. Reconnecting later starts with an empty local cache."}
         </p>
         {disconnectError && (
           <div
@@ -1310,7 +1318,9 @@ function TenantRow({
                 .finally(() => setDisconnecting(false));
             }}
           >
-            {disconnecting ? "Disconnecting" : "Disconnect and delete local data"}
+            {disconnecting
+              ? tenant.kind === "sample" ? "Removing" : "Disconnecting"
+              : tenant.kind === "sample" ? "Remove sample tenant" : "Disconnect and delete local data"}
           </Button>
         </div>
       </div>

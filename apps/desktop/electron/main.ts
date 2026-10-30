@@ -6,6 +6,11 @@ import { runOfficeRehearsal } from "./office-rehearsal.js";
 import { runOfficeSmoke } from "./office-smoke.js";
 import { captureLandingShots } from "./landing-capture.js";
 import {
+  captureFirstRunShots,
+  FIRST_RUN_CAPTURE_HEIGHT,
+  FIRST_RUN_CAPTURE_WIDTH,
+} from "./first-run-capture.js";
+import {
   NATIVE_THEME_COLORS,
   parseNativeAppearance,
 } from "./appearance.js";
@@ -182,6 +187,8 @@ const screenshotCaptureUserData =
 // layout captures keep their deliberate fixtures (including the long model id).
 const isLandingCapture =
   isScreenshotCaptureLaunch && process.env.OPENADMINOS_LANDING_CAPTURE === "1";
+const isFirstRunCapture =
+  isScreenshotCaptureLaunch && process.env.OPENADMINOS_FIRST_RUN_CAPTURE === "1";
 const smokeModelName = isLandingCapture ? "gpt-oss:20b" : "test-smoke-local-model";
 const screenshotModelName = isLandingCapture
   ? "gpt-oss:20b"
@@ -540,6 +547,10 @@ interface ScreenshotRegistryEntry {
 
 function seedScreenshotCaptureState(userDataDir: string): void {
   if (!isScreenshotCaptureLaunch) return;
+  if (isFirstRunCapture) {
+    seedFirstRunCaptureState(userDataDir);
+    return;
+  }
   mkdirSync(userDataDir, { recursive: true });
   const isWebsiteCapture = process.env.OPENADMINOS_WEBSITE_CAPTURE === "1";
   const now = new Date().toISOString();
@@ -667,6 +678,91 @@ function seedScreenshotCaptureState(userDataDir: string): void {
     ) + "\n",
     "utf8",
   );
+}
+
+function seedFirstRunCaptureState(userDataDir: string): void {
+  mkdirSync(userDataDir, { recursive: true });
+  const now = new Date().toISOString();
+  const entries = loadScreenshotRegistryEntries();
+  const entry =
+    entries.find((candidate) => candidate.slug === "compliance-overview") ??
+    entries[0];
+  if (!entry) throw new Error("First-run capture needs one bundled agent.");
+  const installedAgent = {
+    id: entry.id,
+    slug: entry.slug,
+    name: entry.name,
+    description: entry.description,
+    mode: entry.mode,
+    category: entry.category,
+    tier: entry.tier ?? "agent",
+    requiresEntraTier: entry.requiresEntraTier ?? "free",
+    scopes: entry.scopes,
+    author: entry.author,
+    version: entry.version,
+    installedAt: now,
+    registryId: entry.id,
+    minAppVersion: entry.minAppVersion,
+    schedule: {
+      enabled: true,
+      intervalSeconds: 900,
+      lastScheduledRunAt: "2025-01-01T00:00:00.000Z",
+      notifyOnSuccess: true,
+      notifyOnFailure: true,
+      notifyOnChangeOnly: false,
+    },
+    ...(entry.execution ? { execution: entry.execution } : {}),
+  };
+  writeFileSync(
+    join(userDataDir, "state.json"),
+    `${JSON.stringify({
+      activeProviderId: "ollama",
+      installedAgents: [installedAgent],
+      runs: [],
+      tenants: [],
+      registryInstallCountsEnabled: false,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+
+  const registryCacheDir = join(userDataDir, "registry-cache");
+  mkdirSync(registryCacheDir, { recursive: true });
+  writeFileSync(
+    join(registryCacheDir, "index.json"),
+    `${JSON.stringify({
+      schemaVersion: 1,
+      agents: entries,
+      cachedAt: now,
+      sourceUrl: DEFAULT_REGISTRY_SOURCE,
+    }, null, 2)}\n`,
+    "utf8",
+  );
+}
+
+function seedFirstRunCaptureRealTenant(userDataDir: string): void {
+  const statePath = join(userDataDir, "state.json");
+  const persisted = JSON.parse(readFileSync(statePath, "utf8")) as {
+    tenants?: Array<Record<string, unknown>>;
+    activeTenantId?: string;
+  } & Record<string, unknown>;
+  const tenants = Array.isArray(persisted.tenants) ? persisted.tenants : [];
+  if (!tenants.some((tenant) => tenant.id === "first-run-real-tenant")) {
+    tenants.push({
+      id: "first-run-real-tenant",
+      displayName: "Contoso Production",
+      username: "admin@contoso.invalid",
+      homeAccountId: "first-run-real-account",
+      addedAt: "2026-10-25T10:00:00.000Z",
+      lastUsedAt: "2026-10-25T12:00:00.000Z",
+      entraTier: "p2",
+      appRegistration: {
+        kind: "openadminos",
+        clientId: "11111111-2222-4333-8444-555555555555",
+      },
+    });
+  }
+  persisted.tenants = tenants;
+  writeFileSync(statePath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 }
 
 function loadScreenshotRegistryEntries(): ScreenshotRegistryEntry[] {
@@ -907,6 +1003,19 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
   );
 }
 
+function createFirstRunCaptureProviders(): ProviderSummary[] {
+  return providerCatalog.map((provider) => ({
+    ...provider,
+    status: provider.id === "ollama" ? "error" : "available",
+    detail:
+      provider.id === "ollama"
+        ? "Ollama is not running."
+        : provider.detail,
+    models: [],
+    defaultModel: undefined,
+  }));
+}
+
 function failIntuneChatSmoke(error: unknown): void {
   console.error(
     "[intune-chat-smoke] failed",
@@ -1014,6 +1123,16 @@ async function runScreenshotCapture(): Promise<void> {
 
   window.show();
   window.focus();
+  if (isFirstRunCapture) {
+    await captureFirstRunShots(window, screenshotCaptureOutDir, async () => {
+      if (!screenshotCaptureUserData) {
+        throw new Error("OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA is required.");
+      }
+      seedFirstRunCaptureRealTenant(screenshotCaptureUserData);
+    });
+    app.exit(0);
+    return;
+  }
   if (process.env.OPENADMINOS_OFFICE_SMOKE === "1") {
     await runOfficeSmoke(window, screenshotCaptureOutDir);
     await runOfficeRehearsal(window,screenshotCaptureOutDir,async()=>{officeRehearsalRevision=1;await store.tickOffice();});
@@ -4945,10 +5064,22 @@ async function createWindow({ show = true, route }: { show?: boolean; route?: st
     ...(!isScreenshotCaptureLaunch && typeof persisted.y === "number"
       ? { y: persisted.y }
       : {}),
-    width: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_WIDTH : persisted.width,
-    height: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : persisted.height,
+    width: isFirstRunCapture
+      ? FIRST_RUN_CAPTURE_WIDTH
+      : isScreenshotCaptureLaunch
+        ? SCREENSHOT_CAPTURE_WIDTH
+        : persisted.width,
+    height: isFirstRunCapture
+      ? FIRST_RUN_CAPTURE_HEIGHT
+      : isScreenshotCaptureLaunch
+        ? SCREENSHOT_CAPTURE_HEIGHT
+        : persisted.height,
     minWidth: isScreenshotCaptureLaunch ? 800 : 960,
-    minHeight: isScreenshotCaptureLaunch ? SCREENSHOT_CAPTURE_HEIGHT : 680,
+    minHeight: isFirstRunCapture
+      ? FIRST_RUN_CAPTURE_HEIGHT
+      : isScreenshotCaptureLaunch
+        ? SCREENSHOT_CAPTURE_HEIGHT
+        : 680,
     ...(isScreenshotCaptureLaunch
       ? {
           resizable: true,
@@ -6287,6 +6418,9 @@ function registerIpcHandlers() {
     void registerSchedulerIfReady("tenant");
     return state;
   }));
+  ipcMain.handle("openadminos:add-sample-tenant", handleTrusted(() =>
+    store.addSampleTenant(),
+  ));
   ipcMain.handle(
     "openadminos:cancel-connect-tenant",
     handleTrusted(() => store.cancelConnectTenant()),
@@ -6642,7 +6776,11 @@ if (!gotLock) {
       onStateChanged: (info) => {
         mainWindow?.webContents.send("openadminos:app-state-changed", info);
       },
-      ...(isIntuneChatSmokeLaunch || isScreenshotCaptureLaunch
+      ...(isFirstRunCapture
+        ? {
+            providerListFactory: () => createFirstRunCaptureProviders(),
+          }
+        : isIntuneChatSmokeLaunch || isScreenshotCaptureLaunch
         ? {
             graphFactory: () => createIntuneChatSmokeGraph(),
             llmFactory: () => createIntuneChatSmokeLlm(),

@@ -644,6 +644,7 @@ export function makeMockBridge(
     listTenants: vi.fn(async () => appState.tenants),
     getRequestedScopes: vi.fn(async () => []),
     connectTenant: vi.fn(async () => appState),
+    addSampleTenant: vi.fn(async () => appState),
     cancelConnectTenant: vi.fn(async () => undefined),
     setActiveTenant: vi.fn(async (id: string) =>
       updateState({ ...appState, activeTenantId: id }),

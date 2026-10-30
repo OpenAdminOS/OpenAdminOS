@@ -115,6 +115,10 @@ import {
   selfTrainingCandidateFromPrompt,
 } from "./planner.js";
 import { executeIntuneChatTool, type IntuneChatToolContext } from "./tools.js";
+import {
+  buildSampleTenantSuggestedPromptAnswer,
+  sampleProviderRequiredAnswer,
+} from "../sample-tenant/answers.js";
 
 type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
@@ -143,7 +147,6 @@ export interface ChatPersistedState {
   tenants: TenantRecord[];
   activeTenantId?: string;
 }
-
 export interface ChatServiceHost {
   read(): Promise<ChatPersistedState>;
   requireIntelligenceStore(): IntelligenceSqliteStore;
@@ -1523,6 +1526,12 @@ export class IntuneChatService {
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
+    const sampleWithoutProvider =
+      tenant.kind === "sample" &&
+      !(
+        provider.status === "connected" ||
+        (provider.id === "azure-openai" && provider.status === "available")
+      );
     const selectedModel = resolveProviderDefaultModel(
       provider,
       persisted.activeModelByProviderId,
@@ -1666,14 +1675,29 @@ export class IntuneChatService {
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
         )
       : undefined;
+    const sampleSuggestedAnswer = sampleWithoutProvider && !planned.hasWriteIntent
+      ? await buildSampleTenantSuggestedPromptAnswer(
+          (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
+          content,
+          new Date(answerGeneratedAt),
+        )
+      : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
       responseModel = undefined;
     } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
+    } else if (sampleSuggestedAnswer !== undefined) {
+      assistantContent = sampleSuggestedAnswer;
+      usedDeterministic = true;
+      responseModel = undefined;
     } else if (directDeviceAnswer !== undefined) {
       assistantContent = directDeviceAnswer;
+      responseModel = undefined;
+    } else if (sampleWithoutProvider) {
+      assistantContent = sampleProviderRequiredAnswer();
+      usedDeterministic = true;
       responseModel = undefined;
     } else {
       const llm = await this.host.buildLlm(providerId, selectedModel);
@@ -1839,6 +1863,12 @@ export class IntuneChatService {
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
+    const sampleWithoutProvider =
+      tenant.kind === "sample" &&
+      !(
+        provider.status === "connected" ||
+        (provider.id === "azure-openai" && provider.status === "available")
+      );
     options.signal?.throwIfAborted();
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");
@@ -2161,6 +2191,13 @@ export class IntuneChatService {
     };
 
     const directVoiceAnswer = await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant.id, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
+    const sampleSuggestedAnswer = sampleWithoutProvider && !planned.hasWriteIntent
+      ? await buildSampleTenantSuggestedPromptAnswer(
+          (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
+          content,
+          new Date(answerGeneratedAt),
+        )
+      : undefined;
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
     if (namedAgent) {
       assistantContent = `${namedAgent.name} is an installed ${namedAgent.mode === "read" ? "read-only" : "write"} agent. Use its Run button to review and start it. Nothing has been started.${namedAgent.mode === "write" ? " Its change plan still requires confirmation." : ""}`;
@@ -2169,8 +2206,18 @@ export class IntuneChatService {
     } else if (planned.hasWriteIntent) {
       assistantContent = writeIntentBlockedMessage(agentSuggestions);
       emitDelta(assistantContent);
+    } else if (sampleSuggestedAnswer !== undefined) {
+      assistantContent = sampleSuggestedAnswer;
+      usedDeterministic = true;
+      responseModel = undefined;
+      emitDelta(assistantContent);
     } else if (directVoiceAnswer !== undefined) {
       assistantContent = directVoiceAnswer;
+      responseModel = undefined;
+      emitDelta(assistantContent);
+    } else if (sampleWithoutProvider) {
+      assistantContent = sampleProviderRequiredAnswer();
+      usedDeterministic = true;
       responseModel = undefined;
       emitDelta(assistantContent);
     } else {
