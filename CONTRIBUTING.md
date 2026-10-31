@@ -23,6 +23,10 @@ Thanks for your interest. This project is community-built and contributions are 
 - **Wrappers around other AI products** — we provide an abstraction so users can swap providers. Don't lock in to one vendor.
 - **"Smart" defaults that bypass the diff-confirmation flow** — every write operation gets human review. No exceptions.
 
+## Agents we don't accept
+
+The public registry is for IT administration. Agents whose purpose is to score or evaluate individual employees' performance, productivity, or behaviour, to prepare hiring, promotion, termination, or task-allocation decisions, to infer emotions, or to categorise people by biometric data are not accepted. Account-security work, such as triaging Entra risky users, is fine. These uses would move OpenAdminOS into the EU AI Act's high-risk or prohibited categories; see [`docs/gitbook/trust/eu-ai-act.md`](docs/gitbook/trust/eu-ai-act.md).
+
 ## Agent contract
 
 Every OpenAdminOS agent is **LLM-augmented by contract**. The manifest must include at least one `format: llm` step, and the run's `result.summary` must reference that step's output (e.g. `{{ summarize.output.text | default("Summary unavailable.") }}`). Deterministic templates that simply count records are not agents — they're queries. Reach for `Get-MgDeviceManagementManagedDevice | Group-Object` or similar PowerShell instead.

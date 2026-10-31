@@ -37,6 +37,10 @@ Registry updates are not silently applied when the trust boundary changes. OpenA
 
 If an agent requires a newer OpenAdminOS version, Agent Hub still shows it but blocks install, run, and update application with Update OpenAdminOS copy.
 
+## Accepted Purposes
+
+The public registry accepts agents for IT administration: devices, apps, policies, identities, licences, and tenant configuration. It does not accept agents whose purpose is to evaluate individual employees' performance or behaviour, to prepare employment decisions about them, to infer emotions, or to categorise people by biometric data. Account-security triage, such as reviewing Entra risky users, stays in scope. See [EU AI Act](eu-ai-act.md) for the reasoning.
+
 ## Registry QA
 
 Registry CI rejects malformed or incomplete public agents before they can appear in the generated index. Checks cover duplicate slugs, invalid semver, missing README files, missing LLM steps, undeclared scopes, content-safety issues, and stale generated index output.
