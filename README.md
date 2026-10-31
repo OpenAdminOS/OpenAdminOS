@@ -2,9 +2,11 @@
 
 <h1>OpenAdminOS</h1>
 
-<p><strong>Open-source, local-first AI agents for Microsoft 365 admins.</strong></p>
+<p><strong>Sovereign AI agents for IT administration.</strong></p>
 
-<p>Run AI agents against your Microsoft 365 tenant from your own machine. Keep sensitive work local, avoid per-token costs with local models, and approve every change before it happens.</p>
+<p>Runs on the admin's own computer. Company data never leaves the device.</p>
+
+<p>OpenAdminOS is a free, MIT-licensed desktop app for running auditable AI agents against the systems you administer. Microsoft 365, Intune and Entra are the starting point, not the only target. Agents are plain YAML you can read before you run, risky changes need typed confirmation, and no third-party app registration is required.</p>
 
 [![CI](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml)
 [![Release](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml)
@@ -25,25 +27,63 @@
 
 ## Why OpenAdminOS
 
-- **Local-first by default.** Pick a local LLM (Ollama today; LM Studio planned) and tenant data plus prompts never leave the device. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. Switching to a hosted provider changes the trust banner honestly.
-- **Every agent is auditable YAML.** No opaque code paths, no hidden Graph calls. Read the full pipeline — every Graph endpoint, every transform, every prompt — before you install.
+- **Local-first by default.** Pick a local model (Ollama, LM Studio, or Apple Foundation Models) and tenant data plus prompts never leave the device. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. Switching to a hosted provider changes the trust banner honestly.
+- **Every agent is auditable YAML.** No opaque code paths, no hidden Graph calls. Read the full pipeline (every Graph endpoint, every transform, every prompt) before you install.
 - **Write agents always pause for typed diff confirmation.** No "trust this agent" toggle. Destructive changes require typing the phrase shown against the live diff (`type RETIRE 47 DEVICES to proceed`), every time.
 - **No app registration required.** Sign in with your own admin identity via MSAL (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secrets, no consent dance with a third-party multi-tenant app.
 - **Author agents in plain English.** Describe what you want; the local LLM drafts a manifest grounded in the JSON Schema; one click installs it.
+
+## Supported systems
+
+OpenAdminOS started with Microsoft 365 because that is where most IT administration happens today. The runtime is not tied to one vendor: connectors are separate packages behind a common interface, so other systems can be added the same way the existing ones were.
+
+**Available today**
+
+| System | What works |
+|---|---|
+| Microsoft 365, Intune, Entra (core) | Sign-in with your own admin identity, Chat over Intune, Entra and Defender data, drift and baselines, and 16 ready-made agents in the registry. |
+| Microsoft Teams | Outbound delivery of run reports. |
+| Slack | Outbound delivery of run reports. |
+| Discord | Outbound delivery of run reports through a channel webhook. |
+| Outlook, WhatsApp Web, Signal | Outbound delivery of run reports. |
+
+Connectors send terminal run reports only. They do not read messages or inboxes.
+
+**Planned (not available yet)**
+
+| System | Status |
+|---|---|
+| ServiceNow | Designed: create and update incidents from agent findings. |
+| Jira | Planned: file issues from an agent's structured output. |
+| Salesforce | Planned. |
+| Generic webhook | Planned: post run results to any HTTPS endpoint. |
+| Google Workspace | Proposed: user lifecycle, license and compliance reports via the Google Admin SDK. |
+
+### AI models
+
+| Option | Where it runs |
+|---|---|
+| OpenAdmin 8B, our fine-tuned model for Microsoft 365 administration (`ollama run openadminos/openadmin-8b`, see [benchmarks](https://openadminos.com/benchmarks)) | On the device, through Ollama |
+| Open models such as Mistral, through Ollama or LM Studio | On the device |
+| Apple Foundation Models on compatible macOS | On the device |
+| Azure OpenAI with your own key and endpoint | Your Azure resource |
+| OpenAI, Anthropic, GitHub Copilot, Google Gemini through their locally installed vendor CLIs, using your existing vendor account | The vendor's API |
+
+When a hosted option is selected, the app states where data goes before anything is sent.
 
 ## Download
 
 | Platform | Asset |
 |---|---|
-| macOS (Apple Silicon) | [`OpenAdminOS-<version>-arm64.dmg`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest) — signed with Developer ID, notarized |
+| macOS (Apple Silicon) | [`OpenAdminOS-<version>-arm64.dmg`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest): signed with Developer ID, notarized |
 | Windows (x64) | [`OpenAdminOS-<version>-win-x64.exe`](https://github.com/OpenAdminOS/OpenAdminOS/releases/latest): code-signed NSIS installer, per-user install |
 | From source | See [Quickstart](#quickstart) below |
 
 ---
 
-## What's in the box (v0.2.5)
+## What's in the box
 
-### Agent Templates — agents as YAML pipelines
+### Agent Templates: agents as YAML pipelines
 
 Every shipped agent is a declarative `manifest.yaml`. No companion TypeScript needed. The runtime interprets the manifest top-to-bottom.
 
@@ -73,17 +113,17 @@ definition:
     summary: '{{ summarize.output.text | default("Summary unavailable.") }}'
 ```
 
-**Step formats**: `graph` (read Microsoft Graph), `transform` (pure data shaping), `llm` (required — every agent invokes the model at least once), `map` (per-item sub-pipelines), `write` (emits one action per source item and pauses for typed phrase confirmation), and `connector` (declared outbound egress).
+**Step formats**: `graph` (read Microsoft Graph), `transform` (pure data shaping), `llm` (required: every agent invokes the model at least once), `map` (per-item sub-pipelines), `write` (emits one action per source item and pauses for typed phrase confirmation), and `connector` (declared outbound egress).
 
 ### Static QA gate
 
 `npm run qa` validates every shipped manifest:
 - **JSON Schema validation** of the YAML against [`schemas/agent-template.schema.json`](schemas/agent-template.schema.json).
-- **Graph QA**: declared scopes are real, endpoints exist in the OpenAPI surface, `$select` fields exist on the resource, fixtures match the live schema. Uses the [`merill/msgraph`](https://github.com/merill/msgraph) skill — offline, no auth, no tenant calls.
+- **Graph QA**: declared scopes are real, endpoints exist in the OpenAPI surface, `$select` fields exist on the resource, fixtures match the live schema. Uses the [`merill/msgraph`](https://github.com/merill/msgraph) skill: offline, no auth, no tenant calls.
 
 A malformed manifest fails CI with a structured per-field diff.
 
-### NL2Agent — describe an agent in English
+### NL2Agent: describe an agent in English
 
 The "Build your own Agent" button on the hub opens a guided flow. Type a description, the active LLM provider drafts a YAML manifest grounded in the schema and a worked example, the draft renders through the same Manifest Preview component as public agents, and Save & install routes you straight to the new agent's detail page. User-authored agents persist under `userData/agents/<slug>/` and appear in the merged registry without a restart.
 
@@ -92,7 +132,7 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 - **Tenant data never leaves the device** when a local LLM is selected. No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry.
 - **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. Destructive operations require typed-phrase confirmation against the live diff, every time.
 - **No tenant, no run.** The desktop shell remains available for browsing and drafting, but tenant-backed Chat, Graph refreshes, Changes, and agents pause for contextual connection. Agents never run against fallback demo data.
-- **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. There is no separate global "enable writes" toggle — the typed-phrase confirmation per run is the only gate.
+- **Graph writes follow the tenant binding.** Connect a real tenant and write agents call Microsoft Graph for real after you approve their plan. There is no separate global "enable writes" toggle. The typed-phrase confirmation per run is the only gate.
 
 ### What's shipped vs what's coming
 
@@ -109,10 +149,10 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 | Agent registry | Agent Hub fetches `agents/index.json`, caches locally, version-pins installs, reviews scope-diff updates, and supports custom registry sources. | More maintainer workflow automation. |
 | Build your own Agent | Guided manifest drafting, validation, repair, editable YAML review, local preflight, install, edit, export, and public "Share with community" issue intake are implemented. | More examples and better Graph QA messages. |
 | Reference agents | The repo includes investigator, advisor, dashboard, cleanup, and one experimental script agent. | More agents after maintainer review. |
-| Connectors | Outbound-only Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal delivery are implemented. They send terminal run reports and do not read messages or inboxes. | ServiceNow and other enterprise connectors remain future work. |
+| Connectors | Outbound-only Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal delivery are implemented. They send terminal run reports and do not read messages or inboxes. | ServiceNow, Jira, Salesforce, and a generic webhook. See [Supported systems](#supported-systems). |
 | Schedules | Per-agent schedules use the OS scheduler on macOS and Windows after tenant sign-in. Scheduled runs still use the signed app and local state. | More schedule health and audit polish. |
 | macOS menu bar | The signed app includes a menu-bar companion for active tenant/provider state, schedules, recent activity, and a compact read-only chat prompt. | Windows/Linux companion surfaces are not planned for 0.3. |
-| LLM providers | Ollama, Apple Foundation Models on compatible macOS, and OpenAI through the local Codex CLI are implemented. | Anthropic via Claude Code CLI, LM Studio, and Azure OpenAI are planned for 0.3. |
+| LLM providers | Ollama, LM Studio, Apple Foundation Models on compatible macOS, Azure OpenAI, and OpenAI, Anthropic, GitHub Copilot, and Google Gemini through their locally installed vendor CLIs. | An integrated local model explorer ([#102](https://github.com/OpenAdminOS/OpenAdminOS/issues/102)). |
 | MXC sandbox | The Intune Device Posture Auditor uses `execution.kind: script` behind the experimental MXC setting. Normal community agents remain YAML templates. | Hardened sandbox policy before arbitrary community script agents. |
 | Installers | macOS DMG/PKG builds are signed and notarized. Windows x64 ships a code-signed NSIS installer. Linux x64 AppImage, `.deb`, `.rpm`, and the apt repository are published. | Microsoft Store (AppX) distribution. |
 | Local storage | SQLite stores chat, cache, schedules, Workspaces, runs, and local learning state. Secrets stay local through Electron secure storage and platform secret-store requirements. | Keychain hardening continues where platform support needs it. |
@@ -128,7 +168,7 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 | `sign-in-failure-explainer` | policies | read | Correlates sign-in logs, Conditional Access, device state, and directory changes to explain failures. |
 | `stale-guest-cleanup` | policies | write | Flags stale guests with LLM rationale and disables them only after typed confirmation. |
 
-The repo currently indexes 14 agent and dashboard manifests under `agents/<slug>/manifest.yaml`. Read them — they are the documentation of what the runtime can do.
+The repo currently indexes 16 agent and dashboard manifests under `agents/<slug>/manifest.yaml`. Read them: they are the documentation of what the runtime can do.
 
 ## Quickstart
 
@@ -138,7 +178,7 @@ git clone https://github.com/OpenAdminOS/OpenAdminOS.git
 cd OpenAdminOS
 npm install
 
-# 2. Install Ollama and pull a model (required — every agent uses the LLM at least once)
+# 2. Install Ollama and pull a model (required: every agent uses the LLM at least once)
 brew install ollama && ollama serve &
 ollama pull llama3.2:3b   # lightweight default; or pull whichever model you prefer
 
@@ -172,7 +212,7 @@ docs/
   mockups/        8 reference HTML mockups + design system tokens
 ```
 
-Stack: TypeScript, npm workspaces + Turborepo, Electron 42, Vite + React + React Router, Tailwind, MSAL (`@azure/msal-node`), `js-yaml`, `ajv`. SQLite + `keytar` arrive in v0.2 with persistence + secrets hardening.
+Stack: TypeScript, npm workspaces + Turborepo, Electron 42, Vite + React + React Router, Tailwind, MSAL (`@azure/msal-node`), `js-yaml`, `ajv`. SQLite for local state and Electron secure storage for secrets.
 
 ## Writing an agent by hand
 
@@ -211,11 +251,23 @@ definition:
     summary: '{{ summarize.output.text | default("Summary unavailable.") }}'
 ```
 
-Every agent must include at least one `format: llm` step — the runtime enforces this and `npm run qa` flags violations. Use the LLM step's output as the run's headline summary.
+Every agent must include at least one `format: llm` step. The runtime enforces this and `npm run qa` flags violations. Use the LLM step's output as the run's headline summary.
 
 Drop that at `agents/my-agent/manifest.yaml`, run `npm run qa`, and the agent shows up in the hub.
 
 For the full schema, see [`schemas/agent-template.schema.json`](schemas/agent-template.schema.json) and [`schemas/README.md`](schemas/README.md). For deeper architecture, see [`docs/SPEC.md`](docs/SPEC.md).
+
+## Roadmap
+
+These items are planned and not available yet. Each issue holds the current design discussion; feedback there is welcome.
+
+- [Hosted control plane](https://github.com/OpenAdminOS/OpenAdminOS/issues/124) (#124), planned
+- [Shared memory](https://github.com/OpenAdminOS/OpenAdminOS/issues/125) (#125), planned
+- [Reporting and status reports](https://github.com/OpenAdminOS/OpenAdminOS/issues/127) (#127), planned
+- [Agent and MCP governance](https://github.com/OpenAdminOS/OpenAdminOS/issues/120) (#120), planned
+- [Marketplace for vendor agents, plugins, and MCP tools](https://github.com/OpenAdminOS/OpenAdminOS/issues/103) (#103), planned
+- [Integrated local model explorer](https://github.com/OpenAdminOS/OpenAdminOS/issues/102) (#102), planned
+- [Compute pool, shared local inference across devices](https://github.com/OpenAdminOS/OpenAdminOS/issues/104) (#104), planned
 
 ## Contributing
 
@@ -227,4 +279,4 @@ MIT. See [`LICENSE`](LICENSE).
 
 ## Who's behind it
 
-Free community project — sponsorships welcome, no paid tier planned for the platform itself.
+Free community project. Sponsorships welcome, no paid tier planned for the platform itself.

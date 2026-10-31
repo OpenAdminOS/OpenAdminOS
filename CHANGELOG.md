@@ -14,6 +14,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Recapture the homepage screenshots at 1280 x 800 and 2x with the demo tenant, and show the product tour as tabs over a full-width screenshot, so the app is readable on the page.
 - Website fixes: the product tour pauses on keyboard focus and has a Pause button, benchmark charts use distinct colors in both themes, the download button no longer offers the macOS build before it knows your platform (and phones are told it is a desktop app), the theme toggle always changes the theme and stays in sync, and print shows every section.
 - Move the documentation from GitBook to a self-hosted docs site at docs.openadminos.com, built from the same Markdown with a sidebar, local search, page outline, and previous/next links in the calm identity. Existing docs links keep working.
+- Reposition the README as vendor-neutral, local-first AI agents for IT administration with Microsoft 365 as the starting point, and add Supported systems, AI models, and Roadmap sections that separate what ships today from what is planned.
 
 ### Removed
 
