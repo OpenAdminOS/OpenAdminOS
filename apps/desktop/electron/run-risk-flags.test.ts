@@ -23,10 +23,10 @@ function run(overrides: Partial<RunRecord> = {}): RunRecord {
     queuedAt: "2026-10-31T00:00:00Z", steps: [], logs: [], plan: plan(), ...overrides };
 }
 
-async function fixture(history: RunRecord[] = []) {
+async function fixture(history: RunRecord[] = [], installed: AgentSummary = agent) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-risk-flags-"));
   const path = join(dir, "state.json");
-  await writeFile(path, JSON.stringify({ activeProviderId: "ollama", installedAgents: [agent], tenants: [], runs: history }));
+  await writeFile(path, JSON.stringify({ activeProviderId: "ollama", installedAgents: [installed], tenants: [], runs: history }));
   const read = async () => JSON.parse(await readFile(path, "utf8")) as RunPersistedState;
   const host = {
     read,
@@ -95,6 +95,15 @@ describe("host write plan risk assessment", () => {
         assert.deepEqual(pending.riskAssessment.flags.map((flag) => flag.id), ["directory-object-deletion"]);
         assert.deepEqual((await f.read()).runs.find((candidate) => candidate.id === pending.id)?.riskAssessment, pending.riskAssessment);
       }
+    } finally { await f.cleanup(); }
+  });
+
+  it("does not flag template writes as undeclared when the agent declares no Graph operations", async () => {
+    const f = await fixture([], { ...agent, graphOperations: undefined });
+    try {
+      await f.service.persistRunSnapshot(run({ plan: { summary: "Disable guests.", confirmationPhrase: "DISABLE 1 GUESTS",
+        actions: [{ id: "a", kind: "graph-write", label: "Disable guest", request: { method: "PATCH", path: "/users/guest-1", body: { accountEnabled: false } } }] } }));
+      assert.deepEqual((await f.read()).runs[0]?.riskAssessment, { status: "complete", flags: [] });
     } finally { await f.cleanup(); }
   });
 });

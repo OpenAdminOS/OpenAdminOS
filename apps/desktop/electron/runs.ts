@@ -1141,8 +1141,14 @@ export class RunService {
   private assessPlan(run: RunRecord, state: RunPersistedState): RunRecord["riskAssessment"] {
     if (!run.plan) return undefined;
     const agent = state.installedAgents.find((candidate) => candidate.slug === run.agentSlug);
+    // Only code-backed agents declare graphOperations. Declarative templates
+    // take their write requests from the manifest's own actionTemplate, so an
+    // empty or missing list means "nothing to compare against", not "undeclared".
+    const graphOperations = run.origin === undefined && agent?.graphOperations?.length
+      ? agent.graphOperations
+      : undefined;
     return assessWritePlanSafely(run.plan, {
-      ...(run.origin === undefined ? { graphOperations: agent?.graphOperations ?? [] } : {}),
+      ...(graphOperations ? { graphOperations } : {}),
       historicalConfirmedActionCounts: run.origin !== undefined || run.tenantId === undefined ? [] : state.runs.flatMap((previous) =>
         previous.id !== run.id && previous.agentSlug === run.agentSlug &&
         previous.tenantId === run.tenantId && previous.confirmedAt && Array.isArray(previous.plan?.actions)
