@@ -8,6 +8,7 @@ import type {
   LlmCompletion,
   LlmOptions,
   LlmStreamChunk,
+  LlmTokenUsage,
   RunLlmApi,
 } from "@openadminos/agent-sdk";
 
@@ -94,7 +95,7 @@ export function createCodexLlm(options: CodexProviderOptions = {}): RunLlmApi {
       if (!last) {
         throw new Error("Codex CLI returned no final assistant message.");
       }
-      return { text: last.accumulated, model: last.model };
+      return { text: last.accumulated, model: last.model, ...(last.tokenUsage ? { tokenUsage: last.tokenUsage } : {}) };
     },
     async *stream(opts: LlmOptions): AsyncIterable<LlmStreamChunk> {
       const model = opts.model ?? defaultModel;
@@ -384,6 +385,7 @@ async function* runCodexExecStream(input: {
   let stdout = "";
   let stderr = "";
   let accumulated = "";
+  let tokenUsage: LlmTokenUsage | undefined;
   let yielded = false;
   let settled = false;
   const abortFromCaller = () => {
@@ -425,6 +427,7 @@ async function* runCodexExecStream(input: {
     for (const line of lines) {
       const event = parseCodexJsonLine(line);
       if (!event) continue;
+      tokenUsage = codexTokenUsage(event) ?? tokenUsage;
       const next = extractCodexAssistantText(event);
       if (!next) continue;
       if (next.kind === "delta") {
@@ -448,6 +451,7 @@ async function* runCodexExecStream(input: {
     }
   }
 
+  tokenUsage = codexTokenUsage(parseCodexJsonLine(stdout)) ?? tokenUsage;
   const exitCode = await closePromise;
   settled = true;
   clearTimeout(timer);
@@ -479,6 +483,7 @@ async function* runCodexExecStream(input: {
     accumulated: finalText,
     done: true,
     model,
+    ...(tokenUsage ? { tokenUsage } : {}),
   };
 }
 
@@ -498,6 +503,17 @@ function parseCodexJsonLine(line: string): unknown | undefined {
   } catch {
     return undefined;
   }
+}
+
+function codexTokenUsage(event: unknown): LlmTokenUsage | undefined {
+  if (!event || typeof event !== "object") return undefined;
+  const record = event as { type?: string; usage?: { input_tokens?: number; output_tokens?: number } };
+  if (record.type !== "turn.completed" || !record.usage) return undefined;
+  const prompt = record.usage.input_tokens;
+  const completion = record.usage.output_tokens;
+  if (typeof prompt !== "number" || !Number.isFinite(prompt) || prompt < 0 ||
+      typeof completion !== "number" || !Number.isFinite(completion) || completion < 0) return undefined;
+  return { promptTokens: prompt, completionTokens: completion, totalTokens: prompt + completion };
 }
 
 function extractCodexAssistantText(event: unknown): { kind: "delta" | "message"; text: string } | undefined {

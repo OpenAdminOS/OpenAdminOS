@@ -752,6 +752,15 @@ export interface RunRecord {
    * doesn't report token telemetry.
    */
   tokens?: LlmTokenUsage;
+  /** Per-call totals for local forecasts; missing metrics stay unknown. Older runs have null usage. */
+  usage?: RunModelUsage | null;
+}
+
+export interface RunModelUsage extends LlmTokenUsage {
+  providerId: ProviderId;
+  model?: string;
+  calls: number;
+  mixedModels: boolean;
 }
 
 export const DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS = 500;
@@ -3440,6 +3449,8 @@ export interface LlmTokenUsage {
   completionTokens?: number;
   /** Sum of prompt + completion when known; some providers report only this. */
   totalTokens?: number;
+  /** USD cost reported by the provider, never calculated from a price table. */
+  costUsd?: number;
 }
 
 export interface LlmCompletion {

@@ -7,6 +7,7 @@ import {
 } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { NewAgentModal } from "../components/NewAgentModal";
+import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 import { useToast } from "../components/Toast";
 import {
   IconChevronDown,
@@ -490,19 +491,24 @@ export default function AgentsHome() {
                 <span className="calm-row-icon">
                   {row.display.mode === "write" ? <IconBolt size={16} /> : <IconShield size={16} />}
                 </span>
-                <button type="button" className="min-w-0 flex-1 text-left" onClick={() => openAgent(row.slug)}>
-                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                    <span className="truncate font-medium text-[var(--color-text)]">{formatAgentDisplayName(row.display)}</span>
-                    <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
-                      <StatusDot tone={row.display.mode === "write" ? "warning" : "success"} />
-                      {row.display.mode === "write" ? "Makes changes" : "Read-only"}
-                      <span aria-hidden="true">·</span>
-                      {meta}
+                <div className="min-w-0 flex-1">
+                  <button type="button" className="block w-full min-w-0 text-left" onClick={() => openAgent(row.slug)}>
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                      <span className="truncate font-medium text-[var(--color-text)]">{formatAgentDisplayName(row.display)}</span>
+                      <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                        <StatusDot tone={row.display.mode === "write" ? "warning" : "success"} />
+                        {row.display.mode === "write" ? "Makes changes" : "Read-only"}
+                        <span aria-hidden="true">·</span>
+                        {meta}
+                      </span>
                     </span>
-                  </span>
-                  <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
-                  {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
-                </button>
+                    <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
+                    {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
+                  </button>
+                  {scheduled && row.installed ? (
+                    <ScheduleUsageForecast agent={row.installed} intervalSeconds={row.installed.schedule!.intervalSeconds} compact />
+                  ) : null}
+                </div>
                 <div className="calm-row-actions flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
                   {row.installed ? (
                     <>

@@ -150,6 +150,7 @@ describe("createClaudeCodeLlm", () => {
 
       assert.equal(completion.text, "Hello");
       assert.equal(completion.model, "claude-sonnet-5");
+      assert.deepEqual(completion.tokenUsage, { promptTokens: 13, completionTokens: 2, totalTokens: 15, costUsd: 0.004 });
       const calls = await fixture.readCalls();
       const generation = calls.at(-1) ?? "";
       assert.match(generation, /-p --output-format json/);
@@ -186,9 +187,10 @@ describe("createClaudeCodeLlm", () => {
       assert.equal(chunks.at(-1)?.accumulated, "Hello");
       assert.equal(chunks.at(-1)?.done, true);
       assert.deepEqual(chunks.at(-1)?.tokenUsage, {
-        promptTokens: 3,
+        promptTokens: 13,
         completionTokens: 2,
-        totalTokens: 5,
+        totalTokens: 15,
+        costUsd: 0.004,
       });
     } finally {
       await fixture.cleanup();
@@ -230,7 +232,7 @@ if (args[0] === "--version") {
       console.log(JSON.stringify({type: "assistant", message: {model: "claude-sonnet-5", content: [{type: "text", text}]}}));
     }
   }
-  console.log(JSON.stringify({type: "result", subtype: "success", result: "Hello", message: {model: "claude-sonnet-5"}, usage: {input_tokens: 3, output_tokens: 2}}));
+  process.stdout.write(JSON.stringify({type: "result", subtype: "success", result: "Hello", message: {model: "claude-sonnet-5"}, total_cost_usd: 0.004, usage: {input_tokens: 3, cache_read_input_tokens: 7, cache_creation_input_tokens: 3, output_tokens: 2}}));
 }
 `;
   await writeFile(binaryPath, script, "utf8");

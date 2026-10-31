@@ -20,6 +20,7 @@ import type {
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, Switch } from "../components/ui";
+import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 
 import { statusLabel, statusTone } from "./Runs";
 
@@ -369,6 +370,8 @@ function ScheduleRow({
           </div>
         </div>
 
+        <ScheduleUsageForecast agent={agent} intervalSeconds={intervalSeconds} compact />
+
         <div className="mt-4 grid grid-cols-2 gap-3">
           <ScheduleMetric
             label="Next run"
@@ -574,6 +577,8 @@ function UnscheduledRow({
   onOpen: () => void;
   onSchedule: (schedule: AgentSchedule) => Promise<void>;
 }) {
+  const [intervalSeconds, setIntervalSeconds] = useState(3600);
+  const [busy, setBusy] = useState(false);
   return (
     <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 md:flex-row md:items-center md:justify-between">
       <div className="min-w-0">
@@ -594,26 +599,37 @@ function UnscheduledRow({
         <p className="mt-1 line-clamp-1 text-sm text-[var(--color-text-muted)]">
           {agent.description}
         </p>
+        <ScheduleUsageForecast agent={agent} intervalSeconds={intervalSeconds} compact />
       </div>
       <div className="flex shrink-0 flex-wrap items-center gap-1.5">
-        {QUICK_INTERVALS.map((interval) => (
-          <Button
-            key={interval.seconds}
-            size="sm"
-            variant="secondary"
-            onClick={() =>
-              void onSchedule({
+        <label className="grid gap-1 text-xs text-[var(--color-text-muted)]">
+          Interval for {agent.name}
+          <select name="schedule-interval" value={intervalSeconds} disabled={busy} onChange={(event) => setIntervalSeconds(Number(event.target.value))}
+            className="h-9 rounded-md bg-[var(--color-surface)] px-3 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]">
+            {QUICK_INTERVALS.map((interval) => <option key={interval.seconds} value={interval.seconds}>{interval.label}</option>)}
+          </select>
+        </label>
+        <Button
+          size="sm"
+          variant="secondary"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              await onSchedule({
                 enabled: true,
-                intervalSeconds: interval.seconds,
+                intervalSeconds,
                 notifyOnSuccess: true,
                 notifyOnFailure: true,
                 notifyOnChangeOnly: false,
-              })
+              });
+            } finally {
+              setBusy(false);
             }
-          >
-            {interval.label}
-          </Button>
-        ))}
+          }}
+        >
+          {busy ? "Saving…" : "Enable schedule"}
+        </Button>
       </div>
     </div>
   );

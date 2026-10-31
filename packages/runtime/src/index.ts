@@ -36,6 +36,7 @@ import { withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant
 
 export { TENANT_DATA_INSTRUCTIONS, fenceTenantData, stripTenantDataFences,
   withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
+import { accumulateRunUsage } from "./run-usage.js";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
@@ -330,6 +331,7 @@ export function createQueuedRun(input: {
     queuedAt: now,
     providerId: input.providerId,
     model: input.model,
+    usage: null,
     summary: `${input.agent.name} is queued.`,
     steps: [],
     logs: [
@@ -465,7 +467,14 @@ async function createPhaseHandle(
       working = { ...working, tokens: mergeTokenUsage(working.tokens, usage) };
       void input.onProgress(working);
     },
-  }, input.signal);
+    recordUsage: (usage, model) => {
+      working = {
+        ...working,
+        usage: accumulateRunUsage(working.usage, input.providerId, model, usage),
+      };
+      void input.onProgress(working);
+    },
+  }, input.signal, input.model);
 
   const logFn = (
     level: RunLogLevel,
@@ -630,6 +639,7 @@ interface ThinkingHooks {
   ): void;
   updateLiveSummary(text: string, streaming: boolean): void;
   accumulateTokens(usage: LlmTokenUsage): void;
+  recordUsage(usage: LlmTokenUsage | undefined, model: string | undefined): void;
 }
 
 export function mergeTokenUsage(
@@ -654,7 +664,7 @@ export function mergeTokenUsage(
   return merged;
 }
 
-function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: AbortSignal): RunLlmApi {
+function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: AbortSignal, runModel?: string): RunLlmApi {
   base = withTenantDataOutputFilter(base);
   const guardAvailable = () => {
     if (!base.available) {
@@ -687,6 +697,7 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
       signal?.throwIfAborted();
       options = { ...options, system: withTenantDataInstructions(options.system), signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal };
       const stepId = hooks.getCurrentStepId();
+      let usageRecorded = false;
       const reset = () => {
         if (stepId) {
           hooks.updateStepThinking(stepId, () => undefined);
@@ -707,6 +718,10 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
           if (chunk.done && chunk.tokenUsage) {
             hooks.accumulateTokens(chunk.tokenUsage);
           }
+          if (chunk.done) {
+            hooks.recordUsage(chunk.tokenUsage, options.model ?? runModel ?? base.defaultModel ?? chunk.model);
+            usageRecorded = true;
+          }
           yield chunk;
         }
         if (stepId) {
@@ -717,6 +732,10 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
       } catch (error) {
         reset();
         throw error;
+      } finally {
+        if (!usageRecorded) {
+          hooks.recordUsage(undefined, options.model ?? runModel ?? base.defaultModel);
+        }
       }
     },
   };
