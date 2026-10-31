@@ -21,7 +21,7 @@ OpenAdminOS is not intended to make, or prepare, decisions about people as worke
 | High-risk (Annex III) | Not high-risk for its intended purpose. IT administration of a Microsoft 365 tenant is not an Annex III use. The nearest category is employment (Annex III, point 4), which the registry rules below keep out of scope. |
 | Prohibited practices (Article 5) | Not applicable. Agents that recognise emotions at work, categorise people by biometric data, or produce social scores are not accepted into the registry. |
 | Disclosure of AI interaction (Article 50(1)) | Administrators always see that they are working with an AI model, which provider and model is in use, and where prompts go. |
-| Marking of generated text (Article 50(2)) | Not yet implemented. Exported reports and copied text do not carry a machine-readable AI-generated marker. The project is waiting for the Commission's code of practice on marking before choosing a format. |
+| Marking of generated text (Article 50(2)) | Run reports from **Copy report** and **Share** end with a note that the report includes AI-generated text, naming the provider and model. JSON exports already carry the provider and model as fields. Text copied from a single Chat answer carries no note. |
 | Model providers | The developers of the general-purpose models you select are the model providers, for example Anthropic, OpenAI, Google, or the publisher of a model you run in Ollama or LM Studio. Services that host or relay those models, such as GitHub Copilot and Azure OpenAI, carry their own terms. |
 | OpenAdmin models | Fine-tunes of openly licensed base models. The Commission's guidelines for general-purpose AI model providers treat modification compute above one third of the original model's training compute as an indicative criterion for the modifier becoming a model provider. OpenAdmin training runs are several orders of magnitude below that. The models are still published with model cards and a public training dataset. |
 
@@ -33,7 +33,7 @@ These features exist for their own reasons. They also line up with what the Act 
 |---|---|
 | Human oversight | Write agents always stop at a diff confirmation, and the change applies only after the confirmation phrase is typed exactly. There is no bypass. See [Write confirmation](write-confirmation.md). |
 | Disclosure of AI use | The top bar always shows the current tenant, provider, and data boundary: no model, a local model, or the hosted provider and model that prompts go to. See [Hosted providers](hosted-providers.md). |
-| Records | Run history is stored locally, subject to the retention setting in Settings. **Copy report** on a run result includes the status, start time, provider, model, tenant, steps, and logs. |
+| Records | Run history is stored locally, subject to the retention setting in Settings. **Copy report** on a run result includes the status, start time, provider, model, tenant, steps, and logs, and ends with the AI-generated note. |
 | Data location | With a local provider, prompts and tenant data stay on the device. With a hosted provider, the UI names where they go. See [Local-first guarantee](local-first.md). |
 | Documentation | Every registry agent declares its Graph scopes, read or write mode, and write actions in its manifest. The [Graph scope matrix](../generated/reference/graph-scope-matrix.md) and [Write safety matrix](../generated/reference/write-safety-matrix.md) are generated from those manifests. |
 
