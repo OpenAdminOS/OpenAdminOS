@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
@@ -12,12 +12,65 @@ import type {
   RunLlmApi,
   RunStatus,
   WritePlan,
+  WriteLimits,
 } from "@openadminos/agent-sdk";
 
 import { createQueuedRun, executeApply, executePlan, executeRun } from "./index.js";
 import { createSandboxBroker } from "./sandbox-broker.js";
+import { parseAgentTemplate, runAgentTemplateApply } from "./agent-template.js";
 
 describe("write plan safety", () => {
+  for (const limits of [undefined, { maxActions: 1 }, { maxActions: 5, maxActionsPerOperation: { "retire-managed-device": 1 } }]) {
+    it(`fails oversized template plans before confirmation (${JSON.stringify(limits)})`, async () => {
+      const fixture = makeWriteAgentFixture({
+        devices: Array.from({ length: limits ? 2 : 101 }, (_, i) => managedDevice(`device-${i}`, `Laptop ${i}`, `SERIAL-${i}`)),
+        ...(limits ? { writeLimits: limits } : {}),
+      });
+      try {
+        const progress: RunStatus[] = [];
+        const failed = await executePlan({
+          run: createQueuedRun({ agent: fixture.agent, providerId: "ollama" }), agent: fixture.agent,
+          providerId: "ollama", llm: fixture.llm, createGraph: () => fixture.graph,
+          onProgress(next) { progress.push(next.status); },
+        });
+        assert.equal(failed.status, "failed");
+        assert.match(failed.error ?? "", /Nothing was changed\. Narrow the selection/);
+        assert.equal(failed.plan, undefined);
+        assert.ok(!progress.includes("awaiting-confirmation"));
+        assert.deepEqual(fixture.retireCalls, []);
+      } finally { fixture.cleanup(); }
+    });
+  }
+
+  it("reloads limits at apply time before any Graph write", async () => {
+    const fixture = makeWriteAgentFixture({ devices: [managedDevice("one", "One", "1"), managedDevice("two", "Two", "2")], writeLimits: { maxActions: 2 } });
+    try {
+      const common = { agent: fixture.agent, providerId: "ollama" as const, llm: fixture.llm, createGraph: () => fixture.graph, realWrites: true, onProgress() {} };
+      const planned = await executePlan({ ...common, run: createQueuedRun(common) });
+      assert.equal(planned.status, "awaiting-confirmation");
+      assert.ok(planned.plan);
+      const path = join(fixture.agent.registryPath!, "manifest.yaml");
+      writeFileSync(path, readFileSync(path, "utf8").replace('"maxActions":2', '"maxActions":1'));
+      const failed = await executeApply({ ...common, run: planned, plan: planned.plan });
+      assert.equal(failed.status, "failed");
+      assert.match(failed.error ?? "", /manifest allows at most 1 per run/);
+      assert.deepEqual(fixture.retireCalls, []);
+    } finally { fixture.cleanup(); }
+  });
+
+  for (const limits of [undefined, { maxActions: 1 }, { maxActions: 5, maxActionsPerOperation: { "retire-managed-device": 1 } }]) {
+    it(`rechecks the whole plan in direct template apply (${JSON.stringify(limits)})`, async () => {
+      const fixture = makeWriteAgentFixture({ devices: [] });
+      try {
+        const manifest = parseAgentTemplate(readFileSync(join(fixture.agent.registryPath!, "manifest.yaml"), "utf8"));
+        if (limits) manifest.descriptor.writeLimits = limits;
+        const plan: WritePlan = { summary: "Review plan.", confirmationPhrase: "RETIRE 101 DEVICES", actions: Array.from({ length: limits ? 2 : 101 }, (_, i) => ({ id: String(i), kind: "retire-managed-device", label: `Device ${i}`, metadata: { deviceId: String(i) } })) };
+        await assert.rejects(() => runAgentTemplateApply(manifest, { graph: fixture.graph, realWrites: true } as RunContext, plan), /Nothing was changed/);
+        assert.deepEqual(fixture.retireCalls, []);
+      } finally { fixture.cleanup(); }
+    });
+  }
+
   it("completes write agents whose plan has zero actions", async () => {
     const fixture = makeWriteAgentFixture({
       slug: "empty-write-agent",
@@ -744,6 +797,7 @@ definition:
 });
 
 function makeWriteAgentFixture(options: {
+  writeLimits?: WriteLimits;
   slug?: string;
   name?: string;
   description?: string;
@@ -777,6 +831,7 @@ function makeWriteAgentFixture(options: {
         options.confirmationPhraseTemplate ??
         "OFFBOARD {{ actions | size }} DEVICES",
       summaryTemplate: options.summaryTemplate ?? "{{ explain.output.text }}",
+      ...(options.writeLimits ? { writeLimits: options.writeLimits } : {}),
     }),
     "utf8",
   );
@@ -807,6 +862,7 @@ function makeWriteAgentFixture(options: {
 }
 
 function writeAgentManifest(input: {
+  writeLimits?: WriteLimits;
   slug: string;
   name: string;
   description: string;
@@ -824,6 +880,7 @@ function writeAgentManifest(input: {
     verified: true
   category: devices
   mode: write
+  ${input.writeLimits ? `writeLimits: ${JSON.stringify(input.writeLimits)}` : ""}
 skills:
   - id: load
     format: graph
