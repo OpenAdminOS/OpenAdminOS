@@ -2,6 +2,7 @@ import { voiceDeviceEvidenceAnswer, voiceDeviceEvidenceIntent } from "./voice-de
 import type { WebSearch } from "./web-search.js";
 import { voiceConversationContext, voiceInventoryAnswer, voiceAppPlatformCountAnswer, voiceDeviceSummaryAnswer, voiceResourcesForQuestion, compactVoiceAnswerPack, assertVoicePromptBudget, VOICE_ANSWER_INSTRUCTIONS, VOICE_PROMPT_BYTE_LIMIT } from "./voice-context.js";
 import { randomUUID } from "node:crypto";
+import { fenceTenantData, withTenantDataOutputFilter } from "@openadminos/runtime";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -914,8 +915,8 @@ export class IntuneChatService {
 
     const lines = [
       "Workspace context attached by the admin.",
-      `Workspace: ${workspace.title}`,
-      `Tenant: ${workspace.tenantName ?? workspace.tenantId}`,
+      `Workspace: ${fenceTenantData(workspace.title, "workspace:title")}`,
+      `Tenant: ${fenceTenantData(workspace.tenantName ?? workspace.tenantId, "workspace:tenant")}`,
     ];
     if (includesInstructions && workspace.instructions) {
       lines.push("", "Workspace instructions:", workspace.instructions.trim());
@@ -923,15 +924,20 @@ export class IntuneChatService {
     if (notes.length > 0) {
       lines.push("", "Workspace notes:");
       notes.slice(0, 12).forEach((note, index) => {
-        lines.push(`${index + 1}. ${trimForPrompt(note.content, 1400)}`);
+        lines.push(`${index + 1}. ${fenceTenantData(trimForPrompt(note.content, 1400), "workspace:note")}`);
       });
     }
     if (evidence.length > 0) {
       lines.push("", "Workspace evidence:");
       evidence.slice(0, 8).forEach((entry, index) => {
+        const serialized = JSON.stringify(entry.content) ?? "null";
         lines.push(
-          `${index + 1}. ${entry.title} (${entry.sourceType}, ${entry.createdAt})`,
-          trimForPrompt(JSON.stringify(entry.content, null, 2), 2800),
+          `${index + 1}. ${fenceTenantData({
+            title: entry.title, sourceType: entry.sourceType, createdAt: entry.createdAt,
+            content: serialized.length <= 2800 ? entry.content : {
+              truncatedByHost: true, excerpt: trimForPrompt(serialized, 2800),
+            },
+          }, "workspace:evidence")}`,
         );
       });
     }
@@ -1202,7 +1208,7 @@ export class IntuneChatService {
     comparisons: MultiTenantChatJob["comparisons"];
   }): Promise<string> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    const llm = await this.host.buildLlm(input.providerId, input.model);
+    const llm = withTenantDataOutputFilter(await this.host.buildLlm(input.providerId, input.model));
     if (!llm.available) return deterministic;
     try {
       const completion = await llm.complete({
@@ -1211,14 +1217,14 @@ export class IntuneChatService {
           "Summarize this read-only multi-tenant Chat result for an admin.",
           "The JSON table is the source of truth. Mention partial, failed, skipped, or stale tenants.",
           `Question: ${input.prompt}`,
-          JSON.stringify(
+          fenceTenantData(JSON.stringify(
             {
               summary: input.summary,
               tenants: input.comparisons,
             },
             null,
             2,
-          ),
+          ), "chat:multi-tenant-result"),
         ].join("\n\n"),
         ...(input.model ? { model: input.model } : {}),
         temperature: 0.2,
@@ -1676,9 +1682,9 @@ export class IntuneChatService {
       assistantContent = directDeviceAnswer;
       responseModel = undefined;
     } else {
-      const llm = await this.host.buildLlm(providerId, selectedModel);
+      const llm = withTenantDataOutputFilter(await this.host.buildLlm(providerId, selectedModel));
       const withMemory = conversationMemory
-        ? `Conversation so far (earliest first, may be truncated):\n${conversationMemory}\n\nCurrent question: ${content}`
+        ? `Conversation so far (earliest first, may be truncated):\n${fenceTenantData(conversationMemory, "chat:history")}\n\nCurrent question: ${content}`
         : content;
       const modelQuestion = workspaceContext
         ? `${withMemory}\n\n${workspaceContext.promptBlock}`
@@ -2174,11 +2180,11 @@ export class IntuneChatService {
       responseModel = undefined;
       emitDelta(assistantContent);
     } else {
-      const llm = await this.host.buildLlm(providerId, selectedModel);
+      const llm = withTenantDataOutputFilter(await this.host.buildLlm(providerId, selectedModel));
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory
-          ? `Conversation so far (earliest first, may be truncated):\n${conversationMemory}\n\nCurrent question: ${content}`
+          ? `Conversation so far (earliest first, may be truncated):\n${fenceTenantData(conversationMemory, "chat:history")}\n\nCurrent question: ${content}`
           : content);
       const modelQuestion = workspaceContext
         ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
@@ -2893,8 +2899,16 @@ function buildAnswerPrompt(
   answerPack: string,
   documentation: ReadonlyArray<{ file: string; title?: string; text: string }>,
 ): string {
+  const pack = answerPack ? JSON.parse(answerPack) as Record<string, unknown> : {};
+  const { question, instruction, ...evidence } = pack;
+  const context = [
+    `Admin question:\n${typeof question === "string" ? question : ""}`,
+    "Retrieved tenant context:",
+    fenceTenantData(evidence, "chat:answer-pack"),
+    typeof instruction === "string" ? instruction : "",
+  ].join("\n\n");
   if (documentation.length === 0) {
-    return `Use this retrieved tenant context to answer the admin.\n\n${answerPack}`;
+    return `Use this retrieved tenant context to answer the admin.\n\n${context}`;
   }
   const passages = documentation
     .map(
@@ -2909,6 +2923,6 @@ function buildAnswerPrompt(
     "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. If it does not cover the question, say so rather than guessing.",
     "",
     "Retrieved tenant context, which is this tenant's actual state:",
-    answerPack,
+    context,
   ].join("\n");
 }

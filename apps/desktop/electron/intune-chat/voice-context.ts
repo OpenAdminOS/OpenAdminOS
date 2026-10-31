@@ -1,4 +1,5 @@
 import { isNovaConversationOnly } from "../../src/shared/nova-transcript.js";
+import { fenceTenantData } from "@openadminos/runtime";
 import type {
   GraphCacheResourceStatus,
   GraphCacheResourceKind,
@@ -38,7 +39,7 @@ export function voiceConversationContext(
   const previous = reference.slice().reverse().find(turn => turn.role === "user")?.text.slice(0, 400);
   return {
     history: followsUp && history.length
-      ? `Previous conversation (reference only): ${JSON.stringify(history)}\nCurrent question: ${question}`
+      ? `Previous conversation (reference only): ${fenceTenantData(history, "nova:history")}\nCurrent question: ${question}`
       : question,
     planningQuestion: previous && followsUp ? `${previous}\nFollow-up: ${question}` : question,
   };

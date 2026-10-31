@@ -1154,6 +1154,32 @@ such as `client_secret` or `access_token`; it also redacts common public
 identity and local-path markers. This is a backstop for accidental paste, not a
 reason for admins to include tenant data in the report.
 
+### Tenant content in model prompts
+
+Tenant-authored text, including names, descriptions, cached records, connector
+responses, and evidence carried between Agent Team assignments, is untrusted
+data. Prompt assembly places it inside `tenant_data` fences with a fresh random
+nonce and a source label. Angle brackets inside the content are escaped without
+changing JSON structure or decoded values, so embedded tags cannot close a fence.
+The shared system instruction tells models to ignore instructions in this data,
+keep the admin's task and tool choices, never trigger writes from it, and report
+embedded instructions as a finding.
+
+Fences apply only at model boundaries: Chat answer packs and tool observations,
+conversation and workspace evidence, template prompt interpolations (including
+nested maps and connector results), sandboxed script submissions, and Office
+persona evidence. Saved admin instructions remain instructions. Script-provided
+prompt and system text are both treated as data because the host cannot establish
+their provenance; the host supplies the read-only analysis instruction. Numeric
+and boolean template values remain literal. Echoed delimiters are removed before
+streaming, run-result rendering, storage, or connector delivery. Raw records and
+display templates are unchanged.
+
+This reduces prompt-injection risk. It does not guarantee that a model will ignore
+every malicious instruction. Host-enforced write confirmation remains the real
+control over tenant changes, with typed confirmation for destructive actions.
+Local providers keep the same on-device data boundary.
+
 ### Intune Chat and local intelligence
 
 Intune Chat is the operating surface for exploratory tenant work. Agents remain

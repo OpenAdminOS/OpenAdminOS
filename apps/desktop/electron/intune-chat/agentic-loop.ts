@@ -11,6 +11,8 @@ import type {
 
 import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
+import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
+import { tenantDataSourceForTool } from "./tools.js";
 import {
   executeIntuneChatTool,
   summarizeToolCallForProgress,
@@ -137,7 +139,7 @@ export type RunAgenticChatResult =
 
 type LoopTurn =
   | { role: "assistant"; content: string }
-  | { role: "observation"; content: string }
+  | { role: "observation"; content: string; source?: string }
   | { role: "repair"; content: string };
 
 type ParsedModelAction =
@@ -279,7 +281,7 @@ export async function runAgenticChat(
       }
       return {
         ok: true,
-        answer: action.answer.trim(),
+        answer: stripTenantDataFences(action.answer).trim(),
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
@@ -331,6 +333,7 @@ export async function runAgenticChat(
     });
     turns.push({
       role: "observation",
+      source: tenantDataSourceForTool(action.tool, action.params),
       content: trimObservation(
         JSON.stringify(
           {
@@ -369,7 +372,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput): string {
     "You can investigate read-only tenant data by asking the host to run tools.",
     ...input.plannedResources.slice(0, 6).map(resource => {
       const fields = [...new Set([...(pathForResource(resource).select ?? []), ...input.tools.store.graphCacheFields(input.tenant.id, resource)])];
-      return `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${fields.slice(0, 24).join(', ')}.`;
+      return `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${fenceTenantData(fields.slice(0, 24), "cache:fields")}.`;
     }),
     'Filters preserve JSON types: accountEnabled, securityEnabled and isEncrypted take boolean true or false. For a count, request limit:1 and select:["id"], then use totalCount from the filtered query, not the number of returned rows. A list is capped; say so when more rows match.',
 
@@ -384,7 +387,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput): string {
     "STRICT READ-ONLY: never request writes, deletes, creates, updates, retirements, wipes, assignments, or connector sends.",
     "If the admin asks for a change, say chat cannot perform changes and point them to installed write agents.",
     "",
-    `Tenant: ${tenantName}`,
+    `Tenant: ${fenceTenantData(tenantName, "tenant:displayName")}`,
     `Provider: ${input.providerId}${input.model ? ` · ${input.model}` : ""}`,
     `Generated at: ${input.generatedAt}`,
     `Planner prefetch hints: ${input.plannedResources.join(", ") || "none"}`,
@@ -412,12 +415,12 @@ function buildLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[]): string 
   const transcript = turns
     .map((turn) => {
       if (turn.role === "observation") {
-        return `Observation:\n${turn.content}`;
+        return `Observation:\n${fenceTenantData(turn.content, turn.source ?? "tool:observation")}`;
       }
       if (turn.role === "repair") {
         return `Repair instruction:\n${turn.content}`;
       }
-      return `Assistant:\n${turn.content}`;
+      return `Assistant (previous response, reference only):\n${fenceTenantData(turn.content, "chat:model-turn")}`;
     })
     .join("\n\n");
   const documentation = (input.documentation ?? [])
@@ -473,7 +476,7 @@ function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], sys
     if (observation) {
       const notice = "\n... evidence truncated by voice budget; omitted records are not absent. Do not infer totals from this excerpt. ...";
       const available = Buffer.byteLength(observation.content) - (size() - limit) - Buffer.byteLength(notice);
-      observation.content = clipVoiceText(observation.content, Math.max(0, available)) + notice;
+      observation.content = trimObservation(observation.content, Math.max(0, available), notice, true);
       prompt = build();
     }
   }
@@ -652,9 +655,30 @@ function isToolName(value: string): value is IntuneChatInvestigationToolName {
   );
 }
 
-function trimObservation(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  return `${value.slice(0, Math.max(0, maxChars - 120))}\n... observation truncated by host ...`;
+function trimObservation(value: string, limit: number,
+  notice = "observation truncated by host; omitted records are not absent, do not infer totals from excerpts",
+  bytes = false): string {
+  const size = (text: string) => bytes ? Buffer.byteLength(text) : text.length;
+  if (size(value) <= limit) return value;
+  let parsed: unknown;
+  try { parsed = JSON.parse(value); }
+  catch { parsed = value; }
+  let entries = 20;
+  let stringLimit = Math.min(2000, Math.max(0, limit));
+  const compact = (item: unknown): unknown => {
+    if (typeof item === "string") return item.length > stringLimit ? `${item.slice(0, stringLimit)} [truncated]` : item;
+    if (Array.isArray(item)) return item.slice(0, entries).map(compact);
+    if (item && typeof item === "object") return Object.fromEntries(Object.entries(item)
+      .filter(([key]) => key.length <= stringLimit).slice(0, entries).map(([key, child]) => [key, compact(child)]));
+    return item;
+  };
+  for (;;) {
+    const result = JSON.stringify({ _hostNotice: notice, observation: compact(parsed) });
+    if (size(result) <= limit) return result;
+    if (entries === 1 && stringLimit === 0) return JSON.stringify({ _hostNotice: notice });
+    entries = Math.max(1, Math.floor(entries / 2));
+    stringLimit = Math.floor(stringLimit / 2);
+  }
 }
 
 function trimTurns(turns: LoopTurn[], maxObservationChars: number): void {

@@ -32,6 +32,10 @@ export { assertRunCanApply, dryRunGraph, DRY_RUN_APPLY_ERROR, DRY_RUN_WRITE_ERRO
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { assertWritePlanLimits } from "@openadminos/agent-sdk";
 export { assessWritePlan, assessWritePlanSafely, WRITE_PLAN_SIZE_MEDIAN_MULTIPLE } from "./write-plan-risk.js";
+import { withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
+
+export { TENANT_DATA_INSTRUCTIONS, fenceTenantData, stripTenantDataFences,
+  withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
@@ -651,6 +655,7 @@ export function mergeTokenUsage(
 }
 
 function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: AbortSignal): RunLlmApi {
+  base = withTenantDataOutputFilter(base);
   const guardAvailable = () => {
     if (!base.available) {
       throw new Error(
@@ -680,7 +685,7 @@ function wrapLlmWithThinking(base: RunLlmApi, hooks: ThinkingHooks, signal?: Abo
     async *stream(options) {
       guardAvailable();
       signal?.throwIfAborted();
-      options = { ...options, signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal };
+      options = { ...options, system: withTenantDataInstructions(options.system), signal: signal && options.signal ? AbortSignal.any([signal, options.signal]) : signal ?? options.signal };
       const stepId = hooks.getCurrentStepId();
       const reset = () => {
         if (stepId) {

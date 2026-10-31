@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { it } from "node:test";
 import { AppStateStore } from "../state.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
+import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 
 async function fixture(empty = false, deviceRows?: unknown[]) {
   const dir = await mkdtemp(join(tmpdir(), "nova-chat-review-"));
@@ -178,6 +179,8 @@ it("includes the prior question in voice follow-ups and bounds model input", asy
     const prompt = f.prompts.at(-1)!;
     assert.match(prompt.prompt, /Which users are guests/);
     assert.match(prompt.prompt, /Which of those are disabled/);
+    assert.match(prompt.prompt, /source="nova:history"/);
+    assert.ok(prompt.system?.includes(TENANT_DATA_INSTRUCTIONS));
     assert.match(prompt.system!, /Unrelated uncached resources/);
     assert.ok(
       Buffer.byteLength(prompt.prompt) + Buffer.byteLength(prompt.system!) <=
