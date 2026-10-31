@@ -11,18 +11,19 @@ This page sets out how the OpenAdminOS project reads the EU AI Act (Regulation (
 
 OpenAdminOS is a desktop app that helps IT administrators inspect and manage their own Microsoft 365 tenants: devices, apps, policies, identities, licences, and configuration. Agents read tenant data through Microsoft Graph, summarise it with the model the administrator selects, and propose changes. Every write pauses for human review.
 
-OpenAdminOS is not intended to make, or prepare, decisions about people as workers. That includes hiring, promotion, termination, task allocation based on personal traits, and monitoring or scoring an employee's performance or behaviour. It is not a safety component of critical infrastructure.
+OpenAdminOS is not intended to make, or prepare, decisions about people as workers. That includes recruitment, promotion, termination, task allocation based on individual behaviour or personal traits, and monitoring or evaluating the performance or behaviour of people in work-related relationships. It is not a safety component of critical infrastructure.
 
 ## How the Act applies
 
 | Part | Assessment |
 |---|---|
-| Desktop app | An AI system released under the MIT licence. Article 2(12) excludes free and open-source AI systems from the Act unless they are high-risk, fall under the prohibited practices in Article 5, or fall under the transparency duties in Article 50. |
+| Desktop app | An AI system released under the MIT licence. Article 2(12) excludes free and open-source AI systems from the Act, but not when they fall under Article 50. The app interacts directly with people and generates text, so the project does not rely on that exclusion. As a system that is not high-risk, the obligations the project works to are Article 50 transparency and Article 4 AI literacy. |
 | High-risk (Annex III) | Not high-risk for its intended purpose. IT administration of a Microsoft 365 tenant is not an Annex III use. The nearest category is employment (Annex III, point 4), which the registry rules below keep out of scope. |
-| Prohibited practices (Article 5) | Not applicable. Agents that perform emotion recognition at work, biometric categorisation, or social scoring are not accepted into the registry. |
-| Transparency (Article 50) | Applies. Administrators always see that they are working with an AI model, which model and provider produced an answer, and where prompts go. |
-| Hosted models | Anthropic, OpenAI, GitHub Copilot, Google, and Microsoft (Azure OpenAI) are the providers of the general-purpose models behind hosted options. Their model obligations stay with them. |
-| OpenAdmin models | Fine-tunes of openly licensed base models. Under the Commission's guidelines for general-purpose AI model providers, a fine-tune makes the modifier a model provider only when the modification uses more than a third of the original training compute. OpenAdmin training runs are far below that. The models are still published with model cards and a public training dataset. |
+| Prohibited practices (Article 5) | Not applicable. Agents that recognise emotions at work, categorise people by biometric data, or produce social scores are not accepted into the registry. |
+| Disclosure of AI interaction (Article 50(1)) | Administrators always see that they are working with an AI model, which provider and model is in use, and where prompts go. |
+| Marking of generated text (Article 50(2)) | Not yet implemented. Exported reports and copied text do not carry a machine-readable AI-generated marker. The project is waiting for the Commission's code of practice on marking before choosing a format. |
+| Model providers | The developers of the general-purpose models you select are the model providers, for example Anthropic, OpenAI, Google, or the publisher of a model you run in Ollama or LM Studio. Services that host or relay those models, such as GitHub Copilot and Azure OpenAI, carry their own terms. |
+| OpenAdmin models | Fine-tunes of openly licensed base models. The Commission's guidelines for general-purpose AI model providers treat modification compute above one third of the original model's training compute as an indicative criterion for the modifier becoming a model provider. OpenAdmin training runs are several orders of magnitude below that. The models are still published with model cards and a public training dataset. |
 
 ## What the product does
 
@@ -30,9 +31,9 @@ These features exist for their own reasons. They also line up with what the Act 
 
 | Topic | In OpenAdminOS |
 |---|---|
-| Human oversight | Write agents always stop at a diff confirmation. Destructive actions need a typed phrase. There is no bypass. See [Write confirmation](write-confirmation.md). |
+| Human oversight | Write agents always stop at a diff confirmation, and the change applies only after the confirmation phrase is typed exactly. There is no bypass. See [Write confirmation](write-confirmation.md). |
 | Disclosure of AI use | The top bar always shows the current tenant, provider, and data boundary: no model, a local model, or the hosted provider and model that prompts go to. See [Hosted providers](hosted-providers.md). |
-| Records | Run history is stored locally. **Copy report** on a run result includes the status, start time, provider, model, tenant, steps, and logs. |
+| Records | Run history is stored locally, subject to the retention setting in Settings. **Copy report** on a run result includes the status, start time, provider, model, tenant, steps, and logs. |
 | Data location | With a local provider, prompts and tenant data stay on the device. With a hosted provider, the UI names where they go. See [Local-first guarantee](local-first.md). |
 | Documentation | Every registry agent declares its Graph scopes, read or write mode, and write actions in its manifest. The [Graph scope matrix](../generated/reference/graph-scope-matrix.md) and [Write safety matrix](../generated/reference/write-safety-matrix.md) are generated from those manifests. |
 
@@ -40,19 +41,20 @@ These features exist for their own reasons. They also line up with what the Act 
 
 The public registry does not accept agents whose purpose is to:
 
-- Score, rank, or evaluate individual employees' performance, productivity, or behaviour, or to prepare hiring, promotion, termination, or task-allocation decisions about them.
-- Infer emotions, or categorise people by biometric data.
+- Score, rank, or evaluate individual workers' performance, productivity, or behaviour, or prepare recruitment, promotion, termination, or task-allocation decisions about them.
+- Recognise emotions, or categorise people by biometric data.
 - Produce social scores or other assessments of people beyond the security and configuration state of their accounts and devices.
 
-Security work on accounts stays in scope. An agent that triages Entra risky users so an administrator can reset a password or revoke sessions looks at account compromise, not at the person's work. Maintainers apply these rules during [registry review](registry-trust.md).
+Security and configuration work on accounts stays in scope. An agent that triages Entra risky users so an administrator can reset a password or revoke sessions looks at account compromise, not at the person's work. Directory change audits and sign-in failure analysis look at account and configuration events in the same way. Their outputs must not be used to evaluate individual workers. Maintainers apply these rules during [registry review](registry-trust.md).
 
 ## What stays with your organisation
 
 If your organisation is subject to the Act as a deployer, its obligations remain its own. In practice:
 
-- Make sure the administrators who use OpenAdminOS understand what the models can and cannot do (AI literacy, Article 4).
-- Assess your own use. Agents from a custom registry fork, or agents you write yourself, are outside the public registry rules.
-- Keep run reports where your audit process needs them.
+- Take measures so that the administrators who use OpenAdminOS understand what the models can and cannot do (AI literacy, Article 4).
+- Assess your own use. Agents from a custom registry fork, agents you write yourself, and questions asked in Chat are outside the public registry rules.
+- Using OpenAdminOS for an Annex III purpose, such as evaluating workers, is outside its intended purpose. Under Article 25, that can make your organisation the provider of a high-risk AI system.
+- Keep run reports where your audit process needs them, and set run history retention to match.
 - Choose a local provider when prompts and tenant data must not leave the device.
 
 ## When this assessment changes

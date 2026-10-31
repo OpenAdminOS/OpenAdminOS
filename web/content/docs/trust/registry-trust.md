@@ -39,7 +39,7 @@ If an agent requires a newer OpenAdminOS version, Agent Hub still shows it but b
 
 ## Accepted Purposes
 
-The public registry accepts agents for IT administration: devices, apps, policies, identities, licences, and tenant configuration. It does not accept agents whose purpose is to evaluate individual employees' performance or behaviour, to prepare employment decisions about them, to infer emotions, or to categorise people by biometric data. Account-security triage, such as reviewing Entra risky users, stays in scope. See [EU AI Act](eu-ai-act.md) for the reasoning.
+The public registry accepts agents for IT administration: devices, apps, policies, identities, licences, and tenant configuration. It does not accept agents whose purpose is to evaluate individual workers' performance or behaviour, to prepare employment decisions about them, to recognise emotions, to categorise people by biometric data, or to produce social scores. Account-security and configuration work, such as reviewing Entra risky users or auditing directory changes, stays in scope. See [EU AI Act](eu-ai-act.md) for the reasoning.
 
 ## Registry QA
 

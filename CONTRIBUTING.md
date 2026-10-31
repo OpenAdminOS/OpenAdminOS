@@ -25,7 +25,7 @@ Thanks for your interest. This project is community-built and contributions are 
 
 ## Agents we don't accept
 
-The public registry is for IT administration. Agents whose purpose is to score or evaluate individual employees' performance, productivity, or behaviour, to prepare hiring, promotion, termination, or task-allocation decisions, to infer emotions, or to categorise people by biometric data are not accepted. Account-security work, such as triaging Entra risky users, is fine. These uses would move OpenAdminOS into the EU AI Act's high-risk or prohibited categories; see [`docs/gitbook/trust/eu-ai-act.md`](docs/gitbook/trust/eu-ai-act.md).
+The public registry is for IT administration. Agents whose purpose is to score or evaluate individual workers' performance, productivity, or behaviour, to prepare recruitment, promotion, termination, or task-allocation decisions, to recognise emotions, to categorise people by biometric data, or to produce social scores are not accepted. Account-security and configuration work, such as triaging Entra risky users or auditing directory changes, is fine. These uses could fall into the EU AI Act's high-risk or prohibited categories, so the registry excludes them as a rule; see [`docs/gitbook/trust/eu-ai-act.md`](docs/gitbook/trust/eu-ai-act.md).
 
 ## Agent contract
 
