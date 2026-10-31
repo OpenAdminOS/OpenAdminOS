@@ -73,6 +73,7 @@ export function entryToRegistrySummary(
     minAppVersion: entry.minAppVersion,
     execution: entry.execution,
     connectors: entry.connectors,
+    ...(entry.writeLimits ? { writeLimits: entry.writeLimits } : {}),
   }, appVersion);
 }
 

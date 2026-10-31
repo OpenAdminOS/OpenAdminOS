@@ -42,6 +42,8 @@ This agent runs through the host-side Agent Template interpreter.
 
 ## Write Behavior
 
+At most 100 actions per run (host default). Plans above the limit fail before confirmation and are checked again before any changes are applied.
+
 | Step | Action | Confirmation | Scopes |
 | --- | --- | --- | --- |
 | Build offboarding plan | Retire Managed Device | `OFFBOARD N DEVICES` | `DeviceManagementManagedDevices.PrivilegedOperations.All` |

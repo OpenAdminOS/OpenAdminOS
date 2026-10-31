@@ -13,6 +13,9 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { load as parseYaml } from "js-yaml";
+import { tsImport } from "tsx/esm/api";
+
+const { writeLimitsValidationIssue } = await tsImport("../packages/agent-sdk/src/write-limits.ts", import.meta.url);
 
 const DEFAULT_BASE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main";
@@ -41,6 +44,10 @@ function parseManifest(manifestPath) {
   const raw = parseYaml(readFileSync(manifestPath, "utf8"));
   const descriptor = raw?.descriptor ?? {};
   const skills = Array.isArray(raw?.skills) ? raw.skills : [];
+  const limitsIssue = writeLimitsValidationIssue(descriptor.writeLimits, descriptor.mode ?? "read");
+  if (limitsIssue) {
+    throw new Error(`${manifestPath}: descriptor.${limitsIssue.path}: ${limitsIssue.message}`);
+  }
 
   const scopes = new Set();
   for (const skill of skills) {
@@ -73,6 +80,7 @@ function parseManifest(manifestPath) {
       ? { connectors: descriptor.connectors }
       : {}),
     ...(raw?.execution ? { execution: raw.execution } : {}),
+    ...(descriptor.writeLimits ? { writeLimits: descriptor.writeLimits } : {}),
   };
 }
 

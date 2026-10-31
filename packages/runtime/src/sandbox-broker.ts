@@ -9,7 +9,9 @@ import type {
   SandboxBrokerResponse,
   WriteHttpMethod,
   WritePlan,
+  WriteLimits,
 } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, WritePlanLimitError } from "@openadminos/agent-sdk";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 export interface SandboxBrokerAgentPolicy {
@@ -17,6 +19,7 @@ export interface SandboxBrokerAgentPolicy {
   mode: AgentMode;
   scopes?: string[];
   graphOperations?: GraphOperation[];
+  writeLimits?: WriteLimits;
   connectors?: AgentConnectorRequirement[];
 }
 
@@ -66,6 +69,7 @@ export function createSandboxBroker(input: SandboxBrokerInput): SandboxBroker {
           case "connector.invoke":
             return ok(id, await handleConnectorRequest(input, request.params));
           case "write.plan":
+            writePlan = undefined;
             writePlan = handleWritePlanRequest(input, request.params);
             return ok(id, writePlan);
           case "log":
@@ -444,6 +448,7 @@ function validateWritePlan(
     if (request === undefined) continue;
     validateWriteActionRequest(request, agent);
   }
+  assertWritePlanLimits(plan, agent.writeLimits);
 }
 
 function validateWriteActionRequest(
@@ -517,6 +522,9 @@ function ok(id: string, result?: unknown): SandboxBrokerResponse {
 }
 
 function failure(id: string, error: unknown): SandboxBrokerResponse {
+  if (error instanceof WritePlanLimitError) {
+    return { id, ok: false, error: { message: error.message, code: "policy_denied" } };
+  }
   if (error instanceof SandboxBrokerError) {
     return {
       id,

@@ -121,6 +121,7 @@ async function runScriptAgent(
       mode: policy.mode,
       scopes: policy.scopes,
       graphOperations: policy.graphOperations,
+      ...(policy.writeLimits ? { writeLimits: policy.writeLimits } : {}),
       connectors: policy.connectors,
     },
     ctx,

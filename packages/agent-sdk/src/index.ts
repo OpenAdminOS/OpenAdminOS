@@ -56,6 +56,9 @@ export interface SetAzureOpenAIProviderConfigInput {
 
 export type AgentMode = "read" | "write";
 
+export * from "./write-limits.js";
+import type { WriteLimits } from "./write-limits.js";
+
 export type AgentCategory =
   | "devices"
   | "apps"
@@ -130,6 +133,7 @@ export interface AgentContract {
    */
   execution?: AgentExecution;
   graphOperations?: GraphOperation[];
+  writeLimits?: WriteLimits;
   /**
    * Egress dependencies declared by this agent. Validated against the
    * host's registered connectors at manifest load; required connectors
@@ -3335,6 +3339,7 @@ export interface AgentTemplate {
      */
     requiresEntraTier?: RequiredEntraTier;
     mode: AgentMode;
+    writeLimits?: WriteLimits;
     preferredModel?: string;
     /**
      * Connector dependencies declared by this agent. Loaded into

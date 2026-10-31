@@ -28,6 +28,7 @@ import type {
   WritePlan,
 } from "@openadminos/agent-sdk";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
+import { assertWritePlanLimits } from "@openadminos/agent-sdk";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";
@@ -289,6 +290,7 @@ export function toInstalledAgent(
     version: agent.version,
     preferredModel: agent.preferredModel,
     execution: agent.execution,
+    ...(agent.writeLimits ? { writeLimits: agent.writeLimits } : {}),
     registryId: agent.registryId,
     registryPath: agent.registryPath,
     minAppVersion: agent.minAppVersion,
@@ -799,6 +801,7 @@ export async function executePlan(input: ExecuteRunInput): Promise<RunRecord> {
     }
     const plan: WritePlan = await (module as WriteAgentModule).plan(handle.ctx);
     validatePlan(plan, input.agent.slug);
+    assertWritePlanLimits(plan, module.writeLimits);
 
     const pausedAt = new Date().toISOString();
     if (plan.actions.length === 0) {
@@ -877,6 +880,8 @@ export async function executeApply(input: ExecuteApplyInput): Promise<RunRecord>
         `Agent "${input.agent.slug}" is not a write agent.`,
       );
     }
+    validatePlan(input.plan, input.agent.slug);
+    assertWritePlanLimits(input.plan, module.writeLimits);
     const outcome: AgentRunResult = await (module as WriteAgentModule).apply(
       handle.ctx,
       input.plan,
@@ -1222,6 +1227,7 @@ function toAgentDefinition(agent: AgentSummary): RunContext["agent"] {
     version: agent.version,
     preferredModel: agent.preferredModel,
     execution: agent.execution,
+    ...(agent.writeLimits ? { writeLimits: agent.writeLimits } : {}),
   };
 }
 

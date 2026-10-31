@@ -26,7 +26,9 @@ import type {
   WriteActionTemplate,
   WritePlan,
   WriteStep,
+  WriteLimits,
 } from "@openadminos/agent-sdk";
+import { assertWritePlanLimits, writeLimitsValidationIssue } from "@openadminos/agent-sdk";
 
 import { renderDeep, renderTemplate, type TemplateContext } from "./template-engine.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
@@ -79,6 +81,11 @@ export function parseAgentTemplate(source: string): AgentTemplate {
         `expected "agent" or "dashboard", got ${JSON.stringify(descriptor.tier)}`,
       );
     }
+  }
+
+  const limitsIssue = writeLimitsValidationIssue(descriptor.writeLimits, mode);
+  if (limitsIssue) {
+    throw new ManifestValidationError(`descriptor.${limitsIssue.path}`, limitsIssue.message);
   }
 
   if (descriptor.requiresEntraTier !== undefined) {
@@ -572,6 +579,8 @@ export async function runAgentTemplatePlan(
       );
     });
 
+    assertWritePlanLimits({ actions }, manifest.descriptor.writeLimits);
+
     // Confirmation phrase + plan summary template see the full action set.
     const planCtx: TemplateContext = {
       ...settingsCtx,
@@ -666,6 +675,7 @@ export async function runAgentTemplateApply(
   }
 
   const realWrites = ctx.realWrites;
+  assertWritePlanLimits(plan, manifest.descriptor.writeLimits);
   const retiredDeviceIds: string[] = [];
   const simulatedDeviceIds: string[] = [];
   const failed: Array<{ id: string; name: string; error: string }> = [];
@@ -1627,6 +1637,7 @@ function commonMetadata(manifest: AgentTemplate) {
     author: descriptor.author,
     version: descriptor.version,
     minAppVersion: descriptor.minAppVersion,
+    ...(descriptor.writeLimits ? { writeLimits: descriptor.writeLimits } : {}),
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
     ...(manifest.execution ? { execution: manifest.execution } : {}),
   };
@@ -1718,6 +1729,7 @@ export function agentTemplateToRegistrySummary(
   preferredModel?: string;
   execution?: AgentExecution;
   graphOperations: GraphOperation[];
+  writeLimits?: WriteLimits;
   connectors?: AgentConnectorRequirement[];
 } {
   const descriptor = manifest.descriptor;
@@ -1738,6 +1750,7 @@ export function agentTemplateToRegistrySummary(
     ...(descriptor.preferredModel ? { preferredModel: descriptor.preferredModel } : {}),
     ...(manifest.execution ? { execution: manifest.execution } : {}),
     graphOperations: collectGraphOperations(manifest),
+    ...(descriptor.writeLimits ? { writeLimits: descriptor.writeLimits } : {}),
     ...(descriptor.connectors && descriptor.connectors.length > 0
       ? { connectors: descriptor.connectors }
       : {}),

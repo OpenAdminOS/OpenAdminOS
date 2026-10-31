@@ -66,10 +66,31 @@
           "type": "string",
           "description": "Optional. Suggests an LLM model the agent works well against; the host may ignore it."
         },
+        "writeLimits": { "$ref": "#/$defs/writeLimits" },
         "connectors": {
           "type": "array",
           "description": "Egress connector dependencies declared by this agent. Each entry pins a connector id, a minimum connector version, and the capability ids/versions the agent invokes. See docs/SPEC.md §2 (Connector abstraction).",
           "items": { "$ref": "#/$defs/connectorRequirement" }
+        }
+      },
+      "allOf": [{
+        "if": { "properties": { "mode": { "const": "read" } }, "required": ["mode"] },
+        "then": { "not": { "required": ["writeLimits"] } }
+      }]
+    },
+
+    "writeLimits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["maxActions"],
+      "description": "Host-enforced limits for one write plan. Omitted limits default to 100 total actions. Only write agents may declare them.",
+      "properties": {
+        "maxActions": { "type": "integer", "minimum": 1, "maximum": 1000 },
+        "maxActionsPerOperation": {
+          "type": "object",
+          "description": "Optional additional limits keyed by exact WriteAction.kind, within the total plan limit.",
+          "propertyNames": { "pattern": "^\\S(?:[\\s\\S]*\\S)?$" },
+          "additionalProperties": { "type": "integer", "minimum": 1, "maximum": 1000 }
         }
       }
     },

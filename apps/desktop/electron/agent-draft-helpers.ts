@@ -19,6 +19,7 @@ import type {
   TemplateSetting,
 } from "@openadminos/agent-sdk";
 import { validatePath, type EndpointSummary } from "./graph-catalog.js";
+import { DEFAULT_WRITE_MAX_ACTIONS } from "@openadminos/agent-sdk";
 
 
 export const AGENT_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -1358,6 +1359,44 @@ export function buildAgentUpdateReview(input: {
   }
 
   const nextWriteKinds = collectWriteKinds(input.parsedManifest.skills);
+  if (input.previous.mode === "write" && input.target.mode === "write") {
+    const before = input.previous.writeLimits;
+    const after = input.parsedManifest.descriptor.writeLimits;
+    const beforeTotal = before?.maxActions ?? DEFAULT_WRITE_MAX_ACTIONS;
+    const afterTotal = after?.maxActions ?? DEFAULT_WRITE_MAX_ACTIONS;
+    if (before?.maxActions !== after?.maxActions) {
+      changes.push({
+        id: "write-limit-total",
+        label: "Write plan limit changed",
+        severity: (before && !after) || afterTotal > beforeTotal ? "warn" : "info",
+        detail: after
+          ? `Allows at most ${afterTotal} actions per run.`
+          : `Removes the declared limit. The host default of ${DEFAULT_WRITE_MAX_ACTIONS} actions per run applies.`,
+        before: `${beforeTotal}${before ? " (manifest)" : " (host default)"}`,
+        after: `${afterTotal}${after ? " (manifest)" : " (host default)"}`,
+      });
+    }
+    const beforeKinds = before?.maxActionsPerOperation ?? {};
+    const afterKinds = after?.maxActionsPerOperation ?? {};
+    for (const kind of new Set([...Object.keys(beforeKinds), ...Object.keys(afterKinds)])) {
+      const previous = Object.hasOwn(beforeKinds, kind) ? beforeKinds[kind] : undefined;
+      const next = Object.hasOwn(afterKinds, kind) ? afterKinds[kind] : undefined;
+      if (previous === next) continue;
+      const raised = previous === undefined
+        ? Math.min(next ?? afterTotal, afterTotal) > beforeTotal
+        : next !== undefined && next > previous;
+      changes.push({
+        id: `write-limit-operation:${kind}`,
+        label: "Action kind limit changed",
+        severity: next === undefined || raised ? "warn" : "info",
+        detail: next === undefined
+          ? `Removes the separate limit for "${kind}". The total plan limit still applies.`
+          : `Allows at most ${next} actions of kind "${kind}" per run, within the total plan limit.`,
+        before: previous === undefined ? "Total plan limit" : String(previous),
+        after: next === undefined ? "Total plan limit" : String(next),
+      });
+    }
+  }
   if (input.previous.mode !== "write" && input.target.mode === "write") {
     changes.push({
       id: "write-mode-added",

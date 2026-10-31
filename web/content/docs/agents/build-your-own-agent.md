@@ -24,6 +24,8 @@ Preflight checks the provider, manifest shape, Graph scopes, Graph endpoints, co
 
 For write agents, preflight verifies the confirmation gate but does not apply Graph changes. A write agent still pauses for confirmation every time it produces a non-empty write plan.
 
+A write manifest can declare `descriptor.writeLimits.maxActions` and optional `maxActionsPerOperation` values keyed by action kind, such as `graph-write` or `retire-managed-device`. Each value must be a positive integer up to 1,000. The total defaults to 100 actions when no limits are declared. Read agents cannot declare write limits. Limits appear in the permissions preview and cannot be bypassed by approving a plan.
+
 ## Local Agents
 
 Saved builder agents are local to the device. They appear in the merged agent list without becoming public registry entries.

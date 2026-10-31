@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { DEFAULT_WRITE_MAX_ACTIONS } from "@openadminos/agent-sdk";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
 import { Badge, Section } from "./ui";
@@ -64,6 +65,7 @@ export function ManifestPreview({
     <div className="flex flex-col gap-6">
       {showDescriptor && <DescriptorCard manifest={manifest} />}
       <ScopesCard scopes={scopes} />
+      <WriteLimitsSummary manifest={manifest} />
       <PipelineCard steps={manifest.skills} defaultOpen={defaultPipelineOpen} />
       <SettingsCard manifest={manifest} overrides={settingsOverrides} />
       <ResultCard manifest={manifest} />
@@ -121,6 +123,7 @@ export function ManifestSections({
               <p className="mt-2 text-sm text-[var(--color-text-muted)]">
                 Missing consent is requested before the first run.
               </p>
+              <WriteLimitsSummary manifest={manifest} />
             </Section>
           );
         }
@@ -737,6 +740,25 @@ function RawSourceCard({
         )}
       </div>
     </Card>
+  );
+}
+
+function WriteLimitsSummary({ manifest }: { manifest: AgentTemplate }) {
+  if (manifest.descriptor.mode !== "write") return null;
+  const limits = manifest.descriptor.writeLimits;
+  return (
+    <div className="mt-3 break-words text-sm text-[var(--color-text-soft)]">
+      <p>
+        Write limit: {limits?.maxActions ?? DEFAULT_WRITE_MAX_ACTIONS} actions per run
+        {limits ? " (manifest)." : " (host default)."}
+      </p>
+      {Object.entries(limits?.maxActionsPerOperation ?? {}).map(([kind, max]) => (
+        <p key={kind}><code>{kind}</code>: at most {max} actions per run.</p>
+      ))}
+      <p className="mt-1 text-[var(--color-text-muted)]">
+        Plans over these limits fail before confirmation. Nothing is changed.
+      </p>
+    </div>
   );
 }
 

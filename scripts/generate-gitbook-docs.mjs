@@ -12,6 +12,7 @@
  */
 
 import { execFileSync } from "node:child_process";
+import { tsImport } from "tsx/esm/api";
 import {
   copyFileSync,
   existsSync,
@@ -28,6 +29,8 @@ import { fileURLToPath } from "node:url";
 import { load as parseYaml } from "js-yaml";
 
 import { buildDocsSite, parseSummary } from "./docs-site-routes.mjs";
+
+const { DEFAULT_WRITE_MAX_ACTIONS } = await tsImport("../packages/agent-sdk/src/write-limits.ts", import.meta.url);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -249,6 +252,14 @@ function agentPage(agent) {
   }
 
   lines.push("## Write Behavior", "");
+  if (agent.mode === "write") {
+    const limits = descriptor.writeLimits;
+    lines.push(`At most ${limits?.maxActions ?? DEFAULT_WRITE_MAX_ACTIONS} actions per run (${limits ? "manifest limit" : "host default"}). Plans above the limit fail before confirmation and are checked again before any changes are applied.`, "");
+    for (const [kind, max] of Object.entries(limits?.maxActionsPerOperation ?? {})) {
+      lines.push(`- ${mdEscape(displayAction(kind))}: at most ${max} actions per run.`);
+    }
+    if (limits?.maxActionsPerOperation) lines.push("");
+  }
   if (agent.mode !== "write" && details.writeActions.length === 0) {
     lines.push("This is a read-only agent. It does not declare write operations.", "");
   } else if (details.writeActions.length === 0) {
@@ -357,8 +368,8 @@ function writeSafetyMatrixPage(agents) {
     "",
     "OpenAdminOS write agents always pause for human confirmation. This reference lists the current write-mode agents, their declared write actions, and the required confirmation text.",
     "",
-    "| Agent | Action | Confirmation | Scopes |",
-    "| --- | --- | --- | --- |",
+    "| Agent | Action | Plan limit | Confirmation | Scopes |",
+    "| --- | --- | --- | --- | --- |",
   ];
 
   let rows = 0;
@@ -366,22 +377,24 @@ function writeSafetyMatrixPage(agents) {
     const manifest = readManifest(agent.slug);
     const details = collectManifestDetails(manifest);
     if (agent.mode !== "write" && details.writeActions.length === 0) continue;
+    const limits = manifest?.descriptor?.writeLimits;
+    const planLimit = `${limits?.maxActions ?? DEFAULT_WRITE_MAX_ACTIONS} actions (${limits ? "manifest" : "host default"})`;
 
     if (details.writeActions.length === 0) {
       rows += 1;
-      lines.push(`| [${mdEscape(agent.name)}](../agents/${agent.slug}.md) | Not declared | Runtime confirmation required | ${agent.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`);
+      lines.push(`| [${mdEscape(agent.name)}](../agents/${agent.slug}.md) | Not declared | ${planLimit} | Runtime confirmation required | ${agent.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`);
       continue;
     }
 
     for (const action of details.writeActions) {
       rows += 1;
       lines.push(
-        `| [${mdEscape(agent.name)}](../agents/${agent.slug}.md) | ${mdEscape(displayAction(action.kind))} | ${displayConfirmation(action.confirmation)} | ${action.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`,
+        `| [${mdEscape(agent.name)}](../agents/${agent.slug}.md) | ${mdEscape(displayAction(action.kind))} | ${planLimit}${Object.hasOwn(limits?.maxActionsPerOperation ?? {}, action.kind) ? `<br>${limits.maxActionsPerOperation[action.kind]} of this kind` : ""} | ${displayConfirmation(action.confirmation)} | ${action.scopes.map((scope) => `\`${mdEscape(scope)}\``).join("<br>")} |`,
       );
     }
   }
 
-  if (rows === 0) lines.push("| None | No write agents declared | - | - |");
+  if (rows === 0) lines.push("| None | No write agents declared | - | - | - |");
   lines.push("");
   return lines.join("\n");
 }
