@@ -30,7 +30,8 @@ import type {
 } from "@openadminos/agent-sdk";
 import { assertWritePlanLimits, writeLimitsValidationIssue } from "@openadminos/agent-sdk";
 
-import { renderDeep, renderTemplate, type TemplateContext } from "./template-engine.js";
+import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
+import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 export class ManifestValidationError extends Error {
@@ -445,7 +446,7 @@ function makeTemplateCtx(
   pipeline: PipelineState,
   ctx: RunContext,
 ): TemplateContext {
-  return {
+  const instructions = {
     settings,
     ctx: {
       providerId: ctx.providerId,
@@ -454,6 +455,10 @@ function makeTemplateCtx(
     },
     descriptor: manifest.descriptor,
     task: { ...ctx.officeTask, evidenceJson: JSON.stringify(ctx.officeTask?.evidence ?? []) },
+  };
+  return {
+    ...instructions,
+    [PROMPT_INSTRUCTION_ROOTS]: instructions,
     ...pipeline,
   };
 }
@@ -1560,13 +1565,14 @@ async function runLlmSkill(
   const settings = renderDeep(skill.settings, templateCtx());
 
   const completion = await ctx.llm.complete({
-    prompt: settings.prompt,
-    ...(settings.system ? { system: settings.system } : {}),
+    prompt: renderPromptTemplate(skill.settings.prompt, templateCtx()),
+    system: withTenantDataInstructions(skill.settings.system
+      ? renderPromptTemplate(skill.settings.system, templateCtx()) : undefined),
     ...(typeof settings.temperature === "number" ? { temperature: settings.temperature } : {}),
     ...(typeof settings.maxTokens === "number" ? { maxTokens: settings.maxTokens } : {}),
   });
 
-  const cleaned = cleanLlmText(completion.text);
+  const cleaned = cleanLlmText(stripTenantDataFences(completion.text));
   ctx.log(
     "info",
     `LLM step "${skill.label}" used model ${completion.model} · ${cleaned.length} chars returned.`,

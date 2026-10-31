@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 import type {
   GraphCacheRefreshResourceResult,
   GraphCacheResourceKind,
@@ -1029,6 +1030,7 @@ export function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProv
 export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicResearch = false): string {
   return [
     "You are OpenAdminOS Chat.",
+    TENANT_DATA_INSTRUCTIONS,
     publicResearch
       ? "Answer tenant questions from retrieved tenant evidence and public questions from retrieved web evidence. Clearly distinguish those sources."
       : "Answer Microsoft 365 admin questions only from the retrieved tenant context supplied by the host.",

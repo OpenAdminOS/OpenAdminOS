@@ -14,6 +14,7 @@ import type {
 import { assertWritePlanLimits, WritePlanLimitError } from "@openadminos/agent-sdk";
 import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
+import { fenceTenantData, withTenantDataInstructions, withTenantDataOutputFilter } from "./tenant-data.js";
 
 export interface SandboxBrokerAgentPolicy {
   slug: string;
@@ -155,8 +156,15 @@ async function handleLlmRequest(
   }
 
   const options: LlmOptions = {
-    prompt: params.prompt,
-    ...(typeof params.system === "string" ? { system: params.system } : {}),
+    prompt: fenceTenantData(params.prompt, `script:${input.agent.slug}:prompt`),
+    // The system prompt is the agent author's code, reviewed at install, so it
+    // stays an instruction. The prompt is where scripts interpolate tenant
+    // records, so the whole prompt is fenced as data.
+    system: withTenantDataInstructions(
+      typeof params.system === "string" && params.system.trim()
+        ? params.system
+        : "Provide a concise read-only analysis of the supplied tenant data for the admin.",
+    ),
     ...(activeModel
       ? { model: activeModel }
       : typeof params.model === "string"
@@ -167,7 +175,7 @@ async function handleLlmRequest(
       : {}),
     ...(typeof params.maxTokens === "number" ? { maxTokens: params.maxTokens } : {}),
   };
-  return await input.ctx.llm.complete(options);
+  return await withTenantDataOutputFilter(input.ctx.llm).complete(options);
 }
 
 async function handleConnectorRequest(

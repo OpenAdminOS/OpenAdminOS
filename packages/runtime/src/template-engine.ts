@@ -13,10 +13,15 @@
 // the expression is embedded in surrounding text the result is coerced to
 // string.
 
+import { fenceTenantData } from "./tenant-data.js";
+
 const EXPRESSION_REGEX = /\{\{\s*([^}]+?)\s*\}\}/g;
 const STANDALONE_REGEX = /^\s*\{\{\s*([^}]+?)\s*\}\}\s*$/;
 
-export type TemplateContext = Record<string, unknown>;
+export const PROMPT_INSTRUCTION_ROOTS = Symbol("promptInstructionRoots");
+export type TemplateContext = Record<string, unknown> & {
+  [PROMPT_INSTRUCTION_ROOTS]?: Record<string, unknown>;
+};
 
 export interface TemplateFilter {
   (value: unknown, ...args: unknown[]): unknown;
@@ -198,6 +203,22 @@ export function renderTemplate(input: string, ctx: TemplateContext): unknown {
     if (value === undefined || value === null) return "";
     if (typeof value === "string") return value;
     return JSON.stringify(value);
+  });
+}
+
+/** Only model prompts fence interpolations; transforms and displayed results stay typed. */
+export function renderPromptTemplate(input: string, ctx: TemplateContext): string {
+  return input.replace(EXPRESSION_REGEX, (_match, expr: string) => {
+    const value = evaluateExpression(expr, ctx);
+    const path = parseExpression(expr).path;
+    const text = typeof value === "string" ? value : JSON.stringify(value) ?? "";
+    if (value === undefined || value === null || typeof value === "number" || typeof value === "boolean") return text;
+    // Saved settings and admin-approved standing instructions stay trusted. Pipeline
+    // outputs, map bindings and task evidence can contain tenant-authored text.
+    const root = path.split(".")[0]!;
+    if (ctx[PROMPT_INSTRUCTION_ROOTS]?.[root] === ctx[root] &&
+      /^(?:settings\.|descriptor\.|ctx\.|task\.instructions$)/.test(path)) return text;
+    return fenceTenantData(text, `template:${path}`);
   });
 }
 

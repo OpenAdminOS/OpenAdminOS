@@ -7,6 +7,7 @@ import { AppStateStore } from "../state.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
+import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -703,9 +704,9 @@ describe("Intune Chat host service", () => {
       );
       assert.ok(usersCalls >= 2, "users fetched before and during investigation");
 
-      const packStart = fallbackPrompt.indexOf('{\n  "question"');
-      assert.ok(packStart >= 0, "fallback prompt carries the answer pack");
-      const pack = JSON.parse(fallbackPrompt.slice(packStart)) as {
+      const fencedPack = /<tenant_data source="chat:answer-pack" nonce="[a-f0-9]+">\n([\s\S]*?)\n<\/tenant_data/.exec(fallbackPrompt);
+      assert.ok(fencedPack, "fallback prompt carries the fenced answer pack");
+      const pack = JSON.parse(fencedPack[1]!) as {
         resources: Array<{
           resource: string;
           cachedRows: number;
@@ -801,7 +802,7 @@ describe("Intune Chat host service", () => {
       async complete(options) {
         // The deterministic fallback also completes through this mock;
         // its prompt carries the serialized answer pack.
-        if (options.prompt.includes('{\n  "question"')) {
+        if (options.prompt.includes('<tenant_data source="chat:answer-pack"')) {
           fallbackPrompt = options.prompt;
           return { text: "Deterministic answer.", model: "agg-model-sync" };
         }
@@ -843,9 +844,9 @@ describe("Intune Chat host service", () => {
       assert.equal(result.assistantMessage.content, "Deterministic answer.");
       assert.ok(usersCalls >= 2, "users fetched before and during investigation");
 
-      const packStart = fallbackPrompt.indexOf('{\n  "question"');
-      assert.ok(packStart >= 0, "fallback prompt carries the answer pack");
-      const pack = JSON.parse(fallbackPrompt.slice(packStart)) as {
+      const fencedPack = /<tenant_data source="chat:answer-pack" nonce="[a-f0-9]+">\n([\s\S]*?)\n<\/tenant_data/.exec(fallbackPrompt);
+      assert.ok(fencedPack, "fallback prompt carries the fenced answer pack");
+      const pack = JSON.parse(fencedPack[1]!) as {
         resources: Array<{
           resource: string;
           cachedRows: number;
@@ -909,9 +910,11 @@ describe("Intune Chat host service", () => {
     const llm: RunLlmApi = {
       available: true,
       defaultModel: "mock-chat",
-      async complete() {
+      async complete(options) {
+        assert.ok(options.system?.includes(TENANT_DATA_INSTRUCTIONS));
+        assert.match(options.prompt, /<tenant_data source="chat:multi-tenant-result"/);
         return {
-          text: "One tenant completed and one tenant failed. Use the comparison table for source counts.",
+          text: "<tenant_data>One tenant completed and one tenant failed. Use the comparison table for source counts.</tenant_data>",
           model: "mock-chat",
         };
       },

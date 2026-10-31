@@ -57,6 +57,13 @@ export interface IntuneChatToolExecution {
   trace: IntuneChatToolTraceEntry;
 }
 
+export function tenantDataSourceForTool(tool: IntuneChatInvestigationToolName, params: unknown): string {
+  const values = params && typeof params === "object" ? params as Record<string, unknown> : {};
+  if (tool === "graph_get" && typeof values.path === "string") return `graph:${values.path}`;
+  if (tool === "query_cache" && typeof values.resource === "string") return `cache:${values.resource}`;
+  return `tool:${tool}`;
+}
+
 export interface IntuneChatToolContext {
   webSearch?: WebSearch;
   signal?: AbortSignal;
