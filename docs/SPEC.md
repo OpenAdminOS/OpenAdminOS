@@ -1849,6 +1849,17 @@ The macOS menu bar companion must be created during any interactive app launch, 
 
 ---
 
+### EU AI Act position (2026-10-31)
+
+Public page: `docs/gitbook/trust/eu-ai-act.md` (docs.openadminos.com, Trust model section). The page is the project's assessment, not legal advice. Never market OpenAdminOS as "AI Act compliant", "AI Act ready", or certified.
+
+- **Classification.** The desktop app is an AI system under Regulation (EU) 2024/1689, released under MIT. Article 2(12) excludes it except for Article 5 (prohibited), high-risk, and Article 50 (transparency). Its stated intended purpose (IT administration of the admin's own Microsoft 365 tenants) is not an Annex III use. Article 50 transparency applies.
+- **Intended purpose is a product boundary.** The nearest high-risk category is Annex III point 4 (employment: monitoring or evaluating workers' performance or behaviour, or preparing hiring, promotion, termination, or task-allocation decisions). The public registry does not accept agents with that purpose, nor emotion recognition, biometric categorisation, or social scoring. Account-security triage (for example Entra risky users) stays in scope. The rule lives in `CONTRIBUTING.md` and the Registry trust page, and maintainers apply it in review.
+- **Transparency mapping.** The top bar data boundary (provider, model, local or hosted) satisfies AI-interaction disclosure. Run reports from **Copy report** already record provider and model.
+- **OpenAdmin models.** Fine-tunes stay far below the Commission's one-third-of-original-training-compute threshold, so the project is not the general-purpose model provider. Model cards and the public SFT dataset are kept anyway.
+- **Hosted vendors** remain the general-purpose model providers for hosted options. **Deployers** (organisations using the app) keep their own obligations, such as Article 4 AI literacy.
+- **Re-assess when:** the app is distributed on paid or other commercial terms, the registry accepts a new category of agent that evaluates people, the project hosts inference for users, or model training compute grows materially. Timeline note: the 2026 AI Omnibus (in force July 2026, per secondary sources) moved stand-alone high-risk obligations to 2 December 2027 and left Article 50 at 2 August 2026, with a reported grace period for Article 50(2) marking to 2 December 2026. Verify against EUR-Lex before relying on these dates.
+
 ## 3. Design system
 
 ### Calm identity foundation (2026-10-23)
@@ -2612,6 +2623,8 @@ These are explicitly unresolved. Don't pick a default without asking.
 - **Hosted-LLM API key storage**: OS keychain is obvious for personal use, but what about MSP scenarios where multiple admins share a workstation? Per-user or per-workstation?
 - **Telemetry, if ever added**: what's the minimum viable opt-in design that doesn't betray the local-first promise?
 - **Registry moderation**: when an agent is malicious or broken, what's the takedown / flagging process? Who decides?
+- **AI Act Article 50(2) marking**: should exported run reports carry a machine-readable "AI-generated" marker (and a visible "Generated with <model> via OpenAdminOS" line), and in which format? Wait for the Commission's code of practice on marking unless a buyer needs it sooner.
+- **Manifest intended-purpose field**: should `manifest.yaml` gain a declared purpose category so registry QA can enforce the EU AI Act use rules mechanically instead of by review alone? This adds public manifest API surface.
 
 ---
 
