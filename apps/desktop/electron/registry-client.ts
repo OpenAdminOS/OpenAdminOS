@@ -20,7 +20,9 @@ import type {
   AgentExecution,
   AgentTier,
   RequiredEntraTier,
+  WriteLimits,
 } from "@openadminos/agent-sdk";
+import { writeLimitsValidationIssue } from "@openadminos/agent-sdk";
 
 export const DEFAULT_REGISTRY_SOURCE =
   "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents";
@@ -57,6 +59,7 @@ export interface RegistryIndexEntry {
   scopes: string[];
   execution?: AgentExecution;
   connectors?: AgentConnectorRequirement[];
+  writeLimits?: WriteLimits;
   minAppVersion: string;
   manifestUrl: string;
   manifestSha256: string;
@@ -315,6 +318,8 @@ function validateRegistryEntries(entries: RegistryIndexEntry[]): void {
     if (!entry || typeof entry !== "object") {
       throw new Error("Invalid registry agent entry");
     }
+    const issue = writeLimitsValidationIssue(entry.writeLimits, entry.mode);
+    if (issue) throw new Error(`Registry entry "${entry.slug}": ${issue.path}: ${issue.message}`);
     if (!/^[a-f0-9]{64}$/.test(entry.manifestSha256)) {
       throw new Error(
         `Registry entry "${String(entry.slug ?? "unknown")}" has no valid manifest SHA-256 digest`,

@@ -4720,6 +4720,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         tier: target.tier ?? previous.tier,
         requiresEntraTier: target.requiresEntraTier ?? previous.requiresEntraTier,
         scopes: target.scopes,
+        writeLimits: parsedManifest.descriptor.writeLimits,
         author: target.author,
         ...(hasRemainingSettings ? { settings: prunedSettings } : {}),
         provenance: buildAgentProvenance({
@@ -4813,6 +4814,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       );
     }
     const manifestScopes = [...new Set(collectManifestScopes(parsedManifest))].sort();
+    const manifestLimits = parsedManifest.descriptor.writeLimits;
+    const registryLimits = target.writeLimits;
+    if (
+      manifestLimits?.maxActions !== registryLimits?.maxActions ||
+      JSON.stringify(Object.entries(manifestLimits?.maxActionsPerOperation ?? {}).sort()) !==
+        JSON.stringify(Object.entries(registryLimits?.maxActionsPerOperation ?? {}).sort())
+    ) {
+      throw new Error(`${context}: fetched manifest write limits do not match the verified registry entry.`);
+    }
     const registryScopes = [...new Set(target.scopes)].sort();
     if (JSON.stringify(manifestScopes) !== JSON.stringify(registryScopes)) {
       throw new Error(
