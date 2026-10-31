@@ -157,10 +157,14 @@ async function handleLlmRequest(
 
   const options: LlmOptions = {
     prompt: fenceTenantData(params.prompt, `script:${input.agent.slug}:prompt`),
-    system: withTenantDataInstructions([
-      "Provide a concise read-only analysis of the supplied script context for the admin.",
-      typeof params.system === "string" ? fenceTenantData(params.system, `script:${input.agent.slug}:context`) : "",
-    ].filter(Boolean).join("\n")),
+    // The system prompt is the agent author's code, reviewed at install, so it
+    // stays an instruction. The prompt is where scripts interpolate tenant
+    // records, so the whole prompt is fenced as data.
+    system: withTenantDataInstructions(
+      typeof params.system === "string" && params.system.trim()
+        ? params.system
+        : "Provide a concise read-only analysis of the supplied tenant data for the admin.",
+    ),
     ...(activeModel
       ? { model: activeModel }
       : typeof params.model === "string"

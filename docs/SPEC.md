@@ -1168,9 +1168,9 @@ embedded instructions as a finding.
 Fences apply only at model boundaries: Chat answer packs and tool observations,
 conversation and workspace evidence, template prompt interpolations (including
 nested maps and connector results), sandboxed script submissions, and Office
-persona evidence. Saved admin instructions remain instructions. Script-provided
-prompt and system text are both treated as data because the host cannot establish
-their provenance; the host supplies the read-only analysis instruction. Numeric
+persona evidence. Saved admin instructions remain instructions. A script's system
+text is the agent author's code, reviewed at install, so it stays an instruction;
+the script prompt, where scripts interpolate tenant records, is fenced as data. Numeric
 and boolean template values remain literal. Echoed delimiters are removed before
 streaming, run-result rendering, storage, or connector delivery. Raw records and
 display templates are unchanged.
