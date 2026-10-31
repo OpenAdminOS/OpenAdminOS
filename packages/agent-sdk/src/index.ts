@@ -743,6 +743,8 @@ export interface RunRecord {
   steps: RunStepRecord[];
   logs: RunLogRecord[];
   plan?: WritePlan;
+  /** Host-produced assessment, retained with the reviewed plan in run history. */
+  riskAssessment?: WritePlanRiskAssessment;
   tenantId?: string;
   /**
    * Accumulated LLM token usage for this run (summed across all LLM
@@ -3624,6 +3626,25 @@ export interface WritePlan {
   confirmationPhrase: string;
   actions: WriteAction[];
 }
+
+export interface WritePlanRiskFlag {
+  id: string;
+  severity: "warn" | "danger";
+  title: string;
+  explanation: string;
+  actionIds: string[];
+}
+
+export interface WritePlanRiskContext {
+  /** Omit for host-generated plans that have no agent manifest. */
+  graphOperations?: readonly GraphOperation[];
+  /** Non-empty, confirmed plans for this agent and tenant, excluding this run. */
+  historicalConfirmedActionCounts?: readonly number[];
+}
+
+export type WritePlanRiskAssessment =
+  | { status: "complete"; flags: WritePlanRiskFlag[] }
+  | { status: "failed"; reason: string };
 
 export interface ReadAgentModule extends AgentDefinition {
   mode: "read";

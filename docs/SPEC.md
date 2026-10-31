@@ -600,6 +600,37 @@ Concretely:
 - When write limits are omitted, the host caps the entire plan at **100 actions**. The bundled write-agent survey found that stale guest cleanup already selects at most 50 candidates, while device offboarding can emit one retirement per correlated stale device with no selection cap. A 100-action default preserves guest cleanup and keeps an uncapped offboarding proposal within a reviewable batch. Explicit manifests can choose a different bound up to the absolute 1,000-action ceiling. These limits also apply to simulated runs; an over-limit plan fails as a whole instead of silently truncating actions.
 - The sandbox broker, template planner, and host plan boundary enforce the cap before the confirmation screen. The host reloads and validates manifest limits before apply, and the template apply path independently checks the entire plan before its first write. Refusals use the existing failed-run state, identify the actual count and permitted count, state that nothing changed, and ask the admin to narrow the selection and rerun. Manifest permission previews show the declared limit or the host default. Updates that raise or remove a declared total or per-kind cap produce a `warn` trust change; reductions produce `info`. Removing a declaration restores the host default and still requires review.
 - Write agents offer a manual **Dry run** from agent details and Chat suggestions. The host persists `dryRun: true`, restricts Graph access to reads for the whole run (including planning), blocks connector changes/notifications and automatic result delivery, and ends a successful plan in terminal `planned` status, labelled **Dry run: not applied**. Empty dry-run plans also use this status. Neither confirmation IPC nor runtime apply accepts a dry run, even after restart. The result uses the normal plan/diff view with “Dry run. Nothing was changed in <tenant name>.” and no Apply or typed-confirmation controls. **Run for real** queues a new normal run with the saved effective settings, tenant, provider, and model; it rereads tenant state, generates a fresh plan, and requires normal confirmation. The old plan never authorizes changes. Dry runs are not supported by schedules or Agent Team assignments. Existing run JSON remains compatible because the new fields are optional; no storage schema migration is required.
+- Before saving a non-empty plan for confirmation, the desktop host runs a local,
+  deterministic risk check. Run history retains the host-produced verdict and
+  flags separately from the agent's plan. This covers sandboxed and in-process
+  agents, baseline rollbacks, and external proposals; it makes no network or
+  model calls and never replaces typed confirmation.
+- Danger flags cover Conditional Access policy creation/update/deletion,
+  writes under `/roleManagement` and `/directoryRoles`, managed-device wipe,
+  retire, delete, and reset-passcode requests (including the legacy retirement
+  action), directory-object deletion, and application/service-principal
+  credential changes. Matching uses method and resource boundaries, rather than
+  text in an action label. Credential checks include add/remove key or password,
+  credential-property updates, and federated-credential writes.
+- Warning flags cover Intune assignment bodies with the typed All users or
+  All devices target, and action counts strictly greater than three times the
+  historical confirmed-plan median for the same agent and tenant. Use all
+  retained, non-empty confirmed plans, including plans whose apply failed;
+  exclude the current run and never infer a baseline without history. Target
+  labels and group names alone do not establish tenant-wide scope.
+- The sandbox broker continues to reject requests outside declared
+  `graphOperations`. The in-process path does not have that rejection, so its
+  undeclared plan requests receive a danger flag using the broker's method and
+  path-placeholder matching. Agents that declare no `graphOperations` (declarative
+  templates, whose writes come from their own manifest `actionTemplate`) and
+  system plans have no declaration check.
+- Confirmation shows flags above the diff and on affected actions. Any danger
+  flag requires an unchecked-by-default "I have reviewed the flagged actions"
+  checkbox before Apply is enabled, alongside the existing exact typed phrase.
+  Changing the run, plan, or assessment resets both review inputs. Warnings are
+  informational. A failed or missing assessment says "Risk check could not run:
+  <reason>. Review every action manually." and leaves typed confirmation
+  available. No flags means only that the current rules found no match.
 - If you genuinely don't need an LLM (e.g. a pure data export), this product is the wrong tool; reach for `Get-MgDeviceManagementManagedDevice | Export-Csv` or a similar deterministic script instead.
 
 Microsoft Graph execution is beta-only for this project. The runtime and all

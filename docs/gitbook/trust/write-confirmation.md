@@ -27,6 +27,28 @@ Choose **Run for real** to start a new run with the same tenant, provider, model
 
 Dry runs are available only for write agents started manually. Schedules and Agent Team assignments continue to use their normal run flow.
 
+## Risk flags
+
+Before showing a plan, OpenAdminOS checks its proposed actions locally with a
+fixed set of rules. A summary appears above the diff, and affected actions carry
+markers. The check flags Conditional Access and privileged role changes,
+destructive managed-device actions, deletion of users, groups, applications or
+service principals, and application credential changes. Requests outside an
+agent's declared Graph operations are flagged when they reach review.
+
+Warnings identify assignments targeting All users or All devices and plans with
+more than three times this agent's historical median action count in the same
+tenant. Without confirmed-plan history, there is no size warning. Group names
+alone do not establish that an assignment targets everyone.
+
+Danger flags require you to select **I have reviewed the flagged actions** as
+well as type the exact confirmation phrase before Apply is available. Warnings
+are informational. Flags remain in the run's history after approval or rejection.
+
+If the check cannot run, the screen says **Risk check could not run** and asks
+you to review every action manually. Typed confirmation remains available. A
+plan without flags still needs your review; the rules do not cover every risk.
+
 ## No-Op Runs
 
 If a write agent produces zero actions after filters are applied, the run completes as a no-op. It is not treated as a failed confirmation. An empty dry-run plan remains labelled **Dry run: not applied**.

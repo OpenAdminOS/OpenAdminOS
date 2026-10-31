@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Routes, Route, useLocation } from "react-router";
@@ -14,6 +14,96 @@ import {
 } from "../test/test-utils";
 
 describe("RunResult write confirmation", () => {
+  it("requires danger acknowledgement and the exact phrase, and marks the affected action", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun();
+    run.riskAssessment = { status: "complete", flags: [{
+      id: "managed-device-destructive", severity: "danger", title: "Destructive managed device action",
+      explanation: "Retiring a device can interrupt access.", actionIds: [run.plan!.actions[0]!.id],
+    }] };
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    const acknowledgement = await screen.findByRole("checkbox", { name: "I have reviewed the flagged actions" });
+    const apply = screen.getByRole("button", { name: "Apply 2 changes" });
+    const phrase = screen.getByPlaceholderText("Type here to enable Apply");
+    expect(screen.getByRole("region", { name: "Write plan risk flags" })).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: `Risk flags for ${run.plan!.actions[0]!.label}` })).getByText("Danger: Destructive managed device action")).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: `Risk flags for ${run.plan!.actions[1]!.label}` })).not.toBeInTheDocument();
+    await user.click(acknowledgement);
+    expect(apply).toBeDisabled();
+    await user.type(phrase, "OFFBOARD 2 DEVICES");
+    expect(apply).toBeEnabled();
+    await user.click(acknowledgement);
+    expect(apply).toBeDisabled();
+    expect(bridge.confirmRun).not.toHaveBeenCalled();
+    await user.click(acknowledgement);
+    await user.click(apply);
+    await waitFor(() => expect(bridge.confirmRun).toHaveBeenCalledWith(run.id, "OFFBOARD 2 DEVICES"));
+  });
+
+  it("keeps warning flags informational", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun();
+    run.riskAssessment = { status: "complete", flags: [{ id: "unusual-plan-size", severity: "warn", title: "Unusual plan size", explanation: "This plan exceeds the usual count.", actionIds: run.plan!.actions.map((action) => action.id) }] };
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    expect(await screen.findByText("Unusual plan size")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Type here to enable Apply"), "OFFBOARD 2 DEVICES");
+    expect(screen.getByRole("button", { name: "Apply 2 changes" })).toBeEnabled();
+  });
+
+  it("resets approval inputs only when the reviewed plan or assessment changes", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ riskAssessment: { status: "complete", flags: [{ id: "danger", severity: "danger", title: "Review device action", explanation: "This changes a device.", actionIds: ["one"] }] } });
+    let appState = createMockAppState({ runs: [run] });
+    const bridge = makeMockBridge({ getAppState: vi.fn(async () => appState) }, appState);
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    await user.click(await screen.findByRole("checkbox", { name: "I have reviewed the flagged actions" }));
+    await user.type(screen.getByPlaceholderText("Type here to enable Apply"), "OFFBOARD 2 DEVICES");
+    appState = structuredClone(appState);
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(screen.getByRole("checkbox")).toBeChecked();
+    expect(screen.getByRole("button", { name: "Apply 2 changes" })).toBeEnabled();
+    appState = { ...appState, runs: [{ ...run, plan: { ...run.plan!, summary: "A changed proposal needs a fresh review." } }] };
+    await act(async () => { window.dispatchEvent(new Event("focus")); });
+    expect(screen.getByRole("checkbox")).not.toBeChecked();
+    expect(screen.getByPlaceholderText("Type here to enable Apply")).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Apply 2 changes" })).toBeDisabled();
+  });
+
+  it.each([
+    { status: "failed" as const, reason: "A proposed Graph request path contains invalid encoding" },
+    undefined,
+  ])("shows manual review when the risk check failed or was never recorded", async (riskAssessment) => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ riskAssessment });
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    expect(await screen.findByRole("alert")).toHaveTextContent(/Risk check could not run:.*Review every action manually/);
+    expect(screen.queryByText(/No flags from the current rules/)).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Type here to enable Apply"), "OFFBOARD 2 DEVICES");
+    await user.click(screen.getByRole("button", { name: "Apply 2 changes" }));
+    await waitFor(() => expect(bridge.confirmRun).toHaveBeenCalledWith(run.id, "OFFBOARD 2 DEVICES"));
+  });
+
+  it("shows retained flags in terminal run history", async () => {
+    const run = createAwaitingConfirmationRun({ status: "rejected", riskAssessment: { status: "complete", flags: [{ id: "privileged-role", severity: "danger", title: "Privileged role change", explanation: "This request changes privileged access.", actionIds: ["one"] }] } });
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    expect(await screen.findByText("Privileged role change")).toBeInTheDocument();
+    expect(screen.getByText("This request changes privileged access.")).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+  });
+
+  it("does not report an unavailable risk check for a completed empty plan", async () => {
+    const run = createAwaitingConfirmationRun({ status: "completed", plan: { summary: "No changes matched.", confirmationPhrase: "APPLY CHANGES", actions: [] } });
+    const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    await screen.findByRole("dialog");
+    expect(screen.queryByText(/Risk check could not run/)).not.toBeInTheDocument();
+  });
+
   it("keeps Apply disabled until the exact confirmation phrase is typed", async () => {
     const user = userEvent.setup();
     const run = createAwaitingConfirmationRun();

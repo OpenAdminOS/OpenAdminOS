@@ -9,6 +9,7 @@ import { RunFailureRemediation } from "../components/RunFailureRemediation";
 import { CompactRunTelemetry, RunTelemetry } from "../components/RunTelemetry";
 import { useToast } from "../components/Toast";
 import { TenantTile } from "../components/TenantTile";
+import { WritePlanRiskSummary } from "../components/WritePlanRiskSummary";
 import {
   IconArrowLeft,
   IconBolt,
@@ -40,6 +41,7 @@ import {
   type TenantRecord,
   type WriteAction,
   type WritePlan,
+  type WritePlanRiskFlag,
 } from "../shared/openAdminOS";
 import {
   runReportJson,
@@ -321,6 +323,7 @@ function RunDrawer({
         ) : null}
 
         <RunFailureRemediation run={run} />
+        {run.plan && run.plan.actions.length > 0 && run.riskAssessment ? <WritePlanRiskSummary assessment={run.riskAssessment} /> : null}
         {shouldShowResult ? <ResultPanel run={run} /> : null}
         <CompactRunTelemetry
           run={run}
@@ -511,10 +514,12 @@ function ConfirmationPage({
 
           {plan ? (
             <>
+              <WritePlanRiskSummary assessment={run.riskAssessment} />
               <Section title={plan.summary}>
                 <div className="divide-y divide-[var(--color-border-soft)] overflow-hidden rounded-[14px] bg-[var(--color-surface)] shadow-[inset_0_0_0_1px_var(--color-border-soft)]">
                   {plan.actions.map((action, index) => (
-                    <ActionRow key={action.id} action={action} index={index} />
+                    <ActionRow key={action.id} action={action} index={index}
+                      flags={run.riskAssessment?.status === "complete" ? run.riskAssessment.flags.filter((flag) => flag.actionIds.includes(action.id)) : []} />
                   ))}
                 </div>
               </Section>
@@ -524,8 +529,10 @@ function ConfirmationPage({
                   <Button variant="primary" onClick={onRunForReal}>Run for real</Button>
                 </div>
               ) : <TypedConfirmation
+                key={JSON.stringify([run.id, plan, run.riskAssessment])}
                 runId={run.id}
                 plan={plan}
+                requiresRiskAcknowledgement={run.riskAssessment?.status === "complete" && run.riskAssessment.flags.some((flag) => flag.severity === "danger")}
                 onConfirm={onConfirm}
                 onReject={onReject}
               />}
@@ -549,20 +556,24 @@ function ConfirmationPage({
 function TypedConfirmation({
   runId,
   plan,
+  requiresRiskAcknowledgement,
   onConfirm,
   onReject,
 }: {
   runId: string;
   plan: WritePlan;
+  requiresRiskAcknowledgement: boolean;
   onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
   onReject: (runId: string) => Promise<RunRecord>;
 }) {
   const [typed, setTyped] = useState("");
+  const [riskAcknowledged, setRiskAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const armed = typed === plan.confirmationPhrase;
+  const armed = typed === plan.confirmationPhrase && (!requiresRiskAcknowledgement || riskAcknowledged);
 
   const confirm = async () => {
+    if (!armed || busy) return;
     setError(null);
     setBusy(true);
     try {
@@ -598,6 +609,14 @@ function TypedConfirmation({
       <p className="mt-1 text-sm text-[var(--color-text-muted)]">
         Every destructive operation requires a typed phrase. There is no "remember my choice."
       </p>
+      {requiresRiskAcknowledgement ? (
+        <label className="mt-4 flex items-center gap-2 text-sm text-[var(--color-text)]">
+          <input type="checkbox" name="risk-acknowledgement" autoComplete="off" checked={riskAcknowledged} disabled={busy}
+            onChange={(event) => setRiskAcknowledged(event.target.checked)}
+            className="h-4 w-4 accent-[var(--color-danger)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-focus)]" />
+          I have reviewed the flagged actions
+        </label>
+      ) : null}
       <div className="mt-4 grid grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.8fr)_minmax(260px,1fr)_auto]">
         <div className="flex min-h-11 items-center rounded-lg bg-[var(--color-danger-soft)] px-4 font-mono text-base text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           {plan.confirmationPhrase}
@@ -645,7 +664,7 @@ function TypedConfirmation({
   );
 }
 
-function ActionRow({ action, index }: { action: WriteAction; index: number }) {
+function ActionRow({ action, index, flags = [] }: { action: WriteAction; index: number; flags?: WritePlanRiskFlag[] }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const previewId = useId();
   const destructive = action.severity === "destructive";
@@ -664,6 +683,13 @@ function ActionRow({ action, index }: { action: WriteAction; index: number }) {
             <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]">
               {action.description}
             </div>
+          ) : null}
+          {flags.length > 0 ? (
+            <ul aria-label={`Risk flags for ${action.label}`} className="mt-1 flex flex-wrap gap-2">
+              {flags.map((flag) => (
+                <li key={flag.id}><Badge tone={flag.severity === "danger" ? "danger" : "warning"}>{flag.severity === "danger" ? "Danger" : "Warning"}: {flag.title}</Badge></li>
+              ))}
+            </ul>
           ) : null}
           <div className={`mt-1 whitespace-pre-wrap break-words font-mono text-xs ${destructive ? "text-[var(--color-danger)]" : "text-[var(--color-text-soft)]"}`}>
             {actionRequestSummary(action)}
