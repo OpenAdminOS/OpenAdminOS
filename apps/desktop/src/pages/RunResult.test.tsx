@@ -365,3 +365,21 @@ it('shows a failed rerun reason instead of silently leaving the result unchanged
   await user.click(await screen.findByRole('button', { name: 'Run again' }));
   expect(await screen.findByText('Ollama is unavailable. Start Ollama and try again.')).toBeInTheDocument();
 });
+
+
+it("shows the complete dry-run plan without Apply and starts a fresh normal run", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true, finishedAt: "2026-10-31T12:00:00Z" });
+  const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+  expect(await screen.findByText(/Dry run. Nothing was changed in Contoso/)).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: run.plan!.summary })).toBeInTheDocument();
+  for (const action of run.plan!.actions) expect(screen.getByText(action.label)).toBeInTheDocument();
+  expect(screen.queryByPlaceholderText("Type here to enable Apply")).not.toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /Apply/ })).not.toBeInTheDocument();
+  expect(screen.queryByText("Awaiting confirmation")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Run for real" }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ runForRealOfRunId: run.id, tenantId: run.tenantId })));
+  expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]?.dryRun).toBeUndefined();
+  expect(bridge.confirmRun).not.toHaveBeenCalled();
+});

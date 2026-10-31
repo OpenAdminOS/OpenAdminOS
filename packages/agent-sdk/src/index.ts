@@ -482,11 +482,16 @@ export type RunStatus =
   | "running"
   | "awaiting-confirmation"
   | "completed"
+  | "planned"
   | "failed"
   | "rejected"
   | "cancelled";
 
 export interface StartRunOptions {
+  /** Plan a write agent without permitting any apply or external mutation. */
+  dryRun?: boolean;
+  /** Start fresh from a completed dry run using its host-owned input snapshot. */
+  runForRealOfRunId?: string;
   /** Host reloads a prior read-only Team task; renderer never supplies its evidence. */
   retryOfRunId?: string;
   /** Host-owned Office correlation, never accepted by the generic renderer run IPC. */
@@ -687,6 +692,10 @@ export interface RunLogRecord {
 }
 
 export interface RunRecord {
+  dryRun?: boolean;
+  /** Input settings saved at queue time for a fresh run after a dry run. */
+  inputSettings?: Record<string, unknown>;
+  runForRealOfRunId?: string;
   retryOfRunId?: string;
   assessmentKey?: string;
   office?: { missionId: string; personaId: string; step: number };
@@ -3530,6 +3539,8 @@ export interface RunContextOptions {
 }
 
 export interface RunContext {
+  /** Host-enforced planning-only execution. */
+  dryRun?: boolean;
   officeTask?: OfficeTaskContext;
   /** Host cancellation. Check before starting additional work. */
   signal?: AbortSignal;
@@ -3567,10 +3578,10 @@ export interface RunContext {
   settings?: Record<string, unknown>;
   /**
    * Whether write actions invoked via `ctx.graph.*` will hit real Graph.
-   * Always `true` in production because runs require a connected tenant
-   * — the typed diff confirmation is the user-facing gate, not this
-   * flag. Kept as a parameter so unit tests / fixtures can pass
-   * `false` and exercise apply logic without a tenant.
+   * True for normal production runs after typed diff confirmation.
+   * Dry runs force this to false and block writes in the host; they
+   * never execute a simulated apply. Tests may pass false to exercise
+   * ordinary apply logic against fixtures without a tenant.
    */
   realWrites: boolean;
   log(level: RunLogLevel, message: string, metadata?: Record<string, unknown>): void;

@@ -27,6 +27,8 @@ import type {
   WriteAgentModule,
   WritePlan,
 } from "@openadminos/agent-sdk";
+import { assertRunCanApply, dryRunGraph } from "./dry-run.js";
+export { assertRunCanApply, dryRunGraph, DRY_RUN_APPLY_ERROR, DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { assertWritePlanLimits } from "@openadminos/agent-sdk";
 
@@ -304,16 +306,21 @@ export function toInstalledAgent(
 }
 
 export function createQueuedRun(input: {
+  dryRun?: boolean;
   agent: RegistryAgentSummary | AgentSummary;
   providerId: ProviderId;
   model?: string;
 }): RunRecord {
+  if (input.dryRun && input.agent.mode !== "write") {
+    throw new Error("Dry run is only available for write agents. Run this read agent normally.");
+  }
   const now = new Date().toISOString();
   const runId = `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 
   return {
     id: runId,
     agentSlug: input.agent.slug,
+    ...(input.dryRun ? { dryRun: true } : {}),
     status: "queued",
     queuedAt: now,
     providerId: input.providerId,
@@ -498,7 +505,9 @@ async function createPhaseHandle(
         runId: input.run.id,
         signal: input.signal,
         currentStepId: () => currentStepId,
-        ...(input.confirmCapability
+        ...(input.run.dryRun
+          ? { confirmInvocation: async () => ({ approved: false, reason: "Dry run policy blocks connector changes and notifications. Run for real to request approval." }) }
+          : input.confirmCapability
           ? { confirmInvocation: input.confirmCapability }
           : {}),
         onAuditEntry: (entry: ConnectorAuditEntry) => {
@@ -523,9 +532,10 @@ async function createPhaseHandle(
     agent: toAgentDefinition(input.agent),
     providerId: input.providerId,
     model: input.model,
-    graph,
+    graph: input.run.dryRun ? dryRunGraph(graph) : graph,
     llm,
-    realWrites: input.realWrites ?? false,
+    dryRun: input.run.dryRun === true,
+    realWrites: input.run.dryRun ? false : input.realWrites ?? false,
     settings: input.agent.settings,
     officeTask: input.run.officeContext,
     ...(connectorAccessor !== undefined ? { connectors: connectorAccessor } : {}),
@@ -736,6 +746,7 @@ async function failPhase(
 }
 
 export async function executeRun(input: ExecuteRunInput): Promise<RunRecord> {
+  if (input.run.dryRun) throw new Error("Dry run is only available for write agents. Run this read agent normally.");
   const handle = await createPhaseHandle(
     input,
     {
@@ -804,6 +815,22 @@ export async function executePlan(input: ExecuteRunInput): Promise<RunRecord> {
     assertWritePlanLimits(plan, module.writeLimits);
 
     const pausedAt = new Date().toISOString();
+    if (input.run.dryRun) {
+      const planned = handle.setWorking((working) => ({
+        ...working,
+        status: "planned",
+        finishedAt: pausedAt,
+        summary: plan.summary,
+        liveSummary: undefined,
+        plan,
+        logs: [
+          ...working.logs,
+          buildLog(working.id, "info", `Dry run: ${plan.actions.length} proposed actions. Nothing was applied.`, pausedAt),
+        ],
+      }));
+      await handle.emit();
+      return planned;
+    }
     if (plan.actions.length === 0) {
       const completed = handle.setWorking((working) => ({
         ...working,
@@ -864,6 +891,7 @@ export async function executePlan(input: ExecuteRunInput): Promise<RunRecord> {
 }
 
 export async function executeApply(input: ExecuteApplyInput): Promise<RunRecord> {
+  assertRunCanApply(input.run);
   const handle = await createPhaseHandle(
     input,
     {

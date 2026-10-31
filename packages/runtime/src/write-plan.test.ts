@@ -1096,3 +1096,42 @@ describe("template execution cancellation", () => {
     } finally { fixture.cleanup(); }
   });
 });
+
+
+describe("dry run planning", () => {
+  for (const devices of [[], [managedDevice("device-1", "Pilot laptop", "S1")]]) {
+    it(`finishes ${devices.length}-action plans without confirmation or apply`, async () => {
+      const fixture = makeWriteAgentFixture({ devices });
+      try {
+        const progress: RunStatus[] = [];
+        const input = { agent: fixture.agent, providerId: "ollama" as const,
+          llm: fixture.llm, createGraph: () => fixture.graph, realWrites: true,
+          onProgress: (run: { status: RunStatus }) => { progress.push(run.status); } };
+        const planned = await executePlan({ ...input,
+          run: createQueuedRun({ agent: fixture.agent, providerId: "ollama", dryRun: true }) });
+        assert.equal(planned.status, "planned");
+        assert.equal(planned.dryRun, true);
+        assert.ok(planned.finishedAt);
+        assert.equal(planned.plan?.actions.length, devices.length);
+        assert.ok(!progress.includes("awaiting-confirmation"));
+        assert.deepEqual(fixture.retireCalls, []);
+        assert.equal(fixture.llmRequests.length, 1);
+        let graphBuilt = false;
+        await assert.rejects(executeApply({ ...input, run: planned, plan: planned.plan!,
+          createGraph: () => { graphBuilt = true; return fixture.graph; } }), /Dry runs cannot be applied/);
+        assert.equal(graphBuilt, false, "apply is refused before loading or invoking any module");
+        assert.deepEqual(fixture.retireCalls, []);
+      } finally { fixture.cleanup(); }
+    });
+  }
+
+  it("rejects read agents at queue time and runtime entry", async () => {
+    const fixture = makeWriteAgentFixture({ devices: [] });
+    try {
+      const agent = { ...fixture.agent, mode: "read" as const };
+      assert.throws(() => createQueuedRun({ agent, providerId: "ollama", dryRun: true }), /only available for write agents/);
+      await assert.rejects(executeRun({ agent, providerId: "ollama", createGraph: () => fixture.graph,
+        run: { ...createQueuedRun({ agent, providerId: "ollama" }), dryRun: true }, onProgress() {} }), /only available for write agents/);
+    } finally { fixture.cleanup(); }
+  });
+});

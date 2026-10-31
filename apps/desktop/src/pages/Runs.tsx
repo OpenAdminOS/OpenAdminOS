@@ -17,10 +17,11 @@ import {
 import { useAppState } from "../state";
 import type { RunRecord, RunStatus } from "../shared/openAdminOS";
 
-type RunFilter = "all" | "failed" | "review";
+type RunFilter = "all" | "failed" | "review" | "planned";
 type RunTrigger = "manual" | "scheduled" | "team" | "chat" | "gateway";
 
 const terminalStatuses = new Set<RunStatus>([
+  "planned",
   "completed",
   "failed",
   "rejected",
@@ -37,7 +38,7 @@ export default function Runs() {
 
   const statusParam = searchParams.get("status");
   const statusFilter: RunFilter =
-    statusParam === "failed" || statusParam === "review" ? statusParam : "all";
+    statusParam === "failed" || statusParam === "review" || statusParam === "planned" ? statusParam : "all";
   const tenantFilter = searchParams.get("tenant") ?? "";
   const agentFilter = searchParams.get("agent") ?? "";
   const triggerParam = searchParams.get("trigger");
@@ -100,6 +101,7 @@ export default function Runs() {
     if (statusFilter === "review") return [];
     return filteredRuns.filter((run) => {
       if (!terminalStatuses.has(run.status)) return false;
+      if (statusFilter === "planned") return run.status === "planned";
       return statusFilter !== "failed" || run.status === "failed";
     });
   }, [filteredRuns, statusFilter]);
@@ -195,7 +197,7 @@ export default function Runs() {
       <PageHeader title="Runs" />
       <PageBody>
         <div className="calm-page-column space-y-7">
-          {needsReview.length > 0 && statusFilter !== "failed" ? (
+          {needsReview.length > 0 && (statusFilter === "all" || statusFilter === "review") ? (
             <Section id="needs-review" title="Needs review" className="scroll-mt-4">
               <div>
                 {needsReview.map((run) => (
@@ -298,6 +300,7 @@ export default function Runs() {
                       { id: "all", label: "All" },
                       { id: "failed", label: "Failed" },
                       { id: "review", label: "Needs review" },
+                      { id: "planned", label: "Dry runs" },
                     ]}
                   />
                 }
@@ -388,6 +391,7 @@ function RunListRow({
 
 function statusDotTone(status: RunStatus): StatusDotTone {
   if (status === "failed" || status === "rejected" || status === "cancelled") return "danger";
+  if (status === "planned") return "info";
   if (status === "completed") return "success";
   if (status === "awaiting-confirmation" || status === "queued") return "warning";
   return "info";
@@ -442,6 +446,7 @@ export function triggerForRun(run: RunRecord): RunTrigger {
 }
 
 export function statusLabel(status: RunStatus): string {
+  if (status === "planned") return "Dry run: not applied";
   if (status === "queued") return "Queued";
   if (status === "running") return "Running";
   if (status === "awaiting-confirmation") return "Awaiting confirmation";
@@ -454,7 +459,7 @@ export function statusLabel(status: RunStatus): string {
 export function statusTone(status: RunStatus): BadgeTone {
   if (status === "failed") return "danger";
   if (status === "completed") return "success";
-  if (status === "running") return "info";
+  if (status === "running" || status === "planned") return "info";
   if (status === "queued" || status === "awaiting-confirmation") return "warning";
   return "neutral";
 }

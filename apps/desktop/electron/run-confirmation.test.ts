@@ -269,3 +269,17 @@ function writePlan(): WritePlan {
     ],
   };
 }
+
+
+for (const status of ["planned", "awaiting-confirmation"] as const) {
+  it(`refuses apply IPC for a persisted dry run with status ${status}`, async () => {
+    const fixture = await makeStoreFixture({ run: { ...writeRun({ status }), dryRun: true } });
+    try {
+      await assert.rejects(fixture.store.confirmRun("run-confirm", "OFFBOARD 2 DEVICES"), /Dry runs cannot be applied.*Run for real/);
+      const saved = (await fixture.store.getAppState()).runs.find(run => run.id === "run-confirm");
+      assert.equal(saved?.status, status);
+      assert.equal(saved?.confirmedAt, undefined);
+      assert.equal(saved?.dryRun, true);
+    } finally { await fixture.cleanup(); }
+  });
+}

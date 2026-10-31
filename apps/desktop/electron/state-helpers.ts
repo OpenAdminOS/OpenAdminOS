@@ -170,8 +170,16 @@ export function humanizeMsalError(error: unknown): string {
 
 
 
+export function runNotificationTitle(run: RunRecord): string {
+  if (run.status === "planned") return "Dry run: not applied";
+  if (run.status === "completed") return run.trigger === "schedule" ? "Scheduled agent run completed" : "Agent run completed";
+  if (run.status === "failed") return run.trigger === "schedule" ? "Scheduled agent run failed" : "Agent run failed";
+  return run.status === "cancelled" ? "Agent run cancelled" : "Agent run rejected";
+}
+
 export function isTerminalRunStatus(status: RunRecord["status"]): boolean {
   return (
+    status === "planned" ||
     status === "completed" ||
     status === "failed" ||
     status === "cancelled" ||

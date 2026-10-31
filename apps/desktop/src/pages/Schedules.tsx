@@ -21,6 +21,8 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, Switch } from "../components/ui";
 
+import { statusLabel, statusTone } from "./Runs";
+
 const QUICK_INTERVALS: { label: string; seconds: number }[] = [
   { label: "15m", seconds: 15 * 60 },
   { label: "1h", seconds: 60 * 60 },
@@ -452,6 +454,7 @@ function ScheduleRow({
 }
 
 function ScheduleOutcomePill({ run }: { run: RunRecord }) {
+  if (run.status === "planned") return <Badge tone="info">Dry run: not applied</Badge>;
   if (run.status === "completed") {
     return (
       <Badge tone="success">
@@ -551,8 +554,8 @@ function ScheduleActivityTimeline({
                   {changeLabel(run.changeState)}
                 </Badge>
               )}
-              <Badge tone={run.status === "completed" ? "success" : run.status === "failed" ? "danger" : "warning"}>
-                {run.status}
+              <Badge tone={statusTone(run.status)}>
+                {statusLabel(run.status)}
               </Badge>
             </button>
           ))}

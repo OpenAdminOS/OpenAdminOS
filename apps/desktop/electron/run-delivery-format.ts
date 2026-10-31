@@ -337,6 +337,7 @@ export function evaluateRunDeliveryRule(
   delivery: DeliveryRuleSettings,
   connectorName: string,
 ): DeliveryRuleEvaluation {
+  if (run.dryRun || run.status === "planned") return { shouldSend: false, detail: `${connectorName} delivery is disabled for dry runs. Nothing is sent automatically.` };
   const triggerLabel = run.trigger === "schedule" ? "scheduled" : "manual";
   if (run.status !== "completed" && run.status !== "failed") {
     return {
@@ -617,7 +618,7 @@ export function formatTeamsDeliveryMessage(
   agent: AgentSummary,
   tenant: TenantRecord,
 ): string {
-  const status = run.status === "completed" ? "Completed" : "Failed";
+  const status = run.status === "planned" ? "Dry run: not applied" : run.status === "completed" ? "Completed" : "Failed";
   const lines = [
     `## ${agent.name}`,
     "",
@@ -656,7 +657,7 @@ export function formatWhatsAppDeliveryMessage(
   agent: AgentSummary,
   tenant: TenantRecord | undefined,
 ): string {
-  const status = run.status === "completed" ? "Completed" : "Failed";
+  const status = run.status === "planned" ? "Dry run: not applied" : run.status === "completed" ? "Completed" : "Failed";
   const lines = [
     "*OpenAdminOS run report*",
     "",
@@ -697,7 +698,7 @@ export function formatOutlookDeliveryMessage(
   agent: AgentSummary,
   tenant: TenantRecord,
 ): string {
-  const status = run.status === "completed" ? "Completed" : "Failed";
+  const status = run.status === "planned" ? "Dry run: not applied" : run.status === "completed" ? "Completed" : "Failed";
   const lines = [
     `## ${agent.name}`,
     "",
@@ -739,7 +740,7 @@ export function formatChatDeliveryMessage(
   agent: AgentSummary,
   tenant: TenantRecord | undefined,
 ): string {
-  const status = run.status === "completed" ? "Completed" : "Failed";
+  const status = run.status === "planned" ? "Dry run: not applied" : run.status === "completed" ? "Completed" : "Failed";
   const lines = [
     "*OpenAdminOS run report*",
     "",
@@ -780,7 +781,7 @@ export function formatPlainDeliveryMessage(
   agent: AgentSummary,
   tenant: TenantRecord | undefined,
 ): string {
-  const status = run.status === "completed" ? "Completed" : "Failed";
+  const status = run.status === "planned" ? "Dry run: not applied" : run.status === "completed" ? "Completed" : "Failed";
   const lines = [
     "OpenAdminOS run report",
     "",
@@ -817,7 +818,7 @@ export function formatPlainDeliveryMessage(
 
 
 export function formatDeliveryEmailSubject(run: RunRecord, agent: AgentSummary): string {
-  const status = run.status === "completed" ? "completed" : "failed";
+  const status = run.status === "planned" ? "dry run: not applied" : run.status === "completed" ? "completed" : "failed";
   return `OpenAdminOS: ${agent.name} ${status}`;
 }
 

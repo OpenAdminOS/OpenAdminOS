@@ -1304,12 +1304,14 @@ function IntuneChatContent() {
     slug: string,
     conversationId: string,
     messageId: string,
+    dryRun = false,
   ) => {
     if (
       !requireTenantAndProvider(
         createPendingIntent({
           kind: "agent-run",
           slug,
+          ...(dryRun ? { dryRun: true } : {}),
           returnTo: currentReturnTo(location.pathname, location.search),
         }),
       )
@@ -1318,7 +1320,14 @@ function IntuneChatContent() {
     }
     const matchedAgent = state.installedAgents.find((agent) => agent.slug === slug);
     if (matchedAgent?.mode === "write") {
-      navigate(`/agents/${encodeURIComponent(slug)}/confirm`);
+      navigate(`/agents/${encodeURIComponent(slug)}/confirm`, dryRun ? {
+        state: {
+          resumePendingIntent: createPendingIntent({
+            kind: "agent-run", slug, dryRun: true,
+            returnTo: currentReturnTo(location.pathname, location.search),
+          }),
+        },
+      } : undefined);
       return;
     }
     setRunningAgentSlug(slug);
@@ -1326,6 +1335,7 @@ function IntuneChatContent() {
     setNotice(null);
     try {
       const run = await startRun(slug, {
+        ...(dryRun ? { dryRun: true } : {}),
         source: {
           type: "intune-chat",
           conversationId,
@@ -1921,7 +1931,7 @@ function IntuneChatContent() {
                         <SuggestedAgentsBlock
                           suggestions={suggestedAgents}
                           runningAgentSlug={runningAgentSlug}
-                          onRun={(slug) => void handleRunAgent(slug, message.conversationId, message.id)}
+                          onRun={(slug, dryRun) => void handleRunAgent(slug, message.conversationId, message.id, dryRun)}
                           onDismiss={() => {
                             setDismissedSuggestionMessageIds((current) => [...new Set([...current, message.id])]);
                           }}
@@ -4398,7 +4408,7 @@ function SuggestedAgentsBlock({
 }: {
   suggestions: UnifiedAgentSuggestion[];
   runningAgentSlug: string | null;
-  onRun: (slug: string) => void;
+  onRun: (slug: string, dryRun?: boolean) => void;
   onDismiss: () => void;
 }) {
   const [detailsSlug, setDetailsSlug] = useState<string | null>(null);
@@ -4436,6 +4446,9 @@ function SuggestedAgentsBlock({
               >
                 Details
               </Button>
+              {suggestion.mode === "write" ? (
+                <Button size="sm" variant="secondary" disabled={runningAgentSlug === suggestion.slug} onClick={() => onRun(suggestion.slug, true)}>Dry run</Button>
+              ) : null}
               <Button
                 size="sm"
                 variant="secondary"

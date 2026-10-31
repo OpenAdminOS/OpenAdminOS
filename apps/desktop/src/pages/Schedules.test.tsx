@@ -3,8 +3,10 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import Agents from "./Agents";
+import Schedules from "./Schedules";
 import {
   createMockAgent,
+  createAwaitingConfirmationRun,
   createMockAppState,
   makeMockBridge,
   renderRoute,
@@ -104,4 +106,22 @@ describe("Agents schedule actions", () => {
     expect(screen.getAllByText("Device Offboard").length).toBeGreaterThan(0);
   });
 
+});
+
+
+it("offers Dry run for write agents through the normal preflight", async () => {
+  const user = userEvent.setup();
+  const bridge = makeMockBridge();
+  renderRoute(<Agents />, { path: "/agents/:slug", route: "/agents/device-offboard", bridge });
+  await user.click(await screen.findByRole("button", { name: "Dry run" }));
+  await user.click(await screen.findByRole("button", { name: "Start dry run" }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
+});
+
+it("renders a retained planned outcome without implying pending schedule approval", async () => {
+  const agent = createMockAgent({ schedule: { enabled: true, intervalSeconds: 900 } });
+  const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true, trigger: "schedule" });
+  renderRoute(<Schedules />, { path: "/schedules", route: "/schedules", bridge: makeMockBridge({}, createMockAppState({ installedAgents: [agent], runs: [run] })) });
+  expect((await screen.findAllByText("Dry run: not applied")).length).toBeGreaterThan(0);
+  expect(screen.queryByText("Needs confirmation")).not.toBeInTheDocument();
 });

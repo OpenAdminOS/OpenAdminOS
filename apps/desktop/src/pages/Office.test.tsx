@@ -553,3 +553,17 @@ it("keeps fullscreen separate from concealment and gives nested dialogs Escape f
   act(() => nativeChanged(false));
   expect(document.documentElement).not.toHaveAttribute("data-team-fullscreen");
 });
+
+it("shows retained dry-run tasks as unapplied without approval controls", async () => {
+  const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true,
+    office: { missionId: "dry-mission", personaId: persona.id, step: 0 } });
+  const state = createMockAppState({ runs: [run], office: { personas: [persona], missions: [{
+    id: "dry-mission", personaId: persona.id, personaName: persona.name, tenantId: persona.tenantId,
+    providerId: "ollama", agentSlugs: persona.agentSlugs, runIds: [run.id], status: "failed", trigger: "manual",
+    startedAt: persona.createdAt, deadlineAt: "2026-10-31T12:30:00Z",
+  }] } });
+  renderRoute(<Office />, { path: "/office", route: `/office?persona=${persona.id}`, bridge: makeMockBridge({}, state) });
+  expect((await screen.findAllByText(/Dry run: not applied/)).length).toBeGreaterThan(0);
+  expect(screen.queryByText("Waiting for your approval")).not.toBeInTheDocument();
+  expect(screen.queryByRole("link", { name: /Review proposed changes/ })).not.toBeInTheDocument();
+});
