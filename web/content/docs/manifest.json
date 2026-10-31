@@ -122,6 +122,13 @@
           "route": "trust-model/sandboxed-code",
           "path": "trust-model/sandboxed-code",
           "children": []
+        },
+        {
+          "title": "EU AI Act",
+          "source": "trust/eu-ai-act.md",
+          "route": "trust-model/eu-ai-act",
+          "path": "trust-model/eu-ai-act",
+          "children": []
         }
       ]
     },
@@ -376,6 +383,10 @@
     {
       "source": "trust/sandboxed-code",
       "destination": "trust-model/sandboxed-code"
+    },
+    {
+      "source": "trust/eu-ai-act",
+      "destination": "trust-model/eu-ai-act"
     },
     {
       "source": "connectors",

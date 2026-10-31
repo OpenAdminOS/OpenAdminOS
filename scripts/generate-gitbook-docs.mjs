@@ -435,6 +435,7 @@ function summaryPage(agents) {
 - [Write confirmation](trust/write-confirmation.md)
 - [Registry trust](trust/registry-trust.md)
 - [Sandboxed code](trust/sandboxed-code.md)
+- [EU AI Act](trust/eu-ai-act.md)
 
 ## Connectors
 
