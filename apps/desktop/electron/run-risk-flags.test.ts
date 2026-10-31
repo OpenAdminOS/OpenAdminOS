@@ -106,4 +106,14 @@ describe("host write plan risk assessment", () => {
       assert.deepEqual((await f.read()).runs[0]?.riskAssessment, { status: "complete", flags: [] });
     } finally { await f.cleanup(); }
   });
+  it("assesses dry-run plans so the preview shows the same flags", async () => {
+    const f = await fixture();
+    try {
+      await f.service.persistRunSnapshot(run({ status: "planned", dryRun: true }));
+      const risk = (await f.read()).runs[0]?.riskAssessment;
+      assert.equal(risk?.status, "complete");
+      if (risk?.status !== "complete") assert.fail("Missing assessment");
+      assert.deepEqual(risk.flags.map((flag) => flag.id), ["directory-object-deletion"]);
+    } finally { await f.cleanup(); }
+  });
 });
