@@ -239,3 +239,17 @@ function fakeContext(
     step: async (_label, _detail, fn) => await fn(),
   };
 }
+
+
+it("returns a policy error for all sandbox Graph writes during a dry run", async () => {
+  const agent = fakeAgent({ mode: "write" });
+  const ctx = fakeContext(agent);
+  ctx.dryRun = true;
+  const broker = createSandboxBroker({ agent, ctx });
+  for (const method of ["POST", "PATCH", "PUT", "DELETE"] as const) {
+    const response = await broker.handle({ id: method, method: "graph.request", params: { method, path: "/users/test" } });
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, "policy_denied");
+    assert.match(response.error.message, /Dry run policy blocks Graph writes/);
+  }
+});

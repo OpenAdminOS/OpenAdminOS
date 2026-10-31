@@ -712,12 +712,12 @@ function ProgressLine({ label, active }: { label: string; active?: boolean }) {
 
 function OutcomeBadge({ status }: { status: string }) {
   const tone =
-    status === "completed"
+    status === "planned" ? "info" : status === "completed"
       ? "success"
       : status === "failed"
         ? "danger"
         : "warning";
-  return <Badge tone={tone} className="shrink-0">{status}</Badge>;
+  return <Badge tone={tone} className="shrink-0">{status === "planned" ? "Dry run: not applied" : status}</Badge>;
 }
 
 function fallbackSnapshot(state: AppState): CompanionSnapshot {

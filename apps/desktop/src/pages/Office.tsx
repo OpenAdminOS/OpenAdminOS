@@ -312,7 +312,7 @@ export default function Office() {
                             : run
                               ? {
                                   text:
-                                    run.status === "awaiting-confirmation"
+                                    run.status === "planned" ? "Dry run: not applied" : run.status === "awaiting-confirmation"
                                       ? "Waiting for your approval"
                                       : run.status === "running"
                                         ? handoff
@@ -605,7 +605,7 @@ export default function Office() {
                             (mission?.skippedAgentSlugs?.includes(slug)
                               ? "Skipped by assignment plan"
                               : "Not started")}
-                          {agent?.mode === "write"
+                          {run?.status === "planned" ? " · Dry run: not applied" : agent?.mode === "write"
                             ? " · Approval required"
                             : ""}
                         </small>

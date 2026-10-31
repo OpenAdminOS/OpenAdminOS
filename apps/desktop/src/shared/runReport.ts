@@ -13,7 +13,7 @@ export function runReportPlaintext(
   const tenant = ctx.tenantName ?? run.tenantId ?? "Not available";
 
   const lines: string[] = [
-    `${title}: ${run.status}`,
+    `${title}: ${run.status === "planned" ? "Dry run: not applied" : run.status}`,
     `Started: ${run.queuedAt}`,
     `Duration: ${formatDuration(run)}`,
     `Provider: ${run.providerId ?? "Not available"}${run.model ? ` (${run.model})` : ""}`,
@@ -56,7 +56,7 @@ export function runReportMarkdown(
   const parts: string[] = [
     `# ${title}`,
     "",
-    `**Status:** ${run.status}`,
+    `**Status:** ${run.status === "planned" ? "Dry run: not applied" : run.status}`,
     `**Started:** ${run.queuedAt}`,
     `**Duration:** ${formatDuration(run)}`,
     `**Provider:** ${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`,

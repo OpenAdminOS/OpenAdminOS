@@ -123,7 +123,7 @@ export default function AgentDetail({
   const [uninstalling, setUninstalling] = useState(false);
   const [requestedScopes, setRequestedScopes] = useState<RequestedScope[]>([]);
   const [pendingRunChoice, setPendingRunChoice] = useState<
-    { retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string } | null
+    { dryRun?: boolean; runForRealOfRunId?: string; retryOfRunId?: string; tenantId?: string; providerId?: ProviderId; model?: string } | null
   >(null);
   const consumedStartRunOnOpen = useRef(false);
   const resumedIntentRef = useRef<string | null>(null);
@@ -165,6 +165,8 @@ export default function AgentDetail({
   };
 
   const queueRunPreflight = useCallback((choice?: {
+    dryRun?: boolean;
+    runForRealOfRunId?: string;
     retryOfRunId?: string;
     tenantId?: string;
     providerId?: ProviderId;
@@ -176,6 +178,8 @@ export default function AgentDetail({
         createPendingIntent({
           kind: "agent-run",
           slug: agent.slug,
+          ...(choice?.dryRun ? { dryRun: true } : {}),
+          ...(choice?.runForRealOfRunId ? { runForRealOfRunId: choice.runForRealOfRunId } : {}),
           ...(choice?.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
           ...(choice?.tenantId ? { tenantId: choice.tenantId } : {}),
           ...(choice?.providerId ? { providerId: choice.providerId } : {}),
@@ -235,6 +239,8 @@ export default function AgentDetail({
       );
     }
     queueRunPreflight({
+      ...(resumed.dryRun ? { dryRun: true } : {}),
+      ...(resumed.runForRealOfRunId ? { runForRealOfRunId: resumed.runForRealOfRunId } : {}),
       ...(restoredTenantId ? { tenantId: restoredTenantId } : {}),
       ...(resumed.providerId ? { providerId: resumed.providerId } : {}),
       ...(resumed.model ? { model: resumed.model } : {}),
@@ -285,6 +291,8 @@ export default function AgentDetail({
   };
 
   const handleStartRun = async (choice?: {
+    dryRun?: boolean;
+    runForRealOfRunId?: string;
     retryOfRunId?: string;
     tenantId?: string;
     providerId?: ProviderId;
@@ -295,8 +303,10 @@ export default function AgentDetail({
     try {
       await waitForDeliverySaves();
       const options =
-        choice && (choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model)
+        choice && (choice.dryRun || choice.runForRealOfRunId || choice.retryOfRunId || choice.tenantId || choice.providerId || choice.model)
           ? {
+              ...(choice.dryRun ? { dryRun: true } : {}),
+              ...(choice.runForRealOfRunId ? { runForRealOfRunId: choice.runForRealOfRunId } : {}),
               ...(choice.retryOfRunId ? { retryOfRunId: choice.retryOfRunId } : {}),
               ...(choice.tenantId ? { tenantId: choice.tenantId } : {}),
               ...(choice.providerId ? { providerId: choice.providerId } : {}),
@@ -447,6 +457,16 @@ export default function AgentDetail({
         onClose={closeDrawer}
         actions={
           <>
+            {agent.mode === "write" ? (
+              <Button
+                variant="secondary"
+                size="sm"
+                disabled={agent.compatibility?.supported === false}
+                onClick={() => queueRunPreflight({ dryRun: true })}
+              >
+                Dry run
+              </Button>
+            ) : null}
             <RunWithMenu
               providers={state.providers}
               activeProviderId={state.activeProviderId}
@@ -757,7 +777,7 @@ export default function AgentDetail({
                         {run.summary ? stripMarkdownToPlainText(run.summary) : run.status}
                       </div>
                       <div className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-                        {formatDate(run.queuedAt)} · {formatDuration(run)}
+                        {run.status === "planned" ? "Dry run: not applied · " : ""}{formatDate(run.queuedAt)} · {formatDuration(run)}
                       </div>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => navigate(`/runs/${run.id}`)}>
@@ -931,6 +951,7 @@ export default function AgentDetail({
       {agent && (
         <RunPreflightModal
           open={pendingRunChoice !== null}
+          dryRun={pendingRunChoice?.dryRun === true}
           agent={agent}
           activeTenantName={pendingTenant?.displayName}
           providerName={pendingProvider?.name ?? pendingProviderId}
@@ -2487,6 +2508,7 @@ function ChoiceButton({
 }
 
 function RunPreflightModal({
+  dryRun,
   open,
   agent,
   activeTenantName,
@@ -2498,6 +2520,7 @@ function RunPreflightModal({
   onClose,
   onConfirm,
 }: {
+  dryRun: boolean;
   open: boolean;
   agent: { name: string; mode: "read" | "write"; scopes: string[]; schedule?: unknown };
   activeTenantName: string | undefined;
@@ -2515,7 +2538,7 @@ function RunPreflightModal({
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
-        title="Review run"
+        title={dryRun ? "Review dry run" : "Review run"}
         subtitle={agent.name}
         onClose={onClose}
       />
@@ -2552,7 +2575,7 @@ function RunPreflightModal({
           <PreflightFact label="Model" value={model ?? "Provider default"} />
           <PreflightFact
             label="Mode"
-            value={agent.mode === "write" ? "Write with confirmation" : "Read-only"}
+            value={dryRun ? "Dry run: plan only" : agent.mode === "write" ? "Write with confirmation" : "Read-only"}
           />
         </div>
         <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
@@ -2561,7 +2584,7 @@ function RunPreflightModal({
           </div>
           <p className="mt-2 text-base leading-relaxed text-[var(--color-text-soft)]">
             OpenAdminOS runs this agent against the active tenant and saves the
-            result to local run history. {agent.mode === "write"
+            result to local run history. {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
               ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."
               : "This agent cannot change tenant state."}
           </p>
@@ -2587,7 +2610,7 @@ function RunPreflightModal({
             Cancel
           </Button>
           <Button variant="primary" disabled={!canStart} onClick={onConfirm}>
-            {deliverySaving ? "Saving delivery…" : "Start run"}
+            {deliverySaving ? "Saving delivery…" : dryRun ? "Start dry run" : "Start run"}
           </Button>
         </div>
       </div>

@@ -1,3 +1,4 @@
+import { runNotificationTitle } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
@@ -2939,6 +2940,7 @@ function summarizeRuns(runs: RunRecord[]) {
     running: 0,
     "awaiting-confirmation": 0,
     completed: 0,
+    planned: 0,
     failed: 0,
     rejected: 0,
     cancelled: 0,
@@ -3067,18 +3069,7 @@ function showRunNotification(run: RunRecord): void {
   // should still surface.
   if (run.trigger !== "schedule" && mainWindow && mainWindow.isFocused()) return;
 
-  const title =
-    run.status === "completed"
-      ? run.trigger === "schedule"
-        ? "Scheduled agent run completed"
-        : "Agent run completed"
-      : run.status === "failed"
-        ? run.trigger === "schedule"
-          ? "Scheduled agent run failed"
-          : "Agent run failed"
-        : run.status === "cancelled"
-          ? "Agent run cancelled"
-          : "Agent run rejected";
+  const title = runNotificationTitle(run);
   const notification = new Notification({
     id: run.id,
     groupId: run.agentSlug,
@@ -3131,7 +3122,7 @@ function notificationBodyForRun(run: RunRecord): string {
         ? "findings changed"
         : run.changeState === "unchanged"
           ? "no change"
-          : run.status;
+          : run.status === "planned" ? "Dry run: not applied" : run.status;
   const raw = run.error ?? run.summary ?? "";
   const cleaned = raw
     .replace(/[`*_#>]/g, "")
@@ -3388,6 +3379,11 @@ function validateStartRunOptions(value: unknown): StartRunOptions | undefined {
     throw new Error("start run options must be an object.");
   }
   const options: StartRunOptions = {};
+  if (value.dryRun !== undefined) {
+    if (typeof value.dryRun !== "boolean") throw new Error("startRun.dryRun must be a boolean.");
+    options.dryRun = value.dryRun;
+  }
+  if (value.runForRealOfRunId !== undefined) options.runForRealOfRunId = requireBoundedString(value.runForRealOfRunId, "startRun.runForRealOfRunId", 256);
   if (value.retryOfRunId !== undefined) options.retryOfRunId = requireBoundedString(value.retryOfRunId, "startRun.retryOfRunId", 256);
   if (value.tenantId !== undefined) {
     options.tenantId = requireBoundedString(value.tenantId, "startRun.tenantId", 256);

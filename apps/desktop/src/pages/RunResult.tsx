@@ -110,6 +110,7 @@ export default function RunResult() {
         createPendingIntent({
           kind: "agent-run",
           slug: run.agentSlug,
+          ...(run.status === "planned" ? { runForRealOfRunId: run.id } : {}),
           ...(run.officeContext ? { retryOfRunId: run.id } : {}),
           ...(run.tenantId ? { tenantId: run.tenantId } : {}),
           ...(run.providerId ? { providerId: run.providerId } : {}),
@@ -121,11 +122,13 @@ export default function RunResult() {
       return;
     }
     const options: {
+      runForRealOfRunId?: string;
       retryOfRunId?: string;
       tenantId?: string;
       providerId?: typeof run.providerId;
       model?: string;
     } = {};
+    if (run.status === "planned") options.runForRealOfRunId = run.id;
     if (run.officeContext) options.retryOfRunId = run.id;
     if (run.tenantId) options.tenantId = run.tenantId;
     if (run.providerId) options.providerId = run.providerId;
@@ -137,7 +140,7 @@ export default function RunResult() {
       );
   };
 
-  if (run.status === "awaiting-confirmation") {
+  if (run.status === "awaiting-confirmation" || run.status === "planned") {
     return (
       <ConfirmationPage
         run={run}
@@ -149,6 +152,7 @@ export default function RunResult() {
         onBack={closeToRuns}
         onConfirm={confirmRun}
         onReject={rejectRun}
+        onRunForReal={reRun}
       />
     );
   }
@@ -431,6 +435,7 @@ function ConfirmationPage({
   onBack,
   onConfirm,
   onReject,
+  onRunForReal,
 }: {
   run: RunRecord;
   displayName: string;
@@ -441,7 +446,9 @@ function ConfirmationPage({
   onBack: () => void;
   onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
   onReject: (runId: string) => Promise<RunRecord>;
+  onRunForReal: () => void;
 }) {
+  const dryRun = run.dryRun === true || run.status === "planned";
   const plan = run.plan;
   const destructiveCount =
     plan?.actions.filter((action) => action.severity === "destructive").length ?? 0;
@@ -455,7 +462,7 @@ function ConfirmationPage({
         breadcrumb={<BackToRuns onClick={onBack} />}
         actions={
           <>
-            <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone="warning" />Awaiting confirmation</span>
+            <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone={dryRun ? "info" : "warning"} />{dryRun ? "Dry run: not applied" : "Awaiting confirmation"}</span>
             <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
           </>
         }
@@ -468,20 +475,24 @@ function ConfirmationPage({
               <div className="font-medium text-[var(--color-text)]">{tenantName}</div>
               <div className="mt-0.5 truncate text-sm text-[var(--color-text-muted)]">Proposed by {run.external?.clientName ?? displayName}</div>
               <div className="mt-1 text-sm text-[var(--color-text-soft)]">
-                Write operation paused for confirmation. OpenAdminOS will not proceed until the exact phrase is typed.
+                {dryRun ? "Planning is complete. This run cannot apply changes." : "Write operation paused for confirmation. OpenAdminOS will not proceed until the exact phrase is typed."}
               </div>
             </div>
-            <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-warning)]"><StatusDot tone="warning" />Review required</span>
+            <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-warning)]"><StatusDot tone={dryRun ? "info" : "warning"} />{dryRun ? "Not applied" : "Review required"}</span>
           </div>
 
           <p className="text-sm text-[var(--color-text-muted)]">
-            {run.tenantId
+            {dryRun ? `Proposed changes for ${tenantName}` : run.tenantId
               ? `Applies to ${tenantName} through Microsoft Graph`
               : `Simulates changes for ${tenantName} without Microsoft Graph writes`}
             {actionCount ? ` · ${actionCount} · ${destructiveCount} destructive` : ""}
           </p>
 
-          {plan && run.tenantId ? (
+          {dryRun ? (
+            <div role="status" className="rounded-[14px] bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-info)]">
+              Dry run. Nothing was changed in {tenantName}.
+            </div>
+          ) : plan && run.tenantId ? (
             <div className="rounded-[14px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
               <div className="mb-1 flex items-center gap-2 font-medium"><IconWarning size={14} />Microsoft Graph write</div>
               Approving will call Microsoft Graph. {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will be applied to {tenantName}. Review every operation below. Microsoft Graph changes may not be reversible.
@@ -507,12 +518,17 @@ function ConfirmationPage({
                   ))}
                 </div>
               </Section>
-              <TypedConfirmation
+              {dryRun ? (
+                <div className="space-y-3 border-t border-[var(--color-border)] pt-5">
+                  <p className="text-sm text-[var(--color-text-muted)]">Run for real reads the tenant again and prepares a fresh plan using the same settings. Review and confirmation are required before any change.</p>
+                  <Button variant="primary" onClick={onRunForReal}>Run for real</Button>
+                </div>
+              ) : <TypedConfirmation
                 runId={run.id}
                 plan={plan}
                 onConfirm={onConfirm}
                 onReject={onReject}
-              />
+              />}
             </>
           ) : (
             <div

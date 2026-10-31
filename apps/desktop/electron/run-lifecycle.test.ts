@@ -137,3 +137,170 @@ it('retries a read-only Team task using host-owned evidence and rejects cross-te
   agent.mode = 'write'; await reset();
   await assert.rejects(h.service.startRun('draft', { retryOfRunId: original.id }), /Retry write assignments from Agent Team/);
 });
+
+
+it("rejects dry runs for read agents and schedules before provider or tenant work", async () => {
+  const h = harness();
+  const agent = { slug: "test", mode: "read" } as AgentSummary;
+  await h.host.write({ ...h.state(), installedAgents: [agent] });
+  await assert.rejects(h.service.startRun("test", { dryRun: true }), /only available for write agents/);
+  agent.mode = "write";
+  await h.host.write({ ...h.state(), installedAgents: [agent] });
+  await assert.rejects(h.service.startRun("test", { dryRun: true, trigger: "schedule" }), /manual run options/);
+  assert.deepEqual(h.state().runs, []);
+});
+
+it("starts Run for real from saved inputs with a fresh run id and no reusable plan", async () => {
+  const h = harness();
+  const original = { id: "dry", agentSlug: "test", status: "planned", dryRun: true,
+    tenantId: "tenant-a", providerId: "ollama", model: "test", inputSettings: { cutoffDays: 90 },
+    queuedAt: new Date().toISOString(), steps: [], logs: [],
+    plan: { summary: "Old plan", confirmationPhrase: "CHANGE 1 OBJECT", actions: [] } } as RunRecord;
+  const agent = { id: "test", slug: "test", name: "Test", mode: "write", version: "1.0.0", settings: { cutoffDays: 1 },
+    installedAt: new Date().toISOString(), description: "Test dry runs", category: "devices", tier: "agent",
+    requiresEntraTier: "free", scopes: [], author: { name: "Test" } } satisfies AgentSummary;
+  Object.assign(h.host, { appVersion: "0.7.2", listProviders: async () => [{ id: "ollama", status: "connected", models: ["test"], isLocal: true }],
+    providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  await h.host.write({ ...h.state(), installedAgents: [agent], runs: [original], activeTenantId: "tenant-b",
+    tenants: [{ id: "tenant-a" }, { id: "tenant-b" }] as any });
+  const fresh = await h.service.startRun("test", { runForRealOfRunId: original.id });
+  assert.notEqual(fresh.id, original.id);
+  assert.equal(fresh.status, "queued");
+  assert.equal(fresh.tenantId, "tenant-a");
+  assert.equal(fresh.providerId, "ollama");
+  assert.equal(fresh.model, "test");
+  assert.deepEqual(fresh.inputSettings, { cutoffDays: 90 });
+  assert.equal(fresh.dryRun, undefined);
+  assert.equal(fresh.plan, undefined);
+  assert.equal(fresh.confirmedAt, undefined);
+  assert.deepEqual(h.state().installedAgents[0]?.settings, { cutoffDays: 1 });
+  await assert.rejects(h.service.startRun("test", { runForRealOfRunId: original.id, tenantId: "tenant-b" }), /must keep the dry run tenant/);
+  await assert.rejects(h.service.startRun("test", { runForRealOfRunId: original.id, dryRun: true }), /fresh normal run/);
+  await assert.rejects(h.service.startRun("test", { runForRealOfRunId: "missing" }), /completed dry run is unavailable/);
+});
+
+it("keeps planned runs terminal across restart and delayed progress", async () => {
+  const h = harness();
+  const pending = await queue(h);
+  const planned = { ...pending, dryRun: true, status: "planned" as const, finishedAt: new Date().toISOString() };
+  await h.host.write({ ...h.state(), runs: [planned] });
+  await h.service.recoverInterruptedRuns();
+  await h.service.persistRunSnapshot({ ...planned, status: "running" });
+  assert.equal(h.state().runs[0]?.status, "planned");
+  assert.equal((await h.service.cancelRun(planned.id)).status, "planned");
+});
+
+it("plans again from live inventory and saved effective settings when Run for real starts", async () => {
+  const { mkdtemp, writeFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-dry-replan-"));
+  const h = harness();
+  const agent = { id: "dry-replan", slug: "dry-replan", name: "Dry replan", mode: "write", version: "1.0.0",
+    registryPath: dir, scopes: ["User.ReadWrite.All"] } as AgentSummary;
+  let inventory = [{ id: "first" }];
+  let reads = 0;
+  const writes: GraphRequestInput[] = [];
+  const dryFinished = deferred();
+  const realPlanned = deferred();
+  const realFinished = deferred();
+  const persist = h.host.write;
+  h.host.write = async state => {
+    await persist(state);
+    if (state.runs.some(run => run.dryRun && run.status === "planned")) dryFinished.resolve();
+    if (state.runs.some(run => !run.dryRun && run.status === "awaiting-confirmation")) realPlanned.resolve();
+    if (state.runs.some(run => !run.dryRun && run.status === "completed")) realFinished.resolve();
+  };
+  Object.assign(h.host, {
+    appVersion: "0.7.2",
+    listProviders: async () => [{ id: "ollama", name: "Ollama", status: "connected", models: ["test"], defaultModel: "test", isLocal: true }],
+    providerCanRun: () => true,
+    buildLlm: async () => ({ available: true, defaultModel: "test", complete: async () => ({ text: "Review changes", model: "test" }),
+      stream: async function* () { yield { delta: "Review changes", accumulated: "Review changes", done: true, model: "test" }; } }),
+    buildGraph: async () => ({ tenantId: "tenant-a", createGraph: () => ({
+      listManagedDevices: async () => [], retireManagedDevice: async () => { throw new Error("Unexpected retire"); },
+      request: async (input: GraphRequestInput) => {
+        if (input.method !== "GET") { writes.push(input); return {}; }
+        reads += 1; return { value: inventory };
+      },
+    }) }),
+    selfTrainingPromptOverlay: () => undefined,
+    readConnectorConfigs: async () => ({}),
+  });
+  const waitForPlan = async (ready: Promise<void>) => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([ready, new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(JSON.stringify(h.state().runs))), 5000);
+      })]);
+    } finally { clearTimeout(timer); }
+  };
+  try {
+    await writeFile(join(dir, "manifest.yaml"), `
+descriptor:
+  id: dry-replan
+  name: Dry replan
+  description: Test fresh planning.
+  version: 1.0.0
+  author: { name: OpenAdminOS }
+  category: policies
+  mode: write
+skills:
+  - id: load
+    format: graph
+    label: Read users
+    settings:
+      method: GET
+      path: /users
+      scopes: [User.Read.All]
+  - id: explain
+    format: llm
+    label: Explain changes
+    settings:
+      prompt: Review the proposed changes.
+  - id: disable
+    format: write
+    label: Prepare plan
+    settings:
+      kind: graph-write
+      source: "{{ load.output }}"
+      confirmationPhrase: "DISABLE {{ actions | size }} USERS"
+      summary: "Review using threshold {{ settings.cutoffDays }}"
+      scopes: [User.ReadWrite.All]
+      actionTemplate:
+        label: "Disable {{ item.id }}"
+        severity: destructive
+        request:
+          method: PATCH
+          path: "/users/{{ item.id }}"
+          body: { accountEnabled: false }
+definition:
+  settings:
+    - id: cutoffDays
+      label: Cutoff days
+      type: number
+      default: 30
+  result:
+    summary: "{{ explain.output.text }}"
+`);
+    await persist({ ...h.state(), installedAgents: [agent], activeTenantId: "tenant-a", tenants: [{ id: "tenant-a" }] as any });
+    const dry = await h.service.startRun(agent.slug, { dryRun: true });
+    await waitForPlan(dryFinished.promise);
+    assert.deepEqual(h.state().runs[0]?.inputSettings, { cutoffDays: 30 });
+    assert.equal(h.state().runs[0]?.plan?.actions[0]?.request?.path, "/users/first");
+    inventory = [{ id: "second" }];
+    await persist({ ...h.state(), installedAgents: [{ ...agent, settings: { cutoffDays: 1 } }] });
+    const real = await h.service.startRun(agent.slug, { runForRealOfRunId: dry.id });
+    await waitForPlan(realPlanned.promise);
+    const replanned = h.state().runs.find(run => run.id === real.id)!;
+    assert.equal(replanned.plan?.actions[0]?.request?.path, "/users/second");
+    assert.equal(replanned.plan?.summary, "Review using threshold 30");
+    assert.equal(replanned.confirmedAt, undefined);
+    assert.equal(reads, 2);
+    assert.equal(writes.length, 0);
+    await h.service.confirmRun(real.id, replanned.plan!.confirmationPhrase);
+    await waitForPlan(realFinished.promise);
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0]?.path, "/users/second");
+  } finally { await rm(dir, { recursive: true, force: true }); }
+});

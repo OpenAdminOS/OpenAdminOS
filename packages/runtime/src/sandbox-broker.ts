@@ -12,6 +12,7 @@ import type {
   WriteLimits,
 } from "@openadminos/agent-sdk";
 import { assertWritePlanLimits, WritePlanLimitError } from "@openadminos/agent-sdk";
+import { DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 
 export interface SandboxBrokerAgentPolicy {
@@ -100,7 +101,7 @@ async function handleGraphRequest(
   const request = normalizeGraphRequest(params);
   if (request.method !== "GET") {
     throw new SandboxBrokerError(
-      "Sandboxed code cannot call Graph write methods directly. Return a write.plan request instead.",
+      input.ctx.dryRun ? DRY_RUN_WRITE_ERROR : "Sandboxed code cannot call Graph write methods directly. Return a write.plan request instead.",
       "policy_denied",
       { method: request.method, path: request.path },
     );

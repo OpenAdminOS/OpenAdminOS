@@ -1,6 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  assertRunCanApply,
+  loadAgentManifestPreview,
   createQueuedRun,
   executeApply,
   executePlan,
@@ -137,6 +139,7 @@ export class RunService {
         throw new Error(`Run not found: ${runId}`);
       }
       if (
+        run.status === "planned" ||
         run.status === "completed" ||
         run.status === "failed" ||
         run.status === "rejected" ||
@@ -197,12 +200,52 @@ export class RunService {
   ): Promise<RunRecord> {
     const queued = await this.host.serialize(async () => {
       const persisted = await this.host.read();
-      const agent = persisted.installedAgents.find(
+      let agent = persisted.installedAgents.find(
         (installedAgent) => installedAgent.slug === agentSlug,
       );
 
       if (!agent) {
         throw new Error(`Agent is not installed: ${agentSlug}`);
+      }
+      if (options.dryRun !== undefined && typeof options.dryRun !== "boolean") {
+        throw new Error("startRun.dryRun must be a boolean.");
+      }
+      if (options.dryRun && agent.mode !== "write") {
+        throw new Error("Dry run is only available for write agents. Run this read agent normally.");
+      }
+      if ((options.dryRun || options.runForRealOfRunId) && options.trigger === "schedule") {
+        throw new Error("Dry runs and Run for real are manual run options. Open the agent to run it manually.");
+      }
+      if (options.dryRun && (options.office || options.officeContext)) {
+        throw new Error("Dry runs are available from the agent page or Chat. Run this assignment from Agent Team normally.");
+      }
+      if (options.runForRealOfRunId) {
+        const original = persisted.runs.find(run => run.id === options.runForRealOfRunId);
+        if (
+          !original?.dryRun || original.status !== "planned" ||
+          original.agentSlug !== agentSlug || !original.tenantId ||
+          !original.inputSettings || agent.mode !== "write" ||
+          original.office || original.officeContext
+        ) {
+          throw new Error("The completed dry run is unavailable. Open the write agent and prepare a new run.");
+        }
+        if (options.dryRun || options.retryOfRunId || options.office || options.officeContext) {
+          throw new Error("Run for real must start a fresh normal run. Open the completed dry run and try again.");
+        }
+        if (
+          (options.tenantId && options.tenantId !== original.tenantId) ||
+          (options.providerId && options.providerId !== original.providerId) ||
+          (options.model && options.model !== original.model)
+        ) {
+          throw new Error("Run for real must keep the dry run tenant, provider, and model. Start a new run from the agent page to change them.");
+        }
+        agent = { ...agent, settings: structuredClone(original.inputSettings) };
+        options = {
+          ...options,
+          tenantId: original.tenantId,
+          providerId: original.providerId,
+          model: original.model,
+        };
       }
       assertAgentCompatible(
         withAgentCompatibility(agent, this.host.appVersion),
@@ -323,7 +366,18 @@ export class RunService {
       }
 
       if ((options.office || options.officeContext) && persisted.runs.some(r=>(r.office || r.officeContext) && ["queued","running"].includes(r.status))) throw new Error("Team compute slot is occupied. This assignment remains queued.");
-      const queuedRun = createQueuedRun({ agent, providerId, model });
+      if (options.dryRun) {
+        const manifest = loadAgentManifestPreview(agent)?.manifest;
+        const defaults = Object.fromEntries(
+          (manifest?.definition.settings ?? [])
+            .filter(setting => setting.default !== undefined)
+            .map(setting => [setting.id, setting.default]),
+        );
+        agent = { ...agent, settings: { ...defaults, ...agent.settings } };
+      }
+      const queuedRun = createQueuedRun({ agent, providerId, model, dryRun: options.dryRun });
+      if (options.dryRun || options.runForRealOfRunId) queuedRun.inputSettings = structuredClone(agent.settings ?? {});
+      if (options.runForRealOfRunId) queuedRun.runForRealOfRunId = options.runForRealOfRunId;
       queuedRun.assessmentKey = createHash("sha256").update(JSON.stringify({ schema: 1,
         slug: agent.slug, version: agent.version, manifest: agent.provenance?.manifestSha256,
         settings: agent.settings, personaId: options.office?.personaId, officeAssessment:options.officeContext?.assessmentKey })).digest("hex");
@@ -350,8 +404,9 @@ export class RunService {
 
     if (options.source?.type === "intune-chat" && this.host.intelligenceStore) {
       const now = new Date().toISOString();
-      const statusNote =
-        queued.agent.mode === "write"
+      const statusNote = queued.queuedRun.dryRun
+        ? "Dry run only. Nothing will be applied."
+        : queued.agent.mode === "write"
           ? "Write actions still require the normal confirmation flow."
           : "Read-only agent run queued.";
       const message: IntuneChatMessage = {
@@ -519,6 +574,7 @@ export class RunService {
       if (!run) {
         throw new Error(`Run not found: ${runId}`);
       }
+      assertRunCanApply(run);
       if (run.status !== "awaiting-confirmation") {
         throw new Error(
           `Run ${runId} is not awaiting confirmation (status: ${run.status}).`,
@@ -595,7 +651,11 @@ export class RunService {
         ),
       });
 
-      return { kind: "agent" as const, agent, providerId, model, updated };
+      return {
+        kind: "agent" as const,
+        agent: run.inputSettings ? { ...agent, settings: structuredClone(run.inputSettings) } : agent,
+        providerId, model, updated,
+      };
     });
 
     if (transition.kind === "rollback") {
@@ -805,6 +865,7 @@ export class RunService {
     const controller = new AbortController();
     this.controllers.set(input.run.id, controller);
     try {
+      assertRunCanApply(input.run);
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       const baseLlm = await this.host.buildLlm(input.providerId, input.model);
       const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
@@ -885,6 +946,7 @@ export class RunService {
     let systemScopes: string[] = [];
     try {
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
+      assertRunCanApply(input.run);
       if (!plan) throw new Error(`${noun} run has no plan.`);
       const scopes =
         input.run.rollback?.requiredScopes ??

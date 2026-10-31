@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
 
 import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
+import Agents from "./Agents";
 import { AppShell } from "../components/AppShell";
 import {
   createAwaitingConfirmationRun,
@@ -1169,4 +1170,25 @@ describe("IntuneChat conversation routes", () => {
     await user.click(screen.getByText("How I checked"));
     expect(screen.getByText("Sources")).toBeVisible();
   });
+});
+
+it("routes a suggested write-agent dry run through the dry-run preflight", async () => {
+  const user = userEvent.setup();
+  const conversation = { id: "dry-chat", title: "Dry run", tenantId: "tenant-1", scopeKind: "single-tenant" as const,
+    createdAt: "2026-10-31T12:00:00Z", updatedAt: "2026-10-31T12:00:00Z" };
+  const agent = createMockAgent();
+  const bridge = makeMockBridge({
+    listIntuneChatConversations: vi.fn(async () => [conversation]),
+    getIntuneChatMessages: vi.fn(async () => [{ id: "dry-message", conversationId: conversation.id, role: "assistant" as const,
+      content: "Review this installed workflow.", status: "completed" as const, createdAt: conversation.createdAt,
+      agentSuggestions: [{ agentSlug: agent.slug, agentName: agent.name, mode: "write" as const, reason: "Requested change", confidence: 1, scopes: agent.scopes }] }]),
+  });
+  function StateProbe() { const location = useLocation(); return <output data-testid="dry-location">{JSON.stringify({ path: location.pathname, state: location.state })}</output>; }
+  renderWithAppState(<Routes><Route path="/chat/:conversationId" element={<IntuneChat />} /><Route path="/agents/:slug/confirm" element={<><Agents startRunOnOpen /><StateProbe /></>} /></Routes>, { route: "/chat/dry-chat", bridge });
+  await user.click(await screen.findByRole("button", { name: "Dry run" }));
+  expect(screen.getByTestId("dry-location")).toHaveTextContent("/agents/device-offboard/confirm");
+  expect(bridge.startRun).not.toHaveBeenCalled();
+  expect(await screen.findByRole("heading", { name: "Review dry run" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Start dry run" }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
 });

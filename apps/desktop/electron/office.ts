@@ -685,6 +685,10 @@ export class OfficeService {
         continue;
       }
       m.runIds = runs.map((r) => r.id);
+      if (runs.some(run => run.status === "planned")) {
+        this.finish(m, "failed", "A dry run only produced a plan. Review it in Runs and start a normal assignment to apply changes.");
+        continue;
+      }
       const current = runs.find(active);
       const failed = runs.find((r) =>
         ["failed", "cancelled", "rejected"].includes(r.status),

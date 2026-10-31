@@ -220,3 +220,17 @@ function LocationProbe() {
     </div>
   );
 }
+
+
+it("lists dry runs in terminal history and filters them separately from pending review", async () => {
+  const user = userEvent.setup();
+  const planned = createAwaitingConfirmationRun({ id: "dry", status: "planned", dryRun: true });
+  const pending = createAwaitingConfirmationRun({ id: "pending" });
+  const bridge = makeMockBridge({}, createMockAppState({ runs: [planned, pending] }));
+  renderRoute(<Runs />, { path: "/runs", route: "/runs", bridge });
+  expect(await screen.findByText("Dry run: not applied")).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Review" })).toHaveLength(1);
+  await user.click(screen.getByRole("radio", { name: "Dry runs" }));
+  expect(screen.getByText("Dry run: not applied")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+});

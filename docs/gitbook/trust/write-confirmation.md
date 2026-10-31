@@ -17,9 +17,19 @@ Plans above a limit fail before confirmation. The entire plan is checked again b
 
 An agent update that raises or removes a declared limit requires trust review. Lowering a limit is shown as an informational change.
 
+## Dry Run
+
+Choose **Dry run** beside Run on a write agent's detail page, or on its suggestion in Chat. Review the tenant, provider, and scopes, then start the dry run. It reads the tenant and prepares the same proposed actions and diff as a normal run.
+
+The result is labelled **Dry run: not applied** and states which tenant was left unchanged. There is no Apply button or confirmation phrase to enter. The host blocks Graph writes throughout planning, connector changes and notifications, and automatic result delivery. An agent that attempts a blocked operation receives a policy error. Tenant prompts still follow the selected provider's local or hosted data handling.
+
+Choose **Run for real** to start a new run with the same tenant, provider, model, and saved settings. It reads current tenant data and builds a fresh plan for normal review and confirmation. A dry-run plan can never be applied directly.
+
+Dry runs are available only for write agents started manually. Schedules and Agent Team assignments continue to use their normal run flow.
+
 ## No-Op Runs
 
-If a write agent produces zero actions after filters are applied, the run completes as a no-op. It is not treated as a failed confirmation.
+If a write agent produces zero actions after filters are applied, the run completes as a no-op. It is not treated as a failed confirmation. An empty dry-run plan remains labelled **Dry run: not applied**.
 
 ## Reference
 
