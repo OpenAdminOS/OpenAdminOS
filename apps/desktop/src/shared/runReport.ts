@@ -38,6 +38,11 @@ export function runReportPlaintext(
     }
   }
 
+  const note = aiGeneratedNote(run);
+  if (note) {
+    lines.push("", note);
+  }
+
   return lines.join("\n");
 }
 
@@ -81,7 +86,23 @@ export function runReportMarkdown(
     parts.push("", "## Result", "", "```json", JSON.stringify(run.result, null, 2), "```");
   }
 
+  const note = aiGeneratedNote(run);
+  if (note) {
+    parts.push("", "---", "", `_${note}_`);
+  }
+
   return parts.join("\n");
+}
+
+/**
+ * Disclosure line for reports that contain model output (EU AI Act
+ * Article 50(2)). Runs without a provider, such as deterministic baseline
+ * rollbacks, carry no model text and get no note.
+ */
+export function aiGeneratedNote(run: RunRecord): string | undefined {
+  if (!run.providerId) return undefined;
+  const source = run.model ? `${run.providerId} (${run.model})` : run.providerId;
+  return `This report includes AI-generated text, produced in OpenAdminOS with ${source}.`;
 }
 
 export function runReportJson(run: RunRecord): string {
