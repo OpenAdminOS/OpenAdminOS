@@ -644,7 +644,8 @@ export default function AgentDetail({
 
           <Section id="agent-schedule" title="Schedule" className="scroll-mt-4">
             <AgentScheduleCard
-              schedule={agent.schedule}
+              key={agent.slug}
+              agent={agent}
               onChange={async (next) => {
                 await updateAgentSchedule(agent.slug, next);
                 toast.success(

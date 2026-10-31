@@ -13,6 +13,28 @@ import {
 } from "../test/test-utils";
 
 describe("Agents schedule actions", () => {
+  it("shows compact forecasts for active schedules and previews a new interval before enabling", async () => {
+    const user = userEvent.setup();
+    const scheduled = createMockAgent({ schedule: { enabled: true, intervalSeconds: 86400 } });
+    const manual = createMockAgent({ id: "manual", slug: "manual", name: "Manual report", schedule: undefined });
+    const state = createMockAppState({ installedAgents: [scheduled, manual] });
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<Schedules />, { path: "/schedules", route: "/schedules", bridge });
+    expect(await screen.findByText(/About 30 runs per 30 days/)).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Interval for Manual report" }), "900");
+    expect(screen.getByText(/About 2,880 runs per 30 days/)).toBeInTheDocument();
+    expect(bridge.updateAgentSchedule).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Enable schedule" }));
+    await waitFor(() => expect(bridge.updateAgentSchedule).toHaveBeenCalledWith("manual", expect.objectContaining({ intervalSeconds: 900, enabled: true })));
+  });
+
+  it("shows the forecast in the current Agents schedules list", async () => {
+    const agent = createMockAgent({ schedule: { enabled: true, intervalSeconds: 86400 } });
+    const state = createMockAppState({ installedAgents: [agent] });
+    renderRoute(<Agents />, { path: "/agents", route: "/agents?filter=scheduled", bridge: makeMockBridge({}, state) });
+    expect(await screen.findByText(/About 30 runs per 30 days/)).toBeInTheDocument();
+  });
+
   it("resumes a due batch only after the final explicit setup action", async () => {
     const user = userEvent.setup();
     const scheduledAgent = createMockAgent({

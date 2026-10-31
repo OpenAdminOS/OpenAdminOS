@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import type { AgentSchedule } from "../shared/openAdminOS";
+import type { AgentSchedule, AgentSummary } from "../shared/openAdminOS";
+import { ScheduleUsageForecast } from "./ScheduleUsageForecast";
 import {
   Badge,
   Button,
@@ -16,12 +17,13 @@ const PRESETS = [
 ] as const;
 
 export function AgentScheduleCard({
-  schedule,
+  agent,
   onChange,
 }: {
-  schedule: AgentSchedule | undefined;
+  agent: AgentSummary;
   onChange: (next: AgentSchedule | null) => Promise<void> | void;
 }) {
+  const schedule = agent.schedule;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [customValue, setCustomValue] = useState("30");
@@ -29,7 +31,7 @@ export function AgentScheduleCard({
   const enabled = schedule?.enabled === true;
   const currentSeconds = schedule?.intervalSeconds ?? 60 * 60;
   const preset = PRESETS.find((option) => option.seconds === currentSeconds);
-  const selectedInterval = preset?.id ?? "custom";
+  const [selectedInterval, setSelectedInterval] = useState<string>(preset?.id ?? "custom");
   const notificationPrefs = {
     notifyOnSuccess: schedule?.notifyOnSuccess ?? true,
     notifyOnFailure: schedule?.notifyOnFailure ?? true,
@@ -37,6 +39,7 @@ export function AgentScheduleCard({
   };
 
   useEffect(() => {
+    setSelectedInterval(preset?.id ?? "custom");
     if (preset) return;
     if (currentSeconds % 3600 === 0) {
       setCustomValue(String(currentSeconds / 3600));
@@ -69,10 +72,11 @@ export function AgentScheduleCard({
   });
 
   const customSeconds = useMemo(() => {
-    const parsed = Number.parseInt(customValue, 10);
-    if (!Number.isFinite(parsed) || parsed <= 0) return 0;
-    return parsed * (customUnit === "hours" ? 60 * 60 : 60);
+    const parsed = Number(customValue);
+    const seconds = parsed * (customUnit === "hours" ? 60 * 60 : 60);
+    return Number.isSafeInteger(parsed) && parsed > 0 && Number.isSafeInteger(seconds) ? seconds : 0;
   }, [customUnit, customValue]);
+  const draftSeconds = selectedInterval === "custom" ? customSeconds : Number(selectedInterval);
 
   const nextFireMs = schedule?.lastScheduledRunAt
     ? new Date(schedule.lastScheduledRunAt).getTime() + currentSeconds * 1000
@@ -82,7 +86,7 @@ export function AgentScheduleCard({
     <div className="space-y-4">
       <Switch
         checked={enabled}
-        disabled={busy}
+        disabled={busy || (!enabled && draftSeconds < 60)}
         label="Automatic runs"
         description={
           enabled
@@ -90,7 +94,7 @@ export function AgentScheduleCard({
             : "Manual only. Enabling starts one full interval from now."
         }
         onCheckedChange={(checked) =>
-          void apply(checked ? buildSchedule(currentSeconds) : null)
+          void apply(checked ? buildSchedule(draftSeconds) : null)
         }
       />
 
@@ -99,14 +103,10 @@ export function AgentScheduleCard({
         <SegmentedControl
           ariaLabel="Schedule interval"
           value={selectedInterval}
-          onValueChange={(value) => {
-            if (value === "custom") return;
-            const option = PRESETS.find((candidate) => candidate.id === value);
-            if (option) void apply(buildSchedule(option.seconds));
-          }}
+          onValueChange={setSelectedInterval}
           options={[
-            ...PRESETS.map(({ id, label }) => ({ id, label })),
-            { id: "custom", label: "Custom" },
+            ...PRESETS.map(({ id, label }) => ({ id, label, disabled: busy })),
+            { id: "custom", label: "Custom", disabled: busy },
           ]}
           className="max-w-full flex-wrap"
         />
@@ -118,6 +118,8 @@ export function AgentScheduleCard({
             Interval
             <input
               type="number"
+              name="schedule-interval"
+              autoComplete="off"
               min={1}
               step={1}
               inputMode="numeric"
@@ -130,6 +132,7 @@ export function AgentScheduleCard({
           <label className="grid gap-1 text-sm text-[var(--color-text-muted)]">
             Unit
             <select
+              name="schedule-interval-unit"
               value={customUnit}
               disabled={busy}
               onChange={(event) =>
@@ -141,16 +144,20 @@ export function AgentScheduleCard({
               <option value="hours">hours</option>
             </select>
           </label>
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={busy || customSeconds < 60}
-            onClick={() => void apply(buildSchedule(customSeconds))}
-          >
-            Apply
-          </Button>
         </div>
       ) : null}
+
+      {draftSeconds >= 60 ? (
+        <ScheduleUsageForecast agent={agent} intervalSeconds={draftSeconds} />
+      ) : (
+        <p className="text-xs text-[var(--color-text-muted)]">Enter an interval of at least one minute to see expected usage.</p>
+      )}
+      {enabled && draftSeconds !== currentSeconds && (
+        <Button size="sm" variant="secondary" disabled={busy || draftSeconds < 60}
+          onClick={() => void apply(buildSchedule(draftSeconds))}>
+          Save interval
+        </Button>
+      )}
 
       {enabled ? (
         <div className="border-t border-[var(--color-border-soft)] pt-3">

@@ -1062,6 +1062,15 @@ This is modeled on **Home Assistant integrations** (https://developers.home-assi
 
 ### Local storage
 
+Agent run records retain provider/model, input/output/total tokens, and USD cost
+when the provider reports it. A separate usage total tracks every completed model
+call across planning and execution. A missing metric on any call leaves that
+metric unknown for the run; runs using multiple requested models are excluded
+from schedule forecasts. Existing token displays are preserved. Older run
+records load with null forecast usage, without inferring complete totals from
+older partial counters. These records remain in the local profile state file;
+this feature does not move run history into the Chat SQLite store.
+
 SQLite via Electron's built-in `node:sqlite` for:
 - Tenant configurations (encrypted via OS keychain for tokens)
 - Installed agent registry
@@ -2243,6 +2252,8 @@ North-star metric: time from install to first successful result, target under 5 
 - At 1100 px and below, the Chat and Workspaces panel closes into a full-text overlay drawer; it never becomes a numbered mini-rail. The primary navigation frame remains fixed. Production screenshot evidence covers seven states, including typed write confirmation, at 900, 1100, and 1600 px with long tenant/model fixtures, default and reduced-motion lanes, and page-level overflow failure.
 - Informative metadata uses at least 11 px and a minimum 4.5:1 token contrast on production surfaces. Placeholder text uses `--color-text-placeholder` and holds 4.5:1 on every input surface; `--color-text-faint` is decorative-only. Accent-filled controls use `--color-on-accent` rather than hardcoded ink literals. Semantic foreground tokens hold 4.5:1 on their paired soft backgrounds over every production surface. Reduced-motion and forced-colors fallbacks are global.
 - Newly enabled schedules anchor their first due time at the enable action; enabling an interval never creates an immediate surprise run.
+- Schedule interval selection previews usage before enabling or saving. Forecasts use a 30-day month and the latest 20 completed runs for the same agent, active tenant, provider, and resolved requested model. Each known per-run metric is scaled by runs per 30 days, with linearly interpolated median to p90 bounds and the contributing sample count. Runs without complete usage for a metric are excluded from that metric's sample. One matching run produces equal bounds, not an invented uncertainty band. This is an estimate assuming the computer remains available and provider/model settings remain selected, not a spending cap or guarantee. The schedule drawer and schedule lists show the estimate, and custom interval edits update it immediately. Selecting a preset no longer enables or changes a schedule by itself; use Automatic runs to enable it or Save interval to change it.
+- Local provider forecasts say there are no API charges. Hosted per-token providers show tokens and a USD range only when past runs contain provider-reported cost, with no bundled price table. Current OpenAI and Anthropic integrations use subscription CLIs, as do Copilot and Gemini, so they show tokens and subscription-limit guidance without currency, even when a CLI reports a nominal cost. External Ollama/LM Studio endpoints refer admins to their server's billing instead of promising free local execution. Admin-entered per-token prices remain an open question. Forecasting reads local run history only and sends no telemetry.
 - Destructive write plans require a count-bound uppercase phrase that names the operation and target. The same grammar is enforced for declarative manifests, sandboxed plans, and runtime plans before the confirmation UI can appear.
 - Connector execution fails closed: undeclared capabilities are rejected, and side-effect capabilities cannot run when the confirmation bridge is absent.
 - Desktop release metadata is `0.4.3`. CI and tag-release workflows run typecheck, unit/renderer tests, Graph/registry QA, generated-doc checks, upgrade-compatibility checks, build, and both Electron smoke flows before packaging. Automatic version tagging waits for the exact `main` commit to pass CI, including any generated-doc reconciliation required after a squash merge. Linux self-update is disabled while executable packages remain unsigned; apt repository trust or an explicit package install is required. The apt repository requires its private signing key; a passphrase is optional so existing unencrypted repository keys remain supported. Signed supported builds surface update failures in a retryable in-app banner.

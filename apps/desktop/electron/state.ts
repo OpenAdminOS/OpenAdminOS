@@ -5619,7 +5619,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
                 ),
             )
           : defaultState.installedAgents,
-        runs: Array.isArray(parsed.runs) ? parsed.runs : defaultState.runs,
+        runs: Array.isArray(parsed.runs)
+          ? parsed.runs.map((run) => ({ ...run, usage: run.usage ?? null }))
+          : defaultState.runs,
         tenants,
       };
       if (activeTenantId) {

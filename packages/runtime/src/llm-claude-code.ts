@@ -37,6 +37,7 @@ interface ClaudeCodeStreamEvent {
   is_error?: boolean;
   result?: string;
   error?: string;
+  total_cost_usd?: number;
   message?: {
     model?: string;
     content?: Array<{
@@ -46,6 +47,8 @@ interface ClaudeCodeStreamEvent {
   };
   usage?: {
     input_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
     output_tokens?: number;
     total_tokens?: number;
   };
@@ -493,6 +496,16 @@ async function* runClaudeCodeStream(input: {
     }
   }
 
+  const trailingEvent = parseClaudeCodeJson(stdout);
+  if (trailingEvent) {
+    if (trailingEvent.is_error === true || trailingEvent.subtype === "error") {
+      throw new Error(trailingEvent.error ?? trailingEvent.result ?? "Claude Code generation failed.");
+    }
+    actualModel = extractClaudeCodeModel(trailingEvent) ?? actualModel;
+    finalTokenUsage = tokenUsageFromClaudeEvent(trailingEvent) ?? finalTokenUsage;
+    const trailingText = extractClaudeCodeStreamText(trailingEvent);
+    if (trailingText?.kind === "result") finalText = trailingText.text;
+  }
   const exitCode = await closePromise;
   settled = true;
   clearTimeout(timer);
@@ -683,13 +696,18 @@ function extractClaudeCodeModel(event: ClaudeCodeStreamEvent): string | undefine
 
 function tokenUsageFromClaudeEvent(event: ClaudeCodeStreamEvent): LlmTokenUsage | undefined {
   const prompt =
-    typeof event.usage?.input_tokens === "number" ? event.usage.input_tokens : undefined;
+    typeof event.usage?.input_tokens === "number"
+      ? event.usage.input_tokens + (event.usage.cache_read_input_tokens ?? 0) + (event.usage.cache_creation_input_tokens ?? 0)
+      : undefined;
   const completion =
     typeof event.usage?.output_tokens === "number" ? event.usage.output_tokens : undefined;
   const total =
     typeof event.usage?.total_tokens === "number" ? event.usage.total_tokens : undefined;
-  if (prompt === undefined && completion === undefined && total === undefined) return undefined;
+  const cost = typeof event.total_cost_usd === "number" && Number.isFinite(event.total_cost_usd) && event.total_cost_usd >= 0
+    ? event.total_cost_usd : undefined;
+  if (prompt === undefined && completion === undefined && total === undefined && cost === undefined) return undefined;
   const usage: LlmTokenUsage = {};
+  if (cost !== undefined) usage.costUsd = cost;
   if (prompt !== undefined) usage.promptTokens = prompt;
   if (completion !== undefined) usage.completionTokens = completion;
   if (total !== undefined) {
