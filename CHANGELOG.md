@@ -10,6 +10,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Add an EU AI Act page to the docs trust model: how the Act applies to the app, the registry, and the OpenAdmin models, what the product already does, and what stays with the organisation using it. The public registry now states which agent purposes it does not accept.
 - Write plans now have enforced action limits, shown in permissions previews and checked before confirmation and before changes are applied.
 - Preview a write agent with Dry run to review its full plan without changing the tenant, then use Run for real to prepare a fresh plan for confirmation.
+- Write confirmation highlights high-risk actions and unusually large plans, requires acknowledgement of danger flags, and keeps the risk review in run history.
 - `npm run screenshots:landing` captures the website's app screenshots: the demo tenant at 1280 x 800 and 2x, in light and dark, with realistic display values. It replaces the old clickable-demo capture.
 
 ### Changed

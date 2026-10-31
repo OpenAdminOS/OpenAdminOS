@@ -31,6 +31,7 @@ import { assertRunCanApply, dryRunGraph } from "./dry-run.js";
 export { assertRunCanApply, dryRunGraph, DRY_RUN_APPLY_ERROR, DRY_RUN_WRITE_ERROR } from "./dry-run.js";
 import { confirmationPhraseProblem } from "./confirmation-phrase.js";
 import { assertWritePlanLimits } from "@openadminos/agent-sdk";
+export { assessWritePlan, assessWritePlanSafely, WRITE_PLAN_SIZE_MEDIAN_MULTIPLE } from "./write-plan-risk.js";
 
 import { createOllamaLlm, noopLlm } from "./llm-ollama.js";
 import { createCodexLlm, probeCodexLlm } from "./llm-codex.js";

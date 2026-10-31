@@ -2,6 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 
 import {
   assertRunCanApply,
+  assessWritePlanSafely,
   loadAgentManifestPreview,
   createQueuedRun,
   executeApply,
@@ -499,6 +500,7 @@ export class RunService {
     };
     await this.host.serialize(async () => {
       const persisted = await this.host.read();
+      run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
     });
     this.host.recordLearningEventSafely({
@@ -550,6 +552,7 @@ export class RunService {
     };
     await this.host.serialize(async () => {
       const persisted = await this.host.read();
+      run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
     });
     this.host.recordLearningEventSafely({
@@ -1100,6 +1103,17 @@ export class RunService {
       }
       if (previous && isTerminalRunStatus(previous.status) && !isTerminalRunStatus(run.status)) return;
 
+      if ((run.status === "awaiting-confirmation" || run.status === "planned") && run.plan) {
+        run = {
+          ...run,
+          riskAssessment: previous?.riskAssessment && stableStringify(previous.plan) === stableStringify(run.plan)
+            ? previous.riskAssessment
+            : this.assessPlan(run, persisted),
+        };
+      } else if (previous?.riskAssessment) {
+        run = { ...run, riskAssessment: previous.riskAssessment };
+      }
+
       const wasTerminal = previous ? isTerminalRunStatus(previous.status) : false;
       const isNowTerminal = isTerminalRunStatus(run.status);
       const nextRun =
@@ -1122,6 +1136,25 @@ export class RunService {
       await this.host.enqueueRunDeliveries(deliveryCandidate);
       void this.host.processPendingRunDeliveries();
     }
+  }
+
+  private assessPlan(run: RunRecord, state: RunPersistedState): RunRecord["riskAssessment"] {
+    if (!run.plan) return undefined;
+    const agent = state.installedAgents.find((candidate) => candidate.slug === run.agentSlug);
+    // Only code-backed agents declare graphOperations. Declarative templates
+    // take their write requests from the manifest's own actionTemplate, so an
+    // empty or missing list means "nothing to compare against", not "undeclared".
+    const graphOperations = run.origin === undefined && agent?.graphOperations?.length
+      ? agent.graphOperations
+      : undefined;
+    return assessWritePlanSafely(run.plan, {
+      ...(graphOperations ? { graphOperations } : {}),
+      historicalConfirmedActionCounts: run.origin !== undefined || run.tenantId === undefined ? [] : state.runs.flatMap((previous) =>
+        previous.id !== run.id && previous.agentSlug === run.agentSlug &&
+        previous.tenantId === run.tenantId && previous.confirmedAt && Array.isArray(previous.plan?.actions)
+          ? [previous.plan.actions.length]
+          : []),
+    });
   }
 
   private withScheduleChangeState(run: RunRecord, runs: RunRecord[]): RunRecord {
