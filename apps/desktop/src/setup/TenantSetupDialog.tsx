@@ -6,7 +6,6 @@ import { Badge, StatusDot } from "../components/ui";
 import { ProviderNotReadyCard } from "../components/provider-setup/ProviderNotReadyCard";
 import { TrustBanner } from "../components/TrustBanner";
 import {
-  IconArrowRight,
   IconCheck,
   IconChevronDown,
   IconCloud,
@@ -26,9 +25,9 @@ import type {
 import { isProviderImplemented } from "../shared/providers";
 import type { PendingIntent } from "./pending-intent";
 import { groupRequestedScopes } from "./scope-groups";
+import { PILOT_COPY } from "../shared/pilot-mode";
 
 export type SetupStage =
-  | "first-run"
   | "own-registration"
   | "permissions"
   | "waiting"
@@ -50,9 +49,7 @@ export function TenantSetupDialog({
   activeProviderId,
   onClose,
   onConnect,
-  onAddSampleTenant,
-  onChooseConnect,
-  onChooseOwnRegistration,
+  pilotRemoved = false,
   onKeepWaiting,
   onTryAgain,
   onSelectProvider,
@@ -71,9 +68,8 @@ export function TenantSetupDialog({
   activeProviderId: ProviderId;
   onClose: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
-  onAddSampleTenant: () => void;
-  onChooseConnect: () => void;
-  onChooseOwnRegistration: () => void;
+  /** True after a connect that ended pilot mode and removed its data. */
+  pilotRemoved?: boolean;
   onKeepWaiting: () => void;
   onTryAgain: () => void;
   onSelectProvider: (id: ProviderId) => void;
@@ -92,14 +88,6 @@ export function TenantSetupDialog({
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement}
       </div>
-      {stage === "first-run" && (
-        <FirstRunStep
-          onAddSampleTenant={onAddSampleTenant}
-          onChooseConnect={onChooseConnect}
-          onChooseOwnRegistration={onChooseOwnRegistration}
-          onCancel={onClose}
-        />
-      )}
       {stage === "permissions" && (
         <PermissionsStep
           intent={intent}
@@ -134,6 +122,7 @@ export function TenantSetupDialog({
       )}
       {stage === "provider" && (
         <ProviderStep
+          pilotRemoved={pilotRemoved}
           providers={providers}
           activeProviderId={activeProviderId}
           error={error}
@@ -145,6 +134,7 @@ export function TenantSetupDialog({
       )}
       {stage === "ready" && (
         <ReadyStep
+          pilotRemoved={pilotRemoved}
           tenant={activeTenant}
           delegatedPermissionCount={scopes ? scopes.length + 3 : undefined}
           intent={intent}
@@ -154,79 +144,6 @@ export function TenantSetupDialog({
         />
       )}
     </Modal>
-  );
-}
-
-function FirstRunStep({
-  onAddSampleTenant,
-  onChooseConnect,
-  onChooseOwnRegistration,
-  onCancel,
-}: {
-  onAddSampleTenant: () => void;
-  onChooseConnect: () => void;
-  onChooseOwnRegistration: () => void;
-  onCancel: () => void;
-}) {
-  const options = [
-    {
-      label: SETUP_COPY.sampleAction,
-      description: SETUP_COPY.sampleDescription,
-      action: onAddSampleTenant,
-      primary: true,
-    },
-    {
-      label: SETUP_COPY.connectAction,
-      description: SETUP_COPY.connectDescription,
-      action: onChooseConnect,
-      primary: false,
-    },
-    {
-      label: SETUP_COPY.ownRegistrationAction,
-      description: SETUP_COPY.ownRegistrationDescription,
-      action: onChooseOwnRegistration,
-      primary: false,
-    },
-  ];
-  return (
-    <>
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-6">
-        {options.map((option) => (
-          <section
-            key={option.label}
-            className={`rounded-xl p-4 ring-1 ${
-              option.primary
-                ? "bg-[var(--color-accent-soft)] ring-[var(--color-accent)]/30"
-                : "bg-[var(--color-surface)] ring-[var(--color-border-soft)]"
-            }`}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <h3 className="text-base font-medium text-[var(--color-text)]">
-                  {option.label}
-                </h3>
-                <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
-                  {option.description}
-                </p>
-              </div>
-              <Button
-                data-autofocus={option.primary || undefined}
-                variant={option.primary ? "primary" : "secondary"}
-                size="sm"
-                aria-label={option.label}
-                onClick={option.action}
-                trailingIcon={<IconArrowRight size={12} />}
-              >
-                {option.primary ? "Open" : "Choose"}
-              </Button>
-            </div>
-          </section>
-        ))}
-      </div>
-      <DialogFooter>
-        <Button variant="ghost" onClick={onCancel}>Not now</Button>
-      </DialogFooter>
-    </>
   );
 }
 
@@ -550,6 +467,7 @@ function ErrorStep({ error, onTryAgain, onCancel }: { error: string | null; onTr
 }
 
 function ProviderStep({
+  pilotRemoved,
   providers,
   activeProviderId,
   error,
@@ -558,6 +476,7 @@ function ProviderStep({
   onRecheck,
   onCancel,
 }: {
+  pilotRemoved: boolean;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
   error: string | null;
@@ -571,6 +490,7 @@ function ProviderStep({
   return (
     <>
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-6">
+        {pilotRemoved ? <div className="-mt-4 mb-4"><PilotRemovedNote /></div> : null}
         <p className="text-base leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.providerBody}</p>
         {pendingRequired && (
           <div className="mt-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
@@ -638,6 +558,7 @@ function ProviderStep({
 }
 
 function ReadyStep({
+  pilotRemoved,
   tenant,
   delegatedPermissionCount,
   intent,
@@ -645,6 +566,7 @@ function ReadyStep({
   onCancel,
   onResume,
 }: {
+  pilotRemoved: boolean;
   tenant: TenantRecord | undefined;
   delegatedPermissionCount: number | undefined;
   intent: PendingIntent | null;
@@ -672,6 +594,7 @@ function ReadyStep({
           </div>
           <Badge tone="success"><StatusDot tone="success" /> Active</Badge>
         </div>
+        {pilotRemoved ? <PilotRemovedNote /> : null}
         <p className="mt-5 text-base leading-6 text-[var(--color-text-soft)]">
           {registrationSummary}
         </p>
@@ -686,6 +609,14 @@ function ReadyStep({
         <Button data-autofocus variant="primary" onClick={onResume}>{resumeIntentLabel(intent, agentName)}</Button>
       </DialogFooter>
     </>
+  );
+}
+
+function PilotRemovedNote() {
+  return (
+    <p role="status" className="mt-4 rounded-lg bg-[var(--color-info-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-text)] ring-1 ring-[var(--color-info)]/25">
+      {PILOT_COPY.removedAfterConnect}
+    </p>
   );
 }
 
@@ -706,7 +637,6 @@ function intentNeedsProvider(intent: PendingIntent | null): boolean {
 }
 
 function dialogTitle(stage: SetupStage): string {
-  if (stage === "first-run") return SETUP_COPY.firstRunTitle;
   if (stage === "provider") return SETUP_COPY.providerTitle;
   if (stage === "ready") return SETUP_COPY.connectedTitle;
   return SETUP_COPY.title;
@@ -714,8 +644,6 @@ function dialogTitle(stage: SetupStage): string {
 
 function dialogSubtitle(stage: SetupStage): string {
   switch (stage) {
-    case "first-run":
-      return SETUP_COPY.firstRunSubtitle;
     case "own-registration":
       return SETUP_COPY.subtitle;
     case "permissions":
@@ -735,8 +663,6 @@ function dialogSubtitle(stage: SetupStage): string {
 
 function setupAnnouncement(stage: SetupStage, tenant: TenantRecord | undefined): string {
   switch (stage) {
-    case "first-run":
-      return "Choose how to start OpenAdminOS.";
     case "own-registration":
       return "Your own app registration form is ready.";
     case "waiting":

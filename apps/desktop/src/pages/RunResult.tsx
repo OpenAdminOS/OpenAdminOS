@@ -49,6 +49,7 @@ import {
   runReportPlaintext,
 } from "../shared/runReport";
 import { useAppState } from "../state";
+import { PILOT_COPY } from "../shared/pilot-mode";
 import Runs, {
   agentNameForRun,
   formatDate,
@@ -83,11 +84,15 @@ export default function RunResult() {
   const runProvider = run.providerId
     ? state.providers.find((provider) => provider.id === run.providerId)
     : undefined;
-  const runTrust = deriveTrustState({
+  const derivedTrust = deriveTrustState({
     provider: runProvider,
     activeTenant: runTenant,
     model: run.model,
   });
+  // Pilot runs never contact a provider; their LLM steps use prepared text.
+  const runTrust = run.pilot
+    ? { ...derivedTrust, detail: PILOT_COPY.runTrust, isLocal: true }
+    : derivedTrust;
   const displayName = agent
     ? formatAgentDisplayName(agent)
     : agentNameForRun(run, state.installedAgents);
@@ -150,7 +155,7 @@ export default function RunResult() {
         tenant={runTenant}
         tenantName={tenantName}
         trustDetail={runTrust.detail}
-        providerIsLocal={runProvider?.isLocal === true}
+        providerIsLocal={run.pilot === true || runProvider?.isLocal === true}
         onBack={closeToRuns}
         onConfirm={confirmRun}
         onReject={rejectRun}
@@ -169,7 +174,7 @@ export default function RunResult() {
           tenantName={tenantName}
           sampleData={runTenant?.kind === "sample"}
           providerName={providerNameForRun(run, state.providers)}
-          providerIsLocal={runProvider?.isLocal}
+          providerIsLocal={run.pilot === true || runProvider?.isLocal}
           trustDetail={runTrust.detail}
           onBackground={closeToRuns}
           onCancel={() => cancelRun(run.id)}
@@ -187,7 +192,7 @@ export default function RunResult() {
         tenantName={tenantName}
         sampleData={runTenant?.kind === "sample"}
         providerName={providerNameForRun(run, state.providers)}
-        providerIsLocal={runProvider?.isLocal}
+        providerIsLocal={run.pilot === true || runProvider?.isLocal}
         trustDetail={runTrust.detail}
         activeTenantId={state.activeTenantId}
         tenants={state.tenants}

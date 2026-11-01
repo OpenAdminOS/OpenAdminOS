@@ -55,7 +55,7 @@ describe("Agents schedule actions", () => {
     const sampleTenant = {
       id: "openadminos-sample-tenant",
       kind: "sample" as const,
-      displayName: "Contoso (sample data)",
+      displayName: "Contoso (pilot)",
       username: "admin@contoso-sample.invalid",
       homeAccountId: "openadminos-sample-account",
       addedAt: "2026-10-26T12:00:00.000Z",
@@ -70,19 +70,40 @@ describe("Agents schedule actions", () => {
 
     renderRoute(<Agents />, {
       path: "/agents",
-      route: "/agents?filter=scheduled",
+      route: "/agents",
       bridge,
     });
 
     expect(
       await screen.findByText(
-        "Schedules are paused while the sample tenant is active. Switch to a connected tenant to resume.",
+        "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.",
       ),
     ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Schedule actions" }));
-    expect(screen.getByRole("menuitem", { name: "Run due now (1)" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Switch to Contoso Production" }));
     await waitFor(() => expect(bridge.setActiveTenant).toHaveBeenCalledWith(realTenant.id));
+  });
+
+  it("shows the production page for the Schedules tab in pilot mode", async () => {
+    const state = createMockAppState({
+      tenants: [{
+        id: "openadminos-sample-tenant",
+        kind: "sample" as const,
+        displayName: "Contoso (pilot)",
+        username: "admin@contoso-sample.invalid",
+        homeAccountId: "openadminos-sample-account",
+        addedAt: "2026-10-26T12:00:00.000Z",
+      }],
+      activeTenantId: "openadminos-sample-tenant",
+    });
+    renderRoute(<Agents />, {
+      path: "/agents",
+      route: "/agents?filter=scheduled",
+      bridge: makeMockBridge({}, state),
+    });
+    expect(
+      await screen.findByText("Schedules are available in production. Connect your tenant to use them."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Schedules" })).not.toBeInTheDocument();
   });
 
   it("resumes a due batch only after the final explicit setup action", async () => {

@@ -88,6 +88,13 @@ import { MarkdownPreview } from "../components/MarkdownPreview";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
+import {
+  PILOT_COPY,
+  PILOT_STARTERS,
+  pilotPromptEntry,
+  type PilotAgentSlug,
+} from "../shared/pilot-mode";
+import { PilotProductionPage } from "../components/PilotMode";
 import Workspaces from "./Workspaces";
 
 const promptGroups = CHAT_PROMPT_GROUPS;
@@ -191,7 +198,7 @@ function IntuneChatContent() {
     setActiveProvider,
     setActiveModel,
   } = useAppState();
-  const { requireTenant, requireTenantAndProvider, openSetup } = useSetupFlow();
+  const { requireTenant, requireTenantAndProvider } = useSetupFlow();
   const shellChrome = useShellChromeOptional();
   const dataBoundaryContext = useDataBoundaryOptional();
   const updateContext = useUpdateStateOptional();
@@ -675,6 +682,7 @@ function IntuneChatContent() {
     if (
       provider &&
       activeTenant &&
+      activeTenant.kind !== "sample" &&
       !provider.isLocal &&
       (requiresHostedChatConsent(provider, activeTenant) || Boolean(workspaceContext))
     ) {
@@ -1443,6 +1451,13 @@ function IntuneChatContent() {
   const needsYouCount =
     awaitingConfirmationRuns.length + openFindings.length + (updateNeedsAttention ? 1 : 0);
   const homeSuggestions = promptGroups.flatMap((group) => group.prompts).slice(0, 3);
+  const pilot = activeTenant?.kind === "sample";
+  const pilotAgentName = (slug: PilotAgentSlug) => {
+    const agent =
+      state.installedAgents.find((entry) => entry.slug === slug) ??
+      state.registryAgents.find((entry) => entry.slug === slug);
+    return agent ? formatAgentDisplayName(agent) : slug;
+  };
   const unknownConversation = Boolean(
     shellLoaded &&
       routeConversationId &&
@@ -1540,7 +1555,14 @@ function IntuneChatContent() {
     disabled: unknownConversation || sending || runningMultiTenant,
   };
 
-  const renderComposer = (placement: "home" | "docked") => (
+  const renderComposer = (placement: "home" | "docked") => pilot ? (
+    <PilotComposer
+      placement={placement}
+      sending={sending}
+      disabled={unknownConversation}
+      onPick={(prompt) => void handleSend(prompt)}
+    />
+  ) : (
     <ChatComposer
       placement={placement}
       textareaRef={composerRef}
@@ -1562,7 +1584,6 @@ function IntuneChatContent() {
       onModelSelect={(providerId, model) => void handleModelSelect(providerId, model)}
       onOpenProviders={() => navigate("/settings/providers")}
       dataBoundary={dataBoundary}
-      onConnectTenant={openSetup}
     />
   );
 
@@ -1638,6 +1659,15 @@ function IntuneChatContent() {
       />
     </>
   );
+  if (workspaceView && pilot) {
+    return (
+      <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
+        {calmTopBar}
+        <PilotProductionPage feature="Workspaces" plural />
+      </div>
+    );
+  }
+
   if (workspaceView) {
     return (
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
@@ -1674,7 +1704,7 @@ function IntuneChatContent() {
                   <h1 className="line-clamp-2 font-serif text-display font-medium tracking-[-0.015em] text-[var(--color-text)]">
                     {activeTenant.displayName}
                   </h1>
-                  <p className="mt-1.5 text-base text-[var(--color-text-muted)]">{homeFreshness}</p>
+                  <p className="mt-1.5 text-base text-[var(--color-text-muted)]">{pilot ? PILOT_COPY.dataLabel : homeFreshness}</p>
                 </div>
               </div>
             ) : (
@@ -1751,6 +1781,7 @@ function IntuneChatContent() {
                 </div>
               </section>
             ) : null}
+            {pilot ? null : (
             <div className="mt-5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
               <span className="mr-0.5">Try</span>
               {homeSuggestions.map((prompt) => (
@@ -1773,6 +1804,7 @@ function IntuneChatContent() {
                 Run an agent with /
               </button>
             </div>
+            )}
           </div>
         </section>
         {calmModals}
@@ -1865,7 +1897,16 @@ function IntuneChatContent() {
                           setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
                         }}
                       />
-                      {message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
+                      {pilot && message.role === "assistant" && message.status === "completed" && message.id !== progressAssistantMessageId ? (
+                        <PilotFollowUps
+                          prompt={previousUserPromptForMessage(displayedMessages, message)}
+                          disabled={sending}
+                          agentName={pilotAgentName}
+                          onPick={(prompt) => void handleSend(prompt)}
+                          onOpenAgent={(slug) => navigate(`/agents/${encodeURIComponent(slug)}`)}
+                        />
+                      ) : null}
+                      {!pilot && message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
                         <SuggestedAgentsBlock
                           suggestions={suggestedAgents}
                           runningAgentSlug={runningAgentSlug}
@@ -2036,7 +2077,6 @@ function ChatComposer({
   onModelSelect,
   onOpenProviders,
   dataBoundary,
-  onConnectTenant,
 }: {
   placement: "home" | "docked";
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -2058,7 +2098,6 @@ function ChatComposer({
   onModelSelect: (providerId: ProviderId, model: string) => void;
   onOpenProviders: () => void;
   dataBoundary: DataBoundary;
-  onConnectTenant: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
   const [activePickerIndex, setActivePickerIndex] = useState(0);
@@ -2201,18 +2240,6 @@ function ChatComposer({
       ) : null}
 
       <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
-        {activeTenant?.kind === "sample" ? (
-          <div role="note" className="mb-2 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-            <span>Sample data. Answers describe the fictional Contoso tenant. Connect your tenant to see your own.</span>
-            <button
-              type="button"
-              onClick={onConnectTenant}
-              className="rounded font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
-            >
-              Connect your tenant
-            </button>
-          </div>
-        ) : null}
         {!activeTenant ? (
           <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
             {SETUP_COPY.guestChatHint}
@@ -2335,6 +2362,120 @@ function ChatComposer({
           <span>Prompts and tenant data go to {activeProvider?.name ?? "the selected provider"} while this model is selected.</span>
         </div>
       )}
+    </div>
+  );
+}
+
+const PILOT_CHIP_CLASS =
+  "min-h-[30px] max-w-full rounded-lg bg-[var(--color-hover)] px-2.5 py-1 text-left text-sm leading-5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-active)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60";
+
+/**
+ * Pilot mode replaces free text with prepared prompts. The text box stays
+ * visible but disabled, so it is clear that production Chat is open-ended.
+ */
+function PilotComposer({
+  placement,
+  sending,
+  disabled,
+  onPick,
+}: {
+  placement: "home" | "docked";
+  sending: boolean;
+  disabled: boolean;
+  onPick: (prompt: string) => void;
+}) {
+  const explanationId = `pilot-composer-explanation-${placement}`;
+  return (
+    <div className="relative">
+      <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-composer)]">
+        <div
+          role="group"
+          aria-label="Prepared prompts"
+          className={`flex flex-wrap gap-1.5 ${placement === "home" ? "" : "max-h-[76px] overflow-y-auto"}`}
+        >
+          {PILOT_STARTERS.map((starter) => (
+            <button
+              key={starter.prompt}
+              type="button"
+              disabled={sending || disabled}
+              onClick={() => onPick(starter.prompt)}
+              title={starter.prompt}
+              className={PILOT_CHIP_CLASS}
+            >
+              {placement === "home" ? (
+                <>
+                  <span className="font-medium text-[var(--color-text)]">{starter.area}</span>
+                  <span aria-hidden="true" className="opacity-60"> · </span>
+                  {suggestionLabel(starter.prompt)}
+                </>
+              ) : (
+                <span className="font-medium">{starter.area}</span>
+              )}
+            </button>
+          ))}
+        </div>
+        <label htmlFor={`intune-chat-composer-${placement}`} className="sr-only">
+          {CHAT_COPY.composerLabel}
+        </label>
+        <textarea
+          id={`intune-chat-composer-${placement}`}
+          name={`intune-chat-composer-${placement}`}
+          rows={1}
+          disabled
+          aria-describedby={explanationId}
+          placeholder={PILOT_COPY.composerExplanation}
+          className="mt-3 block min-h-[34px] w-full resize-none rounded-lg bg-[var(--color-bg-raised)] px-3 py-1.5 text-md leading-[1.55] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] disabled:cursor-not-allowed"
+        />
+        <p id={explanationId} className="sr-only">{PILOT_COPY.composerExplanation}</p>
+      </div>
+      <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
+        <IconLock size={13} />
+        <span>{PILOT_COPY.composerBoundary}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Follow-up chips and the matching pilot agent under a prepared answer. */
+function PilotFollowUps({
+  prompt,
+  disabled,
+  agentName,
+  onPick,
+  onOpenAgent,
+}: {
+  prompt: string | null;
+  disabled: boolean;
+  agentName: (slug: PilotAgentSlug) => string;
+  onPick: (prompt: string) => void;
+  onOpenAgent: (slug: PilotAgentSlug) => void;
+}) {
+  const entry = prompt ? pilotPromptEntry(prompt) : undefined;
+  if (!entry || (entry.followUps.length === 0 && !entry.agentSlug)) return null;
+  return (
+    <div role="group" aria-label="Follow-up prompts" className="-mt-5 mb-[30px] flex flex-wrap gap-1.5">
+      {entry.followUps.map((followUp) => (
+        <button
+          key={followUp}
+          type="button"
+          disabled={disabled}
+          onClick={() => onPick(followUp)}
+          className={PILOT_CHIP_CLASS}
+        >
+          {suggestionLabel(followUp)}
+        </button>
+      ))}
+      {entry.agentSlug ? (
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => onOpenAgent(entry.agentSlug!)}
+          className={`${PILOT_CHIP_CLASS} inline-flex items-center gap-1.5 ring-1 ring-[var(--color-accent)]/35`}
+        >
+          <IconLayers size={12} className="shrink-0" />
+          {PILOT_COPY.tryAgent(agentName(entry.agentSlug))}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -3996,6 +4137,17 @@ function AnswerScopeDisclosure({
   const resourceNames = [...new Set(sources.map((source) => source.label))].join(", ");
   const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
   const hasDetails = Boolean(sources.length > 0 || trace.length > 0);
+
+  if (tenant?.kind === "sample" && !multiTenant) {
+    return (
+      <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
+        <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
+        <span>{tenant.displayName}</span>
+        <span aria-hidden="true" className="opacity-60">·</span>
+        <span>{PILOT_COPY.answerScope}</span>
+      </div>
+    );
+  }
 
   return (
     <>

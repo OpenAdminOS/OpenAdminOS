@@ -80,6 +80,9 @@ import {
 } from "../copy";
 import { DataSettingsSection } from "./Cache";
 import { ConnectorsSettingsSection } from "./Connectors";
+import { PilotProductionPage } from "../components/PilotMode";
+import { useToast } from "../components/Toast";
+import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   Badge,
   Button as UiButton,
@@ -176,7 +179,15 @@ export default function Settings() {
     setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
-  const { openSetup } = useSetupFlow();
+  const { openSetup, startPilot } = useSetupFlow();
+  const toast = useToast();
+  const pilot = state.tenants.some(
+    (tenant) => tenant.id === state.activeTenantId && tenant.kind === "sample",
+  );
+  // Connectors are a production feature; pilot mode hides the section.
+  const settingsSections = pilot
+    ? SETTINGS_SECTIONS.filter((entry) => entry.id !== "connectors")
+    : SETTINGS_SECTIONS;
 
   useEffect(() => {
     if (SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)) {
@@ -321,6 +332,15 @@ export default function Settings() {
     }
   };
 
+  if (pilot && sectionParam === "connectors") {
+    return (
+      <>
+        <PageHeader title="Settings" wide />
+        <PilotProductionPage feature="Connectors" plural />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title="Settings" wide />
@@ -402,7 +422,7 @@ export default function Settings() {
               </div>
             )}
           </div>
-          {SETTINGS_SECTIONS.map((s) => (
+          {settingsSections.map((s) => (
             <button
               key={s.id}
               onClick={() => selectSettingsTarget({ section: s.id })}
@@ -444,7 +464,26 @@ export default function Settings() {
               id="tenants"
               visible={visibleSectionIds.has("tenants")}
               query={settingsQuery}
-              action={<UiButton variant="primary" size="sm" onClick={() => openSetup()}>Connect tenant</UiButton>}
+              action={
+                <div className="flex items-center gap-2">
+                  {pilot ? null : (
+                    <UiButton
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        void startPilot().catch((caught) =>
+                          toast.error(
+                            `Pilot mode did not open. ${caught instanceof Error ? userFacingErrorReason(caught.message) ?? "" : ""} Try again from Settings, Tenants.`.replace(/\s+/g, " "),
+                          ),
+                        );
+                      }}
+                    >
+                      {PILOT_COPY.openAction}
+                    </UiButton>
+                  )}
+                  <UiButton variant="primary" size="sm" onClick={() => openSetup()}>Connect tenant</UiButton>
+                </div>
+              }
             >
               <TenantsSection
                 tenants={state.tenants}
@@ -460,7 +499,7 @@ export default function Settings() {
             <SettingsPageSection id="chat" visible={visibleSectionIds.has("chat")} query={settingsQuery}>
               <ChatSettingsSectionV2 />
             </SettingsPageSection>
-            <SettingsPageSection id="connectors" visible={visibleSectionIds.has("connectors")} query={settingsQuery}>
+            <SettingsPageSection id="connectors" visible={!pilot && visibleSectionIds.has("connectors")} query={settingsQuery}>
               <ConnectorsSettingsSection
                 connectorId={searchParams.get("connector")}
                 onConnectorChange={updateConnectorRoute}
@@ -1219,18 +1258,18 @@ function TenantRow({
             <span title={tenant.displayName} className="min-w-0 max-w-full truncate text-base font-medium text-[var(--color-text)]">
               {tenant.displayName}
             </span>
-            {tenant.kind === "sample" ? <Badge tone="warning">Sample data</Badge> : null}
+            {tenant.kind === "sample" ? <Badge tone="info">{PILOT_COPY.badge}</Badge> : null}
             {isActive ? <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone="success" />Active</span> : null}
           </div>
           <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
             {tenant.kind === "sample"
-              ? "Fictional tenant stored on this device"
+              ? "Fictional company, stored on this device"
               : `${domain} · ${entraLicenseName ?? "Entra tier not available"}`}
           </div>
         </div>
-        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample inventory" : licenses.map((license) => license.displayName).join(", ")}>
+        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample data" : licenses.map((license) => license.displayName).join(", ")}>
           {tenant.kind === "sample"
-            ? "Built-in sample inventory"
+            ? "Built-in sample data"
             : licenses.length > 0
             ? licenses.map((license) => license.displayName).join(", ")
             : "No license details"}
@@ -1249,7 +1288,7 @@ function TenantRow({
           items={[
             {
               id: "disconnect",
-              label: tenant.kind === "sample" ? "Remove" : "Disconnect",
+              label: tenant.kind === "sample" ? PILOT_COPY.leaveAction : "Disconnect",
               danger: true,
               onSelect: () => {
                 setDisconnectError(null);
@@ -1267,9 +1306,9 @@ function TenantRow({
       size="md"
     >
       <ModalHeader
-        title={tenant.kind === "sample" ? "Remove sample tenant" : `Disconnect ${tenant.displayName}`}
-        subtitle={tenant.kind === "sample" ? "Delete the fictional tenant and its local data" : "Remove the connection and its local tenant data"}
-        badge={<Badge tone={tenant.kind === "sample" ? "warning" : "danger"}>Permanent local deletion</Badge>}
+        title={tenant.kind === "sample" ? PILOT_COPY.leaveTitle : `Disconnect ${tenant.displayName}`}
+        subtitle={tenant.kind === "sample" ? "Delete the pilot tenant and its local data" : "Remove the connection and its local tenant data"}
+        badge={<Badge tone={tenant.kind === "sample" ? "info" : "danger"}>Permanent local deletion</Badge>}
         onClose={() => {
           if (!disconnecting) setConfirmDisconnect(false);
         }}
@@ -1277,12 +1316,12 @@ function TenantRow({
       <div className="space-y-4 p-6">
         <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
           {tenant.kind === "sample"
-            ? "This permanently deletes the fictional tenant's local Graph cache, change history, chats, run history, and learning records from this device."
+            ? PILOT_COPY.leaveBody
             : "This removes the Microsoft sign-in connection and permanently deletes this tenant's local Graph cache, change history, chats, workspaces, run history, learning records, and queued deliveries from this device."}
         </div>
         <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
           {tenant.kind === "sample"
-            ? "You can add the built-in sample tenant again later."
+            ? "You can open pilot mode again later from the tenant menu or Settings, Tenants."
             : "Microsoft 365 data in the tenant is not changed. Reconnecting later starts with an empty local cache."}
         </p>
         {disconnectError && (
@@ -1320,7 +1359,7 @@ function TenantRow({
           >
             {disconnecting
               ? tenant.kind === "sample" ? "Removing" : "Disconnecting"
-              : tenant.kind === "sample" ? "Remove sample tenant" : "Disconnect and delete local data"}
+              : tenant.kind === "sample" ? PILOT_COPY.leaveAction : "Disconnect and delete local data"}
           </Button>
         </div>
       </div>

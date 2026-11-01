@@ -1,4 +1,5 @@
 import type { RunRecord } from "./openAdminOS.js";
+import { PILOT_COPY } from "./pilot-mode.js";
 
 export interface RunReportContext {
   agentName?: string;
@@ -17,9 +18,9 @@ export function runReportPlaintext(
     `${title}: ${run.status === "planned" ? "Dry run: not applied" : run.status}`,
     `Started: ${run.queuedAt}`,
     `Duration: ${formatDuration(run)}`,
-    `Provider: ${run.providerId ?? "Not available"}${run.model ? ` (${run.model})` : ""}`,
+    `Provider: ${runProviderLabel(run)}`,
     `Tenant: ${tenant}`,
-    ...(ctx.sampleData ? ["Data: Sample data from the fictional Contoso tenant"] : []),
+    ...(ctx.sampleData ? ["Data: Pilot mode sample data from a fictional company"] : []),
   ];
 
   if (run.summary) {
@@ -61,9 +62,9 @@ export function runReportMarkdown(
     `**Status:** ${run.status === "planned" ? "Dry run: not applied" : run.status}`,
     `**Started:** ${run.queuedAt}`,
     `**Duration:** ${formatDuration(run)}`,
-    `**Provider:** ${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`,
+    `**Provider:** ${run.pilot ? PILOT_COPY.providerName : `${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`}`,
     `**Tenant:** ${tenant}`,
-    ...(ctx.sampleData ? ["**Data:** Sample data from the fictional Contoso tenant"] : []),
+    ...(ctx.sampleData ? ["**Data:** Pilot mode sample data from a fictional company"] : []),
   ];
 
   if (run.summary) {
@@ -103,6 +104,9 @@ export function runReportMarkdown(
  * rollbacks, carry no model text and get no note.
  */
 export function aiGeneratedNote(run: RunRecord): string | undefined {
+  // Pilot runs use prepared sample text, so the note must not claim that a
+  // model produced it.
+  if (run.pilot) return PILOT_COPY.reportNote;
   if (!run.providerId) return undefined;
   const source = run.model ? `${run.providerId} (${run.model})` : run.providerId;
   return `This report includes AI-generated text, produced in OpenAdminOS with ${source}.`;
@@ -116,13 +120,18 @@ export function runReportJson(
     ctx.sampleData
       ? {
           sampleData: true,
-          sampleDataNotice: "Fictional Contoso tenant data",
+          sampleDataNotice: "Pilot mode sample data from a fictional company",
           run,
         }
       : run,
     null,
     2,
   );
+}
+
+function runProviderLabel(run: RunRecord): string {
+  if (run.pilot) return PILOT_COPY.providerName;
+  return `${run.providerId ?? "Not available"}${run.model ? ` (${run.model})` : ""}`;
 }
 
 function formatDuration(run: RunRecord): string {

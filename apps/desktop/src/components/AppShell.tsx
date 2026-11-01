@@ -16,6 +16,7 @@ import {
   useShellChrome,
 } from "../state";
 import { TopBar } from "./TopBar";
+import { PilotBanner } from "./PilotMode";
 
 export { PageHeader } from "./ui/PageHeader";
 
@@ -102,6 +103,7 @@ function ShellLayout({
       <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
+        <PilotBanner />
         <main id="main-content" tabIndex={-1} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {children}
         </main>

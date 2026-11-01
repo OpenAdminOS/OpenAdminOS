@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
@@ -24,44 +24,78 @@ import type {
   WorkspaceDetail,
 } from "../shared/openAdminOS";
 import { deriveTrustCopy } from "../copy";
+import { PILOT_COPY } from "../shared/pilot-mode";
 
 function LocationProbe() {
   return <output data-testid="location">{useLocation().pathname}</output>;
 }
 
 describe("IntuneChat guest exploration", () => {
-  it("keeps sample data labeled above the composer", async () => {
+  it("replaces free text with prepared prompt chips in pilot mode", async () => {
     const user = userEvent.setup();
-    renderRoute(<IntuneChat />, {
-      path: "/chat/:conversationId?",
-      route: "/chat",
-      bridge: makeMockBridge(
-        {},
-        createMockAppState({
-          tenants: [
-            {
-              id: "openadminos-sample-tenant",
-              kind: "sample",
-              displayName: "Contoso (sample data)",
-              username: "admin@contoso-sample.invalid",
-              homeAccountId: "openadminos-sample-account",
-              addedAt: "2026-10-26T12:00:00.000Z",
-            },
-          ],
-          activeTenantId: "openadminos-sample-tenant",
-        }),
-      ),
+    const pilotTenant = {
+      id: "openadminos-sample-tenant",
+      kind: "sample" as const,
+      displayName: "Contoso (pilot)",
+      username: "admin@contoso-sample.invalid",
+      homeAccountId: "openadminos-sample-account",
+      addedAt: "2026-10-26T12:00:00.000Z",
+    };
+    const state = createMockAppState({
+      tenants: [pilotTenant],
+      activeTenantId: pilotTenant.id,
+      installedAgents: [
+        {
+          ...createMockAgent(),
+          id: "find-inactive-devices",
+          slug: "find-inactive-devices",
+          name: "Find inactive devices",
+        },
+      ],
     });
+    const prompt = "Which managed devices have not synced in the last 7 days?";
+    const conversation: IntuneChatConversation = {
+      id: "conversation-pilot",
+      title: prompt,
+      createdAt: "2026-10-26T12:00:00.000Z",
+      updatedAt: "2026-10-26T12:00:00.000Z",
+      tenantId: pilotTenant.id,
+      scopeKind: "single-tenant",
+    };
+    const messages: IntuneChatMessage[] = [
+      { id: "user-1", conversationId: conversation.id, role: "user", content: prompt, status: "completed", createdAt: "2026-10-26T12:00:00.000Z" },
+      { id: "assistant-1", conversationId: conversation.id, role: "assistant", content: "17 of 119 managed devices have not checked in.", status: "completed", createdAt: "2026-10-26T12:00:01.000Z" },
+    ];
+    const bridge = makeMockBridge(
+      {
+        streamIntuneChatMessage: vi.fn(async () => ({
+          conversation,
+          userMessage: messages[0]!,
+          assistantMessage: messages[1]!,
+          cacheStatus: { tenantId: pilotTenant.id, resources: [] },
+        })),
+        listIntuneChatConversations: vi.fn(async () => [conversation]),
+        getIntuneChatMessages: vi.fn(async () => messages),
+      },
+      state,
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
-    expect(
-      await screen.findByText(
-        "Sample data. Answers describe the fictional Contoso tenant. Connect your tenant to see your own.",
-      ),
-    ).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Connect your tenant" }));
-    expect(
-      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
-    ).toBeInTheDocument();
+    const composer = await screen.findByRole("textbox", { name: "Ask about your Microsoft 365 tenant" });
+    expect(composer).toBeDisabled();
+    expect(composer).toHaveAttribute("placeholder", PILOT_COPY.composerExplanation);
+    const chips = within(screen.getByRole("group", { name: "Prepared prompts" })).getAllByRole("button");
+    expect(chips).toHaveLength(6);
+    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
+
+    await user.click(chips[0]!);
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0]).toMatchObject({ content: prompt });
+    const followUps = await screen.findByRole("group", { name: "Follow-up prompts" });
+    expect(within(followUps).getByRole("button", { name: "Which devices are both stale and noncompliant" })).toBeInTheDocument();
+    expect(within(followUps).getByRole("button", { name: "Which devices are stale in Intune but still active in Entra" })).toBeInTheDocument();
+    expect(within(followUps).getByRole("button", { name: "Try the agent: Find inactive devices" })).toBeInTheDocument();
+    expect(screen.getByText(PILOT_COPY.answerScope)).toBeInTheDocument();
   });
 
   it("lets a user draft from a suggestion and asks for setup only on Send", async () => {
@@ -125,12 +159,6 @@ describe("IntuneChat guest exploration", () => {
       route: "/chat",
       bridge,
     });
-
-    // A fresh install auto-opens setup; this test covers the contextual
-    // path, so dismiss the first-run dialog before drafting a question.
-    await user.click(
-      await screen.findByRole("button", { name: "Close" }),
-    );
 
     const composer = await screen.findByRole("combobox", {
       name: "Ask about your Microsoft 365 tenant",

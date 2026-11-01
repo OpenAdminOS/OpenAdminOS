@@ -1,17 +1,30 @@
 import type { PendingIntent } from "../setup/pending-intent";
 
+export const WELCOME_COPY = {
+  title: "Welcome to OpenAdminOS",
+  subtitle: "Try it on sample data first, or connect your Microsoft 365 tenant now.",
+  pilotTitle: "Start in pilot mode",
+  pilotBody:
+    "Explore a fictional company's tenant. No Microsoft sign-in, no AI setup. Prepared prompts and three agents show how OpenAdminOS works.",
+  pilotBullets: [
+    "Sample data, clearly labeled",
+    "Nothing leaves this device",
+    "Switch to production any time",
+  ],
+  pilotAction: "Start pilot mode",
+  pilotStarting: "Starting pilot mode",
+  pilotFailed: "Pilot mode did not start.",
+  connectTitle: "Connect your tenant",
+  connectBody:
+    "Production. Ask anything about your own tenant and use every agent. Needs a Microsoft sign-in and one-time admin approval for read access.",
+  connectAction: "Connect tenant",
+  ownRegistrationLink:
+    "Your organization blocks third-party apps? Use your own app registration.",
+  footer: "Read-only by default. Write actions always ask for your confirmation.",
+  skip: "Skip for now",
+} as const;
+
 export const SETUP_COPY = {
-  firstRunTitle: "Choose how to start",
-  firstRunSubtitle: "Open sample data now, or connect a Microsoft 365 tenant.",
-  sampleAction: "Try with sample data",
-  sampleDescription:
-    "Explore a fictional Contoso tenant. No Microsoft sign-in. Nothing leaves this device unless you pick a hosted provider.",
-  connectAction: "Connect your tenant",
-  connectDescription:
-    "Sign in with the OpenAdminOS app. A Global Administrator or Privileged Role Administrator approves read-only access once.",
-  ownRegistrationAction: "Use your organization's app registration",
-  ownRegistrationDescription:
-    "For tenants that block third-party apps. You enter the client ID your admin created.",
   title: "Connect a Microsoft 365 tenant",
   subtitle: "Review the read access OpenAdminOS requests before Microsoft sign-in.",
   dailyRole:

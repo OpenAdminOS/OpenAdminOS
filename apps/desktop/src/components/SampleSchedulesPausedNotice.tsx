@@ -5,7 +5,7 @@ import { Button } from "./Button";
 import { IconWarning } from "./icons";
 
 const PAUSED_COPY =
-  "Schedules are paused while the sample tenant is active. Switch to a connected tenant to resume.";
+  "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.";
 
 export function SampleSchedulesPausedNotice({ className = "" }: { className?: string }) {
   const { state, setActiveTenant } = useAppState();

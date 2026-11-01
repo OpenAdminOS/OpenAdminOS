@@ -9,6 +9,7 @@ import {
   IconCheck,
   IconChevronDown,
   IconClose,
+  IconPlay,
   IconPlus,
   IconSettings,
 } from "./icons";
@@ -17,6 +18,10 @@ import { Pill } from "./Pill";
 import { TenantTile } from "./TenantTile";
 import { useToast } from "./Toast";
 import { Tooltip } from "./ui";
+import { PILOT_COPY } from "../shared/pilot-mode";
+
+const MENU_ITEM_CLASS =
+  "flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]";
 
 function entraTierLabel(tier: "free" | "p1" | "p2" | "unknown" | undefined): string {
   if (!tier || tier === "unknown") return "Entra tier not detected";
@@ -39,6 +44,7 @@ export function TenantSwitcher() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
+  const pilotActive = activeTenant?.kind === "sample";
 
   useEffect(() => {
     if (!open) return;
@@ -85,7 +91,7 @@ export function TenantSwitcher() {
       await disconnectTenant(pendingDisconnect.tenantId);
       toast.success(
         pendingDisconnect.sample
-          ? "Sample tenant removed."
+          ? "Pilot mode ended. Its sample data was deleted from this device."
           : `${pendingDisconnect.displayName} disconnected.`,
       );
       setPendingDisconnect(null);
@@ -103,7 +109,7 @@ export function TenantSwitcher() {
 
   const tooltip = activeTenant
     ? activeTenant.kind === "sample"
-      ? "Fictional Contoso sample data. No Microsoft sign-in."
+      ? "Pilot mode. Sample data from a fictional company. No Microsoft sign-in."
       : `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.`
     : state.tenants.length > 0
       ? "No active tenant. Choose a connected tenant."
@@ -138,7 +144,7 @@ export function TenantSwitcher() {
               {activeTenant?.displayName ?? "No tenant"}
             </span>
             {activeTenant?.kind === "sample" ? (
-              <Pill tone="warning">Sample data</Pill>
+              <Pill tone="info">{PILOT_COPY.badge}</Pill>
             ) : null}
             <IconChevronDown size={11} className="shrink-0 text-[var(--color-text-muted)]" />
           </button>
@@ -178,15 +184,15 @@ export function TenantSwitcher() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-base font-medium text-[var(--color-text)]">{tenant.displayName}</span>
                         <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
-                          {tenant.kind === "sample" ? "Fictional tenant" : `${domain} · ${entraTierLabel(tenant.entraTier)}`}
+                          {tenant.kind === "sample" ? `${PILOT_COPY.modeName} · fictional company` : `${domain} · ${entraTierLabel(tenant.entraTier)}`}
                         </span>
                       </span>
                       {active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
                     </button>
                     <button
                       type="button"
-                      aria-label={tenant.kind === "sample" ? "Remove sample tenant" : `Disconnect ${tenant.displayName}`}
-                      title={tenant.kind === "sample" ? "Remove sample tenant" : `Disconnect ${tenant.displayName}`}
+                      aria-label={tenant.kind === "sample" ? PILOT_COPY.leaveAction : `Disconnect ${tenant.displayName}`}
+                      title={tenant.kind === "sample" ? PILOT_COPY.leaveAction : `Disconnect ${tenant.displayName}`}
                       disabled={busy}
                       onClick={() => {
                         setPendingDisconnect({ tenantId: tenant.id, displayName: tenant.displayName, sample: tenant.kind === "sample" });
@@ -201,7 +207,7 @@ export function TenantSwitcher() {
               })
             )}
             <div className="my-1 h-px bg-[var(--color-border-soft)]" />
-            {!state.tenants.some((tenant) => tenant.kind === "sample") ? (
+            {pilotActive ? null : (
               <button
                 type="button"
                 role="menuitem"
@@ -209,21 +215,22 @@ export function TenantSwitcher() {
                 onClick={() => {
                   setBusy(true);
                   void addSampleTenant()
-                    .then(() => setOpen(false))
+                    .then(() => {
+                      setOpen(false);
+                      navigate("/chat");
+                    })
                     .catch((error) =>
                       toast.error(
-                        error instanceof Error
-                          ? error.message
-                          : "The sample tenant could not be added.",
+                        `Pilot mode did not open.${error instanceof Error ? ` ${userFacingErrorReason(error.message)}` : ""} Try again from the tenant menu.`,
                       ),
                     )
                     .finally(() => setBusy(false));
                 }}
-                className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+                className={MENU_ITEM_CLASS}
               >
-                <IconPlus size={12} /> Try with sample data
+                <IconPlay size={12} /> {PILOT_COPY.openAction}
               </button>
-            ) : null}
+            )}
             <button
               type="button"
               role="menuitem"
@@ -231,32 +238,47 @@ export function TenantSwitcher() {
                 setOpen(false);
                 openSetup();
               }}
-              className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+              className={MENU_ITEM_CLASS}
             >
               <IconPlus size={12} /> Connect tenant
             </button>
-            <button
-              type="button"
-              role="menuitem"
-              onClick={() => {
-                setOpen(false);
-                navigate("/settings/tenants");
-              }}
-              className="flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
-            >
-              <IconSettings size={12} /> Manage tenants
-            </button>
+            {pilotActive && activeTenant ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={() => {
+                  setPendingDisconnect({ tenantId: activeTenant.id, displayName: activeTenant.displayName, sample: true });
+                  setOpen(false);
+                }}
+                className={MENU_ITEM_CLASS}
+              >
+                <IconClose size={12} /> {PILOT_COPY.leaveAction}
+              </button>
+            ) : (
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setOpen(false);
+                  navigate("/settings/tenants");
+                }}
+                className={MENU_ITEM_CLASS}
+              >
+                <IconSettings size={12} /> Manage tenants
+              </button>
+            )}
           </div>
         ) : null}
       </div>
 
       <Modal open={pendingDisconnect !== null} onClose={() => { if (!busy) setPendingDisconnect(null); }} size="md">
         <ModalHeader
-          title={pendingDisconnect?.sample ? "Remove sample tenant" : "Disconnect tenant"}
+          title={pendingDisconnect?.sample ? PILOT_COPY.leaveTitle : "Disconnect tenant"}
           subtitle={pendingDisconnect?.displayName}
           badge={
-            <Pill tone={pendingDisconnect?.sample ? "warning" : "danger"}>
-              {pendingDisconnect?.sample ? "Sample data" : "Local credentials"}
+            <Pill tone={pendingDisconnect?.sample ? "info" : "danger"}>
+              {pendingDisconnect?.sample ? PILOT_COPY.badge : "Local credentials"}
             </Pill>
           }
           onClose={() => setPendingDisconnect(null)}
@@ -264,13 +286,13 @@ export function TenantSwitcher() {
         <div className="space-y-4 p-6">
           <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {pendingDisconnect?.sample
-              ? "The fictional tenant, its runs, chats, workspaces, and cached rows will be deleted from this device. You can add it again later."
+              ? `${PILOT_COPY.leaveBody} You can open pilot mode again later.`
               : "Cached credentials for this tenant will be removed from this machine. You can reconnect the tenant later."}
           </div>
           <div className="flex justify-end gap-2">
             <Button variant="ghost" disabled={busy} onClick={() => setPendingDisconnect(null)}>Cancel</Button>
             <Button variant="danger" disabled={busy} onClick={() => void disconnect()}>
-              {busy ? "Removing" : pendingDisconnect?.sample ? "Remove sample tenant" : "Disconnect"}
+              {busy ? "Removing" : pendingDisconnect?.sample ? PILOT_COPY.leaveAction : "Disconnect"}
             </Button>
           </div>
         </div>

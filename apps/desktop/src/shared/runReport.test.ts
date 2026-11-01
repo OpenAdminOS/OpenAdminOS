@@ -28,6 +28,19 @@ describe("run report AI-generated note", () => {
     );
   });
 
+  it("says no model was used for pilot runs", () => {
+    const pilot = run({ pilot: true, model: "pilot-prepared", summary: "Prepared sample report." });
+    expect(aiGeneratedNote(pilot)).toBe(
+      "This report uses prepared sample text. No model was used.",
+    );
+    const plain = runReportPlaintext(pilot, { sampleData: true });
+    expect(plain).toContain("Provider: Pilot (prepared)");
+    expect(plain).toContain("Data: Pilot mode sample data from a fictional company");
+    expect(plain).not.toContain("AI-generated");
+    expect(runReportMarkdown(pilot)).toContain("**Provider:** Pilot (prepared)");
+    expect(runReportMarkdown(pilot)).not.toContain("AI-generated");
+  });
+
   it("is omitted for runs without a provider", () => {
     const deterministic = run();
     expect(aiGeneratedNote(deterministic)).toBeUndefined();

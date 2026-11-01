@@ -11,6 +11,9 @@ import {
 } from "../test/test-utils";
 import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
 import { useSetupFlow } from "./SetupFlowContext";
+import { FirstLaunchWelcome } from "./WelcomeView";
+import { WELCOME_COPY } from "../copy";
+import { PILOT_COPY } from "../shared/pilot-mode";
 
 function SetupTrigger() {
   const { requireTenant } = useSetupFlow();
@@ -170,14 +173,9 @@ describe("contextual tenant setup", () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const connectTenant = vi.fn(async () => createMockAppState());
-    renderWithAppState(<div>App content</div>, {
-      route: "/chat",
-      bridge: makeMockBridge({ connectTenant }, emptyState),
-    });
+    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
 
-    await user.click(
-      await screen.findByRole("button", { name: "Connect your tenant" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
       await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
     );
@@ -206,9 +204,9 @@ describe("contextual tenant setup", () => {
       },
       emptyState,
     );
-    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+    renderWelcome(bridge);
 
-    await user.click(await screen.findByRole("button", { name: "Connect your tenant" }));
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
       await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
     );
@@ -216,21 +214,17 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByText(/with 5 delegated Microsoft Graph permissions, all read-only/),
     ).toBeInTheDocument();
+    expect(screen.queryByText(PILOT_COPY.removedAfterConnect)).not.toBeInTheDocument();
   });
 
   it("connects with a custom app registration when the admin supplies one", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const connectTenant = vi.fn(async () => createMockAppState());
-    renderWithAppState(<div>App content</div>, {
-      route: "/chat",
-      bridge: makeMockBridge({ connectTenant }, emptyState),
-    });
+    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
 
     await user.click(
-      await screen.findByRole("button", {
-        name: "Use your organization's app registration",
-      }),
+      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
     );
     await user.type(
       screen.getByLabelText(/Application \(client\) ID/i),
@@ -255,14 +249,9 @@ describe("contextual tenant setup", () => {
   it("never asks for a client secret", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWithAppState(<div>App content</div>, {
-      route: "/chat",
-      bridge: makeMockBridge({}, emptyState),
-    });
+    renderWelcome(makeMockBridge({}, emptyState));
     await user.click(
-      await screen.findByRole("button", {
-        name: "Use your organization's app registration",
-      }),
+      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
     );
     expect(screen.queryByLabelText(/secret/i)).not.toBeInTheDocument();
     expect(
@@ -272,67 +261,69 @@ describe("contextual tenant setup", () => {
     ).toBeInTheDocument();
   });
 
-  it("opens the first-run choice automatically when a launch has no connected tenants", async () => {
+  it("shows the full-window welcome when a launch has no tenants", async () => {
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWithAppState(<div>App content</div>, {
-      route: "/chat",
-      bridge: makeMockBridge({}, emptyState),
-    });
+    renderWelcome(makeMockBridge({}, emptyState));
 
     expect(
-      await screen.findByRole("heading", { name: "Choose how to start" }),
+      await screen.findByRole("heading", { level: 1, name: "Welcome to OpenAdminOS" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Try with sample data" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect your tenant" })).toBeInTheDocument();
+    expect(screen.queryByText("App content")).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Use your organization's app registration" }),
+      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
+    ).toEqual(["Start in pilot mode", "Connect your tenant"]);
+    expect(screen.getByRole("button", { name: "Start pilot mode" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect tenant" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Read-only by default. Write actions always ask for your confirmation."),
     ).toBeInTheDocument();
-    expect(
-      screen.getAllByRole("heading", { level: 3 }).map((heading) => heading.textContent),
-    ).toEqual([
-      "Try with sample data",
-      "Connect your tenant",
-      "Use your organization's app registration",
-    ]);
   });
 
-  it("adds sample data from the first-run choice", async () => {
+  it("opens setup on the permissions stage from the Connect card", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    const addSampleTenant = vi.fn(async () =>
-      createMockAppState({
-        tenants: [
-          {
-            id: "openadminos-sample-tenant",
-            kind: "sample",
-            displayName: "Contoso (sample data)",
-            username: "admin@contoso-sample.invalid",
-            homeAccountId: "openadminos-sample-account",
-            addedAt: "2026-10-26T12:00:00.000Z",
-          },
-        ],
-        activeTenantId: "openadminos-sample-tenant",
-      }),
-    );
-    const bridge = makeMockBridge({ addSampleTenant }, emptyState);
-    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+    renderWelcome(makeMockBridge({}, emptyState));
 
-    await user.click(
-      await screen.findByRole("button", { name: "Try with sample data" }),
-    );
-
-    await waitFor(() => expect(addSampleTenant).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("heading", { name: "Choose how to start" })).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    expect(
+      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve and continue to Microsoft" })).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
   });
 
-  it("stays contextual when a tenant is already connected", async () => {
-    renderWithAppState(<div>App content</div>, { route: "/chat" });
+  it("starts pilot mode from the welcome and leaves the welcome", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const addSampleTenant = vi.fn(async () => pilotState());
+    const bridge = makeMockBridge({ addSampleTenant }, emptyState);
+    renderWelcome(bridge);
+
+    await user.click(await screen.findByRole("button", { name: "Start pilot mode" }));
+
+    await waitFor(() => expect(addSampleTenant).toHaveBeenCalledOnce());
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Welcome to OpenAdminOS" })).not.toBeInTheDocument();
+  });
+
+  it("leaves the guest shell when the admin skips the welcome", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({}, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Skip for now" }));
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+  });
+
+  it("does not show the welcome when a tenant is already connected", async () => {
+    renderWelcome();
 
     await screen.findByText("App content");
     await new Promise((resolve) => setTimeout(resolve, 0));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(
-      screen.queryByRole("heading", { name: "Choose how to start" }),
+      screen.queryByRole("heading", { name: "Welcome to OpenAdminOS" }),
     ).not.toBeInTheDocument();
   });
 
@@ -347,14 +338,9 @@ describe("contextual tenant setup", () => {
       activeTenantId: undefined,
       providers,
     });
-    renderWithAppState(<div>App content</div>, {
-      route: "/chat",
-      bridge: makeMockBridge({}, emptyState),
-    });
+    renderWelcome(makeMockBridge({}, emptyState));
 
-    await user.click(
-      await screen.findByRole("button", { name: "Connect your tenant" }),
-    );
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
       await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
     );
@@ -363,4 +349,86 @@ describe("contextual tenant setup", () => {
       await screen.findByRole("heading", { name: "Pick an LLM provider" }),
     ).toBeInTheDocument();
   });
+
+  it("says pilot data was removed after connecting from pilot mode", async () => {
+    const user = userEvent.setup();
+    const connectedState = createMockAppState();
+    const bridge = makeMockBridge(
+      { connectTenant: vi.fn(async () => connectedState) },
+      pilotState(),
+    );
+    renderWithAppState(<OpenSetupButton />, { route: "/chat", bridge });
+
+    await user.click(await screen.findByRole("button", { name: "Open setup" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+    );
+    expect(await screen.findByText(PILOT_COPY.removedAfterConnect)).toBeInTheDocument();
+  });
+
+  it("does not ask for a provider before pilot agent runs", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) => ({
+      ...provider,
+      status: "error" as const,
+    }));
+    const onReady = vi.fn();
+    renderWithAppState(<RequireProviderButton onReady={onReady} />, {
+      route: "/agents",
+      bridge: makeMockBridge({}, { ...pilotState(), providers }),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Run agent" }));
+    expect(onReady).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("heading", { name: "Pick an LLM provider" })).not.toBeInTheDocument();
+  });
 });
+
+function renderWelcome(bridge?: ReturnType<typeof makeMockBridge>) {
+  return renderWithAppState(
+    <FirstLaunchWelcome>
+      <div>App content</div>
+    </FirstLaunchWelcome>,
+    { route: "/chat", ...(bridge ? { bridge } : {}) },
+  );
+}
+
+function pilotState() {
+  return createMockAppState({
+    tenants: [
+      {
+        id: "openadminos-sample-tenant",
+        kind: "sample",
+        displayName: "Contoso (pilot)",
+        username: "admin@contoso-sample.invalid",
+        homeAccountId: "openadminos-sample-account",
+        addedAt: "2026-10-26T12:00:00.000Z",
+      },
+    ],
+    activeTenantId: "openadminos-sample-tenant",
+  });
+}
+
+function OpenSetupButton() {
+  const { openSetup } = useSetupFlow();
+  return <Button onClick={() => openSetup()}>Open setup</Button>;
+}
+
+function RequireProviderButton({ onReady }: { onReady: () => void }) {
+  const { requireTenantAndProvider } = useSetupFlow();
+  return (
+    <Button
+      onClick={() => {
+        if (
+          requireTenantAndProvider(
+            createPendingIntent({ kind: "agent-run", slug: "find-inactive-devices", returnTo: "/agents" }),
+          )
+        ) {
+          onReady();
+        }
+      }}
+    >
+      Run agent
+    </Button>
+  );
+}
