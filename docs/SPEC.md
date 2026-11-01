@@ -2703,7 +2703,7 @@ These are explicitly unresolved. Don't pick a default without asking.
 
 - Hybrid AD agents (the audience and patterns are different enough to be a separate product)
 - General Intune/Entra admin consulting features (this is an agent runner, not an admin tool)
-- A web-hosted SaaS version (would betray the local-first positioning)
+- A web-hosted SaaS version of the app (would betray the local-first positioning). The paid hosted team service in §8b is not this: it coordinates approvals, roles, and audit between desktops, never runs agents, and never holds tenant tokens.
 - Agents for non-Microsoft platforms (AWS, GCP): possibly later, but the v1 thesis is depth-in-Microsoft, not breadth
 - Agent-authoring inside the desktop app (authors use their own editor + the SDK; the app is a runtime, not an IDE)
 - Defender for Endpoint device actions (isolate machine, live response, etc.). These use the separate `api.security.microsoft.com` API rather than Microsoft Graph. v0.5 is Graph-only; Defender is a read/report surface (alerts, incidents, Secure Score), not an action surface. Revisit if there is demand for a second non-Graph client.
@@ -2724,6 +2724,53 @@ Query embedding reuses the Ollama instance the app already manages (`nomic-embed
 **Opt-in usage telemetry.** Off by default. Counts and versions only: a resettable anonymous install id, app version, OS/arch, whether the active provider is local or hosted, and bucketed (never exact) tenant/agent/run counts, plus whether a retrieval index is installed. Never tenant content, tenant ids, prompts, run results, or error text. The Privacy preview shows the exact JSON, and the send path serializes that same payload, so preview and wire can never diverge. Nothing is sent unless the user opts in AND the build has a collector URL configured (empty by default).
 
 **Fleet.** For installs with two or more tenants, a Fleet view aggregates each tenant's active baseline, drift counts, and last capture time, filterable by tenant group. Multi-tenant runs keep per-tenant confirmation for writes.
+
+## 8b. Commercial model (decided 2026-11-01)
+
+OpenAdminOS is open core. The desktop app stays MIT and fully functional on its own. The paid tier is a **hosted team service** for IT teams and MSPs.
+
+**Boundary rule.** Never charge for what a single admin uses today. Nothing currently in the MIT app moves behind a paywall: multi-tenant chat, multi-tenant jobs, tenant groups, Fleet, drift and rollback, the MCP write-gateway, and local audit export stay free.
+
+**Paid scope**, in build order: multi-person approvals and roles; audit forwarding to customer-owned destinations (for example Microsoft Sentinel or a SIEM); a hosted private registry with authentication and publisher signing; SSO via Entra ID; SCIM; support with an SLA.
+
+**Audit forwarding (decided 2026-11-01).** Each desktop forwards its own audit events directly to the customer's destination (for example a Log Analytics workspace). The team service does not forward on behalf of devices, so it never needs credentials for customer destinations, and a device that is offline forwards its backlog when it reconnects.
+
+**Code layout.** The team service lives in a separate private repository. This repo never imports private code and never references it through git submodules. The desktop side of team features (joining a team, the approval inbox, role-aware UI) is MIT, lives here, and talks to the service through a documented API. Public builds and contributor CI never need access to private code.
+
+**Private repository.** The team service lives in `OpenAdminOS/OpenAdminOS-Enterprise` (private). Public issues stay the public roadmap; implementation issues in the private repo link back to them.
+
+**Hosting.** Hosted first. A self-hosted team service may follow later as a paid, licensed option for enterprise contracts, never as a free download.
+
+**One surface.** Team administration (members, roles, approval policy) happens in the desktop app. The team service has no end-user web UI (hard constraint #5).
+
+**Trust model.**
+- The desktop stays the executor. Tenant tokens never reach the team service. Graph calls and LLM prompts run on the admin's device exactly as today.
+- Approval diffs and audit payloads are end-to-end encrypted between team members' devices. The service stores ciphertext plus the routing metadata needed to deliver approvals.
+- Multi-person approval is additive to hard constraint #2: reviewers are added, the requester's diff review and typed confirmation are never removed, and the final apply still runs on a desktop.
+- Without a team connection the app behaves exactly as it does today. Joining a team is an explicit action with trust messaging that names the service.
+- **Hard constraint #1 exception (decided 2026-11-01).** After an explicit team join, end-to-end encrypted approval and audit payloads may leave the device for the team service, even when a local provider is selected. The status strip then shows "Team service · Frankfurt · end-to-end encrypted". Leaving the team stops all team traffic.
+
+**Hosting (decided 2026-11-01).** The team service runs on Vercel in the Frankfurt region (`fra1`). Its database and any file storage must also be pinned to Frankfurt so the status-strip claim covers every byte at rest, not just compute. The database is a dedicated Supabase project in the Frankfurt region (`eu-central-1`), used for nothing else.
+
+**Plaintext routing metadata (decided 2026-11-01).** The service can read only what it needs to route and enforce approvals: team and member identifiers, device public keys and their enrollment signatures, requester, approver, request and decision timestamps, approval state, and the tenant identifier. Diffs, action lists, object names, agent output, and audit event bodies are always ciphertext.
+
+**Team key management (proposed 2026-11-01).**
+- **Device keys.** Each desktop generates an X25519 encryption key pair and an Ed25519 signing key pair when it joins a team. Private keys stay in Electron `safeStorage` and never leave the device. Primitives come from Node's built-in `crypto` (X25519, Ed25519, HKDF, AES-256-GCM), so no new dependency is needed.
+- **Per-payload encryption, no shared team key.** Each approval or audit payload is encrypted with a fresh random content key. That key is wrapped separately to every device currently allowed to read it: eligible approvers for an approval, audit readers for audit events. Removing a member therefore never requires re-encrypting history or rotating a team secret.
+- **Enrollment is signed by an admin, not by the server.** A new device's public keys only become trusted after an existing team admin approves the device on their own desktop and signs its keys. Clients verify that signature chain back to the team root before wrapping anything to a device, so a compromised service cannot slip in its own key. Admins compare a short device fingerprint during approval.
+- **Team root.** The first admin device creates the team root signing key. Teams are prompted to keep at least two admins.
+- **Member and device removal.** An admin revokes the device signature, and the service stops delivering to it. New payloads are never wrapped to a revoked device. Pending approvals addressed to it are reissued to the remaining approvers. Payloads a device already decrypted before removal cannot be recalled; the UI states this plainly.
+- **Recovery.** A lost device is replaced by enrolling a new one through another admin. For the case where every admin device is lost, team creation produces a one-time recovery kit (printable code) that can sign a new admin device. The service holds no escrow copy and cannot recover a team on its own; losing every admin device and the recovery kit means creating a new team.
+
+**Mobile companion (direction approved 2026-11-01).** iOS and Android apps sign in with the same account and connect to the user's own desktop instances, without requiring Tailscale. Tracked publicly in #139; the relay is team-service work.
+- The phone is a companion, like the macOS menu bar companion: the desktop stays the host for tenant tokens, Graph calls, run history, and every write. Typed write confirmation and the final apply stay on the requester's desktop. A phone may act as a reviewer for team approvals.
+- Connection: direct over LAN or Tailscale, or through the team service relay. Relay messages use the same device keys and admin-signed enrollment as the desktop, so the relay never sees plaintext.
+- On-device models: selected small read-only tasks can run on the phone itself, using Apple's on-device Foundation Models on iOS and llama.cpp with a local model on Android. The desktop sends only the bounded context the task needs over the encrypted channel, and the status strip names the phone as the model location. On-device models have small context windows, so tasks must be narrow (for example summarizing a run report or triaging a notification), not full investigations.
+- Code layout: the mobile clients are MIT and live in the public repo; only the relay lives in the private repo.
+- Pricing line (decided 2026-11-01): personal pairing (one admin, own devices, including the relay) is free. Team approvals on mobile are part of the paid team tier.
+- Stack (decided 2026-11-01): Expo (React Native, TypeScript) for both iOS and Android, as a workspace in this monorepo. Expo development builds, not Expo Go, because the on-device models need native code: Foundation Models through a local Expo module in Swift, llama.cpp through a native module on Android. Any third-party llama.cpp binding is a new dependency to review before adoption. Release builds must be reproducible from this repo's CI with our own signing, not only from Expo's hosted build service.
+
+**Pricing** is decided outside this spec.
 
 ---
 
