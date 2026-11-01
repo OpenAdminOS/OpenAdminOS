@@ -1,25 +1,32 @@
 import type { RunGraphApi } from "@openadminos/agent-sdk";
 
 import {
-  CHAT_PROMPT_GROUPS,
   CHAT_SUGGESTED_PROMPTS,
   type ChatSuggestedPrompt,
 } from "../../src/shared/chat-prompts.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const MAX_TABLE_ROWS = 10;
-const FOOTER =
-  "Shown without an LLM summary. Pick a provider in Settings to get explained answers.";
 
 type Row = Record<string, unknown>;
 type TableRow = readonly unknown[];
+export type SampleAnswerFact = string | number | readonly string[];
 
-export const SAMPLE_NO_PROVIDER_PROMPTS = [
-  CHAT_PROMPT_GROUPS[0].prompts[0],
-  CHAT_PROMPT_GROUPS[2].prompts[0],
-  CHAT_PROMPT_GROUPS[4].prompts[0],
-  CHAT_PROMPT_GROUPS[6].prompts[0],
-] as const;
+/**
+ * One computed answer: a headline sentence, the evidence table, and the
+ * facts that prepared pilot narratives are written from. Every value comes
+ * from the pilot Graph at request time.
+ */
+export interface ComputedSampleAnswer {
+  prompt: ChatSuggestedPrompt;
+  sentence: string;
+  columns: readonly string[];
+  rows: readonly TableRow[];
+  facts: Readonly<Record<string, SampleAnswerFact>>;
+}
+
+export const SAMPLE_COMPUTED_ANSWER_FOOTER =
+  "In production, answers come from your tenant and the model you choose.";
 
 const promptByNormalizedText = new Map(
   CHAT_SUGGESTED_PROMPTS.map((prompt) => [normalizePrompt(prompt), prompt]),
@@ -34,23 +41,57 @@ export function normalizePrompt(value: string): string {
     .trim();
 }
 
-export function sampleProviderRequiredAnswer(): string {
-  return [
-    "Answering your own questions needs an LLM provider. Pick one in Settings, or try one of these:",
-    "",
-    ...SAMPLE_NO_PROVIDER_PROMPTS.map((prompt) => `- ${prompt}`),
-  ].join("\n");
+export function matchSuggestedPrompt(question: string): ChatSuggestedPrompt | undefined {
+  return promptByNormalizedText.get(normalizePrompt(question));
+}
+
+/** Renders a computed answer as the sentence, the table, and a footer line. */
+export function renderComputedSampleAnswer(
+  computed: ComputedSampleAnswer,
+  options: { lead?: string; omitSentence?: boolean; maxRows?: number; footer: string },
+): string {
+  const visible = computed.rows.slice(0, options.maxRows ?? MAX_TABLE_ROWS);
+  const lines = [
+    ...(options.lead ? [options.lead, ""] : []),
+    ...(options.omitSentence ? [] : [computed.sentence, ""]),
+    `| ${computed.columns.map(markdownCell).join(" | ")} |`,
+    `| ${computed.columns.map(() => "---").join(" | ")} |`,
+    ...visible.map((row) => `| ${row.map(markdownCell).join(" | ")} |`),
+  ];
+  if (computed.rows.length > visible.length) {
+    lines.push("", `and ${computed.rows.length - visible.length} more.`);
+  }
+  lines.push("", options.footer);
+  return lines.join("\n");
 }
 
 export async function buildSampleTenantSuggestedPromptAnswer(
   graph: RunGraphApi,
   question: string,
   nowInput: Date = new Date(),
+  footer = SAMPLE_COMPUTED_ANSWER_FOOTER,
 ): Promise<string | undefined> {
-  const prompt = promptByNormalizedText.get(normalizePrompt(question));
+  const computed = await computeSampleTenantAnswer(graph, question, nowInput);
+  return computed ? renderComputedSampleAnswer(computed, { footer }) : undefined;
+}
+
+export async function computeSampleTenantAnswer(
+  graph: RunGraphApi,
+  question: string,
+  nowInput: Date = new Date(),
+): Promise<ComputedSampleAnswer | undefined> {
+  const prompt = matchSuggestedPrompt(question);
   if (!prompt) return undefined;
   const now = new Date(nowInput.getTime());
+  const computed = await computeForPrompt(graph, prompt, now);
+  return { prompt, ...computed };
+}
 
+async function computeForPrompt(
+  graph: RunGraphApi,
+  prompt: ChatSuggestedPrompt,
+  now: Date,
+): Promise<Omit<ComputedSampleAnswer, "prompt">> {
   switch (prompt) {
     case "Which managed devices have not synced in the last 7 days?":
       return staleManagedDevices(graph, now);
@@ -101,7 +142,7 @@ export async function buildSampleTenantSuggestedPromptAnswer(
     case "Which Conditional Access policies exclude guest or external identities?":
       return guestExclusionPolicies(graph);
     case "Which high-severity Defender incidents are open?":
-      return openHighSeverityIncidents(graph);
+      return openHighSeverityIncidents(graph, now);
     case "Which Defender alerts were raised this week?":
       return defenderAlertsThisWeek(graph, now);
     case "How has Secure Score changed over the last 90 days?":
@@ -113,9 +154,19 @@ export async function buildSampleTenantSuggestedPromptAnswer(
 
 async function staleManagedDevices(graph: RunGraphApi, now: Date) {
   const users = indexById(await readCollection(graph, "/users"));
-  const rows = (await readCollection(graph, "/deviceManagement/managedDevices"))
-    .filter((device) => isManaged(device) && daysOld(device.lastSyncDateTime, now) > 7)
+  const managed = (await readCollection(graph, "/deviceManagement/managedDevices"))
+    .filter(isManaged);
+  const rows = managed
+    .filter((device) => daysOld(device.lastSyncDateTime, now) > 7)
     .sort(oldestFirst("lastSyncDateTime"));
+  const facts = {
+    total: managed.length,
+    oldestName: String(rows[0]?.deviceName ?? ""),
+    oldestDays: rows[0] ? Math.floor(daysOld(rows[0].lastSyncDateTime, now)) : 0,
+    noncompliant: rows.filter((device) => device.complianceState === "noncompliant").length,
+    over30: rows.filter((device) => daysOld(device.lastSyncDateTime, now) >= 30).length,
+    platforms: summarizeCounts(rows.map((device) => String(device.operatingSystem))),
+  };
   return answer(
     `${rows.length} managed devices have not synced in more than 7 days.`,
     ["Device", "OS", "Last sync", "Compliance", "Primary user"],
@@ -126,6 +177,7 @@ async function staleManagedDevices(graph: RunGraphApi, now: Date) {
       device.complianceState,
       users.get(String(device.userId))?.displayName ?? device.userPrincipalName,
     ]),
+    facts,
   );
 }
 
@@ -161,6 +213,11 @@ async function staleIntuneActiveEntra(graph: RunGraphApi, now: Date) {
         device.complianceState,
       ];
     }),
+    {
+      activeToday: rows.filter((device) =>
+        daysOld(entraByDeviceId.get(String(device.azureADDeviceId))?.approximateLastSignInDateTime, now) <= 1,
+      ).length,
+    },
   );
 }
 
@@ -183,6 +240,10 @@ async function staleNoncompliantDevices(graph: RunGraphApi, now: Date) {
       device.userPrincipalName,
       arrayStrings(device.complianceReasons).join(", "),
     ]),
+    {
+      names: rows.map((device) => String(device.deviceName)),
+      reasons: [...new Set(rows.flatMap((device) => arrayStrings(device.complianceReasons)))],
+    },
   );
 }
 
@@ -205,6 +266,12 @@ async function unencryptedWindowsDevices(graph: RunGraphApi) {
       device.userPrincipalName,
       shortDate(device.lastSyncDateTime),
     ]),
+    {
+      names: rows.map((device) => String(device.deviceName)),
+      noncompliant: rows.filter((device) => device.complianceState === "noncompliant").length,
+      windowsTotal: (await readCollection(graph, "/deviceManagement/managedDevices"))
+        .filter((device) => isManaged(device) && device.operatingSystem === "Windows").length,
+    },
   );
 }
 
@@ -221,11 +288,16 @@ async function disabledUsers(graph: RunGraphApi) {
       user.userType,
       shortDate(nested(user, "signInActivity", "lastSuccessfulSignInDateTime")),
     ]),
+    {
+      licensed: rows.filter((user) => rowArray(user.assignedLicenses).length > 0).length,
+      guests: rows.filter((user) => user.userType === "Guest").length,
+    },
   );
 }
 
 async function inactiveGuests(graph: RunGraphApi, now: Date) {
-  const rows = (await readCollection(graph, "/users"))
+  const users = await readCollection(graph, "/users");
+  const rows = users
     .filter(
       (user) =>
         user.userType === "Guest" &&
@@ -244,6 +316,14 @@ async function inactiveGuests(graph: RunGraphApi, now: Date) {
       shortDate(nested(user, "signInActivity", "lastSuccessfulSignInDateTime")),
       user.externalUserState,
     ]),
+    {
+      guests: users.filter((user) => user.userType === "Guest").length,
+      pending: rows.filter((user) => user.externalUserState === "PendingAcceptance").length,
+      enabled: rows.filter((user) => user.accountEnabled !== false).length,
+      oldestDays: rows[0]
+        ? Math.floor(daysOld(nested(rows[0], "signInActivity", "lastSuccessfulSignInDateTime"), now))
+        : 0,
+    },
   );
 }
 
@@ -270,6 +350,10 @@ async function usersWithNoncompliantDevices(graph: RunGraphApi) {
       linked.length,
       linked.map((device) => String(device.deviceName)).join(", "),
     ]),
+    {
+      devices: rows.reduce((total, entry) => total + entry.devices.length, 0),
+      multiple: rows.filter((entry) => entry.devices.length > 1).length,
+    },
   );
 }
 
@@ -330,6 +414,12 @@ async function requiredAppInstallFailures(graph: RunGraphApi) {
         shortDate(status.lastSyncDateTime),
       ];
     }),
+    {
+      failed: rows.filter(({ status }) => status.installState === "failed").length,
+      pending: rows.filter(({ status }) => status.installState === "pendingInstall").length,
+      apps: [...new Set(rows.map(({ app }) => String(app.displayName)))],
+      errorCodes: [...new Set(rows.flatMap(({ status }) => typeof status.errorCode === "string" ? [status.errorCode] : []))],
+    },
   );
 }
 
@@ -388,6 +478,13 @@ async function supersededAppsStillDetected(graph: RunGraphApi) {
       detectedApp?.deviceCount,
       detectedApp?.version,
     ]),
+    {
+      deviceCount,
+      apps: rows.map(({ app }) => String(app.displayName)),
+      replacements: rows.map(({ app }) =>
+        String(apps.find((candidate) => candidate.id === app.supersededByAppId)?.displayName ?? "Unknown"),
+      ),
+    },
   );
 }
 
@@ -444,6 +541,11 @@ async function recentlyModifiedCompliancePolicies(graph: RunGraphApi, now: Date)
       shortDate(policy.createdDateTime),
       rowArray(policy.assignments).length,
     ]),
+    {
+      newestName: String(rows[0]?.displayName ?? ""),
+      newestDays: rows[0] ? Math.floor(daysOld(rows[0].lastModifiedDateTime, now)) : 0,
+      names: rows.map((policy) => String(policy.displayName)),
+    },
   );
 }
 
@@ -464,6 +566,13 @@ async function inactiveConditionalAccessPolicies(graph: RunGraphApi) {
       shortDate(policy.modifiedDateTime),
       arrayStrings(nested(policy, "conditions", "applications", "includeApplications")).join(", "),
     ]),
+    {
+      disabled: rows.filter((policy) => policy.state === "disabled").map((policy) => String(policy.displayName)),
+      reportOnly: rows
+        .filter((policy) => policy.state === "enabledForReportingButNotEnforced")
+        .map((policy) => String(policy.displayName)),
+      total: (await readCollection(graph, "/identity/conditionalAccess/policies")).length,
+    },
   );
 }
 
@@ -535,6 +644,11 @@ async function conditionalAccessFailures(graph: RunGraphApi) {
       nested(signIn, "status", "errorCode"),
       nested(signIn, "location", "city"),
     ]),
+    {
+      users: new Set(rows.map((signIn) => String(signIn.userId))).size,
+      topApp: mostCommon(rows.map((signIn) => String(signIn.appDisplayName))),
+      topUser: mostCommon(rows.map((signIn) => String(signIn.userDisplayName))),
+    },
   );
 }
 
@@ -627,6 +741,11 @@ async function unmanagedEntraDevices(graph: RunGraphApi) {
 
 async function expiringAppCredentials(graph: RunGraphApi, now: Date) {
   const apps = await readCollection(graph, "/applications");
+  const expired = apps.flatMap((app) =>
+    [...rowArray(app.passwordCredentials), ...rowArray(app.keyCredentials)]
+      .filter((credential) => Date.parse(String(credential.endDateTime)) < now.getTime())
+      .map(() => String(app.displayName)),
+  );
   const rows = apps.flatMap((app) => [
     ...rowArray(app.passwordCredentials).map((credential) => ({ app, credential, type: "Secret" })),
     ...rowArray(app.keyCredentials).map((credential) => ({ app, credential, type: "Certificate" })),
@@ -646,6 +765,14 @@ async function expiringAppCredentials(graph: RunGraphApi, now: Date) {
       shortDate(credential.endDateTime),
       Math.ceil((Date.parse(String(credential.endDateTime)) - now.getTime()) / DAY_MS),
     ]),
+    {
+      soonestApp: String(rows[0]?.app.displayName ?? ""),
+      soonestDays: rows[0]
+        ? Math.ceil((Date.parse(String(rows[0].credential.endDateTime)) - now.getTime()) / DAY_MS)
+        : 0,
+      expired: expired.length,
+      expiredApps: [...new Set(expired)],
+    },
   );
 }
 
@@ -676,6 +803,14 @@ async function privilegedRoleMembers(graph: RunGraphApi) {
       role.displayName,
       member.accountEnabled === true ? "Yes" : "No",
     ]),
+    {
+      users: userCount,
+      assignments: assignments.length,
+      globalAdmins: assignments.filter(({ role }) => role.displayName === "Global Administrator").length,
+      disabledHolders: new Set(
+        assignments.filter(({ member }) => member.accountEnabled !== true).map(({ member }) => String(member.id)),
+      ).size,
+    },
   );
 }
 
@@ -698,10 +833,19 @@ async function guestExclusionPolicies(graph: RunGraphApi) {
       ),
       shortDate(policy.modifiedDateTime),
     ]),
+    {
+      names: rows.map((policy) => String(policy.displayName)),
+      types: [...new Set(rows.flatMap((policy) =>
+        String(nested(policy, "conditions", "users", "excludeGuestsOrExternalUsers", "guestOrExternalUserTypes") ?? "")
+          .split(",")
+          .map((entry) => entry.trim())
+          .filter(Boolean),
+      ))],
+    },
   );
 }
 
-async function openHighSeverityIncidents(graph: RunGraphApi) {
+async function openHighSeverityIncidents(graph: RunGraphApi, now: Date) {
   const rows = (await readCollection(graph, "/security/incidents"))
     .filter(
       (incident) =>
@@ -719,6 +863,11 @@ async function openHighSeverityIncidents(graph: RunGraphApi) {
       shortDateTime(incident.lastUpdateDateTime),
       incident.assignedTo,
     ]),
+    {
+      names: rows.map((incident) => String(incident.displayName)),
+      active: rows.filter((incident) => incident.status === "active").length,
+      newestHours: rows[0] ? Math.floor((now.getTime() - Date.parse(String(rows[0].createdDateTime))) / (60 * 60 * 1000)) : 0,
+    },
   );
 }
 
@@ -736,6 +885,11 @@ async function defenderAlertsThisWeek(graph: RunGraphApi, now: Date) {
       alert.serviceSource,
       shortDateTime(alert.createdDateTime),
     ]),
+    {
+      high: rows.filter((alert) => alert.severity === "high").length,
+      unresolved: rows.filter((alert) => alert.status !== "resolved").length,
+      highTitles: rows.filter((alert) => alert.severity === "high").map((alert) => String(alert.title)),
+    },
   );
 }
 
@@ -780,6 +934,10 @@ async function secureScoreActions(graph: RunGraphApi) {
       control.implementationCost,
       control.userImpact,
     ]),
+    {
+      top: rows.slice(0, 3).map((control) => String(control.title)),
+      lowCost: rows.filter((control) => control.implementationCost === "Low").length,
+    },
   );
 }
 
@@ -787,20 +945,9 @@ function answer(
   sentence: string,
   columns: readonly string[],
   rows: readonly TableRow[],
-): string {
-  const visible = rows.slice(0, MAX_TABLE_ROWS);
-  const lines = [
-    sentence,
-    "",
-    `| ${columns.map(markdownCell).join(" | ")} |`,
-    `| ${columns.map(() => "---").join(" | ")} |`,
-    ...visible.map((row) => `| ${row.map(markdownCell).join(" | ")} |`),
-  ];
-  if (rows.length > visible.length) {
-    lines.push("", `and ${rows.length - visible.length} more.`);
-  }
-  lines.push("", FOOTER);
-  return lines.join("\n");
+  facts: Record<string, SampleAnswerFact> = {},
+): Omit<ComputedSampleAnswer, "prompt"> {
+  return { sentence, columns, rows, facts: { count: rows.length, ...facts } };
 }
 
 async function readCollection(graph: RunGraphApi, initialPath: string): Promise<Row[]> {
@@ -892,6 +1039,14 @@ function newestFirst(field: string) {
 function oldestFirst(field: string) {
   return (left: Row, right: Row) =>
     Date.parse(String(left[field] ?? "")) - Date.parse(String(right[field] ?? ""));
+}
+
+function summarizeCounts(values: string[]): string[] {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts.entries()]
+    .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+    .map(([value, count]) => `${count} ${value}`);
 }
 
 function mostCommon(values: string[]): string {

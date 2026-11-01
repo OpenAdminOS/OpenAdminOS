@@ -55,7 +55,7 @@ describe("sample tenant state", () => {
       assert.equal(users.value.length, 2);
       await assert.rejects(
         () => built.tenantSession.acquireTokenForScopes(["User.Read.All"]),
-        /The sample tenant has no Microsoft sign-in\. Connect your tenant to use this\./,
+        /Pilot mode has no Microsoft sign-in\. Connect your tenant to use this\./,
       );
 
       await fixture.store.probeEntraTier(second.tenants[0]!, { force: true });
@@ -76,23 +76,23 @@ describe("sample tenant state", () => {
             intervalSeconds: 3600,
             enabled: true,
           }),
-        /Schedules are not available on the sample tenant/,
+        /Scheduling is available in production\. Connect your tenant to use it\./,
       );
       await assert.rejects(
         () => fixture.store.saveOfficePersona({ tenantId: SAMPLE_TENANT_ID }),
-        /Agent Team personas are not available on the sample tenant/,
+        /Agent Team is available in production\. Connect your tenant to use it\./,
       );
       await assert.rejects(
         () => fixture.store.createWorkspace({ tenantId: SAMPLE_TENANT_ID, title: "Sample" }),
-        /Workspaces are not available on the sample tenant/,
+        /Workspaces are available in production\. Connect your tenant to use them\./,
       );
       await assert.rejects(
         () => fixture.store.testConnector("teams"),
-        /Connectors are not available on the sample tenant/,
+        /Connectors are available in production\. Connect your tenant to use them\./,
       );
       await assert.rejects(
         () => fixture.store.listConnectorTeams("teams"),
-        /Connectors are not available on the sample tenant/,
+        /Connectors are available in production\. Connect your tenant to use them\./,
       );
       assert.equal(fixture.tokenReads, 0);
       assert.equal(fixture.customTokenStores, 0);
@@ -181,7 +181,7 @@ describe("sample tenant state", () => {
       assert.equal((await fixture.store.getAppState()).runs.length, 0);
       assert.ok(
         messages.some((message) =>
-          message.includes("[scheduler] skipped 1 due schedule because the sample tenant is active"),
+          message.includes("[scheduler] skipped 1 due schedule because pilot mode is active"),
         ),
       );
     } finally {

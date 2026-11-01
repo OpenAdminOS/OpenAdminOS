@@ -148,7 +148,7 @@ describe("sample tenant dataset", () => {
     ).length, 3);
   });
 
-  it("uses only the reserved sample email domain", () => {
+  it("uses only reserved .invalid email domains", () => {
     const dataset = createSampleTenantDataset(NOW);
     const emails = collectStrings(dataset).filter((value) => value.includes("@"));
     assert.ok(emails.length > 0);
@@ -156,7 +156,7 @@ describe("sample tenant dataset", () => {
       const addresses = value.match(/[A-Z0-9._%+#-]+@[A-Z0-9.-]+/gi) ?? [];
       for (const address of addresses) {
         assert.ok(
-          address.toLowerCase().endsWith("@contoso-sample.invalid"),
+          address.toLowerCase().endsWith(".invalid"),
           `Unexpected sample email domain: ${address}`,
         );
       }

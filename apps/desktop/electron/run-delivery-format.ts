@@ -625,7 +625,7 @@ export function formatTeamsDeliveryMessage(
     `**Status:** ${status}`,
     `**Tenant:** ${tenant.displayName}`,
     ...(tenant.kind === "sample"
-      ? ["**Data:** Sample data from the fictional Contoso tenant"]
+      ? ["**Data:** Pilot mode sample data from a fictional company"]
       : []),
     `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `**Queued:** ${run.queuedAt}`,
@@ -668,7 +668,7 @@ export function formatWhatsAppDeliveryMessage(
     `Status: ${status}`,
     `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
     ...(tenant?.kind === "sample"
-      ? ["Data: Sample data from the fictional Contoso tenant"]
+      ? ["Data: Pilot mode sample data from a fictional company"]
       : []),
     `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `Queued: ${run.queuedAt}`,
@@ -711,7 +711,7 @@ export function formatOutlookDeliveryMessage(
     `**Status:** ${status}`,
     `**Tenant:** ${tenant.displayName}`,
     ...(tenant.kind === "sample"
-      ? ["**Data:** Sample data from the fictional Contoso tenant"]
+      ? ["**Data:** Pilot mode sample data from a fictional company"]
       : []),
     `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `**Queued:** ${run.queuedAt}`,
@@ -757,7 +757,7 @@ export function formatChatDeliveryMessage(
     `*Status:* ${status}`,
     `*Tenant:* ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
     ...(tenant?.kind === "sample"
-      ? ["*Data:* Sample data from the fictional Contoso tenant"]
+      ? ["*Data:* Pilot mode sample data from a fictional company"]
       : []),
     `*Trigger:* ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `*Queued:* ${run.queuedAt}`,
@@ -801,7 +801,7 @@ export function formatPlainDeliveryMessage(
     `Status: ${status}`,
     `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
     ...(tenant?.kind === "sample"
-      ? ["Data: Sample data from the fictional Contoso tenant"]
+      ? ["Data: Pilot mode sample data from a fictional company"]
       : []),
     `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `Queued: ${run.queuedAt}`,

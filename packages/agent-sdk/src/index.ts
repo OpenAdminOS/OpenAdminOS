@@ -702,6 +702,11 @@ export interface RunLogRecord {
 
 export interface RunRecord {
   dryRun?: boolean;
+  /**
+   * Set for runs on the built-in pilot tenant. Their LLM steps used
+   * prepared sample text and no model provider was contacted.
+   */
+  pilot?: true;
   /** Input settings saved at queue time for a fresh run after a dry run. */
   inputSettings?: Record<string, unknown>;
   runForRealOfRunId?: string;

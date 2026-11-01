@@ -6,8 +6,7 @@ import { buildSampleTenantSuggestedPromptAnswer } from "./answers.js";
 import { createSampleGraph } from "./graph.js";
 
 const NOW = new Date("2026-10-26T12:00:00.000Z");
-const FOOTER =
-  "Shown without an LLM summary. Pick a provider in Settings to get explained answers.";
+const FOOTER = "In production, answers come from your tenant and the model you choose.";
 
 const scenarios = [
   ["Which managed devices have not synced in the last 7 days?", "17 managed devices"],

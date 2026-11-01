@@ -6785,6 +6785,12 @@ if (!gotLock) {
         : {}),
     });
     await store.recoverInterruptedRuns();
+    void store.refreshPilotCacheIfStale().catch((error) => {
+      console.warn(
+        "[pilot] sample cache refresh did not start",
+        error instanceof Error ? error.message : String(error),
+      );
+    });
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
     void store.processPendingRunDeliveries();

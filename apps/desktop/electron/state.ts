@@ -32,6 +32,7 @@ import {
   wrapConnector,
   findRegistryAgentById,
   listAllRegistryAgents,
+  listBuiltInRegistryAgents,
   listRegisteredConnectors,
   loadAgentManifestPreview,
   noSecrets,
@@ -180,7 +181,9 @@ import { defaultUpdateChannel } from "../src/shared/update-channel.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { searchEndpoints } from "./graph-catalog.js";
-import { createSampleGraph } from "./sample-tenant/graph.js";
+import { createSampleGraph, type SampleGraph } from "./sample-tenant/graph.js";
+import { createPilotLlm } from "./sample-tenant/pilot-llm.js";
+import { PILOT_AGENT_SLUGS, PILOT_COPY } from "../src/shared/pilot-mode.js";
 import {
   SAMPLE_TENANT_HOME_ACCOUNT_ID,
   SAMPLE_TENANT_ID,
@@ -718,7 +721,7 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
         details: {
           ...event.details,
           sampleData: true,
-          sampleDataNotice: "Fictional Contoso tenant data",
+          sampleDataNotice: "Pilot mode sample data from a fictional company",
         },
       };
     })
@@ -1148,6 +1151,17 @@ export interface AppStateStoreOptions {
    * development workflows. Packaged builds must leave this false.
    */
   allowDevRegistrySource?: boolean;
+  /**
+   * Test hook for the pilot tenant clock. The pilot Graph, prepared Chat
+   * answers, and pilot agent text all read time from it. Production uses
+   * the system clock.
+   */
+  clock?: () => Date;
+  /**
+   * Test hook for the interactive Microsoft sign-in used by connectTenant.
+   * Production leaves this unset so sign-in always runs through MSAL.
+   */
+  interactiveSignIn?: typeof runInteractiveFlow;
 }
 
 export class AppStateStore {
@@ -1191,7 +1205,9 @@ export class AppStateStore {
     | undefined;
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
-  private sampleGraph = createSampleGraph();
+  private readonly clock: () => Date;
+  private readonly interactiveSignIn: typeof runInteractiveFlow;
+  private sampleGraph: SampleGraph;
   private tenantConnectController: AbortController | undefined;
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
@@ -1226,6 +1242,8 @@ export class AppStateStore {
       this.providerSecretsForOverride = undefined;
       this.providerSecretStore = undefined;
       this.allowDevRegistrySource = false;
+      this.clock = () => new Date();
+      this.interactiveSignIn = runInteractiveFlow;
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
@@ -1268,7 +1286,10 @@ export class AppStateStore {
           )
         : undefined;
       this.allowDevRegistrySource = options.allowDevRegistrySource === true;
+      this.clock = options.clock ?? (() => new Date());
+      this.interactiveSignIn = options.interactiveSignIn ?? runInteractiveFlow;
     }
+    this.sampleGraph = createSampleGraph({ clock: this.clock });
     const host = this;
     this.chatService = new IntuneChatService({
       read: () => host.read(),
@@ -1276,6 +1297,7 @@ export class AppStateStore {
       resolveTenant: (persisted, tenantId) =>
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
+      now: () => host.clock(),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),
       buildGraph: (pinnedTenantId, agentScopes) =>
         host.buildGraph(pinnedTenantId, agentScopes),
@@ -1354,6 +1376,7 @@ export class AppStateStore {
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),
+      buildPilotLlm: (agentSlug) => createPilotLlm({ agentSlug, clock: host.clock }),
       buildGraph: (pinnedTenantId, agentScopes, execution) =>
         host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),
@@ -1464,7 +1487,7 @@ export class AppStateStore {
         )
       ) {
         throw new Error(
-          "Agent Team personas are not available on the sample tenant. Connect your tenant to assign this teammate.",
+          PILOT_COPY.featureInProduction("Agent Team"),
         );
       }
     }
@@ -1886,7 +1909,7 @@ export class AppStateStore {
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
       acquireInteractive: async (scopes) =>
-        runInteractiveFlow({ client, scopes, openBrowser }),
+        this.interactiveSignIn({ client, scopes, openBrowser }),
     });
   }
 
@@ -2040,7 +2063,7 @@ export class AppStateStore {
   private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
     if (tenant.kind === "sample") {
       throw new Error(
-        "The sample tenant has no Microsoft sign-in. Connect your tenant to use this.",
+        PILOT_COPY.noSignIn,
       );
     }
     return this.msalClientFor(tenant.appRegistration);
@@ -2052,7 +2075,7 @@ export class AppStateStore {
       username: SAMPLE_TENANT_USERNAME,
       acquireTokenForScopes: async () => {
         throw new Error(
-          "The sample tenant has no Microsoft sign-in. Connect your tenant to use this.",
+          PILOT_COPY.noSignIn,
         );
       },
     };
@@ -2783,7 +2806,7 @@ export class AppStateStore {
     const tenant = this.resolveTenant(persisted, input.tenantId);
     if (tenant.kind === "sample" && input.enabled) {
       throw new Error(
-        "Schedules are not available on the sample tenant. Connect your tenant to schedule cache refreshes.",
+        PILOT_COPY.featureInProduction("Scheduling"),
       );
     }
     return this.chatService.setGraphCacheRefreshSchedule(input);
@@ -3144,7 +3167,7 @@ export class AppStateStore {
     const tenant = this.resolveTenant(persisted, input.tenantId);
     if (tenant.kind === "sample") {
       throw new Error(
-        "Workspaces are not available on the sample tenant. Connect your tenant to create a workspace.",
+        PILOT_COPY.featureInProduction("Workspaces", true),
       );
     }
     return this.requireIntelligenceStore().createWorkspace({
@@ -3293,7 +3316,7 @@ export class AppStateStore {
       const tenant = this.resolveTenant(persisted, mapping.tenantId);
       if (tenant.kind === "sample") {
         throw new Error(
-          "Workspaces are not available on the sample tenant. Connect your tenant to create a workspace.",
+          PILOT_COPY.featureInProduction("Workspaces", true),
         );
       }
       if (mapping.workspaceId) {
@@ -3365,7 +3388,7 @@ export class AppStateStore {
       : undefined;
     if (tenant?.kind === "sample") {
       throw new Error(
-        "Connectors are not available on the sample tenant. Connect your tenant to test this connector.",
+        PILOT_COPY.featureInProduction("Connectors", true),
       );
     }
     if (!tenant && factory.descriptor.authSource !== "external") {
@@ -3589,7 +3612,7 @@ export class AppStateStore {
       : undefined;
     if (tenant?.kind === "sample") {
       throw new Error(
-        "Connectors are not available on the sample tenant. Connect your tenant to use this connector.",
+        PILOT_COPY.featureInProduction("Connectors", true),
       );
     }
     if (!tenant && factory.descriptor.authSource !== "external") {
@@ -3656,7 +3679,7 @@ export class AppStateStore {
     if (!tenant || !factory) throw new Error("Tenant or connector is unavailable.");
     if (tenant.kind === "sample") {
       throw new Error(
-        "Connector deliveries are not available on the sample tenant. Connect your tenant to send this message.",
+        PILOT_COPY.featureInProduction("Connector deliveries", true),
       );
     }
     const config = persisted.connectors?.[input.connectorId]?.config ?? {};
@@ -3922,7 +3945,7 @@ export class AppStateStore {
         : undefined;
       if (activeTenant?.kind === "sample" && schedule?.enabled) {
         throw new Error(
-          "Schedules are not available on the sample tenant. Connect your tenant to schedule this agent.",
+          PILOT_COPY.featureInProduction("Scheduling"),
         );
       }
       const idx = persisted.installedAgents.findIndex(
@@ -4024,7 +4047,7 @@ export class AppStateStore {
       : undefined;
     if (activeTenant?.kind === "sample") {
       throw new Error(
-        "Connector deliveries are not available on the sample tenant. Connect your tenant to deliver run results.",
+        PILOT_COPY.featureInProduction("Connector deliveries", true),
       );
     }
   }
@@ -4053,7 +4076,7 @@ export class AppStateStore {
       }).length;
       if (dueCount > 0) {
         console.info(
-          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because the sample tenant is active`,
+          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because pilot mode is active`,
         );
       }
       return;
@@ -5278,7 +5301,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const client = this.msalClientFor(registration);
     let result;
     try {
-      result = await runInteractiveFlow({
+      result = await this.interactiveSignIn({
         client,
         openBrowser: this.openBrowser,
         signal: controller.signal,
@@ -5337,6 +5360,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // is treated as informational (badges shown, runs not blocked).
     void this.probeEntraTier(tenant).catch(() => undefined);
 
+    // Connecting a real tenant ends pilot mode. The pilot tenant goes
+    // through the normal disconnect path, which purges its runs, cache,
+    // and conversations without any Microsoft sign-in call.
+    if ((await this.read()).tenants.some((entry) => entry.kind === "sample")) {
+      await this.disconnectTenant(SAMPLE_TENANT_ID);
+      await this.setActiveTenant(tenant.id);
+    }
+
     return this.getAppState();
   }
 
@@ -5359,7 +5390,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const persisted = await this.read();
       const existing = persisted.tenants.find((tenant) => tenant.id === SAMPLE_TENANT_ID);
       created = !existing;
-      if (created) this.sampleGraph = createSampleGraph();
+      if (created) this.sampleGraph = createSampleGraph({ clock: this.clock });
+      const pilotAgents = this.pilotAgentsToInstall(persisted.installedAgents, addedAt);
       const nextTenants = existing
         ? persisted.tenants.map((tenant) =>
             tenant.id === SAMPLE_TENANT_ID
@@ -5372,6 +5404,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         : [...persisted.tenants, sample];
       await this.write({
         ...persisted,
+        installedAgents: [...persisted.installedAgents, ...pilotAgents],
         tenants: nextTenants,
         activeTenantId: SAMPLE_TENANT_ID,
       });
@@ -5386,6 +5419,57 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       );
     }
     return this.getAppState();
+  }
+
+  /**
+   * The three pilot agents install from the bundled registry, without the
+   * Hub and without reporting an install, so pilot mode works offline and
+   * sends nothing. They stay installed after pilot mode ends.
+   */
+  private pilotAgentsToInstall(
+    installedAgents: AgentSummary[],
+    installedAt: string,
+  ): AgentSummary[] {
+    const installed = new Set(installedAgents.flatMap((agent) => [agent.slug, agent.id]));
+    const bundled = listBuiltInRegistryAgents();
+    return PILOT_AGENT_SLUGS.flatMap((slug) => {
+      if (installed.has(slug)) return [];
+      const entry = bundled.find((agent) => agent.slug === slug);
+      if (!entry) {
+        console.warn(`[pilot] bundled agent ${slug} is missing; it will not be available in pilot mode`);
+        return [];
+      }
+      // The bundled summary lists only the manifest's Graph reads, so keeping
+      // it would flag the agent's own declared write as undeclared in the
+      // risk review. Hub installs carry no operation list either.
+      const { graphOperations: _readOnlyOperations, ...summary } = entry;
+      const compatible = withAgentCompatibility(summary, this.appVersion);
+      const agent = toInstalledAgent(compatible, installedAt);
+      agent.provenance = buildAgentProvenance({ agent: compatible, installedAt: agent.installedAt });
+      return [agent];
+    });
+  }
+
+  /**
+   * Pilot data is materialized relative to each request, but Chat history
+   * and Settings read the SQLite cache. Refresh it when the app starts in
+   * pilot mode with a cache older than one day.
+   */
+  async refreshPilotCacheIfStale(): Promise<boolean> {
+    const persisted = await this.read();
+    const active = persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId);
+    if (active?.kind !== "sample" || !this.intelligenceStore) return false;
+    const status = await this.chatService.getGraphCacheStatus(SAMPLE_TENANT_ID);
+    const oldest = Math.min(
+      ...status.resources.map((resource) =>
+        resource.refreshedAt ? Date.parse(resource.refreshedAt) : 0,
+      ),
+    );
+    if (Number.isFinite(oldest) && this.clock().getTime() - oldest < 24 * 60 * 60 * 1000) {
+      return false;
+    }
+    await this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID });
+    return true;
   }
 
   cancelConnectTenant(): void {
@@ -5455,7 +5539,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
       acquireInteractive: async (scopes) =>
-        await runInteractiveFlow({ client, scopes, openBrowser }),
+        await this.interactiveSignIn({ client, scopes, openBrowser }),
     });
     const result = await probeSubscribedSkus(
       (scopes) => session.acquireTokenForScopes(scopes),
@@ -5548,7 +5632,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       this.intelligenceStore?.purgeTenant(id);
       await this.write(next);
-      if (target?.kind === "sample") this.sampleGraph = createSampleGraph();
+      if (target?.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     });
     await this.officeService.purgeTenant(id);
 

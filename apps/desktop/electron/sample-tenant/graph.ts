@@ -169,15 +169,109 @@ function writeBody(input: GraphRequestInput): Record<string, unknown> {
   return clone(input.body as Record<string, unknown>);
 }
 
+/** A clock shared by the pilot Graph, prepared answers, and pilot agents. */
+export type SampleClock = () => Date;
+
+export interface SampleGraphOptions {
+  /** Fixed reference time. Prefer `clock` so every read sees the current time. */
+  now?: Date;
+  /** Returns the current time. Defaults to the system clock. */
+  clock?: SampleClock;
+}
+
+export interface SampleGraph extends RunGraphApi {
+  /** The clock this Graph materializes timestamps with. */
+  readonly clock: SampleClock;
+}
+
 /**
- * A process-local Graph implementation backed by a fresh mutable dataset.
- * Each instance owns its copy, so simulated writes never escape the sample tenant.
+ * Simulated writes are kept as an overlay on top of the generated dataset:
+ * field patches keyed by resource id, removed ids, and created rows. The
+ * dataset itself is materialized from relative offsets on every read, so
+ * timestamps always describe the moment of the request while the overlay
+ * survives until the pilot tenant is removed.
  */
-export function createSampleGraph(options: { now?: Date } = {}): RunGraphApi {
-  const dataset = createSampleTenantDataset(options.now);
+interface SampleOverlay {
+  patches: Map<string, Record<string, unknown>>;
+  deleted: Set<string>;
+  created: Map<string, Array<Record<string, unknown>>>;
+  singletonPatches: Map<string, Record<string, unknown>>;
+  createdCount: number;
+  version: number;
+}
+
+function overlayKey(collectionPath: string, id: string): string {
+  return `${collectionPath}\u0000${id}`;
+}
+
+function applyOverlay(
+  dataset: SampleTenantDataset,
+  overlay: SampleOverlay,
+): SampleTenantDataset {
+  if (overlay.version === 0) return dataset;
+  const resources: SampleTenantDataset["resources"] = {};
+  for (const [collectionPath, rows] of Object.entries(dataset.resources)) {
+    const next: Array<Record<string, unknown>> = [];
+    for (const row of rows) {
+      const key = overlayKey(collectionPath, String(row.id));
+      if (overlay.deleted.has(key)) continue;
+      const patch = overlay.patches.get(key);
+      next.push(patch ? { ...row, ...clone(patch) } : row);
+    }
+    for (const created of overlay.created.get(collectionPath) ?? []) {
+      if (!overlay.deleted.has(overlayKey(collectionPath, String(created.id)))) {
+        next.push(clone(created));
+      }
+    }
+    resources[collectionPath] = next;
+  }
+  const singletons: SampleTenantDataset["singletons"] = {};
+  for (const [path, value] of Object.entries(dataset.singletons)) {
+    const patch = overlay.singletonPatches.get(path);
+    singletons[path] = patch ? { ...value, ...clone(patch) } : value;
+  }
+  return { loadedAt: dataset.loadedAt, resources, singletons };
+}
+
+/**
+ * A process-local Graph implementation backed by the generated pilot
+ * dataset. Each instance owns its overlay, so simulated writes never escape
+ * the pilot tenant and are discarded with it.
+ */
+export function createSampleGraph(options: SampleGraphOptions = {}): SampleGraph {
+  const fixed = options.now ? new Date(options.now.getTime()) : undefined;
+  const clock: SampleClock =
+    options.clock ?? (fixed ? () => new Date(fixed.getTime()) : () => new Date());
+  const overlay: SampleOverlay = {
+    patches: new Map(),
+    deleted: new Set(),
+    created: new Map(),
+    singletonPatches: new Map(),
+    createdCount: 0,
+    version: 0,
+  };
+  let cached: { at: number; version: number; dataset: SampleTenantDataset } | undefined;
+  const materialize = (): SampleTenantDataset => {
+    const now = clock();
+    if (cached && cached.at === now.getTime() && cached.version === overlay.version) {
+      return cached.dataset;
+    }
+    const dataset = applyOverlay(createSampleTenantDataset(now), overlay);
+    cached = { at: now.getTime(), version: overlay.version, dataset };
+    return dataset;
+  };
+  const patchRow = (collectionPath: string, id: string, patch: Record<string, unknown>) => {
+    const key = overlayKey(collectionPath, id);
+    const createdRows = overlay.created.get(collectionPath);
+    const createdRow = createdRows?.find((row) => String(row.id) === id);
+    if (createdRow) Object.assign(createdRow, clone(patch));
+    else overlay.patches.set(key, { ...(overlay.patches.get(key) ?? {}), ...clone(patch) });
+    overlay.version += 1;
+  };
 
   const request: RunGraphApi["request"] = async (input) => {
     input.signal?.throwIfAborted();
+    const dataset = materialize();
     const normalized = normalizePath(input.path);
     const query = { ...normalized.query, ...(input.query ?? {}) };
     const path = normalized.path;
@@ -185,8 +279,12 @@ export function createSampleGraph(options: { now?: Date } = {}): RunGraphApi {
     if (singleton) {
       if (input.method === "GET") return selectFields(singleton, query.$select);
       if (input.method === "PATCH") {
-        Object.assign(singleton, writeBody(input));
-        return clone(singleton);
+        overlay.singletonPatches.set(path, {
+          ...(overlay.singletonPatches.get(path) ?? {}),
+          ...writeBody(input),
+        });
+        overlay.version += 1;
+        return clone({ ...singleton, ...overlay.singletonPatches.get(path) });
       }
       throw new SampleGraphError(405, "Request_BadRequest", `Method ${input.method} is not supported for ${path}.`);
     }
@@ -198,8 +296,13 @@ export function createSampleGraph(options: { now?: Date } = {}): RunGraphApi {
     if (!located.itemId) {
       if (input.method === "GET") return collectionResponse(located.collectionPath, located.rows, query);
       if (input.method === "POST") {
-        const created = { id: `sample-created-${located.rows.length + 1}`, ...writeBody(input) };
-        located.rows.push(created);
+        overlay.createdCount += 1;
+        const created = { id: `sample-created-${overlay.createdCount}`, ...writeBody(input) };
+        overlay.created.set(located.collectionPath, [
+          ...(overlay.created.get(located.collectionPath) ?? []),
+          created,
+        ]);
+        overlay.version += 1;
         return clone(created);
       }
       throw new SampleGraphError(405, "Request_BadRequest", `Method ${input.method} is not supported for ${path}.`);
@@ -212,8 +315,10 @@ export function createSampleGraph(options: { now?: Date } = {}): RunGraphApi {
     const item = located.rows[index]!;
     if (located.suffix === "retire") {
       if (input.method !== "POST") throw new SampleGraphError(405, "Request_BadRequest", "Retire requires POST.");
-      item.retired = true;
-      item.managementState = "retirePending";
+      patchRow(located.collectionPath, located.itemId, {
+        retired: true,
+        managementState: "retirePending",
+      });
       return { simulated: true };
     }
     if (located.suffix === "memberOf" || located.suffix === "transitiveMemberOf") {
@@ -239,7 +344,7 @@ export function createSampleGraph(options: { now?: Date } = {}): RunGraphApi {
       if (input.method !== "GET") throw new SampleGraphError(405, "Request_BadRequest", "Compliance states support GET only.");
       return collectionResponse(
         "/deviceCompliancePolicyStates",
-        [{ id: "sample-compliance-state", displayName: "Windows baseline", state: item.complianceState === "noncompliant" ? "nonCompliant" : "compliant" }],
+        [{ id: "sample-compliance-state", displayName: "WIN-Compliance-Baseline", state: item.complianceState === "noncompliant" ? "nonCompliant" : "compliant" }],
         query,
       );
     }
@@ -277,17 +382,20 @@ export function createSampleGraph(options: { now?: Date } = {}): RunGraphApi {
     }
     if (input.method === "GET") return selectFields(item, query.$select);
     if (input.method === "PATCH" || input.method === "PUT") {
-      Object.assign(item, writeBody(input));
-      return clone(item);
+      const patch = writeBody(input);
+      patchRow(located.collectionPath, located.itemId, patch);
+      return clone({ ...item, ...patch });
     }
     if (input.method === "DELETE") {
-      located.rows.splice(index, 1);
+      overlay.deleted.add(overlayKey(located.collectionPath, located.itemId));
+      overlay.version += 1;
       return { simulated: true };
     }
     throw new SampleGraphError(405, "Request_BadRequest", `Method ${input.method} is not supported for ${path}.`);
   };
 
   return {
+    clock,
     async listManagedDevices() {
       const devices: Array<Record<string, unknown>> = [];
       let path = "/deviceManagement/managedDevices?$top=999";

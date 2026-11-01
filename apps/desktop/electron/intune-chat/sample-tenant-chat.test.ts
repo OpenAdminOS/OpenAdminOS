@@ -4,9 +4,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
-import type { ProviderSummary, RunLlmApi } from "@openadminos/agent-sdk";
+import type { IntuneChatStreamEvent, ProviderSummary, RunLlmApi } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
+import { PILOT_COPY, PILOT_PROMPTS } from "../../src/shared/pilot-mode.js";
 import {
   SAMPLE_TENANT_HOME_ACCOUNT_ID,
   SAMPLE_TENANT_ID,
@@ -14,26 +15,21 @@ import {
   SAMPLE_TENANT_USERNAME,
 } from "../sample-tenant/dataset.js";
 import { createSampleGraph } from "../sample-tenant/graph.js";
+import { buildPilotPreparedAnswer } from "../sample-tenant/pilot-answers.js";
 import { AppStateStore } from "../state.js";
 
-const unavailableProvider: ProviderSummary = {
+const NOW = new Date("2026-10-26T12:00:00.000Z");
+
+// A connected provider: if pilot Chat ever fell through to the normal path,
+// it would build and call this LLM.
+const connectedProvider: ProviderSummary = {
   id: "ollama",
   name: "Ollama",
   description: "Local provider",
   isLocal: true,
-  status: "error",
-  detail: "Ollama is not running.",
-  models: [],
-};
-
-const unavailableLlm: RunLlmApi = {
-  available: false,
-  async complete() {
-    throw new Error("The unavailable LLM must not be called.");
-  },
-  async *stream() {
-    throw new Error("The unavailable LLM must not be called.");
-  },
+  status: "connected",
+  models: ["llama3.1:8b"],
+  defaultModel: "llama3.1:8b",
 };
 
 const tokenStore: TokenCacheStorage = {
@@ -41,57 +37,69 @@ const tokenStore: TokenCacheStorage = {
   write: async () => undefined,
 };
 
-describe("sample tenant chat without a provider", () => {
-  it("returns the computed suggested-prompt answer as deterministic markdown", async () => {
+describe("pilot Chat", () => {
+  it("answers every starter and follow-up with the prepared answer and never builds an LLM", async () => {
     const fixture = await makeChatFixture(true);
     try {
-      const result = await fixture.store.sendIntuneChatMessage({
-        content: "Which managed devices have not synced in the last 7 days?",
-      });
-      assert.equal(result.assistantMessage.status, "completed");
-      assert.match(result.assistantMessage.content, /17 managed devices/);
-      assert.match(result.assistantMessage.content, /\| Device \| OS \| Last sync \| Compliance \| Primary user \|/);
-      assert.match(
-        result.assistantMessage.content,
-        /Shown without an LLM summary\. Pick a provider in Settings to get explained answers\./,
-      );
-      assert.equal(result.assistantMessage.model, undefined);
+      for (const prompt of PILOT_PROMPTS) {
+        const result = await fixture.store.sendIntuneChatMessage({ content: prompt });
+        const expected = await buildPilotPreparedAnswer(createSampleGraph({ now: NOW }), prompt, NOW);
+        assert.equal(result.assistantMessage.status, "completed", prompt);
+        assert.equal(result.assistantMessage.content, expected?.markdown, prompt);
+        assert.equal(result.assistantMessage.providerId, undefined);
+        assert.equal(result.assistantMessage.model, undefined);
+        assert.ok(result.assistantMessage.content.endsWith(PILOT_COPY.answerFooter));
+      }
+      assert.equal(fixture.llmBuilds, 0);
+      assert.equal(fixture.providerLists, 0);
     } finally {
       await fixture.close();
     }
   });
 
-  it("keeps a deterministic direct device answer ahead of provider guidance", async () => {
+  it("streams the same prepared answer, including for Nova", async () => {
     const fixture = await makeChatFixture(true);
     try {
-      const result = await fixture.store.sendIntuneChatMessage({
-        content: "List devices that are not encrypted",
-      });
-      assert.equal(result.assistantMessage.status, "completed");
-      assert.doesNotMatch(result.assistantMessage.content, /Answering your own questions needs an LLM provider/);
-      assert.match(result.assistantMessage.content, /5 devices report not encrypted/);
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("uses the same computed answer in the streaming Nova path", async () => {
-    const fixture = await makeChatFixture(true);
-    try {
+      const events: IntuneChatStreamEvent["type"][] = [];
+      const prompt = "Which Windows devices are not encrypted?";
       const result = await fixture.store.streamIntuneChatMessage(
-        { content: "Which Windows devices are not encrypted?" },
-        () => undefined,
+        { content: prompt },
+        (event) => events.push(event.type),
         { voice: true },
       );
-      assert.equal(result.assistantMessage.status, "completed");
-      assert.match(result.assistantMessage.content, /5 managed Windows devices/);
-      assert.match(result.assistantMessage.content, /Shown without an LLM summary/);
+      const expected = await buildPilotPreparedAnswer(createSampleGraph({ now: NOW }), prompt, NOW);
+      assert.equal(result.assistantMessage.content, expected?.markdown);
+      assert.match(result.assistantMessage.content, /^5 of 71 managed Windows devices/);
+      assert.deepEqual(events, ["started", "status", "delta", "completed"]);
+      assert.equal(fixture.llmBuilds, 0);
     } finally {
       await fixture.close();
     }
   });
 
-  it("keeps the existing failure for a real tenant", async () => {
+  it("rejects a prompt that is not prepared, without writing a conversation", async () => {
+    const fixture = await makeChatFixture(true);
+    try {
+      await assert.rejects(
+        () => fixture.store.sendIntuneChatMessage({ content: "Draft a limerick about coffee." }),
+        { message: PILOT_COPY.promptRejected },
+      );
+      await assert.rejects(
+        () =>
+          fixture.store.streamIntuneChatMessage(
+            { content: "Which policies changed recently?" },
+            () => undefined,
+          ),
+        { message: PILOT_COPY.promptRejected },
+      );
+      assert.equal((await fixture.store.listIntuneChatConversations()).length, 0);
+      assert.equal(fixture.llmBuilds, 0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps the existing provider path for a real tenant", async () => {
     const fixture = await makeChatFixture(false);
     try {
       const result = await fixture.store.sendIntuneChatMessage({
@@ -102,23 +110,7 @@ describe("sample tenant chat without a provider", () => {
         result.assistantMessage.content,
         "No LLM provider is connected. Start Ollama or choose another provider in Settings, then try again.",
       );
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("asks for a provider when the planner cannot identify tenant evidence", async () => {
-    const fixture = await makeChatFixture(true);
-    try {
-      const result = await fixture.store.sendIntuneChatMessage({
-        content: "Draft a limerick about coffee.",
-      });
-      assert.equal(result.assistantMessage.status, "completed");
-      assert.match(
-        result.assistantMessage.content,
-        /Answering your own questions needs an LLM provider\. Pick one in Settings, or try one of these:/,
-      );
-      assert.match(result.assistantMessage.content, /- Which managed devices have not synced in the last 7 days\?/);
+      assert.ok(fixture.llmBuilds > 0);
     } finally {
       await fixture.close();
     }
@@ -126,7 +118,7 @@ describe("sample tenant chat without a provider", () => {
 });
 
 async function makeChatFixture(sample: boolean) {
-  const dir = await mkdtemp(join(tmpdir(), "openadminos-sample-chat-"));
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-pilot-chat-"));
   const statePath = join(dir, "state.json");
   const tenant = sample
     ? {
@@ -155,18 +147,42 @@ async function makeChatFixture(sample: boolean) {
     }),
     "utf8",
   );
-  const graph = createSampleGraph({ now: new Date("2026-10-26T12:00:00.000Z") });
+  let llmBuilds = 0;
+  let providerLists = 0;
+  const unavailableLlm: RunLlmApi = {
+    available: false,
+    async complete() {
+      throw new Error("The LLM must not be called.");
+    },
+    async *stream() {
+      throw new Error("The LLM must not be called.");
+    },
+  };
+  const graph = createSampleGraph({ now: NOW });
   const store = new AppStateStore({
     filePath: statePath,
     tokenStore,
     userDataPath: dir,
     statsApiUrl: "",
+    clock: () => new Date(NOW.getTime()),
     graphFactory: () => graph,
-    providerListFactory: () => [unavailableProvider],
-    llmFactory: () => unavailableLlm,
+    providerListFactory: () => {
+      providerLists += 1;
+      return [sample ? connectedProvider : { ...connectedProvider, status: "error", models: [] }];
+    },
+    llmFactory: () => {
+      llmBuilds += 1;
+      return unavailableLlm;
+    },
   });
   return {
     store,
+    get llmBuilds() {
+      return llmBuilds;
+    },
+    get providerLists() {
+      return providerLists;
+    },
     async close() {
       store.close();
       await rm(dir, { recursive: true, force: true });

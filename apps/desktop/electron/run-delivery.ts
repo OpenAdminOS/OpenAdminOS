@@ -1,3 +1,4 @@
+import { PILOT_COPY } from "../src/shared/pilot-mode.js";
 import {
   createTenantSession,
   findConnectorFactory,
@@ -412,7 +413,7 @@ export class RunDeliveryService {
       : undefined;
     if (tenant?.kind === "sample") {
       const message =
-        "Connector deliveries are not available on the sample tenant. Connect your tenant to deliver run results.";
+        PILOT_COPY.featureInProduction("Connector deliveries", true);
       await this.host.appendRunLog(item.runId, "warn", message);
       return { retryable: false, error: message };
     }
