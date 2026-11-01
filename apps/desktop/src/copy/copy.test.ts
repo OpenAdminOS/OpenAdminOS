@@ -4,6 +4,7 @@ import {
   COMMON_COPY,
   SETTINGS_ITEMS,
   SETTINGS_SECTIONS,
+  SETUP_COPY,
   chatErrorCopy,
   deriveTrustCopy,
   searchSettings,
@@ -18,7 +19,7 @@ function stringsIn(value: unknown): string[] {
 
 describe("v0.4 copy catalog", () => {
   it("uses the restrained product voice", () => {
-    const strings = stringsIn({ CHAT_COPY, COMMON_COPY, SETTINGS_ITEMS, SETTINGS_SECTIONS });
+    const strings = stringsIn({ CHAT_COPY, COMMON_COPY, SETTINGS_ITEMS, SETTINGS_SECTIONS, SETUP_COPY });
     expect(strings.length).toBeGreaterThan(30);
     for (const value of strings) {
       expect(value.trim()).not.toBe("");
@@ -26,6 +27,14 @@ describe("v0.4 copy catalog", () => {
       expect(value).not.toMatch(/[!🚀🎉]/u);
       expect(value).not.toMatch(/\.\.\./);
     }
+  });
+
+  it("recommends a daily reader and separates consent from scoped coverage", () => {
+    expect(SETUP_COPY.dailyRole).toContain("Global Reader");
+    expect(SETUP_COPY.consentRole).toMatch(/Global Administrator.*only needed once/);
+    expect(SETUP_COPY.scopedRoles).toMatch(/Security Reader.*Conditional Access Administrator.*Intune Administrator/);
+    expect(SETUP_COPY.scopedRoles).toContain("reduced coverage");
+    expect(SETUP_COPY.dailyRole + SETUP_COPY.consentRole + SETUP_COPY.scopedRoles).not.toContain("\u2014");
   });
 
   it("derives local and hosted trust boundaries without inventing a region", () => {

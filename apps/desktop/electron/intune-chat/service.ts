@@ -8,6 +8,8 @@ import { join } from "node:path";
 
 import {
   resolveProviderDefaultModel,
+  graphAccessDenialFromError,
+  graphAccessDenialText,
   type AgentSummary,
   type ChatInvestigationMode,
   type ChatInvestigationSettings,
@@ -1100,7 +1102,6 @@ export class IntuneChatService {
       resourceSet.add("managedDevices");
     }
     const resources = sanitizeGraphResources([...resourceSet]);
-    const requiredScopes = requiredScopesForResources(resources);
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
@@ -1120,12 +1121,18 @@ export class IntuneChatService {
           .filter((status) => isGraphCacheStatusStale(status))
           .map((status) => status.resource);
         const cacheFreshness = newestRefreshedAt(relevantStatus);
-        const errors = relevantStatus
-          .map((status) => status.lastError)
-          .filter((error): error is string => Boolean(error));
-        const missingScopes = errors.some((error) => /scope|consent|permission/i.test(error))
-          ? requiredScopes
-          : [];
+        const issues = relevantStatus.flatMap(row => {
+          if (!row.lastError) return [];
+          const denial = row.accessDenial ?? graphAccessDenialFromError(row.lastError, {
+            label: row.label,
+            path: pathForResource(row.resource).path,
+            requiredScopes: row.scopeSet,
+          });
+          return [{ message: denial ? graphAccessDenialText(denial) : row.lastError, denial }];
+        });
+        const errors = issues.map(issue => issue.message);
+        const accessDenials = issues.flatMap(issue => issue.denial ? [issue.denial] : []);
+        const missingScopes = [...new Set(accessDenials.flatMap(denial => denial.missingScopes))];
         const status = tenantReadinessStatus({
           missingScopes,
           staleResources,
@@ -1142,7 +1149,8 @@ export class IntuneChatService {
           staleResources,
           missingScopes,
           warnings: readinessWarnings({ status, staleResources, errors }),
-          recovery: readinessRecovery(status),
+          recovery: readinessRecovery(status, accessDenials),
+          ...(accessDenials.length > 0 ? { accessDenials } : {}),
         };
       });
     return {
@@ -1420,18 +1428,22 @@ export class IntuneChatService {
         });
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
-        // A 403 on a read resource almost always means the tenant was
-        // consented before this permission existed in the requested set.
-        // Surface the recovery path instead of the raw Graph body.
-        const message = raw.includes("HTTP 403")
-          ? `Microsoft Graph denied read access for ${definition.label}. This tenant was likely connected before OpenAdminOS requested ${definition.scopes.join(", ")}. Reconnect the tenant to grant the new read permissions, then refresh again.`
-          : raw;
+        const accessDenial = graphAccessDenialFromError(error, {
+          label: definition.label,
+          path: request.path,
+          method: "GET",
+          requiredScopes: definition.scopes,
+          entraTier: tenant.entraTier,
+          intuneLicensed: tenant.intuneLicensed,
+        });
+        const message = accessDenial ? graphAccessDenialText(accessDenial) : raw;
         store.recordGraphResourceError({
           tenantId: tenant.id,
           resource,
           label: definition.label,
           scopeSet: definition.scopes,
           error: message,
+          ...(accessDenial ? { accessDenial } : {}),
           now: refreshedAt,
         });
         slots[slot] = {
@@ -1441,6 +1453,7 @@ export class IntuneChatService {
           refreshedAt,
           ok: false,
           error: message,
+          ...(accessDenial ? { accessDenial } : {}),
         };
         completed += 1;
         onProgress?.({

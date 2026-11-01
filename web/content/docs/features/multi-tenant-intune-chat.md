@@ -1,11 +1,11 @@
 ---
-title: "Multi-tenant Intune Chat"
+title: "Multi-tenant Chat"
 description: "Read-only investigations across more than one connected tenant."
 ---
 
-# Multi-tenant Intune Chat
+# Multi-tenant Chat
 
-Multi-tenant Intune Chat is for read-only MSP-style investigations across connected tenants. The default chat scope remains the active tenant. When a prompt asks for all tenants, every connected tenant, selected tenants, or all customers, OpenAdminOS opens a scope review before it refreshes Graph cache data or builds a model prompt.
+Multi-tenant Chat is for read-only MSP-style investigations across connected tenants. The default chat scope remains the active tenant. When a prompt asks for all tenants, every connected tenant, selected tenants, or all customers, OpenAdminOS opens a scope review before it refreshes Graph cache data or builds a model prompt.
 
 The scope review shows the resolved tenant list, selected tenant groups, planned Graph resources, cache freshness, provider and model, missing scopes, expired sessions, throttling warnings, and any tenant that will be skipped. Tenant groups are local shortcuts only; they expand into explicit tenant ids before the run starts.
 

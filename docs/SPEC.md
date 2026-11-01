@@ -1254,8 +1254,21 @@ response or the iteration cap produces a visible fallback notice and answers
 `graph_get` accepts only GET, validates paths against the chat Graph cache
 declarations and bundled Graph catalog read scopes, caps `$top` and returned rows
 at 50, follows `@odata.nextLink` paging within that row budget through validated
-`$skiptoken` re-requests, reports truncation, and names the missing scope with a
-reconnect recovery when Graph answers 403. Endpoints that reject `$top` (the
+`$skiptoken` re-requests, reports truncation, and classifies Graph 403 responses
+using granted token scopes, known Graph error codes, and the existing subscribed-SKU inventory. Missing consent names the scopes
+and offers reconnect or an admin consent handoff. Missing licence names Microsoft
+Intune or the required Entra ID tier. Granted scopes with denied access point to
+Entra or Intune role assignment or activation. Unverified failures list consent,
+role, licence, and access-policy possibilities without recommending reconnect.
+Structured access-denial fields are additive in run history, cache status, and
+multi-tenant readiness; persisted status values remain unchanged. Licence inventory
+failures remain unknown. This Phase 1 change adds no access probes, selectable
+permission packs, onboarding questions, or changes to scopes requested at sign-in.
+Setup recommends Global Reader for daily read work, treats Global Administrator as
+a one-time consent role, and supports scoped roles with reduced coverage. Public
+docs use Chat or Tenant Chat while file paths and URLs stay unchanged.
+
+Endpoints that reject `$top` (the
 managed device overview and authentication methods policy singletons, the
 fixed-page-size directory roles collection, and the license SKU inventory) are
 requested without a page size, and planner-declared cache paths, their canonical

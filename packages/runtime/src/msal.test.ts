@@ -8,6 +8,7 @@ import type {
 import {
   DEFAULT_SCOPE_METADATA,
   DEFAULT_SCOPES,
+  createTenantSession,
   runInteractiveFlow,
   TenantConnectCancelledError,
   TenantConnectTimeoutError,
@@ -21,6 +22,20 @@ describe("default tenant consent scopes", () => {
     const described = DEFAULT_SCOPE_METADATA.map((scope) => scope.name).sort();
     assert.deepEqual(requested, described);
     assert.equal(new Set(requested).size, requested.length);
+  });
+  it("retains the scopes actually returned by MSAL without changing token requests", async () => {
+    const requests: string[][] = [];
+    const client = {
+      getTokenCache: () => ({ getAccountByHomeId: async () => ({ homeAccountId: "account" }) }),
+      acquireTokenSilent: async (request: { scopes: string[] }) => {
+        requests.push(request.scopes);
+        return { accessToken: "opaque-token", scopes: ["User.Read.All"] };
+      },
+    } as unknown as PublicClientApplication;
+    const session = createTenantSession({ client, tenantId: "tenant", username: "reader", homeAccountId: "account" });
+    assert.deepEqual(await session.acquireTokenWithScopes!(["User.Read.All", "AuditLog.Read.All"]), { accessToken: "opaque-token", scopes: ["User.Read.All"] });
+    assert.equal(await session.acquireTokenForScopes(["User.Read.All"]), "opaque-token");
+    assert.deepEqual(requests, [["User.Read.All", "AuditLog.Read.All"], ["User.Read.All"]]);
   });
 });
 

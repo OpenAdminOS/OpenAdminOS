@@ -149,6 +149,7 @@ import {
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   providerCatalog,
   resolveProviderDefaultModel,
+  graphAccessDenialFromError,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSchedule,
@@ -261,6 +262,7 @@ import {
   normalizeWorkspaceTitle,
   tenantNamesById,
 } from "./state-helpers.js";
+import { lookupEndpoint } from "./graph-catalog.js";
 export { __agentDraftTestUtils } from "./agent-draft-helpers.js";
 
 
@@ -3952,7 +3954,8 @@ export class AppStateStore {
   ): Promise<void> {
     const now = new Date(nowMs).toISOString();
     const message = error instanceof Error ? error.message : String(error);
-    const summary = humanizeScheduledRunError(message);
+    const accessDenial = graphAccessDenialFromError(error);
+    const summary = humanizeScheduledRunError(message, accessDenial);
     const runId = `run_${nowMs.toString(36)}_${randomUUID().slice(0, 8)}`;
     const failedRun: RunRecord = {
       id: runId,
@@ -3964,6 +3967,7 @@ export class AppStateStore {
       trigger: "schedule",
       summary,
       error: message,
+      ...(accessDenial ? { accessDenial } : {}),
       steps: [],
       logs: [
         {
@@ -5067,7 +5071,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const latestWake = scheduledRuns[0];
     const latestSuccess = scheduledRuns.find((run) => run.status === "completed");
     const latestFailureMessage = latestWake?.status === "failed"
-      ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.")
+      ? humanizeScheduledRunError(latestWake.error ?? latestWake.summary ?? "Scheduled run failed.", latestWake.accessDenial)
       : undefined;
     return {
       supported: process.platform !== "linux",
@@ -5258,6 +5262,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         entraTier: detected,
         entraTierDetectedAt: new Date().toISOString(),
         relevantLicenses,
+        intuneLicensed: result?.intuneLicensed,
       };
       await this.write({ ...persisted, tenants: next });
     });
@@ -5481,18 +5486,26 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const scopes = (agentScopes ?? []).filter((s) => s.length > 0);
     const tokenProvider =
       scopes.length > 0
-        ? async () => await tenantSession.acquireTokenForScopes(scopes)
+        ? async () => tenantSession.acquireTokenWithScopes
+          ? await tenantSession.acquireTokenWithScopes(scopes)
+          : await tenantSession.acquireTokenForScopes(scopes)
         : async () => {
             const result = await acquireTokenSilent({
               client,
               homeAccountId: tenant.homeAccountId,
             });
-            return result.accessToken;
+            return { accessToken: result.accessToken, scopes: result.scopes };
           };
     return {
       createGraph: (log) => this.graphFactory
         ? this.graphFactory({ tenantId: tenant.id, scopes, log })
-        : createGraphAdapter({ tokenProvider, log, signal: execution?.signal }),
+        : createGraphAdapter({ tokenProvider, log, signal: execution?.signal,
+            accessContext: (method, path) => ({
+              requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
+              entraTier: tenant.entraTier,
+              intuneLicensed: tenant.intuneLicensed,
+            }),
+          }),
       tenantId: tenant.id,
       tenantSession,
     };

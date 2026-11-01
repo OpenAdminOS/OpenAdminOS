@@ -102,7 +102,8 @@ it("preloads all pages and preserves the complete snapshot after a paging failur
     cached = status.resources.find((r) => r.resource === "managedDevices")!;
     assert.equal(cached.rows, 1200);
     assert.equal(cached.refreshedAt, refreshedAt);
-    assert.match(cached.lastError!, /read permissions/);
+    assert.match(cached.lastError!, /cannot determine the cause/);
+    assert.doesNotMatch(cached.lastError!, /reconnect/i);
     mode = "cancel";
     const before = requests;
     await store.startGraphCachePreload({

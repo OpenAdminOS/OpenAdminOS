@@ -5,6 +5,7 @@ import { dirname } from "node:path";
 import type {
   ChatInvestigationMode,
   ChatInvestigationSettings,
+  GraphAccessDenial,
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
   GraphCacheRefreshScheduleSettings,
@@ -69,6 +70,7 @@ interface ResourceStatusRow {
   refreshed_at: string | null;
   scope_set_json: string;
   last_error: string | null;
+  access_denial_json: string | null;
   tenant_total: number | null;
 }
 
@@ -743,7 +745,8 @@ export class IntelligenceSqliteStore {
             refreshed_at = excluded.refreshed_at,
             scope_set_json = excluded.scope_set_json,
             tenant_total = excluded.tenant_total,
-            last_error = NULL`,
+            last_error = NULL,
+            access_denial_json = NULL`,
         )
         .run(
           input.tenantId,
@@ -912,19 +915,21 @@ export class IntelligenceSqliteStore {
     label: string;
     scopeSet: string[];
     error: string;
+    accessDenial?: GraphAccessDenial;
     now: string;
   }): void {
     this.db
       .prepare(
         `INSERT INTO graph_cache_status (
           tenant_id, resource, label, row_count, page_count, page_limit_reached,
-          refreshed_at, scope_set_json, last_error
+          refreshed_at, scope_set_json, last_error, access_denial_json
         )
-        VALUES (?, ?, ?, 0, 0, 0, NULL, ?, ?)
+        VALUES (?, ?, ?, 0, 0, 0, NULL, ?, ?, ?)
         ON CONFLICT(tenant_id, resource) DO UPDATE SET
           label = excluded.label,
           scope_set_json = excluded.scope_set_json,
-          last_error = excluded.last_error`,
+          last_error = excluded.last_error,
+          access_denial_json = excluded.access_denial_json`,
       )
       .run(
         input.tenantId,
@@ -932,6 +937,7 @@ export class IntelligenceSqliteStore {
         input.label,
         JSON.stringify(input.scopeSet),
         `${input.now}: ${input.error}`,
+        input.accessDenial ? JSON.stringify(input.accessDenial) : null,
       );
   }
 
@@ -964,7 +970,7 @@ export class IntelligenceSqliteStore {
     const rows = this.db
       .prepare(
         `SELECT resource, label, row_count, page_count, page_limit_reached,
-                refreshed_at, scope_set_json, last_error, tenant_total
+                refreshed_at, scope_set_json, last_error, tenant_total, access_denial_json
          FROM graph_cache_status
          WHERE tenant_id = ?`,
       )
@@ -980,6 +986,7 @@ export class IntelligenceSqliteStore {
           scopeSet: definition.scopes,
         };
       }
+      const accessDenial = readJson<GraphAccessDenial | null>(row.access_denial_json ?? "null", null);
       return {
         resource: row.resource,
         label: row.label,
@@ -989,6 +996,7 @@ export class IntelligenceSqliteStore {
         refreshedAt: row.refreshed_at ?? undefined,
         scopeSet: readJson<string[]>(row.scope_set_json, definition.scopes),
         lastError: row.last_error ?? undefined,
+        ...(accessDenial ? { accessDenial } : {}),
         tenantTotal: row.tenant_total ?? undefined,
       };
     });
@@ -3656,6 +3664,7 @@ export class IntelligenceSqliteStore {
     // Tenant-wide total reported by Graph via $count, which can exceed
     // the number of rows the cache holds.
     ensureColumn(this.db, "graph_cache_status", "tenant_total", "INTEGER");
+    ensureColumn(this.db, "graph_cache_status", "access_denial_json", "TEXT");
     ensureColumn(
       this.db,
       "graph_cache_status",

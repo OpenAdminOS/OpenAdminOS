@@ -541,30 +541,37 @@ export interface CreateTenantSessionInput {
 export function createTenantSession(
   input: CreateTenantSessionInput,
 ): TenantSession {
+  const acquire = async (scopes: string[]): Promise<AuthenticationResult> => {
+    try {
+      const result = await acquireTokenSilent({
+        client: input.client,
+        homeAccountId: input.homeAccountId,
+        scopes,
+      });
+      return result;
+    } catch (silentError) {
+      const needsInteractive =
+        silentError instanceof InteractionRequiredAuthError ||
+        (silentError instanceof Error &&
+          silentError.message.includes("is no longer valid")) ||
+        (silentError instanceof Error &&
+          silentError.message.includes("No cached account"));
+      if (!needsInteractive || !input.acquireInteractive) {
+        throw silentError;
+      }
+      const result = await input.acquireInteractive(scopes);
+      return result;
+    }
+  };
   return {
     tenantId: input.tenantId,
     username: input.username,
     async acquireTokenForScopes(scopes: string[]): Promise<string> {
-      try {
-        const result = await acquireTokenSilent({
-          client: input.client,
-          homeAccountId: input.homeAccountId,
-          scopes,
-        });
-        return result.accessToken;
-      } catch (silentError) {
-        const needsInteractive =
-          silentError instanceof InteractionRequiredAuthError ||
-          (silentError instanceof Error &&
-            silentError.message.includes("is no longer valid")) ||
-          (silentError instanceof Error &&
-            silentError.message.includes("No cached account"));
-        if (!needsInteractive || !input.acquireInteractive) {
-          throw silentError;
-        }
-        const result = await input.acquireInteractive(scopes);
-        return result.accessToken;
-      }
+      return (await acquire(scopes)).accessToken;
+    },
+    async acquireTokenWithScopes(scopes: string[]) {
+      const result = await acquire(scopes);
+      return { accessToken: result.accessToken, scopes: result.scopes };
     },
   };
 }

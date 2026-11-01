@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
+import { graphAccessDenialFromError, graphAccessDenialText, type GraphAccessDenial } from "@openadminos/agent-sdk";
 import type {
   GraphCacheRefreshResourceResult,
   GraphCacheResourceKind,
@@ -86,17 +87,17 @@ export function isNodeError(error: unknown): error is NodeJS.ErrnoException {
 
 
 
-export function humanizeScheduledRunError(message: string): string {
+export function humanizeScheduledRunError(message: string, accessDenial?: GraphAccessDenial): string {
   const raw = message.trim();
   const lower = raw.toLowerCase();
+  if (accessDenial) return graphAccessDenialText(accessDenial);
+  const unknownDenial = graphAccessDenialFromError(raw);
+  if (unknownDenial) return graphAccessDenialText(unknownDenial);
   if (lower.includes("graph request failed") && lower.includes("fetch failed")) {
     return "Microsoft Graph request failed. Check network or VPN connectivity, then rerun the schedule.";
   }
   if (lower.includes("graph request failed") && (lower.includes("401") || lower.includes("unauthorized"))) {
     return "Microsoft Graph rejected the request because the tenant sign-in expired. Reconnect the tenant, then rerun the schedule.";
-  }
-  if (lower.includes("graph request failed") && (lower.includes("403") || lower.includes("forbidden"))) {
-    return "Microsoft Graph rejected the request because required permissions are missing. Reconnect the tenant and approve the agent scopes.";
   }
   if (lower.includes("no active tenant") || lower.includes("tenant required")) {
     return "No active tenant is available. Connect a tenant before scheduled runs can start.";
@@ -367,12 +368,13 @@ export function readinessWarnings(input: {
 
 
 
-export function readinessRecovery(status: TenantReadinessStatus): string {
+export function readinessRecovery(status: TenantReadinessStatus, accessDenials: GraphAccessDenial[] = []): string {
+  if (accessDenials.length > 0) return [...new Set(accessDenials.map(denial => denial.recovery))].join(" ");
   const copy: Record<TenantReadinessStatus, string> = {
     ready: "Ready to run.",
     stale: "Run can refresh cache before answering.",
     expired: "Reconnect this tenant before including it.",
-    "missing-scopes": "Grant the missing delegated Graph scopes, then retry.",
+    "missing-scopes": "Review the access error to check consent, active roles, and tenant licences before retrying.",
     throttled: "Wait for Microsoft Graph throttling to clear or remove this tenant.",
     skipped: "Tenant is skipped for this run.",
     failed: "Review the cached error or remove this tenant from the run.",

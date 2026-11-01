@@ -452,7 +452,7 @@ describe("Intune Chat read-only tools", () => {
     }
   });
 
-  it("graph_get names the missing scope and recovery on a live 403", async () => {
+  it("graph_get leaves a 403 without token evidence unverified", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-tools-"));
     const store = seededStore(dir, 1);
     try {
@@ -467,9 +467,9 @@ describe("Intune Chat read-only tools", () => {
       });
       const execution = await executeIntuneChatTool(ctx, "graph_get", { path: "/users" });
       assert.ok(execution.trace.error, "expected a traced error");
-      assert.match(execution.trace.error, /denied read access for GET \/users/);
-      assert.match(execution.trace.error, /User\.Read\.All/);
-      assert.match(execution.trace.error, /Reconnect the tenant/);
+      assert.match(execution.trace.error, /denied access to GET \/users/);
+      assert.match(execution.trace.error, /cannot determine the cause/);
+      assert.doesNotMatch(execution.trace.error, /reconnect/i);
       assert.match(execution.trace.error, /HTTP 403/);
     } finally {
       store.close();
