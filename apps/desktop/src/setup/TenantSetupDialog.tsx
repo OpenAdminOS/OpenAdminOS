@@ -167,10 +167,19 @@ function PermissionsStep({
               Sign in through your system browser
             </h3>
             <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
-              Use a Microsoft 365 admin account. Tokens are stored through the operating system’s protected credential store and are never sent to an OpenAdminOS server.
+              {SETUP_COPY.dailyRole}
+            </p>
+            <p className="mt-2 text-sm leading-5 text-[var(--color-text-soft)]">
+              {SETUP_COPY.consentRole}
+            </p>
+            <p className="mt-2 text-sm leading-5 text-[var(--color-text-soft)]">
+              {SETUP_COPY.scopedRoles}
             </p>
             <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
-              Microsoft shows the app registration as Microsoft Graph Command Line Tools. Access can be revoked from Entra Enterprise applications.
+              {SETUP_COPY.tokenStorage}
+            </p>
+            <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
+              {SETUP_COPY.appListing}
             </p>
           </div>
         </div>

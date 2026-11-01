@@ -3,6 +3,16 @@ import type { PendingIntent } from "../setup/pending-intent";
 export const SETUP_COPY = {
   title: "Connect a Microsoft 365 tenant",
   subtitle: "Review the read access OpenAdminOS requests before Microsoft sign-in.",
+  dailyRole:
+    "Global Reader is recommended for daily read access across Intune and Entra. Coverage depends on tenant licences and service-specific access controls.",
+  consentRole:
+    "A Global Administrator is only needed once to grant the requested admin consent. Use your daily account after consent is granted.",
+  scopedRoles:
+    "Scoped roles such as Security Reader, Conditional Access Administrator, and Intune Administrator also work, with reduced coverage outside their area. Consent does not add role permissions or licences.",
+  appListing:
+    "Entra lists the app as OpenAdminOS, or under your own registration's name. Access can be revoked from Enterprise applications.",
+  tokenStorage:
+    "Tokens are stored through the operating system's protected credential store and are never sent to an OpenAdminOS server.",
   readOnlyNote:
     "All requested permissions are read-only. Write-mode agents request their specific scope separately at install time, with their own Microsoft consent screen.",
   betaNote:
