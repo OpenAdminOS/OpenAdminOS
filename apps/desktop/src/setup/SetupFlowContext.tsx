@@ -32,7 +32,15 @@ const SOFT_TIMEOUT_MS = 180_000;
 interface SetupFlowValue {
   requireTenant(intent?: PendingIntent): boolean;
   requireTenantAndProvider(intent?: PendingIntent): boolean;
+  /** Opens tenant setup on the permissions stage. */
   openSetup(): void;
+  /** Opens tenant setup on the own app registration form. */
+  openOwnRegistration(): void;
+  /** Adds or reopens the pilot tenant and makes it active. */
+  startPilot(): Promise<void>;
+  /** True while the first-launch welcome view replaces the shell. */
+  welcomeOpen: boolean;
+  dismissWelcome(): void;
 }
 
 const SetupFlowContext = createContext<SetupFlowValue | null>(null);
@@ -45,6 +53,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     state,
     loading,
     connectTenant,
+    addSampleTenant,
     cancelConnectTenant,
     getRequestedScopes,
     setActiveProvider,
@@ -57,6 +66,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const [scopesError, setScopesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectedTenant, setConnectedTenant] = useState<TenantRecord | undefined>();
+  const [pilotRemoved, setPilotRemoved] = useState(false);
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
   const attemptIdRef = useRef(0);
   const restoredRef = useRef(false);
 
@@ -68,7 +79,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       ? state.installedAgents.find((agent) => agent.slug === intent.slug)?.name ??
         state.registryAgents.find((agent) => agent.slug === intent.slug)?.name
       : undefined;
-  const providerReadyForIntent = useCallback(
+  const providerReady = useCallback(
     (candidate: PendingIntent | null | undefined) => {
       const providerId =
         candidate?.kind === "agent-run" && candidate.providerId
@@ -86,6 +97,19 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       );
     },
     [state.activeProviderId, state.providers],
+  );
+  // Pilot mode never uses a provider: Chat answers prepared prompts and the
+  // pilot agents run with prepared text. Only production work needs one.
+  const providerReadyForIntent = useCallback(
+    (candidate: PendingIntent | null | undefined) => {
+      const tenantId =
+        candidate?.kind === "agent-run" && candidate.tenantId
+          ? candidate.tenantId
+          : activeTenant?.id;
+      const tenant = state.tenants.find((entry) => entry.id === tenantId);
+      return tenant?.kind === "sample" || providerReady(candidate);
+    },
+    [activeTenant?.id, providerReady, state.tenants],
   );
 
   const loadScopes = useCallback(async () => {
@@ -107,6 +131,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       attemptIdRef.current += 1;
       setIntent(nextIntent);
       setError(null);
+      setPilotRemoved(false);
       setConnectedTenant(activeTenant);
       if (nextIntent) writePendingIntent(nextIntent);
       else clearPendingIntent();
@@ -122,7 +147,9 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
             : "ready");
       setStage(nextStage);
       setOpen(true);
-      if (nextStage === "permissions") void loadScopes();
+      if (nextStage === "permissions" || nextStage === "own-registration") {
+        void loadScopes();
+      }
     },
     [activeTenant, loadScopes, providerReadyForIntent],
   );
@@ -135,19 +162,21 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       beginFlow(restored);
       return;
     }
-    // First run: a launch with zero connected tenants opens the setup flow
-    // unprompted, so a fresh install starts with permissions and Microsoft
-    // sign-in instead of an inert chat screen. Once a tenant exists, setup
-    // stays contextual. Skipped for the menu-bar companion window and
-    // renderer-only development, where tenant auth is unavailable.
+    // First launch: a full-window welcome offers pilot mode or production
+    // before any Microsoft sign-in. It appears at most once per renderer
+    // launch and "Skip for now" leaves the guest shell.
     if (
       window.openAdminOS &&
       state.tenants.length === 0 &&
       !location.pathname.startsWith("/companion")
     ) {
-      beginFlow(null, "permissions");
+      setWelcomeOpen(true);
     }
   }, [beginFlow, loading, location.pathname, state.tenants.length]);
+
+  useEffect(() => {
+    if (state.tenants.length > 0) setWelcomeOpen(false);
+  }, [state.tenants.length]);
 
   useEffect(() => {
     if (!open || stage !== "waiting") return;
@@ -186,6 +215,11 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   );
 
   const openSetup = useCallback(() => beginFlow(null, "permissions"), [beginFlow]);
+  const openOwnRegistration = useCallback(
+    () => beginFlow(null, "own-registration"),
+    [beginFlow],
+  );
+  const dismissWelcome = useCallback(() => setWelcomeOpen(false), []);
 
   const closeFlow = useCallback(() => {
     const wasWaiting = stage === "waiting" || stage === "timeout";
@@ -193,6 +227,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     setOpen(false);
     setIntent(null);
     setError(null);
+    setPilotRemoved(false);
     clearPendingIntent();
     if (wasWaiting) void cancelConnectTenant();
   }, [cancelConnectTenant, stage]);
@@ -201,7 +236,10 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     const attemptId = attemptIdRef.current + 1;
     attemptIdRef.current = attemptId;
     setError(null);
+    setPilotRemoved(false);
     setStage("waiting");
+    // The host removes the pilot tenant after a successful connect.
+    const hadPilot = state.tenants.some((tenant) => tenant.kind === "sample");
     try {
       const tenant = await connectTenant(options);
       if (attemptId !== attemptIdRef.current) {
@@ -209,11 +247,13 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         return;
       }
       setConnectedTenant(tenant);
+      setPilotRemoved(hadPilot && Boolean(tenant));
       // Intent-less flows (first run, status strip, Settings) continue into
       // provider selection when no provider is connected yet, so a fresh
-      // install is fully usable when the dialog closes.
+      // install is fully usable when the dialog closes. The new tenant is
+      // production, so pilot mode never waives the provider here.
       setStage(
-        (!intent || intentNeedsProvider(intent)) && !providerReadyForIntent(intent)
+        (!intent || intentNeedsProvider(intent)) && !providerReady(intent)
           ? "provider"
           : "ready",
       );
@@ -222,7 +262,18 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       setError(caught instanceof Error ? caught.message : String(caught));
       setStage("error");
     }
-  }, [connectTenant, intent, providerReadyForIntent, toast]);
+  }, [connectTenant, intent, providerReady, state.tenants, toast]);
+
+  const startPilot = useCallback(async () => {
+    attemptIdRef.current += 1;
+    await addSampleTenant();
+    setIntent(null);
+    setOpen(false);
+    setError(null);
+    clearPendingIntent();
+    setWelcomeOpen(false);
+    navigate("/chat");
+  }, [addSampleTenant, navigate]);
 
   const tryAgain = useCallback(async () => {
     attemptIdRef.current += 1;
@@ -283,8 +334,16 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   }, [intent, navigate]);
 
   const value = useMemo<SetupFlowValue>(
-    () => ({ requireTenant, requireTenantAndProvider, openSetup }),
-    [openSetup, requireTenant, requireTenantAndProvider],
+    () => ({
+      requireTenant,
+      requireTenantAndProvider,
+      openSetup,
+      openOwnRegistration,
+      startPilot,
+      welcomeOpen,
+      dismissWelcome,
+    }),
+    [dismissWelcome, openOwnRegistration, openSetup, requireTenant, requireTenantAndProvider, startPilot, welcomeOpen],
   );
 
   return (
@@ -303,6 +362,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         activeProviderId={state.activeProviderId}
         onClose={closeFlow}
         onConnect={(options) => void startConnect(options)}
+        pilotRemoved={pilotRemoved}
         onKeepWaiting={() => setStage("waiting")}
         onTryAgain={() => void tryAgain()}
         onSelectProvider={(id) => void selectProvider(id)}

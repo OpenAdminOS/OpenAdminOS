@@ -4,6 +4,8 @@ import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { IconChat, IconWarning } from "./components/icons";
 import { EmptyState } from "./components/ui";
+import { PilotProductionOnly } from "./components/PilotMode";
+import { FirstLaunchWelcome } from "./setup/WelcomeView";
 
 const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
@@ -50,37 +52,53 @@ export default function App() {
   }
 
   return (
-    <AppShell>
-      <Suspense fallback={<RouteFallback />}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/chat" replace />} />
-          <Route path="/onboarding" element={<Navigate to="/chat" replace />} />
-          <Route path="/agents" element={<Agents />} />
-          <Route path="/agents/office" element={<OfficeRedirect />} />
-          <Route path="/agents/team/:personaId" element={<PersonaOfficeRedirect />} />
-          <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
-          <Route path="/agents/schedules" element={<AgentsQueryRedirect filter="scheduled" />} />
-          <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
-          <Route path="/agents/:slug" element={<Agents />} />
-          <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
-          <Route path="/chat/workspaces/:workspaceId" element={<IntuneChat />} />
-          <Route path="/chat/:conversationId?" element={<IntuneChat />} />
-          <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
-          <Route path="/office" element={<Office />} />
-          <Route path="/changes" element={<Changes />} />
-          <Route path="/fleet" element={<FleetRedirect />} />
-          <Route path="/workspaces" element={<WorkspacesRedirect />} />
-          <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailRedirect />} />
-          <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
-          <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
-          <Route path="/runs" element={<Runs />} />
-          <Route path="/activity" element={<ActivityRedirect />} />
-          <Route path="/runs/:id" element={<RunResult />} />
-          <Route path="/settings/:section?" element={<Settings />} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </Suspense>
-    </AppShell>
+    <FirstLaunchWelcome>
+      <AppShell>
+        <Suspense fallback={<RouteFallback />}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/onboarding" element={<Navigate to="/chat" replace />} />
+            <Route path="/agents" element={<Agents />} />
+            <Route path="/agents/office" element={<OfficeRedirect />} />
+            <Route path="/agents/team/:personaId" element={<PersonaOfficeRedirect />} />
+            <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
+            <Route path="/agents/schedules" element={<AgentsQueryRedirect filter="scheduled" />} />
+            <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
+            <Route path="/agents/:slug" element={<Agents />} />
+            <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
+            <Route path="/chat/workspaces/:workspaceId" element={<IntuneChat />} />
+            <Route path="/chat/:conversationId?" element={<IntuneChat />} />
+            <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
+            <Route
+              path="/office"
+              element={
+                <PilotProductionOnly feature="Agent Team">
+                  <Office />
+                </PilotProductionOnly>
+              }
+            />
+            <Route
+              path="/changes"
+              element={
+                <PilotProductionOnly feature="Changes" plural>
+                  <Changes />
+                </PilotProductionOnly>
+              }
+            />
+            <Route path="/fleet" element={<FleetRedirect />} />
+            <Route path="/workspaces" element={<WorkspacesRedirect />} />
+            <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailRedirect />} />
+            <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
+            <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
+            <Route path="/runs" element={<Runs />} />
+            <Route path="/activity" element={<ActivityRedirect />} />
+            <Route path="/runs/:id" element={<RunResult />} />
+            <Route path="/settings/:section?" element={<Settings />} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+        </Suspense>
+      </AppShell>
+    </FirstLaunchWelcome>
   );
 }
 

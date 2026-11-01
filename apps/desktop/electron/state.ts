@@ -32,6 +32,7 @@ import {
   wrapConnector,
   findRegistryAgentById,
   listAllRegistryAgents,
+  listBuiltInRegistryAgents,
   listRegisteredConnectors,
   loadAgentManifestPreview,
   noSecrets,
@@ -180,6 +181,16 @@ import { defaultUpdateChannel } from "../src/shared/update-channel.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { searchEndpoints } from "./graph-catalog.js";
+import { createSampleGraph, type SampleGraph } from "./sample-tenant/graph.js";
+import { createPilotLlm } from "./sample-tenant/pilot-llm.js";
+import { PILOT_AGENT_SLUGS, PILOT_COPY } from "../src/shared/pilot-mode.js";
+import { pickLocalProviderToAutoSelect } from "../src/shared/provider-detection.js";
+import {
+  SAMPLE_TENANT_HOME_ACCOUNT_ID,
+  SAMPLE_TENANT_ID,
+  SAMPLE_TENANT_NAME,
+  SAMPLE_TENANT_USERNAME,
+} from "./sample-tenant/dataset.js";
 
 import {
   DEFAULT_REGISTRY_SOURCE,
@@ -268,6 +279,21 @@ export { __agentDraftTestUtils } from "./agent-draft-helpers.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
+  /**
+   * Whether the user ever picked a provider. Only `false` lets the host
+   * select a ready local provider automatically. Fresh state files are
+   * written with `false`. State files from earlier versions do not have the
+   * field, and their `activeProviderId` cannot tell an explicit Ollama pick
+   * from the old default, so `read()` treats a missing field as chosen:
+   * existing installs are never switched.
+   */
+  providerChosenByUser?: boolean;
+  /**
+   * The local provider the host selected automatically, and whether the
+   * one-time Chat notice about it was dismissed. Cleared by an explicit
+   * provider choice.
+   */
+  providerAutoSelection?: { providerId: ProviderId; noticeDismissed: boolean };
   /**
    * User-picked model override per provider. When the provider exposes
    * multiple installed models, the user can pick which one is "active"
@@ -403,6 +429,7 @@ type WhatsAppWebClientLike = Pick<
 
 const defaultState: PersistedState = {
   activeProviderId: "ollama",
+  providerChosenByUser: false,
   installedAgents: [],
   runs: [],
   tenants: [],
@@ -508,6 +535,23 @@ function driftPruneReason(
 
 const AUDIT_LOG_SCHEMA_VERSION = 1;
 const AUDIT_CHAIN_START_HASH = "0".repeat(64);
+
+function sampleRelevantLicenses(): NonNullable<TenantRecord["relevantLicenses"]> {
+  return [
+    {
+      skuPartNumber: "SPE_E5",
+      displayName: "Microsoft 365 E5",
+      enabledUnits: 80,
+      consumedUnits: 70,
+    },
+    {
+      skuPartNumber: "EMSPREMIUM",
+      displayName: "Enterprise Mobility + Security E5",
+      enabledUnits: 80,
+      consumedUnits: 65,
+    },
+  ];
+}
 
 type AuditLogEventSource =
   | "run-history"
@@ -685,7 +729,20 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
     });
   }
 
-  return events.sort(compareAuditEvents);
+  return events
+    .map((event) => {
+      const tenant = event.tenantId ? tenantById.get(event.tenantId) : undefined;
+      if (tenant?.kind !== "sample") return event;
+      return {
+        ...event,
+        details: {
+          ...event.details,
+          sampleData: true,
+          sampleDataNotice: "Pilot mode sample data from a fictional company",
+        },
+      };
+    })
+    .sort(compareAuditEvents);
 }
 
 function runAuditDetails(
@@ -759,11 +816,15 @@ function actorForTenant(
     };
   }
   return {
-    kind: "connected-admin",
+    kind: tenant.kind === "sample" ? "local-admin" : "connected-admin",
     tenantId: tenant.id,
     tenantName: tenant.displayName,
-    username: tenant.username,
-    homeAccountId: tenant.homeAccountId,
+    ...(tenant.kind !== "sample"
+      ? {
+          username: tenant.username,
+          homeAccountId: tenant.homeAccountId,
+        }
+      : {}),
   };
 }
 
@@ -1107,6 +1168,17 @@ export interface AppStateStoreOptions {
    * development workflows. Packaged builds must leave this false.
    */
   allowDevRegistrySource?: boolean;
+  /**
+   * Test hook for the pilot tenant clock. The pilot Graph, prepared Chat
+   * answers, and pilot agent text all read time from it. Production uses
+   * the system clock.
+   */
+  clock?: () => Date;
+  /**
+   * Test hook for the interactive Microsoft sign-in used by connectTenant.
+   * Production leaves this unset so sign-in always runs through MSAL.
+   */
+  interactiveSignIn?: typeof runInteractiveFlow;
 }
 
 export class AppStateStore {
@@ -1150,6 +1222,9 @@ export class AppStateStore {
     | undefined;
   private readonly providerSecretStore: SafeStorageProviderSecretStore | undefined;
   private readonly allowDevRegistrySource: boolean;
+  private readonly clock: () => Date;
+  private readonly interactiveSignIn: typeof runInteractiveFlow;
+  private sampleGraph: SampleGraph;
   private tenantConnectController: AbortController | undefined;
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
@@ -1184,6 +1259,8 @@ export class AppStateStore {
       this.providerSecretsForOverride = undefined;
       this.providerSecretStore = undefined;
       this.allowDevRegistrySource = false;
+      this.clock = () => new Date();
+      this.interactiveSignIn = runInteractiveFlow;
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
@@ -1226,7 +1303,10 @@ export class AppStateStore {
           )
         : undefined;
       this.allowDevRegistrySource = options.allowDevRegistrySource === true;
+      this.clock = options.clock ?? (() => new Date());
+      this.interactiveSignIn = options.interactiveSignIn ?? runInteractiveFlow;
     }
+    this.sampleGraph = createSampleGraph({ clock: this.clock });
     const host = this;
     this.chatService = new IntuneChatService({
       read: () => host.read(),
@@ -1234,6 +1314,7 @@ export class AppStateStore {
       resolveTenant: (persisted, tenantId) =>
         host.resolveTenant(persisted as PersistedState, tenantId),
       listProviders: () => host.listProviders(),
+      now: () => host.clock(),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),
       buildGraph: (pinnedTenantId, agentScopes) =>
         host.buildGraph(pinnedTenantId, agentScopes),
@@ -1312,6 +1393,7 @@ export class AppStateStore {
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),
+      buildPilotLlm: (agentSlug) => createPilotLlm({ agentSlug, clock: host.clock }),
       buildGraph: (pinnedTenantId, agentScopes, execution) =>
         host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),
@@ -1411,7 +1493,23 @@ export class AppStateStore {
       changed: () => this.emitStateChanged("office-changed"),
     });
   }
-  saveOfficePersona(input: unknown) { return this.officeService.save(input); }
+  async saveOfficePersona(input: unknown) {
+    if (input && typeof input === "object" && !Array.isArray(input)) {
+      const tenantId = (input as { tenantId?: unknown }).tenantId;
+      const persisted = await this.read();
+      if (
+        typeof tenantId === "string" &&
+        persisted.tenants.some(
+          (tenant) => tenant.id === tenantId && tenant.kind === "sample",
+        )
+      ) {
+        throw new Error(
+          PILOT_COPY.featureInProduction("Agent Team"),
+        );
+      }
+    }
+    return this.officeService.save(input);
+  }
   deleteOfficePersona(id: string) { return this.officeService.remove(id); }
   startOfficePersona(id: string) { return this.officeService.start(id); }
   stopOfficePersona(id: string) { return this.officeService.stop(id); }
@@ -1819,6 +1917,7 @@ export class AppStateStore {
   }
 
   private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
+    if (tenant.kind === "sample") return this.sampleTenantSession();
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     return createTenantSession({
@@ -1827,7 +1926,7 @@ export class AppStateStore {
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
       acquireInteractive: async (scopes) =>
-        runInteractiveFlow({ client, scopes, openBrowser }),
+        this.interactiveSignIn({ client, scopes, openBrowser }),
     });
   }
 
@@ -1979,7 +2078,24 @@ export class AppStateStore {
 
   /** The MSAL client that issued this tenant's tokens. */
   private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
+    if (tenant.kind === "sample") {
+      throw new Error(
+        PILOT_COPY.noSignIn,
+      );
+    }
     return this.msalClientFor(tenant.appRegistration);
+  }
+
+  private sampleTenantSession(): TenantSession {
+    return {
+      tenantId: SAMPLE_TENANT_ID,
+      username: SAMPLE_TENANT_USERNAME,
+      acquireTokenForScopes: async () => {
+        throw new Error(
+          PILOT_COPY.noSignIn,
+        );
+      },
+    };
   }
 
   private requireIntelligenceStore(): IntelligenceSqliteStore {
@@ -2211,8 +2327,8 @@ export class AppStateStore {
   }
 
   async getAppState(): Promise<AppState> {
-    const persisted = await this.read();
     const providers = await this.listProviders();
+    const persisted = await this.autoSelectLocalProvider(await this.read(), providers);
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
       providers[0];
@@ -2256,6 +2372,19 @@ export class AppStateStore {
     }
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
+    }
+    const autoSelection = persisted.providerAutoSelection;
+    if (
+      autoSelection &&
+      !autoSelection.noticeDismissed &&
+      persisted.providerChosenByUser === false &&
+      activeProvider?.id === autoSelection.providerId &&
+      !this.isPilotModeActive(persisted)
+    ) {
+      state.providerAutoSelectNotice = {
+        providerId: activeProvider.id,
+        providerName: activeProvider.name,
+      };
     }
     return state;
   }
@@ -2703,6 +2832,13 @@ export class AppStateStore {
   async setGraphCacheRefreshSchedule(
     input: SetGraphCacheRefreshScheduleInput,
   ): Promise<GraphCacheRefreshScheduleSettings> {
+    const persisted = await this.read();
+    const tenant = this.resolveTenant(persisted, input.tenantId);
+    if (tenant.kind === "sample" && input.enabled) {
+      throw new Error(
+        PILOT_COPY.featureInProduction("Scheduling"),
+      );
+    }
     return this.chatService.setGraphCacheRefreshSchedule(input);
   }
 
@@ -3059,6 +3195,11 @@ export class AppStateStore {
   async createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceDetail> {
     const persisted = await this.read();
     const tenant = this.resolveTenant(persisted, input.tenantId);
+    if (tenant.kind === "sample") {
+      throw new Error(
+        PILOT_COPY.featureInProduction("Workspaces", true),
+      );
+    }
     return this.requireIntelligenceStore().createWorkspace({
       id: `wksp_${randomUUID()}`,
       tenantId: tenant.id,
@@ -3202,6 +3343,12 @@ export class AppStateStore {
       if (!resolvedTenantIds.has(mapping.tenantId)) {
         throw new Error(`Tenant ${mapping.tenantId} is not part of this multi-tenant result.`);
       }
+      const tenant = this.resolveTenant(persisted, mapping.tenantId);
+      if (tenant.kind === "sample") {
+        throw new Error(
+          PILOT_COPY.featureInProduction("Workspaces", true),
+        );
+      }
       if (mapping.workspaceId) {
         const workspace = store.getWorkspace(
           mapping.workspaceId,
@@ -3269,6 +3416,11 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
+    if (tenant?.kind === "sample") {
+      throw new Error(
+        PILOT_COPY.featureInProduction("Connectors", true),
+      );
+    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         "No tenant connected. Connect a Microsoft 365 tenant before testing connectors.",
@@ -3488,6 +3640,11 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
+    if (tenant?.kind === "sample") {
+      throw new Error(
+        PILOT_COPY.featureInProduction("Connectors", true),
+      );
+    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         "No tenant connected. Connect a Microsoft 365 tenant before invoking connectors.",
@@ -3550,6 +3707,11 @@ export class AppStateStore {
     const tenant = persisted.tenants.find(t => t.id === input.tenantId);
     const factory = findConnectorFactory(input.connectorId);
     if (!tenant || !factory) throw new Error("Tenant or connector is unavailable.");
+    if (tenant.kind === "sample") {
+      throw new Error(
+        PILOT_COPY.featureInProduction("Connector deliveries", true),
+      );
+    }
     const config = persisted.connectors?.[input.connectorId]?.config ?? {};
     if (JSON.stringify(config) !== JSON.stringify(input.config)) throw new Error("Connector settings changed. Review a new preview before sending.");
     const instance = await factory.build({ tenant: this.createTenantSessionForRecord(tenant),
@@ -3808,6 +3970,14 @@ export class AppStateStore {
 
     await this.serialize(async () => {
       const persisted = await this.read();
+      const activeTenant = persisted.activeTenantId
+        ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+        : undefined;
+      if (activeTenant?.kind === "sample" && schedule?.enabled) {
+        throw new Error(
+          PILOT_COPY.featureInProduction("Scheduling"),
+        );
+      }
       const idx = persisted.installedAgents.findIndex(
         (agent) => agent.slug === slug || agent.id === slug,
       );
@@ -3853,6 +4023,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentTeamsDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentTeamsDelivery(slug, delivery);
   }
 
@@ -3860,6 +4031,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentWhatsAppWebDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentWhatsAppWebDelivery(slug, delivery);
   }
 
@@ -3867,6 +4039,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentOutlookDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentOutlookDelivery(slug, delivery);
   }
 
@@ -3874,6 +4047,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSlackDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSlackDelivery(slug, delivery);
   }
 
@@ -3881,6 +4055,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentDiscordDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentDiscordDelivery(slug, delivery);
   }
 
@@ -3888,7 +4063,23 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSignalDelivery | null,
   ): Promise<AppState> {
+    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSignalDelivery(slug, delivery);
+  }
+
+  private async assertSampleDeliveryAllowed(
+    delivery: { enabled: boolean } | null,
+  ): Promise<void> {
+    if (!delivery?.enabled) return;
+    const persisted = await this.read();
+    const activeTenant = persisted.activeTenantId
+      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+      : undefined;
+    if (activeTenant?.kind === "sample") {
+      throw new Error(
+        PILOT_COPY.featureInProduction("Connector deliveries", true),
+      );
+    }
   }
 
   /**
@@ -3901,6 +4092,25 @@ export class AppStateStore {
   async fireDueSchedules(): Promise<void> {
     const persisted = await this.read();
     const nowMs = Date.now();
+    const activeTenant = persisted.activeTenantId
+      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
+      : undefined;
+    if (activeTenant?.kind === "sample") {
+      const dueCount = persisted.installedAgents.filter((agent) => {
+        const schedule = agent.schedule;
+        if (!schedule?.enabled) return false;
+        const lastFired = schedule.lastScheduledRunAt
+          ? new Date(schedule.lastScheduledRunAt).getTime()
+          : scheduleFallbackAnchor(agent.installedAt, nowMs);
+        return nowMs >= lastFired + schedule.intervalSeconds * 1000;
+      }).length;
+      if (dueCount > 0) {
+        console.info(
+          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because pilot mode is active`,
+        );
+      }
+      return;
+    }
 
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
@@ -4957,13 +5167,72 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     await this.serialize(async () => {
       const persisted = await this.read();
+      const { providerAutoSelection: _cleared, ...rest } = persisted;
       await this.write({
-        ...persisted,
+        ...rest,
         activeProviderId: id,
+        providerChosenByUser: true,
       });
     });
 
     return this.getAppState();
+  }
+
+  async dismissProviderAutoSelectNotice(): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      if (!persisted.providerAutoSelection || persisted.providerAutoSelection.noticeDismissed) {
+        return;
+      }
+      await this.write({
+        ...persisted,
+        providerAutoSelection: { ...persisted.providerAutoSelection, noticeDismissed: true },
+      });
+    });
+    return this.getAppState();
+  }
+
+  /**
+   * Selects the first ready local provider (Ollama with a text model, LM
+   * Studio, Apple Foundation) when the user never chose a provider and the
+   * active one is not ready. Runs whenever provider readiness is listed for
+   * app state, so a local runtime started later is picked up too. Hosted
+   * providers are never selected here: that would send tenant data off the
+   * device without the user deciding it. Skipped in pilot mode.
+   */
+  private async autoSelectLocalProvider(
+    persisted: PersistedState,
+    providers: ProviderSummary[],
+  ): Promise<PersistedState> {
+    if (persisted.providerChosenByUser !== false) return persisted;
+    if (this.isPilotModeActive(persisted)) return persisted;
+    const candidate = pickLocalProviderToAutoSelect(providers, persisted.activeProviderId);
+    if (!candidate) return persisted;
+    return this.serialize(async () => {
+      // Re-check against the latest state: the user may have picked a
+      // provider, or pilot mode may have started, since the first read.
+      const current = await this.read();
+      if (current.providerChosenByUser !== false || this.isPilotModeActive(current)) {
+        return current;
+      }
+      const next = pickLocalProviderToAutoSelect(providers, current.activeProviderId);
+      if (!next) return current;
+      const updated: PersistedState = {
+        ...current,
+        activeProviderId: next.id,
+        providerAutoSelection: { providerId: next.id, noticeDismissed: false },
+      };
+      await this.write(updated);
+      console.info(`[providers] selected local provider ${next.id} automatically`);
+      return updated;
+    });
+  }
+
+  private isPilotModeActive(persisted: PersistedState): boolean {
+    if (!persisted.activeTenantId) return false;
+    return persisted.tenants.some(
+      (tenant) => tenant.id === persisted.activeTenantId && tenant.kind === "sample",
+    );
   }
 
   async setActiveModel(
@@ -5121,7 +5390,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const client = this.msalClientFor(registration);
     let result;
     try {
-      result = await runInteractiveFlow({
+      result = await this.interactiveSignIn({
         client,
         openBrowser: this.openBrowser,
         signal: controller.signal,
@@ -5180,7 +5449,116 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // is treated as informational (badges shown, runs not blocked).
     void this.probeEntraTier(tenant).catch(() => undefined);
 
+    // Connecting a real tenant ends pilot mode. The pilot tenant goes
+    // through the normal disconnect path, which purges its runs, cache,
+    // and conversations without any Microsoft sign-in call.
+    if ((await this.read()).tenants.some((entry) => entry.kind === "sample")) {
+      await this.disconnectTenant(SAMPLE_TENANT_ID);
+      await this.setActiveTenant(tenant.id);
+    }
+
     return this.getAppState();
+  }
+
+  async addSampleTenant(): Promise<AppState> {
+    const addedAt = new Date().toISOString();
+    let created = false;
+    const sample: TenantRecord = {
+      id: SAMPLE_TENANT_ID,
+      kind: "sample",
+      displayName: SAMPLE_TENANT_NAME,
+      username: SAMPLE_TENANT_USERNAME,
+      homeAccountId: SAMPLE_TENANT_HOME_ACCOUNT_ID,
+      addedAt,
+      lastUsedAt: addedAt,
+      entraTier: "p2",
+      entraTierDetectedAt: addedAt,
+      relevantLicenses: sampleRelevantLicenses(),
+    };
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const existing = persisted.tenants.find((tenant) => tenant.id === SAMPLE_TENANT_ID);
+      created = !existing;
+      if (created) this.sampleGraph = createSampleGraph({ clock: this.clock });
+      const pilotAgents = this.pilotAgentsToInstall(persisted.installedAgents, addedAt);
+      const nextTenants = existing
+        ? persisted.tenants.map((tenant) =>
+            tenant.id === SAMPLE_TENANT_ID
+              ? (() => {
+                  const { appRegistration: _, ...sampleState } = tenant;
+                  return { ...sampleState, ...sample, addedAt: tenant.addedAt };
+                })()
+              : tenant,
+          )
+        : [...persisted.tenants, sample];
+      await this.write({
+        ...persisted,
+        installedAgents: [...persisted.installedAgents, ...pilotAgents],
+        tenants: nextTenants,
+        activeTenantId: SAMPLE_TENANT_ID,
+      });
+    });
+    if (created) {
+      void this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID }).catch(
+        (error) =>
+          console.warn(
+            "[sample-tenant] cache preload did not start",
+            error instanceof Error ? error.message : String(error),
+          ),
+      );
+    }
+    return this.getAppState();
+  }
+
+  /**
+   * The three pilot agents install from the bundled registry, without the
+   * Hub and without reporting an install, so pilot mode works offline and
+   * sends nothing. They stay installed after pilot mode ends.
+   */
+  private pilotAgentsToInstall(
+    installedAgents: AgentSummary[],
+    installedAt: string,
+  ): AgentSummary[] {
+    const installed = new Set(installedAgents.flatMap((agent) => [agent.slug, agent.id]));
+    const bundled = listBuiltInRegistryAgents();
+    return PILOT_AGENT_SLUGS.flatMap((slug) => {
+      if (installed.has(slug)) return [];
+      const entry = bundled.find((agent) => agent.slug === slug);
+      if (!entry) {
+        console.warn(`[pilot] bundled agent ${slug} is missing; it will not be available in pilot mode`);
+        return [];
+      }
+      // The bundled summary lists only the manifest's Graph reads, so keeping
+      // it would flag the agent's own declared write as undeclared in the
+      // risk review. Hub installs carry no operation list either.
+      const { graphOperations: _readOnlyOperations, ...summary } = entry;
+      const compatible = withAgentCompatibility(summary, this.appVersion);
+      const agent = toInstalledAgent(compatible, installedAt);
+      agent.provenance = buildAgentProvenance({ agent: compatible, installedAt: agent.installedAt });
+      return [agent];
+    });
+  }
+
+  /**
+   * Pilot data is materialized relative to each request, but Chat history
+   * and Settings read the SQLite cache. Refresh it when the app starts in
+   * pilot mode with a cache older than one day.
+   */
+  async refreshPilotCacheIfStale(): Promise<boolean> {
+    const persisted = await this.read();
+    const active = persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId);
+    if (active?.kind !== "sample" || !this.intelligenceStore) return false;
+    const status = await this.chatService.getGraphCacheStatus(SAMPLE_TENANT_ID);
+    const oldest = Math.min(
+      ...status.resources.map((resource) =>
+        resource.refreshedAt ? Date.parse(resource.refreshedAt) : 0,
+      ),
+    );
+    if (Number.isFinite(oldest) && this.clock().getTime() - oldest < 24 * 60 * 60 * 1000) {
+      return false;
+    }
+    await this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID });
+    return true;
   }
 
   cancelConnectTenant(): void {
@@ -5212,6 +5590,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     tenant: TenantRecord,
     options: { force?: boolean } = {},
   ): Promise<void> {
+    if (tenant.kind === "sample") {
+      const detectedAt = new Date().toISOString();
+      await this.serialize(async () => {
+        const persisted = await this.read();
+        const tenants = persisted.tenants.map((entry) =>
+          entry.id === tenant.id
+            ? {
+                ...entry,
+                entraTier: "p2" as const,
+                entraTierDetectedAt: detectedAt,
+                relevantLicenses: sampleRelevantLicenses(),
+              }
+            : entry,
+        );
+        await this.write({ ...persisted, tenants });
+      });
+      return;
+    }
     const DAY_MS = 24 * 60 * 60 * 1000;
     const recent =
       tenant.entraTier &&
@@ -5232,7 +5628,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
       acquireInteractive: async (scopes) =>
-        await runInteractiveFlow({ client, scopes, openBrowser }),
+        await this.interactiveSignIn({ client, scopes, openBrowser }),
     });
     const result = await probeSubscribedSkus(
       (scopes) => session.acquireTokenForScopes(scopes),
@@ -5271,12 +5667,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async setActiveTenant(id: string): Promise<AppState> {
     await this.serialize(async () => {
       const persisted = await this.read();
-      const exists = persisted.tenants.some((tenant) => tenant.id === id);
-      if (!exists) {
+      if (!persisted.tenants.some((tenant) => tenant.id === id)) {
         throw new Error(`Tenant not found: ${id}`);
       }
+      const lastUsedAt = new Date().toISOString();
       await this.write({
         ...persisted,
+        tenants: persisted.tenants.map((tenant) =>
+          tenant.id === id ? { ...tenant, lastUsedAt } : tenant,
+        ),
         activeTenantId: id,
       });
     });
@@ -5284,11 +5683,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async disconnectTenant(id: string): Promise<AppState> {
+    await this.cancelGraphCachePreload(id).catch(() => undefined);
     for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
     await this.serialize(async () => {
       const persisted = await this.read();
       const target = persisted.tenants.find((tenant) => tenant.id === id);
-      if (target) {
+      if (target && target.kind !== "sample") {
         try {
           await removeAccount({
             client: this.msalClientForTenant(target),
@@ -5321,6 +5721,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       this.intelligenceStore?.purgeTenant(id);
       await this.write(next);
+      if (target?.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     });
     await this.officeService.purgeTenant(id);
 
@@ -5456,6 +5857,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
       );
     }
+    const scopes = (agentScopes ?? []).filter((scope) => scope.length > 0);
+    if (tenant.kind === "sample") {
+      const tenantSession = this.sampleTenantSession();
+      return {
+        createGraph: (log) =>
+          this.graphFactory
+            ? this.graphFactory({ tenantId: tenant.id, scopes, log })
+            : this.sampleGraph,
+        tenantId: tenant.id,
+        tenantSession,
+      };
+    }
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const tenantSession = createTenantSession({
@@ -5483,7 +5896,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // interactive consent on the first run that requires a new one.
     // Connectors already do this for their declared scopes; agents now
     // get the same treatment.
-    const scopes = (agentScopes ?? []).filter((s) => s.length > 0);
     const tokenProvider =
       scopes.length > 0
         ? async () => tenantSession.acquireTokenWithScopes
@@ -5520,6 +5932,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   private async enqueueRunDeliveries(run: RunRecord): Promise<void> {
+    const persisted = await this.read();
+    if (
+      run.tenantId &&
+      persisted.tenants.some(
+        (tenant) => tenant.id === run.tenantId && tenant.kind === "sample",
+      )
+    ) {
+      return;
+    }
     return this.runDeliveryService.enqueueRunDeliveries(run);
   }
 
@@ -5596,7 +6017,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // use the OpenAdminOS registration.
       const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : []).map(
         (tenant) =>
-          isPlainRecordValue(tenant) && tenant.appRegistration === undefined
+          isPlainRecordValue(tenant) &&
+          tenant.kind !== "sample" &&
+          tenant.appRegistration === undefined
             ? {
                 ...tenant,
                 appRegistration: {
@@ -5639,6 +6062,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       };
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
+      }
+      // See PersistedState.providerChosenByUser: a missing field means an
+      // install from before provider detection, which is never switched.
+      state.providerChosenByUser =
+        typeof parsed.providerChosenByUser === "boolean"
+          ? parsed.providerChosenByUser
+          : true;
+      const rawAutoSelection = (parsed as { providerAutoSelection?: unknown }).providerAutoSelection;
+      if (
+        isPlainRecordValue(rawAutoSelection) &&
+        isProviderId((rawAutoSelection as Record<string, unknown>).providerId)
+      ) {
+        const autoSelection = rawAutoSelection as Record<string, unknown>;
+        state.providerAutoSelection = {
+          providerId: autoSelection.providerId as ProviderId,
+          noticeDismissed: autoSelection.noticeDismissed === true,
+        };
       }
       if (typeof parsed.installId === "string" && parsed.installId.length > 0) {
         state.installId = parsed.installId;

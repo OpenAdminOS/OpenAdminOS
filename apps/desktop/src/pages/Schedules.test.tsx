@@ -35,6 +35,77 @@ describe("Agents schedule actions", () => {
     expect(await screen.findByText(/About 30 runs per 30 days/)).toBeInTheDocument();
   });
 
+  it("shows why schedules are paused and switches to the most recently used real tenant", async () => {
+    const user = userEvent.setup();
+    const scheduledAgent = createMockAgent({
+      schedule: {
+        enabled: true,
+        intervalSeconds: 900,
+        lastScheduledRunAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+    const realTenant = {
+      id: "real-tenant",
+      displayName: "Contoso Production",
+      username: "admin@contoso.invalid",
+      homeAccountId: "real-account",
+      addedAt: "2026-10-20T12:00:00.000Z",
+      lastUsedAt: "2026-10-25T12:00:00.000Z",
+    };
+    const sampleTenant = {
+      id: "openadminos-sample-tenant",
+      kind: "sample" as const,
+      displayName: "Contoso (pilot)",
+      username: "admin@contoso-sample.invalid",
+      homeAccountId: "openadminos-sample-account",
+      addedAt: "2026-10-26T12:00:00.000Z",
+      lastUsedAt: "2026-10-26T12:00:00.000Z",
+    };
+    const state = createMockAppState({
+      tenants: [realTenant, sampleTenant],
+      activeTenantId: sampleTenant.id,
+      installedAgents: [scheduledAgent],
+    });
+    const bridge = makeMockBridge({}, state);
+
+    renderRoute(<Agents />, {
+      path: "/agents",
+      route: "/agents",
+      bridge,
+    });
+
+    expect(
+      await screen.findByText(
+        "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Switch to Contoso Production" }));
+    await waitFor(() => expect(bridge.setActiveTenant).toHaveBeenCalledWith(realTenant.id));
+  });
+
+  it("shows the production page for the Schedules tab in pilot mode", async () => {
+    const state = createMockAppState({
+      tenants: [{
+        id: "openadminos-sample-tenant",
+        kind: "sample" as const,
+        displayName: "Contoso (pilot)",
+        username: "admin@contoso-sample.invalid",
+        homeAccountId: "openadminos-sample-account",
+        addedAt: "2026-10-26T12:00:00.000Z",
+      }],
+      activeTenantId: "openadminos-sample-tenant",
+    });
+    renderRoute(<Agents />, {
+      path: "/agents",
+      route: "/agents?filter=scheduled",
+      bridge: makeMockBridge({}, state),
+    });
+    expect(
+      await screen.findByText("Schedules are available in production. Connect your tenant to use them."),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Schedules" })).not.toBeInTheDocument();
+  });
+
   it("resumes a due batch only after the final explicit setup action", async () => {
     const user = userEvent.setup();
     const scheduledAgent = createMockAgent({

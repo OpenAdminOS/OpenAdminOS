@@ -11,6 +11,7 @@ import {
 import { deriveTrustCopy } from "../copy";
 import { resolveProviderDefaultModel } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
+import { PILOT_COPY } from "../shared/pilot-mode";
 
 export type DataBoundary =
   | {
@@ -68,6 +69,17 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
         model: "GPT-Live-1",
         tooltip: `${trust.boundary ?? trust.strip} Nova voice audio and shared context are active.`,
         isVoiceHosted: true,
+      };
+    }
+
+    // Pilot mode never sends anything to a model: Chat answers are prepared
+    // and pilot agents use prepared text, whatever provider is configured.
+    if (activeTenant?.kind === "sample") {
+      return {
+        kind: "local",
+        label: PILOT_COPY.boundaryLabel,
+        tooltip: PILOT_COPY.boundaryTooltip,
+        isVoiceHosted: false,
       };
     }
 

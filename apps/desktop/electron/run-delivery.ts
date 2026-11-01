@@ -1,3 +1,4 @@
+import { PILOT_COPY } from "../src/shared/pilot-mode.js";
 import {
   createTenantSession,
   findConnectorFactory,
@@ -405,6 +406,16 @@ export class RunDeliveryService {
     const run = persisted.runs.find((candidate) => candidate.id === item.runId);
     if (!run || !isTerminalRunStatus(run.status)) {
       return { retryable: false };
+    }
+    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    const tenant = tenantId
+      ? persisted.tenants.find((candidate) => candidate.id === tenantId)
+      : undefined;
+    if (tenant?.kind === "sample") {
+      const message =
+        PILOT_COPY.featureInProduction("Connector deliveries", true);
+      await this.host.appendRunLog(item.runId, "warn", message);
+      return { retryable: false, error: message };
     }
     try {
       switch (item.connectorId) {

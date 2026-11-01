@@ -2194,11 +2194,35 @@ Removed from navigation:
 - **Home**: its checklist duplicated Chat onboarding, its recent work duplicated run history, and its trust card duplicated the persistent shell boundary. `/` redirects to `/chat`.
 - **Report issue**: available in Settings → About and contextual failure recovery, not as permanent primary navigation.
 
-### First run and contextual activation (updated for v0.5)
+### First run and contextual activation (updated 2026-10-26)
 
 Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`.
 
 **v0.5 decision (2026-08-29):** a launch with zero connected tenants opens the shared setup dialog automatically (permissions review, then Microsoft sign-in, then provider selection when no provider is connected), so a fresh install starts guided instead of presenting an inert chat screen. The dialog is dismissible and auto-opens at most once per launch; a restored pending intent takes precedence; the menu-bar companion window and renderer-only development never auto-open. Once at least one tenant exists, setup returns to being purely contextual. Users can still dismiss the dialog and inspect Chat, Agents, Changes, and Settings, select a suggested question, and edit a local draft before granting tenant access. The empty-state heading, explanation, and suggested questions stay centered as one block immediately above the composer rather than floating in the middle of the transcript area.
+
+**Superseded 2026-11-01: production and pilot mode.** The auto-opened permissions dialog asked every new user for admin consent before they had seen anything work, and many Intune admins cannot grant consent or create app registrations. Customer conversations confirmed that requiring a tenant connection to get started makes people give up. The app therefore has two modes:
+
+- **Production**: a connected tenant, any question, every agent, normal provider rules.
+- **Pilot mode**: a built-in fictional tenant ("Contoso (pilot)"), no Microsoft sign-in, no AI provider, and a deliberately reduced feature set that is stated plainly. It is a guided tour, not a full simulation, so future agents and features never need pilot data.
+
+**First launch.** A launch with zero tenants (no restored pending intent, not the companion window, not renderer-only development) shows a full-window welcome, at most once per launch, with two equal choices: **Start in pilot mode** and **Connect your tenant**. "Use your own app registration" is a link under Connect, because it is a way of connecting rather than a third path. "Skip for now" leaves the guest shell.
+
+**Pilot tenant.** Internally `TenantRecord.kind = "sample"` with fixed id `openadminos-sample-tenant` and `.invalid` addresses only. It is a real tenant scope for hard constraint 3, so every surface keeps its normal tenant checks. A local fake Graph backend serves a curated, deterministic dataset in a realistic company convention, with planted findings. Timestamps are relative to the moment of each request, and simulated writes are kept as an overlay until the pilot tenant is removed. Rules:
+
+- No MSAL client, token, or browser sign-in is ever created for the pilot tenant. Removing it deletes its runs, conversations, and cache like any tenant and skips Microsoft account removal.
+- A slim banner on every screen states the mode and offers Connect. The tenant switcher, answer scope lines, exports, and shared results are labeled.
+- Navigation is reduced to Chat, Agents, Runs, and Settings. Agent Team, Changes, Workspaces, Connectors, Schedules, and Browse are hidden; opening one directly shows "Available in production" with a Connect action.
+- **Chat** accepts prepared prompts only: six starters (devices, compliance, Conditional Access, users, apps, security), each with two follow-ups and, where relevant, a link to the matching pilot agent. Free text is disabled with an explanation, and the host rejects any other prompt for the pilot tenant. Each prepared answer is a short narrative plus a table, generated from templates over facts computed from the current pilot data, so numbers cannot drift. Pilot Chat never calls a model, even when a provider is configured, so the tour behaves the same on every machine.
+- **Agents**: three are runnable: Find inactive devices (read), Conditional Access explainer (read), and Stale guest cleanup (write). Their model steps return prepared text built from the same computed facts, labeled as prepared, and run reports say no model was used. Every other agent, including future ones, is listed as available in production and refused on the pilot tenant.
+- Stale guest cleanup keeps the full diff review, typed confirmation, risk review, and dry run. Confirmed changes apply to the pilot data only and the result says the change was simulated.
+- Connecting a real tenant from pilot mode removes the pilot tenant after a successful connect and says so. Pilot mode can be opened again later from the tenant switcher or Settings.
+- Agent schedules follow the active tenant, so scheduled runs are skipped while pilot mode is active alongside real tenants. The schedules surface says so and offers to switch back.
+
+**Provider detection (production).** When the user has not chosen a provider and the default is not ready, the app selects a ready local provider automatically. A detected hosted provider (a signed-in Claude Code, Codex, or similar CLI) is only pre-selected in the provider step with its data-residency line, and needs one explicit click: a silent hosted default would send tenant data off the device.
+
+**Connect flow wording (2026-10-26).** The permissions stage states that permissions are delegated: OpenAdminOS reads only what both the consented scopes and the signed-in admin's role allow, so Intune RBAC roles and scope tags still apply. The own-registration form says no client secret is used, so there is nothing secret to store on the device. After sign-in, the connected stage reports what now exists in the customer tenant in Entra terms: the enterprise application name, its application (client) ID, and the delegated permission count (default read scopes plus openid, profile, and offline_access), computed from the scope list rather than hard-coded. A custom registration reports its own client ID.
+
+Planned next (not yet built): a permission-area picker for the connect flow (Intune, Entra, Security), a generated registration script that an admin with app-registration rights can run, and an "Authentication and permissions" docs page for security reviewers. Separate app registrations per team or agent remain a later architecture change.
 
 Setup opens only when an action needs tenant context: sending Chat, starting or rerunning an agent, opening tenant Changes from its empty state, refreshing tenant cache data, or explicitly choosing Connect tenant. The shared setup dialog follows this order:
 
@@ -2538,7 +2562,7 @@ Any future agent that needs *per-row* LLM judgment uses `map`. Any future agent 
 
 These must exist and work well before any public release.
 
-1. **Guided first-run activation**: the real Chat-first shell opens immediately, and a zero-tenant launch auto-opens the setup dialog (see §4a). Tenant permissions, browser sign-in, and provider readiness otherwise appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
+1. **Guided first-run activation**: the real Chat-first shell opens immediately, and a zero-tenant launch offers pilot mode or tenant connection (see §4a). Tenant permissions, browser sign-in, and provider readiness otherwise appear only when a tenant-backed action is attempted, then return to an explicit resume review. <90 seconds from the first tenant-backed action to a grounded chat answer or successful agent run.
 2. **MSAL consent flow**: Lawyer-grade transparency about Graph scopes requested. Read scopes only by default; write scopes requested per-agent at install time.
 3. **LLM provider configuration**: All 5 providers, test connection, model dropdowns populated by querying the provider, per-agent overrides.
 4. **Diff confirmation for write agents**: Side-by-side before/after, scope summary, typed confirmation for destructive actions.
@@ -2669,6 +2693,9 @@ Registry QA is expected to run cleanly for bundled agents. When the upstream Mic
 | `20-mcp-gateway.html` | v0.5 gateway settings, pairing, connected clients, and pending external proposals | ✅ Done |
 | `22-office.html` | Office room, original persona avatars, and assignment briefing | ✅ Done |
 | `21-telemetry.html` | v0.5 opt-in usage telemetry with the exact payload preview | ✅ Done |
+| `27-calm-shell.html` | Calm shell desktop redesign | ✅ Done |
+| `28-logo-explorations.html` | Logo concepts; concept A (oa ligature) shipped | ✅ Done |
+| `29-first-run.html` | Two-choice welcome, pilot mode, and connected-stage summary | ✅ Done |
 
 When implementing screens in production code, port the design tokens from `_design.css` to the production app's theme system (Tailwind config or CSS variables in the global stylesheet). Build the components listed in §3 as proper React components, not as one-off implementations per screen.
 

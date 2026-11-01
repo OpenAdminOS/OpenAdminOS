@@ -54,6 +54,7 @@ interface AppStateContextValue {
     options?: { confirmTrustChanges?: boolean },
   ) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
+  dismissProviderAutoSelectNotice: () => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
   setRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
   setUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
@@ -62,6 +63,7 @@ interface AppStateContextValue {
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: (options?: ConnectTenantOptions) => Promise<TenantRecord | undefined>;
+  addSampleTenant: () => Promise<TenantRecord>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
@@ -369,6 +371,24 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const dismissProviderAutoSelectNotice = useCallback(async () => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      setState((currentState) => {
+        const { providerAutoSelectNotice: _dismissed, ...rest } = currentState;
+        return rest;
+      });
+      return;
+    }
+    try {
+      const nextState = await api.dismissProviderAutoSelectNotice();
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      setError(toError(caughtError));
+    }
+  }, []);
+
   const setRegistryInstallCountsEnabled = useCallback(async (enabled: boolean) => {
     const api = getOpenAdminOSApi();
     if (!api) {
@@ -499,6 +519,28 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     const api = getOpenAdminOSApi();
     if (!api) return;
     await api.cancelConnectTenant();
+  }, []);
+
+  const addSampleTenant = useCallback(async () => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      throw new Error("Sample data is unavailable in browser development.");
+    }
+    setError(null);
+    try {
+      const nextState = await api.addSampleTenant();
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+      const tenant = nextState.tenants.find(
+        (entry) => entry.id === nextState.activeTenantId && entry.kind === "sample",
+      );
+      if (!tenant) throw new Error("The sample tenant was not added.");
+      return tenant;
+    } catch (caughtError) {
+      const tenantError = toError(caughtError);
+      setError(tenantError);
+      throw tenantError;
+    }
   }, []);
 
   const setActiveTenant = useCallback(async (id: string) => {
@@ -1014,6 +1056,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgent,
       setActiveModel,
       setActiveProvider,
+      dismissProviderAutoSelectNotice,
       setRegistryInstallCountsEnabled,
       setUsageTelemetryEnabled,
       startRun,
@@ -1021,6 +1064,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       rejectRun,
       cancelRun,
       connectTenant,
+      addSampleTenant,
       cancelConnectTenant,
       getRequestedScopes,
       setActiveTenant,
@@ -1047,6 +1091,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       cancelConnectTenant,
       confirmRun,
       connectTenant,
+      addSampleTenant,
       disconnectTenant,
       draftAgentManifest,
       error,
@@ -1064,6 +1109,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       saveAgentDraft,
       setActiveModel,
       setActiveProvider,
+      dismissProviderAutoSelectNotice,
       setRegistryInstallCountsEnabled,
       setUsageTelemetryEnabled,
       setRegistrySource,

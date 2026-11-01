@@ -444,6 +444,7 @@ function summaryPage(agents) {
 ## Trust model
 
 - [Local-first guarantee](trust/local-first.md)
+- [Authentication and permissions](trust/authentication.md)
 - [Hosted providers](trust/hosted-providers.md)
 - [Write confirmation](trust/write-confirmation.md)
 - [Registry trust](trust/registry-trust.md)

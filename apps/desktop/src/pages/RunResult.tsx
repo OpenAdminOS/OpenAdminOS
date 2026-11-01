@@ -49,6 +49,7 @@ import {
   runReportPlaintext,
 } from "../shared/runReport";
 import { useAppState } from "../state";
+import { PILOT_COPY } from "../shared/pilot-mode";
 import Runs, {
   agentNameForRun,
   formatDate,
@@ -83,11 +84,15 @@ export default function RunResult() {
   const runProvider = run.providerId
     ? state.providers.find((provider) => provider.id === run.providerId)
     : undefined;
-  const runTrust = deriveTrustState({
+  const derivedTrust = deriveTrustState({
     provider: runProvider,
     activeTenant: runTenant,
     model: run.model,
   });
+  // Pilot runs never contact a provider; their LLM steps use prepared text.
+  const runTrust = run.pilot
+    ? { ...derivedTrust, detail: PILOT_COPY.runTrust, isLocal: true }
+    : derivedTrust;
   const displayName = agent
     ? formatAgentDisplayName(agent)
     : agentNameForRun(run, state.installedAgents);
@@ -150,7 +155,7 @@ export default function RunResult() {
         tenant={runTenant}
         tenantName={tenantName}
         trustDetail={runTrust.detail}
-        providerIsLocal={runProvider?.isLocal === true}
+        providerIsLocal={run.pilot === true || runProvider?.isLocal === true}
         onBack={closeToRuns}
         onConfirm={confirmRun}
         onReject={rejectRun}
@@ -167,8 +172,9 @@ export default function RunResult() {
           run={run}
           displayName={displayName}
           tenantName={tenantName}
+          sampleData={runTenant?.kind === "sample"}
           providerName={providerNameForRun(run, state.providers)}
-          providerIsLocal={runProvider?.isLocal}
+          providerIsLocal={run.pilot === true || runProvider?.isLocal}
           trustDetail={runTrust.detail}
           onBackground={closeToRuns}
           onCancel={() => cancelRun(run.id)}
@@ -184,8 +190,9 @@ export default function RunResult() {
         run={run}
         displayName={displayName}
         tenantName={tenantName}
+        sampleData={runTenant?.kind === "sample"}
         providerName={providerNameForRun(run, state.providers)}
-        providerIsLocal={runProvider?.isLocal}
+        providerIsLocal={run.pilot === true || runProvider?.isLocal}
         trustDetail={runTrust.detail}
         activeTenantId={state.activeTenantId}
         tenants={state.tenants}
@@ -239,6 +246,7 @@ function RunDrawer({
   run,
   displayName,
   tenantName,
+  sampleData,
   providerName,
   providerIsLocal,
   trustDetail,
@@ -253,6 +261,7 @@ function RunDrawer({
   run: RunRecord;
   displayName: string;
   tenantName: string;
+  sampleData: boolean;
   providerName: string;
   providerIsLocal?: boolean;
   trustDetail: string;
@@ -283,7 +292,7 @@ function RunDrawer({
               {rerunLabel}
             </Button>
           ) : null}
-          <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
+          <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={sampleData} />
         </>
       }
     >
@@ -341,6 +350,7 @@ function LiveRunModal({
   run,
   displayName,
   tenantName,
+  sampleData,
   providerName,
   providerIsLocal,
   trustDetail,
@@ -350,6 +360,7 @@ function LiveRunModal({
   run: RunRecord;
   displayName: string;
   tenantName: string;
+  sampleData: boolean;
   providerName: string;
   providerIsLocal?: boolean;
   trustDetail: string;
@@ -385,7 +396,7 @@ function LiveRunModal({
             {tenantName} · {providerName} · {run.id}
           </div>
         </div>
-        <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
+        <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={sampleData} />
       </header>
 
       <RunTelemetry
@@ -466,7 +477,7 @@ function ConfirmationPage({
         actions={
           <>
             <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone={dryRun ? "info" : "warning"} />{dryRun ? "Dry run: not applied" : "Awaiting confirmation"}</span>
-            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
+            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={tenant?.kind === "sample"} />
           </>
         }
       />
@@ -766,10 +777,12 @@ function RunActionsMenu({
   run,
   agentName,
   tenantName,
+  sampleData,
 }: {
   run: RunRecord;
   agentName: string;
   tenantName: string;
+  sampleData: boolean;
 }) {
   const toast = useToast();
   const items: MenuEntry[] = [
@@ -778,7 +791,7 @@ function RunActionsMenu({
       label: "Copy report",
       icon: <IconCopy size={13} />,
       onSelect: () => {
-        void copyTextToClipboard(runReportPlaintext(run, { agentName, tenantName }))
+        void copyTextToClipboard(runReportPlaintext(run, { agentName, tenantName, sampleData }))
           .then(() => toast.success("Run report copied."))
           .catch((error) =>
             toast.error(error instanceof Error ? error.message : String(error)),
@@ -792,7 +805,7 @@ function RunActionsMenu({
       onSelect: () => {
         void window.openAdminOS?.saveTextFile({
           suggestedName: `${run.agentSlug}-${run.id}.json`,
-          content: runReportJson(run),
+          content: runReportJson(run, { sampleData }),
           filters: [{ name: "JSON", extensions: ["json"] }],
         });
       },
@@ -804,7 +817,7 @@ function RunActionsMenu({
       onSelect: () => {
         void window.openAdminOS?.saveTextFile({
           suggestedName: `${run.agentSlug}-${run.id}.md`,
-          content: runReportMarkdown(run, { agentName, tenantName }),
+          content: runReportMarkdown(run, { agentName, tenantName, sampleData }),
           filters: [{ name: "Markdown", extensions: ["md"] }],
         });
       },

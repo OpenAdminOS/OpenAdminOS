@@ -586,6 +586,11 @@ export interface TenantRecord {
   addedAt: string;
   lastUsedAt?: string;
   /**
+   * Identifies the built-in fictional tenant. Absent means this is a real
+   * Microsoft 365 tenant backed by a Microsoft sign-in.
+   */
+  kind?: "sample";
+  /**
    * Detected Entra ID licensing tier for this tenant, derived from
    * `/subscribedSkus` at connection time and refreshed on a 24h
    * cadence. `unknown` means the probe hasn't run or failed (e.g.
@@ -697,6 +702,11 @@ export interface RunLogRecord {
 
 export interface RunRecord {
   dryRun?: boolean;
+  /**
+   * Set for runs on the built-in pilot tenant. Their LLM steps used
+   * prepared sample text and no model provider was contacted.
+   */
+  pilot?: true;
   /** Input settings saved at queue time for a fresh run after a dry run. */
   inputSettings?: Record<string, unknown>;
   runForRealOfRunId?: string;
@@ -935,6 +945,12 @@ export interface AppState {
   usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
   office?: OfficeState;
+  /**
+   * Present once after the host selected a ready local provider for a user
+   * who never chose one, until the user dismisses it or picks a provider.
+   * Never set in pilot mode. Hosted providers are never auto-selected.
+   */
+  providerAutoSelectNotice?: { providerId: ProviderId; providerName: string };
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -2729,6 +2745,8 @@ export interface OpenAdminOSApi {
     options?: { confirmTrustChanges?: boolean },
   ): Promise<AppState>;
   setActiveProvider(id: ProviderId): Promise<AppState>;
+  /** Hide the one-time notice about an automatically selected local provider. */
+  dismissProviderAutoSelectNotice(): Promise<AppState>;
   /**
    * Pin the active model for the given provider. Pass `null` to revert
    * to "whichever model the provider reports first". The host validates
@@ -2781,6 +2799,8 @@ export interface OpenAdminOSApi {
    */
   getRequestedScopes(): Promise<RequestedScope[]>;
   connectTenant(options?: ConnectTenantOptions): Promise<AppState>;
+  /** Add or reactivate the built-in fictional tenant. This is idempotent. */
+  addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;

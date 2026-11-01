@@ -23,6 +23,7 @@ export function buildConversationExportMarkdown(input: {
   tenantName?: string;
   providerName?: string;
   cacheSummary: string;
+  sampleData?: boolean;
 }): string {
   const lines = [
     `# ${input.conversation.title}`,
@@ -31,6 +32,7 @@ export function buildConversationExportMarkdown(input: {
     `Tenant: ${input.tenantName ?? input.conversation.tenantId ?? "Unknown"}`,
     `Provider: ${input.providerName ?? "Unknown"}`,
     `Cache: ${input.cacheSummary}`,
+    ...(input.sampleData ? ["Data: Pilot mode sample data from a fictional company"] : []),
     "",
     "This export was generated locally by OpenAdminOS. It includes chat text and source metadata, not cached Graph row payloads.",
     "",

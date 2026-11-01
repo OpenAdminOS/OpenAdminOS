@@ -32,6 +32,7 @@ import {
 import { useAppState } from "../state";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   resolveRunModel,
@@ -81,7 +82,7 @@ export default function AgentDetail({
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { requireTenantAndProvider } = useSetupFlow();
+  const { requireTenantAndProvider, openSetup } = useSetupFlow();
   const {
     state,
     registryAgents,
@@ -135,6 +136,9 @@ export default function AgentDetail({
   const licenseMissing = agent
     ? hasLicenseShortfall(agent.requiresEntraTier, activeTenant?.entraTier)
     : false;
+  // In pilot mode only the three pilot agents run, with prepared text.
+  const pilot = activeTenant?.kind === "sample";
+  const pilotRunnable = pilot && Boolean(agent && isPilotAgentSlug(agent.slug));
   const pendingTenant = pendingRunChoice?.tenantId
     ? state.tenants.find((tenant) => tenant.id === pendingRunChoice.tenantId)
     : activeTenant;
@@ -172,6 +176,10 @@ export default function AgentDetail({
     providerId?: ProviderId;
     model?: string;
   }) => {
+    if (agent && pilot && !isPilotAgentSlug(agent.slug)) {
+      setRunError(PILOT_COPY.agentRefused(agent.name));
+      return;
+    }
     if (
       agent &&
       !requireTenantAndProvider(
@@ -192,7 +200,7 @@ export default function AgentDetail({
     }
     setRunError(null);
     setPendingRunChoice(choice ?? {});
-  }, [agent, requireTenantAndProvider]);
+  }, [agent, pilot, requireTenantAndProvider]);
 
   const trackDeliverySave = (save: Promise<void>): Promise<void> => {
     const tracked = save.finally(() => {
@@ -457,7 +465,7 @@ export default function AgentDetail({
         onClose={closeDrawer}
         actions={
           <>
-            {agent.mode === "write" ? (
+            {agent.mode === "write" && (!pilot || pilotRunnable) ? (
               <Button
                 variant="secondary"
                 size="sm"
@@ -467,15 +475,30 @@ export default function AgentDetail({
                 Dry run
               </Button>
             ) : null}
-            <RunWithMenu
-              providers={state.providers}
-              activeProviderId={state.activeProviderId}
-              activeModelByProviderId={state.activeModelByProviderId}
-              disabled={agent.compatibility?.supported === false}
-              onRun={(choice) => {
-                queueRunPreflight(choice);
-              }}
-            />
+            {pilot && !pilotRunnable ? (
+              <Button variant="secondary" size="sm" title={PILOT_COPY.agentRefused(agent.name)} onClick={openSetup}>
+                {PILOT_COPY.agentConnectToRun}
+              </Button>
+            ) : pilot ? (
+              <Button
+                variant="primary"
+                size="sm"
+                disabled={agent.compatibility?.supported === false}
+                onClick={() => queueRunPreflight()}
+              >
+                Run
+              </Button>
+            ) : (
+              <RunWithMenu
+                providers={state.providers}
+                activeProviderId={state.activeProviderId}
+                activeModelByProviderId={state.activeModelByProviderId}
+                disabled={agent.compatibility?.supported === false}
+                onRun={(choice) => {
+                  queueRunPreflight(choice);
+                }}
+              />
+            )}
             <Menu
               ariaLabel={`${agent.name} actions`}
               trigger={
@@ -955,10 +978,11 @@ export default function AgentDetail({
           dryRun={pendingRunChoice?.dryRun === true}
           agent={agent}
           activeTenantName={pendingTenant?.displayName}
-          providerName={pendingProvider?.name ?? pendingProviderId}
-          providerIsLocal={pendingProvider?.isLocal === true}
+          providerName={pendingTenant?.kind === "sample" ? PILOT_COPY.providerName : pendingProvider?.name ?? pendingProviderId}
+          providerIsLocal={pendingTenant?.kind === "sample" || pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
-          model={pendingModel}
+          pilot={pendingTenant?.kind === "sample"}
+          model={pendingTenant?.kind === "sample" ? "Prepared sample text" : pendingModel}
           deliverySaving={pendingDeliverySaveCount > 0}
           onClose={() => setPendingRunChoice(null)}
           onConfirm={() => {
@@ -2516,11 +2540,13 @@ function RunPreflightModal({
   providerName,
   providerIsLocal,
   requestedScopes,
+  pilot = false,
   model,
   deliverySaving,
   onClose,
   onConfirm,
 }: {
+  pilot?: boolean;
   dryRun: boolean;
   open: boolean;
   agent: { name: string; mode: "read" | "write"; scopes: string[]; schedule?: unknown };
@@ -2534,7 +2560,7 @@ function RunPreflightModal({
   onConfirm: () => void;
 }) {
   const requestedScopeNames = new Set(requestedScopes.map((scope) => scope.name));
-  const mayNeedConsent = agent.scopes.some((scope) => !requestedScopeNames.has(scope));
+  const mayNeedConsent = !pilot && agent.scopes.some((scope) => !requestedScopeNames.has(scope));
   const canStart = Boolean(activeTenantName) && !deliverySaving;
   return (
     <Modal open={open} onClose={onClose} size="md">
@@ -2584,6 +2610,7 @@ function RunPreflightModal({
             What happens
           </div>
           <p className="mt-2 text-base leading-relaxed text-[var(--color-text-soft)]">
+            {pilot ? "Pilot mode runs this agent on the fictional sample tenant with prepared text instead of a model. Changes only touch the in-memory sample data. " : null}
             OpenAdminOS runs this agent against the active tenant and saves the
             result to local run history. {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
               ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."

@@ -14,6 +14,7 @@ import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
+import { PROVIDER_DETECTION_COPY } from "../copy";
 import { setAnswerFont } from "../styles/answer-font";
 import { setDensity } from "../styles/density";
 
@@ -334,6 +335,56 @@ describe("Settings provider section", () => {
     await waitFor(() => {
       expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
     });
+  });
+
+  it("lists a ready hosted provider first as detected when no local provider is ready", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        activeProviderId: "ollama",
+        providers: [
+          { ...provider("ollama"), status: "not-installed", models: [] },
+          provider("lm-studio"),
+          provider("anthropic"),
+          provider("openai"),
+        ],
+      }),
+    );
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge,
+    });
+
+    const detected = await screen.findByRole("region", { name: PROVIDER_DETECTION_COPY.detectedLabel });
+    expect(within(detected).getByText(provider("openai").description)).toBeInTheDocument();
+    expect(within(detected).queryByText("Anthropic")).not.toBeInTheDocument();
+    // The detected provider also leads the full list, and stays inactive.
+    const radios = screen.getAllByRole("radio", { name: /^Set .* active$/ });
+    expect(radios[0]).toHaveAccessibleName("Set OpenAI active");
+    expect(radios[0]).not.toBeChecked();
+    expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+
+    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("OpenAI") }));
+    await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
+  });
+
+  it("does not show detected hosted providers while a local provider is ready", async () => {
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge(
+        {},
+        createMockAppState({
+          activeProviderId: "anthropic",
+          providers: [provider("ollama"), provider("anthropic"), provider("openai")],
+        }),
+      ),
+    });
+
+    await screen.findByRole("heading", { name: "Providers" });
+    expect(screen.queryByRole("region", { name: PROVIDER_DETECTION_COPY.detectedLabel })).not.toBeInTheDocument();
   });
 
   it("renders an available inactive provider with a neutral status", async () => {

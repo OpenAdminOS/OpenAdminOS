@@ -3,6 +3,7 @@ import { Avatar } from "../components/Avatar";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { Badge, StatusDot } from "../components/ui";
+import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
 import { ProviderNotReadyCard } from "../components/provider-setup/ProviderNotReadyCard";
 import { TrustBanner } from "../components/TrustBanner";
 import {
@@ -23,10 +24,13 @@ import type {
   TenantRecord,
 } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
+import { detectedHostedProviders } from "../shared/provider-detection";
 import type { PendingIntent } from "./pending-intent";
 import { groupRequestedScopes } from "./scope-groups";
+import { PILOT_COPY } from "../shared/pilot-mode";
 
 export type SetupStage =
+  | "own-registration"
   | "permissions"
   | "waiting"
   | "timeout"
@@ -47,6 +51,7 @@ export function TenantSetupDialog({
   activeProviderId,
   onClose,
   onConnect,
+  pilotRemoved = false,
   onKeepWaiting,
   onTryAgain,
   onSelectProvider,
@@ -65,6 +70,8 @@ export function TenantSetupDialog({
   activeProviderId: ProviderId;
   onClose: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
+  /** True after a connect that ended pilot mode and removed its data. */
+  pilotRemoved?: boolean;
   onKeepWaiting: () => void;
   onTryAgain: () => void;
   onSelectProvider: (id: ProviderId) => void;
@@ -93,6 +100,17 @@ export function TenantSetupDialog({
           onConnect={onConnect}
         />
       )}
+      {stage === "own-registration" && (
+        <PermissionsStep
+          intent={intent}
+          agentName={agentName}
+          scopes={scopes}
+          scopesError={scopesError}
+          onCancel={onClose}
+          onConnect={onConnect}
+          initialCustomOpen
+        />
+      )}
       {stage === "waiting" && <WaitingStep onCancel={onClose} />}
       {stage === "timeout" && (
         <TimeoutStep
@@ -106,6 +124,7 @@ export function TenantSetupDialog({
       )}
       {stage === "provider" && (
         <ProviderStep
+          pilotRemoved={pilotRemoved}
           providers={providers}
           activeProviderId={activeProviderId}
           error={error}
@@ -117,7 +136,9 @@ export function TenantSetupDialog({
       )}
       {stage === "ready" && (
         <ReadyStep
+          pilotRemoved={pilotRemoved}
           tenant={activeTenant}
+          delegatedPermissionCount={scopes ? scopes.length + 3 : undefined}
           intent={intent}
           agentName={agentName}
           onCancel={onClose}
@@ -135,6 +156,7 @@ function PermissionsStep({
   scopesError,
   onCancel,
   onConnect,
+  initialCustomOpen = false,
 }: {
   intent: PendingIntent | null;
   agentName?: string;
@@ -142,11 +164,12 @@ function PermissionsStep({
   scopesError: string | null;
   onCancel: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
+  initialCustomOpen?: boolean;
 }) {
   const groups = useMemo(() => groupRequestedScopes(scopes ?? []), [scopes]);
   // Bring-your-own app registration: closed by default so the common
   // path stays one button, but always visible as an option.
-  const [customOpen, setCustomOpen] = useState(false);
+  const [customOpen, setCustomOpen] = useState(initialCustomOpen);
   const [clientId, setClientId] = useState("");
   const [directoryTenantId, setDirectoryTenantId] = useState("");
   return (
@@ -221,6 +244,7 @@ function PermissionsStep({
         <div className="mt-5 space-y-2 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-xs leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           <p>{SETUP_COPY.readOnlyNote}</p>
           <p>{SETUP_COPY.signInScopesNote}</p>
+          <p>{SETUP_COPY.delegatedPermissionsNote}</p>
           <p>{SETUP_COPY.betaNote}</p>
         </div>
 
@@ -239,6 +263,8 @@ function PermissionsStep({
               <label className="block text-sm text-[var(--color-text-soft)]">
                 {SETUP_COPY.clientIdLabel}
                 <input
+                  name="tenant-client-id"
+                  autoComplete="off"
                   value={clientId}
                   onChange={(event) => setClientId(event.target.value)}
                   placeholder="00000000-0000-0000-0000-000000000000"
@@ -252,6 +278,8 @@ function PermissionsStep({
               <label className="block text-sm text-[var(--color-text-soft)]">
                 {SETUP_COPY.directoryIdLabel}
                 <input
+                  name="tenant-directory-id"
+                  autoComplete="off"
                   value={directoryTenantId}
                   onChange={(event) => setDirectoryTenantId(event.target.value)}
                   placeholder="contoso.onmicrosoft.com"
@@ -441,6 +469,7 @@ function ErrorStep({ error, onTryAgain, onCancel }: { error: string | null; onTr
 }
 
 function ProviderStep({
+  pilotRemoved,
   providers,
   activeProviderId,
   error,
@@ -449,6 +478,7 @@ function ProviderStep({
   onRecheck,
   onCancel,
 }: {
+  pilotRemoved: boolean;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
   error: string | null;
@@ -457,11 +487,16 @@ function ProviderStep({
   onRecheck: () => void | Promise<void>;
   onCancel: () => void;
 }) {
+  // Ready hosted providers lead when no local one is ready. They are
+  // listed once, above the grid, and only the user can select them.
+  const detected = detectedHostedProviders(providers, activeProviderId);
+  const detectedIds = new Set(detected.map((provider) => provider.id));
   const available = providers.filter((provider) => isProviderImplemented(provider.id));
   const selected = available.find((provider) => provider.id === activeProviderId);
   return (
     <>
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-6">
+        {pilotRemoved ? <div className="-mt-4 mb-4"><PilotRemovedNote /></div> : null}
         <p className="text-base leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.providerBody}</p>
         {pendingRequired && (
           <div className="mt-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
@@ -473,8 +508,13 @@ function ProviderStep({
             {error}
           </div>
         )}
+        <DetectedHostedProviders
+          className="mt-5"
+          providers={detected}
+          onSelect={onSelectProvider}
+        />
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
-          {available.map((provider) => {
+          {available.filter((provider) => !detectedIds.has(provider.id)).map((provider) => {
             const active = provider.id === activeProviderId;
             return (
               <button
@@ -529,18 +569,28 @@ function ProviderStep({
 }
 
 function ReadyStep({
+  pilotRemoved,
   tenant,
+  delegatedPermissionCount,
   intent,
   agentName,
   onCancel,
   onResume,
 }: {
+  pilotRemoved: boolean;
   tenant: TenantRecord | undefined;
+  delegatedPermissionCount: number | undefined;
   intent: PendingIntent | null;
   agentName?: string;
   onCancel: () => void;
   onResume: () => void;
 }) {
+  const registrationSummary = tenant?.appRegistration?.kind === "custom"
+    ? `Signed in with your app registration ${tenant.appRegistration.clientId}.`
+    : tenant?.appRegistration?.kind === "openadminos"
+      ? `The enterprise application OpenAdminOS (app ID ${tenant.appRegistration.clientId}) is now in ${tenant.displayName} with ${delegatedPermissionCount === undefined ? "delegated" : `${delegatedPermissionCount} delegated`} Microsoft Graph permissions, all read-only. Find it in Entra admin center under Enterprise applications.`
+      : "The tenant is connected and active. You can keep exploring or start a tenant-backed action.";
+
   return (
     <>
       <div className="min-h-[280px] flex-1 p-6">
@@ -555,17 +605,29 @@ function ReadyStep({
           </div>
           <Badge tone="success"><StatusDot tone="success" /> Active</Badge>
         </div>
+        {pilotRemoved ? <PilotRemovedNote /> : null}
         <p className="mt-5 text-base leading-6 text-[var(--color-text-soft)]">
-          {intent
-            ? "Your original action is ready. Continuing sends it through the normal tenant, provider, and confirmation checks."
-            : "The tenant is connected and active. You can keep exploring or start a tenant-backed action."}
+          {registrationSummary}
         </p>
+        {intent && (
+          <p className="mt-3 text-sm leading-5 text-[var(--color-text-muted)]">
+            Your original action is ready. Continuing sends it through the normal tenant, provider, and confirmation checks.
+          </p>
+        )}
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>{intent ? "Cancel" : "Close"}</Button>
         <Button data-autofocus variant="primary" onClick={onResume}>{resumeIntentLabel(intent, agentName)}</Button>
       </DialogFooter>
     </>
+  );
+}
+
+function PilotRemovedNote() {
+  return (
+    <p role="status" className="mt-4 rounded-lg bg-[var(--color-info-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-text)] ring-1 ring-[var(--color-info)]/25">
+      {PILOT_COPY.removedAfterConnect}
+    </p>
   );
 }
 
@@ -593,6 +655,8 @@ function dialogTitle(stage: SetupStage): string {
 
 function dialogSubtitle(stage: SetupStage): string {
   switch (stage) {
+    case "own-registration":
+      return SETUP_COPY.subtitle;
     case "permissions":
       return SETUP_COPY.subtitle;
     case "waiting":
@@ -610,6 +674,8 @@ function dialogSubtitle(stage: SetupStage): string {
 
 function setupAnnouncement(stage: SetupStage, tenant: TenantRecord | undefined): string {
   switch (stage) {
+    case "own-registration":
+      return "Your own app registration form is ready.";
     case "waiting":
       return "Waiting for Microsoft sign-in.";
     case "timeout":

@@ -1,5 +1,29 @@
 import type { PendingIntent } from "../setup/pending-intent";
 
+export const WELCOME_COPY = {
+  title: "Welcome to OpenAdminOS",
+  subtitle: "Try it on sample data first, or connect your Microsoft 365 tenant now.",
+  pilotTitle: "Start in pilot mode",
+  pilotBody:
+    "Explore a fictional company's tenant. No Microsoft sign-in, no AI setup. Prepared prompts and three agents show how OpenAdminOS works.",
+  pilotBullets: [
+    "Sample data, clearly labeled",
+    "Nothing leaves this device",
+    "Switch to production any time",
+  ],
+  pilotAction: "Start pilot mode",
+  pilotStarting: "Starting pilot mode",
+  pilotFailed: "Pilot mode did not start.",
+  connectTitle: "Connect your tenant",
+  connectBody:
+    "Production. Ask anything about your own tenant and use every agent. Needs a Microsoft sign-in and one-time admin approval for read access.",
+  connectAction: "Connect tenant",
+  ownRegistrationLink:
+    "Your organization blocks third-party apps? Use your own app registration.",
+  footer: "Read-only by default. Write actions always ask for your confirmation.",
+  skip: "Skip for now",
+} as const;
+
 export const SETUP_COPY = {
   title: "Connect a Microsoft 365 tenant",
   subtitle: "Review the read access OpenAdminOS requests before Microsoft sign-in.",
@@ -44,7 +68,9 @@ export const SETUP_COPY = {
   ownRegistrationBody:
     "For organizations that do not allow third-party multi-tenant apps. Register a public client (mobile and desktop) in Entra with the redirect URI http://localhost, then enter its details below.",
   ownRegistrationNoSecret:
-    "No client secret is needed or accepted. OpenAdminOS signs in as a public client using Authorization Code with PKCE, so a secret could not be kept safe in a desktop app.",
+    "No client secret is used. OpenAdminOS signs in as a public client (Authorization Code with PKCE), so there is no secret to store on this device.",
+  delegatedPermissionsNote:
+    "Delegated permissions: OpenAdminOS can only read what both these permissions and your own admin role allow. Intune RBAC roles and scope tags still apply.",
   clientIdLabel: "Application (client) ID",
   clientIdHint: "The GUID from your app registration overview.",
   directoryIdLabel: "Directory (tenant) ID",

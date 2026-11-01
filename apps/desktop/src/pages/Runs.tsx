@@ -16,6 +16,7 @@ import {
 } from "../components/ui";
 import { useAppState } from "../state";
 import type { RunRecord, RunStatus } from "../shared/openAdminOS";
+import { PILOT_COPY } from "../shared/pilot-mode";
 
 type RunFilter = "all" | "failed" | "review" | "planned";
 type RunTrigger = "manual" | "scheduled" | "team" | "chat" | "gateway";
@@ -403,6 +404,9 @@ function runDescription(
   tenants: { id: string; displayName: string }[],
 ): string {
   const provider = providers.find((candidate) => candidate.id === run.providerId);
+  if (run.pilot) {
+    return `${PILOT_COPY.providerName} · no model, stays on this device · ${tenantNameForRun(run, tenants)} · ${capitalize(triggerForRun(run))}`;
+  }
   const providerName = provider?.name ?? run.providerId ?? "Provider not recorded";
   const boundary = provider ? (provider.isLocal ? "local, stays on this device" : "hosted") : "location not recorded";
   const model = run.model ? ` · ${run.model}` : "";
@@ -432,6 +436,7 @@ export function providerNameForRun(
   run: RunRecord,
   providers: { id: string; name: string }[],
 ): string {
+  if (run.pilot) return PILOT_COPY.providerName;
   if (!run.providerId) return "Not recorded";
   return providers.find((provider) => provider.id === run.providerId)?.name ?? run.providerId;
 }

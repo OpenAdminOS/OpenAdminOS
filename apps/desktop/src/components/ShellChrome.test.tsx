@@ -1,4 +1,4 @@
-import { screen } from "@testing-library/react";
+import { screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -10,6 +10,24 @@ import {
 } from "../test/test-utils";
 import { DataBoundaryProvider, useDataBoundary } from "../state";
 import { AppShell } from "./AppShell";
+import { PilotProductionOnly } from "./PilotMode";
+import { PILOT_COPY } from "../shared/pilot-mode";
+
+function pilotState() {
+  return createMockAppState({
+    tenants: [
+      {
+        id: "openadminos-sample-tenant",
+        kind: "sample",
+        displayName: "Contoso (pilot)",
+        username: "admin@contoso-sample.invalid",
+        homeAccountId: "openadminos-sample-account",
+        addedAt: "2026-10-26T12:00:00.000Z",
+      },
+    ],
+    activeTenantId: "openadminos-sample-tenant",
+  });
+}
 
 describe("shell chrome", () => {
   it("keeps tenant, model boundary, and running work visible without a status strip", async () => {
@@ -94,6 +112,87 @@ describe("shell chrome", () => {
     );
     await user.click(screen.getByRole("menuitemradio", { name: /Contoso IT/ }));
     expect(setActiveTenant).toHaveBeenCalledWith("tenant-1");
+  });
+
+  it("shows pilot mode chrome: tenant label, banner, and reduced navigation", async () => {
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, pilotState()),
+    });
+
+    const tenantButton = await screen.findByRole("button", {
+      name: /Switch tenant, Contoso \(pilot\)/,
+    });
+    expect(within(tenantButton).getByText("Pilot mode")).toBeInTheDocument();
+    const banner = screen.getByRole("region", { name: "Pilot mode" });
+    expect(banner).toHaveTextContent(PILOT_COPY.banner);
+    expect(within(banner).getByRole("button", { name: "Connect your tenant" })).toBeInTheDocument();
+    const primary = screen.getByRole("navigation", { name: "Primary" });
+    expect(within(primary).getByRole("link", { name: "Agents" })).toBeInTheDocument();
+    expect(within(primary).getByRole("link", { name: "Runs" })).toBeInTheDocument();
+    expect(within(primary).queryByRole("link", { name: "Agent Team" })).not.toBeInTheDocument();
+    expect(within(primary).queryByRole("link", { name: "Changes" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Create workspace" })).not.toBeInTheDocument();
+    expect(screen.getByRole("status", { name: PILOT_COPY.boundaryLabel })).toBeInTheDocument();
+  });
+
+  it("keeps the full navigation and no banner in production", async () => {
+    renderRoute(<AppShell><div /></AppShell>, { path: "*", route: "/chat" });
+    const primary = await screen.findByRole("navigation", { name: "Primary" });
+    expect(within(primary).getByRole("link", { name: "Agent Team" })).toBeInTheDocument();
+    expect(within(primary).getByRole("link", { name: "Changes" })).toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: "Pilot mode" })).not.toBeInTheDocument();
+  });
+
+  it("renders the designed production page for a hidden route in pilot mode", async () => {
+    renderRoute(
+      <PilotProductionOnly feature="Agent Team">
+        <div>Team content</div>
+      </PilotProductionOnly>,
+      { path: "*", route: "/office", bridge: makeMockBridge({}, pilotState()) },
+    );
+    expect(await screen.findByRole("heading", { name: "Agent Team" })).toBeInTheDocument();
+    expect(
+      screen.getByText("Agent Team is available in production. Connect your tenant to use it."),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect your tenant" })).toBeInTheDocument();
+    expect(screen.queryByText("Team content")).not.toBeInTheDocument();
+  });
+
+  it("opens pilot mode from the tenant menu", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const addSampleTenant = vi.fn(async () => pilotState());
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({ addSampleTenant }, emptyState),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Connect a tenant" }));
+    await user.click(screen.getByRole("menuitem", { name: "Open pilot mode" }));
+    expect(addSampleTenant).toHaveBeenCalledOnce();
+  });
+
+  it("leaves pilot mode only after a confirm that says what is deleted", async () => {
+    const user = userEvent.setup();
+    const disconnectTenant = vi.fn(async () =>
+      createMockAppState({ tenants: [], activeTenantId: undefined }),
+    );
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({ disconnectTenant }, pilotState()),
+    });
+
+    await user.click(await screen.findByRole("button", { name: /Switch tenant, Contoso \(pilot\)/ }));
+    expect(screen.getByRole("menuitem", { name: "Connect tenant" })).toBeInTheDocument();
+    await user.click(screen.getByRole("menuitem", { name: "Leave pilot mode" }));
+    expect(await screen.findByText(/This deletes the fictional Contoso tenant from this device, with its pilot runs, chats/)).toBeInTheDocument();
+    expect(disconnectTenant).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Leave pilot mode" }));
+    expect(disconnectTenant).toHaveBeenCalledWith("openadminos-sample-tenant");
   });
 
   it("surfaces tenant switch and updater retry failures", async () => {

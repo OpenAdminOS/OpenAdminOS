@@ -248,8 +248,6 @@ describe("Office", () => {
       path: "/office",
       bridge: makeMockBridge({ saveOfficePersona: vi.fn() }, state),
     });
-    await screen.findByRole("dialog");
-    await user.keyboard("{Escape}");
     await user.click(
       await screen.findByRole("button", { name: "Add your first teammate" }),
     );

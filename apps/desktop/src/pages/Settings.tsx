@@ -67,6 +67,8 @@ import {
 import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
+import { detectedHostedProviders } from "../shared/provider-detection";
+import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
 import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
@@ -80,6 +82,9 @@ import {
 } from "../copy";
 import { DataSettingsSection } from "./Cache";
 import { ConnectorsSettingsSection } from "./Connectors";
+import { PilotProductionPage } from "../components/PilotMode";
+import { useToast } from "../components/Toast";
+import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   Badge,
   Button as UiButton,
@@ -176,7 +181,15 @@ export default function Settings() {
     setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
-  const { openSetup } = useSetupFlow();
+  const { openSetup, startPilot } = useSetupFlow();
+  const toast = useToast();
+  const pilot = state.tenants.some(
+    (tenant) => tenant.id === state.activeTenantId && tenant.kind === "sample",
+  );
+  // Connectors are a production feature; pilot mode hides the section.
+  const settingsSections = pilot
+    ? SETTINGS_SECTIONS.filter((entry) => entry.id !== "connectors")
+    : SETTINGS_SECTIONS;
 
   useEffect(() => {
     if (SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)) {
@@ -321,6 +334,15 @@ export default function Settings() {
     }
   };
 
+  if (pilot && sectionParam === "connectors") {
+    return (
+      <>
+        <PageHeader title="Settings" wide />
+        <PilotProductionPage feature="Connectors" plural />
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader title="Settings" wide />
@@ -402,7 +424,7 @@ export default function Settings() {
               </div>
             )}
           </div>
-          {SETTINGS_SECTIONS.map((s) => (
+          {settingsSections.map((s) => (
             <button
               key={s.id}
               onClick={() => selectSettingsTarget({ section: s.id })}
@@ -444,7 +466,26 @@ export default function Settings() {
               id="tenants"
               visible={visibleSectionIds.has("tenants")}
               query={settingsQuery}
-              action={<UiButton variant="primary" size="sm" onClick={() => openSetup()}>Connect tenant</UiButton>}
+              action={
+                <div className="flex items-center gap-2">
+                  {pilot ? null : (
+                    <UiButton
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        void startPilot().catch((caught) =>
+                          toast.error(
+                            `Pilot mode did not open. ${caught instanceof Error ? userFacingErrorReason(caught.message) ?? "" : ""} Try again from Settings, Tenants.`.replace(/\s+/g, " "),
+                          ),
+                        );
+                      }}
+                    >
+                      {PILOT_COPY.openAction}
+                    </UiButton>
+                  )}
+                  <UiButton variant="primary" size="sm" onClick={() => openSetup()}>Connect tenant</UiButton>
+                </div>
+              }
             >
               <TenantsSection
                 tenants={state.tenants}
@@ -460,7 +501,7 @@ export default function Settings() {
             <SettingsPageSection id="chat" visible={visibleSectionIds.has("chat")} query={settingsQuery}>
               <ChatSettingsSectionV2 />
             </SettingsPageSection>
-            <SettingsPageSection id="connectors" visible={visibleSectionIds.has("connectors")} query={settingsQuery}>
+            <SettingsPageSection id="connectors" visible={!pilot && visibleSectionIds.has("connectors")} query={settingsQuery}>
               <ConnectorsSettingsSection
                 connectorId={searchParams.get("connector")}
                 onConnectorChange={updateConnectorRoute}
@@ -555,11 +596,24 @@ function ProvidersSection({
   onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
   onProviderConfigSaved: () => Promise<void>;
 }) {
+  // Ready hosted providers lead when no local one is ready, and are never
+  // made active without the user's click.
+  const detected = detectedHostedProviders(providers, activeProviderId);
+  const detectedIds = new Set(detected.map((provider) => provider.id));
+  const ordered = [
+    ...providers.filter((provider) => detectedIds.has(provider.id)),
+    ...providers.filter((provider) => !detectedIds.has(provider.id)),
+  ];
   return (
     <div className="max-w-[1040px]">
+      <DetectedHostedProviders
+        className="mb-4"
+        providers={detected}
+        onSelect={(id) => onSetActiveProvider(id)}
+      />
       <fieldset className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         <legend className="sr-only">Active provider</legend>
-        {providers.map((provider) => (
+        {ordered.map((provider) => (
           <ProviderRow
             key={provider.id}
             provider={provider}
@@ -1219,18 +1273,25 @@ function TenantRow({
             <span title={tenant.displayName} className="min-w-0 max-w-full truncate text-base font-medium text-[var(--color-text)]">
               {tenant.displayName}
             </span>
+            {tenant.kind === "sample" ? <Badge tone="info">{PILOT_COPY.badge}</Badge> : null}
             {isActive ? <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone="success" />Active</span> : null}
           </div>
           <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
-            {domain} · {entraLicenseName ?? "Entra tier not available"}
+            {tenant.kind === "sample"
+              ? "Fictional company, stored on this device"
+              : `${domain} · ${entraLicenseName ?? "Entra tier not available"}`}
           </div>
         </div>
-        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={licenses.map((license) => license.displayName).join(", ")}>
-          {licenses.length > 0
+        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample data" : licenses.map((license) => license.displayName).join(", ")}>
+          {tenant.kind === "sample"
+            ? "Built-in sample data"
+            : licenses.length > 0
             ? licenses.map((license) => license.displayName).join(", ")
             : "No license details"}
         </div>
-        <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
+        {tenant.kind !== "sample" ? (
+          <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
+        ) : null}
         {!isActive ? (
           <UiButton variant="secondary" size="sm" onClick={() => void onSetActive(tenant.id)}>
             Set active
@@ -1242,7 +1303,7 @@ function TenantRow({
           items={[
             {
               id: "disconnect",
-              label: "Disconnect",
+              label: tenant.kind === "sample" ? PILOT_COPY.leaveAction : "Disconnect",
               danger: true,
               onSelect: () => {
                 setDisconnectError(null);
@@ -1260,22 +1321,23 @@ function TenantRow({
       size="md"
     >
       <ModalHeader
-        title={`Disconnect ${tenant.displayName}`}
-        subtitle="Remove the connection and its local tenant data"
-        badge={<Badge tone="danger">Permanent local deletion</Badge>}
+        title={tenant.kind === "sample" ? PILOT_COPY.leaveTitle : `Disconnect ${tenant.displayName}`}
+        subtitle={tenant.kind === "sample" ? "Delete the pilot tenant and its local data" : "Remove the connection and its local tenant data"}
+        badge={<Badge tone={tenant.kind === "sample" ? "info" : "danger"}>Permanent local deletion</Badge>}
         onClose={() => {
           if (!disconnecting) setConfirmDisconnect(false);
         }}
       />
       <div className="space-y-4 p-6">
         <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          This removes the Microsoft sign-in connection and permanently deletes this
-          tenant&apos;s local Graph cache, change history, chats, workspaces, run history,
-          learning records, and queued deliveries from this device.
+          {tenant.kind === "sample"
+            ? PILOT_COPY.leaveBody
+            : "This removes the Microsoft sign-in connection and permanently deletes this tenant's local Graph cache, change history, chats, workspaces, run history, learning records, and queued deliveries from this device."}
         </div>
         <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
-          Microsoft 365 data in the tenant is not changed. Reconnecting later starts with
-          an empty local cache.
+          {tenant.kind === "sample"
+            ? "You can open pilot mode again later from the tenant menu or Settings, Tenants."
+            : "Microsoft 365 data in the tenant is not changed. Reconnecting later starts with an empty local cache."}
         </p>
         {disconnectError && (
           <div
@@ -1310,7 +1372,9 @@ function TenantRow({
                 .finally(() => setDisconnecting(false));
             }}
           >
-            {disconnecting ? "Disconnecting" : "Disconnect and delete local data"}
+            {disconnecting
+              ? tenant.kind === "sample" ? "Removing" : "Disconnecting"
+              : tenant.kind === "sample" ? PILOT_COPY.leaveAction : "Disconnect and delete local data"}
           </Button>
         </div>
       </div>

@@ -118,6 +118,8 @@ import {
   selfTrainingCandidateFromPrompt,
 } from "./planner.js";
 import { executeIntuneChatTool, type IntuneChatToolContext } from "./tools.js";
+import { answerPilotChatMessage } from "./pilot-chat.js";
+import { PILOT_COPY } from "../../src/shared/pilot-mode.js";
 
 type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
@@ -149,6 +151,8 @@ export interface ChatPersistedState {
 
 export interface ChatServiceHost {
   read(): Promise<ChatPersistedState>;
+  /** Clock shared with the pilot Graph. Defaults to the system clock. */
+  now?(): Date;
   requireIntelligenceStore(): IntelligenceSqliteStore;
   resolveTenant(persisted: ChatPersistedState, tenantId?: string): TenantRecord;
   listProviders(): Promise<ProviderSummary[]>;
@@ -1088,6 +1092,15 @@ export class IntuneChatService {
       activeTenantId: activeTenant.id,
     });
     const selectedTenantSet = new Set(resolvedTenantIds);
+    // Pilot Chat answers prepared prompts only and never reaches a model,
+    // so the pilot tenant cannot join a multi-tenant answer.
+    if (
+      persisted.tenants.some(
+        (tenant) => tenant.kind === "sample" && selectedTenantSet.has(tenant.id),
+      )
+    ) {
+      throw new Error(PILOT_COPY.multiTenantRejected);
+    }
     const savedQuery = input.savedQueryId
       ? store
           .listSavedMultiTenantQueries()
@@ -1539,6 +1552,15 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
+    if (tenant.kind === "sample") {
+      return answerPilotChatMessage({
+        message: input,
+        tenant,
+        store,
+        graph: (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
+        now: this.host.now?.() ?? new Date(),
+      });
+    }
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
@@ -1855,6 +1877,17 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
+    if (tenant.kind === "sample") {
+      return answerPilotChatMessage({
+        message: input,
+        tenant,
+        store,
+        graph: (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
+        now: this.host.now?.() ?? new Date(),
+        onEvent,
+        ...(options.signal ? { signal: options.signal } : {}),
+      });
+    }
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
