@@ -1,4 +1,4 @@
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -12,7 +12,7 @@ import {
 import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
 import { useSetupFlow } from "./SetupFlowContext";
 import { FirstLaunchWelcome } from "./WelcomeView";
-import { WELCOME_COPY } from "../copy";
+import { PROVIDER_DETECTION_COPY, WELCOME_COPY } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
 function SetupTrigger() {
@@ -348,6 +348,41 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByRole("heading", { name: "Pick an LLM provider" }),
     ).toBeInTheDocument();
+  });
+
+  it("lists a ready hosted provider first as detected, without selecting it", async () => {
+    const user = userEvent.setup();
+    // No local provider is ready; only the Codex CLI is signed in.
+    const providers = mockProviders.map((provider) =>
+      provider.id === "openai"
+        ? provider
+        : { ...provider, status: provider.isLocal ? ("error" as const) : ("not-installed" as const) },
+    );
+    const emptyState = createMockAppState({
+      tenants: [],
+      activeTenantId: undefined,
+      activeProviderId: "ollama",
+      providers,
+    });
+    const bridge = makeMockBridge({}, emptyState);
+    renderWelcome(bridge);
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+    );
+
+    const detected = await screen.findByRole("region", { name: PROVIDER_DETECTION_COPY.detectedLabel });
+    const openai = providers.find((provider) => provider.id === "openai")!;
+    expect(within(detected).getByText(openai.description)).toBeInTheDocument();
+    expect(within(detected).queryByText("Anthropic")).not.toBeInTheDocument();
+    // Detected first: the section precedes the provider grid.
+    const grid = screen.getByRole("button", { name: /Ollama/ });
+    expect(detected.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+
+    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("OpenAI") }));
+    await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
   });
 
   it("says pilot data was removed after connecting from pilot mode", async () => {

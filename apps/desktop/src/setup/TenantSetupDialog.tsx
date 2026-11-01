@@ -3,6 +3,7 @@ import { Avatar } from "../components/Avatar";
 import { Button } from "../components/Button";
 import { Modal, ModalHeader } from "../components/Modal";
 import { Badge, StatusDot } from "../components/ui";
+import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
 import { ProviderNotReadyCard } from "../components/provider-setup/ProviderNotReadyCard";
 import { TrustBanner } from "../components/TrustBanner";
 import {
@@ -23,6 +24,7 @@ import type {
   TenantRecord,
 } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
+import { detectedHostedProviders } from "../shared/provider-detection";
 import type { PendingIntent } from "./pending-intent";
 import { groupRequestedScopes } from "./scope-groups";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -485,6 +487,10 @@ function ProviderStep({
   onRecheck: () => void | Promise<void>;
   onCancel: () => void;
 }) {
+  // Ready hosted providers lead when no local one is ready. They are
+  // listed once, above the grid, and only the user can select them.
+  const detected = detectedHostedProviders(providers, activeProviderId);
+  const detectedIds = new Set(detected.map((provider) => provider.id));
   const available = providers.filter((provider) => isProviderImplemented(provider.id));
   const selected = available.find((provider) => provider.id === activeProviderId);
   return (
@@ -502,8 +508,13 @@ function ProviderStep({
             {error}
           </div>
         )}
+        <DetectedHostedProviders
+          className="mt-5"
+          providers={detected}
+          onSelect={onSelectProvider}
+        />
         <div className="mt-5 grid gap-2 sm:grid-cols-2">
-          {available.map((provider) => {
+          {available.filter((provider) => !detectedIds.has(provider.id)).map((provider) => {
             const active = provider.id === activeProviderId;
             return (
               <button

@@ -945,6 +945,12 @@ export interface AppState {
   usageTelemetryEnabled?: boolean;
   schedulerStatus?: SchedulerStatus;
   office?: OfficeState;
+  /**
+   * Present once after the host selected a ready local provider for a user
+   * who never chose one, until the user dismisses it or picks a provider.
+   * Never set in pilot mode. Hosted providers are never auto-selected.
+   */
+  providerAutoSelectNotice?: { providerId: ProviderId; providerName: string };
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -2739,6 +2745,8 @@ export interface OpenAdminOSApi {
     options?: { confirmTrustChanges?: boolean },
   ): Promise<AppState>;
   setActiveProvider(id: ProviderId): Promise<AppState>;
+  /** Hide the one-time notice about an automatically selected local provider. */
+  dismissProviderAutoSelectNotice(): Promise<AppState>;
   /**
    * Pin the active model for the given provider. Pass `null` to revert
    * to "whichever model the provider reports first". The host validates

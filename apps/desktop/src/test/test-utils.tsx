@@ -589,9 +589,11 @@ export function makeMockBridge(
       changes: [],
     })),
     updateAgent: vi.fn(async () => appState),
-    setActiveProvider: vi.fn(async (id: ProviderId) =>
-      updateState({
-        ...appState,
+    setActiveProvider: vi.fn(async (id: ProviderId) => {
+      // An explicit choice clears the auto-selection notice, as the host does.
+      const { providerAutoSelectNotice: _cleared, ...rest } = appState;
+      return updateState({
+        ...rest,
         activeProviderId: id,
         trust: deriveTrustState({
           provider: appState.providers.find((provider) => provider.id === id),
@@ -600,8 +602,12 @@ export function makeMockBridge(
           ),
           model: appState.activeModelByProviderId?.[id],
         }),
-      }),
-    ),
+      });
+    }),
+    dismissProviderAutoSelectNotice: vi.fn(async () => {
+      const { providerAutoSelectNotice: _dismissed, ...rest } = appState;
+      return updateState(rest);
+    }),
     setActiveModel: vi.fn(async (providerId: ProviderId, model: string | null) =>
       updateState({
         ...appState,

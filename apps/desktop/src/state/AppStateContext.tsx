@@ -54,6 +54,7 @@ interface AppStateContextValue {
     options?: { confirmTrustChanges?: boolean },
   ) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
+  dismissProviderAutoSelectNotice: () => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
   setRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
   setUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
@@ -367,6 +368,24 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       throw providerError;
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const dismissProviderAutoSelectNotice = useCallback(async () => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      setState((currentState) => {
+        const { providerAutoSelectNotice: _dismissed, ...rest } = currentState;
+        return rest;
+      });
+      return;
+    }
+    try {
+      const nextState = await api.dismissProviderAutoSelectNotice();
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      setError(toError(caughtError));
     }
   }, []);
 
@@ -1037,6 +1056,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       updateAgent,
       setActiveModel,
       setActiveProvider,
+      dismissProviderAutoSelectNotice,
       setRegistryInstallCountsEnabled,
       setUsageTelemetryEnabled,
       startRun,
@@ -1089,6 +1109,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       saveAgentDraft,
       setActiveModel,
       setActiveProvider,
+      dismissProviderAutoSelectNotice,
       setRegistryInstallCountsEnabled,
       setUsageTelemetryEnabled,
       setRegistrySource,

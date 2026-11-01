@@ -6340,6 +6340,10 @@ function registerIpcHandlers() {
   ),
   );
   ipcMain.handle(
+    "openadminos:dismiss-provider-auto-select-notice",
+    handleTrusted(() => store.dismissProviderAutoSelectNotice()),
+  );
+  ipcMain.handle(
     "openadminos:set-active-model",
     handleTrusted((_event, providerId: unknown, model: unknown) =>
       store.setActiveModel(validateProviderId(providerId), validateActiveModel(model)),

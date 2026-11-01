@@ -71,7 +71,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -197,6 +197,7 @@ function IntuneChatContent() {
     loading,
     setActiveProvider,
     setActiveModel,
+    dismissProviderAutoSelectNotice,
   } = useAppState();
   const { requireTenant, requireTenantAndProvider } = useSetupFlow();
   const shellChrome = useShellChromeOptional();
@@ -302,6 +303,7 @@ function IntuneChatContent() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
+  const pilot = activeTenant?.kind === "sample";
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const activeModel = resolveProviderDefaultModel(
     provider,
@@ -522,6 +524,13 @@ function IntuneChatContent() {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const scrollRoot = messagesScrollRef.current;
     if (!scrollRoot || !followLatestRef.current) return;
+    // A prepared pilot answer opens with its narrative and ends with a
+    // table and follow-up chips. Following the bottom would hide the
+    // narrative, so pilot mode keeps the prompt bubble at the top instead.
+    if (pilot && scrollLatestUserToTop(scrollRoot, messages, reducedMotion ? "auto" : "smooth")) {
+      setShowScrollToLatest(false);
+      return;
+    }
     if (typeof scrollRoot.scrollTo === "function") {
       scrollRoot.scrollTo({
         top: scrollRoot.scrollHeight,
@@ -531,7 +540,7 @@ function IntuneChatContent() {
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
     }
     setShowScrollToLatest(false);
-  }, [messages, sending, chatProgress?.message]);
+  }, [messages, sending, chatProgress?.message, pilot]);
 
   useEffect(
     () => () => {
@@ -1451,7 +1460,6 @@ function IntuneChatContent() {
   const needsYouCount =
     awaitingConfirmationRuns.length + openFindings.length + (updateNeedsAttention ? 1 : 0);
   const homeSuggestions = promptGroups.flatMap((group) => group.prompts).slice(0, 3);
-  const pilot = activeTenant?.kind === "sample";
   const pilotAgentName = (slug: PilotAgentSlug) => {
     const agent =
       state.installedAgents.find((entry) => entry.slug === slug) ??
@@ -1717,6 +1725,13 @@ function IntuneChatContent() {
                 </p>
               </div>
             )}
+            {state.providerAutoSelectNotice && !pilot ? (
+              <ProviderAutoSelectNotice
+                providerName={state.providerAutoSelectNotice.providerName}
+                onOpenSettings={() => navigate("/settings/providers")}
+                onDismiss={() => void dismissProviderAutoSelectNotice()}
+              />
+            ) : null}
             <ChatNotices
               error={error}
               notice={notice}
@@ -1879,7 +1894,7 @@ function IntuneChatContent() {
                     ? state.tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
                   return (
-                    <div key={message.id} data-message-id={message.id}>
+                    <div key={message.id} data-message-id={message.id} className="scroll-mt-[18px]">
                       <ChatMessageBubble
                         message={message}
                         progress={message.id === progressAssistantMessageId ? chatProgress : null}
@@ -1950,16 +1965,27 @@ function IntuneChatContent() {
 
         <div className="relative shrink-0 px-6 pb-3.5">
           {showScrollToLatest ? (
-            <IconButton
-              label="Scroll to latest"
-              tooltip="Scroll to latest"
-              icon={<IconArrowDown size={13} />}
-              onClick={scrollToLatest}
-              className="absolute bottom-[calc(100%+10px)] left-1/2 z-20 -translate-x-1/2 bg-[var(--color-surface)] shadow-[var(--shadow-pop)]"
-            />
+            // Positioned wrapper: IconButton places its own classes on the
+            // inner button, which sits inside the tooltip's relative wrapper.
+            <div className="absolute bottom-[calc(100%+10px)] left-1/2 z-20 -translate-x-1/2">
+              <IconButton
+                label="Scroll to latest"
+                tooltip="Scroll to latest"
+                icon={<IconArrowDown size={13} />}
+                onClick={scrollToLatest}
+                className="bg-[var(--color-surface)] shadow-[var(--shadow-pop)]"
+              />
+            </div>
           ) : null}
           <div className="pointer-events-none absolute inset-x-0 -top-7 h-7 bg-gradient-to-b from-transparent to-[var(--color-bg)]" />
           <div className="relative mx-auto w-full max-w-[740px]">
+            {state.providerAutoSelectNotice && !pilot ? (
+              <ProviderAutoSelectNotice
+                providerName={state.providerAutoSelectNotice.providerName}
+                onOpenSettings={() => navigate("/settings/providers")}
+                onDismiss={() => void dismissProviderAutoSelectNotice()}
+              />
+            ) : null}
             <ChatNotices
               error={error}
               notice={notice}
@@ -2589,6 +2615,30 @@ function ComposerModelPopover({
         </div>
       </div>
     </details>
+  );
+}
+
+/** One-time notice after the host selected a ready local provider. */
+function ProviderAutoSelectNotice({
+  providerName,
+  onOpenSettings,
+  onDismiss,
+}: {
+  providerName: string;
+  onOpenSettings: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div role="status" className="mb-3 flex items-start justify-between gap-4 rounded-[10px] bg-[var(--color-info-soft)] px-3 py-2 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-info)]/25">
+      <span className="flex min-w-0 items-start gap-2">
+        <IconHardDrive size={13} className="mt-0.5 shrink-0 text-[var(--color-success)]" />
+        <span className="min-w-0">{PROVIDER_DETECTION_COPY.autoSelectedNotice(providerName)}</span>
+      </span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        <Button size="sm" variant="ghost" onClick={onOpenSettings}>{PROVIDER_DETECTION_COPY.autoSelectedNoticeSettings}</Button>
+        <IconButton size="sm" label={PROVIDER_DETECTION_COPY.autoSelectedNoticeDismiss} tooltip={PROVIDER_DETECTION_COPY.autoSelectedNoticeDismiss} icon={<IconClose size={12} />} onClick={onDismiss} />
+      </span>
+    </div>
   );
 }
 
@@ -4704,6 +4754,25 @@ function safeWebSources(trace: IntuneChatToolTraceEntry[]) {
         .map((source) => [source.url, source]),
     ).values(),
   ];
+}
+
+/**
+ * Scrolls the latest user message to the top of the transcript. Returns
+ * false when there is no user message to anchor to.
+ */
+function scrollLatestUserToTop(
+  scrollRoot: HTMLElement,
+  messages: IntuneChatMessage[],
+  behavior: ScrollBehavior,
+): boolean {
+  const latestUser = [...messages].reverse().find((message) => message.role === "user");
+  if (!latestUser) return false;
+  const element = [...scrollRoot.querySelectorAll<HTMLElement>("[data-message-id]")].find(
+    (candidate) => candidate.dataset.messageId === latestUser.id,
+  );
+  if (!element) return false;
+  element.scrollIntoView({ block: "start", inline: "nearest", behavior });
+  return true;
 }
 
 function scrollLatestUserNearTop(

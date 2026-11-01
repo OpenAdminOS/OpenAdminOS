@@ -311,10 +311,8 @@ async function firstRunCaptureStepScript(
         bodyText().includes("In production, answers come from your tenant and the model you choose."),
       "prepared pilot answer",
     );
-    // Scroll to the end of the conversation so the follow-up chips sit
-    // above the prompt chips, as they do right after an answer arrives.
-    const log = document.querySelector<HTMLElement>('[role="log"]');
-    if (log) log.scrollTop = log.scrollHeight;
+    // Pilot Chat keeps the prompt bubble at the top when the answer
+    // arrives, so the narrative is on screen. Capture what the app shows.
     await delay(400);
     return;
   }

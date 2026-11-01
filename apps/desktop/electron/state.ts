@@ -184,6 +184,7 @@ import { searchEndpoints } from "./graph-catalog.js";
 import { createSampleGraph, type SampleGraph } from "./sample-tenant/graph.js";
 import { createPilotLlm } from "./sample-tenant/pilot-llm.js";
 import { PILOT_AGENT_SLUGS, PILOT_COPY } from "../src/shared/pilot-mode.js";
+import { pickLocalProviderToAutoSelect } from "../src/shared/provider-detection.js";
 import {
   SAMPLE_TENANT_HOME_ACCOUNT_ID,
   SAMPLE_TENANT_ID,
@@ -278,6 +279,21 @@ export { __agentDraftTestUtils } from "./agent-draft-helpers.js";
 
 interface PersistedState {
   activeProviderId: ProviderId;
+  /**
+   * Whether the user ever picked a provider. Only `false` lets the host
+   * select a ready local provider automatically. Fresh state files are
+   * written with `false`. State files from earlier versions do not have the
+   * field, and their `activeProviderId` cannot tell an explicit Ollama pick
+   * from the old default, so `read()` treats a missing field as chosen:
+   * existing installs are never switched.
+   */
+  providerChosenByUser?: boolean;
+  /**
+   * The local provider the host selected automatically, and whether the
+   * one-time Chat notice about it was dismissed. Cleared by an explicit
+   * provider choice.
+   */
+  providerAutoSelection?: { providerId: ProviderId; noticeDismissed: boolean };
   /**
    * User-picked model override per provider. When the provider exposes
    * multiple installed models, the user can pick which one is "active"
@@ -413,6 +429,7 @@ type WhatsAppWebClientLike = Pick<
 
 const defaultState: PersistedState = {
   activeProviderId: "ollama",
+  providerChosenByUser: false,
   installedAgents: [],
   runs: [],
   tenants: [],
@@ -2310,8 +2327,8 @@ export class AppStateStore {
   }
 
   async getAppState(): Promise<AppState> {
-    const persisted = await this.read();
     const providers = await this.listProviders();
+    const persisted = await this.autoSelectLocalProvider(await this.read(), providers);
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
       providers[0];
@@ -2355,6 +2372,19 @@ export class AppStateStore {
     }
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
+    }
+    const autoSelection = persisted.providerAutoSelection;
+    if (
+      autoSelection &&
+      !autoSelection.noticeDismissed &&
+      persisted.providerChosenByUser === false &&
+      activeProvider?.id === autoSelection.providerId &&
+      !this.isPilotModeActive(persisted)
+    ) {
+      state.providerAutoSelectNotice = {
+        providerId: activeProvider.id,
+        providerName: activeProvider.name,
+      };
     }
     return state;
   }
@@ -5137,13 +5167,72 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     await this.serialize(async () => {
       const persisted = await this.read();
+      const { providerAutoSelection: _cleared, ...rest } = persisted;
       await this.write({
-        ...persisted,
+        ...rest,
         activeProviderId: id,
+        providerChosenByUser: true,
       });
     });
 
     return this.getAppState();
+  }
+
+  async dismissProviderAutoSelectNotice(): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      if (!persisted.providerAutoSelection || persisted.providerAutoSelection.noticeDismissed) {
+        return;
+      }
+      await this.write({
+        ...persisted,
+        providerAutoSelection: { ...persisted.providerAutoSelection, noticeDismissed: true },
+      });
+    });
+    return this.getAppState();
+  }
+
+  /**
+   * Selects the first ready local provider (Ollama with a text model, LM
+   * Studio, Apple Foundation) when the user never chose a provider and the
+   * active one is not ready. Runs whenever provider readiness is listed for
+   * app state, so a local runtime started later is picked up too. Hosted
+   * providers are never selected here: that would send tenant data off the
+   * device without the user deciding it. Skipped in pilot mode.
+   */
+  private async autoSelectLocalProvider(
+    persisted: PersistedState,
+    providers: ProviderSummary[],
+  ): Promise<PersistedState> {
+    if (persisted.providerChosenByUser !== false) return persisted;
+    if (this.isPilotModeActive(persisted)) return persisted;
+    const candidate = pickLocalProviderToAutoSelect(providers, persisted.activeProviderId);
+    if (!candidate) return persisted;
+    return this.serialize(async () => {
+      // Re-check against the latest state: the user may have picked a
+      // provider, or pilot mode may have started, since the first read.
+      const current = await this.read();
+      if (current.providerChosenByUser !== false || this.isPilotModeActive(current)) {
+        return current;
+      }
+      const next = pickLocalProviderToAutoSelect(providers, current.activeProviderId);
+      if (!next) return current;
+      const updated: PersistedState = {
+        ...current,
+        activeProviderId: next.id,
+        providerAutoSelection: { providerId: next.id, noticeDismissed: false },
+      };
+      await this.write(updated);
+      console.info(`[providers] selected local provider ${next.id} automatically`);
+      return updated;
+    });
+  }
+
+  private isPilotModeActive(persisted: PersistedState): boolean {
+    if (!persisted.activeTenantId) return false;
+    return persisted.tenants.some(
+      (tenant) => tenant.id === persisted.activeTenantId && tenant.kind === "sample",
+    );
   }
 
   async setActiveModel(
@@ -5973,6 +6062,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       };
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
+      }
+      // See PersistedState.providerChosenByUser: a missing field means an
+      // install from before provider detection, which is never switched.
+      state.providerChosenByUser =
+        typeof parsed.providerChosenByUser === "boolean"
+          ? parsed.providerChosenByUser
+          : true;
+      const rawAutoSelection = (parsed as { providerAutoSelection?: unknown }).providerAutoSelection;
+      if (
+        isPlainRecordValue(rawAutoSelection) &&
+        isProviderId((rawAutoSelection as Record<string, unknown>).providerId)
+      ) {
+        const autoSelection = rawAutoSelection as Record<string, unknown>;
+        state.providerAutoSelection = {
+          providerId: autoSelection.providerId as ProviderId,
+          noticeDismissed: autoSelection.noticeDismissed === true,
+        };
       }
       if (typeof parsed.installId === "string" && parsed.installId.length > 0) {
         state.installId = parsed.installId;

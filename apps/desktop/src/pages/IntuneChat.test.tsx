@@ -23,7 +23,7 @@ import type {
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
-import { deriveTrustCopy } from "../copy";
+import { PROVIDER_DETECTION_COPY, deriveTrustCopy } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
 function LocationProbe() {
@@ -242,6 +242,155 @@ describe("IntuneChat new conversation routing", () => {
     await waitFor(() =>
       expect(screen.queryByText("Conversation not found")).not.toBeInTheDocument(),
     );
+  });
+});
+
+const PILOT_TENANT = {
+  id: "openadminos-sample-tenant",
+  kind: "sample" as const,
+  displayName: "Contoso (pilot)",
+  username: "admin@contoso-sample.invalid",
+  homeAccountId: "openadminos-sample-account",
+  addedAt: "2026-10-26T12:00:00.000Z",
+};
+
+/** A bridge whose stream emits started and completed, like the host. */
+function streamingBridge(state: ReturnType<typeof createMockAppState>) {
+  const tenantId = state.activeTenantId;
+  const conversation: IntuneChatConversation = {
+    id: "conversation-scroll",
+    title: "Which managed devices have not synced in the last 7 days?",
+    createdAt: "2026-10-26T12:00:00.000Z",
+    updatedAt: "2026-10-26T12:00:00.000Z",
+    tenantId,
+    scopeKind: "single-tenant",
+  };
+  let saved: IntuneChatMessage[] = [];
+  return makeMockBridge(
+    {
+      listIntuneChatConversations: vi.fn(async () => (saved.length ? [conversation] : [])),
+      getIntuneChatMessages: vi.fn(async () => saved),
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent) => {
+        const userMessage: IntuneChatMessage = {
+          id: "user-scroll",
+          conversationId: conversation.id,
+          role: "user",
+          content: input.content,
+          status: "completed",
+          createdAt: conversation.createdAt,
+        };
+        const assistantMessage: IntuneChatMessage = {
+          id: "assistant-scroll",
+          conversationId: conversation.id,
+          role: "assistant",
+          content: "17 of 119 managed devices have not checked in.\n\n| Device | Last sync |\n| --- | --- |\n| CTS-MB-0180 | 2026-04-01 |",
+          status: "completed",
+          createdAt: "2026-10-26T12:00:01.000Z",
+        };
+        const cacheStatus: GraphCacheStatus = { tenantId, resources: [] };
+        onEvent({ type: "started", conversation, userMessage, assistantMessage: { ...assistantMessage, content: "", status: "streaming" }, cacheStatus } as never);
+        saved = [userMessage, assistantMessage];
+        const result: SendIntuneChatMessageResult = { conversation, userMessage, assistantMessage, cacheStatus };
+        onEvent({ type: "completed", result });
+        return result;
+      }),
+    },
+    state,
+  );
+}
+
+function spyOnMessageScrollIntoView() {
+  const anchored: Array<{ messageId: string | undefined; options: unknown }> = [];
+  const spy = vi
+    .spyOn(HTMLElement.prototype, "scrollIntoView")
+    .mockImplementation(function (this: HTMLElement, options?: boolean | ScrollIntoViewOptions) {
+      if (this.dataset.messageId) anchored.push({ messageId: this.dataset.messageId, options });
+    });
+  return { anchored, restore: () => spy.mockRestore() };
+}
+
+describe("IntuneChat answer scroll", () => {
+  it("keeps the prompt at the top when a pilot answer arrives", async () => {
+    const user = userEvent.setup();
+    const scroll = spyOnMessageScrollIntoView();
+    try {
+      const bridge = streamingBridge(
+        createMockAppState({ tenants: [PILOT_TENANT], activeTenantId: PILOT_TENANT.id }),
+      );
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+      const chips = within(await screen.findByRole("group", { name: "Prepared prompts" })).getAllByRole("button");
+      await user.click(chips[0]!);
+      await screen.findByText(/17 of 119 managed devices have not checked in/);
+
+      await waitFor(() =>
+        expect(scroll.anchored).toContainEqual({
+          messageId: "user-scroll",
+          options: expect.objectContaining({ block: "start" }),
+        }),
+      );
+    } finally {
+      scroll.restore();
+    }
+  });
+
+  it("keeps following the latest output in production", async () => {
+    const user = userEvent.setup();
+    const scroll = spyOnMessageScrollIntoView();
+    try {
+      const bridge = streamingBridge(createMockAppState());
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+      const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+      await user.type(composer, "Which managed devices have not synced in the last 7 days?");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      await screen.findByText(/17 of 119 managed devices have not checked in/);
+
+      expect(scroll.anchored).toEqual([]);
+    } finally {
+      scroll.restore();
+    }
+  });
+});
+
+describe("IntuneChat automatic provider notice", () => {
+  const notice = PROVIDER_DETECTION_COPY.autoSelectedNotice("LM Studio");
+
+  it("shows once after a local provider was selected automatically, until dismissed", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        activeProviderId: "lm-studio",
+        providers: mockProviders.map((provider) =>
+          provider.id === "lm-studio"
+            ? { ...provider, status: "connected" as const, models: ["qwen2.5-7b-instruct"] }
+            : provider,
+        ),
+        providerAutoSelectNotice: { providerId: "lm-studio", providerName: "LM Studio" },
+      }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: PROVIDER_DETECTION_COPY.autoSelectedNoticeDismiss }));
+    await waitFor(() => expect(bridge.dismissProviderAutoSelectNotice).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByText(notice)).not.toBeInTheDocument());
+  });
+
+  it("never shows in pilot mode", async () => {
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        tenants: [PILOT_TENANT],
+        activeTenantId: PILOT_TENANT.id,
+        providerAutoSelectNotice: { providerId: "lm-studio", providerName: "LM Studio" },
+      }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    await screen.findByRole("group", { name: "Prepared prompts" });
+    expect(screen.queryByText(notice)).not.toBeInTheDocument();
   });
 });
 

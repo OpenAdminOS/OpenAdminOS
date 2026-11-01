@@ -67,6 +67,8 @@ import {
 import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
+import { detectedHostedProviders } from "../shared/provider-detection";
+import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
 import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
@@ -594,11 +596,24 @@ function ProvidersSection({
   onSetActiveModel: (id: ProviderId, model: string | null) => Promise<void>;
   onProviderConfigSaved: () => Promise<void>;
 }) {
+  // Ready hosted providers lead when no local one is ready, and are never
+  // made active without the user's click.
+  const detected = detectedHostedProviders(providers, activeProviderId);
+  const detectedIds = new Set(detected.map((provider) => provider.id));
+  const ordered = [
+    ...providers.filter((provider) => detectedIds.has(provider.id)),
+    ...providers.filter((provider) => !detectedIds.has(provider.id)),
+  ];
   return (
     <div className="max-w-[1040px]">
+      <DetectedHostedProviders
+        className="mb-4"
+        providers={detected}
+        onSelect={(id) => onSetActiveProvider(id)}
+      />
       <fieldset className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
         <legend className="sr-only">Active provider</legend>
-        {providers.map((provider) => (
+        {ordered.map((provider) => (
           <ProviderRow
             key={provider.id}
             provider={provider}

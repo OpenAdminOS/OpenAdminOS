@@ -433,6 +433,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:update-agent", slug, options),
   setActiveProvider: (id: ProviderId) =>
     ipcRenderer.invoke("openadminos:set-active-provider", id),
+  dismissProviderAutoSelectNotice: () =>
+    ipcRenderer.invoke("openadminos:dismiss-provider-auto-select-notice"),
   setActiveModel: (providerId: ProviderId, model: string | null) =>
     ipcRenderer.invoke("openadminos:set-active-model", providerId, model),
   reviewOfficeFinding: input => ipcRenderer.invoke("openadminos:office-review", input),
