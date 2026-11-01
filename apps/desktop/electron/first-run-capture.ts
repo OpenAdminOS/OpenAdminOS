@@ -6,12 +6,31 @@ export const FIRST_RUN_CAPTURE_WIDTH = 1280;
 export const FIRST_RUN_CAPTURE_HEIGHT = 800;
 
 type FirstRunCaptureAction =
-  | "wait-first-run"
-  | "add-sample-chat"
-  | "open-sample-switcher"
+  | "wait-welcome"
+  | "open-connect-permissions"
   | "open-own-registration"
   | "close-setup"
+  | "start-pilot-chat"
+  | "open-pilot-agents"
+  | "run-inactive-devices"
+  | "open-write-confirm"
+  | "open-hidden-route"
   | "open-paused-schedules";
+
+export const FIRST_RUN_CAPTURE_SHOTS = [
+  "welcome",
+  "connect-permissions",
+  "own-registration",
+  "pilot-chat",
+  "pilot-agents",
+  "pilot-agent-report",
+  "pilot-write-confirm",
+  "pilot-hidden-route",
+  "schedules-paused",
+] as const;
+
+// Theme changes animate colors; wait for the transition before capturing.
+const THEME_SETTLE_MS = 1500;
 
 export async function captureFirstRunShots(
   window: BrowserWindow,
@@ -23,18 +42,31 @@ export async function captureFirstRunShots(
   window.webContents.setBackgroundThrottling(false);
   await waitForViewport(window);
 
-  await runStep(window, "wait-first-run");
-  await captureReloadedFirstRunThemes(window, outDir);
+  await runStep(window, "wait-welcome");
+  await captureReloadedWelcomeThemes(window, outDir);
 
-  await runStep(window, "add-sample-chat");
-  await captureThemes(window, outDir, "sample-chat");
-
-  await runStep(window, "open-sample-switcher");
-  await captureThemes(window, outDir, "sample-switcher");
+  await runStep(window, "open-connect-permissions");
+  await captureThemes(window, outDir, "connect-permissions");
+  await runStep(window, "close-setup");
 
   await runStep(window, "open-own-registration");
   await captureThemes(window, outDir, "own-registration");
   await runStep(window, "close-setup");
+
+  await runStep(window, "start-pilot-chat");
+  await captureThemes(window, outDir, "pilot-chat");
+
+  await runStep(window, "open-pilot-agents");
+  await captureThemes(window, outDir, "pilot-agents");
+
+  await runStep(window, "run-inactive-devices");
+  await captureThemes(window, outDir, "pilot-agent-report");
+
+  await runStep(window, "open-write-confirm");
+  await captureThemes(window, outDir, "pilot-write-confirm");
+
+  await runStep(window, "open-hidden-route");
+  await captureThemes(window, outDir, "pilot-hidden-route");
 
   await preparePausedSchedules();
   const loaded = new Promise<void>((resolve) =>
@@ -46,7 +78,7 @@ export async function captureFirstRunShots(
   await runStep(window, "open-paused-schedules");
   await captureThemes(window, outDir, "schedules-paused");
 
-  console.log("[first-run-capture] wrote 10 screenshots");
+  console.log(`[first-run-capture] wrote ${FIRST_RUN_CAPTURE_SHOTS.length * 2} screenshots`);
 }
 
 async function captureThemes(
@@ -61,7 +93,7 @@ async function captureThemes(
   }
 }
 
-async function captureReloadedFirstRunThemes(
+async function captureReloadedWelcomeThemes(
   window: BrowserWindow,
   outDir: string,
 ): Promise<void> {
@@ -73,9 +105,9 @@ async function captureReloadedFirstRunThemes(
     window.webContents.reload();
     await loaded;
     await waitForViewport(window);
-    await runStep(window, "wait-first-run");
+    await runStep(window, "wait-welcome");
     await prepareCaptureSurface(window);
-    await writeCapture(window, outDir, "first-run", theme);
+    await writeCapture(window, outDir, "welcome", theme);
   }
 }
 
@@ -102,7 +134,7 @@ async function setCaptureTheme(
       localStorage.setItem("openadminos:appearance:v1", ${JSON.stringify(theme)});
       window.dispatchEvent(new StorageEvent("storage", { key: "openadminos:appearance:v1" }));
       await document.fonts.ready;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await new Promise((resolve) => setTimeout(resolve, ${THEME_SETTLE_MS}));
     })()`,
     true,
   );
@@ -198,90 +230,9 @@ async function firstRunCaptureStepScript(
     await delay(200);
   };
 
-  if (action === "wait-first-run") {
-    await waitFor(
-      () =>
-        bodyText().includes("Choose how to start") &&
-        bodyText().includes("Try with sample data") &&
-        bodyText().includes("Use your organization's app registration"),
-      "first-run choice",
-    );
-    return;
-  }
-
-  if (action === "add-sample-chat") {
-    await clickButton("Try with sample data");
-    await waitFor(
-      () => !bodyText().includes("Choose how to start"),
-      "sample tenant activation",
-    );
-    await navigate("/chat");
-    await waitFor(
-      () =>
-        Boolean(document.querySelector('[id^="intune-chat-composer"]')) &&
-        bodyText().includes("Sample data. Answers describe the fictional Contoso tenant."),
-      "sample Chat composer",
-    );
-    const textarea = document.querySelector<HTMLTextAreaElement>(
-      '[id^="intune-chat-composer"]',
-    );
-    if (!textarea) throw new Error("Sample Chat textarea was not found.");
-    const setter = Object.getOwnPropertyDescriptor(
-      HTMLTextAreaElement.prototype,
-      "value",
-    )?.set;
-    setter?.call(
-      textarea,
-      "Which managed devices have not synced in the last 7 days?",
-    );
-    textarea.dispatchEvent(new Event("input", { bubbles: true }));
-    await clickButton("Send");
-    await waitFor(
-      () =>
-        bodyText().includes("17 managed devices have not synced in more than 7 days.") &&
-        bodyText().includes("Shown without an LLM summary."),
-      "computed sample answer",
-    );
-    return;
-  }
-
-  if (action === "open-sample-switcher") {
-    const trigger = buttons().find((button) =>
-      button.getAttribute("aria-label")?.startsWith("Switch tenant, Contoso (sample data)"),
-    );
-    if (!trigger) throw new Error("Sample tenant switcher was not found.");
-    trigger.click();
-    await waitFor(
-      () =>
-        Boolean(document.querySelector('[role="menu"][aria-label="Connected tenants"]')) &&
-        bodyText().includes("Fictional tenant"),
-      "sample tenant menu",
-    );
-    return;
-  }
-
-  if (action === "open-own-registration") {
-    const connect = Array.from(
-      document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]'),
-    ).find((button) => button.textContent?.trim() === "Connect tenant");
-    if (!connect) throw new Error("Connect tenant menu item was not found.");
-    connect.click();
-    await waitFor(
-      () => bodyText().includes("Connect a Microsoft 365 tenant"),
-      "tenant setup dialog",
-    );
-    await clickButton("Connect with your own app registration");
-    await waitFor(
-      () =>
-        Boolean(document.querySelector('input[name="tenant-client-id"]')) &&
-        Boolean(document.querySelector('input[name="tenant-directory-id"]')) &&
-        bodyText().includes("No client secret is used."),
-      "own registration form",
-    );
-    const clientId = document.querySelector<HTMLElement>(
-      'input[name="tenant-client-id"]',
-    );
-    let scrollParent = clientId?.parentElement;
+  const scrollDialogToBottom = async (selector: string) => {
+    const element = document.querySelector<HTMLElement>(selector);
+    let scrollParent = element?.parentElement;
     while (
       scrollParent &&
       !["auto", "scroll"].includes(getComputedStyle(scrollParent).overflowY)
@@ -290,11 +241,49 @@ async function firstRunCaptureStepScript(
     }
     if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
     await delay(250);
+  };
+
+  if (action === "wait-welcome") {
+    await waitFor(
+      () =>
+        bodyText().includes("Welcome to OpenAdminOS") &&
+        bodyText().includes("Start pilot mode") &&
+        bodyText().includes("Use your own app registration."),
+      "welcome view",
+    );
+    return;
+  }
+
+  if (action === "open-connect-permissions") {
+    await clickButton("Connect tenant");
+    await waitFor(
+      () =>
+        bodyText().includes("Connect a Microsoft 365 tenant") &&
+        Boolean(findButton("Approve and continue to Microsoft")),
+      "permissions stage",
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    await delay(400);
+    return;
+  }
+
+  if (action === "open-own-registration") {
+    await clickButton("Your organization blocks third-party apps? Use your own app registration.");
+    await waitFor(
+      () =>
+        Boolean(document.querySelector('input[name="tenant-client-id"]')) &&
+        Boolean(document.querySelector('input[name="tenant-directory-id"]')) &&
+        bodyText().includes("No client secret is used."),
+      "own registration form",
+    );
+    await scrollDialogToBottom('input[name="tenant-client-id"]');
+    (document.activeElement as HTMLElement | null)?.blur();
+    await delay(200);
     return;
   }
 
   if (action === "close-setup") {
-    await clickButton("Close");
+    await clickButton("Cancel");
     await waitFor(
       () => !bodyText().includes("Connect a Microsoft 365 tenant"),
       "setup dialog close",
@@ -302,11 +291,89 @@ async function firstRunCaptureStepScript(
     return;
   }
 
-  await navigate("/agents?filter=scheduled");
+  if (action === "start-pilot-chat") {
+    await clickButton("Start pilot mode");
+    await waitFor(
+      () =>
+        !bodyText().includes("Welcome to OpenAdminOS") &&
+        Boolean(document.querySelector('[role="group"][aria-label="Prepared prompts"]')),
+      "pilot Chat",
+    );
+    const chip = document.querySelector<HTMLButtonElement>(
+      '[role="group"][aria-label="Prepared prompts"] button',
+    );
+    if (!chip) throw new Error("Pilot prompt chip was not found.");
+    chip.click();
+    await waitFor(
+      () =>
+        bodyText().includes("managed devices have not checked in with Intune") &&
+        Boolean(document.querySelector('[role="group"][aria-label="Follow-up prompts"]')) &&
+        bodyText().includes("In production, answers come from your tenant and the model you choose."),
+      "prepared pilot answer",
+    );
+    // Scroll to the end of the conversation so the follow-up chips sit
+    // above the prompt chips, as they do right after an answer arrives.
+    const log = document.querySelector<HTMLElement>('[role="log"]');
+    if (log) log.scrollTop = log.scrollHeight;
+    await delay(400);
+    return;
+  }
+
+  if (action === "open-pilot-agents") {
+    await navigate("/agents");
+    await waitFor(
+      () =>
+        bodyText().includes("Available in pilot mode") &&
+        bodyText().includes("Available in production") &&
+        Boolean(findButton("Run Find inactive devices")),
+      "pilot agents",
+    );
+    return;
+  }
+
+  if (action === "run-inactive-devices") {
+    await clickButton("Run Find inactive devices");
+    await waitFor(
+      () =>
+        location.hash.startsWith("#/runs/") &&
+        bodyText().includes("Prepared sample report.") &&
+        bodyText().includes("Pilot (prepared)"),
+      "completed pilot run",
+      40000,
+    );
+    await delay(500);
+    return;
+  }
+
+  if (action === "open-write-confirm") {
+    await navigate("/agents/stale-guest-cleanup/confirm");
+    await clickButton("Start run");
+    await waitFor(
+      () =>
+        location.hash.startsWith("#/runs/") &&
+        bodyText().includes("DISABLE 5 GUESTS") &&
+        bodyText().includes("Type the phrase below to confirm"),
+      "write confirmation",
+      40000,
+    );
+    await delay(500);
+    return;
+  }
+
+  if (action === "open-hidden-route") {
+    await navigate("/office");
+    await waitFor(
+      () => bodyText().includes("Agent Team is available in production. Connect your tenant to use it."),
+      "pilot hidden route",
+    );
+    return;
+  }
+
+  await navigate("/agents");
   await waitFor(
     () =>
       bodyText().includes(
-        "Schedules are paused while the sample tenant is active. Switch to a connected tenant to resume.",
+        "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.",
       ) &&
       bodyText().includes("Switch to Contoso Production"),
     "paused schedules notice",

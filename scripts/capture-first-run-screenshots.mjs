@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { access, mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,15 +12,20 @@ const viteBin = resolve(
 const port = process.env.OPENADMINOS_FIRST_RUN_SCREENSHOT_PORT ?? "5177";
 const rendererUrl = `http://127.0.0.1:${port}`;
 const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-first-run-capture-"));
+// Screenshots land in <outDir>/app. The default keeps them outside the repo.
 const outDir = resolve(
   process.env.OPENADMINOS_FIRST_RUN_SCREENSHOT_OUT_DIR ??
-    "/tmp/oaos-firstrun/shots",
+    join(homedir(), ".cache", "oaos-pilot", "shots"),
 );
 const names = [
-  "first-run",
-  "sample-chat",
-  "sample-switcher",
+  "welcome",
+  "connect-permissions",
   "own-registration",
+  "pilot-chat",
+  "pilot-agents",
+  "pilot-agent-report",
+  "pilot-write-confirm",
+  "pilot-hidden-route",
   "schedules-paused",
 ];
 const expectedFiles = names.flatMap((name) =>
@@ -60,7 +65,7 @@ try {
   });
   pipeProcess(electron, "electron");
 
-  const code = await waitForExit(electron, 90_000);
+  const code = await waitForExit(electron, 240_000);
   if (code !== 0) {
     throw new Error(`Electron first-run capture exited with code ${code}.`);
   }
