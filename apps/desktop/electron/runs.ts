@@ -1254,9 +1254,8 @@ export class RunService {
   private assessPlan(run: RunRecord, state: RunPersistedState): RunRecord["riskAssessment"] {
     if (!run.plan) return undefined;
     const agent = state.installedAgents.find((candidate) => candidate.slug === run.agentSlug);
-    // Only code-backed agents declare graphOperations. Declarative templates
-    // take their write requests from the manifest's own actionTemplate, so an
-    // empty or missing list means "nothing to compare against", not "undeclared".
+    // Installed agent summaries carry every declared Graph read and write.
+    // An empty or missing list means there is no declaration set to compare.
     const graphOperations = run.origin === undefined && agent?.graphOperations?.length
       ? agent.graphOperations
       : undefined;

@@ -5591,11 +5591,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         console.warn(`[pilot] bundled agent ${slug} is missing; it will not be available in pilot mode`);
         return [];
       }
-      // The bundled summary lists only the manifest's Graph reads, so keeping
-      // it would flag the agent's own declared write as undeclared in the
-      // risk review. Hub installs carry no operation list either.
-      const { graphOperations: _readOnlyOperations, ...summary } = entry;
-      const compatible = withAgentCompatibility(summary, this.appVersion);
+      const compatible = withAgentCompatibility(entry, this.appVersion);
       const agent = toInstalledAgent(compatible, installedAt);
       agent.provenance = buildAgentProvenance({ agent: compatible, installedAt: agent.installedAt });
       return [agent];

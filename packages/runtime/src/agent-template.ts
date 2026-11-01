@@ -1693,19 +1693,56 @@ function collectScopes(manifest: AgentTemplate): string[] {
 
 function collectGraphOperations(manifest: AgentTemplate): GraphOperation[] {
   const operations: GraphOperation[] = [];
+  const operationByKey = new Map<string, GraphOperation>();
+  const addOperation = (operation: GraphOperation): void => {
+    const selectKey = [...(operation.select ?? [])].sort().join(",");
+    const key = `${operation.method}\u0000${operation.path}\u0000${selectKey}`;
+    const existing = operationByKey.get(key);
+    if (existing) {
+      if (!existing.notes && operation.notes) existing.notes = operation.notes;
+      return;
+    }
+    operationByKey.set(key, operation);
+    operations.push(operation);
+  };
+
   walkSkills(manifest.skills, (skill) => {
-    if (skill.format !== "graph") return;
-    const op: GraphOperation = {
-      method: skill.settings.method,
-      path: skill.settings.path,
-    };
-    if (skill.settings.select && skill.settings.select.length > 0) {
-      op.select = [...skill.settings.select];
+    if (skill.format === "graph") {
+      const operation: GraphOperation = {
+        method: skill.settings.method,
+        path: skill.settings.path,
+      };
+      if (skill.settings.select && skill.settings.select.length > 0) {
+        operation.select = [...skill.settings.select];
+      }
+      if (skill.detail) {
+        operation.notes = skill.detail;
+      }
+      addOperation(operation);
+      return;
     }
-    if (skill.detail) {
-      op.notes = skill.detail;
+
+    if (skill.format !== "write") return;
+    const notes = skill.detail ?? skill.label;
+    if (skill.settings.kind === "graph-write") {
+      const request = skill.settings.actionTemplate.request;
+      if (request) {
+        addOperation({
+          method: request.method,
+          path: request.path,
+          notes,
+        });
+      }
+      return;
     }
-    operations.push(op);
+
+    if (skill.settings.kind === "retire-managed-device") {
+      addOperation({
+        method: "POST",
+        path: "/deviceManagement/managedDevices/{id}/retire",
+        notes,
+      });
+    }
   });
   return operations;
 }

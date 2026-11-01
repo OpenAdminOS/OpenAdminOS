@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import type { WriteAction, WriteHttpMethod, WritePlan } from "@openadminos/agent-sdk";
+import { agentTemplateToRegistrySummary, parseAgentTemplate } from "./agent-template.js";
 import { assessWritePlan, assessWritePlanSafely } from "./write-plan-risk.js";
 
 function action(path: string, method: WriteHttpMethod = "POST", body?: unknown): WriteAction {
@@ -125,7 +127,7 @@ describe("write plan risk rules", () => {
 
   it("flags undeclared requests with the broker's method and placeholder matching", () => {
     const proposal = plan(action("/users/user-1", "PATCH"));
-    for (const path of ["/users/{id}", "/users/:id", "/users/user-1/"]) {
+    for (const path of ["/users/{id}", "/users/:id", "/users/{{ item.id }}", "/users/user-1/"]) {
       assert.deepEqual(assessWritePlan(proposal, { graphOperations: [{ method: "PATCH", path }] }), []);
     }
     for (const graphOperations of [[], [{ method: "POST" as const, path: "/users/{id}" }], [{ method: "PATCH" as const, path: "/users/{id}/manager" }]]) {
@@ -134,6 +136,33 @@ describe("write plan risk rules", () => {
       assert.equal(flags[0]?.severity, "danger");
     }
     assert.deepEqual(assessWritePlan(proposal), []);
+  });
+
+  it("accepts a bundled write agent's own request and rejects method or path changes", () => {
+    const manifest = parseAgentTemplate(readFileSync(
+      new URL("../../../agents/stale-guest-cleanup/manifest.yaml", import.meta.url),
+      "utf8",
+    ));
+    const graphOperations = agentTemplateToRegistrySummary(manifest).graphOperations;
+    const declared = action("/users/guest-1", "PATCH", { accountEnabled: false });
+    assert.equal(
+      assessWritePlan(plan(declared), { graphOperations }).some(
+        (flag) => flag.id === "undeclared-request",
+      ),
+      false,
+    );
+
+    for (const changed of [
+      action("/users/guest-1", "DELETE"),
+      action("/groups/guest-1", "PATCH", { accountEnabled: false }),
+    ]) {
+      assert.equal(
+        assessWritePlan(plan(changed), { graphOperations }).some(
+          (flag) => flag.id === "undeclared-request",
+        ),
+        true,
+      );
+    }
   });
 
   it("groups matching action ids once per rule without changing the input", () => {

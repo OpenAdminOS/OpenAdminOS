@@ -98,7 +98,7 @@ describe("host write plan risk assessment", () => {
     } finally { await f.cleanup(); }
   });
 
-  it("does not flag template writes as undeclared when the agent declares no Graph operations", async () => {
+  it("skips declaration matching when an installed agent has no Graph operation list", async () => {
     const f = await fixture([], { ...agent, graphOperations: undefined });
     try {
       await f.service.persistRunSnapshot(run({ plan: { summary: "Disable guests.", confirmationPhrase: "DISABLE 1 GUESTS",
