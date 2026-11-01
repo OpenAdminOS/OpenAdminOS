@@ -253,12 +253,9 @@ describe("contextual tenant setup", () => {
   it("locks the required area and updates the approved scope count", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWithAppState(<div>App content</div>, {
-      route: "/chat",
-      bridge: makeMockBridge({}, emptyState),
-    });
+    renderWelcome(makeMockBridge({}, emptyState));
 
-    await user.click(await screen.findByRole("button", { name: "Connect your tenant" }));
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     const directory = await screen.findByRole("checkbox", {
       name: "Users, groups, and directory",
     });
@@ -288,11 +285,11 @@ describe("contextual tenant setup", () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const bridge = makeMockBridge({}, emptyState);
-    renderWithAppState(<div>App content</div>, { route: "/chat", bridge });
+    renderWelcome(bridge);
 
     await user.click(
       await screen.findByRole("button", {
-        name: "Use your organization's app registration",
+        name: "Your organization blocks third-party apps? Use your own app registration.",
       }),
     );
     const displayName = screen.getByLabelText("Application display name");
@@ -366,7 +363,7 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve and continue to Microsoft" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" })).toBeInTheDocument();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
   });
 
@@ -446,7 +443,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
 
     const detected = await screen.findByRole("region", { name: PROVIDER_DETECTION_COPY.detectedLabel });
@@ -473,7 +470,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Open setup" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" }),
     );
     expect(await screen.findByText(PILOT_COPY.removedAfterConnect)).toBeInTheDocument();
   });
