@@ -8,6 +8,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 - Add a code of conduct (Contributor Covenant 2.1) and a security policy with private vulnerability reporting and the scope of what to report.
 - Document how to connect with your own Entra app registration: redirect URI, public client flows, and the delegated Graph permissions to add. A test keeps the documented permission list in sync with the app.
+- Add the client-side team cryptography package for signed device enrollment, revocation, encrypted payloads, and offline recovery, with no user-facing behavior changes yet.
 - Copied and shared run reports end with a note that the report includes AI-generated text, naming the provider and model.
 - Add an EU AI Act page to the docs trust model: how the Act applies to the app, the registry, and the OpenAdmin models, what the product already does, and what stays with the organisation using it. The public registry now states which agent purposes it does not accept.
 - Write plans now have enforced action limits, shown in permissions previews and checked before confirmation and before changes are applied.

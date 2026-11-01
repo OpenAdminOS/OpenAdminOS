@@ -1,0 +1,23 @@
+{
+  "name": "@openadminos/team-crypto",
+  "version": "0.7.2",
+  "private": true,
+  "type": "module",
+  "description": "Client-side cryptography for encrypted OpenAdminOS team payloads.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --import tsx --test \"src/**/*.test.ts\""
+  },
+  "sideEffects": false,
+  "engines": { "node": ">=22" }
+}
