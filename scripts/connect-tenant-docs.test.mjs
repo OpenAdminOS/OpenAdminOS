@@ -9,10 +9,10 @@ const root = join(here, "..");
 
 // Read the scope list from source so this test needs no build step.
 function defaultReadScopes() {
-  const sdk = readFileSync(
-    join(root, "packages", "agent-sdk", "src", "index.ts"),
-    "utf8",
-  );
+  // The list lives with the permission areas; index.ts re-exports it.
+  const sdk = ["index.ts", "permission-areas.ts"]
+    .map((file) => readFileSync(join(root, "packages", "agent-sdk", "src", file), "utf8"))
+    .join("\n");
   const block = sdk.match(
     /export const DEFAULT_GRAPH_READ_SCOPE_NAMES = \[([\s\S]*?)\] as const;/,
   );
