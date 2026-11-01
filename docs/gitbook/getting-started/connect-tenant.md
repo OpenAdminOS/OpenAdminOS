@@ -18,8 +18,10 @@ By default, OpenAdminOS signs in with the OpenAdminOS multi-tenant app registrat
 1. In the Microsoft Entra admin center, go to **App registrations** and create a new registration. Single-tenant or multi-tenant both work.
 2. Under **Authentication**, add the platform **Mobile and desktop applications** with the redirect URI `http://localhost`.
 3. Under **Authentication**, set **Allow public client flows** to **Yes**.
-4. Under **API permissions**, add the delegated Microsoft Graph read permissions listed below, then grant admin consent. You can also skip this step and approve the permissions at first sign-in instead. The setup dialog always shows the current list with the reason for each scope.
+4. Under **API permissions**, add the delegated Microsoft Graph read permissions listed below (or only those for the permission areas your team needs), then grant admin consent. You can also skip this step and approve the permissions at first sign-in instead. The setup dialog always shows the current list with the reason for each scope.
 5. In OpenAdminOS, start connecting a tenant, choose **Connect with your own app registration**, and enter the **Application (client) ID**. Enter the **Directory (tenant) ID** only if the registration is single-tenant.
+
+If you cannot create app registrations yourself, the own-registration form can generate a PowerShell setup script for your Entra administrator. See [Authentication and permissions](../trust/authentication.md).
 
 Delegated read permissions requested at sign-in:
 
