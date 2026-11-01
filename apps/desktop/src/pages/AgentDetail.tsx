@@ -4,7 +4,11 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
-import { ManifestPreview, ManifestSections } from "../components/ManifestPreview";
+import {
+  DeclaredGraphOperations,
+  ManifestPreview,
+  ManifestSections,
+} from "../components/ManifestPreview";
 import { stripMarkdownToPlainText } from "../components/MarkdownPreview";
 import { Modal, ModalHeader } from "../components/Modal";
 import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
@@ -1094,6 +1098,7 @@ function HubAgentDrawer({
                   </div>
                 ))}
               </div>
+              {preview ? <DeclaredGraphOperations manifest={preview.manifest} /> : null}
               <div className="flex justify-end gap-2">
                 <Button size="sm" variant="ghost" disabled={installing} onClick={onCancelInstall}>
                   Cancel
@@ -1129,6 +1134,9 @@ function HubAgentDrawer({
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
               Missing consent is requested before the first run.
             </p>
+            {!installConfirm && preview ? (
+              <DeclaredGraphOperations manifest={preview.manifest} />
+            ) : null}
           </Section>
 
           {previewLoading ? (

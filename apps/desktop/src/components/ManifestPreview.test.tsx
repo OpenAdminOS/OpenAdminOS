@@ -55,4 +55,41 @@ describe("ManifestSections", () => {
     expect(screen.getByText("Permissions")).toBeInTheDocument();
     expect(screen.queryByText("What the run produces")).not.toBeInTheDocument();
   });
+
+  it("labels declared write requests in the permissions preview", () => {
+    const preview = previewWithoutResult();
+    preview.manifest.descriptor.mode = "write";
+    preview.manifest.skills = [
+      {
+        id: "load_users",
+        format: "graph",
+        label: "Load users",
+        settings: { method: "GET", path: "/users", scopes: ["User.Read.All"] },
+      },
+      {
+        id: "disable_user",
+        format: "write",
+        label: "Disable user",
+        settings: {
+          kind: "graph-write",
+          source: "{{ users }}",
+          confirmationPhrase: "DISABLE 1 USER",
+          actionTemplate: {
+            label: "Disable user",
+            request: {
+              method: "PATCH",
+              path: "/users/{{ item.id }}",
+              body: { accountEnabled: false },
+            },
+          },
+        },
+      },
+    ];
+
+    render(<ManifestSections preview={preview} sections={["permissions"]} />);
+    expect(screen.getByText("Declared Graph operations")).toBeInTheDocument();
+    expect(screen.getByText("PATCH")).toBeInTheDocument();
+    expect(screen.getByText("/users/{{ item.id }}")).toBeInTheDocument();
+    expect(screen.getByText("Write")).toBeInTheDocument();
+  });
 });

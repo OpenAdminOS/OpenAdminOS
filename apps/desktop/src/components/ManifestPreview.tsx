@@ -15,6 +15,7 @@ import {
 import type {
   AgentManifestPreview,
   AgentTemplate,
+  GraphOperation,
   GraphStep,
   LlmStep,
   TemplateStep,
@@ -64,7 +65,7 @@ export function ManifestPreview({
   return (
     <div className="flex flex-col gap-6">
       {showDescriptor && <DescriptorCard manifest={manifest} />}
-      <ScopesCard scopes={scopes} />
+      <ScopesCard scopes={scopes} manifest={manifest} />
       <WriteLimitsSummary manifest={manifest} />
       <PipelineCard steps={manifest.skills} defaultOpen={defaultPipelineOpen} />
       <SettingsCard manifest={manifest} overrides={settingsOverrides} />
@@ -123,6 +124,7 @@ export function ManifestSections({
               <p className="mt-2 text-sm text-[var(--color-text-muted)]">
                 Missing consent is requested before the first run.
               </p>
+              <DeclaredGraphOperations manifest={manifest} />
               <WriteLimitsSummary manifest={manifest} />
             </Section>
           );
@@ -247,33 +249,117 @@ function DescriptorCard({ manifest }: { manifest: AgentTemplate }) {
 
 // ─── shared bits ─────────────────────────────────────────────────────────
 
-function ScopesCard({ scopes }: { scopes: string[] }) {
-  if (scopes.length === 0) return null;
+function ScopesCard({ scopes, manifest }: { scopes: string[]; manifest: AgentTemplate }) {
+  const operations = collectDeclaredGraphOperations(manifest);
+  if (scopes.length === 0 && operations.length === 0) return null;
   return (
     <Card>
       <div className="p-6">
-        <SectionLabel>Required Graph scopes</SectionLabel>
-        <div className="mt-3 flex flex-col gap-2">
-          {scopes.map((scope) => (
-            <div
-              key={scope}
-              className="flex items-center gap-2.5 rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
-            >
-              <IconLock size={13} className="text-[var(--color-text-muted)]" />
-              <span className="font-mono text-sm text-[var(--color-text)]">
-                {scope}
-              </span>
+        {scopes.length > 0 ? (
+          <>
+            <SectionLabel>Required Graph scopes</SectionLabel>
+            <div className="mt-3 flex flex-col gap-2">
+              {scopes.map((scope) => (
+                <div
+                  key={scope}
+                  className="flex items-center gap-2.5 rounded-md bg-[var(--color-bg-raised)] px-3 py-2 ring-1 ring-[var(--color-border-soft)]"
+                >
+                  <IconLock size={13} className="text-[var(--color-text-muted)]" />
+                  <span className="font-mono text-sm text-[var(--color-text)]">
+                    {scope}
+                  </span>
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
-        <div className="mt-4 text-sm text-[var(--color-text-muted)]">
-          Approved at tenant sign-in. You can revoke these from the
-          tenant's Enterprise applications view in the Microsoft Entra
-          admin center at any time.
-        </div>
+            <div className="mt-4 text-sm text-[var(--color-text-muted)]">
+              Approved at tenant sign-in. You can revoke these from the
+              tenant's Enterprise applications view in the Microsoft Entra
+              admin center at any time.
+            </div>
+          </>
+        ) : null}
+        <DeclaredGraphOperations manifest={manifest} />
       </div>
     </Card>
   );
+}
+
+export function DeclaredGraphOperations({ manifest }: { manifest: AgentTemplate }) {
+  const operations = collectDeclaredGraphOperations(manifest);
+  if (operations.length === 0) return null;
+  return (
+    <div className="mt-4">
+      <SectionLabel>Declared Graph operations</SectionLabel>
+      <div className="mt-2 divide-y divide-[var(--color-border-soft)]">
+        {operations.map((operation) => {
+          const write = operation.method !== "GET";
+          return (
+            <div
+              key={`${operation.method}:${operation.path}:${(operation.select ?? []).join(",")}`}
+              className="py-2.5 first:pt-0 last:pb-0"
+            >
+              <div className="flex min-w-0 items-center gap-2 font-mono text-sm">
+                <span className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ${write
+                  ? "bg-[var(--color-danger-soft)] text-[var(--color-danger)]"
+                  : "bg-[var(--color-success-soft)] text-[var(--color-success)]"
+                }`}>
+                  {operation.method}
+                </span>
+                <span className="min-w-0 break-all text-[var(--color-text)]">{operation.path}</span>
+                <Badge tone={write ? "danger" : "neutral"}>{write ? "Write" : "Read"}</Badge>
+              </div>
+              {operation.notes ? (
+                <p className="mt-1 text-xs text-[var(--color-text-muted)]">{operation.notes}</p>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function collectDeclaredGraphOperations(manifest: AgentTemplate): GraphOperation[] {
+  const operations: GraphOperation[] = [];
+  const seen = new Set<string>();
+  const add = (operation: GraphOperation): void => {
+    const selectKey = [...(operation.select ?? [])].sort().join(",");
+    const key = `${operation.method}\u0000${operation.path}\u0000${selectKey}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    operations.push(operation);
+  };
+  const walk = (steps: TemplateStep[]): void => {
+    for (const step of steps) {
+      if (step.format === "graph") {
+        add({
+          method: step.settings.method,
+          path: step.settings.path,
+          ...(step.settings.select?.length ? { select: [...step.settings.select] } : {}),
+          ...(step.detail ? { notes: step.detail } : {}),
+        });
+      } else if (step.format === "write") {
+        const notes = step.detail ?? step.label;
+        if (step.settings.kind === "graph-write" && step.settings.actionTemplate.request) {
+          add({
+            method: step.settings.actionTemplate.request.method,
+            path: step.settings.actionTemplate.request.path,
+            notes,
+          });
+        } else if (step.settings.kind === "retire-managed-device") {
+          add({
+            method: "POST",
+            path: "/deviceManagement/managedDevices/{id}/retire",
+            notes,
+          });
+        }
+      } else if (step.format === "map") {
+        walk(step.settings.do);
+      }
+    }
+  };
+  walk(manifest.skills);
+  return operations;
 }
 
 function PipelineCard({
