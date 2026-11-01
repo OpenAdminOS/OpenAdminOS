@@ -57,7 +57,9 @@ export interface SetAzureOpenAIProviderConfigInput {
 export type AgentMode = "read" | "write";
 
 export * from "./write-limits.js";
+export * from "./graph-access.js";
 import type { WriteLimits } from "./write-limits.js";
+import type { GraphAccessDenial } from "./graph-access.js";
 
 export type AgentCategory =
   | "devices"
@@ -593,6 +595,8 @@ export interface TenantRecord {
   entraTier?: DetectedEntraTier;
   /** ISO timestamp of the last successful entraTier probe. */
   entraTierDetectedAt?: string;
+  /** Active Intune service plan, from the existing subscribed-SKU inventory. */
+  intuneLicensed?: boolean | undefined;
   /**
    * Admin-relevant subscribed SKUs detected from the same
    * `/subscribedSkus` probe that produces `entraTier`. Filtered to
@@ -741,6 +745,7 @@ export interface RunRecord {
   result?: unknown;
   error?: string;
   steps: RunStepRecord[];
+  accessDenial?: GraphAccessDenial;
   logs: RunLogRecord[];
   plan?: WritePlan;
   /** Host-produced assessment, retained with the reviewed plan in run history. */
@@ -1124,6 +1129,7 @@ export interface GraphCacheResourceStatus {
   refreshedAt?: string;
   scopeSet: string[];
   lastError?: string;
+  accessDenial?: GraphAccessDenial;
   /**
    * Total this resource holds in the tenant, as reported by Graph via
    * `$count`. Can exceed `rows`, which is capped by the cache page
@@ -1619,6 +1625,7 @@ export interface GraphCacheRefreshResourceResult {
   refreshedAt?: string;
   ok: boolean;
   error?: string;
+  accessDenial?: GraphAccessDenial;
 }
 
 export interface GraphCacheRefreshResult {
@@ -1715,6 +1722,7 @@ export interface TenantScopePreflightTenant {
   missingScopes: string[];
   warnings: string[];
   recovery: string;
+  accessDenials?: GraphAccessDenial[];
 }
 
 export interface TenantScopePreflight {
@@ -3968,6 +3976,8 @@ export interface TenantSession {
   username: string;
   /** Mints a Graph token covering the requested scope set. Implementations cache per scope set. */
   acquireTokenForScopes(scopes: string[]): Promise<string>;
+  /** Same acquisition, retaining MSAL's actual granted scopes for error reporting. */
+  acquireTokenWithScopes?(scopes: string[]): Promise<{ accessToken: string; scopes: string[] }>;
 }
 
 /**

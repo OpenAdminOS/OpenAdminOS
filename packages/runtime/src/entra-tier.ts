@@ -113,6 +113,7 @@ export async function probeSubscribedSkus(
   relevantLicenses: TenantLicense[];
   /** Every `skuPartNumber` returned by Graph, including ones we did not surface. Useful for diagnosing missing entries in the lookup table. */
   allSkuPartNumbers: string[];
+  intuneLicensed: boolean;
 } | null> {
   try {
     const token = await tokenProvider(["Organization.Read.All"]);
@@ -121,7 +122,8 @@ export async function probeSubscribedSkus(
     });
     if (!response.ok) return null;
     const body = (await response.json()) as SubscribedSkusResponse;
-    const skus = body.value ?? [];
+    if (!Array.isArray(body.value)) return null;
+    const skus = body.value;
     const allSkuPartNumbers = skus
       .map((s) => s.skuPartNumber)
       .filter((p): p is string => typeof p === "string" && p.length > 0);
@@ -129,6 +131,8 @@ export async function probeSubscribedSkus(
       tier: classifySkus(skus),
       relevantLicenses: extractRelevantLicenses(skus),
       allSkuPartNumbers,
+      intuneLicensed: skus.some(sku => sku.capabilityStatus === "Enabled"
+        && sku.servicePlans?.some(plan => plan.servicePlanName === "INTUNE_A" && plan.provisioningStatus === "Success")),
     };
   } catch {
     return null;

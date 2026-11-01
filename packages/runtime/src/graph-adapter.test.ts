@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 
 import { createGraphAdapter } from "./graph-adapter.js";
+import { GraphAccessDeniedError } from "@openadminos/agent-sdk";
 
 interface RecordedCall {
   url: string;
@@ -43,6 +44,43 @@ function mockFetch(
 }
 
 describe("createGraphAdapter", () => {
+  it("keeps granted MSAL scopes for opaque tokens and parses the full Graph code", async () => {
+    const calls: RecordedCall[] = [];
+    const adapter = createGraphAdapter({
+      tokenProvider: async () => ({ accessToken: "opaque-secret-token", scopes: ["AuditLog.Read.All"] }),
+      accessContext: () => ({ requiredScopes: ["AuditLog.Read.All"] }),
+      fetchImpl: mockFetch([jsonResponse({ error: { message: "x".repeat(500), code: "Authentication_RequestFromNonPremiumTenantOrB2CTenant" } }, { status: 403 })], calls),
+    });
+    await assert.rejects(adapter.request({ method: "GET", path: "/auditLogs/signIns" }), error => {
+      assert.ok(error instanceof GraphAccessDeniedError);
+      assert.equal(error.accessDenial.cause, "missing-licence");
+      assert.doesNotMatch(JSON.stringify(error), /opaque-secret-token/);
+      assert.doesNotMatch(error.message, /reconnect/i);
+      return true;
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.headers.authorization, "Bearer opaque-secret-token");
+  });
+
+  it("uses scp as a diagnostic fallback and leaves unparseable tokens unknown", async () => {
+    for (const [token, cause] of [
+      [`e30.${Buffer.from(JSON.stringify({ scp: "User.Read.All" })).toString("base64url")}.signature`, "missing-role"],
+      [`e30.${Buffer.from(JSON.stringify({ scp: "AuditLog.Read.All" })).toString("base64url")}.signature`, "missing-consent"],
+      ["opaque-token", "unknown"],
+      ["not.a.token", "unknown"],
+      [`e30.${Buffer.from(JSON.stringify({ roles: ["User.Read.All"] })).toString("base64url")}.signature`, "unknown"],
+    ]) {
+      const adapter = createGraphAdapter({ tokenProvider: async () => token!, accessContext: () => ({ requiredScopes: ["User.Read.All"] }),
+        fetchImpl: mockFetch([jsonResponse({ error: { code: "Authorization_RequestDenied" } }, { status: 403 })], []),
+      });
+      await assert.rejects(adapter.request({ method: "GET", path: "/users" }), error => {
+        assert.ok(error instanceof GraphAccessDeniedError);
+        assert.equal(error.accessDenial.cause, cause);
+        return true;
+      });
+    }
+  });
+
   it("attaches the bearer token from the provider on every request", async () => {
     const calls: RecordedCall[] = [];
     const adapter = createGraphAdapter({

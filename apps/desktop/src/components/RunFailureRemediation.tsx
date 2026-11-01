@@ -2,6 +2,7 @@ import { IconWarning } from "./icons";
 import { Button } from "./Button";
 import { useReportIssue } from "./ReportIssueModal";
 import type { RunRecord } from "../shared/openAdminOS";
+import { graphAccessDenialFromError } from "@openadminos/agent-sdk";
 
 interface Suggestion {
   match: (error: string) => boolean;
@@ -36,11 +37,6 @@ const SUGGESTIONS: Suggestion[] = [
     body: "Disconnect and reconnect the tenant from Settings → Tenants. MSAL caches a refresh token but Graph can revoke it independently.",
   },
   {
-    match: (e) => /403|forbidden|insufficient|scope|consent/i.test(e),
-    title: "Scope or consent issue",
-    body: "The signed-in account does not have the Graph scope this agent requires. Re-consent with an admin account, or pick an agent with a narrower scope set.",
-  },
-  {
     match: (e) => /tenant.*not connected|no tenant/i.test(e),
     title: "No tenant connected",
     body: "Open Settings → Tenants and connect a Microsoft 365 tenant before running agents.",
@@ -56,6 +52,10 @@ export function RunFailureRemediation({ run }: { run: RunRecord }) {
   const openReportIssue = useReportIssue();
   if (run.status !== "failed" || !run.error) return null;
   const matched = SUGGESTIONS.filter((suggestion) => suggestion.match(run.error!));
+  const accessDenial = run.accessDenial ?? graphAccessDenialFromError(run.error);
+  if (accessDenial) {
+    matched.unshift({ match: () => true, title: accessDenial.title, body: `${accessDenial.message} ${accessDenial.recovery}` });
+  }
 
   return (
     <section className="border-l-2 border-[var(--color-danger)] bg-[var(--color-danger-soft)]">

@@ -1,4 +1,5 @@
 import { awaitWithSignal } from "./cancellation.js";
+import { GraphAccessDeniedError, type GraphAccessContext } from "@openadminos/agent-sdk";
 import type {
   GraphRequestInput as SdkGraphRequestInput,
   ManagedDeviceRecord,
@@ -20,7 +21,9 @@ export type GraphAdapterLogger = (
 
 export interface GraphAdapterOptions {
   signal?: AbortSignal;
-  tokenProvider: () => Promise<string>;
+  tokenProvider: () => Promise<string | { accessToken: string; scopes?: readonly string[] }>;
+  /** Reporting context only. Does not request scopes or probe access. */
+  accessContext?: (method: SdkGraphRequestInput["method"], path: string) => GraphAccessContext;
   baseUrl?: string;
   fetchImpl?: typeof fetch;
   maxRetries?: number;
@@ -115,6 +118,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
           timeoutMs,
           baseUrl,
           log: options.log,
+          accessContext: options.accessContext,
         });
         for (const item of payload.value ?? []) {
           records.push(toManagedDeviceRecord(item));
@@ -146,6 +150,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         idempotent: false,
         baseUrl,
         log: options.log,
+        accessContext: options.accessContext,
       });
     },
 
@@ -193,6 +198,7 @@ export function createGraphAdapter(options: GraphAdapterOptions): RunGraphApi {
         idempotent: method === "GET" || method === "PUT" || method === "DELETE",
         baseUrl,
         log: options.log,
+        accessContext: options.accessContext,
         ...(input.signal ? { signal: options.signal ? AbortSignal.any([options.signal, input.signal]) : input.signal } : {}),
       });
     },
@@ -219,7 +225,8 @@ function buildGraphUrl(
 interface GraphRequestInput {
   method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE";
   url: string;
-  tokenProvider: () => Promise<string>;
+  tokenProvider: GraphAdapterOptions["tokenProvider"];
+  accessContext?: GraphAdapterOptions["accessContext"];
   fetchImpl: typeof fetch;
   maxRetries: number;
   retryBackoffMs: number;
@@ -274,7 +281,9 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     if (input.signal?.aborted) {
       throw new Error(GRAPH_REQUEST_CANCELLED);
     }
-    const token = await awaitWithSignal(input.tokenProvider(), input.signal);
+    const acquired = await awaitWithSignal(input.tokenProvider(), input.signal);
+    const token = typeof acquired === "string" ? acquired : acquired.accessToken;
+    const grantedScopes = typeof acquired === "string" ? scopesFromAccessToken(token) : acquired.scopes ?? scopesFromAccessToken(token);
     if (input.signal?.aborted) throw new Error(GRAPH_REQUEST_CANCELLED);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), input.timeoutMs);
@@ -487,9 +496,40 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
         },
       );
     }
+    if (response.status === 403) {
+      let errorCode: string | undefined;
+      let graphMessage: string | undefined;
+      try {
+        const parsed = JSON.parse(body);
+        const code = parsed?.error?.code ?? parsed?.code;
+        if (typeof code === "string") errorCode = code;
+        const message = parsed?.error?.message ?? parsed?.message;
+        if (typeof message === "string") graphMessage = message;
+      } catch { /* Unknown response shape remains an unverified denial. */ }
+      throw new GraphAccessDeniedError({
+        ...input.accessContext?.(input.method, shortPath),
+        method: input.method,
+        path: shortPath.split("?")[0],
+        grantedScopes,
+        errorCode,
+        graphMessage,
+      });
+    }
     throw new Error(
       `Graph responded with HTTP ${response.status} for ${input.url}: ${truncate(body, 200)}`,
     );
+  }
+}
+
+/** Decode only for diagnostics. Graph remains responsible for token validation. */
+function scopesFromAccessToken(token: string): string[] | undefined {
+  try {
+    const payload = token.split(".")[1];
+    if (!payload) return undefined;
+    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
+    return typeof claims.scp === "string" ? claims.scp.split(/\s+/).filter(Boolean) : undefined;
+  } catch {
+    return undefined;
   }
 }
 

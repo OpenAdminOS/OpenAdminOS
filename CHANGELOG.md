@@ -33,6 +33,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Graph permission errors now name the actual cause (missing consent, a missing or inactive role, or a missing licence) with a matching recovery step, instead of always asking you to reconnect the tenant. Tenant setup names roles that work (Global Reader for daily use, Global Administrator only to grant consent), and the docs call the feature Tenant Chat.
 - Nightly builds are no longer published for changes that only touch contributor tooling: docs generation, screenshot capture, smoke and script tests, release tooling, contributor npm scripts, or GitHub display attributes.
 
 ### Security
