@@ -5,7 +5,7 @@ import { Card } from "../components/Card";
 import { Button } from "../components/Button";
 import { Select } from "../components/Select";
 import { Avatar } from "../components/Avatar";
-import { ManifestPreview } from "../components/ManifestPreview";
+import { DeclaredGraphOperations, ManifestPreview } from "../components/ManifestPreview";
 import { Modal, ModalHeader } from "../components/Modal";
 import {
   IconBadgeCheck,
@@ -521,6 +521,9 @@ export function AgentInstallDetails({
               </Badge>
             ))}
           </div>
+          {manifestPreview ? (
+            <DeclaredGraphOperations manifest={manifestPreview.manifest} />
+          ) : null}
           <div className="mt-4 flex justify-end gap-2">
             <Button variant="ghost" size="sm" disabled={installing} onClick={onCancelInstall}>
               Cancel
@@ -590,6 +593,10 @@ export function AgentInstallDetails({
           </div>
         </div>
       )}
+
+      {!confirmInstall && manifestPreview ? (
+        <DeclaredGraphOperations manifest={manifestPreview.manifest} />
+      ) : null}
 
       {showRaw && (
         <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">

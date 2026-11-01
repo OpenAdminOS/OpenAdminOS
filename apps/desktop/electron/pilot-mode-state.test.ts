@@ -31,6 +31,16 @@ describe("pilot mode", () => {
       for (const slug of PILOT_AGENT_SLUGS) {
         assert.ok(state.installedAgents.some((agent) => agent.slug === slug), slug);
       }
+      const staleGuestCleanup = state.installedAgents.find(
+        (agent) => agent.slug === "stale-guest-cleanup",
+      );
+      assert.ok(staleGuestCleanup?.graphOperations?.some(
+        (operation) => operation.method === "GET" && operation.path === "/users",
+      ));
+      assert.ok(staleGuestCleanup?.graphOperations?.some(
+        (operation) =>
+          operation.method === "PATCH" && operation.path === "/users/{{ item.id }}",
+      ));
       const again = await fixture.store.addSampleTenant();
       assert.equal(
         again.installedAgents.filter((agent) => (PILOT_AGENT_SLUGS as readonly string[]).includes(agent.slug)).length,
@@ -72,8 +82,14 @@ describe("pilot mode", () => {
       const awaiting = await waitForRun(fixture.store, queued.id, ["awaiting-confirmation", "failed", "completed"]);
       assert.equal(awaiting.status, "awaiting-confirmation", awaiting.error);
       assert.equal(awaiting.plan?.confirmationPhrase, "DISABLE 5 GUESTS");
-      assert.ok(awaiting.riskAssessment);
-      assert.doesNotMatch(JSON.stringify(awaiting.riskAssessment), /undeclared-request/);
+      assert.equal(awaiting.riskAssessment?.status, "complete");
+      if (awaiting.riskAssessment?.status !== "complete") {
+        assert.fail("Pilot write plan risk assessment did not complete");
+      }
+      assert.equal(
+        awaiting.riskAssessment.flags.some((flag) => flag.id === "undeclared-request"),
+        false,
+      );
       const rationale = (awaiting.result as { data?: { perGuestRationale?: unknown[] } } | undefined)?.data?.perGuestRationale;
       if (Array.isArray(rationale)) {
         for (const entry of rationale) assert.match(JSON.stringify(entry), /Prepared sample report\./);

@@ -202,6 +202,49 @@ describe("sandbox broker", () => {
     assert.equal(response.ok, true);
     assert.deepEqual(broker.getWritePlan(), plan);
   });
+
+  it("rejects undeclared write plans from sandboxed code", async () => {
+    const agent = fakeAgent({
+      mode: "write",
+      graphOperations: [
+        {
+          method: "PATCH",
+          path: "/users/{user-id}",
+        },
+      ],
+    });
+    const broker = createSandboxBroker({
+      agent,
+      ctx: fakeContext(agent),
+    });
+    const plan: WritePlan = {
+      summary: "Disable one guest.",
+      confirmationPhrase: "DISABLE 1 GUEST",
+      actions: [
+        {
+          id: "disable-u1",
+          kind: "graph-write",
+          label: "Disable guest u1",
+          request: {
+            method: "PATCH",
+            path: "/groups/u1",
+            body: { accountEnabled: false },
+          },
+        },
+      ],
+    };
+
+    const response = await broker.handle({
+      id: "plan-undeclared",
+      method: "write.plan",
+      params: plan,
+    });
+
+    assert.equal(response.ok, false);
+    assert.equal(response.error.code, "policy_denied");
+    assert.match(response.error.message, /is not declared/);
+    assert.equal(broker.getWritePlan(), undefined);
+  });
 });
 
 function fakeAgent(overrides: Partial<AgentSummary> = {}): AgentSummary {
