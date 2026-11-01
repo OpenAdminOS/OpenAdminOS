@@ -1,11 +1,11 @@
 ---
-title: "Intune Chat"
+title: "Tenant Chat"
 description: "Ask read-only questions about a connected tenant and see exactly what ran."
 ---
 
-# Intune Chat
+# Tenant Chat
 
-Intune Chat is the front door for investigating a connected tenant in plain language. It answers read-only questions about Intune and Entra by making bounded Microsoft Graph calls against the active tenant, then explaining the result.
+Tenant Chat is the front door for investigating a connected tenant in plain language. It answers read-only questions about Intune and Entra by making bounded Microsoft Graph calls against the active tenant, then explaining the result.
 
 Chat is a top-level surface in OpenAdminOS. On first run, the Home checklist can hand a starter question straight into Chat so you get a real answer before installing anything.
 
@@ -29,4 +29,4 @@ When a question maps to an installed agent, Chat surfaces a conservative, locall
 
 Chat uses the active LLM provider. With a local provider, tenant data and prompts stay on the device. With a hosted provider, OpenAdminOS shows the hosted-provider data-flow message before tenant context is sent. See [Hosted providers](../trust/hosted-providers.md) and the LLM provider matrix.
 
-For read-only investigations that span more than one connected tenant, see [Multi-tenant Intune Chat](multi-tenant-intune-chat.md).
+For read-only investigations that span more than one connected tenant, see [Multi-tenant Chat](multi-tenant-intune-chat.md).

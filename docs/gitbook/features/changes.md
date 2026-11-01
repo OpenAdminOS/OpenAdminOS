@@ -19,7 +19,7 @@ Snapshots are built from the local Graph cache, so the timeline reflects what Op
 
 ## Using Drift In Chat
 
-The read-only `query_drift` tool lets [Intune Chat](intune-chat.md) answer questions about recorded changes without leaving the app. Like the rest of Chat, it is read-only and never writes back to the tenant.
+The read-only `query_drift` tool lets [Tenant Chat](intune-chat.md) answer questions about recorded changes without leaving the app. Like the rest of Chat, it is read-only and never writes back to the tenant.
 
 ## Evidence And Export
 

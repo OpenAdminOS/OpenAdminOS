@@ -41,7 +41,7 @@
       "slug": "features",
       "pages": [
         {
-          "title": "Intune Chat",
+          "title": "Tenant Chat",
           "source": "features/intune-chat.md",
           "route": "features/intune-chat",
           "path": "features/intune-chat",
@@ -55,7 +55,7 @@
           "children": []
         },
         {
-          "title": "Multi-tenant Intune Chat",
+          "title": "Multi-tenant Chat",
           "source": "features/multi-tenant-intune-chat.md",
           "route": "features/multi-tenant-intune-chat",
           "path": "features/multi-tenant-intune-chat",

@@ -5,9 +5,9 @@ description: "Local, tenant-scoped containers for investigation evidence."
 
 # Workspaces
 
-Workspaces are local, tenant-scoped investigation containers. They keep pinned evidence, linked Intune Chat conversations, linked agent runs, notes, and workspace-local instructions together for one tenant problem.
+Workspaces are local, tenant-scoped investigation containers. They keep pinned evidence, linked Tenant Chat conversations, linked agent runs, notes, and workspace-local instructions together for one tenant problem.
 
-Workspaces are not multi-tenant projects. A workspace belongs to one tenant. Multi-tenant Intune Chat results can be exported locally or split into separate tenant-specific workspace evidence, but one workspace cannot mix evidence from multiple tenants.
+Workspaces are not multi-tenant projects. A workspace belongs to one tenant. Multi-tenant Chat results can be exported locally or split into separate tenant-specific workspace evidence, but one workspace cannot mix evidence from multiple tenants.
 
 ## What a Workspace Stores
 
