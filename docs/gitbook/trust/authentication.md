@@ -61,9 +61,9 @@ OpenAdminOS never widens scopes during a Chat answer. A request for data outside
 
 Disconnecting a tenant in OpenAdminOS removes its account and tokens from the local cache and deletes its local run history and cached data. It does not remove the enterprise application or the consent from the tenant. To revoke access in the tenant, delete the OpenAdminOS enterprise application or remove its granted permissions in Entra admin center.
 
-## Sample Tenant
+## Pilot Mode
 
-The built-in sample tenant is fictional data served from inside the app. It has no Microsoft sign-in, no tokens, and makes no calls to Microsoft Graph.
+Pilot mode runs on fictional data served from inside the app. It has no Microsoft sign-in, no tokens, and makes no calls to Microsoft Graph.
 
 ## Related
 

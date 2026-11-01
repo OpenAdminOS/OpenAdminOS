@@ -14,7 +14,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 - Preview a write agent with Dry run to review its full plan without changing the tenant, then use Run for real to prepare a fresh plan for confirmation.
 - Write confirmation highlights high-risk actions and unusually large plans, requires acknowledgement of danger flags, and keeps the risk review in run history.
 - Schedule previews show expected monthly runs and model usage from recent local history before you enable or change an interval.
-- First run offers three ways in: try a built-in sample tenant (fictional Contoso data, no Microsoft sign-in), connect your tenant, or use your organization's app registration. The sample tenant is labeled everywhere, answers the suggested Chat questions even without an LLM provider, and can be removed at any time.
+- Pilot mode: the first launch offers a welcome with two choices, start in pilot mode or connect your tenant. Pilot mode runs on fictional sample data with no Microsoft sign-in and no AI setup: prepared Chat prompts with follow-ups, three agents (including a write agent with the full confirmation flow), and a banner that states what is limited. Connecting a tenant removes the pilot data and switches to production.
+- When no provider has been chosen, a ready local provider is selected automatically, and a detected hosted provider is suggested with its data-residency note.
 - A docs page on authentication and permissions for security reviewers: public-client sign-in with PKCE, delegated-only permissions, the enterprise application a tenant receives, token storage, and revocation.
 - `npm run screenshots:landing` captures the website's app screenshots: the demo tenant at 1280 x 800 and 2x, in light and dark, with realistic display values. It replaces the old clickable-demo capture.
 

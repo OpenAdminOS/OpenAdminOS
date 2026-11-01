@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>29 · First run and sample tenant · OpenAdminOS</title>
+  <title>29 · First run and pilot mode · OpenAdminOS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
@@ -14,13 +14,18 @@
     (21 read scopes needing admin consent, browser sign-in, provider choice).
     Admins without consent rights never saw the product work.
 
+    Revision 2 (2026-11-01): pilot mode. The app has two modes. Production is a connected
+    tenant. Pilot mode is a guided tour on a fictional tenant: no Microsoft sign-in, no AI
+    setup, prepared prompts instead of free text, three agents, and a reduced feature set
+    that is stated plainly.
+
     This mockup shows:
-      A. First-run choice: sample data, connect your tenant, or your organization's app registration.
-      B. Chat on the sample tenant: badge in the tenant chip, persistent notice, evidence-only
-         answer when no LLM provider is ready.
-      C. Tenant switcher with the sample tenant next to a real one.
-      D. Connect flow: delegated-permission note on the review stage.
-      E. Connected stage: what now exists in Entra, in Entra's own terms.
+      A. First-launch welcome: two choices, full window.
+      B. Pilot Chat: banner, prepared answer, follow-up chips, disabled free text.
+      C. Pilot Agents: three runnable agents, everything else marked for production.
+      D. Tenant switcher in pilot mode.
+      E. Connect flow: delegated-permission note on the review stage.
+      F. Connected stage: what now exists in Entra, and pilot data removed.
 
     Uses the calm-shell tokens from 27-calm-shell.html. Standalone on purpose.
     The mockbar at the top is not part of the app.
@@ -172,12 +177,45 @@
     .solo .dialog { box-shadow: var(--shadow-pop); }
     .notes { margin-top: 14px; font-size: var(--fs-small); color: var(--text-2); }
     .notes li { margin-bottom: 4px; }
+
+    /* Pilot mode */
+    .welcome { min-height: 640px; display: grid; place-items: center; padding: 48px 32px; background: var(--bg); }
+    .welcome-inner { width: 100%; max-width: 900px; }
+    .welcome h3 { font: 500 34px/1.2 var(--font-serif); margin: 0 0 8px; text-align: center; }
+    .welcome .sub { text-align: center; color: var(--text-2); margin: 0 0 32px; font-size: var(--fs-read); }
+    .cards { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+    .card { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 24px; display: flex; flex-direction: column; gap: 12px; }
+    .card.primary { border-color: color-mix(in srgb, var(--ink) 40%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, var(--ink) 16%, transparent), var(--shadow-composer); }
+    .card .kicker { font-size: 12px; font-weight: 600; letter-spacing: .02em; color: var(--text-3); text-transform: uppercase; }
+    .card h4 { margin: 0; font: 500 22px/1.25 var(--font-serif); }
+    .card p { margin: 0; color: var(--text-2); }
+    .card ul { margin: 0; padding-left: 18px; color: var(--text-2); font-size: var(--fs-small); }
+    .card ul li { margin: 3px 0; }
+    .card .grow { flex: 1; }
+    .card .btn { height: 38px; font-size: var(--fs-ui); }
+    .welcome .link-row { margin-top: 10px; font-size: var(--fs-small); color: var(--text-2); }
+    .welcome .foot { margin-top: 28px; display: flex; justify-content: space-between; align-items: center; color: var(--text-3); font-size: var(--fs-small); }
+    .pilot-banner { display: flex; align-items: center; gap: 12px; padding: 8px 20px; background: var(--warn-soft); border-bottom: 1px solid color-mix(in srgb, var(--warn) 22%, transparent); font-size: var(--fs-small); }
+    .pilot-banner .grow { flex: 1; }
+    .chips { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px; margin: 10px 0 4px; }
+    .chip { font: 400 13px/1.3 var(--font-ui); white-space: nowrap; flex: none; padding: 7px 11px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+    .chip.agent { background: var(--bubble); border-color: transparent; }
+    .composer.disabled .ph { color: var(--text-3); }
+    .agent-list { max-width: 760px; margin: 0 auto; padding: 22px 24px; }
+    .agent-list h5 { font: 600 12px/1 var(--font-ui); letter-spacing: .02em; text-transform: uppercase; color: var(--text-3); margin: 18px 0 10px; }
+    .agent { display: grid; grid-template-columns: 34px 1fr auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: 12px; margin-bottom: 8px; background: var(--surface); }
+    .agent .ico { width: 34px; height: 34px; border-radius: 9px; background: var(--bubble); display: grid; place-items: center; color: var(--text-2); font-size: 13px; }
+    .agent .t { font-weight: 500; }
+    .agent .d { color: var(--text-2); font-size: 12.5px; }
+    .agent.locked { opacity: .62; background: transparent; }
+    .mode { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--bubble); color: var(--text-2); margin-left: 6px; }
+    @media (max-width: 960px) { .cards { grid-template-columns: 1fr; } }
     @media (max-width: 960px) { .grid2 { grid-template-columns: 1fr; } .app { grid-template-columns: 1fr; } .side { display: none; } }
   </style>
 </head>
 <body>
   <div class="mockbar">
-    <strong>29 · First run and sample tenant</strong>
+    <strong>29 · First run and pilot mode</strong>
     <span>Theme</span>
     <button type="button" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">Light / dark</button>
   </div>
@@ -186,61 +224,33 @@
 
     <!-- A -->
     <section class="section">
-      <h2>A. First run: three ways in, one of them instant</h2>
-      <p class="lede">Shown once per launch while no tenant exists, in place of the old auto-opened permissions dialog. Closing it leaves the guest shell as before. Sample data comes first because it needs nothing from the admin or their tenant.</p>
+      <h2>A. First launch: two choices, full window</h2>
+      <p class="lede">Shown once per launch while no tenant exists. Pilot mode needs nothing from the admin, their tenant, or an AI provider. The organization app registration is a way of connecting, so it sits under Connect as a link.</p>
       <div class="frame">
-        <div class="app">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">Chat</div><div class="nav">Agent Team</div><div class="nav">Agents</div><div class="nav">Runs</div><div class="nav">Changes</div>
-            <div class="spacer"></div>
-            <div class="tenant-chip"><span class="tile none">?</span><div><div class="name">No tenant</div><div class="sub">Connect or try sample data</div></div></div>
-          </aside>
-          <div class="main"><div class="topline">Chat</div><div class="col"></div></div>
-          <div class="scrim">
-            <div class="dialog" role="dialog" aria-labelledby="fr-title">
-              <header>
-                <h3 id="fr-title">Start with OpenAdminOS</h3>
-                <p>You can look around with sample data first and connect your tenant later.</p>
-              </header>
-              <div class="body">
-                <div class="choice primary">
-                  <span class="ico" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
-                  </span>
-                  <div>
-                    <div class="t">Try with sample data</div>
-                    <div class="d">Explore a fictional Contoso tenant. No Microsoft sign-in. Nothing leaves this device unless you pick a hosted provider.</div>
-                    <div class="meta"><span>120 devices · 80 users · 8 CA policies</span><span>Remove it any time</span></div>
-                  </div>
-                  <button class="btn primary">Open sample tenant</button>
-                </div>
-                <div class="choice">
-                  <span class="ico" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="3" y="3" width="8" height="8"/><rect x="13" y="3" width="8" height="8"/><rect x="3" y="13" width="8" height="8"/><rect x="13" y="13" width="8" height="8"/></svg>
-                  </span>
-                  <div>
-                    <div class="t">Connect your tenant</div>
-                    <div class="d">Sign in with the OpenAdminOS app. A Global Administrator or Privileged Role Administrator approves read-only access once.</div>
-                  </div>
-                  <button class="btn">Connect</button>
-                </div>
-                <div class="choice">
-                  <span class="ico" aria-hidden="true">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M12 3l8 4v5c0 4.5-3.4 8.3-8 9-4.6-.7-8-4.5-8-9V7z"/></svg>
-                  </span>
-                  <div>
-                    <div class="t">Use your organization's app registration</div>
-                    <div class="d">For tenants that block third-party apps. You enter the client ID your admin created.</div>
-                  </div>
-                  <button class="btn">Set up</button>
-                </div>
+        <div class="welcome">
+          <div class="welcome-inner">
+            <h3>Welcome to OpenAdminOS</h3>
+            <p class="sub">Try it on sample data first, or connect your Microsoft 365 tenant now.</p>
+            <div class="cards">
+              <div class="card primary">
+                <span class="kicker">Pilot mode</span>
+                <h4>Start in pilot mode</h4>
+                <p>Explore a fictional company's tenant. No Microsoft sign-in, no AI setup. Prepared prompts and three agents show how OpenAdminOS works.</p>
+                <ul><li>Sample data, clearly labeled</li><li>Nothing leaves this device</li><li>Switch to production any time</li></ul>
+                <span class="grow"></span>
+                <button class="btn primary">Start pilot mode</button>
               </div>
-              <footer>
-                <span class="fine grow">Hosted providers and tenant permissions are explained before anything is sent.</span>
-                <button class="btn ghost">Not now</button>
-              </footer>
+              <div class="card">
+                <span class="kicker">Production</span>
+                <h4>Connect your tenant</h4>
+                <p>Ask anything about your own tenant and use every agent. Needs a Microsoft sign-in and one-time admin approval for read access.</p>
+                <ul><li>Your live tenant data</li><li>Any question, every agent</li><li>Local or hosted AI provider, your choice</li></ul>
+                <span class="grow"></span>
+                <button class="btn">Connect tenant</button>
+                <div class="link-row">Your organization blocks third-party apps? <a class="link" href="#">Use your own app registration.</a></div>
+              </div>
             </div>
+            <div class="foot"><span>Read-only by default. Write actions always ask for your confirmation.</span><button class="btn ghost">Skip for now</button></div>
           </div>
         </div>
       </div>
@@ -248,69 +258,99 @@
 
     <!-- B -->
     <section class="section">
-      <h2>B. Chat on the sample tenant</h2>
-      <p class="lede">The tenant chip, the notice above the composer, and every answer's scope line say "Sample data". With no LLM provider ready, Chat still answers from the computed evidence and says what a provider would add. With a provider, answers are normal.</p>
+      <h2>B. Pilot Chat: prepared prompts, no free text</h2>
+      <p class="lede">A banner on every screen states the mode. Six starter prompts cover devices, compliance, Conditional Access, users, apps, and security. Each prepared answer reads like a real one, its numbers come from the sample data, and two follow-ups keep the conversation going. No model is called in pilot mode.</p>
       <div class="frame">
         <div class="app">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">Chat</div><div class="nav">Agent Team</div><div class="nav">Agents</div><div class="nav">Runs</div><div class="nav">Changes</div>
+            <div class="nav on">Chat</div><div class="nav">Agents</div><div class="nav">Runs</div><div class="nav">Settings</div>
             <div class="spacer"></div>
-            <div class="tenant-chip"><span class="tile sample">C</span><div><div class="name">Contoso</div><div class="sub"><span class="badge sample">Sample data</span></div></div></div>
+            <div class="tenant-chip"><span class="tile sample">C</span><div><div class="name">Contoso (pilot)</div><div class="sub"><span class="badge sample">Pilot mode</span></div></div></div>
           </aside>
           <div class="main">
-            <div class="topline"><span>Stale devices</span><span class="grow"></span><span class="badge sample">Sample data</span></div>
+            <div class="pilot-banner"><span class="grow"><strong>Pilot mode.</strong> Sample data from a fictional company. Chat uses prepared prompts and three agents are available.</span><button class="btn small">Connect your tenant</button></div>
             <div class="col">
               <div class="user-msg">Which managed devices have not synced in the last 7 days?</div>
               <div class="answer">
-                <div class="scope"><span class="badge sample">Sample data</span><span>Contoso · Intune managed devices · cached 2 min ago</span></div>
-                <p>14 of 120 managed devices have not synced in the last 7 days. 9 are Windows, 3 macOS, 2 iOS.</p>
+                <div class="scope"><span class="badge sample">Pilot mode</span><span>Prepared answer from sample data · Intune managed devices</span></div>
+                <p>17 of 120 managed devices have not checked in for more than a week, most of them Windows laptops. Two are also noncompliant, so they are the first to look at. Stale sync is a signal to investigate, not proof a device is gone: check ownership and recent sign-ins before retiring anything.</p>
                 <table>
                   <thead><tr><th>Device</th><th>OS</th><th>Last sync</th><th>Compliance</th><th>Primary user</th></tr></thead>
                   <tbody>
-                    <tr><td>CTS-LT-0417</td><td>Windows 11</td><td>41 days ago</td><td>Noncompliant</td><td class="mono">megan.b@contoso-sample.invalid</td></tr>
-                    <tr><td>CTS-LT-0388</td><td>Windows 11</td><td>23 days ago</td><td>Compliant</td><td class="mono">diego.s@contoso-sample.invalid</td></tr>
-                    <tr><td>CTS-MB-0092</td><td>macOS 15</td><td>12 days ago</td><td>In grace period</td><td class="mono">lee.g@contoso-sample.invalid</td></tr>
+                    <tr><td>CTS-LT-0417</td><td>Windows 11 24H2</td><td>41 days ago</td><td>Noncompliant</td><td>Megan Bowen</td></tr>
+                    <tr><td>CTS-LT-0388</td><td>Windows 11 23H2</td><td>23 days ago</td><td>Compliant</td><td>Diego Siciliani</td></tr>
+                    <tr><td>CTS-MB-0092</td><td>macOS 15.2</td><td>12 days ago</td><td>In grace period</td><td>Lee Gu</td></tr>
                   </tbody>
                 </table>
-                <div class="no-llm">Shown without an LLM summary. <a href="#">Pick a provider in Settings</a> to get explained answers.</div>
+                <div class="no-llm">In production, answers come from your tenant and the model you choose.</div>
+                <div class="chips">
+                  <span class="chip">Which devices are both stale and noncompliant?</span>
+                  <span class="chip">Which devices are stale in Intune but still active in Entra?</span>
+                  <span class="chip agent">Try the agent: Find inactive devices</span>
+                </div>
               </div>
             </div>
-            <div class="notice"><span class="grow"><strong>Sample data.</strong> Answers describe the fictional Contoso tenant. Connect your tenant to see your own.</span><button class="btn small">Connect your tenant</button></div>
-            <div class="composer">
-              <div class="ph">Ask about devices, users, apps, policies, sign-ins, or identity</div>
-              <div class="row"><span>No provider · evidence only</span><span class="grow"></span><span class="send">↑</span></div>
+            <div class="composer disabled">
+              <div class="ph">In pilot mode you choose from prepared prompts. Connect your tenant to ask anything.</div>
+              <div class="row"><span>Pilot mode · prepared answers</span><span class="grow"></span></div>
             </div>
-            <p class="trust">Sample tenant · Nothing leaves this device</p>
+            <p class="trust">Pilot mode · Nothing leaves this device</p>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>Schedules, Agent Team personas, workspaces and connector deliveries are refused on the sample tenant with a one-line reason and a Connect action.</li>
-        <li>Write agents run their full diff review and typed confirmation. Changes apply to an in-memory copy of the sample data and the result says "Simulated on sample data".</li>
-        <li>Exports and shared results carry a "Sample data" marker.</li>
+        <li>Hidden in pilot mode: Agent Team, Changes, Workspaces, Connectors, Schedules, and Browse. Opening one shows "Available in production" with a Connect button.</li>
+        <li>Exports and shared results carry a "Sample data" marker. Reports say no model was used.</li>
       </ul>
     </section>
 
     <!-- C -->
     <section class="section">
-      <h2>C. Tenant switcher with a sample and a real tenant</h2>
-      <p class="lede">The sample tenant keeps its striped tile and badge next to real tenants. Connecting a real tenant makes it active but does not remove the sample.</p>
+      <h2>C. Pilot Agents: three to try</h2>
+      <p class="lede">One read agent for devices, one for identity with a written report, and one write agent that shows the change review and typed confirmation. Their AI steps use prepared text in pilot mode. Every other agent, including future ones, is marked for production.</p>
       <div class="frame">
-        <div class="app" style="min-height: 420px;">
+        <div class="app" style="min-height: 520px;">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">Chat</div><div class="nav">Agent Team</div><div class="nav">Agents</div>
+            <div class="nav">Chat</div><div class="nav on">Agents</div><div class="nav">Runs</div><div class="nav">Settings</div>
             <div class="spacer"></div>
-            <div class="tenant-chip"><span class="tile real">F</span><div><div class="name">fabrikam.com</div><div class="sub">admin@fabrikam.com</div></div></div>
+            <div class="tenant-chip"><span class="tile sample">C</span><div><div class="name">Contoso (pilot)</div><div class="sub"><span class="badge sample">Pilot mode</span></div></div></div>
+          </aside>
+          <div class="main">
+            <div class="pilot-banner"><span class="grow"><strong>Pilot mode.</strong> Sample data from a fictional company. Chat uses prepared prompts and three agents are available.</span><button class="btn small">Connect your tenant</button></div>
+            <div class="agent-list">
+              <h5>Available in pilot mode</h5>
+              <div class="agent"><span class="ico">D</span><div><div class="t">Find inactive devices <span class="mode">Read</span></div><div class="d">Groups stale Intune devices by age, OS, and compliance, with review-first next steps.</div></div><button class="btn primary small">Run</button></div>
+              <div class="agent"><span class="ico">CA</span><div><div class="t">Conditional Access explainer <span class="mode">Read</span></div><div class="d">Reviews policy coverage, report-only and disabled policies, and broad exclusions.</div></div><button class="btn primary small">Run</button></div>
+              <div class="agent"><span class="ico">G</span><div><div class="t">Stale guest cleanup <span class="mode">Write</span></div><div class="d">Plans to disable idle guest accounts. Shows the change review and typed confirmation.</div></div><button class="btn primary small">Run</button></div>
+              <h5>Available in production</h5>
+              <div class="agent locked"><span class="ico">S</span><div><div class="t">Secure Score prioritizer</div><div class="d">Connect your tenant to run.</div></div><span></span></div>
+              <div class="agent locked"><span class="ico">R</span><div><div class="t">Risky user triage</div><div class="d">Connect your tenant to run.</div></div><span></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- D -->
+    <section class="section">
+      <h2>D. Tenant switcher in pilot mode</h2>
+      <p class="lede">Connecting a real tenant removes the pilot data and switches to production. Pilot mode can be opened again later from here or from Settings.</p>
+      <div class="frame">
+        <div class="app" style="min-height: 400px;">
+          <aside class="side">
+            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
+            <div class="nav on">Chat</div><div class="nav">Agents</div>
+            <div class="spacer"></div>
+            <div class="tenant-chip"><span class="tile sample">C</span><div><div class="name">Contoso (pilot)</div><div class="sub"><span class="badge sample">Pilot mode</span></div></div></div>
           </aside>
           <div class="main"><div class="topline">Chat</div><div class="col"></div></div>
           <div class="pop">
-            <div class="item on"><span class="tile real">F</span><div class="grow"><div>fabrikam.com</div><div class="sub">admin@fabrikam.com</div></div><span aria-label="Active">✓</span></div>
-            <div class="item"><span class="tile sample">C</span><div class="grow"><div>Contoso <span class="badge sample">Sample data</span></div><div class="sub">Fictional tenant on this device</div></div></div>
+            <div class="item on"><span class="tile sample">C</span><div class="grow"><div>Contoso (pilot) <span class="badge sample">Pilot mode</span></div><div class="sub">Fictional company on this device</div></div><span aria-label="Active">✓</span></div>
             <hr>
-            <div class="act">Connect another tenant</div>
-            <div class="act danger">Remove sample tenant</div>
+            <div class="act">Connect tenant</div>
+            <div class="act danger">Leave pilot mode</div>
           </div>
         </div>
       </div>
@@ -318,7 +358,7 @@
 
     <!-- D + E -->
     <section class="section">
-      <h2>D and E. Connecting a real tenant</h2>
+      <h2>E and F. Connecting a real tenant</h2>
       <p class="lede">The review stage says plainly that permissions are delegated. The connected stage reports what was added to the tenant, using Entra's name for it, so an admin can find it under Enterprise applications.</p>
       <div class="grid2">
         <div class="solo">
@@ -347,7 +387,7 @@
                 <dt>Permissions</dt><dd>21 read scopes + openid, profile, offline_access</dd>
                 <dt>Signed in as</dt><dd>admin@fabrikam.com</dd>
               </dl>
-              <p class="fine" style="margin-top: 10px;">The sample tenant is still available in the tenant switcher. Remove it there when you no longer need it.</p>
+              <p class="fine" style="margin-top: 10px;">Pilot mode data was removed. You are now in production.</p>
             </div>
             <footer><span class="grow"></span><button class="btn primary">Done</button></footer>
           </div>
