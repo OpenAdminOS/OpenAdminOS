@@ -35,6 +35,8 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
+  grantedScopeSet,
+  missingPermissionAreasForScopes,
   resolveRunModel,
   type AgentManifestPreview,
   type AgentDiscordDelivery,
@@ -52,6 +54,7 @@ import {
   type RequestedScope,
   type RegistryAgentSummary,
   type RunRecord,
+  type TenantRecord,
   type WhatsAppWebGroupRef,
   type WhatsAppWebRecipientType,
 } from "../shared/openAdminOS";
@@ -977,7 +980,7 @@ export default function AgentDetail({
           open={pendingRunChoice !== null}
           dryRun={pendingRunChoice?.dryRun === true}
           agent={agent}
-          activeTenantName={pendingTenant?.displayName}
+          activeTenant={pendingTenant}
           providerName={pendingTenant?.kind === "sample" ? PILOT_COPY.providerName : pendingProvider?.name ?? pendingProviderId}
           providerIsLocal={pendingTenant?.kind === "sample" || pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
@@ -2536,7 +2539,7 @@ function RunPreflightModal({
   dryRun,
   open,
   agent,
-  activeTenantName,
+  activeTenant,
   providerName,
   providerIsLocal,
   requestedScopes,
@@ -2550,7 +2553,7 @@ function RunPreflightModal({
   dryRun: boolean;
   open: boolean;
   agent: { name: string; mode: "read" | "write"; scopes: string[]; schedule?: unknown };
-  activeTenantName: string | undefined;
+  activeTenant: TenantRecord | undefined;
   providerName: string;
   providerIsLocal: boolean;
   requestedScopes: RequestedScope[];
@@ -2559,9 +2562,11 @@ function RunPreflightModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  const requestedScopeNames = new Set(requestedScopes.map((scope) => scope.name));
-  const mayNeedConsent = !pilot && agent.scopes.some((scope) => !requestedScopeNames.has(scope));
-  const canStart = Boolean(activeTenantName) && !deliverySaving;
+  // The pilot tenant has every area and never asks Microsoft for consent.
+  const missingAreas = activeTenant && !pilot
+    ? missingPermissionAreasForScopes(agent.scopes, grantedScopeSet(activeTenant))
+    : [];
+  const canStart = Boolean(activeTenant) && !deliverySaving;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -2570,7 +2575,7 @@ function RunPreflightModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        {!activeTenantName && (
+        {!activeTenant && (
           <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
             Connect or select a Microsoft 365 tenant before starting this run.
             OpenAdminOS never runs an agent without an active tenant scope.
@@ -2582,10 +2587,11 @@ function RunPreflightModal({
             through {providerName}'s local CLI and leave this device.
           </div>
         )}
-        {mayNeedConsent && (
+        {missingAreas.length > 0 && activeTenant && (
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            This agent declares scopes that may require Microsoft incremental
-            consent the first time it runs for this tenant.
+            This agent needs {missingAreas.map((area) => area.title).join(", ")} access,
+            which was not granted for {activeTenant.displayName}. Starting it asks
+            Microsoft for consent before the run continues.
           </div>
         )}
         {deliverySaving && (
@@ -2594,7 +2600,7 @@ function RunPreflightModal({
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2">
-          <PreflightFact label="Tenant" value={activeTenantName ?? "No tenant selected"} />
+          <PreflightFact label="Tenant" value={activeTenant?.displayName ?? "No tenant selected"} />
           <PreflightFact
             label="Provider"
             value={`${providerName}${providerIsLocal ? " · local" : " · hosted"}`}

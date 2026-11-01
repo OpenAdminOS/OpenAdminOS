@@ -1872,3 +1872,73 @@ it('renders device lists and app counts from SQLite and recognizes an installed 
     assert.doesNotMatch(agent.assistantMessage.content, /cannot perform tenant changes/);
   } finally {store.close();await rm(dir,{recursive:true,force:true});}
 });
+
+it("answers an ungranted area deterministically without calling Graph", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-ungranted-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeProviderId: "ollama",
+      activeModelByProviderId: { ollama: "mock-chat" },
+      activeTenantId: "tenant-directory-only",
+      tenants: [
+        {
+          id: "tenant-directory-only",
+          displayName: "Directory team",
+          username: "admin@example.test",
+          homeAccountId: "directory-only",
+          addedAt: new Date().toISOString(),
+          grantedScopes: [
+            "User.Read.All",
+            "GroupMember.Read.All",
+            "Directory.Read.All",
+            "Organization.Read.All",
+          ],
+        },
+      ],
+      installedAgents: [],
+      runs: [],
+    }),
+  );
+  let graphCalls = 0;
+  let llmCalls = 0;
+  const store = new AppStateStore({
+    filePath,
+    tokenStore,
+    userDataPath: dir,
+    statsApiUrl: "",
+    graphFactory: () => ({
+      request: async () => {
+        graphCalls += 1;
+        return { value: [] };
+      },
+    } as unknown as RunGraphApi),
+    llmFactory: () => {
+      llmCalls += 1;
+      return {
+        available: true,
+        async complete() {
+          return { text: "Unexpected model answer.", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      };
+    },
+  });
+  try {
+    const result = await store.sendIntuneChatMessage({
+      content: "List remediation scripts",
+    });
+    assert.equal(
+      result.assistantMessage.content,
+      "This question needs Devices and configuration access, which was not granted for Directory team. Add it in Settings, Tenants.",
+    );
+    assert.equal(graphCalls, 0);
+    assert.equal(llmCalls, 0);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

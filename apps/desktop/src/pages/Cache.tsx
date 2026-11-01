@@ -73,7 +73,11 @@ export function DataSettingsSection() {
     setSelected((current) =>
       current.size > 0
         ? current
-        : new Set(nextStatus.resources.map((resource) => resource.resource)),
+        : new Set(
+            nextStatus.resources
+              .filter((resource) => !resource.notGrantedArea)
+              .map((resource) => resource.resource),
+          ),
     );
   }, [tenantId]);
 
@@ -102,7 +106,8 @@ export function DataSettingsSection() {
     () =>
       status?.resources.filter(
         (resource) =>
-          !resource.refreshedAt || Boolean(resource.lastError) || resource.pageLimitReached,
+          !resource.notGrantedArea &&
+          (!resource.refreshedAt || Boolean(resource.lastError) || resource.pageLimitReached),
       ) ?? [],
     [status],
   );
@@ -227,7 +232,7 @@ export function DataSettingsSection() {
             <input
               type="checkbox"
               checked={selected.has(resource.resource)}
-              disabled={running}
+              disabled={running || Boolean(resource.notGrantedArea)}
               onChange={(event) =>
                 setSelected((current) => {
                   const next = new Set(current);
@@ -263,7 +268,9 @@ export function DataSettingsSection() {
         sortable: true,
         sortValue: (resource) => resource.refreshedAt ?? "",
         render: (resource) =>
-          resource.lastError ? (
+          resource.notGrantedArea ? (
+            <span className="text-[var(--color-text-muted)]">Not granted</span>
+          ) : resource.lastError ? (
             <span className="text-[var(--color-danger)]">Refresh failed</span>
           ) : resource.refreshedAt ? (
             formatDateTime(resource.refreshedAt)
@@ -275,8 +282,10 @@ export function DataSettingsSection() {
         id: "permission",
         header: "Permission",
         render: (resource) => (
-          <span className="break-words font-mono text-xs">
-            {resource.scopeSet.join(", ") || "None"}
+          <span className={resource.notGrantedArea ? "text-xs text-[var(--color-text-muted)]" : "break-words font-mono text-xs"}>
+            {resource.notGrantedArea
+              ? `${resource.notGrantedArea} area`
+              : resource.scopeSet.join(", ") || "None"}
           </span>
         ),
       },
@@ -291,6 +300,9 @@ export function DataSettingsSection() {
     localData?.activeTenantGraphRowCount ??
     status?.resources.reduce((total, resource) => total + resource.rows, 0) ??
     0;
+  const grantableResources = status?.resources.filter(
+    (resource) => !resource.notGrantedArea,
+  ) ?? [];
 
   return (
     <div className="max-w-[1040px] rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
@@ -325,7 +337,7 @@ export function DataSettingsSection() {
             disabled={running || !tenantId || selected.size === 0}
             onClick={() => preload(false)}
           >
-            Preload {selected.size === status?.resources.length ? "all " : ""}
+            Preload {selected.size === grantableResources.length ? "all " : ""}
             {selected.size} resources
           </Button>
         </div>
@@ -493,9 +505,9 @@ export function DataSettingsSection() {
                 <input
                   type="checkbox"
                   disabled={running || !status}
-                  checked={Boolean(status?.resources.length) && selected.size === status?.resources.length}
+                  checked={grantableResources.length > 0 && selected.size === grantableResources.length}
                   onChange={(event) =>
-                    setSelected(new Set(event.target.checked ? status?.resources.map((resource) => resource.resource) : []))
+                    setSelected(new Set(event.target.checked ? grantableResources.map((resource) => resource.resource) : []))
                   }
                 />
                 Select all

@@ -8,6 +8,7 @@ import { AppStateProvider } from "../state";
 import { SetupFlowProvider } from "../setup/SetupFlowContext";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
+  DEFAULT_GRAPH_READ_SCOPE_NAMES,
   DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   deriveTrustState,
@@ -648,8 +649,15 @@ export function makeMockBridge(
       return { ...cancelledRun, status: "cancelled" as const };
     }),
     listTenants: vi.fn(async () => appState.tenants),
-    getRequestedScopes: vi.fn(async () => []),
+    getRequestedScopes: vi.fn(async () =>
+      DEFAULT_GRAPH_READ_SCOPE_NAMES.map((name) => ({
+        name,
+        mode: "read" as const,
+        rationale: `Read access for ${name}.`,
+      })),
+    ),
     connectTenant: vi.fn(async () => appState),
+    addTenantAccess: vi.fn(async () => appState),
     addSampleTenant: vi.fn(async () => appState),
     cancelConnectTenant: vi.fn(async () => undefined),
     setActiveTenant: vi.fn(async (id: string) =>

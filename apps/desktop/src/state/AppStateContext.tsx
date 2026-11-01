@@ -27,6 +27,7 @@ import {
   type AgentWhatsAppWebDelivery,
   type AppState,
   type OpenAdminOSApi,
+  type PermissionAreaId,
   type ProviderId,
   type RegistryAgentSummary,
   type RequestedScope,
@@ -63,6 +64,7 @@ interface AppStateContextValue {
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: (options?: ConnectTenantOptions) => Promise<TenantRecord | undefined>;
+  addTenantAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
   addSampleTenant: () => Promise<TenantRecord>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
@@ -520,6 +522,26 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     if (!api) return;
     await api.cancelConnectTenant();
   }, []);
+
+  const addTenantAccess = useCallback(
+    async (tenantId: string, areaId: PermissionAreaId) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        throw new Error("Adding tenant access is unavailable in browser development.");
+      }
+      setError(null);
+      try {
+        const nextState = await api.addTenantAccess(tenantId, areaId);
+        setState(nextState);
+        setRegistryAgents(nextState.registryAgents);
+      } catch (caughtError) {
+        const tenantError = toError(caughtError);
+        setError(tenantError);
+        throw tenantError;
+      }
+    },
+    [],
+  );
 
   const addSampleTenant = useCallback(async () => {
     const api = getOpenAdminOSApi();
@@ -1064,6 +1086,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       rejectRun,
       cancelRun,
       connectTenant,
+      addTenantAccess,
       addSampleTenant,
       cancelConnectTenant,
       getRequestedScopes,
@@ -1091,6 +1114,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       cancelConnectTenant,
       confirmRun,
       connectTenant,
+      addTenantAccess,
       addSampleTenant,
       disconnectTenant,
       draftAgentManifest,

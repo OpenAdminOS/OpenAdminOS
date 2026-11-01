@@ -10,6 +10,7 @@ import {
   renderWithAppState,
 } from "../test/test-utils";
 import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
+import { PERMISSION_AREAS } from "../shared/openAdminOS";
 import { useSetupFlow } from "./SetupFlowContext";
 import { FirstLaunchWelcome } from "./WelcomeView";
 import { PROVIDER_DETECTION_COPY, WELCOME_COPY } from "../copy";
@@ -46,7 +47,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "View changes" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
     await user.click(await screen.findByRole("button", { name: "Cancel sign-in" }));
 
@@ -177,10 +178,11 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
-    // No options means the default app identity.
-    expect(connectTenant).toHaveBeenCalledWith(undefined);
+    expect(connectTenant).toHaveBeenCalledWith({
+      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
+    });
   });
 
   it("shows the loaded delegated permission count after an OpenAdminOS connection", async () => {
@@ -208,7 +210,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
 
     expect(
@@ -234,16 +236,88 @@ describe("contextual tenant setup", () => {
       screen.getByLabelText(/Directory \(tenant\) ID/i),
       "contoso.onmicrosoft.com",
     );
+    await user.click(screen.getByRole("checkbox", { name: "Apps" }));
     await user.click(
-      screen.getByRole("button", { name: "Connect with your own app registration" }),
+      screen.getByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
 
     expect(connectTenant).toHaveBeenCalledWith({
+      permissionAreaIds: ["devices", "directory", "identity", "security"],
       appRegistration: {
         clientId: "d1de0a94-f67a-421d-8804-a235955ffd69",
         directoryTenantId: "contoso.onmicrosoft.com",
       },
     });
+  });
+
+  it("locks the required area and updates the approved scope count", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({}, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    const directory = await screen.findByRole("checkbox", {
+      name: "Users, groups, and directory",
+    });
+    expect(directory).toBeChecked();
+    expect(directory).toBeDisabled();
+    expect(
+      screen.getByText(
+        "Required: tenant identity, users, and groups are used by every area.",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", {
+        name: "Approve 21 read scopes and continue to Microsoft",
+      }),
+    ).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Apps" }));
+    await user.click(screen.getByRole("checkbox", { name: "Security and sign-ins" }));
+    expect(
+      screen.getByRole("button", {
+        name: "Approve 13 read scopes and continue to Microsoft",
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it("generates, copies, and saves an admin registration script", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const bridge = makeMockBridge({}, emptyState);
+    renderWelcome(bridge);
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: "Your organization blocks third-party apps? Use your own app registration.",
+      }),
+    );
+    const displayName = screen.getByLabelText("Application display name");
+    await user.clear(displayName);
+    await user.type(displayName, "Contoso's OpenAdminOS");
+    await user.click(screen.getByRole("button", { name: "Generate setup script" }));
+
+    const script = screen.getByLabelText("PowerShell setup script");
+    expect((script as HTMLTextAreaElement).value).toContain("Contoso''s OpenAdminOS");
+    expect(
+      (screen.getByLabelText("Message for your admin") as HTMLTextAreaElement).value,
+    ).toContain("delegated and read-only");
+
+    await user.click(screen.getByRole("button", { name: "Copy script" }));
+    expect(bridge.writeClipboardText).toHaveBeenCalledWith(
+      expect.stringContaining("New-MgApplication"),
+    );
+    await user.click(screen.getByRole("button", { name: "Save script" }));
+    expect(bridge.saveTextFile).toHaveBeenCalledWith(
+      expect.objectContaining({
+        suggestedName: "OpenAdminOS-registration-setup.ps1",
+        filters: [{ name: "PowerShell script", extensions: ["ps1"] }],
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Copy message" }));
+    expect(bridge.writeClipboardText).toHaveBeenLastCalledWith(
+      expect.stringContaining("trust-model/authentication"),
+    );
   });
 
   it("never asks for a client secret", async () => {
@@ -289,7 +363,7 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve and continue to Microsoft" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" })).toBeInTheDocument();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
   });
 
@@ -342,7 +416,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
 
     expect(
@@ -369,7 +443,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
 
     const detected = await screen.findByRole("region", { name: PROVIDER_DETECTION_COPY.detectedLabel });
@@ -396,7 +470,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Open setup" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve and continue to Microsoft" }),
+      await screen.findByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" }),
     );
     expect(await screen.findByText(PILOT_COPY.removedAfterConnect)).toBeInTheDocument();
   });
