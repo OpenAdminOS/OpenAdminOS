@@ -219,9 +219,17 @@ async function makeFixture(options: { withOtherAgent?: boolean; clock?: () => Da
       return signIns;
     },
     async close() {
-      await store.cancelGraphCachePreload(SAMPLE_TENANT_ID).catch(() => undefined);
+      // Connecting a tenant starts a background cache preload; stop every
+      // tenant's preload before deleting the directory it writes into.
+      const tenantIds = new Set([SAMPLE_TENANT_ID]);
+      for (const tenant of (await store.getAppState().catch(() => undefined))?.tenants ?? []) {
+        tenantIds.add(tenant.id);
+      }
+      for (const tenantId of tenantIds) {
+        await store.cancelGraphCachePreload(tenantId).catch(() => undefined);
+      }
       store.close();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };
 }
