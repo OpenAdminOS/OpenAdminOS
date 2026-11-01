@@ -17,6 +17,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Record the open-core commercial model in the spec: the desktop app stays MIT, and a separate paid hosted team service (Frankfurt, end-to-end encrypted) adds approvals, roles, audit forwarding, a private registry, SSO, and SCIM. Also record the direction for iOS and Android companion apps. No application behavior changed.
 - Treat tenant records and carried evidence as untrusted model input to reduce the risk of embedded instructions influencing a run, while keeping write confirmation required.
 - Rework openadminos.com in the calm identity (paper light, graphite dark, self-hosted Geist and Newsreader, oa wordmark) and rewrite the homepage around real screenshots of the redesigned app.
 - Recapture the homepage screenshots at 1280 x 800 and 2x with the demo tenant, and show the product tour as tabs over a full-width screenshot, so the app is readable on the page.

@@ -70,7 +70,7 @@ Decisions that are *not* in SPEC.md should be flagged, not invented. If you're c
 
 These are non-negotiable. If you find yourself about to violate one, stop and ask.
 
-1. **Tenant data and LLM prompts never leave the user's machine when a local provider is selected.** No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. When a hosted provider is selected, the UI must honestly state where data goes (e.g., "Anthropic API · US").
+1. **Tenant data and LLM prompts never leave the user's machine when a local provider is selected.** No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. When a hosted provider is selected, the UI must honestly state where data goes (e.g., "Anthropic API · US"). Only exception: after an explicit team join, end-to-end encrypted approval and audit payloads go to the paid team service, with the status strip saying so (see SPEC.md §8b).
 
 2. **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. No "trust this agent" exception. Every write operation gets human-in-the-loop approval, every time. Destructive operations require typed confirmation (e.g., user must type `RETIRE 47 DEVICES` to proceed).
 
@@ -78,7 +78,7 @@ These are non-negotiable. If you find yourself about to violate one, stop and as
 
 4. **No silent failures.** Every error has a designed state with a clear recovery path (see `06-error-states.html`). Generic "something went wrong" messages are forbidden.
 
-5. **One UI, one surface.** The desktop app is the only end-user surface. No CLI fork, no separate web tree. Repo scripts and contributor tooling are not the same thing as a published end-user CLI.
+5. **One UI, one surface.** The desktop app is the only end-user surface. No CLI fork, no separate web tree. Repo scripts and contributor tooling are not the same thing as a published end-user CLI. Exception: iOS and Android companion apps that pair with the user's own desktop instances (see SPEC.md §8b); the desktop stays the host for tenant access and writes.
 
 6. **Open-source from day one.** Public GitHub repo, MIT license, contributing guide, code of conduct. No "we'll open source it later" — it's open from commit zero.
 
