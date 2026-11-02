@@ -56,12 +56,13 @@ Do not create a client secret. OpenAdminOS signs in as a public client, so there
 If you cannot create app registrations yourself, choose **Use your organization's app registration** and then **Generate setup script**. Enter a display name that follows your naming convention and select the areas. OpenAdminOS generates a PowerShell script for the Microsoft Graph PowerShell SDK, plus a short message to send with it. The script:
 
 1. Explains each change it makes in a comment block at the top.
-2. Signs in with `Application.ReadWrite.All` and `DelegatedPermissionGrant.ReadWrite.All`, which the administrator running it must hold.
-3. Stops without changes if an application with the same display name already exists.
-4. Creates a single-tenant public client registration with the `http://localhost` redirect URI.
-5. Adds the delegated Microsoft Graph scopes for the selected areas, looking up their permission IDs in the tenant at run time.
-6. Creates the enterprise application and grants tenant-wide admin consent for the same scopes.
-7. Prints the application (client) ID and directory (tenant) ID to enter in OpenAdminOS.
+2. Stops without changes if the Microsoft Graph PowerShell modules it uses (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Identity.SignIns`) are not installed. `Install-Module Microsoft.Graph -Scope CurrentUser` installs all of them.
+3. Signs in with `Application.ReadWrite.All` and `DelegatedPermissionGrant.ReadWrite.All`, which the administrator running it must hold.
+4. Stops without changes if an application with the same display name already exists.
+5. Creates a single-tenant public client registration with the `http://localhost` redirect URI.
+6. Adds the delegated Microsoft Graph scopes for the selected areas, looking up their permission IDs in the tenant at run time.
+7. Creates the enterprise application and grants tenant-wide admin consent for the same scopes. If either step fails, it deletes the registration it created, so nothing is left half set up.
+8. Prints the application (client) ID and directory (tenant) ID to enter in OpenAdminOS.
 
 The script never creates a client secret or certificate. Generation happens on your device and does not use an LLM.
 
