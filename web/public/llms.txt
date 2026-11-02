@@ -1,7 +1,9 @@
 # OpenAdminOS
 
-OpenAdminOS is an open-source, local-first desktop platform for Microsoft 365,
-Intune, and Entra administrators to run agent workflows against their tenants.
+OpenAdminOS is an open-source, local-first desktop platform for IT administrators
+to run agent workflows against the systems they manage. It is not tied to one
+vendor. Microsoft 365, Intune, and Entra are supported today; ServiceNow, Jira,
+Google Workspace, Salesforce, and a generic webhook are planned.
 
 Primary website: https://www.openadminos.com/
 Source code: https://github.com/OpenAdminOS/OpenAdminOS

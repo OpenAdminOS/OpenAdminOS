@@ -50,6 +50,14 @@ const benchmarkLead = leadOverHosted();
 
 // Hover tints use each company's brand color. Black-and-white brands use the
 // page ink so they tint neutrally in light and dark.
+// Keep in sync with "Supported systems" in README.md. Only list a system as
+// available when the app can use it today.
+const SYSTEMS = [
+  { status: "Available today", systems: "Microsoft 365, Intune, Entra, and Defender data through Microsoft Graph" },
+  { status: "Run report delivery", systems: "Teams, Slack, Discord, Outlook, WhatsApp Web, Signal" },
+  { status: "Planned, not available yet", systems: "ServiceNow, Jira, Google Workspace, Salesforce, generic webhook" },
+] as const;
+
 const WORKS_WITH: readonly { name: string; color: string }[] = [
   { name: "Ollama", color: "var(--color-brand-ink)" },
   { name: "LM Studio", color: "var(--color-brand-ink)" },
@@ -171,17 +179,17 @@ const COMMON_QUESTIONS = [
   {
     question: "What is OpenAdminOS?",
     answer:
-      "OpenAdminOS is a local-first agent runtime and open-source desktop app for Microsoft 365, Intune, and Entra administrators. It connects to a tenant through MSAL, reads tenant data through Microsoft Graph, and runs declared agent workflows from the admin's machine. Local LLM providers keep prompts and tenant context on-device; hosted providers remain optional and are labeled before data leaves the workstation.",
+      "OpenAdminOS is a local-first agent runtime and open-source desktop app for IT administrators. It is not tied to one vendor: each system it works with is a separate connector behind a common interface. Microsoft 365, Intune, and Entra are supported today. For those, the app connects to a tenant through MSAL, reads data through Microsoft Graph, and runs declared agent workflows from the admin's machine. Local LLM providers keep prompts and tenant context on-device; hosted providers remain optional and are labeled before data leaves the workstation.",
   },
   {
-    question: "Does OpenAdminOS send Microsoft 365 tenant data to the cloud?",
+    question: "Does OpenAdminOS send company data to the cloud?",
     answer:
       "Not when a local provider is selected. With Ollama or another local provider, tenant data, prompts, and run results stay on the device. If an admin chooses a hosted provider such as OpenAI, Anthropic, or Azure OpenAI, the app labels that tenant context will be sent to that provider.",
   },
   {
-    question: "Which Microsoft 365 services does it work with?",
+    question: "Which systems does it work with?",
     answer:
-      "The product is built around Microsoft Graph and initially focuses on Intune and Entra administration: devices, users, groups, sign-ins, Conditional Access, compliance posture, app assignments, audit logs, and related tenant signals.",
+      "Today, Microsoft 365 through Microsoft Graph: Intune and Entra devices, users, groups, sign-ins, Conditional Access, compliance posture, app assignments, audit logs, and related signals. Run reports can be delivered to Teams, Slack, Discord, Outlook, WhatsApp Web, and Signal. ServiceNow, Jira, Google Workspace, Salesforce, and a generic webhook are planned and not available yet.",
   },
   {
     question: "What Microsoft Graph permissions do agents need?",
@@ -285,14 +293,14 @@ export default async function HomePage() {
       <section className="mx-auto w-full max-w-7xl px-6 pt-14 sm:px-10 sm:pt-20">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-end lg:gap-16">
           <h1 className="font-display text-balance text-[2.9rem] leading-[1.02] sm:text-[4.4rem] lg:text-[4.9rem]">
-            Agents for your Microsoft 365 tenant, on your own machine.
+            Agents for the systems you administer, on your own machine.
           </h1>
           <div className="lg:pb-3">
             <p className="text-pretty text-lg leading-8 text-brand-muted">
-              OpenAdminOS is an open-source desktop app for Intune and Entra
-              admins. Ask your tenant questions, run agents from an open
-              registry, and approve every change before it reaches Microsoft
-              Graph.
+              OpenAdminOS is an open-source desktop app for IT admins. Ask
+              questions about the systems you run, use agents from an open
+              registry, and approve every change before it is made. Microsoft
+              365, Intune, and Entra are supported today.
             </p>
             <DownloadCta urls={downloadUrls} className="mt-7" />
           </div>
@@ -374,15 +382,30 @@ export default async function HomePage() {
         </ul>
       </section>
 
+      {/* Systems */}
+      <section className="mx-auto w-full max-w-7xl px-6 pt-16 sm:px-10">
+        <p className="text-center text-sm text-brand-faint">
+          Systems it connects to
+        </p>
+        <ul className="mt-6 grid border-l border-t border-brand-line md:grid-cols-3">
+          {SYSTEMS.map(({ status, systems }) => (
+            <li key={status} className="border-b border-r border-brand-line px-6 py-5">
+              <p className="font-mono text-xs text-brand-faint">{status}</p>
+              <p className="mt-2 text-[15px] leading-7 text-brand-muted">{systems}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       {/* Lead + figures */}
       <section className="mx-auto w-full max-w-7xl px-6 py-24 sm:px-10 sm:py-32">
         <p
           data-reveal
           className="font-display lead-two-tone max-w-5xl text-balance text-[1.9rem] leading-[1.2] sm:text-[2.6rem]"
         >
-          <strong>Local-first agents for Microsoft 365.</strong> Questions,
+          <strong>Local-first agents for IT administration.</strong> Questions,
           scheduled checks, and reviewed changes, run from the admin&apos;s own
-          machine against the tenant they picked.
+          machine against the systems they picked.
         </p>
         <div className="mt-16 grid gap-px overflow-hidden rounded-[18px] border border-brand-line bg-brand-line md:grid-cols-3">
           {FIGURES.map(({ fig, title, text, Figure }) => (

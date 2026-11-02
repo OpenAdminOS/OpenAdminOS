@@ -16,7 +16,7 @@ import { CopyPromptButton } from "./CopyPromptButton";
 
 const TITLE = "Build your own Agent examples";
 const DESCRIPTION =
-  "Copyable prompt examples for drafting read, write, and connector-backed OpenAdminOS agents for Microsoft 365 administration.";
+  "Copyable prompt examples for drafting read, write, and connector-backed OpenAdminOS agents for IT administration, starting with Microsoft 365.";
 const AGENT_SDK_DOCS_URL = `${GITHUB_URL}/blob/main/docs/agent-sdk.md`;
 
 export const metadata: Metadata = pageMetadata({
@@ -371,7 +371,7 @@ export default function ExamplesPage() {
       <PageIntro
         tone="slate"
         eyebrow="Examples gallery"
-        title="Prompts that draft useful Microsoft 365 agents."
+        title="Prompts that draft useful admin agents."
         description={DESCRIPTION}
       />
 

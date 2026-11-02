@@ -23,6 +23,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- The website describes OpenAdminOS as service-agnostic agents for IT administration instead of a Microsoft 365-only tool. Microsoft 365, Intune, and Entra are listed as supported today, and the homepage shows which systems are available, which only receive run reports, and which are planned.
 - Record the open-core commercial model in the spec: the desktop app stays MIT, and a separate paid hosted team service (Frankfurt, end-to-end encrypted) adds approvals, roles, audit forwarding, a private registry, SSO, and SCIM. Also record the direction for iOS and Android companion apps. No application behavior changed.
 - Treat tenant records and carried evidence as untrusted model input to reduce the risk of embedded instructions influencing a run, while keeping write confirmation required.
 - After connecting a tenant, the setup dialog names the enterprise application added to the tenant, its client ID, and its delegated permission count, and the permissions step explains that Intune RBAC roles and scope tags still apply.

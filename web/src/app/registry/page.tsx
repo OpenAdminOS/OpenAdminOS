@@ -12,9 +12,9 @@ import {
   websiteSchema,
 } from "../seo";
 
-const TITLE = "Microsoft 365 agent registry";
+const TITLE = "IT admin agent registry";
 const DESCRIPTION =
-  "Browse the OpenAdminOS registry model for Microsoft 365 admin agents, including declared Graph scopes, read/write mode, model requirements, and review gates.";
+  "Browse the OpenAdminOS registry model for IT admin agents, including declared permissions, read/write mode, model requirements, and review gates. Current agents target Microsoft 365, Intune, and Entra.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,

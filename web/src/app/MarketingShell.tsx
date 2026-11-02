@@ -147,8 +147,7 @@ export function MarketingShell({
               <Wordmark />
             </Link>
             <p className="mt-4 text-sm leading-6 text-brand-muted">
-              Open-source, local-first agents for Microsoft 365 admins. MIT
-              licensed.
+              Open-source, local-first agents for IT admins. MIT licensed.
             </p>
           </div>
           {FOOTER_GROUPS.map((group) => (

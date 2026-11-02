@@ -24,7 +24,7 @@ There is no separate CLI. Power users get the same GUI; contributor tooling (age
 
 ### Why this exists
 
-Most AI tools for IT admins today are wrappers around ChatGPT: single-purpose, cloud-only, no extensibility. OpenAdminOS is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for Microsoft 365 admins**: local-first runtime, GitHub-hosted integrations, opinionated UX.
+Most AI tools for IT admins today are wrappers around ChatGPT: single-purpose, cloud-only, no extensibility. OpenAdminOS is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for IT admins**: local-first runtime, GitHub-hosted integrations, opinionated UX. The product is service-agnostic: each administered system is a connector behind a common interface. Microsoft 365 (Intune, Entra, Defender through Microsoft Graph) is the first supported system. Public copy describes the product in vendor-neutral terms and lists a system as available only when the app can use it today; planned systems are labeled as planned.
 
 ---
 

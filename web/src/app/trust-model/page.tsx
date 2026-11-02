@@ -14,7 +14,7 @@ import {
 
 const TITLE = "Local-first trust model for tenant agents";
 const DESCRIPTION =
-  "How OpenAdminOS keeps Microsoft 365 tenant work local by default, labels hosted model egress, and gates every write agent behind human approval.";
+  "How OpenAdminOS keeps admin work local by default, labels hosted model egress, and gates every write agent behind human approval.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
