@@ -2217,6 +2217,7 @@ Chat is the first-run surface, and the full shell remains browsable without a te
 - Stale guest cleanup keeps the full diff review, typed confirmation, risk review, and dry run. Confirmed changes apply to the pilot data only and the result says the change was simulated.
 - Connecting a real tenant from pilot mode removes the pilot tenant after a successful connect and says so. Pilot mode can be opened again later from the tenant switcher or Settings.
 - Agent schedules follow the active tenant, so scheduled runs are skipped while pilot mode is active alongside real tenants. The schedules surface says so and offers to switch back.
+- The same applies when no tenant is active: due schedules wait instead of recording a "No tenant connected" failure, and the schedules surface says so. A scheduled run that fails to start records the tenant it fired against, so removing that tenant (including the pilot tenant) removes it. Tenant-less scheduled failures saved by earlier versions are dropped when the state is read.
 
 **Provider detection (production).** When the user has not chosen a provider and the default is not ready, the app selects a ready local provider automatically. A detected hosted provider (a signed-in Claude Code, Codex, or similar CLI) is only pre-selected in the provider step with its data-residency line, and needs one explicit click: a silent hosted default would send tenant data off the device.
 
