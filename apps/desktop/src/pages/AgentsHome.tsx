@@ -8,7 +8,7 @@ import {
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
-import { SampleSchedulesPausedNotice } from "../components/SampleSchedulesPausedNotice";
+import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
 import {
   IconChevronDown,
@@ -465,7 +465,7 @@ export default function AgentsHome() {
           <span>{rows.length} of {sourceRows.length} {source === "hub" ? "hub" : "installed"} agents</span>
           {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
         </div>
-        {scheduledOnly ? <SampleSchedulesPausedNotice className="mb-3" /> : null}
+        {scheduledOnly ? <SchedulesPausedNotice className="mb-3" /> : null}
         {scheduledOnly && scheduledAgents.length > 0 && schedulerRegistered === false ? (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             <span>Background scheduling is off. Schedules run only while OpenAdminOS is open.</span>

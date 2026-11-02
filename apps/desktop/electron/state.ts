@@ -502,6 +502,14 @@ function sanitizeNonNegativeInteger(value: unknown): number | undefined {
   return Math.round(value);
 }
 
+function scheduleDueAtMs(agent: AgentSummary, nowMs: number): number {
+  const schedule = agent.schedule;
+  const lastFired = schedule?.lastScheduledRunAt
+    ? new Date(schedule.lastScheduledRunAt).getTime()
+    : scheduleFallbackAnchor(agent.installedAt, nowMs);
+  return lastFired + (schedule?.intervalSeconds ?? 0) * 1000;
+}
+
 function scheduleFallbackAnchor(installedAt: string, nowMs: number): number {
   const installedMs = Date.parse(installedAt);
   return Number.isFinite(installedMs) ? installedMs : nowMs;
@@ -4106,18 +4114,22 @@ export class AppStateStore {
     const activeTenant = persisted.activeTenantId
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
       : undefined;
-    if (activeTenant?.kind === "sample") {
-      const dueCount = persisted.installedAgents.filter((agent) => {
-        const schedule = agent.schedule;
-        if (!schedule?.enabled) return false;
-        const lastFired = schedule.lastScheduledRunAt
-          ? new Date(schedule.lastScheduledRunAt).getTime()
-          : scheduleFallbackAnchor(agent.installedAt, nowMs);
-        return nowMs >= lastFired + schedule.intervalSeconds * 1000;
-      }).length;
+    // Schedules run against the active tenant. They wait in pilot mode,
+    // and without an active tenant, where every due schedule would only
+    // record a "No tenant connected" failure. The schedules surfaces say so.
+    const pausedReason =
+      activeTenant?.kind === "sample"
+        ? "pilot mode is active"
+        : !activeTenant
+          ? "no tenant is connected"
+          : undefined;
+    if (pausedReason) {
+      const dueCount = persisted.installedAgents.filter(
+        (agent) => agent.schedule?.enabled && nowMs >= scheduleDueAtMs(agent, nowMs),
+      ).length;
       if (dueCount > 0) {
         console.info(
-          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because pilot mode is active`,
+          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because ${pausedReason}`,
         );
       }
       return;
@@ -4126,11 +4138,7 @@ export class AppStateStore {
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
-      const lastFired = schedule.lastScheduledRunAt
-        ? new Date(schedule.lastScheduledRunAt).getTime()
-        : scheduleFallbackAnchor(agent.installedAt, nowMs);
-      const dueAtMs = lastFired + schedule.intervalSeconds * 1000;
-      if (nowMs < dueAtMs) continue;
+      if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
 
       // Skip if there's already an in-flight run for this agent because we
       // don't want a long-running agent to queue more copies of itself.
@@ -4174,6 +4182,16 @@ export class AppStateStore {
     nowMs: number,
   ): Promise<void> {
     const now = new Date(nowMs).toISOString();
+    // Read the tenant at failure time: it can be switched or removed while
+    // earlier schedules in the same tick were starting. With no tenant
+    // left there is nothing to attribute the failure to, so the schedule
+    // only advances, like a skipped schedule.
+    const current = await this.read();
+    const tenantId = current.tenants.some(
+      (tenant) => tenant.id === current.activeTenantId && tenant.kind !== "sample",
+    )
+      ? current.activeTenantId
+      : undefined;
     const message = error instanceof Error ? error.message : String(error);
     const accessDenial = graphAccessDenialFromError(error);
     const summary = humanizeScheduledRunError(message, accessDenial);
@@ -4185,6 +4203,8 @@ export class AppStateStore {
       queuedAt: now,
       startedAt: now,
       finishedAt: now,
+      // Removing this tenant also removes this record.
+      tenantId,
       trigger: "schedule",
       summary,
       error: message,
@@ -4200,7 +4220,7 @@ export class AppStateStore {
         },
       ],
     };
-    await this.persistRunSnapshot(failedRun);
+    if (failedRun.tenantId) await this.persistRunSnapshot(failedRun);
     await this.updateAgentSchedule(agent.slug, {
       enabled: true,
       intervalSeconds: schedule.intervalSeconds,
@@ -6134,7 +6154,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             )
           : defaultState.installedAgents,
         runs: Array.isArray(parsed.runs)
-          ? parsed.runs.map((run) => ({ ...run, usage: run.usage ?? null }))
+          ? parsed.runs
+              // Before scheduler failures carried a tenant, a schedule that
+              // fired with no tenant connected saved a tenant-less failed
+              // run. No tenant removal ever matched it, so it outlived
+              // every tenant, including the pilot tenant. Every run start
+              // pins a tenant, so a tenant-less scheduled run can only be
+              // one of these records.
+              .filter((run) => !(run.trigger === "schedule" && !run.tenantId))
+              .map((run) => ({ ...run, usage: run.usage ?? null }))
           : defaultState.runs,
         tenants,
       };

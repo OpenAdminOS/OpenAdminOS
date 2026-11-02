@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { Button } from "../components/Button";
 import { Card } from "../components/Card";
-import { SampleSchedulesPausedNotice } from "../components/SampleSchedulesPausedNotice";
+import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
 import {
   IconCheck,
@@ -165,7 +165,7 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
 
   const content = (
     <div className="space-y-6">
-        <SampleSchedulesPausedNotice />
+        <SchedulesPausedNotice />
         {scheduledAgents.length > 0 && schedulerRegistered === false && (
           <ScheduleNotice
             tone="warning"

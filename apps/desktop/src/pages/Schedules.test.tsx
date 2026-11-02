@@ -83,6 +83,35 @@ describe("Agents schedule actions", () => {
     await waitFor(() => expect(bridge.setActiveTenant).toHaveBeenCalledWith(realTenant.id));
   });
 
+  it("says schedules are paused while no tenant is active", async () => {
+    const user = userEvent.setup();
+    const scheduledAgent = createMockAgent({
+      schedule: { enabled: true, intervalSeconds: 900 },
+    });
+    const realTenant = {
+      id: "real-tenant",
+      displayName: "Contoso Production",
+      username: "admin@contoso.invalid",
+      homeAccountId: "real-account",
+      addedAt: "2026-10-20T12:00:00.000Z",
+    };
+    const state = createMockAppState({
+      tenants: [realTenant],
+      activeTenantId: undefined,
+      installedAgents: [scheduledAgent],
+    });
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<Schedules />, { path: "/schedules", route: "/schedules", bridge });
+
+    expect(
+      await screen.findByText(
+        "Schedules are paused while no tenant is active. Select or connect a tenant to resume.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Switch to Contoso Production" }));
+    await waitFor(() => expect(bridge.setActiveTenant).toHaveBeenCalledWith(realTenant.id));
+  });
+
   it("shows the production page for the Schedules tab in pilot mode", async () => {
     const state = createMockAppState({
       tenants: [{
