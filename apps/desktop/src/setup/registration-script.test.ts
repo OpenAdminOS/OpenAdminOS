@@ -51,6 +51,18 @@ describe("registration setup generator", () => {
     expect(output.script).toContain("IsFallbackPublicClient = $true");
     expect(output.script).toContain("RedirectUris = @('http://localhost')");
     expect(output.script).toContain("New-MgOauth2PermissionGrant");
+    // Every cmdlet module must be checked before the first change is made.
+    for (const module of [
+      "Microsoft.Graph.Authentication",
+      "Microsoft.Graph.Applications",
+      "Microsoft.Graph.Identity.SignIns",
+    ]) {
+      expect(output.script).toContain(`'${module}'`);
+    }
+    expect(output.script.indexOf("$missingModules.Count -gt 0")).toBeLessThan(
+      output.script.indexOf("New-MgApplication"),
+    );
+    expect(output.script).toContain("Remove-MgApplication -ApplicationId $application.Id");
     expect(output.script).toContain("ConsentType = 'AllPrincipals'");
     expect(output.script).toContain("'openid'");
     expect(output.script).toContain("'profile'");

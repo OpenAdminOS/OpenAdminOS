@@ -60,10 +60,10 @@ This script creates a tenant-owned Microsoft Entra app registration named ${disp
 
 It makes these changes:
 1. Connects to Microsoft Graph with permission to create an application and grant delegated tenant-wide consent. An administrator must approve these setup permissions.
-2. Stops before changing anything if an application with the same display name already exists. This avoids updating or duplicating an existing registration.
+2. Stops before changing anything if a required Microsoft Graph PowerShell module is missing, or if an application with the same display name already exists. This avoids updating or duplicating an existing registration.
 3. Creates a single-tenant public client application with the localhost redirect URI required by the OpenAdminOS desktop sign-in flow.
 4. Adds delegated Microsoft Graph permissions for these OpenAdminOS areas: ${areaList}. It also adds openid, profile, and offline_access for sign-in and refresh tokens.
-5. Creates the corresponding enterprise application and grants tenant-wide admin consent for the same delegated scope set.
+5. Creates the corresponding enterprise application and grants tenant-wide admin consent for the same delegated scope set. If either step fails, it deletes the application it created in step 3.
 
 The script does not create a client secret or certificate. OpenAdminOS signs users in through the system browser and acts with the signed-in administrator's delegated access.
 #>
@@ -75,9 +75,12 @@ $requestedScopeValues = @(
 ${scopeLines}
 )
 
-if (-not (Get-Module -ListAvailable -Name Microsoft.Graph.Applications)) {
-    throw 'The Microsoft Graph PowerShell SDK is not installed. Run Install-Module Microsoft.Graph -Scope CurrentUser, then run this script again. No changes were made.'
+$requiredModules = @('Microsoft.Graph.Authentication', 'Microsoft.Graph.Applications', 'Microsoft.Graph.Identity.SignIns')
+$missingModules = @($requiredModules | Where-Object { -not (Get-Module -ListAvailable -Name $_) })
+if ($missingModules.Count -gt 0) {
+    throw "The Microsoft Graph PowerShell SDK is missing these modules: $($missingModules -join ', '). Run Install-Module Microsoft.Graph -Scope CurrentUser, then run this script again. No changes were made."
 }
+Import-Module $requiredModules
 
 Connect-MgGraph -Scopes Application.ReadWrite.All, DelegatedPermissionGrant.ReadWrite.All
 
@@ -124,17 +127,27 @@ $application = New-MgApplication -BodyParameter @{
     )
 }
 
-$servicePrincipal = New-MgServicePrincipal -BodyParameter @{
-    AppId = $application.AppId
-}
+try {
+    $servicePrincipal = New-MgServicePrincipal -BodyParameter @{
+        AppId = $application.AppId
+    }
 
-$scopeString = $requestedScopeValues -join ' '
-New-MgOauth2PermissionGrant -BodyParameter @{
-    ClientId = $servicePrincipal.Id
-    ConsentType = 'AllPrincipals'
-    ResourceId = $graphServicePrincipal.Id
-    Scope = $scopeString
-} | Out-Null
+    $scopeString = $requestedScopeValues -join ' '
+    New-MgOauth2PermissionGrant -BodyParameter @{
+        ClientId = $servicePrincipal.Id
+        ConsentType = 'AllPrincipals'
+        ResourceId = $graphServicePrincipal.Id
+        Scope = $scopeString
+    } | Out-Null
+} catch {
+    $setupError = $_.Exception.Message
+    try {
+        Remove-MgApplication -ApplicationId $application.Id
+    } catch {
+        throw "Admin consent could not be granted: $setupError The application '$displayName' (client ID $($application.AppId)) was created but could not be removed: $($_.Exception.Message) Delete it in the Microsoft Entra admin center under App registrations."
+    }
+    throw "Admin consent could not be granted: $setupError The application '$displayName' that this script created was removed. No changes were left in place."
+}
 
 $context = Get-MgContext
 Write-Host ''
