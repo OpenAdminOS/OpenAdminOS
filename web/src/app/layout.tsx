@@ -29,6 +29,8 @@ export const metadata: Metadata = {
   category: "technology",
   keywords: [
     "OpenAdminOS",
+    "IT admin agents",
+    "local AI agents for IT administration",
     "Microsoft 365 admin agents",
     "Intune agents",
     "Entra agents",

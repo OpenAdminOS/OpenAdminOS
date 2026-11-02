@@ -18,7 +18,7 @@ export const revalidate = 900;
 
 const TITLE = "Download for Windows, macOS, and Linux";
 const DESCRIPTION =
-  "Download OpenAdminOS for Windows, macOS, or Linux, review release notes, and inspect the open-source Microsoft 365 admin agent runtime before running it against a tenant.";
+  "Download OpenAdminOS for Windows, macOS, or Linux, review release notes, and inspect the open-source admin agent runtime before you connect it.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,

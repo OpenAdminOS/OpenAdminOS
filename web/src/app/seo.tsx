@@ -40,9 +40,9 @@ export const LEGAL_ENTITY_ADDRESS_LINES = [
 ] as const;
 
 export const HOME_TITLE =
-  "OpenAdminOS - Local AI agents for Microsoft 365";
+  "OpenAdminOS - Local AI agents for IT administration";
 export const HOME_DESCRIPTION =
-  "Open-source desktop app for Intune and Entra admins. Run Microsoft 365 agents with local models, and approve every Graph change.";
+  "Open-source desktop app for IT admins. Run agents with local models and approve every change. Supports Microsoft 365, Intune, and Entra today.";
 
 export const SOCIAL_IMAGE_PATH = "/opengraph-image.png";
 export const TWITTER_IMAGE_PATH = "/twitter-image.png";
@@ -158,7 +158,7 @@ export function softwareApplicationSchema(input?: {
     "@id": `${SITE_URL}/#software`,
     name: SITE_NAME,
     applicationCategory: "BusinessApplication",
-    applicationSubCategory: "Microsoft 365 administration",
+    applicationSubCategory: "IT administration",
     operatingSystem: input?.operatingSystem ?? "Windows, macOS, Linux",
     softwareVersion: input?.version ?? undefined,
     description: HOME_DESCRIPTION,

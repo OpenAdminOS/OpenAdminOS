@@ -14,7 +14,7 @@ import {
 
 const TITLE = "Local and hosted LLM providers";
 const DESCRIPTION =
-  "OpenAdminOS supports local LLM providers for private Microsoft 365 tenant work and labels hosted provider egress before prompts are sent.";
+  "OpenAdminOS supports local LLM providers for private admin work and labels hosted provider egress before prompts are sent.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
