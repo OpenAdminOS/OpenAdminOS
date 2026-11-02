@@ -4107,17 +4107,23 @@ export class AppStateStore {
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
       : undefined;
     if (activeTenant?.kind === "sample") {
-      const dueCount = persisted.installedAgents.filter((agent) => {
-        const schedule = agent.schedule;
-        if (!schedule?.enabled) return false;
-        const lastFired = schedule.lastScheduledRunAt
-          ? new Date(schedule.lastScheduledRunAt).getTime()
-          : scheduleFallbackAnchor(agent.installedAt, nowMs);
-        return nowMs >= lastFired + schedule.intervalSeconds * 1000;
-      }).length;
+      const dueCount = this.dueScheduleCount(persisted.installedAgents, nowMs);
       if (dueCount > 0) {
         console.info(
           `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because pilot mode is active`,
+        );
+      }
+      return;
+    }
+    // Schedules run against the active tenant. Without one, every due
+    // schedule would only record a "No tenant connected" failure that no
+    // tenant removal ever cleans up, so they wait until a tenant is
+    // connected. The schedules surfaces state this.
+    if (!activeTenant) {
+      const dueCount = this.dueScheduleCount(persisted.installedAgents, nowMs);
+      if (dueCount > 0) {
+        console.info(
+          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because no tenant is connected`,
         );
       }
       return;
@@ -4154,13 +4160,30 @@ export class AppStateStore {
           lastScheduledRunAt: new Date(nowMs).toISOString(),
         });
       } catch (error) {
-        await this.persistScheduledRunFailure(agent, schedule, error, nowMs);
+        await this.persistScheduledRunFailure(
+          agent,
+          schedule,
+          error,
+          nowMs,
+          activeTenant.id,
+        );
         console.error(
           `[scheduler] agent "${agent.slug}" failed to start:`,
           error,
         );
       }
     }
+  }
+
+  private dueScheduleCount(agents: AgentSummary[], nowMs: number): number {
+    return agents.filter((agent) => {
+      const schedule = agent.schedule;
+      if (!schedule?.enabled) return false;
+      const lastFired = schedule.lastScheduledRunAt
+        ? new Date(schedule.lastScheduledRunAt).getTime()
+        : scheduleFallbackAnchor(agent.installedAt, nowMs);
+      return nowMs >= lastFired + schedule.intervalSeconds * 1000;
+    }).length;
   }
 
   async refreshDueGraphCaches(): Promise<void> {
@@ -4172,6 +4195,7 @@ export class AppStateStore {
     schedule: AgentSchedule,
     error: unknown,
     nowMs: number,
+    tenantId: string,
   ): Promise<void> {
     const now = new Date(nowMs).toISOString();
     const message = error instanceof Error ? error.message : String(error);
@@ -4185,6 +4209,9 @@ export class AppStateStore {
       queuedAt: now,
       startedAt: now,
       finishedAt: now,
+      // The tenant the schedule fired against, so removing that tenant
+      // also removes this record.
+      tenantId,
       trigger: "schedule",
       summary,
       error: message,
@@ -6134,7 +6161,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             )
           : defaultState.installedAgents,
         runs: Array.isArray(parsed.runs)
-          ? parsed.runs.map((run) => ({ ...run, usage: run.usage ?? null }))
+          ? parsed.runs
+              // Before scheduler failures carried a tenant, a schedule that
+              // fired with no tenant connected saved a tenant-less failed
+              // run. No tenant removal ever matched it, so it outlived
+              // every tenant, including the pilot tenant. Every run start
+              // pins a tenant, so a tenant-less scheduled run can only be
+              // one of these records.
+              .filter((run) => !(run.trigger === "schedule" && !run.tenantId))
+              .map((run) => ({ ...run, usage: run.usage ?? null }))
           : defaultState.runs,
         tenants,
       };
