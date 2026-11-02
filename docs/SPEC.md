@@ -6,7 +6,7 @@
 
 ## 1. What we're building
 
-**OpenAdminOS** is an open-source desktop platform for Microsoft 365 administrators (initially Intune & Entra) to run AI agents against their tenants. Agents are TypeScript modules contributed by the community, run locally on the admin's machine, and operate against the tenant via Microsoft Graph.
+**OpenAdminOS** is an open-source desktop platform for IT administrators to run AI agents across their IT stack, starting with Microsoft 365 (initially Intune & Entra). Agents are TypeScript modules contributed by the community, run locally on the admin's machine, and operate against the tenant via Microsoft Graph.
 
 The product is local-first: by default, tenant data and LLM prompts never leave the user's device. The user can opt into hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), and when they do, the UI honestly reflects that data leaves the device.
 
@@ -24,7 +24,7 @@ There is no separate CLI. Power users get the same GUI; contributor tooling (age
 
 ### Why this exists
 
-Most AI tools for IT admins today are wrappers around ChatGPT: single-purpose, cloud-only, no extensibility. OpenAdminOS is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for IT admins**: local-first runtime, GitHub-hosted integrations, opinionated UX. The product is service-agnostic: each administered system is a connector behind a common interface. Microsoft 365 (Intune, Entra, Defender through Microsoft Graph) is the first supported system. Public copy describes the product in vendor-neutral terms and lists a system as available only when the app can use it today; planned systems are labeled as planned.
+Most AI tools for IT admins today are wrappers around ChatGPT: single-purpose, cloud-only, no extensibility. OpenAdminOS is a **platform**: the runtime, the registry, the trust model. Community-contributed agents accumulate over time. The closest mental model is **Home Assistant for IT admins**: local-first runtime, GitHub-hosted integrations, opinionated UX. The product is service-agnostic: each service in the admin's IT stack is a connector behind a common interface. Microsoft 365 (Intune, Entra, Defender through Microsoft Graph) is the first supported service. Public copy uses "IT stack" as the umbrella term (not "systems"), stays vendor-neutral, and lists a service as available only when the app can use it today; planned services are labeled as planned.
 
 ---
 

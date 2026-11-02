@@ -5,7 +5,7 @@ description: "How OpenAdminOS agents are classified and reviewed."
 
 # Agents
 
-OpenAdminOS agents are reviewed units of automation for Microsoft 365 administration. Each agent declares what it reads, whether it can write, which Microsoft Graph scopes it needs, and which model behavior it expects.
+OpenAdminOS agents are reviewed units of automation for IT administration. Each agent declares what it reads, whether it can write, which permissions it needs (Microsoft Graph scopes for the current Microsoft 365 agents), and which model behavior it expects.
 
 The agent catalog is the fastest way to inspect what an agent can do before installing or running it.
 

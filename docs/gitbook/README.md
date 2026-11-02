@@ -1,11 +1,11 @@
 ---
 title: "OpenAdminOS documentation"
-description: "Open-source, local-first agents for Microsoft 365 admins."
+description: "Open-source, local-first agents for IT admins."
 ---
 
 # OpenAdminOS
 
-OpenAdminOS is an open-source desktop app for Microsoft 365 administrators who need to run reviewed agents against Intune and Entra tenants.
+OpenAdminOS is an open-source desktop app for IT administrators who need to run reviewed agents across their IT stack. It starts with Microsoft 365: Intune and Entra tenants.
 
 The app is local-first by default. Tenant data and prompts stay on the device when a local provider such as Ollama is selected. Hosted providers are available only with explicit provider selection and visible data-flow messaging.
 

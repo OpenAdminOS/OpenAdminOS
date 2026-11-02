@@ -21,7 +21,7 @@ import {
 const LAST_UPDATED = "2026-10-24";
 const TITLE = "Privacy policy";
 const DESCRIPTION =
-  "How OpenAdminOS handles data from the systems you connect, such as Microsoft 365, authentication tokens, LLM prompts, registry install counts, and website analytics.";
+  "How OpenAdminOS handles data from the services you connect, such as Microsoft 365, authentication tokens, LLM prompts, registry install counts, and website analytics.";
 
 export const metadata: Metadata = pageMetadata({
   title: TITLE,
@@ -65,7 +65,7 @@ export default function PrivacyPage() {
             <h2 className="font-display text-[1.5rem] leading-tight text-brand-ink">Summary</h2>
             <p className="mt-3">
               OpenAdminOS is a desktop app for IT administrators. It runs on
-              your computer. Data from the systems you connect (today, your
+              your computer. Data from the services you connect (today, your
               Microsoft 365 tenant), local
               model prompts, run history, and crash logs are not sent to{" "}
               {LEGAL_ENTITY_NAME}, the company behind OpenAdminOS.

@@ -2,7 +2,7 @@
   "name": "@openadminos/desktop",
   "private": true,
   "version": "0.7.2",
-  "description": "Open-source, local-first agents for Microsoft 365 admins.",
+  "description": "Open-source, local-first agents for IT admins.",
   "author": {
     "name": "OpenAdminOS",
     "email": "support@openadminos.com"
