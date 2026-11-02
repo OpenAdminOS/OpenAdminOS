@@ -6,6 +6,8 @@ import { IconWarning } from "./icons";
 
 const PAUSED_COPY =
   "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.";
+const NO_TENANT_PAUSED_COPY =
+  "Schedules are paused while no tenant is active. Select or connect a tenant to resume.";
 
 export function SampleSchedulesPausedNotice({ className = "" }: { className?: string }) {
   const { state, setActiveTenant } = useAppState();
@@ -26,7 +28,13 @@ export function SampleSchedulesPausedNotice({ className = "" }: { className?: st
     [state.tenants],
   );
 
-  if (!sampleActive) return null;
+  // Without an active tenant the scheduler skips due schedules, so say so
+  // wherever schedules are shown.
+  const noTenantActive =
+    !state.tenants.some((tenant) => tenant.id === state.activeTenantId) &&
+    state.installedAgents.some((agent) => agent.schedule?.enabled);
+
+  if (!sampleActive && !noTenantActive) return null;
 
   return (
     <div
@@ -35,7 +43,7 @@ export function SampleSchedulesPausedNotice({ className = "" }: { className?: st
     >
       <span className="flex min-w-0 items-center gap-2">
         <IconWarning size={14} className="shrink-0" />
-        <span>{PAUSED_COPY}</span>
+        <span>{sampleActive ? PAUSED_COPY : NO_TENANT_PAUSED_COPY}</span>
       </span>
       {recentTenant ? (
         <Button
