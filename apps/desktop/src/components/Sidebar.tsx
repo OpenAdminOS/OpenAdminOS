@@ -200,7 +200,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           label: "Agent Team",
           icon: <IconAgentTeam size={14} />,
           count: findingCount || undefined,
-          tooltip: findingCount ? `${findingCount} findings to review` : undefined,
+          tooltip: findingCount
+            ? `${findingCount} ${findingCount === 1 ? "finding" : "findings"} to review`
+            : undefined,
         }]),
     { to: "/agents", label: "Agents", icon: <IconAgents size={14} /> },
     { to: "/runs", label: "Runs", icon: <IconActivity size={14} />, count: reviewCount || undefined },
