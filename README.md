@@ -6,7 +6,7 @@
 
 <p>Runs on the admin's own computer. Company data never leaves the device.</p>
 
-<p>OpenAdminOS is a free, MIT-licensed desktop app for running auditable AI agents across your IT stack. Microsoft 365, Intune and Entra are the starting point, not the only target. Agents are plain YAML you can read before you run, risky changes need typed confirmation, and no third-party app registration is required.</p>
+<p>OpenAdminOS is a free, MIT-licensed desktop app for running auditable AI agents for IT administration. Microsoft 365, Intune and Entra are the starting point, not the only target. Agents are plain YAML you can read before you run, risky changes need typed confirmation, and no third-party app registration is required.</p>
 
 [![CI](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml)
 [![Release](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml)
@@ -33,7 +33,7 @@
 - **No app registration required.** Sign in with your own admin identity via MSAL (Authorization Code + PKCE against the public Microsoft Graph CLI client). No client secrets, no consent dance with a third-party multi-tenant app.
 - **Author agents in plain English.** Describe what you want; the local LLM drafts a manifest grounded in the JSON Schema; one click installs it.
 
-## Works with your IT stack
+## What agents connect to
 
 OpenAdminOS started with Microsoft 365 because that is where most IT administration happens today. The runtime is not tied to one vendor: connectors are separate packages behind a common interface, so other services can be added the same way the existing ones were.
 
@@ -149,7 +149,7 @@ The "Build your own Agent" button on the hub opens a guided flow. Type a descrip
 | Agent registry | Agent Hub fetches `agents/index.json`, caches locally, version-pins installs, reviews scope-diff updates, and supports custom registry sources. | More maintainer workflow automation. |
 | Build your own Agent | Guided manifest drafting, validation, repair, editable YAML review, local preflight, install, edit, export, and public "Share with community" issue intake are implemented. | More examples and better Graph QA messages. |
 | Reference agents | The repo includes investigator, advisor, dashboard, cleanup, and one experimental script agent. | More agents after maintainer review. |
-| Connectors | Outbound-only Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal delivery are implemented. They send terminal run reports and do not read messages or inboxes. | ServiceNow, Jira, Salesforce, and a generic webhook. See [Works with your IT stack](#works-with-your-it-stack). |
+| Connectors | Outbound-only Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal delivery are implemented. They send terminal run reports and do not read messages or inboxes. | ServiceNow, Jira, Salesforce, and a generic webhook. See [What agents connect to](#what-agents-connect-to). |
 | Schedules | Per-agent schedules use the OS scheduler on macOS and Windows after tenant sign-in. Scheduled runs still use the signed app and local state. | More schedule health and audit polish. |
 | macOS menu bar | The signed app includes a menu-bar companion for active tenant/provider state, schedules, recent activity, and a compact read-only chat prompt. | Windows/Linux companion surfaces are not planned for 0.3. |
 | LLM providers | Ollama, LM Studio, Apple Foundation Models on compatible macOS, Azure OpenAI, and OpenAI, Anthropic, GitHub Copilot, and Google Gemini through their locally installed vendor CLIs. | An integrated local model explorer ([#102](https://github.com/OpenAdminOS/OpenAdminOS/issues/102)). |

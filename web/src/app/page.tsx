@@ -50,7 +50,17 @@ const benchmarkLead = leadOverHosted();
 
 // Hover tints use each company's brand color. Black-and-white brands use the
 // page ink so they tint neutrally in light and dark.
-// Keep in sync with "Works with your IT stack" in README.md. Only list a
+// Each item must stay literally true: local providers are the only automatic
+// choice, write agents always pause for approval, and runs are kept in local
+// history.
+const HERO_GUARANTEES = [
+  "Local models by default",
+  "Every change approved",
+  "Every run logged",
+  "Open source, MIT",
+] as const;
+
+// Keep in sync with "What agents connect to" in README.md. Only list a
 // service as available when the app can use it today.
 const STACK = [
   { status: "Available today", services: "Microsoft 365, Intune, Entra, and Defender data through Microsoft Graph" },
@@ -179,7 +189,7 @@ const COMMON_QUESTIONS = [
   {
     question: "What is OpenAdminOS?",
     answer:
-      "OpenAdminOS is a local-first agent runtime and open-source desktop app for IT administrators. It is not tied to one vendor: each service in your IT stack is a separate connector behind a common interface. Microsoft 365, Intune, and Entra are supported today. For those, the app connects to a tenant through MSAL, reads data through Microsoft Graph, and runs declared agent workflows from the admin's machine. Local LLM providers keep prompts and tenant context on-device; hosted providers remain optional and are labeled before data leaves the workstation.",
+      "OpenAdminOS is a local-first agent runtime and open-source desktop app for IT administrators. It is not tied to one vendor: each service it works with is a separate connector behind a common interface. Microsoft 365, Intune, and Entra are supported today. For those, the app connects to a tenant through MSAL, reads data through Microsoft Graph, and runs declared agent workflows from the admin's machine. Local LLM providers keep prompts and tenant context on-device; hosted providers remain optional and are labeled before data leaves the workstation.",
   },
   {
     question: "Does OpenAdminOS send company data to the cloud?",
@@ -187,7 +197,7 @@ const COMMON_QUESTIONS = [
       "Not when a local provider is selected. With Ollama or another local provider, tenant data, prompts, and run results stay on the device. If an admin chooses a hosted provider such as OpenAI, Anthropic, or Azure OpenAI, the app labels that tenant context will be sent to that provider.",
   },
   {
-    question: "Which parts of my IT stack does it work with?",
+    question: "What can agents connect to?",
     answer:
       "Today, Microsoft 365 through Microsoft Graph: Intune and Entra devices, users, groups, sign-ins, Conditional Access, compliance posture, app assignments, audit logs, and related signals. Run reports can be delivered to Teams, Slack, Discord, Outlook, WhatsApp Web, and Signal. ServiceNow, Jira, Google Workspace, Salesforce, and a generic webhook are planned and not available yet.",
   },
@@ -293,16 +303,24 @@ export default async function HomePage() {
       <section className="mx-auto w-full max-w-7xl px-6 pt-14 sm:px-10 sm:pt-20">
         <div className="grid gap-8 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-end lg:gap-16">
           <h1 className="font-display text-balance text-[2.9rem] leading-[1.02] sm:text-[4.4rem] lg:text-[4.9rem]">
-            Agents for your IT stack, on your own machine.
+            Your admin backlog, handled by agents you can trust.
           </h1>
           <div className="lg:pb-3">
             <p className="text-pretty text-lg leading-8 text-brand-muted">
-              OpenAdminOS is an open-source desktop app for IT admins. Ask
-              questions, run agents from an open registry, and approve every
-              change before it happens. Starts with Microsoft&nbsp;365, Intune,
-              and Entra.
+              Stale devices, forgotten guest accounts, access policies nobody
+              has reviewed in a year. OpenAdminOS agents find them on a
+              schedule and prepare the fix, using a model that runs on your own
+              machine. Nothing changes until you approve it.
             </p>
             <DownloadCta urls={downloadUrls} className="mt-7" />
+            <ul className="mt-6 flex flex-wrap gap-x-5 gap-y-2 text-sm text-brand-faint">
+              {HERO_GUARANTEES.map((item) => (
+                <li key={item} className="flex items-center gap-2">
+                  <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-current" />
+                  {item}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
       </section>
@@ -382,10 +400,10 @@ export default async function HomePage() {
         </ul>
       </section>
 
-      {/* IT stack */}
+      {/* What agents connect to */}
       <section className="mx-auto w-full max-w-7xl px-6 pt-16 sm:px-10">
         <p className="text-center text-sm text-brand-faint">
-          Works with your IT stack
+          What agents connect to
         </p>
         <ul className="mt-6 grid border-l border-t border-brand-line md:grid-cols-3">
           {STACK.map(({ status, services }) => (
@@ -405,7 +423,7 @@ export default async function HomePage() {
         >
           <strong>Local-first agents for IT administration.</strong> Questions,
           scheduled checks, and reviewed changes, run from the admin&apos;s own
-          machine across their IT stack.
+          machine.
         </p>
         <div className="mt-16 grid gap-px overflow-hidden rounded-[18px] border border-brand-line bg-brand-line md:grid-cols-3">
           {FIGURES.map(({ fig, title, text, Figure }) => (
