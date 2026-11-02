@@ -60,7 +60,7 @@ function NavRow({ item }: { item: NavItem }) {
     <NavLink
       to={item.to}
       className={({ isActive }) =>
-        `group flex h-[var(--nav-h)] items-center gap-2 rounded-[8px] px-2.5 text-base transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+        `group flex h-[var(--nav-h)] min-w-0 flex-1 items-center gap-2 rounded-[8px] px-2.5 text-base transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
           isActive
             ? "bg-[var(--color-active)] font-medium text-[var(--color-text)]"
             : "text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)]"
@@ -76,7 +76,7 @@ function NavRow({ item }: { item: NavItem }) {
       ) : null}
     </NavLink>
   );
-  return item.tooltip ? <Tooltip content={item.tooltip} side="right">{row}</Tooltip> : row;
+  return item.tooltip ? <Tooltip content={item.tooltip} side="right" fullWidth>{row}</Tooltip> : row;
 }
 
 function formatMonth(value: string): string {
@@ -200,7 +200,9 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
           label: "Agent Team",
           icon: <IconAgentTeam size={14} />,
           count: findingCount || undefined,
-          tooltip: findingCount ? `${findingCount} findings to review` : undefined,
+          tooltip: findingCount
+            ? `${findingCount} ${findingCount === 1 ? "finding" : "findings"} to review`
+            : undefined,
         }]),
     { to: "/agents", label: "Agents", icon: <IconAgents size={14} /> },
     { to: "/runs", label: "Runs", icon: <IconActivity size={14} />, count: reviewCount || undefined },
