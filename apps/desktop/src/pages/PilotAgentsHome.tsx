@@ -3,7 +3,7 @@ import { useNavigate } from "react-router";
 
 import { Button } from "../components/Button";
 import { IconBolt, IconLock, IconPlay, IconShield } from "../components/icons";
-import { SampleSchedulesPausedNotice } from "../components/SampleSchedulesPausedNotice";
+import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
 import { StatusDot } from "../components/ui";
 import { formatAgentDisplayName } from "../shared/agent-display";
@@ -87,7 +87,7 @@ export default function PilotAgentsHome() {
 
   return (
     <div className="calm-page-column">
-      {showSchedulesPaused ? <SampleSchedulesPausedNotice className="mb-5" /> : null}
+      {showSchedulesPaused ? <SchedulesPausedNotice className="mb-5" /> : null}
       <section aria-labelledby="pilot-agents-heading">
         <h2 id="pilot-agents-heading" className="px-0.5 pb-2 text-sm font-medium text-[var(--color-text-muted)]">
           {PILOT_COPY.agentsAvailable}

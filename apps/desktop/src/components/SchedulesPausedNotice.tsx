@@ -9,7 +9,7 @@ const PAUSED_COPY =
 const NO_TENANT_PAUSED_COPY =
   "Schedules are paused while no tenant is active. Select or connect a tenant to resume.";
 
-export function SampleSchedulesPausedNotice({ className = "" }: { className?: string }) {
+export function SchedulesPausedNotice({ className = "" }: { className?: string }) {
   const { state, setActiveTenant } = useAppState();
   const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
