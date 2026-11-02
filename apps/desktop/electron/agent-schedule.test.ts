@@ -202,6 +202,36 @@ describe("agent scheduling", () => {
     }
   });
 
+  it("records no failure when the tenant is removed while the schedule starts", async () => {
+    const fixture = await makeStore({
+      tenants: [realTenant],
+      activeTenantId: realTenant.id,
+      installedAgents: [scheduledAgent],
+    });
+    const internal = fixture.store as unknown as {
+      startRun: () => Promise<never>;
+      read(): Promise<Record<string, unknown>>;
+      write(state: Record<string, unknown>): Promise<void>;
+    };
+    internal.startRun = async () => {
+      const { activeTenantId: _removed, ...rest } = await internal.read();
+      await internal.write({ ...rest, tenants: [] });
+      throw new Error("No tenant connected. Connect a Microsoft 365 tenant before running agents.");
+    };
+    const originalError = console.error;
+    console.error = () => undefined;
+    try {
+      const before = Date.now();
+      await fixture.store.fireDueSchedules();
+      assert.equal((await fixture.store.getAppState()).runs.length, 0);
+      const schedule = await fixture.store.getAgentSchedule("agent-1");
+      assert.ok(Date.parse(schedule?.lastScheduledRunAt ?? "") >= before);
+    } finally {
+      console.error = originalError;
+      await fixture.close();
+    }
+  });
+
   it("drops legacy scheduled failures that never recorded a tenant", async () => {
     const manual = { ...failedScheduledRun("run-manual"), trigger: "manual" } as RunRecord;
     const fixture = await makeStore({

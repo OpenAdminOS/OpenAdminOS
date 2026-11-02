@@ -502,6 +502,14 @@ function sanitizeNonNegativeInteger(value: unknown): number | undefined {
   return Math.round(value);
 }
 
+function scheduleDueAtMs(agent: AgentSummary, nowMs: number): number {
+  const schedule = agent.schedule;
+  const lastFired = schedule?.lastScheduledRunAt
+    ? new Date(schedule.lastScheduledRunAt).getTime()
+    : scheduleFallbackAnchor(agent.installedAt, nowMs);
+  return lastFired + (schedule?.intervalSeconds ?? 0) * 1000;
+}
+
 function scheduleFallbackAnchor(installedAt: string, nowMs: number): number {
   const installedMs = Date.parse(installedAt);
   return Number.isFinite(installedMs) ? installedMs : nowMs;
@@ -4106,24 +4114,22 @@ export class AppStateStore {
     const activeTenant = persisted.activeTenantId
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
       : undefined;
-    if (activeTenant?.kind === "sample") {
-      const dueCount = this.dueScheduleCount(persisted.installedAgents, nowMs);
+    // Schedules run against the active tenant. They wait in pilot mode,
+    // and without an active tenant, where every due schedule would only
+    // record a "No tenant connected" failure. The schedules surfaces say so.
+    const pausedReason =
+      activeTenant?.kind === "sample"
+        ? "pilot mode is active"
+        : !activeTenant
+          ? "no tenant is connected"
+          : undefined;
+    if (pausedReason) {
+      const dueCount = persisted.installedAgents.filter(
+        (agent) => agent.schedule?.enabled && nowMs >= scheduleDueAtMs(agent, nowMs),
+      ).length;
       if (dueCount > 0) {
         console.info(
-          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because pilot mode is active`,
-        );
-      }
-      return;
-    }
-    // Schedules run against the active tenant. Without one, every due
-    // schedule would only record a "No tenant connected" failure that no
-    // tenant removal ever cleans up, so they wait until a tenant is
-    // connected. The schedules surfaces state this.
-    if (!activeTenant) {
-      const dueCount = this.dueScheduleCount(persisted.installedAgents, nowMs);
-      if (dueCount > 0) {
-        console.info(
-          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because no tenant is connected`,
+          `[scheduler] skipped ${dueCount} due schedule${dueCount === 1 ? "" : "s"} because ${pausedReason}`,
         );
       }
       return;
@@ -4132,11 +4138,7 @@ export class AppStateStore {
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
-      const lastFired = schedule.lastScheduledRunAt
-        ? new Date(schedule.lastScheduledRunAt).getTime()
-        : scheduleFallbackAnchor(agent.installedAt, nowMs);
-      const dueAtMs = lastFired + schedule.intervalSeconds * 1000;
-      if (nowMs < dueAtMs) continue;
+      if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
 
       // Skip if there's already an in-flight run for this agent because we
       // don't want a long-running agent to queue more copies of itself.
@@ -4160,30 +4162,13 @@ export class AppStateStore {
           lastScheduledRunAt: new Date(nowMs).toISOString(),
         });
       } catch (error) {
-        await this.persistScheduledRunFailure(
-          agent,
-          schedule,
-          error,
-          nowMs,
-          activeTenant.id,
-        );
+        await this.persistScheduledRunFailure(agent, schedule, error, nowMs);
         console.error(
           `[scheduler] agent "${agent.slug}" failed to start:`,
           error,
         );
       }
     }
-  }
-
-  private dueScheduleCount(agents: AgentSummary[], nowMs: number): number {
-    return agents.filter((agent) => {
-      const schedule = agent.schedule;
-      if (!schedule?.enabled) return false;
-      const lastFired = schedule.lastScheduledRunAt
-        ? new Date(schedule.lastScheduledRunAt).getTime()
-        : scheduleFallbackAnchor(agent.installedAt, nowMs);
-      return nowMs >= lastFired + schedule.intervalSeconds * 1000;
-    }).length;
   }
 
   async refreshDueGraphCaches(): Promise<void> {
@@ -4195,9 +4180,18 @@ export class AppStateStore {
     schedule: AgentSchedule,
     error: unknown,
     nowMs: number,
-    tenantId: string,
   ): Promise<void> {
     const now = new Date(nowMs).toISOString();
+    // Read the tenant at failure time: it can be switched or removed while
+    // earlier schedules in the same tick were starting. With no tenant
+    // left there is nothing to attribute the failure to, so the schedule
+    // only advances, like a skipped schedule.
+    const current = await this.read();
+    const tenantId = current.tenants.some(
+      (tenant) => tenant.id === current.activeTenantId && tenant.kind !== "sample",
+    )
+      ? current.activeTenantId
+      : undefined;
     const message = error instanceof Error ? error.message : String(error);
     const accessDenial = graphAccessDenialFromError(error);
     const summary = humanizeScheduledRunError(message, accessDenial);
@@ -4209,8 +4203,7 @@ export class AppStateStore {
       queuedAt: now,
       startedAt: now,
       finishedAt: now,
-      // The tenant the schedule fired against, so removing that tenant
-      // also removes this record.
+      // Removing this tenant also removes this record.
       tenantId,
       trigger: "schedule",
       summary,
@@ -4227,7 +4220,7 @@ export class AppStateStore {
         },
       ],
     };
-    await this.persistRunSnapshot(failedRun);
+    if (failedRun.tenantId) await this.persistRunSnapshot(failedRun);
     await this.updateAgentSchedule(agent.slug, {
       enabled: true,
       intervalSeconds: schedule.intervalSeconds,
