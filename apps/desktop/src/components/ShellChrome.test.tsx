@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createAwaitingConfirmationRun,
   createMockAppState,
+  createMockMcpServers,
   makeMockBridge,
   renderRoute,
 } from "../test/test-utils";
@@ -72,6 +73,26 @@ describe("shell chrome", () => {
       await screen.findByRole("status", { name: /Hosted · OpenAI.*gpt-5/ }),
     ).toBeInTheDocument();
     expect(screen.getByText("Nightly")).toBeInTheDocument();
+  });
+
+  it("names the hosts that receive MCP tool queries, also with a local model", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({
+        mcpServers: createMockMcpServers({
+          "microsoft-learn": { installed: true, enabled: true },
+          "kql-search": { installed: true, enabled: true },
+          intuneautomation: { installed: true, enabled: false },
+        }),
+      })),
+    });
+
+    const status = await screen.findByRole("status", { name: /Local · Ollama · llama3\.1 · tool queries to learn\.microsoft\.com \+1/ });
+    await user.hover(status);
+    expect(await screen.findByText(/MCP tool queries the model writes go to learn\.microsoft\.com and www\.kqlsearch\.com\./)).toBeInTheDocument();
+    expect(screen.queryByText(/www\.intuneautomation\.com/)).not.toBeInTheDocument();
   });
 
   it("keeps updater errors and recovery in the sidebar", async () => {

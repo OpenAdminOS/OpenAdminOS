@@ -16,6 +16,15 @@ export interface TrustCopyInput {
   model?: string;
   scope?: TrustScope;
   attachments?: TrustAttachments;
+  /** Hosts of enabled MCP servers that receive the tool queries the model writes. */
+  toolHosts?: readonly string[];
+}
+
+export interface ToolHostsCopy {
+  /** Short status strip segment, for example "tool queries to learn.microsoft.com +2". */
+  strip: string;
+  /** Tooltip sentence naming every host. */
+  detail: string;
 }
 
 export interface DerivedTrustCopy {
@@ -25,6 +34,26 @@ export interface DerivedTrustCopy {
   confirmBody: string;
   storage: string;
   isLocal: boolean;
+  toolHosts?: ToolHostsCopy;
+}
+
+function listHosts(hosts: readonly string[]): string {
+  if (hosts.length <= 2) return hosts.join(" and ");
+  return `${hosts.slice(0, -1).join(", ")} and ${hosts.at(-1)}`;
+}
+
+/**
+ * Names the third-party hosts that receive MCP tool queries. Shown with
+ * local providers too: the queries leave the device even when the model
+ * does not.
+ */
+export function deriveToolHostsCopy(hosts: readonly string[] | undefined): ToolHostsCopy | undefined {
+  const unique = [...new Set(hosts ?? [])].filter(Boolean);
+  if (unique.length === 0) return undefined;
+  return {
+    strip: `tool queries to ${unique[0]}${unique.length > 1 ? ` +${unique.length - 1}` : ""}`,
+    detail: `MCP tool queries the model writes go to ${listHosts(unique)}. The model is told to send only public questions, never tenant names, IDs or tenant data.`,
+  };
 }
 
 function scopeLabel(scope?: TrustScope): string {
@@ -54,6 +83,7 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
   const modelDetail = model ? ` using ${model}` : "";
   const scope = scopeLabel(input.scope);
   const attachments = attachmentLabel(input.attachments);
+  const toolHosts = deriveToolHostsCopy(input.toolHosts);
 
   if (!input.provider) {
     return {
@@ -67,7 +97,8 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
 
   if (input.provider.isLocal) {
     return {
-      strip: "local-only · no data leaves this device",
+      strip: toolHosts ? `local model · ${toolHosts.strip}` : "local-only · no data leaves this device",
+      ...(toolHosts ? { toolHosts } : {}),
       ...(attachments
         ? { boundary: `${attachments} will be included. Processing stays on this device.` }
         : {}),
@@ -79,7 +110,8 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
   }
 
   return {
-    strip: `hosted · tenant context sent to ${providerName}`,
+    strip: `hosted · tenant context sent to ${providerName}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
+    ...(toolHosts ? { toolHosts } : {}),
     boundary: `Tenant context will be sent to ${providerName}${attachments ? ` with ${attachments}` : ""}.`,
     confirmTitle: "Send tenant context to hosted provider",
     confirmBody: `${providerName}${modelDetail} will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,

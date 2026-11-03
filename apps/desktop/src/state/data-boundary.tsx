@@ -25,6 +25,8 @@ export type DataBoundary =
       kind: "local";
       label: string;
       model?: string;
+      /** Status strip segment naming the MCP hosts that receive tool queries. */
+      toolHosts?: string;
       tooltip: string;
       isVoiceHosted: false;
     }
@@ -32,6 +34,7 @@ export type DataBoundary =
       kind: "hosted";
       label: string;
       model?: string;
+      toolHosts?: string;
       tooltip: string;
       isVoiceHosted: boolean;
     };
@@ -99,13 +102,19 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       provider,
       ...(model ? { model } : {}),
       scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+      toolHosts: (state.mcpServers ?? [])
+        .filter((server) => server.installed && server.enabled)
+        .map((server) => server.host),
     });
+    const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip } : {};
+    const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";
     if (provider.isLocal) {
       return {
         kind: "local",
         label: `Local · ${provider.name}`,
         ...(model ? { model } : {}),
-        tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}`,
+        ...toolHosts,
+        tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
         isVoiceHosted: false,
       };
     }
@@ -113,7 +122,8 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       kind: "hosted",
       label: `Hosted · ${provider.name}`,
       ...(model ? { model } : {}),
-      tooltip: `${trust.boundary ?? trust.strip}`,
+      ...toolHosts,
+      tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,
       isVoiceHosted: false,
     };
   }, [state, voiceHosted]);

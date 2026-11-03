@@ -6,6 +6,7 @@ import {
   SETTINGS_SECTIONS,
   SETUP_COPY,
   chatErrorCopy,
+  deriveToolHostsCopy,
   deriveTrustCopy,
   searchSettings,
 } from "./index.js";
@@ -55,6 +56,23 @@ describe("v0.4 copy catalog", () => {
     expect(hosted.confirmBody).toContain("2 selected tenants");
     expect(hosted.confirmBody).toContain("2 evidence items");
     expect(hosted.confirmBody).not.toMatch(/\b(?:US|EU|region)\b/i);
+  });
+
+  it("names MCP tool hosts honestly, also for a local model", () => {
+    const hosts = ["learn.microsoft.com", "www.kqlsearch.com", "www.intuneautomation.com"];
+    const local = deriveTrustCopy({ provider: { name: "Ollama", isLocal: true }, scope: { tenantNames: ["Contoso"] }, toolHosts: hosts });
+    expect(local.strip).toBe("local model · tool queries to learn.microsoft.com +2");
+    expect(local.strip).not.toMatch(/no data leaves/);
+    expect(local.toolHosts?.detail).toBe(
+      "MCP tool queries the model writes go to learn.microsoft.com, www.kqlsearch.com and www.intuneautomation.com. The model is told to send only public questions, never tenant names, IDs or tenant data.",
+    );
+    const hosted = deriveTrustCopy({ provider: { name: "Anthropic", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
+    expect(hosted.strip).toBe("hosted · tenant context sent to Anthropic · tool queries to learn.microsoft.com");
+    expect(deriveToolHostsCopy([])).toBeUndefined();
+    expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true }, toolHosts: [] }).strip).toBe("local-only · no data leaves this device");
+    for (const value of stringsIn(local.toolHosts)) {
+      expect(value).not.toMatch(/[!\u2014\u2013]| - /u);
+    }
   });
 
   it("keeps Settings ids unique and searchable from the same catalog", () => {
