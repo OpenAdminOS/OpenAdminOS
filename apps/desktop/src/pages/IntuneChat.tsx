@@ -4365,6 +4365,11 @@ function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
               <div className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
                 {entry.resultSummary}
               </div>
+              {entry.mcpSource ? (
+                <div className="mt-1 text-xs leading-5 text-[var(--color-warning)]">
+                  MCP tool · {entry.mcpSource.serverName} at {entry.mcpSource.host} · third-party content, not tenant evidence
+                </div>
+              ) : null}
               {entry.error && (
                 <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-xs leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                   {entry.error}

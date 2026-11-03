@@ -1089,6 +1089,46 @@ describe("IntuneChat conversation routes", () => {
     expect(screen.queryByText(/Detected matching agent/)).not.toBeInTheDocument();
   });
 
+  it("shows the host of each MCP tool call in What ran", async () => {
+    const user = userEvent.setup();
+    const conversation: IntuneChatConversation = {
+      id: "conversation-mcp-1",
+      title: "Grace period",
+      createdAt: "2026-11-03T10:00:00.000Z",
+      updatedAt: "2026-11-03T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge();
+    bridge.listIntuneChatConversations = vi.fn(async () => [conversation]);
+    bridge.getIntuneChatMessages = vi.fn(async () => [
+      {
+        id: "mcp-assistant-1",
+        conversationId: conversation.id,
+        role: "assistant" as const,
+        content: "The grace period is set per noncompliance action.",
+        createdAt: "2026-11-03T10:01:00.000Z",
+        status: "completed" as const,
+        toolTrace: [{
+          id: "tool-1",
+          tool: "mcp__microsoft-learn__microsoft_docs_search" as const,
+          params: { query: "Intune compliance grace period" },
+          resultSummary: "Microsoft Learn answered from learn.microsoft.com · 2,400 characters",
+          mcpSource: { serverId: "microsoft-learn", serverName: "Microsoft Learn", host: "learn.microsoft.com", tool: "microsoft_docs_search" },
+          durationMs: 820,
+          createdAt: "2026-11-03T10:00:30.000Z",
+          completedAt: "2026-11-03T10:00:31.000Z",
+        }],
+      },
+    ]);
+
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-mcp-1", bridge });
+
+    await user.click(await screen.findByText("How I checked"));
+    await user.click(screen.getByRole("button", { name: /What ran/ }));
+    expect(screen.getByText("MCP tool · Microsoft Learn at learn.microsoft.com · third-party content, not tenant evidence")).toBeInTheDocument();
+  });
+
   it("shows a recovery state for a deleted or unknown conversation URL", async () => {
     const bridge = makeMockBridge();
     bridge.listIntuneChatConversations = vi.fn(async () => []);
