@@ -344,6 +344,55 @@ describe("reconnecting a tenant with a different app registration", () => {
     }
   });
 
+  it("keeps the cached account when only the authority changes, because the token cache is per client", async () => {
+    const fixture = await makeFixture();
+    try {
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID, directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+      const removedViaDirectory = recordRemovals(fixture.internal.msalClientFor(customRegistration));
+      const removedViaCommon = recordRemovals(
+        fixture.internal.msalClientFor({ kind: "custom", clientId: CUSTOM_CLIENT_ID, authority: DEFAULT_AUTHORITY }),
+      );
+
+      const state = await fixture.store.connectTenant({ appRegistration: { clientId: CUSTOM_CLIENT_ID } });
+
+      assert.equal(state.tenants[0]?.appRegistration?.authority, DEFAULT_AUTHORITY);
+      assert.deepEqual(removedViaDirectory, []);
+      assert.deepEqual(removedViaCommon, []);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps the cached account while another tenant signs in with it from the same client", async () => {
+    const fixture = await makeFixture({
+      tenants: [
+        {
+          id: "fabrikam-tenant-id",
+          displayName: "Fabrikam",
+          username: "admin@contoso.example",
+          homeAccountId: "home-account.contoso-tenant-id",
+          addedAt: "2026-11-01T10:00:00.000Z",
+          appRegistration: { kind: "custom", clientId: CUSTOM_CLIENT_ID, authority: DEFAULT_AUTHORITY },
+        },
+      ],
+    });
+    try {
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID, directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+      const removed = recordRemovals(fixture.internal.msalClientFor(customRegistration));
+
+      const state = await fixture.store.connectTenant({});
+
+      assert.equal(state.tenants.length, 2);
+      assert.deepEqual(removed, []);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("keeps the cached account when the tenant reconnects with the same registration", async () => {
     const fixture = await makeFixture();
     try {

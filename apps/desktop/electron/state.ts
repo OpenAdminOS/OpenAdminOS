@@ -2105,21 +2105,23 @@ export class AppStateStore {
   /**
    * Reconnecting a tenant with a different app registration leaves the
    * previous client's refresh token on disk. Remove that account unless
-   * another connected tenant still signs in with the same client and
-   * account. Failure leaves an unused cached account behind, never a
-   * broken connection, so it is logged rather than surfaced.
+   * another connected tenant still signs in with the same account from the
+   * same token cache. Token caches are partitioned by client ID only, not by
+   * authority (see `msalClientFor`), so an authority change alone never
+   * removes anything. Failure leaves an unused cached account behind, never
+   * a broken connection, so it is logged rather than surfaced.
    */
   private async forgetReplacedSignIn(previous: TenantRecord, current: TenantRecord): Promise<void> {
     if (previous.kind === "sample") return;
-    const key = (registration: TenantAppRegistration | undefined) =>
-      `${registration?.clientId ?? defaultClientId()}|${registration?.authority ?? DEFAULT_AUTHORITY}`;
-    const previousKey = key(previous.appRegistration);
-    if (previousKey === key(current.appRegistration)) return;
+    const cachePartition = (registration: TenantAppRegistration | undefined) =>
+      registration?.clientId ?? defaultClientId();
+    const previousPartition = cachePartition(previous.appRegistration);
+    if (previousPartition === cachePartition(current.appRegistration)) return;
     const stillUsed = (await this.read()).tenants.some(
       (tenant) =>
         tenant.kind !== "sample" &&
         tenant.homeAccountId === previous.homeAccountId &&
-        key(tenant.appRegistration) === previousKey,
+        cachePartition(tenant.appRegistration) === previousPartition,
     );
     if (stillUsed) return;
     try {
