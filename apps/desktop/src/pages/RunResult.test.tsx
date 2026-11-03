@@ -100,7 +100,7 @@ describe("RunResult write confirmation", () => {
     const run = createAwaitingConfirmationRun({ status: "completed", plan: { summary: "No changes matched.", confirmationPhrase: "APPLY CHANGES", actions: [] } });
     const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
     renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
-    await screen.findByRole("dialog");
+    await screen.findByRole("region", { name: "Run status" });
     expect(screen.queryByText(/Risk check could not run/)).not.toBeInTheDocument();
   });
 
@@ -375,11 +375,14 @@ describe("RunResult write confirmation", () => {
   });
 });
 
-it("opens terminal runs in the URL-addressable run drawer", async () => {
+it("opens terminal runs as a full run page with collapsible details", async () => {
+  const user = userEvent.setup();
   const run = createAwaitingConfirmationRun({
     status: "completed",
     plan: undefined,
+    startedAt: "2026-10-10T10:00:00.000Z",
     finishedAt: "2026-10-10T10:01:00.000Z",
+    summary: "## Summary\n\nTwo stale devices were found.",
   });
   const bridge = makeMockBridge(
     {},
@@ -395,15 +398,25 @@ it("opens terminal runs in the URL-addressable run drawer", async () => {
     bridge,
   });
 
-  expect(await screen.findByRole("dialog", { name: "Device Offboard" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Device Offboard" })).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Run status" })).getByRole("status")).toHaveTextContent("Completed in 1m 00s");
+  expect(screen.getByRole("region", { name: "Report" })).toHaveTextContent("Two stale devices were found.");
+  expect(screen.queryByRole("tablist", { name: "Run detail views" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Run details/ }));
   expect(screen.getByRole("tablist", { name: "Run detail views" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Telemetry" })).toBeInTheDocument();
 });
 
-it("opens queued and running runs in the live run modal", async () => {
+it("shows queued and running runs on the run page with live progress and cancel", async () => {
+  const user = userEvent.setup();
   const run = createAwaitingConfirmationRun({
     status: "running",
     plan: undefined,
+    steps: [
+      { id: "step-1", runId: "run-write-1", label: "Load managed devices", status: "completed", startedAt: "2026-10-10T10:00:00.000Z", finishedAt: "2026-10-10T10:00:02.000Z" },
+      { id: "step-2", runId: "run-write-1", label: "Write the report", status: "running", startedAt: "2026-10-10T10:00:02.000Z" },
+      { id: "step-3", runId: "run-write-1", label: "Deliver report", status: "pending" },
+    ],
   });
   const bridge = makeMockBridge(
     {},
@@ -419,9 +432,14 @@ it("opens queued and running runs in the live run modal", async () => {
     bridge,
   });
 
-  expect(await screen.findByRole("dialog", { name: "Live run: Device Offboard" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Device Offboard" })).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Run status" })).getByRole("status")).toHaveTextContent("Running step 2 of 3");
+  expect(screen.getByRole("progressbar", { name: "Run progress" })).toHaveAttribute("aria-valuenow", "1");
+  expect(within(screen.getByRole("region", { name: "Progress" })).getByText("Write the report")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Run in background" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Cancel run" }));
+  await waitFor(() => expect(bridge.cancelRun).toHaveBeenCalledWith(run.id));
 });
 
 it('retries Team evidence by source ID without sending evidence through the renderer', async () => {
@@ -472,4 +490,86 @@ it("shows the complete dry-run plan without Apply and starts a fresh normal run"
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ runForRealOfRunId: run.id, tenantId: run.tenantId })));
   expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]?.dryRun).toBeUndefined();
   expect(bridge.confirmRun).not.toHaveBeenCalled();
+});
+
+it("does not present host status text as the report while a run is live", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "running",
+    plan: undefined,
+    summary: "Device Offboard is running.",
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  const report = await screen.findByRole("region", { name: "Report" });
+  expect(report).toHaveTextContent("The report appears here as the agent writes it.");
+  expect(report).not.toHaveTextContent("Device Offboard is running.");
+  expect(screen.queryByText(/Written by/)).not.toBeInTheDocument();
+});
+
+it("tells the admin when cancelling a live run fails instead of failing silently", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "running", plan: undefined });
+  const bridge = makeMockBridge(
+    { cancelRun: vi.fn(async () => { throw new Error("Run not found"); }) },
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  await user.click(await screen.findByRole("button", { name: "Cancel run" }));
+  expect(await screen.findByText(/The run could not be cancelled: Run not found/)).toBeInTheDocument();
+});
+
+it("does not cancel a live run when Escape is pressed on the page", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "running", plan: undefined });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  await screen.findByRole("button", { name: "Cancel run" });
+  await user.keyboard("{Escape}");
+  expect(bridge.cancelRun).not.toHaveBeenCalled();
+});
+
+it("keeps a local run labelled local when its provider entry is no longer configured", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "completed",
+    plan: undefined,
+    providerId: "ollama",
+    finishedAt: "2026-10-10T10:01:00.000Z",
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ providers: [], installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  const status = await screen.findByRole("region", { name: "Run status" });
+  expect(status).toHaveTextContent("Local, not billed");
+  expect(status).not.toHaveTextContent("Hosted");
+});
+
+it("opens run details on the Logs tab when a failed run has no error playbook", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "failed",
+    plan: undefined,
+    error: undefined,
+    result: undefined,
+    finishedAt: "2026-10-10T10:01:00.000Z",
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  expect(await screen.findByText("Run failed before producing a result. See the Logs tab for details.")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Logs" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("region", { name: "Run status" })).toHaveTextContent("Open Run details below for the logs.");
 });

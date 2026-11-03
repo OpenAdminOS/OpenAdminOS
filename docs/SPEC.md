@@ -2046,8 +2046,9 @@ explained in `apps/desktop/build/README.md`.
   ghost buttons, icon buttons with tooltips, or an overflow menu.
 - Repeated collections of more than three similar records use `DataTable` or
   divided row lists, not card grids.
-- URL-addressable record details open in the shared right-side `Drawer`. Active
-  runs may use the live-run modal, and write confirmation remains a focused page.
+- URL-addressable record details open in the shared right-side `Drawer`. Runs are
+  the exception: every run opens on a full run page, and write confirmation
+  remains a focused page.
 - Sections use one surface with hairline dividers. Nested bordered or ringed cards
   are avoided.
 
@@ -2065,9 +2066,9 @@ These are visible in the mockups and need to be built as proper React components
 - **Status strip** fixed at the bottom of every main screen, with three compact
   cells for tenant, provider and data boundary, and active runs
 - **Data tables and divided row lists** for agent libraries, runs, changes, and other repeated records
-- **Drawer** for URL-addressable agent, run, connector, and change details
+- **Drawer** for URL-addressable agent, connector, and change details
 - **Run timeline** (stepped pipeline visualization)
-- **Telemetry strip** (used in live run modal)
+- **Run status card** (run page): status headline, segmented step progress, tenant / provider / model / tokens / cost facts, and the data-location line
 - **Activity feed** with two modes: plain language / raw logs
 - **Reasoning block** (purple-accented, for streaming LLM thoughts)
 - **Tabs** (Activity / Logs / Reasoning pattern)
@@ -2091,7 +2092,7 @@ These were debated and decided. Don't relitigate without explicit reason.
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Live run view | Modal overlay over dimmed app | Focus on the active run; doesn't compete with other UI |
+| Live run view | Full run page at `/runs/:id`, shared with finished runs | Progress, the streaming report, and the result read in one place without a modal or side drawer narrowing them; changed on 2026-11-03 from a modal overlay at the maintainer's request |
 | Write-mode agent confirmation | Always pause for diff, every time | Trust requires no exceptions |
 | Activity stream default | Plain language with raw-log toggle | Admins want comprehension first, debug detail on demand |
 | Default LLM provider | Ollama (local) | Trust positioning starts with the default |
@@ -2185,9 +2186,12 @@ Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
 | `/workspaces`, `/workspaces/:workspaceId` | Chat's Workspaces panel or `/chat/workspaces/:workspaceId` |
 
 Runs contains conditional Needs review and Running sections followed by a
-filterable History table. `/runs/:id` opens queued and running work in the live
-run modal, awaiting-confirmation work on a focused confirmation page, and
-terminal runs in a URL-addressable drawer. History links can prefilter by
+filterable History table. `/runs/:id` opens awaiting-confirmation and dry-run
+work on a focused confirmation page, and every other run (queued, running, and
+terminal) on a full run page in one centered column: a status card with a live
+headline, segmented step progress, run facts and the data-location line, then
+failure recovery, the live step timeline, the report, result data, and
+collapsible run details. The back link keeps the History filters. History links can prefilter by
 `?agent=<slug>`, `?status=failed|review`, and `?tenant=<id>`.
 
 Removed from navigation:
@@ -2515,7 +2519,7 @@ The first public-preview milestone. Goal: a polished Electron app that visually 
 
 1. Fresh clone → `pnpm install && pnpm dev` opens the Electron app in under 30 seconds.
 2. All 10 screens reachable from sidebar/keyboard, visually matching mockups within 95% fidelity.
-3. With Ollama running locally and a model installed: clicking "Run" on the sample agent streams real LLM output into the live run modal, completes successfully, displays structured results.
+3. With Ollama running locally and a model installed: clicking "Run" on the sample agent streams real LLM output into the live run page, completes successfully, displays structured results.
 4. With Ollama not running: a designed error state appears with the correct recovery instruction (`ollama serve`).
 5. Trust messaging flips correctly when toggling the LLM provider between local and (mocked) hosted in §07.
 6. openadminos.com is publicly resolvable and presents a working download/GitHub CTA with the local-first trust model visible on the page.

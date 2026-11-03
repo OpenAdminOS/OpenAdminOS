@@ -1,29 +1,33 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { ActivityFeed } from "../components/ActivityFeed";
 import { MarkdownPreview, stripMarkdownToPlainText } from "../components/MarkdownPreview";
-import { Modal } from "../components/Modal";
 import { ResultPanel } from "../components/ResultPanel";
 import { RunFailureRemediation } from "../components/RunFailureRemediation";
-import { CompactRunTelemetry, RunTelemetry } from "../components/RunTelemetry";
+import { RunProgressBar, RunStepTimeline } from "../components/RunProgress";
+import { RunSection } from "../components/RunSection";
 import { useToast } from "../components/Toast";
 import { TenantTile } from "../components/TenantTile";
 import { WritePlanRiskSummary } from "../components/WritePlanRiskSummary";
 import {
   IconArrowLeft,
   IconBolt,
+  IconCheck,
   IconChevronDown,
+  IconClock,
+  IconCloud,
   IconCopy,
   IconDownload,
+  IconHardDrive,
   IconPlay,
   IconShare,
+  IconShield,
   IconWarning,
 } from "../components/icons";
 import {
   Badge,
   Button,
-  Drawer,
   IconButton,
   Menu,
   Section,
@@ -37,6 +41,7 @@ import { copyTextToClipboard } from "../shared/clipboard";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import {
   deriveTrustState,
+  providerCatalog,
   type RunRecord,
   type TenantRecord,
   type WriteAction,
@@ -50,12 +55,12 @@ import {
 } from "../shared/runReport";
 import { useAppState } from "../state";
 import { PILOT_COPY } from "../shared/pilot-mode";
-import Runs, {
+import {
   agentNameForRun,
   formatDate,
+  formatDuration,
   providerNameForRun,
   statusLabel,
-  statusTone,
   tenantNameForRun,
   triggerForRun,
 } from "./Runs";
@@ -81,8 +86,11 @@ export default function RunResult() {
   const runTenant = run.tenantId
     ? state.tenants.find((tenant) => tenant.id === run.tenantId)
     : undefined;
+  // Fall back to the built-in catalog so a run whose provider entry was
+  // later removed still reports where its data went.
   const runProvider = run.providerId
-    ? state.providers.find((provider) => provider.id === run.providerId)
+    ? state.providers.find((provider) => provider.id === run.providerId) ??
+      providerCatalog.find((provider) => provider.id === run.providerId)
     : undefined;
   const derivedTrust = deriveTrustState({
     provider: runProvider,
@@ -97,7 +105,6 @@ export default function RunResult() {
     ? formatAgentDisplayName(agent)
     : agentNameForRun(run, state.installedAgents);
   const tenantName = tenantNameForRun(run, state.tenants);
-  const isLive = run.status === "queued" || run.status === "running";
   const isSystemRun = run.origin !== undefined;
   const requiresTeamReview = Boolean(
     run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
@@ -164,67 +171,47 @@ export default function RunResult() {
     );
   }
 
-  if (isLive) {
-    return (
-      <>
-        <Runs />
-        <LiveRunModal
-          run={run}
-          displayName={displayName}
-          tenantName={tenantName}
-          sampleData={runTenant?.kind === "sample"}
-          providerName={providerNameForRun(run, state.providers)}
-          providerIsLocal={run.pilot === true || runProvider?.isLocal}
-          trustDetail={runTrust.detail}
-          onBackground={closeToRuns}
-          onCancel={() => cancelRun(run.id)}
-        />
-      </>
-    );
-  }
-
   return (
-    <>
-      <Runs />
-      <RunDrawer
-        run={run}
-        displayName={displayName}
-        tenantName={tenantName}
-        sampleData={runTenant?.kind === "sample"}
-        providerName={providerNameForRun(run, state.providers)}
-        providerIsLocal={run.pilot === true || runProvider?.isLocal}
-        trustDetail={runTrust.detail}
-        activeTenantId={state.activeTenantId}
-        tenants={state.tenants}
-        isSystemRun={isSystemRun}
-        rerunLabel={requiresTeamReview ? "Review in Agent Team" : "Run again"}
-        onClose={closeToRuns}
-        onRerun={reRun}
-        onRetargetCurrent={() => {
-          if (
-            !requireTenantAndProvider(
-              createPendingIntent({
-                kind: "agent-run",
-                slug: run.agentSlug,
-                ...(state.activeTenantId
-                  ? { tenantId: state.activeTenantId }
-                  : {}),
-                returnTo: `/runs/${encodeURIComponent(run.id)}`,
-              }),
-            )
-          ) {
-            return;
-          }
-          const options: { tenantId?: string } = {};
-          if (state.activeTenantId) options.tenantId = state.activeTenantId;
-          void startRun(run.agentSlug, options)
-            .then((nextRun) => navigate(`/runs/${nextRun.id}`))
-            .catch((error) =>
-              toast.error(error instanceof Error ? error.message : String(error)),
-            );
-        }}
-      />
-    </>
+    <RunPage
+      key={run.id}
+      run={run}
+      displayName={displayName}
+      tenantName={tenantName}
+      sampleData={runTenant?.kind === "sample"}
+      providerName={providerNameForRun(run, state.providers)}
+      providerIsLocal={run.pilot === true ? true : runProvider?.isLocal}
+      trustDetail={runTrust.detail}
+      activeTenantId={state.activeTenantId}
+      tenants={state.tenants}
+      isSystemRun={isSystemRun}
+      rerunLabel={requiresTeamReview ? "Review in Agent Team" : "Run again"}
+      onBack={closeToRuns}
+      onRerun={reRun}
+      onCancel={() => cancelRun(run.id)}
+      onRetargetCurrent={() => {
+        if (
+          !requireTenantAndProvider(
+            createPendingIntent({
+              kind: "agent-run",
+              slug: run.agentSlug,
+              ...(state.activeTenantId
+                ? { tenantId: state.activeTenantId }
+                : {}),
+              returnTo: `/runs/${encodeURIComponent(run.id)}`,
+            }),
+          )
+        ) {
+          return;
+        }
+        const options: { tenantId?: string } = {};
+        if (state.activeTenantId) options.tenantId = state.activeTenantId;
+        void startRun(run.agentSlug, options)
+          .then((nextRun) => navigate(`/runs/${nextRun.id}`))
+          .catch((error) =>
+            toast.error(error instanceof Error ? error.message : String(error)),
+          );
+      }}
+    />
   );
 }
 
@@ -242,7 +229,7 @@ function MissingRun({ onBack }: { onBack: () => void }) {
   );
 }
 
-function RunDrawer({
+function RunPage({
   run,
   displayName,
   tenantName,
@@ -254,8 +241,9 @@ function RunDrawer({
   tenants,
   isSystemRun,
   rerunLabel,
-  onClose,
+  onBack,
   onRerun,
+  onCancel,
   onRetargetCurrent,
 }: {
   run: RunRecord;
@@ -263,179 +251,535 @@ function RunDrawer({
   tenantName: string;
   sampleData: boolean;
   providerName: string;
-  providerIsLocal?: boolean;
+  /** Undefined when the run recorded no provider. */
+  providerIsLocal: boolean | undefined;
   trustDetail: string;
   activeTenantId?: string;
   tenants: TenantRecord[];
   isSystemRun: boolean;
   rerunLabel: string;
-  onClose: () => void;
+  onBack: () => void;
   onRerun: () => void;
+  onCancel: () => Promise<RunRecord>;
   onRetargetCurrent: () => void;
 }) {
-  const shouldShowResult =
+  const live = run.status === "queued" || run.status === "running";
+  const toast = useToast();
+  const [cancelling, setCancelling] = useState(false);
+  const cancel = () => {
+    if (cancelling) return;
+    setCancelling(true);
+    onCancel()
+      .catch((error: unknown) => {
+        const reason = userFacingErrorReason(
+          error instanceof Error ? error.message : String(error),
+        );
+        toast.error(
+          `The run could not be cancelled${reason ? `: ${reason}` : ""}. It may still be running. Check Runs before starting it again.`,
+        );
+      })
+      .finally(() => setCancelling(false));
+  };
+
+  const failedLike = run.status === "failed" || run.status === "cancelled";
+  // While a run is live, run.summary holds host status text such as
+  // "X is running.", so only the streamed liveSummary counts as report.
+  // Terminal non-completed summaries are host text too; the status card
+  // shows them instead of presenting them as a report.
+  const reportSource = live ? run.liveSummary : run.status === "completed" ? run.summary : undefined;
+  const summaryStreaming = live && Boolean(run.liveSummary);
+  const showReport = Boolean(reportSource) || live;
+  const showSteps = run.steps.length > 0 && (live || failedLike);
+  const showResult =
     run.result !== undefined || run.status === "completed" || run.status === "failed";
+
+  // Sections fade in one after another. Sections that are already on
+  // screen keep their place when the run updates, so nothing flickers.
+  let sectionIndex = 0;
+  const rise = (): CSSProperties => ({ animationDelay: `${60 * ++sectionIndex}ms` });
+
   return (
-    <Drawer
-      open
-      title={displayName}
-      onClose={onClose}
-      actions={
-        <>
-          {!isSystemRun ? (
-            <Button
-              variant="primary"
-              size="sm"
-              leadingIcon={<IconPlay size={12} />}
-              onClick={onRerun}
-            >
-              {rerunLabel}
-            </Button>
-          ) : null}
-          <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={sampleData} />
-        </>
-      }
-    >
-      <div className="space-y-6 p-5">
-        <section aria-label="Run summary" className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={statusTone(run.status)}>{statusLabel(run.status)}</Badge>
-            <span className="text-sm text-[var(--color-text-muted)]">
-              {tenantName} · {capitalize(triggerForRun(run))} · {formatDate(run.startedAt ?? run.queuedAt)}
-            </span>
-          </div>
-          <p className="text-md font-medium leading-relaxed text-[var(--color-text)]">
-            {run.liveSummary ?? run.summary
-              ? stripMarkdownToPlainText(run.liveSummary ?? run.summary ?? "")
-              : "No summary was recorded for this run."}
-          </p>
-          {run.external?.requiredScopes.length ? (
-            <p className="text-sm text-[var(--color-text-muted)]">
-              Required scopes: {run.external.requiredScopes.join(", ")}
-            </p>
-          ) : null}
-          {run.rollback && run.rollback.manualCount > 0 ? (
-            <p className="text-sm text-[var(--color-text-muted)]">
-              {run.rollback.manualCount.toLocaleString()} changes need manual review and are not part of this plan.
-            </p>
-          ) : null}
-        </section>
-
-        {!isSystemRun ? (
-          <TenantDriftNote
-            runTenantId={run.tenantId}
-            activeTenantId={activeTenantId}
-            tenants={tenants}
-            allowRetarget={!run.officeContext}
-            onRetargetCurrent={onRetargetCurrent}
+    <>
+      <PageHeader
+        title={displayName}
+        breadcrumb={<BackToRuns onClick={onBack} />}
+        subtitle={`${capitalize(triggerForRun(run))} run · ${formatDate(run.startedAt ?? run.queuedAt)}`}
+        actions={
+          <>
+            {live ? (
+              <>
+                <Button variant="secondary" size="sm" onClick={onBack} title="The run continues in the background">
+                  Run in background
+                </Button>
+                <Button variant="danger" size="sm" onClick={cancel} disabled={cancelling}>
+                  Cancel run
+                </Button>
+              </>
+            ) : !isSystemRun ? (
+              <Button variant="primary" size="sm" leadingIcon={<IconPlay size={12} />} onClick={onRerun}>
+                {rerunLabel}
+              </Button>
+            ) : null}
+            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={sampleData} />
+          </>
+        }
+      />
+      <PageBody>
+        <div className="calm-page-column space-y-5">
+          <RunStatusCard
+            run={run}
+            tenantName={tenantName}
+            providerName={providerName}
+            providerIsLocal={providerIsLocal}
+            trustDetail={trustDetail}
           />
-        ) : null}
 
-        <RunFailureRemediation run={run} />
-        {run.plan && run.plan.actions.length > 0 && run.riskAssessment ? <WritePlanRiskSummary assessment={run.riskAssessment} /> : null}
-        {shouldShowResult ? <ResultPanel run={run} /> : null}
-        <CompactRunTelemetry
-          run={run}
-          providerIsLocal={providerIsLocal}
-          providerName={providerName}
-        />
-        <ActivityFeed run={run} />
-        <TrustLine local={providerIsLocal === true} detail={trustDetail} />
-      </div>
-    </Drawer>
+          {!isSystemRun ? (
+            <TenantDriftNote
+              runTenantId={run.tenantId}
+              activeTenantId={activeTenantId}
+              tenants={tenants}
+              allowRetarget={!run.officeContext}
+              onRetargetCurrent={onRetargetCurrent}
+            />
+          ) : null}
+
+          <RunFailureRemediation run={run} />
+          {run.plan && run.plan.actions.length > 0 && run.riskAssessment ? (
+            <WritePlanRiskSummary assessment={run.riskAssessment} />
+          ) : null}
+
+          {showSteps ? (
+            <RunSection
+              title={live ? "Progress" : "Where it stopped"}
+              meta={`${settledStepCount(run)} of ${run.steps.length} steps finished`}
+              className="run-rise"
+              style={rise()}
+            >
+              <RunStepTimeline steps={run.steps} live={live} />
+            </RunSection>
+          ) : null}
+
+          {showReport ? (
+            <RunSection
+              title="Report"
+              meta={
+                summaryStreaming ? (
+                  <span className="inline-flex items-center gap-1.5 text-[var(--color-info)]">
+                    <StatusDot tone="info" className="animate-pulse-soft" />
+                    Writing
+                  </span>
+                ) : undefined
+              }
+              className="run-rise"
+              style={rise()}
+              bodyClassName="px-5 pb-6 sm:px-6"
+            >
+              <RunReport source={reportSource} streaming={summaryStreaming} queued={run.status === "queued"} />
+            </RunSection>
+          ) : null}
+
+          {showResult ? (
+            <div className="run-rise" style={rise()}>
+              <ResultPanel run={run} />
+            </div>
+          ) : null}
+
+          <RunDetails run={run} openOnFailure={run.status === "failed"} style={rise()} />
+        </div>
+      </PageBody>
+    </>
   );
 }
 
-function LiveRunModal({
+type StatusTone = "success" | "info" | "warning" | "danger" | "neutral";
+
+const STATUS_TONE: Record<StatusTone, { text: string; tile: string; bar: string }> = {
+  success: {
+    text: "text-[var(--color-success)]",
+    tile: "bg-[var(--color-success-soft)] text-[var(--color-success)]",
+    bar: "bg-[var(--color-success)]",
+  },
+  info: {
+    text: "text-[var(--color-info)]",
+    tile: "bg-[var(--color-info-soft)] text-[var(--color-info)]",
+    bar: "bg-[var(--color-info)]",
+  },
+  warning: {
+    text: "text-[var(--color-warning)]",
+    tile: "bg-[var(--color-warning-soft)] text-[var(--color-warning)]",
+    bar: "bg-[var(--color-warning)]",
+  },
+  danger: {
+    text: "text-[var(--color-danger)]",
+    tile: "bg-[var(--color-danger-soft)] text-[var(--color-danger)]",
+    bar: "bg-[var(--color-danger)]",
+  },
+  neutral: {
+    text: "text-[var(--color-text)]",
+    tile: "bg-[var(--color-hover)] text-[var(--color-text-muted)]",
+    bar: "bg-[var(--color-border-strong)]",
+  },
+};
+
+interface StatusView {
+  tone: StatusTone;
+  icon: ReactNode;
+  headline: string;
+  detail?: string;
+  /** Shown next to the headline: a live clock, or when the run ended. */
+  aside?: string;
+}
+
+function describeRunStatus(run: RunRecord, nowMs: number): StatusView {
+  const formattedDuration = run.startedAt ? formatDuration(run, nowMs) : undefined;
+  const elapsed = formattedDuration === "Not recorded" ? undefined : formattedDuration;
+  const hostSummary = run.summary ? stripMarkdownToPlainText(run.summary) : undefined;
+  const total = run.steps.length;
+  const currentIndex = run.steps.findIndex((step) => step.status === "running");
+  const current = currentIndex >= 0 ? run.steps[currentIndex] : undefined;
+  const finished = run.finishedAt ? `Finished ${formatDate(run.finishedAt)}` : undefined;
+  const tokens = totalTokens(run);
+  const settledDetail = [
+    total > 0 ? `${total} step${total === 1 ? "" : "s"}` : undefined,
+    tokens > 0 ? `${tokens.toLocaleString()} tokens` : undefined,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
+  switch (run.status) {
+    case "queued":
+      return {
+        tone: "warning",
+        icon: <IconClock size={18} />,
+        headline: "Queued",
+        detail: "Waiting to start. The run begins automatically.",
+      };
+    case "running":
+      return {
+        tone: "info",
+        icon: (
+          <span className="h-[18px] w-[18px] animate-spin rounded-full border-2 border-[var(--color-info)]/25 border-t-[var(--color-info)]" />
+        ),
+        headline: current && total > 0 ? `Running step ${currentIndex + 1} of ${total}` : "Running",
+        detail: current?.label ?? "Starting the pipeline.",
+        aside: elapsed,
+      };
+    case "completed":
+      return {
+        tone: "success",
+        icon: <IconCheck size={18} />,
+        headline: elapsed ? `Completed in ${elapsed}` : "Completed",
+        detail: settledDetail || undefined,
+        aside: finished,
+      };
+    case "failed": {
+      const failedIndex = run.steps.findIndex((step) => step.status === "failed");
+      const failedStep = failedIndex >= 0 ? run.steps[failedIndex] : undefined;
+      return {
+        tone: "danger",
+        icon: <IconWarning size={18} />,
+        headline: elapsed ? `Failed after ${elapsed}` : "Failed",
+        detail: failedStep
+          ? `Stopped at step ${failedIndex + 1} of ${total}: ${failedStep.label}`
+          : run.error
+            ? "The run stopped before it finished. The likely causes are listed below."
+            : "The run stopped before it finished. Open Run details below for the logs.",
+        aside: finished,
+      };
+    }
+    case "cancelled":
+      return {
+        tone: "neutral",
+        icon: <IconWarning size={18} />,
+        headline: elapsed ? `Cancelled after ${elapsed}` : "Cancelled",
+        detail: hostSummary ?? "The run was stopped before it finished.",
+        aside: finished,
+      };
+    case "rejected":
+      return {
+        tone: "neutral",
+        icon: <IconShield size={18} />,
+        headline: "Rejected",
+        detail: hostSummary ?? "The write plan was declined. No changes were applied to the tenant.",
+        aside: run.rejectedAt ? `Rejected ${formatDate(run.rejectedAt)}` : finished,
+      };
+    default:
+      // Confirmation and dry-run states render on the confirmation page.
+      return {
+        tone: "warning",
+        icon: <IconBolt size={18} />,
+        headline: statusLabel(run.status),
+      };
+  }
+}
+
+/** A clock that ticks only while `active`, so idle pages do not re-render. */
+function useNow(active: boolean, intervalMs = 250): number {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) return;
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => setNowMs(Date.now()), intervalMs);
+    return () => window.clearInterval(interval);
+  }, [active, intervalMs]);
+  return nowMs;
+}
+
+function settledStepCount(run: RunRecord): number {
+  return run.steps.filter((step) => step.status === "completed" || step.status === "skipped").length;
+}
+
+function totalTokens(run: RunRecord): number {
+  return (
+    run.tokens?.totalTokens ??
+    (run.tokens?.promptTokens ?? 0) + (run.tokens?.completionTokens ?? 0)
+  );
+}
+
+function RunStatusCard({
   run,
-  displayName,
   tenantName,
-  sampleData,
   providerName,
   providerIsLocal,
   trustDetail,
-  onBackground,
-  onCancel,
 }: {
   run: RunRecord;
-  displayName: string;
   tenantName: string;
-  sampleData: boolean;
   providerName: string;
-  providerIsLocal?: boolean;
+  providerIsLocal: boolean | undefined;
   trustDetail: string;
-  onBackground: () => void;
-  onCancel: () => Promise<RunRecord>;
 }) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const interval = window.setInterval(() => setNowMs(Date.now()), 250);
-    return () => window.clearInterval(interval);
-  }, []);
+  const live = run.status === "queued" || run.status === "running";
+  const nowMs = useNow(live);
+  const status = describeRunStatus(run, nowMs);
+  const tone = STATUS_TONE[status.tone];
+  const tokens = totalTokens(run);
 
   return (
-    <Modal
-      open
-      size="lg"
-      closeOnScrim={false}
-      ariaLabel={`Live run: ${displayName}`}
-      onClose={() => void onCancel()}
+    <section
+      aria-label="Run status"
+      className="relative overflow-hidden rounded-[14px] bg-[var(--color-surface)] shadow-[inset_0_0_0_1px_var(--color-border-soft)]"
     >
-      <header className="flex shrink-0 items-start gap-3 border-b border-[var(--color-border-soft)] px-5 py-4">
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="truncate text-md font-semibold text-[var(--color-text)]">
-              {displayName}
-            </h2>
-            <Badge tone={run.status === "running" ? "info" : "warning"}>
-              <StatusDot tone={run.status === "running" ? "info" : "warning"} />
-              {statusLabel(run.status)}
-            </Badge>
+      <span
+        aria-hidden="true"
+        className={`absolute inset-x-0 top-0 h-[2px] opacity-70 transition-colors duration-500 ${tone.bar}`}
+      />
+      <div className="p-5 sm:p-6">
+        <div className="flex items-start gap-4">
+          <div
+            aria-hidden="true"
+            className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] transition-colors duration-500 ${tone.tile} ${
+              run.status === "running" ? "run-live-ring" : ""
+            }`}
+          >
+            {status.icon}
           </div>
-          <div className="mt-1 truncate text-sm text-[var(--color-text-muted)]">
-            {tenantName} · {providerName} · {run.id}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-0.5">
+              <div role="status" aria-live="polite" className={`text-md font-semibold ${tone.text}`}>
+                {status.headline}
+              </div>
+              {status.aside ? (
+                <div
+                  className={`font-mono text-xs tabular-nums ${
+                    live ? "text-[var(--color-info)]" : "text-[var(--color-text-muted)]"
+                  }`}
+                >
+                  {status.aside}
+                </div>
+              ) : null}
+            </div>
+            {status.detail ? (
+              <div className="mt-0.5 line-clamp-2 text-sm text-[var(--color-text-soft)]">{status.detail}</div>
+            ) : null}
           </div>
         </div>
-        <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={sampleData} />
-      </header>
 
-      <RunTelemetry
-        run={run}
-        nowMs={nowMs}
-        isLive
-        providerIsLocal={providerIsLocal}
-        providerName={providerName}
-      />
+        <div className="mt-4">
+          <RunProgressBar run={run} />
+        </div>
 
-      <div className="min-h-0 flex-1 space-y-5 overflow-y-auto p-5">
-        {run.liveSummary || run.summary ? (
-          <section
-            aria-label="Live summary"
-            aria-live="polite"
-            className="border-b border-[var(--color-border-soft)] pb-5"
-          >
-            <MarkdownPreview
-              source={run.liveSummary ?? run.summary ?? ""}
-              className="text-base leading-relaxed text-[var(--color-text)]"
-            />
-          </section>
+        {run.external?.requiredScopes.length ? (
+          <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+            Required scopes: {run.external.requiredScopes.join(", ")}
+          </p>
         ) : null}
-        {run.result !== undefined ? <ResultPanel run={run} /> : null}
-        <ActivityFeed run={run} />
-      </div>
+        {run.rollback && run.rollback.manualCount > 0 ? (
+          <p className="mt-3 text-sm text-[var(--color-text-muted)]">
+            {run.rollback.manualCount.toLocaleString()} changes need manual review and are not part of this plan.
+          </p>
+        ) : null}
 
-      <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t border-[var(--color-border-soft)] px-5 py-3">
-        <div className="min-w-0 flex-1">
+        <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 border-t border-[var(--color-border-soft)] pt-4 sm:grid-cols-3 lg:grid-cols-5">
+          <RunFact label="Tenant" value={tenantName} />
+          <RunFact
+            label="Provider"
+            value={providerName}
+            icon={
+              providerIsLocal === undefined ? undefined : providerIsLocal ? <IconHardDrive size={12} /> : <IconCloud size={12} />
+            }
+            tone={providerIsLocal === undefined ? undefined : providerIsLocal ? "success" : "warning"}
+          />
+          <RunFact label="Model" value={run.model ?? "Not recorded"} mono={Boolean(run.model)} />
+          <RunFact
+            label="Tokens"
+            value={tokens > 0 ? tokens.toLocaleString() : live ? "Counting" : "Not recorded"}
+            mono={tokens > 0}
+          />
+          <RunFact
+            label="Cost"
+            value={
+              providerIsLocal === undefined
+                ? "Not recorded"
+                : providerIsLocal
+                  ? "Local, not billed"
+                  : "Hosted, not recorded"
+            }
+          />
+        </dl>
+
+        <div className="mt-4">
           <TrustLine local={providerIsLocal === true} detail={trustDetail} />
         </div>
-        <Button variant="secondary" size="sm" onClick={onBackground}>
-          Run in background
-        </Button>
-        <Button variant="danger" size="sm" onClick={() => void onCancel()}>
-          Cancel run
-        </Button>
-      </footer>
-    </Modal>
+      </div>
+    </section>
+  );
+}
+
+function RunFact({
+  label,
+  value,
+  icon,
+  tone,
+  mono = false,
+}: {
+  label: string;
+  value: string;
+  icon?: ReactNode;
+  tone?: "success" | "warning";
+  mono?: boolean;
+}) {
+  const iconTone =
+    tone === "success"
+      ? "text-[var(--color-success)]"
+      : tone === "warning"
+        ? "text-[var(--color-warning)]"
+        : "text-[var(--color-text-muted)]";
+  return (
+    <div className="min-w-0">
+      <dt className="text-xs text-[var(--color-text-muted)]">{label}</dt>
+      <dd className="mt-0.5 flex min-w-0 items-center gap-1.5">
+        {icon ? (
+          <span aria-hidden="true" className={`inline-flex shrink-0 ${iconTone}`}>
+            {icon}
+          </span>
+        ) : null}
+        <span
+          title={value}
+          className={`truncate text-sm font-medium text-[var(--color-text)] ${mono ? "font-mono" : ""}`}
+        >
+          {value}
+        </span>
+      </dd>
+    </div>
+  );
+}
+
+function RunReport({
+  source,
+  streaming,
+  queued,
+}: {
+  source: string | undefined;
+  streaming: boolean;
+  queued: boolean;
+}) {
+  if (!source) {
+    return (
+      <div>
+        <div aria-hidden="true" className="flex max-w-[68ch] flex-col gap-2.5">
+          <div className="run-skeleton h-3.5 w-[40%]" />
+          <div className="run-skeleton h-3 w-[94%]" />
+          <div className="run-skeleton h-3 w-[88%]" />
+          <div className="run-skeleton h-3 w-[62%]" />
+        </div>
+        <p className="mt-4 text-sm text-[var(--color-text-muted)]">
+          {queued
+            ? "The report appears here once the run starts."
+            : "The report appears here as the agent writes it."}
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div aria-live={streaming ? "polite" : undefined} aria-busy={streaming || undefined}>
+      <MarkdownPreview
+        source={source}
+        className="chat-answer run-report max-w-[68ch] text-[var(--color-text)]"
+      />
+      {streaming ? (
+        <div aria-hidden="true" className="mt-4 flex max-w-[68ch] flex-col gap-2.5">
+          <div className="run-skeleton h-3 w-[86%]" />
+          <div className="run-skeleton h-3 w-[58%]" />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function RunDetails({
+  run,
+  openOnFailure,
+  style,
+}: {
+  run: RunRecord;
+  openOnFailure: boolean;
+  style?: CSSProperties;
+}) {
+  // Opens by default for failed runs, including a run that fails while
+  // the page is open. RunPage is keyed by run id, so this resets per run.
+  const [open, setOpen] = useState(openOnFailure);
+  useEffect(() => {
+    if (openOnFailure) setOpen(true);
+  }, [openOnFailure]);
+  const panelId = useId();
+  const reasoningCount = run.steps.filter(
+    (step) => step.thinking && step.thinking.text.length > 0,
+  ).length;
+  return (
+    <div
+      style={style}
+      className="run-rise overflow-hidden rounded-[14px] bg-[var(--color-surface)] shadow-[inset_0_0_0_1px_var(--color-border-soft)]"
+    >
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={panelId}
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center justify-between gap-3 px-5 py-3.5 text-left transition-colors hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-[var(--color-focus)]"
+      >
+        <span className="flex min-w-0 items-baseline gap-2.5">
+          <span className="text-md font-semibold text-[var(--color-text)]">Run details</span>
+          <span className="truncate text-sm text-[var(--color-text-muted)]">
+            {run.steps.length} step{run.steps.length === 1 ? "" : "s"} · {run.logs.length} log
+            {run.logs.length === 1 ? "" : "s"}
+            {reasoningCount > 0 ? ` · reasoning for ${reasoningCount}` : ""}
+          </span>
+        </span>
+        <IconChevronDown
+          size={13}
+          aria-hidden="true"
+          className={`shrink-0 text-[var(--color-text-muted)] transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`}
+        />
+      </button>
+      {open ? (
+        <div id={panelId} className="border-t border-[var(--color-border-soft)] px-5 pb-5 pt-3">
+          {/* "Where it stopped" already shows the pipeline for failed runs. */}
+          <ActivityFeed run={run} initialTab={openOnFailure ? "logs" : "pipeline"} />
+        </div>
+      ) : null}
+    </div>
   );
 }
 
