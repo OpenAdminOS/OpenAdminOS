@@ -939,6 +939,10 @@ export interface AppState {
    * Never set in pilot mode. Hosted providers are never auto-selected.
    */
   providerAutoSelectNotice?: { providerId: ProviderId; providerName: string };
+  /** The MCP catalog with local install state. */
+  mcpServers?: McpServerSummary[];
+  /** Whether Chat offers tools, including MCP tools, to the selected model. */
+  chatToolUse?: ChatToolUseStatus;
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -1015,12 +1019,66 @@ export type IntuneChatInvestigationToolName =
   | "query_drift"
   | "web_search";
 
+/**
+ * Chat-facing name of a tool served by an installed MCP server:
+ * `mcp__<serverId>__<toolName>`. The tool list comes from the server at
+ * connect time; only names the host listed for an enabled server run.
+ */
+export type McpChatToolName = `mcp__${string}`;
+
+/** How a catalog MCP server authenticates. Only public servers ship today. */
+export type McpServerAuth = "none";
+
+export interface McpServerToolSummary {
+  name: string;
+  description: string;
+}
+
+/**
+ * A catalog MCP server with its local install state. Tool queries the
+ * model writes go to `host`; tenant data is never sent there by design.
+ */
+export interface McpServerSummary {
+  id: string;
+  name: string;
+  publisher: string;
+  url: string;
+  host: string;
+  description: string;
+  pitch: string;
+  auth: McpServerAuth;
+  readOnly: true;
+  installed: boolean;
+  enabled: boolean;
+  installedAt?: string;
+  lastConnectedAt?: string;
+  /** Tools from the last successful live listing. Empty until installed. */
+  tools: McpServerToolSummary[];
+}
+
+/**
+ * Whether Chat runs its tool loop for the selected model. MCP tools are
+ * offered only when it does.
+ */
+export interface ChatToolUseStatus {
+  available: boolean;
+  notice?: string;
+}
+
 export interface IntuneChatToolTraceEntry {
   id: string;
   tool: IntuneChatInvestigationToolName;
   params: unknown;
   resultSummary: string;
   webSources?: Array<{ title: string; url: string }>;
+  /** Which MCP server answered, and the host the tool query went to. */
+  mcpSource?: {
+    serverId: string;
+    serverName: string;
+    host: string;
+    tool: string;
+    truncated?: boolean;
+  };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources
    * describe what was actually read instead of inheriting the cache
@@ -2533,6 +2591,12 @@ export interface OpenAdminOSApi {
   disableGateway?(): Promise<GatewayPublicStatus>;
   regenerateGatewayToken?(): Promise<{ status: GatewayPublicStatus; token: string }>;
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
+  /** Connect to a catalog MCP server, list its tools and record the install. */
+  installMcpServer?(serverId: string): Promise<McpServerSummary[]>;
+  uninstallMcpServer?(serverId: string): Promise<McpServerSummary[]>;
+  setMcpServerEnabled?(serverId: string, enabled: boolean): Promise<McpServerSummary[]>;
+  /** Reconnect to an installed server and refresh its tool list. */
+  checkMcpServer?(serverId: string): Promise<McpServerSummary[]>;
   getRetrievalStatus?(): Promise<RetrievalStatus>;
   refreshRetrievalIndex?(): Promise<RetrievalStatus>;
   getRetrievalAutoInstall?(): Promise<boolean>;
