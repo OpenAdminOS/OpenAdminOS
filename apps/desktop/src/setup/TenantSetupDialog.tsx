@@ -23,9 +23,10 @@ import type {
   ProviderId,
   ProviderSummary,
   RequestedScope,
+  SavedAppRegistration,
   TenantRecord,
 } from "../shared/openAdminOS";
-import { PERMISSION_AREAS } from "../shared/openAdminOS";
+import { OPENADMINOS_APP_CLIENT_ID, PERMISSION_AREAS } from "../shared/openAdminOS";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import type { PendingIntent } from "./pending-intent";
@@ -59,11 +60,14 @@ export function TenantSetupDialog({
   agentName,
   providers,
   activeProviderId,
+  savedRegistrations = [],
+  editOptions,
   onClose,
   onConnect,
   pilotRemoved = false,
   onKeepWaiting,
   onTryAgain,
+  onEditSignIn,
   onSelectProvider,
   onRecheckProviders,
   onResume,
@@ -78,12 +82,18 @@ export function TenantSetupDialog({
   agentName?: string;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
+  /** Custom registrations remembered on this device, most recent first. */
+  savedRegistrations?: SavedAppRegistration[];
+  /** Options of the attempt the admin returned to edit after an error. */
+  editOptions?: ConnectTenantOptions;
   onClose: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
   /** True after a connect that ended pilot mode and removed its data. */
   pilotRemoved?: boolean;
   onKeepWaiting: () => void;
   onTryAgain: () => void;
+  /** Return from a failed sign-in to the sign-in options. */
+  onEditSignIn?: () => void;
   onSelectProvider: (id: ProviderId) => void;
   onRecheckProviders: () => void | Promise<void>;
   onResume: () => void;
@@ -100,25 +110,18 @@ export function TenantSetupDialog({
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement}
       </div>
-      {stage === "permissions" && (
+      {(stage === "permissions" || stage === "own-registration") && (
         <PermissionsStep
+          key={stage}
           intent={intent}
           agentName={agentName}
           scopes={scopes}
           scopesError={scopesError}
+          savedRegistrations={savedRegistrations}
           onCancel={onClose}
           onConnect={onConnect}
-        />
-      )}
-      {stage === "own-registration" && (
-        <PermissionsStep
-          intent={intent}
-          agentName={agentName}
-          scopes={scopes}
-          scopesError={scopesError}
-          onCancel={onClose}
-          onConnect={onConnect}
-          initialCustomOpen
+          {...(stage === "own-registration" ? { initialChoice: "own" as const } : {})}
+          {...(editOptions ? { initialOptions: editOptions } : {})}
         />
       )}
       {stage === "waiting" && <WaitingStep onCancel={onClose} />}
@@ -130,7 +133,12 @@ export function TenantSetupDialog({
         />
       )}
       {stage === "error" && (
-        <ErrorStep error={error} onTryAgain={onTryAgain} onCancel={onClose} />
+        <ErrorStep
+          error={error}
+          onTryAgain={onTryAgain}
+          onCancel={onClose}
+          {...(onEditSignIn ? { onEditSignIn } : {})}
+        />
       )}
       {stage === "provider" && (
         <ProviderStep
@@ -165,31 +173,70 @@ export function TenantSetupDialog({
   );
 }
 
+export type SignInChoice = "openadminos" | "own";
+
+const NEW_REGISTRATION = "new";
+const CLIENT_ID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const DIRECTORY_ID_PATTERN = /^[0-9a-zA-Z.-]{1,100}$/;
+
+function savedRegistrationKey(entry: { clientId: string; directoryTenantId?: string }): string {
+  return `${entry.clientId.toLowerCase()}|${(entry.directoryTenantId ?? "").toLowerCase()}`;
+}
+
 function PermissionsStep({
   intent,
   agentName,
   scopes,
   scopesError,
+  savedRegistrations,
   onCancel,
   onConnect,
-  initialCustomOpen = false,
+  initialChoice,
+  initialOptions,
 }: {
   intent: PendingIntent | null;
   agentName?: string;
   scopes: RequestedScope[] | null;
   scopesError: string | null;
+  savedRegistrations: SavedAppRegistration[];
   onCancel: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
-  initialCustomOpen?: boolean;
+  /** Set only by entry points that already expressed which app to use. */
+  initialChoice?: SignInChoice;
+  /** The options of an attempt the admin returns to after an error. */
+  initialOptions?: ConnectTenantOptions;
 }) {
   const groups = useMemo(() => groupRequestedScopes(scopes ?? []), [scopes]);
-  // Bring-your-own app registration: closed by default so the common
-  // path stays one button, but always visible as an option.
-  const [customOpen, setCustomOpen] = useState(initialCustomOpen);
-  const [clientId, setClientId] = useState("");
-  const [directoryTenantId, setDirectoryTenantId] = useState("");
+  const initialRegistration = initialOptions?.appRegistration;
+  // Neither app is preselected: the admin chooses before Approve enables.
+  const [choice, setChoice] = useState<SignInChoice | null>(
+    initialOptions ? (initialRegistration ? "own" : "openadminos") : initialChoice ?? null,
+  );
+  const [savedSelection, setSavedSelection] = useState<string>(() => {
+    if (initialRegistration) {
+      const key = savedRegistrationKey(initialRegistration);
+      return savedRegistrations.some((entry) => savedRegistrationKey(entry) === key)
+        ? key
+        : NEW_REGISTRATION;
+    }
+    const mostRecent = savedRegistrations[0];
+    return mostRecent ? savedRegistrationKey(mostRecent) : NEW_REGISTRATION;
+  });
+  const [clientId, setClientId] = useState(initialRegistration?.clientId ?? "");
+  const [directoryTenantId, setDirectoryTenantId] = useState(
+    initialRegistration?.directoryTenantId ?? "",
+  );
+  const [registrationLabel, setRegistrationLabel] = useState(initialRegistration?.label ?? "");
   const [selectedAreaIds, setSelectedAreaIds] = useState<Set<PermissionAreaId>>(
-    () => new Set(PERMISSION_AREAS.map((area) => area.id)),
+    () =>
+      new Set(
+        initialOptions?.permissionAreaIds
+          ? PERMISSION_AREAS.filter(
+              (area) => area.required || initialOptions.permissionAreaIds!.includes(area.id),
+            ).map((area) => area.id)
+          : PERMISSION_AREAS.map((area) => area.id),
+      ),
   );
   const [registrationDisplayName, setRegistrationDisplayName] = useState(
     DEFAULT_REGISTRATION_DISPLAY_NAME,
@@ -209,6 +256,38 @@ function PermissionsStep({
   const selectedAreaIdList = PERMISSION_AREAS.filter((area) =>
     selectedAreaIds.has(area.id),
   ).map((area) => area.id);
+  const savedChoice =
+    choice === "own" && savedSelection !== NEW_REGISTRATION
+      ? savedRegistrations.find((entry) => savedRegistrationKey(entry) === savedSelection)
+      : undefined;
+  const enteringNew = choice === "own" && !savedChoice;
+  const ownRegistration: NonNullable<ConnectTenantOptions["appRegistration"]> | undefined =
+    choice !== "own"
+      ? undefined
+      : savedChoice
+        ? {
+            clientId: savedChoice.clientId,
+            ...(savedChoice.directoryTenantId
+              ? { directoryTenantId: savedChoice.directoryTenantId }
+              : {}),
+            ...(savedChoice.label ? { label: savedChoice.label } : {}),
+          }
+        : {
+            clientId: clientId.trim(),
+            ...(directoryTenantId.trim() ? { directoryTenantId: directoryTenantId.trim() } : {}),
+            ...(registrationLabel.trim() ? { label: registrationLabel.trim() } : {}),
+          };
+  const blockedReason =
+    choice === null
+      ? SETUP_COPY.chooseSignInReason
+      : ownRegistration && ownRegistration.clientId.length === 0
+        ? SETUP_COPY.clientIdRequiredReason
+        : ownRegistration && !CLIENT_ID_PATTERN.test(ownRegistration.clientId)
+          ? SETUP_COPY.clientIdInvalidReason
+          : ownRegistration?.directoryTenantId &&
+              !DIRECTORY_ID_PATTERN.test(ownRegistration.directoryTenantId)
+            ? SETUP_COPY.directoryIdInvalidReason
+            : null;
   const toggleArea = (areaId: PermissionAreaId) => {
     const area = PERMISSION_AREAS.find((candidate) => candidate.id === areaId);
     if (area?.required) return;
@@ -275,7 +354,217 @@ function PermissionsStep({
           </div>
         )}
 
-        <div className="flex items-start gap-3 rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
+        <fieldset>
+          <legend className="text-xs font-medium text-[var(--color-text-muted)]">
+            {SETUP_COPY.signInChoiceLegend}
+          </legend>
+          <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
+            {SETUP_COPY.signInChoiceHint}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <SignInChoiceCard
+              value="openadminos"
+              checked={choice === "openadminos"}
+              title={SETUP_COPY.openAdminOSAppTitle}
+              points={SETUP_COPY.openAdminOSAppPoints(OPENADMINOS_APP_CLIENT_ID)}
+              onSelect={setChoice}
+            />
+            <SignInChoiceCard
+              value="own"
+              checked={choice === "own"}
+              title={SETUP_COPY.ownRegistrationTitle}
+              points={SETUP_COPY.ownRegistrationPoints}
+              onSelect={setChoice}
+            />
+          </div>
+        </fieldset>
+
+        {choice === "own" && (
+          <div className="mt-4 space-y-3 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
+            {savedRegistrations.length > 0 && (
+              <fieldset>
+                <legend className="text-xs font-medium text-[var(--color-text-muted)]">
+                  {SETUP_COPY.savedRegistrationsLegend}
+                </legend>
+                <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+                  {SETUP_COPY.savedRegistrationsHint}
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {savedRegistrations.map((entry) => {
+                    const key = savedRegistrationKey(entry);
+                    return (
+                      <label
+                        key={key}
+                        className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-surface)] px-3 py-2 ring-1 ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)]"
+                      >
+                        <input
+                          type="radio"
+                          name="saved-app-registration"
+                          value={key}
+                          checked={savedSelection === key}
+                          onChange={() => setSavedSelection(key)}
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-accent)]"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm text-[var(--color-text)]">
+                            {entry.label ?? entry.clientId}
+                          </span>
+                          <span className="block break-all font-mono text-xs text-[var(--color-text-muted)]">
+                            {entry.label ? `${entry.clientId}` : null}
+                            {entry.label && entry.directoryTenantId ? " · " : null}
+                            {entry.directoryTenantId ?? (entry.label ? null : "Multi-tenant")}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-[var(--color-surface-hover)]">
+                    <input
+                      type="radio"
+                      name="saved-app-registration"
+                      value={NEW_REGISTRATION}
+                      checked={savedSelection === NEW_REGISTRATION}
+                      onChange={() => setSavedSelection(NEW_REGISTRATION)}
+                      className="h-4 w-4 shrink-0 accent-[var(--color-accent)]"
+                    />
+                    <span className="text-sm text-[var(--color-text-soft)]">
+                      {SETUP_COPY.newRegistrationOption}
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+            )}
+            {enteringNew && (
+              <>
+                <p className="text-sm leading-5 text-[var(--color-text-soft)]">
+                  {SETUP_COPY.ownRegistrationBody}
+                </p>
+                <p className="text-xs leading-5 text-[var(--color-text-muted)]">
+                  {SETUP_COPY.ownRegistrationNoSecret}
+                </p>
+                <label className="block text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.clientIdLabel}
+                  <input
+                    name="tenant-client-id"
+                    autoComplete="off"
+                    value={clientId}
+                    onChange={(event) => setClientId(event.target.value)}
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                    spellCheck={false}
+                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  />
+                  <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+                    {SETUP_COPY.clientIdHint}
+                  </span>
+                </label>
+                <label className="block text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.directoryIdLabel}
+                  <input
+                    name="tenant-directory-id"
+                    autoComplete="off"
+                    value={directoryTenantId}
+                    onChange={(event) => setDirectoryTenantId(event.target.value)}
+                    placeholder="contoso.onmicrosoft.com"
+                    spellCheck={false}
+                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  />
+                  <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+                    {SETUP_COPY.directoryIdHint}
+                  </span>
+                </label>
+                <label className="block text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.registrationLabelLabel}
+                  <input
+                    name="tenant-registration-label"
+                    autoComplete="off"
+                    value={registrationLabel}
+                    maxLength={80}
+                    onChange={(event) => setRegistrationLabel(event.target.value)}
+                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  />
+                  <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+                    {SETUP_COPY.registrationLabelHint}
+                  </span>
+                </label>
+                <section className="rounded-lg bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
+                  <h4 className="text-sm font-medium text-[var(--color-text)]">
+                    Generate a setup script for your admin
+                  </h4>
+                  <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+                    The script creates a tenant-owned public client registration for the selected areas. Review it before sending it to your Entra administrator.
+                  </p>
+                  <label className="mt-3 block text-sm text-[var(--color-text-soft)]">
+                    Application display name
+                    <input
+                      name="registration-display-name"
+                      autoComplete="off"
+                      value={registrationDisplayName}
+                      maxLength={REGISTRATION_DISPLAY_NAME_MAX_LENGTH}
+                      onChange={(event) => {
+                        setRegistrationDisplayName(event.target.value);
+                        setRegistrationSetup(null);
+                        setRegistrationSetupError(null);
+                        setRegistrationActionError(null);
+                      }}
+                      className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                    />
+                  </label>
+                  {registrationSetupError && (
+                    <p role="alert" className="mt-2 text-xs text-[var(--color-danger)]">
+                      {registrationSetupError}
+                    </p>
+                  )}
+                  <Button className="mt-3" size="sm" variant="secondary" onClick={generateSetup}>
+                    Generate setup script
+                  </Button>
+                  {registrationSetup && (
+                    <div className="mt-3 space-y-3">
+                      <label className="block text-xs text-[var(--color-text-muted)]">
+                        PowerShell script
+                        <textarea
+                          readOnly
+                          aria-label="PowerShell setup script"
+                          value={registrationSetup.script}
+                          rows={8}
+                          spellCheck={false}
+                          translate="no"
+                          className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 font-mono text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.script, "Script")}>Copy script</Button>
+                        <Button size="sm" variant="secondary" onClick={() => void saveRegistrationScript()}>Save script</Button>
+                      </div>
+                      <label className="block text-xs text-[var(--color-text-muted)]">
+                        Message for your admin
+                        <textarea
+                          readOnly
+                          aria-label="Message for your admin"
+                          value={registrationSetup.message}
+                          rows={5}
+                          className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+                        />
+                      </label>
+                      <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.message, "Message")}>Copy message</Button>
+                      {registrationSetupStatus && (
+                        <p role="status" className="text-xs text-[var(--color-success)]">
+                          {registrationSetupStatus}
+                        </p>
+                      )}
+                      {registrationActionError && (
+                        <p role="alert" className="text-xs text-[var(--color-danger)]">
+                          {registrationActionError}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 flex items-start gap-3 rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
             <IconShield size={17} />
           </div>
@@ -294,9 +583,6 @@ function PermissionsStep({
             </p>
             <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
               {SETUP_COPY.tokenStorage}
-            </p>
-            <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
-              {SETUP_COPY.appListing}
             </p>
           </div>
         </div>
@@ -350,177 +636,83 @@ function PermissionsStep({
           <p>{SETUP_COPY.delegatedPermissionsNote}</p>
           <p>{SETUP_COPY.betaNote}</p>
         </div>
-
-        <div className="mt-4 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
-          <div className="text-xs font-medium text-[var(--color-text-muted)]">
-            {SETUP_COPY.appIdentityTitle}
-          </div>
-          {customOpen ? (
-            <div className="mt-2 space-y-3">
-              <p className="text-sm leading-5 text-[var(--color-text-soft)]">
-                {SETUP_COPY.ownRegistrationBody}
-              </p>
-              <p className="text-xs leading-5 text-[var(--color-text-muted)]">
-                {SETUP_COPY.ownRegistrationNoSecret}
-              </p>
-              <section className="rounded-lg bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
-                <h4 className="text-sm font-medium text-[var(--color-text)]">
-                  Generate a setup script for your admin
-                </h4>
-                <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
-                  The script creates a tenant-owned public client registration for the selected areas. Review it before sending it to your Entra administrator.
-                </p>
-                <label className="mt-3 block text-sm text-[var(--color-text-soft)]">
-                  Application display name
-                  <input
-                    name="registration-display-name"
-                    autoComplete="off"
-                    value={registrationDisplayName}
-                    maxLength={REGISTRATION_DISPLAY_NAME_MAX_LENGTH}
-                    onChange={(event) => {
-                      setRegistrationDisplayName(event.target.value);
-                      setRegistrationSetup(null);
-                      setRegistrationSetupError(null);
-                      setRegistrationActionError(null);
-                    }}
-                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
-                  />
-                </label>
-                {registrationSetupError && (
-                  <p role="alert" className="mt-2 text-xs text-[var(--color-danger)]">
-                    {registrationSetupError}
-                  </p>
-                )}
-                <Button className="mt-3" size="sm" variant="secondary" onClick={generateSetup}>
-                  Generate setup script
-                </Button>
-                {registrationSetup && (
-                  <div className="mt-3 space-y-3">
-                    <label className="block text-xs text-[var(--color-text-muted)]">
-                      PowerShell script
-                      <textarea
-                        readOnly
-                        aria-label="PowerShell setup script"
-                        value={registrationSetup.script}
-                        rows={8}
-                        spellCheck={false}
-                        translate="no"
-                        className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 font-mono text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-                      />
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.script, "Script")}>Copy script</Button>
-                      <Button size="sm" variant="secondary" onClick={() => void saveRegistrationScript()}>Save script</Button>
-                    </div>
-                    <label className="block text-xs text-[var(--color-text-muted)]">
-                      Message for your admin
-                      <textarea
-                        readOnly
-                        aria-label="Message for your admin"
-                        value={registrationSetup.message}
-                        rows={5}
-                        className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-                      />
-                    </label>
-                    <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.message, "Message")}>Copy message</Button>
-                    {registrationSetupStatus && (
-                      <p role="status" className="text-xs text-[var(--color-success)]">
-                        {registrationSetupStatus}
-                      </p>
-                    )}
-                    {registrationActionError && (
-                      <p role="alert" className="text-xs text-[var(--color-danger)]">
-                        {registrationActionError}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </section>
-              <label className="block text-sm text-[var(--color-text-soft)]">
-                {SETUP_COPY.clientIdLabel}
-                <input
-                  name="tenant-client-id"
-                  autoComplete="off"
-                  value={clientId}
-                  onChange={(event) => setClientId(event.target.value)}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  spellCheck={false}
-                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
-                />
-                <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
-                  {SETUP_COPY.clientIdHint}
-                </span>
-              </label>
-              <label className="block text-sm text-[var(--color-text-soft)]">
-                {SETUP_COPY.directoryIdLabel}
-                <input
-                  name="tenant-directory-id"
-                  autoComplete="off"
-                  value={directoryTenantId}
-                  onChange={(event) => setDirectoryTenantId(event.target.value)}
-                  placeholder="contoso.onmicrosoft.com"
-                  spellCheck={false}
-                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
-                />
-                <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
-                  {SETUP_COPY.directoryIdHint}
-                </span>
-              </label>
-              <button
-                type="button"
-                onClick={() => setCustomOpen(false)}
-                className="text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
-              >
-                {SETUP_COPY.useDefaultRegistration}
-              </button>
-            </div>
-          ) : (
-            <div className="mt-2 space-y-2">
-              <p className="text-sm leading-5 text-[var(--color-text-soft)]">
-                {SETUP_COPY.appIdentityDefault}
-              </p>
-              <button
-                type="button"
-                onClick={() => setCustomOpen(true)}
-                className="text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
-              >
-                {SETUP_COPY.useOwnRegistration}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button
-          data-autofocus
-          variant="primary"
-          leadingIcon={<IconShield size={13} />}
-          disabled={
-            scopes === null ||
-            scopesError !== null ||
-            (customOpen && clientId.trim().length === 0)
-          }
-          onClick={() =>
-            onConnect({
-              permissionAreaIds: selectedAreaIdList,
-              ...(customOpen
-                ? {
-                    appRegistration: {
-                      clientId: clientId.trim(),
-                      ...(directoryTenantId.trim()
-                        ? { directoryTenantId: directoryTenantId.trim() }
-                        : {}),
-                    },
-                  }
-                : {}),
-            })
-          }
-        >
-          Approve {selectedScopeCount} read scopes and continue to Microsoft
-        </Button>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-3 max-[720px]:flex-col-reverse max-[720px]:items-stretch">
+          {blockedReason && (
+            <p
+              id="setup-approve-blocked-reason"
+              className="max-w-[280px] text-right text-xs leading-5 text-[var(--color-text-muted)] max-[720px]:max-w-none max-[720px]:text-left"
+            >
+              {blockedReason}
+            </p>
+          )}
+          <Button
+            data-autofocus
+            variant="primary"
+            leadingIcon={<IconShield size={13} />}
+            aria-describedby={blockedReason ? "setup-approve-blocked-reason" : undefined}
+            disabled={scopes === null || scopesError !== null || blockedReason !== null}
+            onClick={() =>
+              onConnect({
+                permissionAreaIds: selectedAreaIdList,
+                ...(ownRegistration ? { appRegistration: ownRegistration } : {}),
+              })
+            }
+          >
+            Approve {selectedScopeCount} read scopes and continue to Microsoft
+          </Button>
+        </div>
       </DialogFooter>
     </>
+  );
+}
+
+function SignInChoiceCard({
+  value,
+  checked,
+  title,
+  points,
+  onSelect,
+}: {
+  value: SignInChoice;
+  checked: boolean;
+  title: string;
+  points: readonly string[];
+  onSelect: (value: SignInChoice) => void;
+}) {
+  const titleId = `setup-sign-in-${value}-title`;
+  const pointsId = `setup-sign-in-${value}-points`;
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-3 rounded-xl px-4 py-3 ring-1 transition-colors focus-within:ring-2 focus-within:ring-[var(--color-accent)] ${
+        checked
+          ? "bg-[var(--color-accent-soft)] ring-[var(--color-accent)]/45"
+          : "bg-[var(--color-surface)] ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)]"
+      }`}
+    >
+      <input
+        type="radio"
+        name="sign-in-app"
+        value={value}
+        checked={checked}
+        onChange={() => onSelect(value)}
+        aria-labelledby={titleId}
+        aria-describedby={pointsId}
+        className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-accent)] focus-visible:outline-none"
+      />
+      <span className="min-w-0 flex-1">
+        <span id={titleId} className="block text-base font-medium text-[var(--color-text)]">
+          {title}
+        </span>
+        <ul id={pointsId} className="mt-1.5 space-y-1 text-xs leading-5 text-[var(--color-text-soft)]">
+          {points.map((point) => (
+            <li key={point} className="break-words">{point}</li>
+          ))}
+        </ul>
+      </span>
+    </label>
   );
 }
 
@@ -645,7 +837,17 @@ function TimeoutStep({
   );
 }
 
-function ErrorStep({ error, onTryAgain, onCancel }: { error: string | null; onTryAgain: () => void; onCancel: () => void }) {
+function ErrorStep({
+  error,
+  onTryAgain,
+  onCancel,
+  onEditSignIn,
+}: {
+  error: string | null;
+  onTryAgain: () => void;
+  onCancel: () => void;
+  onEditSignIn?: () => void;
+}) {
   return (
     <>
       <div className="flex min-h-[280px] flex-1 flex-col items-center justify-center px-6 py-10 text-center">
@@ -659,7 +861,12 @@ function ErrorStep({ error, onTryAgain, onCancel }: { error: string | null; onTr
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button data-autofocus variant="primary" onClick={onTryAgain}>Try again</Button>
+        <div className="flex flex-wrap justify-end gap-2 max-[720px]:w-full max-[720px]:flex-col-reverse">
+          {onEditSignIn && (
+            <Button variant="secondary" onClick={onEditSignIn}>{SETUP_COPY.editSignIn}</Button>
+          )}
+          <Button data-autofocus variant="primary" onClick={onTryAgain}>Try again</Button>
+        </div>
       </DialogFooter>
     </>
   );

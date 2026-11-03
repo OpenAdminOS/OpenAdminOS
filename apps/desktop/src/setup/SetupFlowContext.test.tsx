@@ -10,10 +10,10 @@ import {
   renderWithAppState,
 } from "../test/test-utils";
 import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
-import { PERMISSION_AREAS } from "../shared/openAdminOS";
+import { OPENADMINOS_APP_CLIENT_ID, PERMISSION_AREAS } from "../shared/openAdminOS";
 import { useSetupFlow } from "./SetupFlowContext";
 import { FirstLaunchWelcome } from "./WelcomeView";
-import { PROVIDER_DETECTION_COPY, WELCOME_COPY } from "../copy";
+import { PROVIDER_DETECTION_COPY, SETUP_COPY, WELCOME_COPY } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
 function SetupTrigger() {
@@ -46,6 +46,7 @@ describe("contextual tenant setup", () => {
     renderWithAppState(<SetupTrigger />, { route: "/changes", bridge });
 
     await user.click(await screen.findByRole("button", { name: "View changes" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -170,13 +171,14 @@ describe("contextual tenant setup", () => {
     expect(screen.queryByRole("heading", { name: "Pick an LLM provider" })).not.toBeInTheDocument();
   });
 
-  it("connects with the OpenAdminOS registration by default", async () => {
+  it("connects with the OpenAdminOS app once the admin chooses it", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const connectTenant = vi.fn(async () => createMockAppState());
     renderWelcome(makeMockBridge({ connectTenant }, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -209,6 +211,7 @@ describe("contextual tenant setup", () => {
     renderWelcome(bridge);
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -365,6 +368,7 @@ describe("contextual tenant setup", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" })).toBeInTheDocument();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
+    expectUnchosenSignIn();
   });
 
   it("starts pilot mode from the welcome and leaves the welcome", async () => {
@@ -415,6 +419,7 @@ describe("contextual tenant setup", () => {
     renderWelcome(makeMockBridge({}, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -442,6 +447,7 @@ describe("contextual tenant setup", () => {
     renderWelcome(bridge);
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -469,6 +475,7 @@ describe("contextual tenant setup", () => {
     renderWithAppState(<OpenSetupButton />, { route: "/chat", bridge });
 
     await user.click(await screen.findByRole("button", { name: "Open setup" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
       await screen.findByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" }),
     );
@@ -490,6 +497,177 @@ describe("contextual tenant setup", () => {
     await user.click(await screen.findByRole("button", { name: "Run agent" }));
     expect(onReady).toHaveBeenCalledOnce();
     expect(screen.queryByRole("heading", { name: "Pick an LLM provider" })).not.toBeInTheDocument();
+  });
+
+  it("opens every connect entry point on two equal, unchosen sign-in choices", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWithAppState(
+      <>
+        <SetupTrigger />
+        <OpenSetupButton />
+        <RequireProviderButton onReady={() => undefined} />
+      </>,
+      { route: "/changes", bridge: makeMockBridge({}, emptyState) },
+    );
+
+    for (const name of ["View changes", "Open setup", "Run agent"]) {
+      await user.click(await screen.findByRole("button", { name }));
+      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" });
+      expectUnchosenSignIn();
+      await user.click(screen.getByRole("button", { name: "Cancel" }));
+    }
+  });
+
+  it("explains each choice and keeps Approve disabled with a visible reason until one is chosen", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWithAppState(<OpenSetupButton />, {
+      route: "/chat",
+      bridge: makeMockBridge({}, emptyState),
+    });
+    await user.click(await screen.findByRole("button", { name: "Open setup" }));
+
+    const openAdminOS = await screen.findByRole("radio", { name: "OpenAdminOS app" });
+    const own = screen.getByRole("radio", { name: "Your own app registration" });
+    expect(openAdminOS).toHaveAccessibleDescription(
+      new RegExp(`sign-in logs as OpenAdminOS, client ID ${OPENADMINOS_APP_CLIENT_ID}`),
+    );
+    expect(openAdminOS).toHaveAccessibleDescription(/No client secret\. Tokens are stored on this device only\./);
+    expect(own).toHaveAccessibleDescription(/organization creates and owns/);
+    expect(own).toHaveAccessibleDescription(/Conditional Access/);
+    expect(own).toHaveAccessibleDescription(/No client secret\. Tokens are stored on this device only\./);
+
+    const approve = await screen.findByRole("button", { name: /Approve \d+ read scopes/ });
+    await waitFor(() => expect(approve).toHaveAccessibleDescription(SETUP_COPY.chooseSignInReason));
+    expect(screen.getByText(SETUP_COPY.chooseSignInReason)).toBeVisible();
+
+    await user.click(own);
+    expect(approve).toBeDisabled();
+    expect(screen.getByText(SETUP_COPY.clientIdRequiredReason)).toBeInTheDocument();
+    await user.type(screen.getByLabelText(/Application \(client\) ID/i), "not-a-guid");
+    expect(screen.getByText(SETUP_COPY.clientIdInvalidReason)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText(/Application \(client\) ID/i));
+    await user.type(
+      screen.getByLabelText(/Application \(client\) ID/i),
+      "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    );
+    expect(approve).toBeEnabled();
+
+    await user.click(openAdminOS);
+    expect(approve).toBeEnabled();
+    expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
+  });
+
+  it("opens with the own registration chosen from the welcome link", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({}, emptyState));
+    await user.click(
+      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
+    );
+    expect(await screen.findByRole("radio", { name: "Your own app registration" })).toBeChecked();
+    expect(screen.getByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
+  });
+
+  it("preselects the most recent saved registration and allows another one", async () => {
+    const user = userEvent.setup();
+    const connectTenant = vi.fn(async () => createMockAppState());
+    const emptyState = createMockAppState({
+      tenants: [],
+      activeTenantId: undefined,
+      savedAppRegistrations: [
+        {
+          clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          directoryTenantId: "contoso.onmicrosoft.com",
+          label: "Contoso admin app",
+          lastUsedAt: "2026-11-03T10:00:00.000Z",
+        },
+        { clientId: "11111111-2222-4333-8444-555555555555", lastUsedAt: "2026-11-01T10:00:00.000Z" },
+      ],
+    });
+    renderWithAppState(<OpenSetupButton />, {
+      route: "/chat",
+      bridge: makeMockBridge({ connectTenant }, emptyState),
+    });
+    await user.click(await screen.findByRole("button", { name: "Open setup" }));
+    expect(screen.queryByRole("radio", { name: /Contoso admin app/ })).not.toBeInTheDocument();
+
+    await user.click(await screen.findByRole("radio", { name: "Your own app registration" }));
+    expect(screen.getByRole("radio", { name: /Contoso admin app/ })).toBeChecked();
+    expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    expect(connectTenant).toHaveBeenLastCalledWith({
+      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
+      appRegistration: {
+        clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        directoryTenantId: "contoso.onmicrosoft.com",
+        label: "Contoso admin app",
+      },
+    });
+  });
+
+  it("enters a different registration next to saved ones", async () => {
+    const user = userEvent.setup();
+    const connectTenant = vi.fn(async () => createMockAppState());
+    const emptyState = createMockAppState({
+      tenants: [],
+      activeTenantId: undefined,
+      savedAppRegistrations: [
+        { clientId: "11111111-2222-4333-8444-555555555555", lastUsedAt: "2026-11-01T10:00:00.000Z" },
+      ],
+    });
+    renderWithAppState(<OpenSetupButton />, {
+      route: "/chat",
+      bridge: makeMockBridge({ connectTenant }, emptyState),
+    });
+    await user.click(await screen.findByRole("button", { name: "Open setup" }));
+    await user.click(await screen.findByRole("radio", { name: "Your own app registration" }));
+    await user.click(screen.getByRole("radio", { name: SETUP_COPY.newRegistrationOption }));
+    await user.type(
+      screen.getByLabelText(/Application \(client\) ID/i),
+      "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    );
+    await user.type(screen.getByLabelText(/Label \(optional\)/), "Fabrikam app");
+    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    expect(connectTenant).toHaveBeenLastCalledWith({
+      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
+      appRegistration: { clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", label: "Fabrikam app" },
+    });
+  });
+
+  it("retries and edits a failed sign-in with the same own registration", async () => {
+    const user = userEvent.setup();
+    const connectTenant = vi.fn(async () => {
+      throw new Error("Microsoft could not find your app registration.");
+    });
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+    await user.click(
+      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
+    );
+    await user.type(
+      screen.getByLabelText(/Application \(client\) ID/i),
+      "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    );
+    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Microsoft could not find your app registration.",
+    );
+    const expected = {
+      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
+      appRegistration: { clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
+    };
+
+    await user.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(connectTenant).toHaveBeenCalledTimes(2));
+    expect(connectTenant).toHaveBeenNthCalledWith(2, expected);
+
+    await user.click(await screen.findByRole("button", { name: SETUP_COPY.editSignIn }));
+    expect(await screen.findByRole("radio", { name: "Your own app registration" })).toBeChecked();
+    expect(screen.getByLabelText(/Application \(client\) ID/i)).toHaveValue(
+      "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    );
   });
 });
 
@@ -516,6 +694,15 @@ function pilotState() {
     ],
     activeTenantId: "openadminos-sample-tenant",
   });
+}
+
+function expectUnchosenSignIn() {
+  const openAdminOS = screen.getByRole("radio", { name: "OpenAdminOS app" });
+  const own = screen.getByRole("radio", { name: "Your own app registration" });
+  expect(openAdminOS).not.toBeChecked();
+  expect(own).not.toBeChecked();
+  expect(screen.getByRole("button", { name: /Approve \d+ read scopes/ })).toBeDisabled();
+  expect(screen.getByText(SETUP_COPY.chooseSignInReason)).toBeInTheDocument();
 }
 
 function OpenSetupButton() {

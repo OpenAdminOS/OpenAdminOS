@@ -284,6 +284,7 @@ describe("Settings provider section", () => {
     ).toBeInTheDocument();
     expect(bridge.refreshGraphCache).not.toHaveBeenCalled();
 
+    await user.click(screen.getByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
       screen.getByRole("button", {
         name: /Approve \d+ read scopes and continue to Microsoft/,
