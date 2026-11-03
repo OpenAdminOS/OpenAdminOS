@@ -15,7 +15,7 @@ The app requests read scopes needed by bundled read-only agents during tenant co
 
 The connect dialog starts with two equal choices, and neither is selected for you. **Approve** stays disabled until you choose one.
 
-- **OpenAdminOS app**: the published multi-tenant app, client ID `d1de0a94-f67a-421d-8804-a235955ffd69`. It appears in your tenant's Enterprise applications and sign-in logs as OpenAdminOS. A Global Administrator consents once for the tenant.
+- **OpenAdminOS app**: the published multi-tenant app, client ID `d1de0a94-f67a-421d-8804-a235955ffd69`. It appears in your tenant's Enterprise applications and sign-in logs as OpenAdminOS. An administrator who can grant tenant-wide consent approves once for the tenant. [Authentication](../trust/authentication.md) lists the roles that can.
 - **Your own app registration**: an app your organization creates and owns, so no third-party multi-tenant app is added to the tenant. Sign-in logs show your app's name, and your Conditional Access and consent rules apply to it.
 
 Neither choice uses a client secret, and in both cases tokens are stored on your device only. The read permissions are the same for both. Every way of connecting (the welcome screen, the tenant menu, Settings, Tenants, the pilot mode banner, and actions that need a tenant) opens the same dialog. The welcome screen's own registration link opens it with **Your own app registration** already chosen.

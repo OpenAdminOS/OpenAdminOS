@@ -64,7 +64,7 @@ export const SETUP_COPY = {
   openAdminOSAppTitle: "OpenAdminOS app",
   openAdminOSAppPoints: (clientId: string) => [
     `Appears in Enterprise applications and sign-in logs as OpenAdminOS, client ID ${clientId}.`,
-    "A Global Administrator consents once for the tenant.",
+    "An administrator who can grant tenant-wide consent approves once for the tenant.",
     "No client secret. Tokens are stored on this device only.",
   ],
   ownRegistrationTitle: "Your own app registration",
