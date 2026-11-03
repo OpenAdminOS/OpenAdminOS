@@ -522,9 +522,10 @@ describe("contextual tenant setup", () => {
   it("explains each choice and keeps Approve disabled with a visible reason until one is chosen", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectTenant = vi.fn(async (_options?: unknown) => createMockAppState());
     renderWithAppState(<OpenSetupButton />, {
       route: "/chat",
-      bridge: makeMockBridge({}, emptyState),
+      bridge: makeMockBridge({ connectTenant }, emptyState),
     });
     await user.click(await screen.findByRole("button", { name: "Open setup" }));
 
@@ -557,6 +558,12 @@ describe("contextual tenant setup", () => {
     await user.click(openAdminOS);
     expect(approve).toBeEnabled();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
+
+    // The custom client ID typed before switching back must not be sent.
+    await user.click(approve);
+    await waitFor(() => expect(connectTenant).toHaveBeenCalledTimes(1));
+    expect(connectTenant).toHaveBeenCalledWith({ permissionAreaIds: expect.any(Array) });
+    expect(connectTenant.mock.calls[0]?.[0]).not.toHaveProperty("appRegistration");
   });
 
   it("opens with the own registration chosen from the welcome link", async () => {
