@@ -871,15 +871,15 @@ Connecting with your own Entra app registration has worked since v0.5.0 (issue #
 
 ## Steps
 
-- [ ] Connect dialog: replace the own-registration disclosure with a two-option choice at the top of the permissions step
-- [ ] Welcome screen: keep two primary choices (pilot, connect); the connect path lands on the choice
-- [ ] Saved registrations: persist in state.json, IPC to list and remove, preselect last used
-- [ ] Registration shown per tenant in Settings > Tenants and the tenant switcher
-- [ ] Fix delivery to resolve the MSAL client per tenant, with test
-- [ ] Rewrite `humanizeMsalError` for the actual registration and BYO error codes, with tests
-- [ ] Host tests for custom-registration connect and client isolation
+- [x] Connect dialog: replace the own-registration disclosure with a two-option choice at the top of the permissions step
+- [x] Welcome screen: keep two primary choices (pilot, connect); the connect path lands on the choice
+- [x] Saved registrations: persist in state.json, IPC to list and remove, preselect last used
+- [x] Registration shown per tenant in Settings > Tenants and the tenant switcher
+- [x] Fix delivery to resolve the MSAL client per tenant, with test
+- [x] Rewrite `humanizeMsalError` for the actual registration and BYO error codes, with tests
+- [x] Host tests for custom-registration connect and client isolation
 - [ ] Lab tenant end-to-end check
-- [ ] SPEC, docs, CHANGELOG
+- [x] SPEC, docs, CHANGELOG
 - [ ] Separate evaluator review and GPT-6.1-Sol PR review
 
 # Vendor MCP authentication (design, 2026-11-03)

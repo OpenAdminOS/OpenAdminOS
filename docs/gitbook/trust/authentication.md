@@ -32,7 +32,7 @@ An Intune administrator whose role is limited by scope tags sees the same limite
 
 ## Which Application Signs In
 
-There are two options.
+There are two options, offered as equal choices at the top of the connect dialog. Neither is preselected, and the admin must choose one before Approve is enabled. Settings, Tenants and the tenant menu show which one each tenant uses.
 
 ### The OpenAdminOS application (default)
 
@@ -47,13 +47,15 @@ Organizations that do not allow third-party multi-tenant applications can create
 1. In Entra admin center, create an app registration with supported account type **Accounts in this organizational directory only**.
 2. Under Authentication, add the platform **Mobile and desktop applications** with redirect URI `http://localhost`, and enable **Allow public client flows**.
 3. Under API permissions, add the delegated Microsoft Graph permissions listed in the [Graph scope matrix](../generated/reference/graph-scope-matrix.md) that you want to allow, then grant admin consent.
-4. In OpenAdminOS, choose **Use your organization's app registration** and enter the application (client) ID and the directory (tenant) ID.
+4. In OpenAdminOS, choose **Your own app registration** and enter the application (client) ID and the directory (tenant) ID.
 
-Do not create a client secret. OpenAdminOS signs in as a public client, so there is no secret to store on the device. Each custom registration gets its own token cache, separate from the default application's.
+Do not create a client secret. OpenAdminOS signs in as a public client, so there is no secret to store on the device. Each custom registration gets its own token cache, separate from the default application's. Token refresh and scheduled Teams and Outlook delivery always use the registration the tenant was connected with.
+
+After a successful connect, the client ID, directory ID, and an optional label are remembered in the local app state so the connect dialog can offer the registration again. These are public identifiers. They can be removed in Settings, Tenants without affecting connected tenants.
 
 ### Setup script for your Entra administrator
 
-If you cannot create app registrations yourself, choose **Use your organization's app registration** and then **Generate setup script**. Enter a display name that follows your naming convention and select the areas. OpenAdminOS generates a PowerShell script for the Microsoft Graph PowerShell SDK, plus a short message to send with it. The script:
+If you cannot create app registrations yourself, choose **Your own app registration** and then **Generate setup script**. Enter a display name that follows your naming convention and select the areas. OpenAdminOS generates a PowerShell script for the Microsoft Graph PowerShell SDK, plus a short message to send with it. The script:
 
 1. Explains each change it makes in a comment block at the top.
 2. Stops without changes if the Microsoft Graph PowerShell modules it uses (`Microsoft.Graph.Authentication`, `Microsoft.Graph.Applications`, `Microsoft.Graph.Identity.SignIns`) are not installed. `Install-Module Microsoft.Graph -Scope CurrentUser` installs all of them.

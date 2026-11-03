@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- The connect dialog opens with two equal choices, OpenAdminOS app or your own app registration, neither preselected; own registrations are remembered on the device, each tenant shows its registration, sign-in errors name the registration with specific fixes, and scheduled Teams and Outlook delivery now uses the tenant's own registration.
 - Public roadmap at roadmap.openadminos.com: four stages from the desktop available today to team features and a vendor ecosystem, each item tracked as a public issue.
 - Add a code of conduct (Contributor Covenant 2.1) and a security policy with private vulnerability reporting and the scope of what to report.
 - Document how to connect with your own Entra app registration: redirect URI, public client flows, and the delegated Graph permissions to add. A test keeps the documented permission list in sync with the app.
