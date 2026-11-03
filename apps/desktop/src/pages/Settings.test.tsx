@@ -14,7 +14,7 @@ import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
-import { PROVIDER_DETECTION_COPY } from "../copy";
+import { PROVIDER_DETECTION_COPY, SETUP_COPY } from "../copy";
 import { setAnswerFont } from "../styles/answer-font";
 import { setDensity } from "../styles/density";
 
@@ -812,6 +812,88 @@ describe("Settings provider section", () => {
     await user.click(screen.getByRole("button", { name: "Continue to Microsoft" }));
     await waitFor(() =>
       expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", "devices"),
+    );
+  });
+
+  it("shows each tenant's app registration and removes a saved registration", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const customTenant = {
+      ...base.tenants[0]!,
+      appRegistration: {
+        kind: "custom" as const,
+        clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        label: "Contoso admin app",
+      },
+    };
+    const state = createMockAppState({
+      tenants: [customTenant],
+      savedAppRegistrations: [
+        {
+          clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+          label: "Contoso admin app",
+          lastUsedAt: "2026-11-03T10:00:00.000Z",
+        },
+        {
+          clientId: "11111111-2222-4333-8444-555555555555",
+          directoryTenantId: "fabrikam.onmicrosoft.com",
+          lastUsedAt: "2026-11-01T10:00:00.000Z",
+        },
+      ],
+    });
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/tenants",
+      bridge,
+    });
+
+    expect(await screen.findByText("Own app registration · Contoso admin app")).toHaveAttribute(
+      "title",
+      "Own app registration Contoso admin app, client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    );
+    const saved = screen.getByRole("region", { name: SETUP_COPY.savedRegistrationsSettingsTitle });
+    expect(saved).toHaveTextContent("Tenants already connected with it keep working.");
+    expect(within(saved).getByText("fabrikam.onmicrosoft.com")).toBeInTheDocument();
+
+    await user.click(
+      within(saved).getByRole("button", {
+        name: SETUP_COPY.removeSavedRegistration("11111111-2222-4333-8444-555555555555"),
+      }),
+    );
+    expect(bridge.removeSavedAppRegistration).toHaveBeenCalledWith(
+      "11111111-2222-4333-8444-555555555555",
+      "fabrikam.onmicrosoft.com",
+    );
+    await waitFor(() =>
+      expect(within(saved).queryByText("fabrikam.onmicrosoft.com")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("Own app registration · Contoso admin app")).toBeInTheDocument();
+  });
+
+  it("surfaces a failed removal of a saved registration with a recovery path", async () => {
+    const user = userEvent.setup();
+    const state = createMockAppState({
+      savedAppRegistrations: [
+        { clientId: "11111111-2222-4333-8444-555555555555", lastUsedAt: "2026-11-01T10:00:00.000Z" },
+      ],
+    });
+    const removeSavedAppRegistration = vi.fn(async () => {
+      throw new Error("The local state file could not be written.");
+    });
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/tenants",
+      bridge: makeMockBridge({ removeSavedAppRegistration }, state),
+    });
+
+    await user.click(
+      await screen.findByRole("button", {
+        name: SETUP_COPY.removeSavedRegistration("11111111-2222-4333-8444-555555555555"),
+      }),
+    );
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      /The saved registration was not removed\. .*Try again\./,
     );
   });
 });

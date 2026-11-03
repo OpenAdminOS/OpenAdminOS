@@ -85,6 +85,13 @@ export const SETUP_COPY = {
   directoryIdInvalidReason:
     "The Directory (tenant) ID must be a GUID or a verified domain name.",
   editSignIn: "Change sign-in options",
+  savedRegistrationsSettingsTitle: "Saved app registrations",
+  savedRegistrationsSettingsBody:
+    "Your own app registrations used on this device. Removing one only removes it from the connect dialog. Tenants already connected with it keep working.",
+  removeSavedRegistration: (name: string) => `Remove saved registration ${name}`,
+  removeSavedRegistrationFailed: (reason: string) =>
+    `The saved registration was not removed. ${reason} Try again.`,
+  savedRegistrationRemoved: "Saved registration removed. Connected tenants are unchanged.",
   ownRegistrationNoSecret:
     "No client secret is used. OpenAdminOS signs in as a public client (Authorization Code with PKCE), so there is no secret to store on this device.",
   delegatedPermissionsNote:

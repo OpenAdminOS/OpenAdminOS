@@ -58,6 +58,7 @@ import {
   type RetrievalStatus,
   type RunHistoryPruneResult,
   type RunHistoryRetentionSettings,
+  type SavedAppRegistration,
   type SandboxSettings,
   type SchedulerLaunchSettings,
   type SelfTrainingSettings,
@@ -71,6 +72,7 @@ import {
 } from "../shared/openAdminOS";
 import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
 import { copyTextToClipboard } from "../shared/clipboard";
+import { savedRegistrationName, tenantRegistrationSummary } from "../shared/app-registration";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
@@ -183,6 +185,7 @@ export default function Settings() {
     setActiveTenant,
     addTenantAccess,
     disconnectTenant,
+    removeSavedAppRegistration,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
     setUsageTelemetryEnabled,
@@ -498,9 +501,11 @@ export default function Settings() {
                 tenants={state.tenants}
                 activeTenantId={state.activeTenantId}
                 error={null}
+                savedRegistrations={state.savedAppRegistrations ?? []}
                 onSetActive={setActiveTenant}
                 onAddAccess={addTenantAccess}
                 onDisconnect={disconnectTenant}
+                onRemoveSavedRegistration={removeSavedAppRegistration}
               />
             </SettingsPageSection>
             <SettingsPageSection id="data" visible={visibleSectionIds.has("data")} query={settingsQuery}>
@@ -1194,16 +1199,20 @@ function TenantsSection({
   tenants,
   activeTenantId,
   error,
+  savedRegistrations,
   onSetActive,
   onAddAccess,
   onDisconnect,
+  onRemoveSavedRegistration,
 }: {
   tenants: TenantRecord[];
   activeTenantId?: string;
   error: string | null;
+  savedRegistrations: SavedAppRegistration[];
   onSetActive: (id: string) => Promise<void>;
   onAddAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
+  onRemoveSavedRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
 }) {
   return (
     <div className="max-w-[1040px]">
@@ -1233,7 +1242,82 @@ function TenantsSection({
           ))
         )}
       </div>
+      {savedRegistrations.length > 0 && (
+        <SavedRegistrationsList
+          registrations={savedRegistrations}
+          onRemove={onRemoveSavedRegistration}
+        />
+      )}
     </div>
+  );
+}
+
+function SavedRegistrationsList({
+  registrations,
+  onRemove,
+}: {
+  registrations: SavedAppRegistration[];
+  onRemove: (clientId: string, directoryTenantId?: string) => Promise<void>;
+}) {
+  const toast = useToast();
+  const [removing, setRemoving] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  return (
+    <section aria-labelledby="saved-app-registrations-heading" className="mt-6">
+      <h3 id="saved-app-registrations-heading" className="text-base font-medium text-[var(--color-text)]">
+        {SETUP_COPY.savedRegistrationsSettingsTitle}
+      </h3>
+      <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">
+        {SETUP_COPY.savedRegistrationsSettingsBody}
+      </p>
+      {removeError && (
+        <div role="alert" className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+          {removeError}
+        </div>
+      )}
+      <div className="mt-3 overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
+        {registrations.map((entry) => {
+          const key = `${entry.clientId}|${entry.directoryTenantId ?? ""}`;
+          const name = savedRegistrationName(entry);
+          return (
+            <div
+              key={key}
+              className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-soft)] px-4 py-[var(--row-y)] last:border-b-0"
+            >
+              <div className="min-w-[220px] flex-1">
+                <div className="truncate text-base text-[var(--color-text)]" title={name}>{name}</div>
+                <div className="mt-0.5 break-all font-mono text-xs text-[var(--color-text-muted)]">
+                  {entry.label ? `${entry.clientId} · ` : ""}
+                  {entry.directoryTenantId ?? "Multi-tenant"}
+                </div>
+              </div>
+              <UiButton
+                variant="ghost"
+                size="sm"
+                aria-label={SETUP_COPY.removeSavedRegistration(name)}
+                disabled={removing !== null}
+                onClick={() => {
+                  setRemoving(key);
+                  setRemoveError(null);
+                  void onRemove(entry.clientId, entry.directoryTenantId)
+                    .then(() => toast.success(SETUP_COPY.savedRegistrationRemoved))
+                    .catch((caught) =>
+                      setRemoveError(
+                        SETUP_COPY.removeSavedRegistrationFailed(
+                          userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
+                        ).replace(/\s+/g, " "),
+                      ),
+                    )
+                    .finally(() => setRemoving(null));
+                }}
+              >
+                {removing === key ? "Removing" : "Remove"}
+              </UiButton>
+            </div>
+          );
+        })}
+      </div>
+    </section>
   );
 }
 
@@ -1287,6 +1371,7 @@ function TenantRow({
   const domain = tenant.username.includes("@")
     ? tenant.username.slice(tenant.username.lastIndexOf("@") + 1)
     : tenant.username;
+  const registration = tenantRegistrationSummary(tenant);
   return (
     <>
       <div className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-soft)] px-0 py-[var(--row-y)] last:border-b-0">
@@ -1304,6 +1389,11 @@ function TenantRow({
               ? "Fictional company, stored on this device"
               : `${domain} · ${entraLicenseName ?? "Entra tier not available"}`}
           </div>
+          {registration ? (
+            <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
+              {registration.text}
+            </div>
+          ) : null}
         </div>
         <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample data" : licenses.map((license) => license.displayName).join(", ")}>
           {tenant.kind === "sample"
@@ -1313,6 +1403,9 @@ function TenantRow({
             : "No license details"}
         </div>
         {tenant.kind !== "sample" ? (
+          // TODO(ugur): this reconnects an existing tenant, so the dialog could
+          // open with the tenant's current registration chosen. It opens
+          // unchosen like every other entry point until that is decided.
           <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
         ) : null}
         {!isActive ? (
