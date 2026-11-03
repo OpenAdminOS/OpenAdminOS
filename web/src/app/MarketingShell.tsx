@@ -20,6 +20,8 @@ const MARKETING_NAV_ITEMS: readonly MobileNavItem[] = [
   { href: "/registry", label: "Registry" },
   { href: "/benchmarks", label: "Benchmarks" },
   { href: "/blog", label: "Blog" },
+  // Same tab: the roadmap is part of the site, on its own host.
+  { href: ROADMAP_URL, label: "Roadmap" },
   { href: DOCS_URL, label: "Documentation", external: true },
   { href: GITHUB_URL, label: "GitHub", external: true },
   { href: "/download", label: "Download", primary: true },
@@ -52,7 +54,7 @@ const FOOTER_GROUPS: readonly {
     title: "Project",
     links: [
       { href: GITHUB_URL, label: "GitHub", external: true },
-      { href: ROADMAP_URL, label: "Roadmap", external: true },
+      { href: ROADMAP_URL, label: "Roadmap" },
       { href: LINKEDIN_URL, label: "LinkedIn", external: true },
       { href: "/privacy", label: "Privacy" },
       { href: "/terms", label: "Terms" },
