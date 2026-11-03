@@ -100,7 +100,7 @@ describe("RunResult write confirmation", () => {
     const run = createAwaitingConfirmationRun({ status: "completed", plan: { summary: "No changes matched.", confirmationPhrase: "APPLY CHANGES", actions: [] } });
     const bridge = makeMockBridge({}, createMockAppState({ runs: [run] }));
     renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
-    await screen.findByRole("dialog");
+    await screen.findByRole("region", { name: "Run status" });
     expect(screen.queryByText(/Risk check could not run/)).not.toBeInTheDocument();
   });
 
@@ -375,11 +375,14 @@ describe("RunResult write confirmation", () => {
   });
 });
 
-it("opens terminal runs in the URL-addressable run drawer", async () => {
+it("opens terminal runs as a full run page with collapsible details", async () => {
+  const user = userEvent.setup();
   const run = createAwaitingConfirmationRun({
     status: "completed",
     plan: undefined,
+    startedAt: "2026-10-10T10:00:00.000Z",
     finishedAt: "2026-10-10T10:01:00.000Z",
+    summary: "## Summary\n\nTwo stale devices were found.",
   });
   const bridge = makeMockBridge(
     {},
@@ -395,15 +398,25 @@ it("opens terminal runs in the URL-addressable run drawer", async () => {
     bridge,
   });
 
-  expect(await screen.findByRole("dialog", { name: "Device Offboard" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Device Offboard" })).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Run status" })).getByRole("status")).toHaveTextContent("Completed in 1m 00s");
+  expect(screen.getByRole("region", { name: "Report" })).toHaveTextContent("Two stale devices were found.");
+  expect(screen.queryByRole("tablist", { name: "Run detail views" })).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: /Run details/ }));
   expect(screen.getByRole("tablist", { name: "Run detail views" })).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Telemetry" })).toBeInTheDocument();
 });
 
-it("opens queued and running runs in the live run modal", async () => {
+it("shows queued and running runs on the run page with live progress and cancel", async () => {
+  const user = userEvent.setup();
   const run = createAwaitingConfirmationRun({
     status: "running",
     plan: undefined,
+    steps: [
+      { id: "step-1", runId: "run-write-1", label: "Load managed devices", status: "completed", startedAt: "2026-10-10T10:00:00.000Z", finishedAt: "2026-10-10T10:00:02.000Z" },
+      { id: "step-2", runId: "run-write-1", label: "Write the report", status: "running", startedAt: "2026-10-10T10:00:02.000Z" },
+      { id: "step-3", runId: "run-write-1", label: "Deliver report", status: "pending" },
+    ],
   });
   const bridge = makeMockBridge(
     {},
@@ -419,9 +432,14 @@ it("opens queued and running runs in the live run modal", async () => {
     bridge,
   });
 
-  expect(await screen.findByRole("dialog", { name: "Live run: Device Offboard" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { level: 1, name: "Device Offboard" })).toBeInTheDocument();
+  expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  expect(within(screen.getByRole("region", { name: "Run status" })).getByRole("status")).toHaveTextContent("Running step 2 of 3");
+  expect(screen.getByRole("progressbar", { name: "Run progress" })).toHaveAttribute("aria-valuenow", "1");
+  expect(within(screen.getByRole("region", { name: "Progress" })).getByText("Write the report")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "Run in background" })).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Cancel run" })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Cancel run" }));
+  await waitFor(() => expect(bridge.cancelRun).toHaveBeenCalledWith(run.id));
 });
 
 it('retries Team evidence by source ID without sending evidence through the renderer', async () => {

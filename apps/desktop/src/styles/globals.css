@@ -398,6 +398,73 @@ button:disabled {
   animation: fade-in 0.25s ease-out;
 }
 
+/* Run page: live progress, skeletons and report spacing. */
+@keyframes run-sweep {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(250%);
+  }
+}
+.run-progress-sweep {
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, var(--color-info), transparent);
+  animation: run-sweep 1.4s ease-in-out infinite;
+}
+.run-progress-indeterminate {
+  position: absolute;
+  inset: 0;
+  width: 35%;
+  border-radius: 999px;
+  background: var(--color-info);
+  opacity: 0.7;
+  animation: run-sweep 1.6s ease-in-out infinite;
+}
+.run-skeleton {
+  border-radius: 6px;
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-raised) 0%,
+    var(--color-border-strong) 50%,
+    var(--color-bg-raised) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
+@keyframes run-ring {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-info) 40%, transparent);
+  }
+  100% {
+    box-shadow: 0 0 0 7px transparent;
+  }
+}
+.run-live-ring {
+  animation: run-ring 1.6s ease-out infinite;
+}
+.run-rise {
+  animation: fade-in 0.35s ease-out both;
+}
+.run-report :where(h1, h2, h3, h4) {
+  margin-top: 1.2em;
+  margin-bottom: 0.25em;
+}
+.run-report :where(h1, h2, h3, h4):first-child {
+  margin-top: 0;
+}
+.run-report :where(p, ul, ol) {
+  margin-top: 0.6em;
+}
+.run-report :where(li) {
+  margin-top: 0.3em;
+}
+.run-report :where(li)::marker {
+  color: var(--color-text-muted);
+}
+
 @keyframes fade-in-scale {
   from {
     opacity: 0;
@@ -628,6 +695,11 @@ button:disabled {
   .animate-fade-in-scale,
   .animate-pulse-soft,
   .animate-companion-rise,
+  .run-progress-sweep,
+  .run-progress-indeterminate,
+  .run-skeleton,
+  .run-live-ring,
+  .run-rise,
   .companion-action-card,
   .companion-list-row {
     animation: none !important;
