@@ -2774,7 +2774,7 @@ OpenAdminOS is open core. The desktop app is MIT and fully functional on its own
 
 **What stays free.** Nothing a single admin uses today moves behind a paywall: multi-tenant chat, multi-tenant jobs, tenant groups, Fleet, drift and rollback, the MCP write-gateway, and local audit export stay free.
 
-**Code boundary.** This repository never contains paid code and never references it through git submodules. Where paid features plug in, it ships a no-op stub package, `@openadminos/enterprise`, with a documented, versioned interface, so a build from this repository is the complete free app. Contributor builds and CI never need access to anything private. Official signed builds include the paid module; it stays dormant until the app holds a valid licence.
+**Code boundary.** This repository never contains paid code and never references it through git submodules. Where paid features plug in, it ships a no-op stub package, `@openadminos/enterprise`, with a documented, versioned interface, so a build from this repository is the complete free app. Contributor builds and CI never need access to anything private. Official signed builds include the paid module; it stays dormant until the app holds a valid licence, which the app checks offline against a public key built into it.
 
 **Trust rules for paid features.**
 - Dormant paid code makes no network calls. Nothing leaves the device for the team service before an explicit team join, which names the service in its trust messaging.
