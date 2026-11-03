@@ -279,4 +279,4 @@ MIT. See [`LICENSE`](LICENSE).
 
 ## Who's behind it
 
-Free community project. Sponsorships welcome, no paid tier planned for the platform itself.
+Free community project. Sponsorships welcome.
