@@ -837,3 +837,46 @@ npm run typecheck && npm run qa && npm run build
 ```
 
 See [`README.md`](../README.md) for the full quickstart.
+
+# Marketplace in the app, first wave (2026-11-03)
+
+Branch `marketplace/first-wave` off `main`, in its own worktree. Runs locally only until approved; no merge, so no nightly.
+
+## Deliverable
+
+A Marketplace sidebar item that replaces the Agent Hub. It lists the registry agents and three remote MCP servers: Microsoft Learn (`https://learn.microsoft.com/api/mcp`), KQL Search (`https://www.kqlsearch.com/mcp`) and IntuneAutomation (`https://www.intuneautomation.com/mcp/`). All three were probed on 2026-11-03: streamable HTTP, protocol 2025-06-18, no sign-in, read-only. Installing a server once makes its tools available to Chat with any provider, because OpenAdminOS runs the tool loop itself.
+
+## Acceptance criteria
+
+1. Sidebar shows Marketplace. The Agents page shows installed agents only; "Install from hub", the command palette entry and the `/hub` redirects open the Marketplace instead.
+2. Marketplace lists all registry agents (install, details and license gating as today) and the three MCP servers, styled after `docs/mockups/25-marketplace.html`, without prices or vendor commerce.
+3. Installing an MCP server shows an authentication step ("No sign-in needed") and the host its queries go to, then connects, lists its tools and stores the install in `state.json`. Uninstall and enable or disable work. A server that is unreachable shows a designed error with retry, never a silent failure.
+4. Chat lists installed MCP tools to the model, calls them through the MCP client in the main process, shows each call in the tool trace with its host, and fences results as third-party content. A docs-only question answered from an MCP tool is not rejected by the tenant-evidence guard.
+5. The model is told to send MCP tools only standalone public questions, never tenant names, user names, device names, IDs or tenant data. MCP tools never reach the external MCP gateway.
+6. Trust copy is honest: with any MCP server enabled, the status strip and its tooltip name the hosts that receive tool queries, also when the model is local.
+7. Pilot mode: the Marketplace is browsable and MCP servers can be installed; agent install stays production-only as today.
+8. Unit tests for the MCP host (connect, list, call, timeout, error), the loop integration and the trust copy; renderer tests for the Marketplace page; Playwright or app screenshots in light and dark.
+9. Verified live in the running app: install all three, ask Chat a question each one answers.
+10. SPEC.md decision, CHANGELOG [Unreleased], separate evaluator and GPT-6.1-Sol review before any PR merge.
+
+## Decisions (2026-11-03)
+
+- Status strip names the MCP hosts whenever an MCP server is enabled, also with a local model.
+- Small local models that skip the tool loop get no MCP tools; Marketplace and Chat say the selected model is too small for tool use.
+- Pilot: the Marketplace is browsable and MCP install is allowed; agent install stays production-only.
+- Every install shows an authentication step, even when it is "No sign-in needed", plus the host queries go to.
+- The catalog of the three servers lives in code for now (typed module with id, name, publisher, host URL, description, auth `none`). No public catalog file yet.
+
+## Out of scope
+
+Vendor sign-in (designed separately as Vendor MCP authentication), local or sandboxed servers, paid listings, publishing a public MCP catalog file, MCP tools in agents or schedules.
+
+## Steps
+
+- [ ] MCP host in the main process: catalog of the three servers, connect, list tools, call with timeout and output cap
+- [ ] Persist installs, IPC and preload API
+- [ ] Chat loop: MCP tools in the prompt, executor, trace, evidence guard, prompt rules
+- [ ] Trust copy for external tool hosts
+- [ ] Marketplace page and sidebar; move the hub out of Agents
+- [ ] Tests, screenshots, live check in the app
+- [ ] SPEC, CHANGELOG, reviews
