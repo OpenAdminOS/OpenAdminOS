@@ -99,7 +99,11 @@ export function MarketingShell({
       ) : null}
       <header className="sticky top-0 z-40 border-b border-brand-line-soft bg-brand-bg/85 backdrop-blur-md supports-[backdrop-filter]:bg-brand-bg/70">
         <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between px-6 sm:px-10">
-          <Link href={homeHref} aria-label="OpenAdminOS home" className="rounded-md">
+          <Link
+            href={homeHref}
+            aria-label="OpenAdminOS home"
+            className="flex items-center rounded-md"
+          >
             <Wordmark />
           </Link>
           <nav
@@ -150,7 +154,11 @@ export function MarketingShell({
       <footer className="border-t border-brand-line bg-brand-surface">
         <div className="mx-auto grid w-full max-w-7xl gap-12 px-6 py-14 sm:px-10 md:grid-cols-[1.4fr_repeat(3,1fr)]">
           <div className="max-w-xs">
-            <Link href={homeHref} aria-label="OpenAdminOS home" className="rounded-md">
+            <Link
+              href={homeHref}
+              aria-label="OpenAdminOS home"
+              className="flex w-fit items-center rounded-md"
+            >
               <Wordmark />
             </Link>
             <p className="mt-4 text-sm leading-6 text-brand-muted">
