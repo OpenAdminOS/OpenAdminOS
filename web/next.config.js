@@ -17,6 +17,13 @@ const webRoot = dirname(fileURLToPath(import.meta.url));
  * and keeps old GitBook and file-path URLs working.
  */
 const DOCS_HOST = "docs.openadminos.com";
+/*
+ * roadmap.openadminos.com serves the /roadmap page at its root. Other page
+ * paths on that host (the shared header and footer links) go to the main site.
+ */
+const ROADMAP_HOST = "roadmap.openadminos.com";
+/** @type {import("next/dist/lib/load-custom-routes").RouteHas[]} */
+const roadmapHost = [{ type: "host", value: "roadmap\\.openadminos\\.com" }];
 /** @type {import("next/dist/lib/load-custom-routes").RouteHas[]} */
 const docsHost = [{ type: "host", value: "docs\\.openadminos\\.com" }];
 /** @type {import("next/dist/lib/load-custom-routes").RouteHas[]} */
@@ -63,6 +70,20 @@ const config = {
         destination: `https://${DOCS_HOST}/:path*`,
         permanent: false,
       },
+      // The roadmap has its own host. Temporary, so the target can change.
+      {
+        source: "/roadmap",
+        has: wwwHost,
+        destination: `https://${ROADMAP_HOST}/`,
+        permanent: false,
+      },
+      { source: "/roadmap", has: roadmapHost, destination: "/", permanent: false },
+      {
+        source: "/:path((?!_next/|_vercel/|api/)[^.]+)",
+        has: roadmapHost,
+        destination: "https://www.openadminos.com/:path",
+        permanent: false,
+      },
       ...docsRedirects(),
       // app/docs-host is only meant to be reached through the host rewrite,
       // and /docs is only the preview prefix. File paths such as the search
@@ -99,6 +120,7 @@ const config = {
           destination: "/docs-host/:path",
         },
         { source: "/", has: docsHost, destination: "/docs-host" },
+        { source: "/", has: roadmapHost, destination: "/roadmap" },
         {
           source: "/:path(.+)\\.md",
           has: docsHost,

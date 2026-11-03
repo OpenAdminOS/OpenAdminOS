@@ -5,6 +5,7 @@ export const SITE_URL = "https://www.openadminos.com";
 export const SITE_HOME_URL = `${SITE_URL}/`;
 export const GITHUB_URL = "https://github.com/OpenAdminOS/OpenAdminOS";
 export const DOCS_URL = "https://docs.openadminos.com/";
+export const ROADMAP_URL = "https://roadmap.openadminos.com/";
 export const LINKEDIN_URL = "https://www.linkedin.com/company/openadminos/";
 export const SUPPORT_EMAIL = "support@openadminos.com";
 /** The company behind OpenAdminOS. The product name stays OpenAdminOS. */
