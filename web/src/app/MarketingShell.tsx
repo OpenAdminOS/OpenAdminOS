@@ -11,6 +11,7 @@ import {
   LEGAL_ENTITY_NAME,
   LINKEDIN_URL,
   MICROSOFT_NOTICE,
+  ROADMAP_URL,
 } from "./seo";
 import { card, eyebrow } from "./ui";
 
@@ -51,6 +52,7 @@ const FOOTER_GROUPS: readonly {
     title: "Project",
     links: [
       { href: GITHUB_URL, label: "GitHub", external: true },
+      { href: ROADMAP_URL, label: "Roadmap", external: true },
       { href: LINKEDIN_URL, label: "LinkedIn", external: true },
       { href: "/privacy", label: "Privacy" },
       { href: "/terms", label: "Terms" },

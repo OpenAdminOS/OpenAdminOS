@@ -85,6 +85,10 @@ interpretation. Unrecognized batch launchers are rejected with installation guid
 persona instructions, model names, and prompt punctuation must remain literal arguments.
 No additional runtime dependency is introduced for this resolution.
 
+### Public roadmap
+
+The public roadmap is the `/roadmap` page of the Next.js app in `web/`, served at the root of `roadmap.openadminos.com` by a host rewrite in `web/next.config.js` (the same pattern as the docs host). Other page paths on that host redirect to the main site, and `/roadmap` on the main site redirects to the roadmap host. The page lists ordered stages without dates, release numbers or pricing; every item has a public GitHub issue. Stage content lives in `web/src/app/roadmap/stages.ts`.
+
 ### Public documentation model
 
 Public documentation lives in `docs/gitbook` and is published at `docs.openadminos.com` by the Next.js app in `web/`, the same Vercel project as the marketing site. GitBook (a paid plan, synced through a repository root `.gitbook.yaml`) served the docs until the self-hosted site replaced it. The `docs` DNS record now points to Vercel, and `.gitbook.yaml` was removed after the cutover was verified; the folder keeps its `docs/gitbook` name so paths, scripts, and edit links stay stable. `docs/gitbook/SUMMARY.md` remains the source of the sidebar groups and page order. Internal product artifacts such as this spec and HTML mockups stay under `docs/` but outside the public docs root.
