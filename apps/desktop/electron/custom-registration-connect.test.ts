@@ -365,6 +365,53 @@ describe("reconnecting a tenant with a different app registration", () => {
     }
   });
 
+  it("keeps the cached account when only the client ID's letter case changes", async () => {
+    const fixture = await makeFixture();
+    try {
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID.toUpperCase(), directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+      const removed = recordRemovals(
+        fixture.internal.msalClientFor({ ...customRegistration, clientId: CUSTOM_CLIENT_ID.toUpperCase() }),
+      );
+
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID, directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+
+      assert.deepEqual(removed, []);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps the cached account while another tenant uses it with a differently cased client ID", async () => {
+    const fixture = await makeFixture({
+      tenants: [
+        {
+          id: "fabrikam-tenant-id",
+          displayName: "Fabrikam",
+          username: "admin@contoso.example",
+          homeAccountId: "home-account.contoso-tenant-id",
+          addedAt: "2026-11-01T10:00:00.000Z",
+          appRegistration: { kind: "custom", clientId: CUSTOM_CLIENT_ID.toUpperCase(), authority: DEFAULT_AUTHORITY },
+        },
+      ],
+    });
+    try {
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID, directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+      const removed = recordRemovals(fixture.internal.msalClientFor(customRegistration));
+
+      await fixture.store.connectTenant({});
+
+      assert.deepEqual(removed, []);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("keeps the cached account while another tenant signs in with it from the same client", async () => {
     const fixture = await makeFixture({
       tenants: [

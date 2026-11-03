@@ -2108,13 +2108,16 @@ export class AppStateStore {
    * another connected tenant still signs in with the same account from the
    * same token cache. Token caches are partitioned by client ID only, not by
    * authority (see `msalClientFor`), so an authority change alone never
-   * removes anything. Failure leaves an unused cached account behind, never
-   * a broken connection, so it is logged rather than surfaced.
+   * removes anything. Client IDs are compared case-insensitively: GUIDs are
+   * accepted in either case, and on case-insensitive filesystems (macOS,
+   * Windows) differently cased IDs resolve to the same token cache file.
+   * Failure leaves an unused cached account behind, never a broken
+   * connection, so it is logged rather than surfaced.
    */
   private async forgetReplacedSignIn(previous: TenantRecord, current: TenantRecord): Promise<void> {
     if (previous.kind === "sample") return;
     const cachePartition = (registration: TenantAppRegistration | undefined) =>
-      registration?.clientId ?? defaultClientId();
+      (registration?.clientId ?? defaultClientId()).toLowerCase();
     const previousPartition = cachePartition(previous.appRegistration);
     if (previousPartition === cachePartition(current.appRegistration)) return;
     const stillUsed = (await this.read()).tenants.some(
