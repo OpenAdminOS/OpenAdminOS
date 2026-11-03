@@ -303,3 +303,62 @@ describe("MSAL client isolation per app registration", () => {
     }
   });
 });
+
+describe("reconnecting a tenant with a different app registration", () => {
+  function recordRemovals(client: unknown): string[] {
+    const removed: string[] = [];
+    const account = { homeAccountId: "home-account.contoso-tenant-id" };
+    Object.defineProperty(client, "getTokenCache", {
+      value: () => ({
+        getAccountByHomeId: async (homeAccountId: string) =>
+          homeAccountId === account.homeAccountId ? account : null,
+        removeAccount: async (entry: { homeAccountId: string }) => {
+          removed.push(entry.homeAccountId);
+        },
+      }),
+    });
+    return removed;
+  }
+
+  const customRegistration: TenantAppRegistration = {
+    kind: "custom",
+    clientId: CUSTOM_CLIENT_ID,
+    authority: "https://login.microsoftonline.com/contoso.onmicrosoft.com",
+  };
+
+  it("removes the previous registration's cached account after switching to the OpenAdminOS app", async () => {
+    const fixture = await makeFixture();
+    try {
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID, directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+      const removed = recordRemovals(fixture.internal.msalClientFor(customRegistration));
+
+      const state = await fixture.store.connectTenant({});
+
+      assert.equal(state.tenants.length, 1);
+      assert.equal(state.tenants[0]?.appRegistration?.clientId, OPENADMINOS_CLIENT_ID);
+      assert.deepEqual(removed, ["home-account.contoso-tenant-id"]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps the cached account when the tenant reconnects with the same registration", async () => {
+    const fixture = await makeFixture();
+    try {
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID, directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+      const removed = recordRemovals(fixture.internal.msalClientFor(customRegistration));
+
+      await fixture.store.connectTenant({
+        appRegistration: { clientId: CUSTOM_CLIENT_ID, directoryTenantId: "contoso.onmicrosoft.com" },
+      });
+
+      assert.deepEqual(removed, []);
+    } finally {
+      await fixture.close();
+    }
+  });
+});

@@ -2102,6 +2102,38 @@ export class AppStateStore {
     return client;
   }
 
+  /**
+   * Reconnecting a tenant with a different app registration leaves the
+   * previous client's refresh token on disk. Remove that account unless
+   * another connected tenant still signs in with the same client and
+   * account. Failure leaves an unused cached account behind, never a
+   * broken connection, so it is logged rather than surfaced.
+   */
+  private async forgetReplacedSignIn(previous: TenantRecord, current: TenantRecord): Promise<void> {
+    if (previous.kind === "sample") return;
+    const key = (registration: TenantAppRegistration | undefined) =>
+      `${registration?.clientId ?? defaultClientId()}|${registration?.authority ?? DEFAULT_AUTHORITY}`;
+    const previousKey = key(previous.appRegistration);
+    if (previousKey === key(current.appRegistration)) return;
+    const stillUsed = (await this.read()).tenants.some(
+      (tenant) =>
+        tenant.kind !== "sample" &&
+        tenant.homeAccountId === previous.homeAccountId &&
+        key(tenant.appRegistration) === previousKey,
+    );
+    if (stillUsed) return;
+    try {
+      await removeAccount({
+        client: this.msalClientFor(previous.appRegistration),
+        homeAccountId: previous.homeAccountId,
+      });
+    } catch (cause) {
+      console.warn(
+        `[tenants] the previous sign-in for ${previous.id} could not be removed from its token cache: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
+  }
+
   /** The MSAL client that issued this tenant's tokens. */
   private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
     if (tenant.kind === "sample") {
@@ -5477,11 +5509,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       appRegistration: registration,
     };
 
+    let replaced: TenantRecord | undefined;
     await this.serialize(async () => {
       const persisted = await this.read();
       const existingIdx = persisted.tenants.findIndex((t) => t.id === tenant.id);
       const nextTenants = [...persisted.tenants];
       if (existingIdx >= 0) {
+        replaced = nextTenants[existingIdx];
         nextTenants[existingIdx] = { ...nextTenants[existingIdx], ...tenant };
       } else {
         nextTenants.push(tenant);
@@ -5505,6 +5539,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           : {}),
       });
     });
+
+    if (replaced) await this.forgetReplacedSignIn(replaced, tenant);
 
     // Background probe: detect the tenant's Entra ID tier so Agent Hub
     // can badge incompatible agents. Failure here is silent. `unknown`
