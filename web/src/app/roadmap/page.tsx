@@ -6,8 +6,10 @@ import {
   GITHUB_URL,
   JsonLd,
   ROADMAP_URL,
+  SITE_HOME_URL,
   organizationSchema,
   pageMetadata,
+  webPageSchema,
   websiteSchema,
 } from "../seo";
 import { ROADMAP_STAGES } from "./stages";
@@ -31,18 +33,16 @@ export default function RoadmapPage() {
     "@graph": [
       organizationSchema(),
       websiteSchema(),
-      {
-        "@type": "WebPage",
-        "@id": `${ROADMAP_URL}#webpage`,
-        url: ROADMAP_URL,
+      webPageSchema({
+        path: ROADMAP_URL,
         name: `OpenAdminOS ${TITLE}`,
         description: DESCRIPTION,
-      },
+      }),
     ],
   };
 
   return (
-    <MarketingShell>
+    <MarketingShell homeHref={SITE_HOME_URL}>
       <JsonLd data={structuredData} />
       <header className="max-w-4xl">
         <p className="font-mono text-xs uppercase tracking-[0.06em] text-brand-faint">
