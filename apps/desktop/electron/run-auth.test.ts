@@ -85,10 +85,18 @@ it("Teams and Outlook deliveries sign in with the tenant's own app registration"
     msalClientForTenant: (tenant: { id: string; appRegistration?: { clientId: string } }) => {
       resolvedFor.push({ tenantId: tenant.id, ...(tenant.appRegistration ? { clientId: tenant.appRegistration.clientId } : {}) });
       const clientId = tenant.appRegistration?.clientId ?? "default";
-      return { getTokenCache: () => ({ getAccountByHomeId: async (homeAccountId: string) => {
-        accountLookups.push(`${clientId}:${homeAccountId}`);
-        return null;
-      } }) };
+      return {
+        getTokenCache: () => ({ getAccountByHomeId: async (homeAccountId: string) => {
+          accountLookups.push(`${clientId}:${homeAccountId}`);
+          return { homeAccountId, tenantId: tenant.id, username: "admin@contoso.example" };
+        } }),
+        acquireTokenSilent: async (request: { scopes: string[] }) => ({
+          accessToken: `token-${clientId}`,
+          scopes: request.scopes,
+          expiresOn: new Date(Date.now() + 3_600_000),
+          account: { homeAccountId: "byo-home" },
+        }),
+      };
     },
     openBrowser: async () => undefined,
     connectorSecretsFor: () => ({ get: async () => undefined }),
@@ -99,8 +107,30 @@ it("Teams and Outlook deliveries sign in with the tenant's own app registration"
     deliverRunToTeams(run: unknown): Promise<{ error?: string }>;
     deliverRunToOutlook(run: unknown): Promise<{ error?: string }>;
   };
-  await internal.deliverRunToTeams(run);
-  await internal.deliverRunToOutlook(run);
+  const graphCalls: Array<{ url: string; authorization: string | null }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    graphCalls.push({ url, authorization: new Headers(init?.headers).get("authorization") });
+    if (url.endsWith("/sendMail")) return new Response(null, { status: 202 });
+    return new Response(JSON.stringify({ id: "message-1", webUrl: "https://teams.example/message-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  let teamsResult: { error?: string };
+  let outlookResult: { error?: string };
+  try {
+    teamsResult = await internal.deliverRunToTeams(run);
+    outlookResult = await internal.deliverRunToOutlook(run);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(teamsResult.error, undefined);
+  assert.equal(outlookResult.error, undefined);
+  assert.ok(graphCalls.some((call) => call.url.endsWith("/teams/team/channels/channel/messages")));
+  assert.ok(graphCalls.some((call) => call.url.endsWith("/me/sendMail")));
+  assert.ok(graphCalls.every((call) => call.authorization === `Bearer token-${byoRegistration.clientId}`));
   assert.deepEqual(resolvedFor, [
     { tenantId: "tenant-byo", clientId: byoRegistration.clientId },
     { tenantId: "tenant-byo", clientId: byoRegistration.clientId },
