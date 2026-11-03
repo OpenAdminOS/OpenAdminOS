@@ -9,6 +9,7 @@ import { FirstLaunchWelcome } from "./setup/WelcomeView";
 
 const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
+const Marketplace = lazy(() => import("./pages/Marketplace"));
 const Runs = lazy(() => import("./pages/Runs"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
@@ -61,11 +62,12 @@ export default function App() {
             <Route path="/agents" element={<Agents />} />
             <Route path="/agents/office" element={<OfficeRedirect />} />
             <Route path="/agents/team/:personaId" element={<PersonaOfficeRedirect />} />
-            <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
+            <Route path="/agents/hub" element={<MarketplaceRedirect />} />
             <Route path="/agents/schedules" element={<AgentsQueryRedirect filter="scheduled" />} />
             <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
             <Route path="/agents/:slug" element={<Agents />} />
-            <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
+            <Route path="/hub" element={<MarketplaceRedirect />} />
+            <Route path="/marketplace" element={<Marketplace />} />
             <Route path="/chat/workspaces/:workspaceId" element={<IntuneChat />} />
             <Route path="/chat/:conversationId?" element={<IntuneChat />} />
             <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
@@ -145,16 +147,9 @@ export function WorkspaceDetailRedirect() {
   );
 }
 
-export function AgentsQueryRedirect({
-  source,
-  filter,
-}: {
-  source?: "hub";
-  filter?: "scheduled";
-}) {
+export function AgentsQueryRedirect({ filter }: { filter?: "scheduled" }) {
   const location = useLocation();
   const search = new URLSearchParams(location.search);
-  if (source) search.set("source", source);
   if (filter) search.set("filter", filter);
   return (
     <Navigate
@@ -163,6 +158,20 @@ export function AgentsQueryRedirect({
         search: search.toString() ? `?${search.toString()}` : "",
         hash: location.hash,
       }}
+      replace
+    />
+  );
+}
+
+/** The Agent Hub moved into the Marketplace; old hub links open its agent listings. */
+export function MarketplaceRedirect() {
+  const location = useLocation();
+  const search = new URLSearchParams(location.search);
+  search.delete("source");
+  search.set("kind", "agents");
+  return (
+    <Navigate
+      to={{ pathname: "/marketplace", search: `?${search.toString()}`, hash: location.hash }}
       replace
     />
   );

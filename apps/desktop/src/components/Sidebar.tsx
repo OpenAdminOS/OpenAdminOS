@@ -33,6 +33,7 @@ import {
   IconDownload,
   IconHardDrive,
   IconLogo,
+  IconMarketplace,
   IconPlus,
   IconRefresh,
   IconSearch,
@@ -190,7 +191,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     controls[next]?.focus();
   };
 
-  // Pilot mode is a guided tour: Chat, Agents, Runs, and Settings only.
+  // Pilot mode is a guided tour: Chat, Agents, Marketplace, Runs, and Settings only.
   const pilot = activeTenant?.kind === "sample";
   const nav: NavItem[] = [
     ...(pilot
@@ -205,6 +206,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             : undefined,
         }]),
     { to: "/agents", label: "Agents", icon: <IconAgents size={14} /> },
+    { to: "/marketplace", label: "Marketplace", icon: <IconMarketplace size={14} /> },
     { to: "/runs", label: "Runs", icon: <IconActivity size={14} />, count: reviewCount || undefined },
     ...(pilot ? [] : [{ to: "/changes", label: "Changes", icon: <IconChanges size={14} /> }]),
   ];

@@ -152,6 +152,8 @@ describe("shell chrome", () => {
     const primary = screen.getByRole("navigation", { name: "Primary" });
     expect(within(primary).getByRole("link", { name: "Agents" })).toBeInTheDocument();
     expect(within(primary).getByRole("link", { name: "Runs" })).toBeInTheDocument();
+    // The Marketplace stays browsable in pilot mode.
+    expect(within(primary).getByRole("link", { name: "Marketplace" })).toBeInTheDocument();
     expect(within(primary).queryByRole("link", { name: "Agent Team" })).not.toBeInTheDocument();
     expect(within(primary).queryByRole("link", { name: "Changes" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create workspace" })).not.toBeInTheDocument();

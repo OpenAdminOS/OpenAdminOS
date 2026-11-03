@@ -1168,11 +1168,11 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Agents",
     },
     {
-      route: "/agents?source=hub",
+      route: "/marketplace",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Library", "hub agents"],
-      heading: "Agents",
+      waitFor: ["MCP tools", "agents"],
+      heading: "Marketplace",
     },
     {
       route: "/agents/find-inactive-devices",
@@ -1343,7 +1343,7 @@ async function runScreenshotCapture(): Promise<void> {
       try {
         await runScreenshotCaptureStep(window, {
           kind: "hub-detail",
-          route: "/agents?source=hub",
+          route: "/marketplace?kind=agents",
           slug: entry.slug,
           name: entry.name,
           expectedCount: entries.length,
@@ -1598,7 +1598,7 @@ async function screenshotCaptureStepScript(
 
   await waitFor(
     () =>
-      bodyText().includes(`${step.expectedCount} of ${step.expectedCount} hub agents`) &&
+      bodyText().includes(`${step.expectedCount} of ${step.expectedCount} agents`) &&
       bodyText().includes(step.name),
     `Hub grid for ${step.slug}`,
   );
