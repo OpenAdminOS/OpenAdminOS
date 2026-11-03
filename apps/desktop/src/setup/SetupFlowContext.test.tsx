@@ -81,7 +81,7 @@ describe("contextual tenant setup", () => {
       ...createMockAppState().tenants[0]!,
       appRegistration: {
         kind: "openadminos" as const,
-        clientId: "11111111-2222-4333-8444-555555555555",
+        clientId: OPENADMINOS_APP_CLIENT_ID,
       },
     };
     renderWithAppState(<div>App content</div>, {
@@ -93,12 +93,39 @@ describe("contextual tenant setup", () => {
     });
 
     expect(
-      await screen.findByText(/The enterprise application OpenAdminOS \(app ID 11111111-2222-4333-8444-555555555555\)/),
+      await screen.findByText(new RegExp(`The enterprise application OpenAdminOS \\(app ID ${OPENADMINOS_APP_CLIENT_ID}\\)`)),
     ).toHaveTextContent("with delegated Microsoft Graph permissions, all read-only");
     expect(screen.queryByText(/with 3 delegated Microsoft Graph permissions/)).not.toBeInTheDocument();
     expect(
       screen.getByText(/Your original action is ready\. Continuing sends it through the normal tenant/),
     ).toBeInTheDocument();
+  });
+
+  it("names the legacy Graph CLI client instead of OpenAdminOS for a tenant connected before v0.5", async () => {
+    writePendingIntent(
+      createPendingIntent({ kind: "view-changes", returnTo: "/changes" }),
+    );
+    const tenant = {
+      ...createMockAppState().tenants[0]!,
+      appRegistration: {
+        kind: "openadminos" as const,
+        clientId: "14d82eec-204b-4c2f-b7e8-296a70dab67e",
+      },
+    };
+    renderWithAppState(<div>App content</div>, {
+      route: "/chat",
+      bridge: makeMockBridge(
+        { getRequestedScopes: vi.fn(() => new Promise<never>(() => undefined)) },
+        createMockAppState({ tenants: [tenant] }),
+      ),
+    });
+
+    expect(
+      await screen.findByText(
+        "Signed in with Microsoft Graph Command Line Tools, client ID 14d82eec-204b-4c2f-b7e8-296a70dab67e.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/The enterprise application OpenAdminOS/)).not.toBeInTheDocument();
   });
 
   it("shows the custom registration summary alongside a pending intent", async () => {
@@ -194,7 +221,7 @@ describe("contextual tenant setup", () => {
       ...createMockAppState().tenants[0]!,
       appRegistration: {
         kind: "openadminos" as const,
-        clientId: "11111111-2222-4333-8444-555555555555",
+        clientId: OPENADMINOS_APP_CLIENT_ID,
       },
     };
     const connectedState = createMockAppState({ tenants: [tenant] });

@@ -27,6 +27,7 @@ import type {
   TenantRecord,
 } from "../shared/openAdminOS";
 import { OPENADMINOS_APP_CLIENT_ID, PERMISSION_AREAS } from "../shared/openAdminOS";
+import { tenantRegistrationSummary } from "../shared/app-registration";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import type { PendingIntent } from "./pending-intent";
@@ -989,11 +990,17 @@ function ReadyStep({
   onCancel: () => void;
   onResume: () => void;
 }) {
-  const registrationSummary = tenant?.appRegistration?.kind === "custom"
-    ? `Signed in with your app registration ${tenant.appRegistration.clientId}.`
-    : tenant?.appRegistration?.kind === "openadminos"
-      ? `The enterprise application OpenAdminOS (app ID ${tenant.appRegistration.clientId}) is now in ${tenant.displayName} with ${delegatedPermissionCount === undefined ? "delegated" : `${delegatedPermissionCount} delegated`} Microsoft Graph permissions, all read-only. Find it in Entra admin center under Enterprise applications.`
-      : "The tenant is connected and active. You can keep exploring or start a tenant-backed action.";
+  const registration = tenant?.appRegistration;
+  // Only the OpenAdminOS client is described as the OpenAdminOS enterprise
+  // application. Tenants pinned to an earlier client (connected before v0.5)
+  // can reach this step through provider setup without reconnecting.
+  const registrationSummary = registration?.kind === "custom"
+    ? `Signed in with your app registration ${registration.clientId}.`
+    : registration?.kind === "openadminos" && registration.clientId === OPENADMINOS_APP_CLIENT_ID
+      ? `The enterprise application OpenAdminOS (app ID ${registration.clientId}) is now in ${tenant?.displayName} with ${delegatedPermissionCount === undefined ? "delegated" : `${delegatedPermissionCount} delegated`} Microsoft Graph permissions, all read-only. Find it in Entra admin center under Enterprise applications.`
+      : registration && tenant
+        ? `Signed in with ${tenantRegistrationSummary(tenant)?.text ?? "an app registration"}, client ID ${registration.clientId}.`
+        : "The tenant is connected and active. You can keep exploring or start a tenant-backed action.";
 
   return (
     <>
