@@ -1017,7 +1017,8 @@ export type IntuneChatInvestigationToolName =
   | "graph_get"
   | "refresh_resource"
   | "query_drift"
-  | "web_search";
+  | "web_search"
+  | McpChatToolName;
 
 /**
  * Chat-facing name of a tool served by an installed MCP server:

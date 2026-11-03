@@ -121,7 +121,7 @@ import {
   selfTrainingCandidateFromPrompt,
   type PlannedChatContext,
 } from "./planner.js";
-import { executeIntuneChatTool, type IntuneChatToolContext } from "./tools.js";
+import { executeIntuneChatTool, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
 import { answerPilotChatMessage } from "./pilot-chat.js";
 import { PILOT_COPY } from "../../src/shared/pilot-mode.js";
 
@@ -205,6 +205,11 @@ export interface ChatServiceHost {
   retrieveDocumentation?(query: string): Promise<
     Array<{ file: string; title?: string; text: string; score: number }>
   >;
+  /**
+   * Tools of the installed, enabled MCP servers for a Chat answer. Never
+   * used by the external gateway's read tools.
+   */
+  mcpChatContext?(tenant: TenantRecord): Promise<McpChatContext | undefined>;
   readonly appVersion: string;
   readonly userDataPath: string | undefined;
   readonly intelligenceStore: IntelligenceSqliteStore | undefined;
@@ -1816,6 +1821,7 @@ export class IntuneChatService {
             providerId,
             model: selectedModel ?? llm.defaultModel,
           });
+          const mcp = await this.mcpToolsFor(tenant);
           if (capability.enabled) {
             const agentic = await runAgenticChat({
               question: modelQuestion,
@@ -1825,7 +1831,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: this.buildChatToolContext(tenant),
+              tools: { ...this.buildChatToolContext(tenant), ...mcp },
               plannedResources: planned.resources,
               agentSuggestions,
               generatedAt: answerGeneratedAt,
@@ -1842,7 +1848,7 @@ export class IntuneChatService {
               responseModel = deterministic.model ?? responseModel;
             }
           } else {
-            const deterministic = await buildDeterministicAnswer(capability.notice);
+            const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, Boolean(mcp.mcp)));
             assistantContent = deterministic.content;
             responseModel = deterministic.model ?? responseModel;
           }
@@ -2343,6 +2349,8 @@ export class IntuneChatService {
             providerId,
             model: selectedModel ?? llm.defaultModel,
           });
+          // Voice keeps its own bounded tool set; MCP tools are Chat only.
+          const mcp = options.voice ? {} : await this.mcpToolsFor(tenant);
           if (capability.enabled || options.webSearch) {
             sendProgress({
               message: "Investigative mode started.",
@@ -2365,7 +2373,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch },
+              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
               agentSuggestions: options.voice ? [] : agentSuggestions,
@@ -2466,15 +2474,16 @@ export class IntuneChatService {
               } else await streamDeterministicAnswer(agentic.fallbackNotice);
             }
           } else {
-            if (capability.reason === "capability-fallback" && capability.notice) {
+            const notice = withMcpSkippedNotice(capability, Boolean(mcp.mcp));
+            if (capability.reason === "capability-fallback" && notice) {
               sendProgress({
-                message: capability.notice,
+                message: notice,
                 stage: "building-context",
                 contextStatus: "active",
                 modelStatus: "pending",
               });
             }
-            await streamDeterministicAnswer(capability.notice);
+            await streamDeterministicAnswer(notice);
           }
         } catch (caught) {
           if (isCancelled()) {
@@ -2655,6 +2664,11 @@ export class IntuneChatService {
       );
       return [];
     }
+  }
+
+  private async mcpToolsFor(tenant: TenantRecord): Promise<{ mcp?: McpChatContext }> {
+    const mcp = await this.host.mcpChatContext?.(tenant);
+    return mcp && mcp.tools.length > 0 ? { mcp } : {};
   }
 
   private buildChatToolContext(tenant: TenantRecord, signal?: AbortSignal): IntuneChatToolContext {
@@ -2925,6 +2939,31 @@ type AgenticCapabilityDecision = {
   reason: "setting" | "capable" | "capability-fallback";
   notice?: string;
 };
+
+/** Says so when installed MCP tools were held back from a model that skips the tool loop. */
+function withMcpSkippedNotice(capability: AgenticCapabilityDecision, mcpInstalled: boolean): string | undefined {
+  if (!mcpInstalled || capability.enabled) return capability.notice;
+  const skipped = capability.reason === "setting"
+    ? "Installed MCP tools were not used because Chat is set to deterministic retrieval."
+    : "Installed MCP tools were not used because the selected model is too small for tool use.";
+  return capability.notice ? `${capability.notice} ${skipped}` : skipped;
+}
+
+/**
+ * Whether Chat runs its tool loop for this provider and model, so the
+ * Marketplace and Chat can say when MCP tools will not be offered.
+ */
+export function chatToolUseStatus(input: Parameters<typeof resolveAgenticCapability>[0]): { available: boolean; notice?: string } {
+  const capability = resolveAgenticCapability(input);
+  if (capability.enabled) return { available: true };
+  const model = input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0] ?? input.provider?.name ?? input.providerId;
+  return {
+    available: false,
+    notice: capability.reason === "setting"
+      ? "Chat is set to deterministic retrieval, so it does not call tools. MCP tools are not used."
+      : `The selected model, ${model}, is too small for tool use. Installed MCP tools are not offered to it. Choose a larger model in Settings.`,
+  };
+}
 
 /** Test seam for the capability decision; not used by app code. */
 export function resolveAgenticCapabilityForTest(
