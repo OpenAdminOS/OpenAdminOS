@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { after, before, describe, it } from "node:test";
 
@@ -7,7 +10,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
 
-import { MCP_CATALOG, mcpHost } from "./catalog.js";
+import { AppStateStore } from "../state.js";
+import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./catalog.js";
 import { McpHost, McpHostError, type McpEndpoint } from "./host.js";
 
 /** A stateless in-process MCP server with tools that exercise each host path. */
@@ -32,8 +36,11 @@ function buildServer(): McpServer {
 
 let httpServer: Server;
 let endpoint: McpEndpoint;
+const originalOllamaUrl = process.env.OPENAGENTS_OLLAMA_URL;
 
 before(async () => {
+  // Provider detection must not reach a real local Ollama.
+  process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
   httpServer = createServer((request, response) => {
     void (async () => {
       const server = buildServer();
@@ -52,6 +59,8 @@ before(async () => {
 });
 
 after(async () => {
+  if (originalOllamaUrl === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+  else process.env.OPENAGENTS_OLLAMA_URL = originalOllamaUrl;
   await new Promise<void>((resolve) => httpServer.close(() => resolve()));
 });
 
@@ -157,5 +166,101 @@ describe("MCP catalog", () => {
       assert.equal(entry.readOnly, true);
       assert.match(entry.id, /^[a-z0-9-]+$/);
     }
+  });
+});
+
+describe("MCP installs in app state", () => {
+  async function withStore(run: (store: AppStateStore, statePath: string, catalog: McpCatalogEntry[]) => Promise<void>) {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-state-"));
+    const statePath = join(dir, "state.json");
+    const catalog: McpCatalogEntry[] = [
+      { ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url },
+      { ...MCP_CATALOG[1]!, id: "gone", name: "Gone", url: "http://127.0.0.1:9/mcp" },
+    ];
+    const store = new AppStateStore({ filePath: statePath, tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "", mcpCatalog: catalog });
+    try { await run(store, statePath, catalog); } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  }
+  const persisted = async (statePath: string) => JSON.parse(await readFile(statePath, "utf8")).mcpServers;
+
+  it("installs, disables, enables and uninstalls a server in state.json", async () => {
+    await withStore(async (store, statePath) => {
+      const installed = await store.installMcpServer("test-docs");
+      const summary = installed.find((entry) => entry.id === "test-docs")!;
+      assert.equal(summary.installed, true);
+      assert.equal(summary.enabled, true);
+      assert.equal(summary.host, "127.0.0.1");
+      assert.deepEqual(summary.tools.map((tool) => tool.name), ["search_docs", "slow", "fails", "big"]);
+      assert.equal((await persisted(statePath))["test-docs"].tools[0].name, "search_docs");
+
+      const disabled = await store.setMcpServerEnabled("test-docs", false);
+      assert.equal(disabled.find((entry) => entry.id === "test-docs")!.enabled, false);
+      assert.equal((await persisted(statePath))["test-docs"].enabled, false);
+      await store.setMcpServerEnabled("test-docs", true);
+
+      const checked = await store.checkMcpServer("test-docs");
+      assert.equal(checked.find((entry) => entry.id === "test-docs")!.enabled, true);
+
+      const removed = await store.uninstallMcpServer("test-docs");
+      assert.equal(removed.find((entry) => entry.id === "test-docs")!.installed, false);
+      assert.equal(await persisted(statePath), undefined);
+    });
+  });
+
+  it("records nothing when the server is unreachable", async () => {
+    await withStore(async (store, statePath) => {
+      await assert.rejects(store.installMcpServer("gone"), /Gone could not be reached at 127\.0\.0\.1/);
+      const servers = await store.listMcpServers();
+      assert.equal(servers.find((entry) => entry.id === "gone")!.installed, false);
+      await readFile(statePath, "utf8").then((raw) => assert.equal(JSON.parse(raw).mcpServers, undefined), () => undefined);
+    });
+  });
+
+  it("answers a Chat question through an installed server and traces its host", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-chat-e2e-"));
+    const statePath = join(dir, "state.json");
+    const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
+    await writeFile(statePath, JSON.stringify({
+      activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
+      installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
+    }));
+    const prompts: string[] = [];
+    const replies = [
+      JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "Intune compliance grace period" } }),
+      JSON.stringify({ final: true, answer: "The grace period is set per noncompliance action." }),
+    ];
+    const store = new AppStateStore({
+      filePath: statePath, userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
+      graphFactory: () => ({ listManagedDevices: async () => [], retireManagedDevice: async () => { throw new Error("no writes"); }, request: async () => ({ value: [] }) }),
+      llmFactory: () => ({
+        available: true, defaultModel: "llama3.1:8b",
+        async complete(options) { prompts.push(options.prompt); return { text: replies[Math.min(prompts.length - 1, replies.length - 1)]!, model: "llama3.1:8b" }; },
+        async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
+      }),
+    });
+    try {
+      await store.installMcpServer("test-docs");
+      const result = await store.sendIntuneChatMessage({ content: "How long is the Intune compliance grace period?" });
+      assert.equal(result.assistantMessage.content, "The grace period is set per noncompliance action.");
+      const trace = result.assistantMessage.toolTrace?.find((entry) => entry.mcpSource);
+      assert.equal(trace?.mcpSource?.host, "127.0.0.1");
+      assert.match(trace!.resultSummary, /Test Docs answered from 127\.0\.0\.1/);
+      assert.ok(prompts.some((prompt) => /Result for Intune compliance grace period/.test(prompt)));
+
+      // A disabled server offers nothing to Chat.
+      await store.setMcpServerEnabled("test-docs", false);
+      prompts.length = 0;
+      const disabled = await store.sendIntuneChatMessage({ content: "How long is the Intune compliance grace period?" });
+      assert.equal(disabled.assistantMessage.toolTrace?.some((entry) => entry.mcpSource) ?? false, false);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("rejects servers outside the catalog and toggles on servers that are not installed", async () => {
+    await withStore(async (store) => {
+      await assert.rejects(store.installMcpServer("evil"), /not in the Marketplace catalog/);
+      await assert.rejects(store.setMcpServerEnabled("test-docs", true), /Test Docs is not installed/);
+      await assert.rejects(store.checkMcpServer("test-docs"), /Test Docs is not installed/);
+    });
   });
 });

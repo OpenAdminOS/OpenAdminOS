@@ -6016,6 +6016,31 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:install-mcp-server",
+    handleTrusted((_event, serverId: unknown) =>
+      store.installMcpServer(requireBoundedString(serverId, "serverId", 64)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:check-mcp-server",
+    handleTrusted((_event, serverId: unknown) =>
+      store.checkMcpServer(requireBoundedString(serverId, "serverId", 64)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:uninstall-mcp-server",
+    handleTrusted((_event, serverId: unknown) =>
+      store.uninstallMcpServer(requireBoundedString(serverId, "serverId", 64)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:set-mcp-server-enabled",
+    handleTrusted((_event, serverId: unknown, enabled: unknown) => {
+      if (typeof enabled !== "boolean") throw new Error("enabled must be a boolean.");
+      return store.setMcpServerEnabled(requireBoundedString(serverId, "serverId", 64), enabled);
+    }),
+  );
+  ipcMain.handle(
     "openadminos:get-fleet-drift-status",
     handleTrusted((_event, input: unknown) => {
       if (input !== undefined && !isPlainRecord(input)) {

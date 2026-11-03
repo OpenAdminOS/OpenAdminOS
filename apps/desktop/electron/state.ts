@@ -168,6 +168,7 @@ import {
   type AgentTeamsDelivery,
   type AgentWhatsAppWebDelivery,
   type AppState,
+  type McpServerSummary,
   type ProviderId,
   type ProviderSummary,
   type RegistryAgentSummary,
@@ -206,7 +207,10 @@ import {
   validateRegistrySource,
 } from "./registry-client.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
-import { IntuneChatService, type IntuneChatStreamOptions } from "./intune-chat/service.js";
+import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } from "./intune-chat/service.js";
+import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatTool } from "./intune-chat/tools.js";
+import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
+import { McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
 import { GatewayService } from "./gateway/service.js";
@@ -422,6 +426,19 @@ interface PersistedState {
   lastDriftHistoryPrune?: DriftHistoryPruneResult;
   /** User-overridable registry source URL. */
   registrySource?: string;
+  /**
+   * Installed catalog MCP servers, keyed by catalog id. Tools are the
+   * last live listing; Chat calls them only through the main-process
+   * MCP host, which checks each name against the server again.
+   */
+  mcpServers?: Record<string, PersistedMcpServer>;
+}
+
+interface PersistedMcpServer {
+  enabled: boolean;
+  installedAt: string;
+  lastConnectedAt?: string;
+  tools: McpToolInfo[];
 }
 
 type WhatsAppWebClientLike = Pick<
@@ -434,6 +451,33 @@ type WhatsAppWebClientLike = Pick<
   | "sendMessage"
   | "dispose"
 >;
+
+/** Keeps only catalog servers with a well-formed tool list. */
+function sanitizeMcpServers(
+  value: unknown,
+  catalog: readonly McpCatalogEntry[],
+): Record<string, PersistedMcpServer> | undefined {
+  if (!isPlainRecordValue(value)) return undefined;
+  const sanitized: Record<string, PersistedMcpServer> = {};
+  for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (!catalog.some((entry) => entry.id === id) || !isPlainRecordValue(raw)) continue;
+    const record = raw as Record<string, unknown>;
+    if (typeof record.installedAt !== "string" || !Array.isArray(record.tools)) continue;
+    const tools = record.tools.filter((tool): tool is McpToolInfo =>
+      isPlainRecordValue(tool) &&
+      typeof (tool as Record<string, unknown>).name === "string" &&
+      typeof (tool as Record<string, unknown>).description === "string" &&
+      isPlainRecordValue((tool as Record<string, unknown>).inputSchema),
+    );
+    sanitized[id] = {
+      enabled: record.enabled === true,
+      installedAt: record.installedAt,
+      ...(typeof record.lastConnectedAt === "string" ? { lastConnectedAt: record.lastConnectedAt } : {}),
+      tools,
+    };
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
 
 const defaultState: PersistedState = {
   activeProviderId: "ollama",
@@ -1198,6 +1242,8 @@ export interface AppStateStoreOptions {
    * Production leaves this unset so sign-in always runs through MSAL.
    */
   interactiveSignIn?: typeof runInteractiveFlow;
+  /** Test hook: MCP servers to offer instead of the built-in catalog. */
+  mcpCatalog?: readonly McpCatalogEntry[];
 }
 
 export class AppStateStore {
@@ -1222,6 +1268,8 @@ export class AppStateStore {
   private readonly driftService: DriftService;
   private readonly runService: RunService;
   private readonly gatewayService: GatewayService;
+  private readonly mcpHost: McpHost;
+  private readonly mcpCatalog: readonly McpCatalogEntry[];
   private retrievalIndexInstance: RetrievalIndex | undefined;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
@@ -1326,6 +1374,8 @@ export class AppStateStore {
       this.interactiveSignIn = options.interactiveSignIn ?? runInteractiveFlow;
     }
     this.sampleGraph = createSampleGraph({ clock: this.clock });
+    this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
+    this.mcpHost = new McpHost({ clientVersion: this.appVersion });
     const host = this;
     this.chatService = new IntuneChatService({
       read: () => host.read(),
@@ -1340,6 +1390,7 @@ export class AppStateStore {
       startRun: (agentSlug, options) => host.startRun(agentSlug, options),
       getDriftTimeline: (input) => host.getDriftTimeline(input),
       retrieveDocumentation: (query) => host.retrieveDocumentation(query),
+      mcpChatContext: (tenant) => host.mcpChatContext(tenant),
       appVersion: this.appVersion,
       get userDataPath() {
         return host.userDataPath;
@@ -1540,6 +1591,7 @@ export class AppStateStore {
   close(): void {
     this.whatsappWebClientInstance?.dispose();
     void this.gatewayService.stop();
+    void this.mcpHost.closeAll();
     this.officeServiceInstance?.close();
     this.intelligenceStore?.close();
   }
@@ -1626,6 +1678,136 @@ export class AppStateStore {
 
   async startGatewayIfEnabled(): Promise<void> {
     await this.gatewayService.startIfEnabled();
+  }
+
+  private requireMcpCatalogEntry(serverId: string): McpCatalogEntry {
+    const entry = this.mcpCatalog.find((candidate) => candidate.id === serverId);
+    if (!entry) throw new Error(`MCP server ${serverId} is not in the Marketplace catalog.`);
+    return entry;
+  }
+
+  private mcpServerSummaries(persisted: PersistedState): McpServerSummary[] {
+    return this.mcpCatalog.map((entry) => {
+      const installed = persisted.mcpServers?.[entry.id];
+      return {
+        id: entry.id,
+        name: entry.name,
+        publisher: entry.publisher,
+        url: entry.url,
+        host: mcpHost(entry.url),
+        description: entry.description,
+        pitch: entry.pitch,
+        auth: entry.auth,
+        readOnly: entry.readOnly,
+        installed: Boolean(installed),
+        enabled: installed?.enabled === true,
+        ...(installed ? { installedAt: installed.installedAt } : {}),
+        ...(installed?.lastConnectedAt ? { lastConnectedAt: installed.lastConnectedAt } : {}),
+        tools: (installed?.tools ?? []).map((tool) => ({ name: tool.name, description: tool.description })),
+      };
+    });
+  }
+
+  async listMcpServers(): Promise<McpServerSummary[]> {
+    return this.mcpServerSummaries(await this.read());
+  }
+
+  /**
+   * Connects, lists tools live and records the install. A failed connect
+   * throws the host's designed message and records nothing.
+   */
+  async installMcpServer(serverId: string): Promise<McpServerSummary[]> {
+    return this.connectMcpServer(serverId, false);
+  }
+
+  /** Reconnects an installed server and refreshes its tool list. */
+  async checkMcpServer(serverId: string): Promise<McpServerSummary[]> {
+    return this.connectMcpServer(serverId, true);
+  }
+
+  private async connectMcpServer(serverId: string, requireInstalled: boolean): Promise<McpServerSummary[]> {
+    const entry = this.requireMcpCatalogEntry(serverId);
+    if (requireInstalled && !(await this.read()).mcpServers?.[serverId]) {
+      throw new Error(`${entry.name} is not installed. Install it from the Marketplace first.`);
+    }
+    const connected = await this.mcpHost.connect(entry);
+    const now = this.clock().toISOString();
+    await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.mcpServers?.[serverId];
+      await this.write({
+        ...current,
+        mcpServers: {
+          ...(current.mcpServers ?? {}),
+          [serverId]: {
+            enabled: existing ? existing.enabled : true,
+            installedAt: existing?.installedAt ?? now,
+            lastConnectedAt: now,
+            tools: connected.tools,
+          },
+        },
+      });
+    });
+    this.emitStateChanged("mcp-servers-changed");
+    return this.listMcpServers();
+  }
+
+  async uninstallMcpServer(serverId: string): Promise<McpServerSummary[]> {
+    this.requireMcpCatalogEntry(serverId);
+    await this.serialize(async () => {
+      const current = await this.read();
+      if (!current.mcpServers?.[serverId]) return;
+      const { [serverId]: _removed, ...rest } = current.mcpServers;
+      const next: PersistedState = { ...current, mcpServers: rest };
+      if (Object.keys(rest).length === 0) delete next.mcpServers;
+      await this.write(next);
+    });
+    await this.mcpHost.disconnect(serverId);
+    this.emitStateChanged("mcp-servers-changed");
+    return this.listMcpServers();
+  }
+
+  async setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServerSummary[]> {
+    const entry = this.requireMcpCatalogEntry(serverId);
+    await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.mcpServers?.[serverId];
+      if (!existing) throw new Error(`${entry.name} is not installed. Install it from the Marketplace first.`);
+      await this.write({ ...current, mcpServers: { ...current.mcpServers, [serverId]: { ...existing, enabled } } });
+    });
+    if (!enabled) await this.mcpHost.disconnect(serverId);
+    this.emitStateChanged("mcp-servers-changed");
+    return this.listMcpServers();
+  }
+
+  /** Tools of the enabled MCP servers, for one Chat answer. */
+  private async mcpChatContext(tenant: TenantRecord): Promise<McpChatContext | undefined> {
+    const persisted = await this.read();
+    const tools: McpChatTool[] = [];
+    for (const entry of this.mcpCatalog) {
+      const installed = persisted.mcpServers?.[entry.id];
+      if (!installed?.enabled) continue;
+      for (const tool of installed.tools) {
+        tools.push({
+          name: mcpChatToolName(entry.id, tool.name),
+          serverId: entry.id,
+          serverName: entry.name,
+          host: mcpHost(entry.url),
+          tool: tool.name,
+          description: tool.description,
+          inputSchema: tool.inputSchema,
+        });
+      }
+    }
+    if (tools.length === 0) return undefined;
+    return {
+      tools,
+      privateTerms: mcpPrivateTermsForTenant(tenant),
+      call: (tool, args, signal) => {
+        const entry = this.requireMcpCatalogEntry(tool.serverId);
+        return this.mcpHost.callTool(entry, tool.tool, args, signal);
+      },
+    };
   }
 
   private async buildUsageTelemetry(): Promise<{
@@ -2385,6 +2567,13 @@ export class AppStateStore {
       usageTelemetryEnabled: persisted.usageTelemetryEnabled === true,
       schedulerStatus: this.deriveSchedulerStatus(persisted),
       office: this.officeService.state(),
+      mcpServers: this.mcpServerSummaries(persisted),
+      chatToolUse: chatToolUseStatus({
+        mode: this.intelligenceStore?.getChatInvestigationSettings().mode ?? "auto",
+        provider: activeProvider,
+        providerId: activeProvider?.id ?? persisted.activeProviderId,
+        ...(activeModel ? { model: activeModel } : {}),
+      }),
     };
     if (persisted.activeModelByProviderId) {
       state.activeModelByProviderId = persisted.activeModelByProviderId;
@@ -6258,6 +6447,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (Array.isArray(parsed.novaConnectorAudit)) {
         state.novaConnectorAudit = parsed.novaConnectorAudit.filter(item => typeof item?.tenantId === "string" && typeof item.timestamp === "string" && readConnectorAuditEntry(item.entry)).slice(-200);
       }
+      const mcpServers = sanitizeMcpServers((parsed as { mcpServers?: unknown }).mcpServers, this.mcpCatalog);
+      if (mcpServers) state.mcpServers = mcpServers;
       const rawConnectors = (parsed as { connectors?: unknown }).connectors;
       if (
         rawConnectors &&
