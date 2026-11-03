@@ -837,3 +837,61 @@ npm run typecheck && npm run qa && npm run build
 ```
 
 See [`README.md`](../README.md) for the full quickstart.
+
+---
+
+# Own app registration as a first-class choice (2026-11-03)
+
+## Decisions (2026-11-03)
+
+- The connect dialog preselects neither option. The admin must choose before Approve is enabled. Entry points that already express intent (the welcome screen's own-registration link) may open with that option chosen.
+
+## Why
+
+Connecting with your own Entra app registration has worked since v0.5.0 (issue #98), but it is hidden behind a link on the welcome screen and a disclosure in the connect dialog. Admins read the product as "privacy first, but you must use our multi-tenant app". Many organisations block third-party multi-tenant apps, or need a tenant-owned app for Conditional Access targeting, sign-in log attribution and consent governance. Connecting with your own registration should be an equal choice wherever a tenant is connected: first run, Connect tenant, and the pilot mode banner.
+
+## Acceptance criteria
+
+1. Every connect entry point (first-run welcome, tenant switcher, Settings > Tenants, pilot banner, PilotAgentsHome, contextual gates) opens the same dialog, which starts with two equal choices: "OpenAdminOS app" and "Your own app registration". Neither is hidden behind a link or disclosure.
+2. Each choice states plainly what it means: which app appears in the tenant's sign-in logs and enterprise apps, that no client secret is used, and that tokens stay on the device in both cases.
+3. Custom registrations are remembered locally (client ID, optional directory ID, optional label; no secrets) and preselected next time. Saved registrations can be removed in Settings > Tenants.
+4. Settings > Tenants and the tenant switcher show which registration each tenant is connected with (OpenAdminOS app or the custom client ID).
+5. Scheduled Teams and Outlook delivery use the tenant's own registration. Today `run-delivery.ts:563` and `:884` call `host.getMsalClient()`, which always resolves the default client, so delivery fails silently for BYO tenants. A test covers a BYO tenant delivering a report.
+6. Sign-in errors name the registration actually used (no "Microsoft Graph CLI" wording) and give a specific fix for the common BYO misconfigurations: missing `http://localhost` redirect (AADSTS50011), public client flows disabled (AADSTS7000218), app not found in the directory (AADSTS700016), single-tenant app used without a directory ID (AADSTS50194), and consent missing (AADSTS65001).
+7. Host-level tests cover `connectTenant` with a custom registration (authority, per-client token store, persisted `appRegistration`) and MSAL client isolation per client ID.
+8. End-to-end check in a lab tenant: connect with a custom single-tenant registration, refresh the cache, run a read agent, deliver a scheduled report. Graph calls verified per the Graph verification rule.
+9. SPEC.md first-launch section, connect-tenant docs, and CHANGELOG updated.
+
+## Out of scope
+
+- Sovereign clouds and custom authority hosts.
+- Two registrations side by side for the same tenant.
+- App-only or certificate auth.
+- The v0.5 legacy token cache question (tenants pinned to the Graph CLI client resolve to `tokens-14d82eec….bin`, not `tokens.bin`). Investigate separately before changing.
+
+## Steps
+
+- [ ] Connect dialog: replace the own-registration disclosure with a two-option choice at the top of the permissions step
+- [ ] Welcome screen: keep two primary choices (pilot, connect); the connect path lands on the choice
+- [ ] Saved registrations: persist in state.json, IPC to list and remove, preselect last used
+- [ ] Registration shown per tenant in Settings > Tenants and the tenant switcher
+- [ ] Fix delivery to resolve the MSAL client per tenant, with test
+- [ ] Rewrite `humanizeMsalError` for the actual registration and BYO error codes, with tests
+- [ ] Host tests for custom-registration connect and client isolation
+- [ ] Lab tenant end-to-end check
+- [ ] SPEC, docs, CHANGELOG
+- [ ] Separate evaluator review and GPT-6.1-Sol PR review
+
+# Vendor MCP authentication (design, 2026-11-03)
+
+Design only. Deliverable: a SPEC section and a public user-facing issue.
+
+Decided 2026-11-03: a connection is stored per tenant, and the user can reuse it for another tenant (an explicit copy, never automatic).
+
+## Acceptance criteria
+
+1. Every MCP listing declares its authentication in its manifest, including an explicit `none`. The install flow always shows an authentication step, even if it only says no sign-in is needed.
+2. Supported methods: none, Microsoft Entra (reuses the tenant sign-in), OAuth 2.1 per the MCP authorization spec, and API key. No tenant client secrets.
+3. A credential belongs to a connection, not to a listing. A connection is defined by the publisher (verified domain plus connection id) and lists the hosts it may be sent to. Listings from the same publisher that name the same connection share it, so the user enters a secret once.
+4. Connections are stored in the OS keychain through safeStorage, bound to a tenant, and are only attached to requests to the hosts the connection declares. A sandboxed local server receives the secret only at spawn and can only reach the declared hosts.
+5. Settings shows each connection, the listings using it, when it was added, and lets the user rotate, sign out or delete it. Removing the last listing that uses a connection asks whether to delete the credential.
