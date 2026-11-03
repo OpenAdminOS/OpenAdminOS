@@ -73,6 +73,7 @@ import type {
   RunHistoryRetentionSettings,
   ProviderTestResult,
   StartRunOptions,
+  SavedAppRegistration,
   TenantAppRegistration,
   ConnectTenantOptions,
   PermissionAreaId,
@@ -274,11 +275,15 @@ import {
   DEFAULT_STATS_API_URL,
   createLocalOnlyTenantSession,
   entryToRegistrySummary,
+  forgetAppRegistration,
   humanizeMsalError,
   humanizeScheduledRunError,
   isNodeError,
   normalizeWorkspaceInstructions,
   normalizeWorkspaceTitle,
+  rememberAppRegistration,
+  sanitizeSavedAppRegistrations,
+  SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH,
   tenantNamesById,
 } from "./state-helpers.js";
 import { lookupEndpoint } from "./graph-catalog.js";
@@ -313,6 +318,12 @@ interface PersistedState {
   runs: RunRecord[];
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /**
+   * Custom app registrations used for a successful connect, most recent
+   * first. Public identifiers only, never secrets. Bounded and validated
+   * on read.
+   */
+  savedAppRegistrations?: SavedAppRegistration[];
   /**
    * Stable per-installation UUID, generated on first agent install and
    * persisted thereafter. Sent to the stats aggregator alongside each
@@ -2374,6 +2385,7 @@ export class AppStateStore {
         model: activeModel,
       }),
       tenants: persisted.tenants,
+      savedAppRegistrations: persisted.savedAppRegistrations ?? [],
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
@@ -5405,13 +5417,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // Resolve which Entra app identity signs in. A custom registration
     // must be a public client (Authorization Code + PKCE, loopback
     // redirect); there is deliberately no client secret to supply.
-    const registration: TenantAppRegistration | undefined = options.appRegistration
+    const directoryTenantId = options.appRegistration?.directoryTenantId?.trim();
+    const label = options.appRegistration?.label
+      ?.trim()
+      .slice(0, SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH);
+    const registration: TenantAppRegistration = options.appRegistration
       ? {
           kind: "custom",
           clientId: requireClientId(options.appRegistration.clientId),
-          authority: authorityForDirectory(
-            options.appRegistration.directoryTenantId,
-          ),
+          authority: authorityForDirectory(directoryTenantId),
+          ...(label ? { label } : {}),
         }
       : { kind: "openadminos", clientId: defaultClientId() };
     const client = this.msalClientFor(registration);
@@ -5459,7 +5474,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       addedAt,
       lastUsedAt: addedAt,
       grantedScopes: intersectGrantedScopes(result.scopes, requestedScopeNames),
-      ...(registration ? { appRegistration: registration } : {}),
+      appRegistration: registration,
     };
 
     await this.serialize(async () => {
@@ -5475,6 +5490,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         ...persisted,
         tenants: nextTenants,
         activeTenantId: tenant.id,
+        ...(registration.kind === "custom"
+          ? {
+              savedAppRegistrations: rememberAppRegistration(
+                persisted.savedAppRegistrations,
+                {
+                  clientId: registration.clientId,
+                  ...(directoryTenantId ? { directoryTenantId } : {}),
+                  ...(label ? { label } : {}),
+                  lastUsedAt: addedAt,
+                },
+              ),
+            }
+          : {}),
       });
     });
 
@@ -5491,6 +5519,25 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await this.setActiveTenant(tenant.id);
     }
 
+    return this.getAppState();
+  }
+
+  /**
+   * Forget a remembered custom registration. Connected tenants keep their
+   * own pinned registration, so their sign-in is unaffected.
+   */
+  async removeSavedAppRegistration(
+    clientId: string,
+    directoryTenantId?: string,
+  ): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const savedAppRegistrations = forgetAppRegistration(
+        persisted.savedAppRegistrations,
+        { clientId, directoryTenantId },
+      );
+      await this.write({ ...persisted, savedAppRegistrations });
+    });
     return this.getAppState();
   }
 
@@ -6164,6 +6211,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       };
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
+      }
+      const savedAppRegistrations = sanitizeSavedAppRegistrations(
+        (parsed as { savedAppRegistrations?: unknown }).savedAppRegistrations,
+      );
+      if (savedAppRegistrations.length > 0) {
+        state.savedAppRegistrations = savedAppRegistrations;
       }
       // See PersistedState.providerChosenByUser: a missing field means an
       // install from before provider detection, which is never switched.

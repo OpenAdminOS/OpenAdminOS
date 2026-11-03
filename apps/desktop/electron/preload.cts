@@ -469,6 +469,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:set-active-tenant", id),
   disconnectTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:disconnect-tenant", id),
+  removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) =>
+    ipcRenderer.invoke("openadminos:remove-saved-app-registration", clientId, directoryTenantId),
   getAgentManifest: (slug: string) =>
     ipcRenderer.invoke("openadminos:get-agent-manifest", slug),
   updateAgentSettings: (slug: string, values: Record<string, unknown>) =>

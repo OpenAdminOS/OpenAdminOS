@@ -669,6 +669,16 @@ export function makeMockBridge(
         tenants: appState.tenants.filter((tenant) => tenant.id !== id),
       }),
     ),
+    removeSavedAppRegistration: vi.fn(async (clientId: string, directoryTenantId?: string) =>
+      updateState({
+        ...appState,
+        savedAppRegistrations: (appState.savedAppRegistrations ?? []).filter(
+          (entry) =>
+            entry.clientId !== clientId ||
+            (entry.directoryTenantId ?? "") !== (directoryTenantId ?? ""),
+        ),
+      }),
+    ),
     getAgentManifest: vi.fn(async () => undefined),
     updateAgentSettings: vi.fn(async () => appState),
     updateAgentSchedule: vi.fn(async () => appState),

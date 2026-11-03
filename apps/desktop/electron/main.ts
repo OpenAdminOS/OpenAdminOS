@@ -4534,6 +4534,13 @@ function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
         128,
       );
     }
+    if (registration.label !== undefined && registration.label !== "") {
+      options.appRegistration.label = requireBoundedString(
+        registration.label,
+        "label",
+        80,
+      );
+    }
   }
   if (value.permissionAreaIds !== undefined) {
     if (!Array.isArray(value.permissionAreaIds)) {
@@ -6460,6 +6467,17 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:disconnect-tenant", handleTrusted((_event, id: unknown) =>
     store.disconnectTenant(requireBoundedString(id, "tenantId", 256)),
   ),
+  );
+  ipcMain.handle(
+    "openadminos:remove-saved-app-registration",
+    handleTrusted((_event, clientId: unknown, directoryTenantId?: unknown) =>
+      store.removeSavedAppRegistration(
+        requireBoundedString(clientId, "clientId", 64),
+        directoryTenantId === undefined || directoryTenantId === ""
+          ? undefined
+          : requireBoundedString(directoryTenantId, "directoryTenantId", 128),
+      ),
+    ),
   );
   ipcMain.handle("openadminos:get-agent-manifest", handleTrusted((_event, slug: unknown) =>
     store.getAgentManifest(requireAgentSlug(slug, "slug")),

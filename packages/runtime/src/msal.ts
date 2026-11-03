@@ -15,6 +15,7 @@ import {
 import { createServer, type Server } from "node:http";
 import {
   DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  OPENADMINOS_APP_CLIENT_ID,
   type TenantSession,
 } from "@openadminos/agent-sdk";
 
@@ -29,7 +30,7 @@ export const GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
  * appears in every authorization URL the browser sees, so shipping it
  * in the open is expected for a public client.
  */
-export const OPENADMINOS_CLIENT_ID = "d1de0a94-f67a-421d-8804-a235955ffd69";
+export const OPENADMINOS_CLIENT_ID = OPENADMINOS_APP_CLIENT_ID;
 
 /** The client id the app signs in with when the user does not bring their own. */
 export function defaultClientId(): string {

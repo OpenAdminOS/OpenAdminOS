@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
-import { graphAccessDenialFromError, graphAccessDenialText, type GraphAccessDenial } from "@openadminos/agent-sdk";
+import {
+  graphAccessDenialFromError,
+  graphAccessDenialText,
+  SAVED_APP_REGISTRATION_LIMIT,
+  type GraphAccessDenial,
+  type SavedAppRegistration,
+} from "@openadminos/agent-sdk";
 import type {
   GraphCacheRefreshResourceResult,
   GraphCacheResourceKind,
@@ -110,6 +116,84 @@ export function humanizeScheduledRunError(message: string, accessDenial?: GraphA
 }
 
 
+
+const CLIENT_ID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const DIRECTORY_ID_PATTERN = /^[0-9a-zA-Z.-]{1,100}$/;
+export const SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH = 80;
+
+function savedRegistrationKey(entry: {
+  clientId: string;
+  directoryTenantId?: string | undefined;
+}): string {
+  return `${entry.clientId.toLowerCase()}|${(entry.directoryTenantId ?? "").toLowerCase()}`;
+}
+
+/**
+ * Validate remembered custom registrations read from state.json. Drops
+ * anything that is not a public client id plus optional directory and
+ * label, dedupes by client id and directory, keeps the most recent use
+ * first, and bounds the list.
+ */
+export function sanitizeSavedAppRegistrations(value: unknown): SavedAppRegistration[] {
+  if (!Array.isArray(value)) return [];
+  const entries: SavedAppRegistration[] = [];
+  for (const candidate of value) {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) continue;
+    const record = candidate as Record<string, unknown>;
+    const clientId = typeof record.clientId === "string" ? record.clientId.trim() : "";
+    if (!CLIENT_ID_PATTERN.test(clientId)) continue;
+    if (typeof record.lastUsedAt !== "string" || !Number.isFinite(Date.parse(record.lastUsedAt))) continue;
+    const entry: SavedAppRegistration = { clientId, lastUsedAt: record.lastUsedAt };
+    if (record.directoryTenantId !== undefined) {
+      const directoryTenantId =
+        typeof record.directoryTenantId === "string" ? record.directoryTenantId.trim() : "";
+      if (!DIRECTORY_ID_PATTERN.test(directoryTenantId)) continue;
+      entry.directoryTenantId = directoryTenantId;
+    }
+    if (typeof record.label === "string") {
+      const label = record.label.trim().slice(0, SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH);
+      if (label) entry.label = label;
+    }
+    entries.push(entry);
+  }
+  entries.sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt));
+  const seen = new Set<string>();
+  return entries
+    .filter((entry) => {
+      const key = savedRegistrationKey(entry);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, SAVED_APP_REGISTRATION_LIMIT);
+}
+
+/** Record a successful connect with a custom registration as the most recent. */
+export function rememberAppRegistration(
+  current: SavedAppRegistration[] | undefined,
+  entry: SavedAppRegistration,
+): SavedAppRegistration[] {
+  const key = savedRegistrationKey(entry);
+  const previous = (current ?? []).find((candidate) => savedRegistrationKey(candidate) === key);
+  const label = entry.label ?? previous?.label;
+  return sanitizeSavedAppRegistrations([
+    { ...entry, ...(label ? { label } : {}) },
+    ...(current ?? []).filter((candidate) => savedRegistrationKey(candidate) !== key),
+  ]);
+}
+
+/** Forget one remembered registration; matching ignores case. */
+export function forgetAppRegistration(
+  current: SavedAppRegistration[] | undefined,
+  target: { clientId: string; directoryTenantId?: string | undefined },
+): SavedAppRegistration[] {
+  const key = savedRegistrationKey({
+    clientId: target.clientId.trim(),
+    directoryTenantId: target.directoryTenantId?.trim() || undefined,
+  });
+  return (current ?? []).filter((candidate) => savedRegistrationKey(candidate) !== key);
+}
 
 /**
  * The Entra app identity a sign-in used, named the way an admin finds it

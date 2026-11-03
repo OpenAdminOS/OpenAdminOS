@@ -627,6 +627,30 @@ export interface TenantAppRegistration {
    * directory id here; multi-tenant apps use the common authority.
    */
   authority?: string;
+  /** Admin-supplied name for a custom registration. Display only. */
+  label?: string;
+}
+
+/**
+ * Application (client) ID of the published OpenAdminOS multi-tenant app
+ * registration. A client id is a public identifier, not a secret: it is
+ * part of every authorization URL the browser sees.
+ */
+export const OPENADMINOS_APP_CLIENT_ID = "d1de0a94-f67a-421d-8804-a235955ffd69";
+
+/** Most custom registrations remembered on this device. */
+export const SAVED_APP_REGISTRATION_LIMIT = 20;
+
+/**
+ * A custom app registration remembered after a successful connect so the
+ * connect dialog can offer it again. Public identifiers only; there is
+ * never a secret to remember.
+ */
+export interface SavedAppRegistration {
+  clientId: string;
+  directoryTenantId?: string;
+  label?: string;
+  lastUsedAt: string;
 }
 
 export interface ConnectTenantOptions {
@@ -634,7 +658,7 @@ export interface ConnectTenantOptions {
    * Custom registration to sign in with. Omit to use the OpenAdminOS
    * app. `directoryTenantId` is required only for single-tenant apps.
    */
-  appRegistration?: { clientId: string; directoryTenantId?: string };
+  appRegistration?: { clientId: string; directoryTenantId?: string; label?: string };
   /** Permission areas selected in the pre-consent review. */
   permissionAreaIds?: PermissionAreaId[];
 }
@@ -922,6 +946,8 @@ export interface AppState {
   trust: TrustState;
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /** Custom app registrations remembered on this device, most recently used first. */
+  savedAppRegistrations?: SavedAppRegistration[];
   /** ISO timestamp of the last successful registry index refresh. Null until first fetch. */
   lastRegistryRefresh: string | null;
   /** Human-readable error from the most recent registry fetch attempt. Null when clean. */
@@ -2795,6 +2821,14 @@ export interface OpenAdminOSApi {
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
+  /**
+   * Forget a remembered custom app registration. Tenants already
+   * connected with it keep working.
+   */
+  removeSavedAppRegistration(
+    clientId: string,
+    directoryTenantId?: string,
+  ): Promise<AppState>;
   getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined>;
   /**
    * Persist per-install overrides for the named agent's
