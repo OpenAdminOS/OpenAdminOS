@@ -5430,7 +5430,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         timeoutMs: 300_000,
       });
     } catch (error) {
-      throw new Error(humanizeMsalError(error));
+      throw new Error(humanizeMsalError(error, registration));
     } finally {
       if (this.tenantConnectController === controller) {
         this.tenantConnectController = undefined;
@@ -5521,7 +5521,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         timeoutMs: 300_000,
       });
     } catch (error) {
-      throw new Error(humanizeMsalError(error));
+      throw new Error(humanizeMsalError(error, tenant.appRegistration));
     }
     const newlyGranted = intersectGrantedScopes(result.scopes, requestedScopes);
     await this.serialize(async () => {

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
+import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 import { graphAccessDenialFromError, graphAccessDenialText, type GraphAccessDenial } from "@openadminos/agent-sdk";
 import type {
   GraphCacheRefreshResourceResult,
@@ -20,6 +20,7 @@ import type {
   RunRecord,
   SelfTrainingSuggestion,
   TenantGroup,
+  TenantAppRegistration,
   TenantReadinessStatus,
   TenantRecord,
   TenantScope,
@@ -111,14 +112,55 @@ export function humanizeScheduledRunError(message: string, accessDenial?: GraphA
 
 
 /**
- * MSAL's interactive flow throws raw library errors whose messages are
- * accurate but unfriendly ("AADSTS500113: No reply address was found"…).
- * Map the common ones to plain English; fall back to the original message
- * so we never hide signal.
+ * The Entra app identity a sign-in used, named the way an admin finds it
+ * in the Entra admin center. Errors must name the registration actually
+ * used so the admin knows which app to fix.
  */
-export function humanizeMsalError(error: unknown): string {
+function describeRegistration(registration: TenantAppRegistration | undefined): {
+  name: string;
+  custom: boolean;
+} {
+  if (registration?.kind === "custom") {
+    return {
+      name: `your app registration (client ID ${registration.clientId})`,
+      custom: true,
+    };
+  }
+  const clientId = registration?.clientId ?? OPENADMINOS_CLIENT_ID;
+  return clientId === OPENADMINOS_CLIENT_ID
+    ? { name: `the OpenAdminOS app (client ID ${clientId})`, custom: false }
+    : {
+        name: `the app this tenant was first connected with (client ID ${clientId})`,
+        custom: false,
+      };
+}
+
+function hasAadstsCode(lower: string, code: string): boolean {
+  // Codes share prefixes (AADSTS50011 and AADSTS500113), so the code
+  // must not continue with another digit.
+  return new RegExp(`aadsts${code}(?!\\d)`).test(lower);
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
+/**
+ * MSAL's interactive flow throws raw library errors whose messages are
+ * accurate but unfriendly ("AADSTS500113: No reply address was found"...).
+ * Map the common ones to plain English that names the registration used
+ * and the specific fix; fall back to the original message so we never
+ * hide signal.
+ */
+export function humanizeMsalError(
+  error: unknown,
+  registration?: TenantAppRegistration,
+): string {
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
+  const app = describeRegistration(registration);
+  const publishedAppFix =
+    "This is a problem with the published app, not your tenant. Report it to OpenAdminOS, and connect with your own app registration in the meantime.";
   if (error instanceof Error && error.name === "TenantConnectCancelledError") {
     return "Sign-in was cancelled. Nothing was connected.";
   }
@@ -128,25 +170,48 @@ export function humanizeMsalError(error: unknown): string {
   if (lower.includes("user_cancelled") || lower.includes("cancelled by user")) {
     return "Sign-in was cancelled in the browser. Try again from Settings → Tenants.";
   }
-  if (lower.includes("aadsts50105") || lower.includes("assigned to a role")) {
-    return "The account isn't assigned to access Microsoft Graph CLI for this tenant. Ask a tenant admin to grant access, or sign in with a different account.";
+  if (hasAadstsCode(lower, "50011") || hasAadstsCode(lower, "500113")) {
+    return app.custom
+      ? `Microsoft rejected the sign-in redirect for ${app.name}. In Entra, open the registration, go to Authentication, add the platform Mobile and desktop applications with the redirect URI http://localhost, save, then try again.`
+      : `Microsoft rejected the sign-in redirect for ${app.name}. ${publishedAppFix}`;
+  }
+  if (hasAadstsCode(lower, "7000218")) {
+    return app.custom
+      ? `Microsoft asked for a client secret because ${app.name} is not set up as a public client. In Entra, open the registration, go to Authentication, set Allow public client flows to Yes, save, then try again. OpenAdminOS never uses a client secret.`
+      : `Microsoft asked for a client secret for ${app.name}. ${publishedAppFix}`;
+  }
+  if (hasAadstsCode(lower, "50194")) {
+    return app.custom
+      ? `${capitalize(app.name)} is single-tenant, so sign-in must go to its own directory. Enter the Directory (tenant) ID from the registration overview in the connect dialog, then try again.`
+      : `Microsoft rejected ${app.name} as single-tenant. ${publishedAppFix}`;
+  }
+  if (hasAadstsCode(lower, "900023")) {
+    return app.custom
+      ? `Microsoft does not recognise the Directory (tenant) ID entered for ${app.name}. Use the Directory (tenant) ID GUID or a verified domain from the registration overview, then try again.`
+      : `Microsoft does not recognise the directory used to sign in with ${app.name}. Check the account you signed in with, then try again.`;
   }
   if (
-    lower.includes("aadsts65001") ||
+    hasAadstsCode(lower, "700016") ||
+    lower.includes("not found in the directory")
+  ) {
+    return app.custom
+      ? `Microsoft could not find ${app.name} in the directory you signed in to. Check the Application (client) ID on the registration overview. If the app is single-tenant, also enter its Directory (tenant) ID, then try again.`
+      : `Microsoft could not find ${app.name} in this tenant. Your organization may block third-party multi-tenant apps. Ask an Entra administrator to allow it, or connect with your own app registration.`;
+  }
+  if (hasAadstsCode(lower, "50105") || lower.includes("assigned to a role")) {
+    return `Your account isn't assigned to ${app.name} in this tenant. Ask a tenant admin to assign you under Enterprise applications, or sign in with a different account.`;
+  }
+  if (
+    hasAadstsCode(lower, "65001") ||
     lower.includes("consent") ||
     lower.includes("requires admin")
   ) {
-    return "Admin consent is required for the Microsoft Graph CLI in this tenant. Have a Global Administrator approve the app, then try again.";
+    return app.custom
+      ? `Admin consent has not been granted for ${app.name}. In Entra, open the registration, go to API permissions, and select Grant admin consent. Or create a new registration with the setup script in the connect dialog. Then try again.`
+      : `Admin consent is required for ${app.name} in this tenant. Have a Global Administrator sign in once and approve the requested permissions, then try again.`;
   }
-  if (lower.includes("aadsts50020") || lower.includes("user account") || lower.includes("not exist")) {
+  if (hasAadstsCode(lower, "50020") || lower.includes("user account") || lower.includes("not exist")) {
     return "That account doesn't exist in this tenant. Pick a directory account during sign-in instead of a personal Microsoft account.";
-  }
-  if (
-    lower.includes("aadsts700016") ||
-    lower.includes("aadsts900023") ||
-    lower.includes("not found in the directory")
-  ) {
-    return "Microsoft rejected the sign-in because the tenant doesn't recognise our app id. This can happen if Conditional Access blocks the Microsoft Graph CLI; check with your security team.";
   }
   if (
     lower.includes("network") ||
@@ -167,7 +232,7 @@ export function humanizeMsalError(error: unknown): string {
     return raw;
   }
   // Fall back to the raw message so debugging is still possible.
-  return `Sign-in failed: ${raw}`;
+  return `Sign-in with ${app.name} failed: ${raw}`;
 }
 
 
