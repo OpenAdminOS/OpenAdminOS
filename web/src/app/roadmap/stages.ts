@@ -54,6 +54,10 @@ export const ROADMAP_STAGES: readonly RoadmapStage[] = [
         text: "Google Antigravity, Muse, Mistral and Microsoft AI.",
       },
       {
+        title: "Agent identity",
+        text: "Least privilege per agent, with its own Entra agent identity or service principal.",
+      },
+      {
         title: "Local model explorer",
         text: "Find, fit check and download models inside the app.",
       },
