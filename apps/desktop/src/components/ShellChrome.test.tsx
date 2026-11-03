@@ -177,8 +177,14 @@ describe("shell chrome", () => {
         authority: "https://login.microsoftonline.com/fabrikam.onmicrosoft.com",
       },
     };
+    const legacyTenant = {
+      ...base.tenants[0]!,
+      id: "tenant-3",
+      displayName: "Northwind",
+      appRegistration: { kind: "openadminos" as const, clientId: "14d82eec-204b-4c2f-b7e8-296a70dab67e" },
+    };
     const state = createMockAppState({
-      tenants: [openAdminOSTenant, customTenant, pilotState().tenants[0]!],
+      tenants: [openAdminOSTenant, customTenant, legacyTenant, pilotState().tenants[0]!],
     });
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
@@ -197,6 +203,12 @@ describe("shell chrome", () => {
       "title",
       "Own app registration, client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee, directory fabrikam.onmicrosoft.com",
     );
+    const legacy = screen.getByRole("menuitemradio", { name: /Northwind/ });
+    expect(within(legacy).getByText("Microsoft Graph Command Line Tools")).toHaveAttribute(
+      "title",
+      expect.stringContaining("client ID 14d82eec-204b-4c2f-b7e8-296a70dab67e. Connected before v0.5."),
+    );
+    expect(within(legacy).queryByText("OpenAdminOS app")).not.toBeInTheDocument();
     const pilot = screen.getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
     expect(within(pilot).queryByText(/app registration|OpenAdminOS app/i)).not.toBeInTheDocument();
   });

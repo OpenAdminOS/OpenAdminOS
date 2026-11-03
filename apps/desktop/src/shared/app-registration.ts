@@ -1,4 +1,15 @@
-import type { SavedAppRegistration, TenantRecord } from "./openAdminOS.js";
+import {
+  OPENADMINOS_APP_CLIENT_ID,
+  type SavedAppRegistration,
+  type TenantRecord,
+} from "./openAdminOS.js";
+
+/**
+ * Microsoft Graph Command Line Tools. Tenants connected before v0.5 are
+ * pinned to this client so their refresh tokens keep working, and that is
+ * the app their tenant lists in Enterprise applications and sign-in logs.
+ */
+const LEGACY_GRAPH_CLI_CLIENT_ID = "14d82eec-204b-4c2f-b7e8-296a70dab67e";
 
 export interface RegistrationSummary {
   /** Short text for rows and menus. */
@@ -24,10 +35,16 @@ export function tenantRegistrationSummary(tenant: TenantRecord): RegistrationSum
   if (tenant.kind === "sample" || !tenant.appRegistration) return null;
   const { kind, clientId, authority, label } = tenant.appRegistration;
   if (kind === "openadminos") {
-    // TODO(ugur): tenants connected before v0.5 are pinned to the Microsoft
-    // Graph Command Line Tools client and show here as the OpenAdminOS app
-    // with that client ID. Should they get their own name?
-    return { text: "OpenAdminOS app", title: `OpenAdminOS app, client ID ${clientId}` };
+    if (clientId === OPENADMINOS_APP_CLIENT_ID) {
+      return { text: "OpenAdminOS app", title: `OpenAdminOS app, client ID ${clientId}` };
+    }
+    if (clientId === LEGACY_GRAPH_CLI_CLIENT_ID) {
+      return {
+        text: "Microsoft Graph Command Line Tools",
+        title: `Microsoft Graph Command Line Tools, client ID ${clientId}. Connected before v0.5. Reconnect to use the OpenAdminOS app or your own app registration.`,
+      };
+    }
+    return { text: `App registration · ${shortClientId(clientId)}`, title: `App registration, client ID ${clientId}` };
   }
   const directory = directoryFromAuthority(authority);
   return {
