@@ -17,13 +17,19 @@ import type {
 
 type Tab = "pipeline" | "logs" | "reasoning";
 
-export function ActivityFeed({ run }: { run: RunRecord }) {
+export function ActivityFeed({
+  run,
+  initialTab = "pipeline",
+}: {
+  run: RunRecord;
+  initialTab?: Tab;
+}) {
   const reasoningSteps = useMemo(
     () => run.steps.filter((step) => step.thinking && step.thinking.text.length > 0),
     [run.steps],
   );
 
-  const [tab, setTab] = useState<Tab>("pipeline");
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   const panelId = `run-${tab}-panel`;
   return (

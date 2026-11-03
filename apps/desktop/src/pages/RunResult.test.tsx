@@ -491,3 +491,85 @@ it("shows the complete dry-run plan without Apply and starts a fresh normal run"
   expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]?.dryRun).toBeUndefined();
   expect(bridge.confirmRun).not.toHaveBeenCalled();
 });
+
+it("does not present host status text as the report while a run is live", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "running",
+    plan: undefined,
+    summary: "Device Offboard is running.",
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  const report = await screen.findByRole("region", { name: "Report" });
+  expect(report).toHaveTextContent("The report appears here as the agent writes it.");
+  expect(report).not.toHaveTextContent("Device Offboard is running.");
+  expect(screen.queryByText(/Written by/)).not.toBeInTheDocument();
+});
+
+it("tells the admin when cancelling a live run fails instead of failing silently", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "running", plan: undefined });
+  const bridge = makeMockBridge(
+    { cancelRun: vi.fn(async () => { throw new Error("Run not found"); }) },
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  await user.click(await screen.findByRole("button", { name: "Cancel run" }));
+  expect(await screen.findByText(/The run could not be cancelled: Run not found/)).toBeInTheDocument();
+});
+
+it("does not cancel a live run when Escape is pressed on the page", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "running", plan: undefined });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  await screen.findByRole("button", { name: "Cancel run" });
+  await user.keyboard("{Escape}");
+  expect(bridge.cancelRun).not.toHaveBeenCalled();
+});
+
+it("keeps a local run labelled local when its provider entry is no longer configured", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "completed",
+    plan: undefined,
+    providerId: "ollama",
+    finishedAt: "2026-10-10T10:01:00.000Z",
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ providers: [], installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  const status = await screen.findByRole("region", { name: "Run status" });
+  expect(status).toHaveTextContent("Local, not billed");
+  expect(status).not.toHaveTextContent("Hosted");
+});
+
+it("opens run details on the Logs tab when a failed run has no error playbook", async () => {
+  const run = createAwaitingConfirmationRun({
+    status: "failed",
+    plan: undefined,
+    error: undefined,
+    result: undefined,
+    finishedAt: "2026-10-10T10:01:00.000Z",
+  });
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug })], runs: [run] }),
+  );
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+
+  expect(await screen.findByText("Run failed before producing a result. See the Logs tab for details.")).toBeInTheDocument();
+  expect(screen.getByRole("tab", { name: "Logs" })).toHaveAttribute("aria-selected", "true");
+  expect(screen.getByRole("region", { name: "Run status" })).toHaveTextContent("Open Run details below for the logs.");
+});

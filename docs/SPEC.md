@@ -2046,8 +2046,9 @@ explained in `apps/desktop/build/README.md`.
   ghost buttons, icon buttons with tooltips, or an overflow menu.
 - Repeated collections of more than three similar records use `DataTable` or
   divided row lists, not card grids.
-- URL-addressable record details open in the shared right-side `Drawer`. Active
-  runs may use the live-run modal, and write confirmation remains a focused page.
+- URL-addressable record details open in the shared right-side `Drawer`. Runs are
+  the exception: every run opens on a full run page, and write confirmation
+  remains a focused page.
 - Sections use one surface with hairline dividers. Nested bordered or ringed cards
   are avoided.
 
@@ -2065,7 +2066,7 @@ These are visible in the mockups and need to be built as proper React components
 - **Status strip** fixed at the bottom of every main screen, with three compact
   cells for tenant, provider and data boundary, and active runs
 - **Data tables and divided row lists** for agent libraries, runs, changes, and other repeated records
-- **Drawer** for URL-addressable agent, run, connector, and change details
+- **Drawer** for URL-addressable agent, connector, and change details
 - **Run timeline** (stepped pipeline visualization)
 - **Run status card** (run page): status headline, segmented step progress, tenant / provider / model / tokens / cost facts, and the data-location line
 - **Activity feed** with two modes: plain language / raw logs

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { RunRecord, RunStatus, RunStepRecord } from "../shared/openAdminOS";
 import { IconCheck, IconWarning } from "./icons";
 
@@ -84,11 +84,19 @@ function terminalFill(status: RunStatus): string {
  */
 export function RunStepTimeline({
   steps,
-  nowMs,
+  live,
 }: {
   steps: RunStepRecord[];
-  nowMs: number;
+  /** Ticks running-step durations; the clock stops once the run settles. */
+  live: boolean;
 }) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => setNowMs(Date.now()), 250);
+    return () => window.clearInterval(interval);
+  }, [live]);
   return (
     <ol className="flex flex-col">
       {steps.map((step, index) => (
@@ -138,9 +146,9 @@ function TimelineRow({
       <div
         className={`mb-2 min-w-0 rounded-lg px-3 py-2 transition-colors ${
           running
-            ? "bg-[var(--color-info-soft)] ring-1 ring-[var(--color-info)]/25"
+            ? "bg-[var(--color-info-soft)]"
             : failed
-              ? "bg-[var(--color-danger-soft)] ring-1 ring-[var(--color-danger)]/25"
+              ? "bg-[var(--color-danger-soft)]"
               : ""
         }`}
       >
@@ -242,13 +250,6 @@ export function formatStepDuration(step: RunStepRecord, nowMs: number): string |
   if (!step.startedAt) return undefined;
   const end = step.finishedAt ? new Date(step.finishedAt).getTime() : nowMs;
   return formatMs(end - new Date(step.startedAt).getTime());
-}
-
-/** Wall-clock run duration, ticking while the run is live. */
-export function formatRunElapsed(run: RunRecord, nowMs: number): string | undefined {
-  if (!run.startedAt) return undefined;
-  const end = run.finishedAt ? new Date(run.finishedAt).getTime() : nowMs;
-  return formatMs(end - new Date(run.startedAt).getTime());
 }
 
 function formatMs(ms: number): string | undefined {
