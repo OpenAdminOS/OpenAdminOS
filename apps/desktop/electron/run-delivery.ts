@@ -84,7 +84,8 @@ export interface RunDeliveryHost {
   write(state: RunDeliveryPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
   getAppState(): Promise<AppState>;
-  getMsalClient(): PublicClientApplication;
+  /** The MSAL client that issued this tenant's tokens. */
+  msalClientForTenant(tenant: TenantRecord): PublicClientApplication;
   openBrowser(url: string): Promise<void>;
   connectorSecretsFor(connectorId: string): SecretAccessor;
   whatsAppWebClient(): WhatsAppWebDeliveryClient;
@@ -560,7 +561,7 @@ export class RunDeliveryService {
           }
         : baseConfig;
 
-    const client = this.host.getMsalClient();
+    const client = this.host.msalClientForTenant(tenant);
     const openBrowser = this.host.openBrowser;
     let scheduledAuthRequired = false;
     const authRecovery = "Scheduled notification needs Microsoft sign-in or additional permissions. Open Connectors and test the connection before retrying delivery.";
@@ -881,7 +882,7 @@ export class RunDeliveryService {
       return { retryable: false, error: "Outlook connector is not registered." };
     }
 
-    const client = this.host.getMsalClient();
+    const client = this.host.msalClientForTenant(tenant);
     const openBrowser = this.host.openBrowser;
     let scheduledAuthRequired = false;
     const authRecovery = "Scheduled notification needs Microsoft sign-in or additional permissions. Open Connectors and test the connection before retrying delivery.";

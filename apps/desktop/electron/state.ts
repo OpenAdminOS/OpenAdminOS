@@ -1463,7 +1463,7 @@ export class AppStateStore {
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
       getAppState: () => host.getAppState(),
-      getMsalClient: () => host.getMsalClient(),
+      msalClientForTenant: (tenant) => host.msalClientForTenant(tenant),
       openBrowser: (url) => host.openBrowser(url),
       connectorSecretsFor: (connectorId) => host.connectorSecretsFor(connectorId),
       whatsAppWebClient: () => host.whatsAppWebClient(),
@@ -2059,10 +2059,6 @@ export class AppStateStore {
       });
     });
     return enabled;
-  }
-
-  private getMsalClient(): PublicClientApplication {
-    return this.msalClientFor(undefined);
   }
 
   /**
