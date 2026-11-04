@@ -146,6 +146,26 @@ describe("Marketplace", () => {
     expect(await within(dialog).findByRole("status")).toHaveTextContent("Removed KQL Search. Chat no longer offers its tools.");
   });
 
+  it("names the action that failed when turning off or uninstalling fails", async () => {
+    const user = userEvent.setup();
+    render("/marketplace?server=kql-search", {
+      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true } }),
+    }, {
+      setMcpServerEnabled: vi.fn().mockRejectedValue(new Error("Error invoking remote method 'openadminos:set-mcp-server-enabled': Error: The settings file could not be written.")),
+      uninstallMcpServer: vi.fn().mockRejectedValue(new Error("The settings file could not be written.")),
+    });
+    const dialog = await screen.findByRole("dialog", { name: "KQL Search details" });
+    await user.click(within(dialog).getByRole("switch", { name: /Available in Chat/ }));
+    const toggleAlert = await within(dialog).findByRole("alert");
+    expect(toggleAlert).toHaveTextContent("Could not turn off KQL Search");
+    expect(toggleAlert).toHaveTextContent("The settings file could not be written.");
+    expect(toggleAlert).not.toHaveTextContent("did not respond");
+
+    await user.click(within(dialog).getByRole("button", { name: "Uninstall" }));
+    await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("Could not uninstall KQL Search"));
+    expect(within(dialog).getByRole("alert")).not.toHaveTextContent("did not respond");
+  });
+
   it("says when the selected model is too small for tool use, on the page and on each server card", async () => {
     const notice = "llama3.2:3b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger.";
     render("/marketplace", { chatToolUse: { available: false, notice } });

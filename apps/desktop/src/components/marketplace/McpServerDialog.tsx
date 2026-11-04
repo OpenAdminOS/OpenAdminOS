@@ -32,11 +32,11 @@ export function McpServerDialog({
   const [view, setView] = useState<View>(startWithInstall && !server.installed ? "install" : "details");
   const [acknowledged, setAcknowledged] = useState(false);
   const [busy, setBusy] = useState<Action | null>(null);
-  const [failure, setFailure] = useState<{ action: Action; message: string } | null>(null);
+  const [failure, setFailure] = useState<{ action: Action; title: string; message: string } | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   const api = window.openAdminOS;
-  const run = async (action: Action, task: () => Promise<unknown> | undefined, success: string) => {
+  const run = async (action: Action, task: () => Promise<unknown> | undefined, success: string, failed: string) => {
     setBusy(action);
     setFailure(null);
     setNotice(null);
@@ -48,16 +48,17 @@ export function McpServerDialog({
       setNotice(success);
       if (action === "install") setView("details");
     } catch (error) {
-      setFailure({ action, message: ipcErrorMessage(error) });
+      setFailure({ action, title: failed, message: ipcErrorMessage(error) });
     } finally {
       setBusy(null);
     }
   };
-  const install = () => void run("install", () => api?.installMcpServer?.(server.id), `Installed ${server.name}. Its tools are available to Chat.`);
-  const check = () => void run("check", () => api?.checkMcpServer?.(server.id), `${server.name} answered. The tool list is up to date.`);
-  const uninstall = () => void run("uninstall", () => api?.uninstallMcpServer?.(server.id), `Removed ${server.name}. Chat no longer offers its tools.`);
+  const install = () => void run("install", () => api?.installMcpServer?.(server.id), `Installed ${server.name}. Its tools are available to Chat.`, `${server.name} could not be installed`);
+  const check = () => void run("check", () => api?.checkMcpServer?.(server.id), `${server.name} answered. The tool list is up to date.`, `${server.name} did not respond`);
+  const uninstall = () => void run("uninstall", () => api?.uninstallMcpServer?.(server.id), `Removed ${server.name}. Chat no longer offers its tools.`, `Could not uninstall ${server.name}`);
   const toggle = (enabled: boolean) => void run("toggle", () => api?.setMcpServerEnabled?.(server.id, enabled),
-    enabled ? `${server.name} is available to Chat.` : `${server.name} is off. Chat does not offer its tools.`);
+    enabled ? `${server.name} is available to Chat.` : `${server.name} is off. Chat does not offer its tools.`,
+    enabled ? `Could not turn on ${server.name}` : `Could not turn off ${server.name}`);
 
   const ink = inkFor(server.id);
   return (
@@ -98,7 +99,7 @@ export function McpServerDialog({
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--color-border-soft)] px-6 py-4">
         {notice ? <p role="status" className="basis-full text-sm text-[var(--color-success)]">{notice}</p> : null}
         {failure && failure.action !== "install" ? (
-          <ErrorBox title={`${server.name} did not respond`} message={failure.message} onRetry={failure.action === "check" ? check : undefined} />
+          <ErrorBox title={failure.title} message={failure.message} onRetry={failure.action === "check" ? check : undefined} />
         ) : null}
         {view === "install" ? (
           <>
