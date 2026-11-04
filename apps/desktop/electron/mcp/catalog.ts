@@ -48,7 +48,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     url: "https://www.intuneautomation.com/mcp/",
     description:
       "A library of PowerShell scripts for Intune and Microsoft Graph automation, with metadata on required permissions. The server only returns script text. It never connects to your tenant or runs a script.",
-    pitch: "Reviewed PowerShell scripts for Intune automation, with their permissions.",
+    pitch: "PowerShell scripts for Intune automation, with their permissions.",
     auth: "none",
     readOnly: true,
   },

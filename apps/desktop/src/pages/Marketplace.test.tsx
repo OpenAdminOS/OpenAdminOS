@@ -48,9 +48,10 @@ describe("Marketplace", () => {
     render();
     expect(await screen.findByRole("heading", { name: "Marketplace", level: 1 })).toBeInTheDocument();
     expect(screen.getByRole("region", { name: "Spotlight" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Discover" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: /Agents/ })).toHaveTextContent("2");
-    expect(screen.getByRole("tab", { name: /MCP tools/ })).toHaveTextContent("3");
+    const kinds = screen.getByRole("group", { name: "Listing kind" });
+    expect(within(kinds).getByRole("button", { name: "Discover" })).toHaveAttribute("aria-pressed", "true");
+    expect(within(kinds).getByRole("button", { name: /Agents/ })).toHaveTextContent("2");
+    expect(within(kinds).getByRole("button", { name: /MCP tools/ })).toHaveTextContent("3");
 
     const mcp = screen.getByRole("region", { name: "MCP tools" });
     for (const [name, host] of [["Microsoft Learn", "learn.microsoft.com"], ["KQL Search", "www.kqlsearch.com"], ["IntuneAutomation", "www.intuneautomation.com"]]) {
@@ -64,7 +65,7 @@ describe("Marketplace", () => {
     expect(within(catalog).getByText(/License required/)).toBeInTheDocument();
     expect(screen.getByText("2 of 2 agents")).toBeInTheDocument();
 
-    expect(document.body.textContent).not.toMatch(/EUR|USD|\$\d|trial|Buy licence|per month|checkout/i);
+    expect(document.body.textContent).not.toMatch(/EUR|USD|\$\d|trial|Buy licence|per month|checkout|\bFree\b/i);
   });
 
   it("filters listings by search and switches kinds through the URL", async () => {
@@ -77,8 +78,9 @@ describe("Marketplace", () => {
     expect(screen.queryByRole("region", { name: "Agents" })).not.toBeInTheDocument();
 
     await user.clear(screen.getByRole("searchbox", { name: "Search the Marketplace" }));
-    await user.click(screen.getByRole("tab", { name: /Agents/ }));
-    expect(screen.getByRole("tab", { name: /Agents/ })).toHaveAttribute("aria-selected", "true");
+    const kinds = screen.getByRole("group", { name: "Listing kind" });
+    await user.click(within(kinds).getByRole("button", { name: /Agents/ }));
+    expect(within(kinds).getByRole("button", { name: /Agents/ })).toHaveAttribute("aria-pressed", "true");
     expect(screen.queryByRole("region", { name: "MCP tools" })).not.toBeInTheDocument();
     expect(screen.queryByRole("region", { name: "Spotlight" })).not.toBeInTheDocument();
   });
@@ -89,7 +91,7 @@ describe("Marketplace", () => {
     await user.click(await screen.findByRole("button", { name: /^Microsoft Learn, MCP tool/ }));
     const dialog = await screen.findByRole("dialog", { name: "Microsoft Learn details" });
     expect(within(dialog).getByText("Where queries go")).toBeInTheDocument();
-    expect(within(dialog).getByText("Free · No sign-in needed")).toBeInTheDocument();
+    expect(within(dialog).getAllByText("No sign-in needed").length).toBeGreaterThan(0);
 
     await user.click(within(dialog).getByRole("button", { name: "Install" }));
     expect(within(dialog).getByText("Authentication")).toBeInTheDocument();

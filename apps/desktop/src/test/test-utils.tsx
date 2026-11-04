@@ -187,7 +187,7 @@ export function createMockMcpServers(
       description: "A reference library of community KQL queries.", pitch: "Community KQL examples to start a hunting or reporting query.",
       auth: "none", readOnly: true, installed: false, enabled: false, tools: [] },
     { id: "intuneautomation", name: "IntuneAutomation", publisher: "IntuneAutomation", url: "https://www.intuneautomation.com/mcp/", host: "www.intuneautomation.com",
-      description: "A library of PowerShell scripts for Intune automation.", pitch: "Reviewed PowerShell scripts for Intune automation, with their permissions.",
+      description: "A library of PowerShell scripts for Intune automation.", pitch: "PowerShell scripts for Intune automation, with their permissions.",
       auth: "none", readOnly: true, installed: false, enabled: false, tools: [] },
   ];
   return base.map((server) => ({ ...server, ...(overrides[server.id] ?? {}) }));

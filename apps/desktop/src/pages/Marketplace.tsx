@@ -119,13 +119,12 @@ export default function Marketplace() {
             />
           ) : null}
 
-          <div role="tablist" aria-label="Listing kind" className="mb-7 flex flex-wrap items-baseline gap-x-7 gap-y-2 border-b border-[var(--color-border-soft)]">
+          <div role="group" aria-label="Listing kind" className="mb-7 flex flex-wrap items-baseline gap-x-7 gap-y-2 border-b border-[var(--color-border-soft)]">
             {kinds.map((entry) => (
               <button
                 key={entry.id}
                 type="button"
-                role="tab"
-                aria-selected={kind === entry.id}
+                aria-pressed={kind === entry.id}
                 onClick={() => setKind(entry.id)}
                 className={`relative pb-3 font-serif text-[24px] tracking-[-0.01em] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
                   kind === entry.id
@@ -249,7 +248,7 @@ function McpCard({ server, onOpen }: { server: McpServerSummary; onOpen: () => v
         <span className="text-sm text-[var(--color-text-soft)]">{server.pitch}</span>
         <Ledger server={server} />
         <span className="mt-auto flex items-center justify-between gap-2 pt-1 text-sm">
-          <span className="text-[var(--color-text-soft)]">Free · No sign-in needed</span>
+          <span className="text-[var(--color-text-soft)]">No sign-in needed</span>
           {status ? <span className={`whitespace-nowrap text-xs ${status.tone}`}>{status.label}</span> : null}
         </span>
       </span>
@@ -299,7 +298,7 @@ function Spotlight({
             >
               Details
             </button>
-            <small className="basis-full text-xs opacity-60">Free · No sign-in needed · {featured.publisher}</small>
+            <small className="basis-full text-xs opacity-60">No sign-in needed · {featured.publisher}</small>
           </div>
         </div>
       </article>

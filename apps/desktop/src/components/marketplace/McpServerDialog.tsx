@@ -131,7 +131,7 @@ export function McpServerDialog({
         ) : (
           <>
             <div>
-              <div className="text-sm font-medium text-[var(--color-text)]">Free · No sign-in needed</div>
+              <div className="text-sm font-medium text-[var(--color-text)]">No sign-in needed</div>
               <div className="text-sm text-[var(--color-text-muted)]">Public server from {server.publisher}</div>
             </div>
             <Button variant="primary" onClick={() => setView("install")}>Install</Button>
