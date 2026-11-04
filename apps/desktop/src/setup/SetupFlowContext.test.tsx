@@ -312,6 +312,69 @@ describe("contextual tenant setup", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows a part another selected service already covers as included", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectTenant = vi.fn(async () => createMockAppState());
+    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
+    await user.click(screen.getByRole("button", { name: "Review Entra parts and scopes" }));
+
+    const people = screen.getByRole("checkbox", { name: "Entra users and groups" });
+    expect(people).toBeChecked();
+    expect(people).toBeDisabled();
+    expect(people).toHaveAccessibleDescription("Included with Intune");
+    const devices = screen.getByRole("checkbox", { name: "Entra devices" });
+    expect(devices).toBeChecked();
+    expect(devices).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Entra sign-in logs" })).not.toBeChecked();
+    // Two of six Entra parts are included, so Entra is partly selected.
+    expect(screen.getByRole("checkbox", { name: "Entra" })).toHaveAttribute("aria-checked", "mixed");
+
+    // Selecting all of Entra adds no scope twice, and the request lists explicit parts.
+    await user.click(screen.getByRole("checkbox", { name: "Entra" }));
+    expect(screen.getByRole("checkbox", { name: "Entra" })).toBeChecked();
+    await user.click(
+      screen.getByRole("button", { name: "Approve 17 read scopes and continue to Microsoft" }),
+    );
+    expect(connectTenant).toHaveBeenCalledWith({
+      partIds: [
+        "intune.people",
+        "intune.devices",
+        "intune.apps",
+        "entra.people",
+        "entra.devices",
+        "entra.apps",
+        "entra.access",
+        "entra.policies",
+        "entra.signins",
+      ],
+    });
+  });
+
+  it("shows the Intune people part as included when Entra is selected", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({}, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Entra" }));
+    await user.click(screen.getByRole("button", { name: "Review Intune parts and scopes" }));
+
+    const people = screen.getByRole("checkbox", { name: "Intune users and groups" });
+    expect(people).toBeChecked();
+    expect(people).toBeDisabled();
+    expect(people).toHaveAccessibleDescription("Included with Entra");
+    expect(screen.getByRole("checkbox", { name: "Intune" })).toHaveAttribute("aria-checked", "mixed");
+    expect(
+      screen.getByRole("button", { name: "Approve 11 read scopes and continue to Microsoft" }),
+    ).toBeEnabled();
+  });
+
   it("expands a service to its parts and sends only the chosen parts", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });

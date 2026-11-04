@@ -1,6 +1,8 @@
 import {
   AVAILABLE_SERVICES,
   SERVICE_PARTS,
+  formatServiceList,
+  serviceById,
   type RequestedScope,
   type ServiceId,
 } from "../shared/openAdminOS";
@@ -85,4 +87,37 @@ export function groupRequestedScopes(scopes: RequestedScope[]): ScopeGroup[] {
 
 function uniqueByName(rows: RequestedScope[]): RequestedScope[] {
   return [...new Map(rows.map((row) => [row.name, row] as const)).values()];
+}
+
+/**
+ * Parts that are not selected but whose scopes are all requested by the
+ * selected parts, for example Entra users and groups once Intune is
+ * selected. Each entry names the services that bring the part in, in
+ * registry order. The request itself is unchanged: it already sends each
+ * scope once.
+ */
+export function includedPartServices(
+  selectedPartIds: ReadonlySet<string>,
+): Map<string, ServiceId[]> {
+  const selected = SERVICE_PARTS.filter((part) => selectedPartIds.has(part.id));
+  const requested = new Set(selected.flatMap((part) => part.scopes.map((scope) => scope.name)));
+  const included = new Map<string, ServiceId[]>();
+  for (const part of SERVICE_PARTS) {
+    if (selectedPartIds.has(part.id) || part.scopes.length === 0) continue;
+    const names = part.scopes.map((scope) => scope.name);
+    if (!names.every((name) => requested.has(name))) continue;
+    const services = AVAILABLE_SERVICES.map((service) => service.id).filter((serviceId) =>
+      selected.some(
+        (other) =>
+          other.service === serviceId && other.scopes.some((scope) => names.includes(scope.name)),
+      ),
+    );
+    included.set(part.id, services);
+  }
+  return included;
+}
+
+/** "Included with Intune", "Included with Intune and Defender". */
+export function includedWithLabel(serviceIds: readonly ServiceId[]): string {
+  return `Included with ${formatServiceList(serviceIds.map((id) => serviceById(id).title))}`;
 }

@@ -39,7 +39,12 @@ import { tenantRegistrationSummary } from "../shared/app-registration";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import type { PendingIntent } from "./pending-intent";
-import { groupRequestedScopes, type ScopeGroup } from "./scope-groups";
+import {
+  groupRequestedScopes,
+  includedPartServices,
+  includedWithLabel,
+  type ScopeGroup,
+} from "./scope-groups";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   DEFAULT_REGISTRATION_DISPLAY_NAME,
@@ -248,6 +253,9 @@ function PermissionsStep({
         }),
       ),
   );
+  // Parts whose scopes the selected parts already request, such as Entra
+  // users and groups once Intune is selected. They show as included.
+  const includedParts = useMemo(() => includedPartServices(selectedPartIds), [selectedPartIds]);
   const [registrationDisplayName, setRegistrationDisplayName] = useState(
     DEFAULT_REGISTRATION_DISPLAY_NAME,
   );
@@ -307,12 +315,14 @@ function PermissionsStep({
     setRegistrationSetupStatus(null);
     setRegistrationActionError(null);
   };
-  // A service checkbox selects or clears all of its parts.
+  // A service checkbox selects or clears all of its parts. A part another
+  // service already includes counts as selected.
   const toggleService = (serviceId: ServiceId) => {
     const partIds = partIdsFor([serviceId]);
     setSelectedPartIds((current) => {
       const next = new Set(current);
-      const allSelected = partIds.every((partId) => next.has(partId));
+      const included = includedPartServices(current);
+      const allSelected = partIds.every((partId) => next.has(partId) || included.has(partId));
       for (const partId of partIds) {
         if (allSelected) next.delete(partId);
         else next.add(partId);
@@ -536,7 +546,9 @@ function PermissionsStep({
                     <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
                       {AVAILABLE_SERVICES.map((service) => {
                         const partIds = partIdsFor([service.id]);
-                        const selected = partIds.filter((partId) => selectedPartIds.has(partId)).length;
+                        const selected = partIds.filter(
+                          (partId) => selectedPartIds.has(partId) || includedParts.has(partId),
+                        ).length;
                         return (
                           <label key={service.id} className="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-soft)]">
                             <TriStateCheckbox
@@ -683,6 +695,7 @@ function PermissionsStep({
                   key={group.id}
                   group={group}
                   selectedPartIds={selectedPartIds}
+                  includedParts={includedParts}
                   onToggleService={
                     group.id === "other" ? undefined : () => toggleService(group.id as ServiceId)
                   }
@@ -790,18 +803,21 @@ function TriStateCheckbox({
   checked,
   indeterminate,
   disabled,
+  describedBy,
   onChange,
 }: {
   ariaLabel: string;
   checked: boolean;
   indeterminate: boolean;
   disabled?: boolean;
+  describedBy?: string;
   onChange?: () => void;
 }) {
   return (
     <input
       type="checkbox"
       aria-label={ariaLabel}
+      aria-describedby={describedBy}
       checked={checked}
       aria-checked={indeterminate ? "mixed" : checked}
       ref={(element) => {
@@ -817,11 +833,14 @@ function TriStateCheckbox({
 function ServiceDisclosure({
   group,
   selectedPartIds,
+  includedParts,
   onToggleService,
   onTogglePart,
 }: {
   group: ScopeGroup;
   selectedPartIds: ReadonlySet<string>;
+  /** Unselected parts whose scopes other selected parts already request. */
+  includedParts: ReadonlyMap<string, readonly ServiceId[]>;
   /** Absent for the Other group, whose rows are always requested. */
   onToggleService?: () => void;
   onTogglePart: (partId: string) => void;
@@ -829,7 +848,9 @@ function ServiceDisclosure({
   const [expanded, setExpanded] = useState(false);
   const panelId = `setup-service-${group.id}`;
   const selectable = Boolean(onToggleService);
-  const selectedParts = group.parts.filter((part) => selectedPartIds.has(part.id)).length;
+  const selectedParts = group.parts.filter(
+    (part) => selectedPartIds.has(part.id) || includedParts.has(part.id),
+  ).length;
   const allSelected = !selectable || selectedParts === group.parts.length;
   return (
     <div className="overflow-hidden rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
@@ -869,15 +890,21 @@ function ServiceDisclosure({
       <div id={panelId} hidden={!expanded} className="border-t border-[var(--color-border-soft)]">
         {group.parts.map((part) => {
           const registryPart = servicePartById(part.id);
+          const includedBy = selectedPartIds.has(part.id) ? undefined : includedParts.get(part.id);
+          const includedId = `${panelId}-${part.id}-included`;
           return (
             <div key={part.id} className="border-b border-[var(--color-border-soft)] px-4 py-3 last:border-b-0">
-              <label className={`flex items-start gap-3 ${selectable ? "cursor-pointer" : ""}`}>
+              <label
+                className={`flex items-start gap-3 ${selectable && !includedBy ? "cursor-pointer" : ""}`}
+              >
                 {selectable ? (
                   <span className="mt-0.5">
                     <TriStateCheckbox
                       ariaLabel={registryPart ? partLabel(registryPart) : part.title}
-                      checked={selectedPartIds.has(part.id)}
+                      checked={selectedPartIds.has(part.id) || Boolean(includedBy)}
                       indeterminate={false}
+                      disabled={Boolean(includedBy)}
+                      {...(includedBy ? { describedBy: includedId } : {})}
                       onChange={() => onTogglePart(part.id)}
                     />
                   </span>
@@ -885,6 +912,11 @@ function ServiceDisclosure({
                 <span className="min-w-0">
                   <span className="block text-sm font-medium text-[var(--color-text)]">{part.title}</span>
                   <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">{part.summary}</span>
+                  {selectable && includedBy ? (
+                    <span id={includedId} className="mt-0.5 block text-xs leading-5 text-[var(--color-text-soft)]">
+                      {includedWithLabel(includedBy)}
+                    </span>
+                  ) : null}
                 </span>
               </label>
               <ul className={`mt-2 space-y-2 ${selectable ? "pl-7" : ""}`}>

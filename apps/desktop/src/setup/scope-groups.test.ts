@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SERVICE_PARTS } from "../shared/openAdminOS";
 import type { RequestedScope } from "../shared/openAdminOS";
-import { groupRequestedScopes } from "./scope-groups";
+import { groupRequestedScopes, includedPartServices, includedWithLabel } from "./scope-groups";
 
 const rows: RequestedScope[] = SERVICE_PARTS.flatMap((part) =>
   part.scopes.map((scope) => ({
@@ -63,5 +63,24 @@ describe("setup scope groups", () => {
     expect(group?.id).toBe("other");
     expect(group?.scopes[0]?.name).toBe("New.Read.All");
     expect(group?.parts[0]?.scopes[0]?.name).toBe("New.Read.All");
+  });
+
+  it("marks a part as included when other selected parts request all of its scopes", () => {
+    const intune = new Set(["intune.people", "intune.devices", "intune.apps"]);
+    const included = includedPartServices(intune);
+    // Entra users and groups has exactly the Intune people scopes, and Entra
+    // devices is Device.Read.All, which Intune devices also requests.
+    expect([...included.keys()]).toEqual(["entra.people", "entra.devices"]);
+    expect(included.get("entra.people")).toEqual(["intune"]);
+    expect(includedWithLabel(included.get("entra.people") ?? [])).toBe("Included with Intune");
+
+    // The reverse direction: Entra covers the Intune people part only.
+    const entra = includedPartServices(new Set(["entra.people", "entra.signins"]));
+    expect([...entra.keys()]).toEqual(["intune.people"]);
+    expect(includedWithLabel(entra.get("intune.people") ?? [])).toBe("Included with Entra");
+
+    // A selected part is never reported as included, and a partial overlap is not enough.
+    expect(includedPartServices(new Set(["entra.people", "intune.people"])).size).toBe(0);
+    expect(includedPartServices(new Set(["entra.devices"])).has("intune.devices")).toBe(false);
   });
 });
