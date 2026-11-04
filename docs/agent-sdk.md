@@ -59,7 +59,7 @@ Top-level keys:
 | `author.verified` | Maintainer-owned marker for bundled or verified authors. |
 | `category` | `devices`, `apps`, `policies`, `compliance`, or `updates`. |
 | `tier` | `agent` or `dashboard`. Defaults to `agent` at parse time. Use `dashboard` for single-source narrated reports. |
-| `services` | Required for registry agents. The Microsoft 365 services the agent needs: `intune`, `entra` or `defender`, at least one, no duplicates. Every declared Graph scope must belong to one of these services in the service registry (`packages/agent-sdk/src/services.ts`). The agent cannot run while one of its services is not connected for the tenant. When a local manifest omits it, the services are derived from the scopes. |
+| `services` | Required for registry agents. The Microsoft 365 services the agent needs: `intune`, `entra` or `defender`, no duplicates. Use `services: []` only for an agent that declares no Graph scopes, such as one that reviews evidence the host supplies. Every declared Graph scope must belong to one of these services in the service registry (`packages/agent-sdk/src/services.ts`). The agent cannot run while one of its services is not connected for the tenant. When a local manifest omits it, the services are derived from the scopes. |
 | `requiresEntraTier` | `free`, `p1`, or `p2`. Defaults to `free`. Use `p1` for sign-ins, directory audits, Conditional Access policies, or user `signInActivity`. Use `p2` for Identity Protection data. |
 | `mode` | `read` or `write`. Write mode requires a `write` step. Read mode cannot declare a `write` step. |
 | `preferredModel` | Optional advisory model name. This is the current model field. There is no `modelRequirements` object in the manifest schema today. |

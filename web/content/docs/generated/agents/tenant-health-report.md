@@ -21,7 +21,7 @@ Summarizes Intune tenant health from compliance, OS, ownership, and stale invent
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.6.3` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `7d14aac` |
+| Last changed | 2026-11-04 · `6b31f81` |
 
 ## Execution
 

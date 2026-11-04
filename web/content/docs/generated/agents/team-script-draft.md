@@ -21,7 +21,7 @@ Prepares a PowerShell script for review from an Agent Team task and its supplied
 | Preferred model | `not pinned` |
 | Minimum app version | `0.6.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `7d14aac` |
+| Last changed | 2026-11-04 · `0b571dd` |
 
 ## Execution
 

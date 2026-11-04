@@ -97,8 +97,6 @@ Agents in the registry that declare this service. An agent cannot run while a se
 | [Intune Device Posture Auditor](../agents/intune-device-posture-auditor.md) | `read` | `DeviceManagementManagedDevices.Read.All` |
 | [Offboarding agent](../agents/offboarding-agent.md) | `write` | `DeviceManagementManagedDevices.Read.All`<br>`Device.Read.All`<br>`DeviceManagementManagedDevices.PrivilegedOperations.All` |
 | [OS update posture](../agents/os-update-posture.md) | `read` | `DeviceManagementManagedDevices.Read.All` |
-| [Team evidence review](../agents/team-evidence-review.md) | `read` | None |
-| [Team PowerShell draft](../agents/team-script-draft.md) | `read` | None |
 | [Tenant health report](../agents/tenant-health-report.md) | `read` | `DeviceManagementManagedDevices.Read.All` |
 
 See also [Permissions by service](../reference/permissions-by-service.md).
