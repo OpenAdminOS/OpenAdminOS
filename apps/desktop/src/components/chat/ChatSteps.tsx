@@ -55,7 +55,7 @@ export function StepTimeline({ steps, id }: { steps: readonly IntuneChatStep[]; 
               {step.kind === "mcp" && step.sent && step.status !== "blocked" ? (
                 <div className="mt-1 flex flex-wrap items-baseline gap-1.5 text-sm text-[var(--color-text-muted)]">
                   <span className="font-medium text-[var(--color-warning)]">Sent</span>
-                  <code className="break-all rounded-[5px] bg-[var(--color-code-bg)] px-1.5 py-px font-mono text-xs text-[var(--color-text)]">{step.sent}</code>
+                  <code className="[overflow-wrap:anywhere] rounded-[5px] bg-[var(--color-code-bg)] px-1.5 py-px font-mono text-xs text-[var(--color-text)]">{step.sent}</code>
                   <span>Nothing else was sent to {step.originLabel}.</span>
                 </div>
               ) : null}

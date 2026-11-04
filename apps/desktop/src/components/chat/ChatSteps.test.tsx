@@ -41,6 +41,15 @@ describe("chat steps", () => {
     expect(rows[3]).toHaveTextContent("OpenAI");
   });
 
+  it("wraps the sent text between words, not inside them", () => {
+    render(<StepTimeline steps={[{ ...steps[1]!, sent: "How does Defender for Endpoint onboarding work for macOS, including prerequisites?" }]} />);
+    const sent = screen.getByText(/including prerequisites/);
+    expect(sent.tagName).toBe("CODE");
+    // break-all split words such as "prer equisites"; anywhere breaks only a token too long for the line.
+    expect(sent.className).not.toMatch(/\bbreak-all\b/);
+    expect(sent.className).toMatch(/\[overflow-wrap:anywhere\]/);
+  });
+
   it("folds into one summary line that expands to the full timeline", async () => {
     const user = userEvent.setup();
     render(<StepSummary message={message} />);
