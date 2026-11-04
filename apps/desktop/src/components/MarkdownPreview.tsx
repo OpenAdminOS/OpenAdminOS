@@ -38,6 +38,12 @@ import { IconCheck, IconCopy } from "./icons";
  */
 export const CitationContext = createContext<((citation: number) => ReactNode | undefined) | undefined>(undefined);
 
+/**
+ * The number a citation shows on screen, so copied text uses the same
+ * numbers. A citation without one copies as written.
+ */
+export const CitationNumberContext = createContext<((citation: number) => number | undefined) | undefined>(undefined);
+
 function Citation({ citation }: { citation: number }) {
   const render = useContext(CitationContext);
   return <>{render?.(citation) ?? `[${citation}]`}</>;
@@ -53,7 +59,7 @@ export function MarkdownPreview({
   className?: string;
   numberedSections?: boolean;
   tableTools?: boolean;
-  /** A copy button on each item of a numbered list, copying that step as plain text. */
+  /** A copy button on each item of a numbered list, copying that step and its sub-items as plain text. */
   copySteps?: boolean;
 }) {
   const blocks = parseBlocks(source, numberedSections);
@@ -65,12 +71,54 @@ export function MarkdownPreview({
   );
 }
 
-/** One numbered step as plain text: Markdown markers and citation numbers removed. */
-export function plainStepText(source: string): string {
-  return stripMarkdownToPlainText(source).replace(/\s*\[\d{1,2}\](?!\()/g, "").trim();
+/** Inline Markdown as the text it shows: markers dropped, link labels kept, citations as their shown numbers in brackets. */
+function inlinePlainText(input: string, shownNumber?: (citation: number) => number | undefined): string {
+  return tokenizeInline(input).map((token) => {
+    switch (token.kind) {
+      case "bold":
+      case "italic":
+      case "strike":
+        return inlinePlainText(token.text, shownNumber);
+      case "cite": {
+        const citation = Number(token.text);
+        return `[${shownNumber?.(citation) ?? citation}]`;
+      }
+      default:
+        return token.text;
+    }
+  }).join("");
 }
 
-function CopyStepButton({ text, step }: { text: string; step: number }) {
+/** A block nested in a step as plain lines, indented two spaces per level, keeping bullets and numbers. */
+function plainBlockLines(block: Block, level: number, shownNumber?: (citation: number) => number | undefined): string[] {
+  const pad = "  ".repeat(level);
+  const lines = (text: string) => text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => `${pad}${line}`);
+  switch (block.kind) {
+    case "paragraph":
+    case "heading":
+      return lines(inlinePlainText(block.text, shownNumber));
+    case "ul":
+    case "ol":
+      return block.items.flatMap((item, index) => [
+        `${pad}${block.kind === "ol" ? `${(block.start ?? 1) + index}.` : "-"} ${inlinePlainText(item.text, shownNumber).trim()}`,
+        ...item.children.flatMap((child) => plainBlockLines(child, level + 1, shownNumber)),
+      ]);
+    case "quote":
+      return block.blocks.flatMap((child) => plainBlockLines(child, level, shownNumber));
+    case "code":
+      return block.content.split(/\r?\n/).map((line) => `${pad}${line}`);
+    case "table":
+      return [block.headers, ...block.rows].map((row) => `${pad}${row.map((cell) => inlinePlainText(cell, shownNumber)).join("\t")}`);
+  }
+}
+
+/** One numbered step as plain text: its own line, then its sub-items and paragraphs indented below it. */
+function plainStepText(item: ListItem, shownNumber?: (citation: number) => number | undefined): string {
+  return [inlinePlainText(item.text, shownNumber).trim(), ...item.children.flatMap((child) => plainBlockLines(child, 1, shownNumber))].join("\n");
+}
+
+function CopyStepButton({ item, step }: { item: ListItem; step: number }) {
+  const shownNumber = useContext(CitationNumberContext);
   const [copied, setCopied] = useState(false);
   useEffect(() => {
     if (!copied) return;
@@ -83,7 +131,7 @@ function CopyStepButton({ text, step }: { text: string; step: number }) {
       aria-label={copied ? `Copied step ${step}` : `Copy step ${step}`}
       title={copied ? "Copied" : `Copy step ${step}`}
       onClick={() => {
-        void copyTextToClipboard(text).then(() => setCopied(true), () => setCopied(false));
+        void copyTextToClipboard(plainStepText(item, shownNumber)).then(() => setCopied(true), () => setCopied(false));
       }}
       className="absolute right-0 top-[3px] inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] group-hover/step:opacity-100 group-focus-within/step:opacity-100"
     >
@@ -125,10 +173,12 @@ export function stripMarkdownToPlainText(source: string): string {
     .trim();
 }
 
+interface ListItem { text: string; children: Block[] }
+
 type Block =
   | { kind: "heading"; level: number; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "ul" | "ol"; items: { text: string; children: Block[] }[]; start?: number }
+  | { kind: "ul" | "ol"; items: ListItem[]; start?: number }
   | { kind: "table"; headers: string[]; rows: string[][] }
   | { kind: "quote"; blocks: Block[] }
   | { kind: "code"; content: string };
@@ -178,7 +228,7 @@ function parseBlocks(input: string, numberedSections = true, depth = 0): Block[]
     const list = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(line);
     if (list) {
       const indent = list[1].length, ordered = /\d/.test(list[2]);
-      const items: { text: string; children: Block[] }[] = [];
+      const items: ListItem[] = [];
       while (i < lines.length) {
         const item = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(lines[i]!);
         if (!item || item[1].length !== indent || /\d/.test(item[2]) !== ordered) break;
@@ -315,8 +365,9 @@ function renderBlock(block: Block, index: number, options: RenderOptions): React
           {block.items.map((item, idx) => (
             <li key={idx} className={options.copySteps ? "group/step relative pr-7" : undefined}>
               {renderInline(item.text)}
-              {item.children.map((child, childIndex) => renderBlock(child, childIndex, options))}
-              {options.copySteps ? <CopyStepButton text={plainStepText(item.text)} step={(block.start ?? 1) + idx} /> : null}
+              {/* Sub-items are copied with their step, so they get no button of their own. */}
+              {item.children.map((child, childIndex) => renderBlock(child, childIndex, { ...options, copySteps: false }))}
+              {options.copySteps ? <CopyStepButton item={item} step={(block.start ?? 1) + idx} /> : null}
             </li>
           ))}
         </ol>

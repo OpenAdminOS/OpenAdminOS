@@ -18,7 +18,7 @@ import {
   type EgressEntry,
   type SourceCard,
 } from "../../shared/chat-steps";
-import { CitationContext, MarkdownPreview } from "../MarkdownPreview";
+import { CitationContext, CitationNumberContext, MarkdownPreview } from "../MarkdownPreview";
 import { IconCheck, IconChevronRight, IconClose, IconCloud, IconExternal, IconHardDrive, IconLayers, IconWarning } from "../icons";
 import { Tooltip } from "../ui/Tooltip";
 
@@ -288,20 +288,22 @@ export function AnswerBody({ message, content }: { message: IntuneChatMessage; c
   };
   return (
     <CitationContext.Provider value={renderCitation}>
-      {blocks.map((block, index) => {
-        const tone = block.kind === "tenant" ? STEP_ORIGIN_TONE.graph : /Docs index$/.test(block.label ?? "") ? STEP_ORIGIN_TONE.device : STEP_ORIGIN_TONE["third-party"];
-        return (
-          <section key={index} aria-label={block.label} className={blocks.length > 1 ? "mb-4" : undefined}>
-            {block.label ? (
-              <div className={`mb-1 flex items-center gap-1.5 font-sans text-xs uppercase tracking-[0.04em] ${tone.text}`}>
-                <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-                {block.label}
-              </div>
-            ) : null}
-            <MarkdownPreview source={block.text} numberedSections={false} tableTools copySteps className="chat-answer text-[var(--color-text)]" />
-          </section>
-        );
-      })}
+      <CitationNumberContext.Provider value={numbering.displayFor}>
+        {blocks.map((block, index) => {
+          const tone = block.kind === "tenant" ? STEP_ORIGIN_TONE.graph : /Docs index$/.test(block.label ?? "") ? STEP_ORIGIN_TONE.device : STEP_ORIGIN_TONE["third-party"];
+          return (
+            <section key={index} aria-label={block.label} className={blocks.length > 1 ? "mb-4" : undefined}>
+              {block.label ? (
+                <div className={`mb-1 flex items-center gap-1.5 font-sans text-xs uppercase tracking-[0.04em] ${tone.text}`}>
+                  <span aria-hidden="true" className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                  {block.label}
+                </div>
+              ) : null}
+              <MarkdownPreview source={block.text} numberedSections={false} tableTools copySteps className="chat-answer text-[var(--color-text)]" />
+            </section>
+          );
+        })}
+      </CitationNumberContext.Provider>
     </CitationContext.Provider>
   );
 }

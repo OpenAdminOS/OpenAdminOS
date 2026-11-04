@@ -208,14 +208,15 @@ describe("chat steps", () => {
     expect(screen.getByText("defender/mac-intune.md · index from Aug 26, 2026")).toBeInTheDocument();
   });
 
-  it("copies one numbered step as plain text, without its citations", async () => {
+  it("copies one numbered step as plain text, with its citations as the numbers shown", async () => {
     const user = userEvent.setup();
     const writeClipboardText = vi.fn(async () => undefined);
     Object.assign(window, { openAdminOS: { writeClipboardText } });
-    const answer: IntuneChatMessage = { ...message, content: "1. Open **Tenant administration** [1].\n2. Select `Connectors and tokens` [2]." };
+    // Stored [2] is cited first, so it shows as 1; the sub-item's [1] shows as 2.
+    const answer: IntuneChatMessage = { ...message, content: "1. Open **Tenant administration** [2].\n2. Select `Connectors and tokens` [2].\n   - Then Defender for Endpoint [1]" };
     render(<AnswerBody message={answer} content={answer.content} />);
     await user.click(screen.getByRole("button", { name: "Copy step 2" }));
-    expect(writeClipboardText).toHaveBeenCalledWith("Select Connectors and tokens.");
+    expect(writeClipboardText).toHaveBeenCalledWith("Select Connectors and tokens [1].\n  - Then Defender for Endpoint [2]");
     expect(screen.getByRole("button", { name: "Copied step 2" })).toBeInTheDocument();
   });
 });
