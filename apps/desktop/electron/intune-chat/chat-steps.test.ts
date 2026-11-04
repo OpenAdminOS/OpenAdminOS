@@ -302,17 +302,56 @@ function learnContext(call: McpChatContext["call"]): McpChatContext {
 const callLearn = JSON.stringify({ tool: learnTool.name, params: { query: "Defender for Endpoint on macOS" } });
 
 describe("agentic loop sources", () => {
-  it("offers no tenant tools for a docs question and refuses one the model asks for", async () => {
+  it("offers no tenant tools for a docs question, and upgrades it to mixed with a refresh when the model calls one", async () => {
     await withStore(async (store) => {
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [{ id: "dev-1", deviceName: "MAC-01", operatingSystem: "macOS" }] });
       const prompts: Array<{ system?: string; prompt: string }> = [];
+      const events: string[] = [];
       const result = await runAgenticChat(loopInput(store, scripted([
         '{"tool":"query_cache","params":{"resource":"managedDevices"}}',
-        '{"final":true,"answer":"Defender for Endpoint supports the three latest macOS releases."}',
-      ], prompts), learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs" }));
+        '{"final":true,"answer":"1 Mac is enrolled."}',
+      ], prompts), learnContext(async () => ({ text: "", truncated: false })), {
+        questionKind: "docs",
+        onUpgrade: () => events.push("upgrade"),
+        ensureTenantData: async () => { events.push("refresh"); },
+        onToolStart: (event) => events.push(event.tool),
+      }));
       assert.equal(result.ok, true);
-      assert.equal(result.toolTrace.length, 0);
+      assert.deepEqual(events, ["upgrade", "refresh", "query_cache"]);
+      assert.deepEqual(result.toolTrace.map((entry) => entry.tool), ["query_cache"]);
       assert.doesNotMatch(prompts[0]!.system!, /- query_cache:|- list_cached_resources:|- graph_get:/);
-      assert.match(prompts[1]!.prompt, /This is a documentation question, so the tenant is not checked/);
+      assert.match(prompts[1]!.system!, /- query_cache:/, "a mixed question is offered tenant tools");
+    });
+  });
+
+  it("asks once for a missing kind, then lets the keyword kind decide; a declared docs label with a tenant reference is mixed", async () => {
+    await withStore(async (store) => {
+      const decided: string[] = [];
+      let refreshes = 0;
+      const classify = (tenantReference: boolean) => ({
+        tenantReference,
+        onKind: (kind: string, reason: string) => { decided.push(`${kind}:${reason}`); return { requiredServerIds: [], learnFirst: false }; },
+      });
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const fallback = await runAgenticChat(loopInput(store, scripted(['{"final":true,"answer":"From memory."}', '{"kind":"Docs?","final":true,"answer":"From memory."}'], prompts),
+        learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs", classify: classify(false), ensureTenantData: async () => { refreshes += 1; } }));
+      assert.equal(fallback.ok, true);
+      assert.match(prompts[0]!.system!, /kind is "docs" when the answer needs only public product knowledge and no fact about this tenant/);
+      assert.match(prompts[0]!.system!, /When unsure, choose "mixed"/);
+      assert.match(prompts[1]!.prompt, /That reply did not give the question kind/);
+      assert.equal(prompts.length, 2, "one repair, then the keyword kind");
+      assert.deepEqual(decided, ["docs:fallback"]);
+      assert.equal(refreshes, 0, "a docs question reads nothing from the tenant");
+
+      decided.length = 0;
+      prompts.length = 0;
+      const vetoed = await runAgenticChat(loopInput(store, scripted(['{"kind":"docs","sources":[],"final":true,"answer":"From memory."}'], prompts),
+        learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs", classify: classify(true), ensureTenantData: async () => { refreshes += 1; } }));
+      assert.deepEqual(decided, ["mixed:veto"]);
+      assert.equal(refreshes, 1, "a mixed question refreshes as soon as the kind is decided");
+      assert.match(prompts[1]!.prompt, /That answer used no tenant evidence/, "the evidence guard uses the final kind");
+      assert.equal(vetoed.ok, false);
     });
   });
 

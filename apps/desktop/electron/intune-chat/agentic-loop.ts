@@ -11,11 +11,11 @@ import type {
   TenantRecord,
 } from "@openadminos/agent-sdk";
 
-import { GRAPH_CACHE_RESOURCES, pathForResource } from "./planner.js";
+import { GRAPH_CACHE_RESOURCES, pathForResource, resolveQuestionKind } from "./planner.js";
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
-import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, type DocsIndexPassage } from "./chat-steps.js";
+import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, type ChatSourcePlan, type DocsIndexPassage, type QuestionKindReason } from "./chat-steps.js";
 import {
   MCP_TOOL_RULES,
   executeIntuneChatTool,
@@ -97,13 +97,25 @@ export const AGENTIC_TOOL_PROTOCOL = [
   "next is optional: up to two short read-only questions the admin could ask next, each under 120 characters.",
 ].join("\n");
 
+/** What the first reply adds while the model classifies the question. */
+function kindProtocol(sourceIds: readonly string[]): string {
+  return [
+    "Your first reply must also give the question kind and the documentation sources you will use, for example:",
+    '```json\n{"kind":"mixed","sources":["docs-index"],"tool":"query_cache","params":{"resource":"managedDevices","limit":25}}\n```',
+    'kind is "docs" when the answer needs only public product knowledge and no fact about this tenant, "tenant" when it needs only this tenant\'s data, and "mixed" when it needs both. When unsure, choose "mixed".',
+    `sources lists the ids you intend to use${sourceIds.length > 0 ? ` (${sourceIds.join(", ")})` : ""}, or [] for none.`,
+  ].join("\n");
+}
+
+const KIND_REPAIR = 'That reply did not give the question kind. Send it again with "kind" ("docs", "tenant" or "mixed") and "sources" added to the JSON. When unsure, choose "mixed".';
+
 /** The protocol for a docs question, which has no tenant tools. */
 const DOCS_TOOL_PROTOCOL = [
   "Use one tool call per iteration.",
   "To call a tool, respond with only a fenced JSON block, for example:",
   '```json\n{"tool":"find_graph_endpoint","params":{"query":"conditional access named locations"}}\n```',
   "Every brace and bracket you open must be closed.",
-  "This is a documentation question. Tenant tools are not available and the tenant is not checked. Answer from documentation sources.",
+  "This is a documentation question, so the tenant is not checked. Answer from documentation sources.",
   "When you are done, return:",
   '```json\n{"final":true,"answer":"...","next":["..."]}\n```',
   "next is optional: up to two short read-only questions the admin could ask next, each under 120 characters. One may offer to check the tenant.",
@@ -116,9 +128,26 @@ export interface RunAgenticChatInput {
   /**
    * How the question was classified. A docs question gets no tenant tools
    * and the evidence guard never asks for them. Tenant and mixed
-   * questions still need tenant evidence. Defaults to "tenant".
+   * questions still need tenant evidence. Defaults to "tenant". With
+   * `classify`, this is the keyword fallback for a reply without a kind.
    */
   questionKind?: IntuneChatQuestionKind;
+  /**
+   * The model declares the kind and its sources in its first reply. A
+   * docs label becomes mixed when the keyword check found a tenant
+   * reference. `onKind` returns the sources for the decided kind.
+   */
+  classify?: {
+    tenantReference: boolean;
+    onKind: (kind: IntuneChatQuestionKind, reason: Exclude<QuestionKindReason, "keywords">, declaredSources: string[]) => Pick<ChatSourcePlan, "requiredServerIds" | "learnFirst">;
+  };
+  /** A docs answer called a tenant tool, so it is now mixed. */
+  onUpgrade?: () => void;
+  /**
+   * Refreshes the planned tenant data. Called when the kind is decided as
+   * tenant or mixed and before each tenant tool; it runs the refresh once.
+   */
+  ensureTenantData?: () => Promise<void>;
   /** MCP servers the answer must call before it finishes. */
   requiredServerIds?: readonly string[];
   /**
@@ -182,9 +211,15 @@ type LoopTurn =
   | { role: "observation"; content: string; source?: string }
   | { role: "repair"; content: string };
 
+/** The question kind and sources a reply declared, when it declared a valid kind. */
+interface DeclaredKind {
+  questionKind?: IntuneChatQuestionKind;
+  sources: string[];
+}
+
 type ParsedModelAction =
-  | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
-  | { kind: "final"; answer: string; next?: unknown }
+  | ({ kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown } & DeclaredKind)
+  | ({ kind: "final"; answer: string; next?: unknown } & DeclaredKind)
   | { kind: "malformed"; reason: string };
 
 export async function runAgenticChat(
@@ -208,9 +243,11 @@ export async function runAgenticChat(
   let noEvidenceCount = 0;
   let evidenceToolCalls = 0;
   let webSearchAttempts = 0;
-  const docsOnly = input.questionKind === "docs";
+  // Undefined until the model's first reply decides it; it can only be upgraded from docs to mixed.
+  let questionKind: IntuneChatQuestionKind | undefined = input.classify ? undefined : input.questionKind ?? "tenant";
+  let kindRepaired = false;
   // Servers named in the question, or chosen for it, must be called once.
-  const required = new Set(input.requiredServerIds ?? []);
+  let required = new Set(input.requiredServerIds ?? []);
   const attemptedServers = new Set<string>();
   let missingSourceCount = 0;
   let learnAnswered = false;
@@ -239,11 +276,11 @@ export async function runAgenticChat(
   let iteration = 0;
   let attempts = 0;
   // The source guard gets as many retries as the evidence guard.
-  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES * 2 + 1;
+  const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES * 2 + 2;
   while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
-    const system = buildAgenticSystemPrompt(input, [...required].filter((id) => !attemptedServers.has(id)), documentation.length > 0 || fallbackPending);
+    const system = buildAgenticSystemPrompt(input, questionKind, [...required].filter((id) => !attemptedServers.has(id)), documentation.length > 0 || fallbackPending);
     const loopInput = { ...input, documentation };
     const prompt = input.voice
       ? buildVoiceLoopPrompt(loopInput, turns, system)
@@ -267,17 +304,7 @@ export async function runAgenticChat(
     const assistantText = completion.text.trim();
     turns.push({ role: "assistant", content: assistantText });
 
-    const parsed = parseModelAction(assistantText, input.tools.mcp);
-    const action: ParsedModelAction = parsed.kind === "tool" && docsOnly && isTenantTool(parsed.tool)
-      ? { kind: "malformed", reason: "docs-question-tenant-tool" }
-      : parsed;
-    if (action.kind === "malformed" && action.reason === "docs-question-tenant-tool") {
-      malformedCount += 1;
-      if (malformedCount <= MAX_MALFORMED_RETRIES) {
-        turns.push({ role: "repair", content: "This is a documentation question, so the tenant is not checked and tenant tools are not available. Answer from documentation sources. You may offer a tenant check in next." });
-        continue;
-      }
-    }
+    const action = parseModelAction(assistantText, input.tools.mcp);
     if (action.kind === "malformed") {
       malformedCount += 1;
       if (malformedCount > MAX_MALFORMED_RETRIES) {
@@ -306,6 +333,28 @@ export async function runAgenticChat(
       });
       continue;
     }
+
+    if (questionKind === undefined && input.classify) {
+      // One repair for a missing or invalid kind, then the keyword kind decides.
+      if (!action.questionKind && !kindRepaired) {
+        kindRepaired = true;
+        turns.push({ role: "repair", content: KIND_REPAIR });
+        continue;
+      }
+      const decided = action.questionKind
+        ? resolveQuestionKind(action.questionKind, input.classify.tenantReference)
+        : { kind: input.questionKind ?? "tenant", vetoed: false };
+      questionKind = decided.kind;
+      const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", action.sources);
+      required = new Set(plan.requiredServerIds);
+      if (!plan.learnFirst && fallbackPending && input.documentationFallback) {
+        // Microsoft Learn is no longer the chosen source, so the withheld local index is loaded now.
+        fallbackPending = false;
+        addDocumentation(await input.documentationFallback());
+      }
+      if (questionKind !== "docs") await input.ensureTenantData?.();
+    }
+    const docsOnly = questionKind === "docs";
 
     if (invalidQueries.size && action.kind === "final" && ++invalidFinals >= 2) return blockedAnswer();
     if (input.voice && action.kind === "final" && (!action.answer.trim() || /\b(?:let me (?:check|look|query|search|investigate|find|retrieve)|i(?:'ll| will) (?:check|look|query|search|investigate|find|retrieve)|i(?:'m| am) (?:currently )?(?:checking|querying|searching|investigating|retrieving))\b/i.test(action.answer))) {
@@ -365,6 +414,14 @@ export async function runAgenticChat(
       };
     }
 
+    if (isTenantTool(action.tool)) {
+      // A docs answer that needs tenant data becomes mixed: it then needs tenant evidence too.
+      if (questionKind === "docs") {
+        questionKind = "mixed";
+        input.onUpgrade?.();
+      }
+      await input.ensureTenantData?.();
+    }
     const startedAt = new Date().toISOString();
     input.onToolStart?.({
       tool: action.tool,
@@ -465,9 +522,9 @@ interface LoopPassage extends DocsIndexPassage {
   citation: number;
 }
 
-function buildAgenticSystemPrompt(input: RunAgenticChatInput, missingSourceIds: readonly string[], docsIndexInPlay: boolean): string {
+function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: IntuneChatQuestionKind | undefined, missingSourceIds: readonly string[], docsIndexInPlay: boolean): string {
   const tenantName = input.tenant.displayName || "Active tenant";
-  const docsOnly = input.questionKind === "docs";
+  const docsOnly = questionKind === "docs";
   const servers = input.tools.mcp?.servers ?? [];
   const missing = servers.filter((server) => missingSourceIds.includes(server.id)).map((server) => server.name);
   return [
@@ -497,7 +554,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, missingSourceIds: 
     `Tenant: ${fenceTenantData(tenantName, "tenant:displayName")}`,
     `Provider: ${input.providerId}${input.model ? ` · ${input.model}` : ""}`,
     `Generated at: ${input.generatedAt}`,
-    `Planner prefetch hints: ${input.plannedResources.join(", ") || "none"}`,
+    `Planner prefetch hints: ${(docsOnly ? [] : input.plannedResources).join(", ") || "none"}`,
     input.agentSuggestions.length > 0
       ? `Installed agent hints: ${input.agentSuggestions
           .slice(0, 3)
@@ -523,6 +580,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, missingSourceIds: 
     "",
     "JSON protocol:",
     docsOnly ? DOCS_TOOL_PROTOCOL : AGENTIC_TOOL_PROTOCOL,
+    questionKind === undefined ? kindProtocol([...servers.map((server) => server.id), ...(docsIndexInPlay ? ["docs-index"] : [])]) : "",
     "",
     "Answer style: concise admin-facing prose, cite caveats and stale or missing data, no hype, no exclamation marks.",
   ].join("\n");
@@ -605,7 +663,7 @@ function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], sys
 function parseModelAction(text: string, mcp: McpChatContext | undefined): ParsedModelAction {
   const extraction = extractLastJsonObject(text);
   if (!extraction.found) {
-    return { kind: "final", answer: text };
+    return { kind: "final", answer: text, sources: [] };
   }
   if (!extraction.valid) {
     return { kind: "malformed", reason: extraction.reason };
@@ -615,6 +673,7 @@ function parseModelAction(text: string, mcp: McpChatContext | undefined): Parsed
     return { kind: "malformed", reason: "Tool JSON must be an object." };
   }
   const record = value as Record<string, unknown>;
+  const declared = declaredKind(record);
   if (record.final === true) {
     const answer =
       typeof record.answer === "string"
@@ -622,7 +681,7 @@ function parseModelAction(text: string, mcp: McpChatContext | undefined): Parsed
         : typeof record.content === "string"
           ? record.content
           : "";
-    return { kind: "final", answer, next: record.next };
+    return { kind: "final", answer, next: record.next, ...declared };
   }
   if (typeof record.tool === "string") {
     if (!isToolName(record.tool, mcp)) {
@@ -632,9 +691,15 @@ function parseModelAction(text: string, mcp: McpChatContext | undefined): Parsed
       record.params && typeof record.params === "object" && !Array.isArray(record.params)
         ? record.params
         : {};
-    return { kind: "tool", tool: record.tool, params };
+    return { kind: "tool", tool: record.tool, params, ...declared };
   }
   return { kind: "malformed", reason: "Tool JSON must include tool or final." };
+}
+
+function declaredKind(record: Record<string, unknown>): DeclaredKind {
+  const kind = typeof record.kind === "string" ? record.kind.trim().toLowerCase() : "";
+  const sources = Array.isArray(record.sources) ? record.sources.filter((item): item is string => typeof item === "string") : [];
+  return kind === "docs" || kind === "tenant" || kind === "mixed" ? { questionKind: kind, sources } : { sources };
 }
 
 function extractLastJsonObject(text: string):
