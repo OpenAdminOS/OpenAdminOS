@@ -1021,3 +1021,18 @@ Same branch. A run showed "Read the question" (9.3 s) and "Working on the answer
 - [x] Scope line shows the current step's title only
 - [x] Sent text wraps at word boundaries
 - [ ] Live check in the running app (needs a restart)
+
+# Answer header, sources and suggestions (2026-11-04)
+
+Same branch. From two runs in the app built at 52ca085: a docs answer and the tenant follow-up "Check our 5 macOS devices for Defender in Intune".
+
+- [x] A. Header names what the answer used; "How I checked" folded into the expanded steps
+- [x] B. Summary sources from citations and steps; total time is wall time
+- [x] C. One card per article, every chunk number maps to it
+- [x] D. Adjacent citation chips ascending and deduplicated
+- [x] E. Prompt: no description of sources, provider or tenant checks; content limits stay
+- [x] F. Tenant questions do not search the local docs index
+- [x] G. Follow-ups answerable with the tools (deterministic wording; model follow-ups constrained through the prompt)
+- [x] H. Agent suggestion needs the agent's own topic term; at most one
+- [x] I. Investigated: the 4-hour-old device cache was within the 6-hour managedDevices threshold; the lazy refresh refreshed the stale security alerts and incidents only, as configured
+- [ ] Live check in the running app (needs a restart)
