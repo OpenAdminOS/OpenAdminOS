@@ -125,7 +125,7 @@ export class McpQueryBlockedError extends Error {}
  * only (see mcp-query-writer.ts).
  */
 export interface McpCallHooks {
-  /** Writes the call's params from the admin's own messages, the tool schema and earlier MCP results. */
+  /** Writes the call's params from the admin's current question, the tool schema and earlier MCP results of this answer. */
   writeQuery(tool: McpChatTool): Promise<unknown>;
   /** Links earlier MCP results of each server in this answer returned. A link param must be one of these, verbatim. */
   resultUrls(serverId: string): readonly string[];
@@ -785,7 +785,7 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   const entry = ctx.mcp?.tools.find((candidate) => candidate.name === tool);
   if (!ctx.mcp || !entry) throw new Error(`${tool} is not an installed MCP tool. Use only the tools listed in this session.`);
   // The params the model wrote are never sent: it may have read tenant data.
-  if (!hooks) throw new Error(`${entry.serverName} queries are written from your own messages in a separate step, which is not available here. Nothing was sent to ${entry.host}.`);
+  if (!hooks) throw new Error(`${entry.serverName} queries are written from your question in a separate step, which is not available here. Nothing was sent to ${entry.host}.`);
   let proposed: unknown;
   try {
     proposed = await hooks.writeQuery(entry);

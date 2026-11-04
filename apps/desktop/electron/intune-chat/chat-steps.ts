@@ -342,7 +342,7 @@ export function toolStepStart(
     return {
       kind: "mcp",
       title: `Asking ${mcp?.serverName ?? "an MCP server"}`,
-      detail: `${mcp?.tool ?? tool} · writing the query from your messages`,
+      detail: `${mcp?.tool ?? tool} · writing the query from your question`,
       origin: "third-party",
       originLabel: mcp?.host ?? "third-party host",
     };

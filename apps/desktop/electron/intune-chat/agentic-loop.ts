@@ -143,12 +143,12 @@ export interface RunAgenticChatInput {
   promptByteLimit?: number;
   question: string;
   /**
-   * The admin's own messages in this conversation, oldest first, ending
-   * with the current one. The only text the MCP query writer gets from the
-   * conversation: `question` can carry history with answers built on
-   * tenant data. Without it, no MCP query is written and nothing is sent.
+   * The admin's current message, as typed or spoken. The only text the MCP
+   * query writer gets from the conversation: `question` can carry history
+   * with answers built on tenant data, and earlier messages can quote
+   * tenant values. Without it, no MCP query is written and nothing is sent.
    */
-  adminMessages?: readonly string[];
+  adminQuestion?: string;
   /**
    * How the question was classified. A docs question gets no tenant tools
    * and the evidence guard never asks for them. Tenant and mixed
@@ -307,7 +307,7 @@ export async function runAgenticChat(
   const citations = new CitationRegistry();
   // Sources numbered up to here reached a model request; only they are returned as consulted and citable.
   let consultedSources = 0;
-  // Titles and links of MCP results in this answer, and the queries sent: the query writer's only context besides the admin's messages.
+  // Titles and links of MCP results in this answer, and the queries it sent: the query writer's only context besides the admin's current question. Nothing carries over from earlier answers.
   const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string }> = [];
   const sentQueries: string[] = [];
   const documentation: LoopPassage[] = [];
@@ -589,7 +589,7 @@ export async function runAgenticChat(
         llm: input.llm,
         ...(input.model ? { model: input.model } : {}),
         ...(input.signal ? { signal: input.signal } : {}),
-        adminMessages: input.adminMessages ?? [],
+        question: input.adminQuestion ?? "",
         tool: entry,
         earlierResults: mcpResults,
         sentQueries,

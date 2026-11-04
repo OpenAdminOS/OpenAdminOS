@@ -87,7 +87,11 @@ interface Harness {
   script(replies: unknown[]): void;
 }
 
-async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean; chunkDelayMs?: number } = {}): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: {
+  emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean; chunkDelayMs?: number;
+  /** Answers the query writer from its prompt instead of the script's last MCP params. */
+  writer?: (prompt: string) => string | undefined;
+} = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
@@ -98,6 +102,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
   const prompts: Array<{ system: string; prompt: string }> = [];
   let replies: string[] = [];
   const chunkDelayMs = options.chunkDelayMs;
+  const writer = options.writer;
   let reply = 0;
   // Stands in for the MCP query writer: it answers with the params the
   // script gave the last MCP tool call, so scripts read as before.
@@ -133,7 +138,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
       async complete(options) {
         if (isMcpQueryWriterRequest(options.system)) {
           writerPrompts.push(options.prompt);
-          return { text: lastParams, model: "llama3.1:8b" };
+          return { text: writer?.(options.prompt) ?? lastParams, model: "llama3.1:8b" };
         }
         prompts.push({ system: options.system ?? "", prompt: options.prompt });
         return { text: nextReply(), model: "llama3.1:8b" };
@@ -211,13 +216,13 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.deepEqual([working[1]!.title, working[1]!.status], ["Working", "active"]);
       // While the query is written nothing has been sent, so no sent text shows; then the exact checked text does.
       const writing = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active"))!.find((step) => step.kind === "mcp")!;
-      assert.deepEqual([writing.sent, writing.detail], [undefined, "microsoft_docs_search · writing the query from your messages"]);
+      assert.deepEqual([writing.sent, writing.detail], [undefined, "microsoft_docs_search · writing the query from your question"]);
       const live = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active" && step.sent));
       const liveMcp = live!.find((step) => step.kind === "mcp")!;
       assert.equal(liveMcp.sent, "Defender for Endpoint on macOS");
       // The query writer saw the admin's question and the tool, never the tenant name or the answering model's prompt.
       assert.equal(writerPrompts.length, 1);
-      assert.ok(writerPrompts[0]!.includes(JSON.stringify([DOCS_QUESTION])), "the admin's message, fenced");
+      assert.ok(writerPrompts[0]!.includes(`\n${DOCS_QUESTION}\n`), "the admin's question, fenced");
       assert.match(writerPrompts[0]!, /Tool: microsoft_docs_search on 127\.0\.0\.1/);
       assert.doesNotMatch(writerPrompts[0]!, /Contoso|contoso\.example|Tenant:|MAC-0/);
       assert.deepEqual([liveMcp.origin, liveMcp.originLabel], ["third-party", "127.0.0.1"]);
@@ -706,5 +711,41 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       const fallback = await store.streamIntuneChatMessage({ content: `  ${DOCS_QUESTION}  ` }, () => {});
       assert.equal(fallback.conversation.title, DOCS_QUESTION.slice(0, 51).trim() + "...", "an invalid title leaves the trimmed question");
     });
+  });
+
+  it("writes a later answer's Learn query from that question only, never from earlier messages, results or queries", async () => {
+    // A writer that copies the fenced question verbatim, so anything else in its prompt would be visible in the sent query too.
+    const echoQuestion = (prompt: string) => {
+      const body = prompt.match(/^The admin's question:\n<tenant_data [^>]*>\n([\s\S]*?)\n<\/tenant_data /)?.[1];
+      return body && !body.includes("420 Cedar") ? JSON.stringify({ query: body }) : '{"query":"Defender for Endpoint on macOS"}';
+    };
+    await withHarness(async ({ store, writerPrompts, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: {} },
+        { final: true, answer: "Grant full disk access [1]." },
+      ]);
+      const first = await store.streamIntuneChatMessage({ content: 'A sample record shows streetAddress: "420 Cedar Avenue". What does Microsoft Learn say about Defender for macOS?' }, () => {});
+      assert.equal(first.assistantMessage.steps?.find((step) => step.kind === "mcp")?.sent, "Defender for Endpoint on macOS");
+      assert.match(first.assistantMessage.documentationSources?.[0]?.title ?? "", /Microsoft Defender for Endpoint on Mac/);
+
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: {} },
+        { final: true, answer: "Microsoft Learn describes the grace period [1]." },
+      ]);
+      const later = "How long is the Intune compliance grace period?";
+      const second = await store.streamIntuneChatMessage({ content: later, conversationId: first.conversation.id }, () => {});
+      // The persisted history holds the address, the earlier result title and the earlier query.
+      const stored = await store.getIntuneChatMessages(first.conversation.id);
+      assert.match(stored[0]!.content, /420 Cedar Avenue/);
+      assert.equal(writerPrompts.length, 1);
+      const prompt = writerPrompts[0]!;
+      assert.ok(prompt.startsWith(`The admin's question:\n`) && prompt.includes(`\n${later}\n`));
+      for (const earlier of [/420 Cedar/, /streetAddress/, /Microsoft Defender for Endpoint on Mac/, /Defender for Endpoint on macOS/, /Earlier results/, /Queries already sent/]) {
+        assert.doesNotMatch(prompt, earlier);
+      }
+      const mcp = second.assistantMessage.steps?.find((step) => step.kind === "mcp");
+      assert.equal(mcp?.sent, later);
+      assert.deepEqual(second.assistantMessage.toolTrace?.find((entry) => entry.tool === learnTool)?.params, { query: later });
+    }, { writer: echoQuestion });
   });
 });

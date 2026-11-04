@@ -360,7 +360,7 @@ describe("source labels and steps", () => {
   it("shows the exact text an MCP call sent, and no sent text when it was blocked", () => {
     // The model's own params are never sent, so the step shows sent text only once the written query passed the checks.
     const start = toolStepStart(learnTool.name, { query: "Contoso Macs" }, learnTool, "OpenAI");
-    assert.deepEqual([start.kind, start.origin, start.originLabel, start.sent, start.detail], ["mcp", "third-party", "learn.microsoft.com", undefined, "microsoft_docs_search · writing the query from your messages"]);
+    assert.deepEqual([start.kind, start.origin, start.originLabel, start.sent, start.detail], ["mcp", "third-party", "learn.microsoft.com", undefined, "microsoft_docs_search · writing the query from your question"]);
     assert.deepEqual(toolStepSending(learnTool.name, { query: "Defender for Endpoint on macOS requirements" }, learnTool), { detail: "microsoft_docs_search", sent: "Defender for Endpoint on macOS requirements" });
     const blocked = toolStepFinish({ id: "t", tool: learnTool.name, params: {}, resultSummary: "Blocked", durationMs: 1, createdAt: "", completedAt: "", error: "the Microsoft Learn query contained a tenant name. Nothing was sent to learn.microsoft.com.",
       mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", blocked: true } });
@@ -416,7 +416,7 @@ async function withStore(run: (store: IntelligenceSqliteStore) => Promise<void>)
 function loopInput(store: IntelligenceSqliteStore, llm: RunLlmApi, mcp: McpChatContext, overrides: Partial<RunAgenticChatInput>): RunAgenticChatInput {
   return {
     question: "What does Microsoft Learn say about Defender for macOS?",
-    adminMessages: ["What does Microsoft Learn say about Defender for macOS?"],
+    adminQuestion: "What does Microsoft Learn say about Defender for macOS?",
     tenant, providerId: "ollama", providerIsLocal: true, model: "llama3.1:8b", llm,
     tools: {
       tenantId: tenant.id, store, grantedScopes: new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES),

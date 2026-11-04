@@ -114,7 +114,7 @@ function toolContext(store: IntelligenceSqliteStore, mcp?: McpChatContext): Intu
 function input(store: IntelligenceSqliteStore, llm: RunLlmApi, mcp?: McpChatContext) {
   return {
     question: "How long is the Intune compliance grace period?",
-    adminMessages: ["How long is the Intune compliance grace period?"],
+    adminQuestion: "How long is the Intune compliance grace period?",
     tenant,
     providerId: "ollama" as const,
     providerIsLocal: true,
@@ -712,11 +712,31 @@ describe("The MCP query writer boundary", () => {
       const result = await runAgenticChat({
         ...input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}'], [], writerPrompts, ['{"query":"set up admin@contoso.example for Intune enrollment"}']), mcpContext(calls)),
         question,
-        adminMessages: [question],
+        adminQuestion: question,
       });
       assert.match(writerPrompts[0]!, /admin@contoso\.example/, "the admin's own words reach the query writer");
       assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
       assert.equal(calls.length, 0);
+    });
+  });
+
+  it("gives the query writer the current question only, not earlier messages in the model's question", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const writerPrompts: string[] = [];
+      const current = "How long is the Intune compliance grace period?";
+      // The answering model's question carries the conversation, with a quoted tenant field from an earlier message.
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}'], [], writerPrompts,
+          ['{"query":"Intune compliance grace period"}']), mcpContext(calls)),
+        question: `Earlier: Why does HR-07 show streetAddress: "420 Cedar Avenue"?\nAssistant: It was set at enrollment.\nCurrent: ${current}`,
+        adminQuestion: current,
+      });
+      assert.equal(result.toolTrace[0]!.error, undefined);
+      assert.equal(writerPrompts.length, 1);
+      assert.match(writerPrompts[0]!, /How long is the Intune compliance grace period\?/);
+      for (const earlier of [/420 Cedar/, /streetAddress/, /HR-07/, /enrollment/]) assert.doesNotMatch(writerPrompts[0]!, earlier);
+      assert.deepEqual(calls.map((call) => call.args), [{ query: "Intune compliance grace period" }]);
     });
   });
 
@@ -753,15 +773,15 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
-  it("sends nothing when the query writer fails or no admin message was given", async () => {
+  it("sends nothing when the query writer fails or no admin question was given", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
       const failed = await runAgenticChat(input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}'], [], [], ["I would search for grace periods."]), mcpContext(calls)));
       assert.match(failed.toolTrace[0]!.error!, /^the Microsoft Learn query could not be written: the model's reply was not one JSON object of params\. Nothing was sent to learn\.microsoft\.com\.$/);
       assert.deepEqual([failed.toolTrace[0]!.mcpSource?.sentToHost, failed.toolTrace[0]!.mcpSource?.blocked], [false, undefined]);
-      const { adminMessages: _omitted, ...withoutMessages } = input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), mcpContext(calls));
+      const { adminQuestion: _omitted, ...withoutMessages } = input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), mcpContext(calls));
       const none = await runAgenticChat(withoutMessages);
-      assert.match(none.toolTrace[0]!.error!, /no admin message was given to write it from\. Nothing was sent/);
+      assert.match(none.toolTrace[0]!.error!, /no admin question was given to write it from\. Nothing was sent/);
       assert.equal(calls.length, 0);
     });
   });

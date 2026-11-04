@@ -1902,7 +1902,7 @@ export class IntuneChatService {
             const documentation = learnFirst || answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
-              adminMessages: adminMessagesOf(history, content),
+              adminQuestion: content,
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
@@ -2548,7 +2548,7 @@ export class IntuneChatService {
               : learnFirst || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
-              adminMessages: adminMessagesOf(history, content),
+              adminQuestion: content,
               ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
@@ -3357,14 +3357,6 @@ function modelClassification(
 }
 
 /** Says so when installed MCP tools were held back from a model that skips the tool loop. */
-/**
- * The admin's own messages in a conversation, oldest first, ending with
- * the current one: the only conversation text the MCP query writer gets.
- */
-function adminMessagesOf(history: readonly IntuneChatMessage[], current: string): string[] {
-  return [...history.filter((message) => message.role === "user").map((message) => message.content), current];
-}
-
 function withMcpSkippedNotice(capability: AgenticCapabilityDecision, mcpInstalled: boolean): string | undefined {
   // The small-model line already says Marketplace tools are off.
   if (!mcpInstalled || capability.enabled || capability.tooSmall) return capability.notice;
