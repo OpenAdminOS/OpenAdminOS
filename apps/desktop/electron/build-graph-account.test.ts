@@ -1,0 +1,124 @@
+import assert from "node:assert/strict";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
+
+import { InteractionRequiredAuthError } from "@azure/msal-node";
+import type { RunGraphApi, TenantRecord } from "@openadminos/agent-sdk";
+
+import { AppStateStore } from "./state.js";
+
+const TENANT: TenantRecord = {
+  id: "contoso-tenant-id",
+  displayName: "Contoso",
+  username: "admin@contoso.example",
+  homeAccountId: "home.contoso-tenant-id",
+  addedAt: "2026-11-04T10:00:00.000Z",
+  grantedScopes: ["graph:User.Read", "graph:DeviceManagementManagedDevices.Read.All"],
+};
+
+type Account = { homeAccountId: string; tenantId: string; username: string };
+
+const realFetch = globalThis.fetch;
+afterEach(() => {
+  globalThis.fetch = realFetch;
+});
+
+async function makeFixture(account: Account) {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-build-graph-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(filePath, JSON.stringify({
+    activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [TENANT], activeTenantId: TENANT.id,
+  }));
+  const loginHints: Array<string | undefined> = [];
+  const store = new AppStateStore({
+    filePath, userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
+    tokenStore: { read: async () => "", write: async () => undefined },
+    tokenStoreFor: () => ({ read: async () => "", write: async () => undefined }),
+    interactiveSignIn: async ({ scopes, loginHint }) => {
+      loginHints.push(loginHint);
+      return {
+        account,
+        scopes: [...(scopes ?? []), "Policy.Read.All"],
+        accessToken: "interactive-token",
+      } as never;
+    },
+  });
+  // Silent acquisition always needs interaction, so every token comes
+  // from the interactive fallback inside buildGraph.
+  Object.defineProperty(store, "msalClientForTenant", { value: () => ({
+    getTokenCache: () => ({ getAccountByHomeId: async () => ({ homeAccountId: TENANT.homeAccountId }) }),
+    acquireTokenSilent: async () => {
+      throw new InteractionRequiredAuthError("interaction_required", "Interaction required.");
+    },
+  }) });
+  const fetches: Array<{ url: string; authorization?: string }> = [];
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const headers = new Headers(init?.headers);
+    fetches.push({ url: String(input), authorization: headers.get("authorization") ?? undefined });
+    return new Response(JSON.stringify({ value: [] }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+  const buildGraph = (store as unknown as {
+    buildGraph(tenantId: string, scopes: string[]): Promise<{ createGraph(log: () => void): RunGraphApi }>;
+  }).buildGraph.bind(store);
+  return {
+    store,
+    loginHints,
+    fetches,
+    async graph(): Promise<RunGraphApi> {
+      const built = await buildGraph(TENANT.id, ["DeviceManagementManagedDevices.Read.All"]);
+      return built.createGraph(() => undefined);
+    },
+    async close() {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    },
+  };
+}
+
+async function settle(): Promise<void> {
+  // recordTokenGrants runs without being awaited by the token provider.
+  for (let i = 0; i < 5; i += 1) await new Promise((resolve) => setImmediate(resolve));
+}
+
+describe("buildGraph interactive fallback", () => {
+  for (const [label, account] of [
+    ["a different account", { homeAccountId: "other.fabrikam-tenant-id", tenantId: "fabrikam-tenant-id", username: "it@fabrikam.example" }],
+    ["the same account in another directory", { homeAccountId: TENANT.homeAccountId, tenantId: "fabrikam-tenant-id", username: TENANT.username }],
+  ] as const) {
+    it(`rejects ${label} before any Graph request or grant update`, async () => {
+      const fixture = await makeFixture(account);
+      try {
+        const graph = await fixture.graph();
+        await assert.rejects(graph.listManagedDevices(), { name: "TenantAccountMismatchError" });
+        await settle();
+        assert.deepEqual(fixture.loginHints, [TENANT.username]);
+        assert.equal(fixture.fetches.length, 0);
+        const state = await fixture.store.getAppState();
+        assert.deepEqual(state.tenants.find((t) => t.id === TENANT.id)?.grantedScopes, TENANT.grantedScopes);
+      } finally {
+        await fixture.close();
+      }
+    });
+  }
+
+  it("uses the token when the connected account signs in", async () => {
+    const fixture = await makeFixture({ homeAccountId: TENANT.homeAccountId, tenantId: TENANT.id, username: TENANT.username });
+    try {
+      const graph = await fixture.graph();
+      assert.deepEqual(await graph.listManagedDevices(), []);
+      await settle();
+      assert.deepEqual(fixture.loginHints, [TENANT.username]);
+      assert.equal(fixture.fetches.length, 1);
+      assert.equal(fixture.fetches[0]?.authorization, "Bearer interactive-token");
+      const state = await fixture.store.getAppState();
+      assert.deepEqual([...(state.tenants.find((t) => t.id === TENANT.id)?.grantedScopes ?? [])].sort(), [
+        ...(TENANT.grantedScopes ?? []),
+        "graph:Policy.Read.All",
+      ].sort());
+    } finally {
+      await fixture.close();
+    }
+  });
+});

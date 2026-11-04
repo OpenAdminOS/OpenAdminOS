@@ -6203,13 +6203,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
         // Re-authentication, or per-capability incremental consent for
         // manually started agents. Subsequent silent acquisitions for the
-        // same scope set succeed from cache.
-        return await runInteractiveFlow({
+        // same scope set succeed from cache. Another account must not
+        // reach Graph or this tenant's grants, so it fails here before
+        // the token is used or recorded.
+        const result = await this.interactiveSignIn({
           client,
           scopes: requestedScopes,
           openBrowser,
           signal: execution?.signal,
+          ...loginHintFor(tenant),
         });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
       },
     });
     // When the agent declares Graph scopes, route the tokenProvider
