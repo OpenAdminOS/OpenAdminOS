@@ -292,6 +292,16 @@ describe("agent matcher probe table (real registry)", () => {
     const compliancePolicies = matchAgentsToQuestion("Which device compliance policies exist?", agents);
     assert.equal(compliancePolicies[0]?.agentSlug, "compliance-overview");
   });
+
+  it("suggests no agent on generic device words alone, and at most one agent", async () => {
+    const agents = await registryAgents();
+    // A Defender follow-up shares only "devices", "macOS" and "Intune" with the device agents.
+    assert.deepEqual(slugs(matchAgentsToQuestion("Check our 5 macOS devices for Defender in Intune", agents)), []);
+    assert.deepEqual(slugs(matchAgentsToQuestion("Show our Intune devices", agents)), []);
+    for (const question of ["Which devices have not synced in 45 days?", "How many of my devices are noncompliant?", "Why are sign-ins failing for finance users?"]) {
+      assert.equal(matchAgentsToQuestion(question, agents).length, 1, question);
+    }
+  });
 });
 
 describe("answer pack fallback breakdowns", () => {

@@ -1239,6 +1239,16 @@ export function pathForResource(resource: GraphCacheResourceKind): {
   }
 }
 
+/**
+ * Words most device agents share. A match on these alone said nothing
+ * about the agent's own topic, so "Find inactive devices" was offered for
+ * a Defender question because both mention devices.
+ */
+const GENERIC_AGENT_TERMS = new Set([
+  "device", "devices", "intune", "endpoint", "endpoints", "managed", "macos", "mac", "macs", "windows", "ios", "ipados",
+  "android", "linux", "check", "show", "list", "tenant", "microsoft",
+].map((term) => stemAgentWord(term)));
+
 const AGENT_MATCH_STOP_TERMS = new Set([
   "why",
   "are",
@@ -1437,10 +1447,13 @@ export function matchAgentsToQuestion(
     // least two metadata terms. Category and write-intent bonuses alone
     // used to float unrelated agents (a script-drafting helper on every
     // device question, a device offboarder on a guest-account request).
+    // ...and at least one of the agent's own topic terms, not only words
+    // such as "device" or "Intune" that most agents share.
     .filter(
       (entry) =>
         entry.score >= (entry.agent.mode === "write" ? 3 : 1.75) &&
-        (entry.nameMatches >= 1 || entry.matchedTerms.length >= 2),
+        (entry.nameMatches >= 1 || entry.matchedTerms.length >= 2) &&
+        entry.matchedTerms.some((term) => !GENERIC_AGENT_TERMS.has(stemAgentWord(term))),
     )
     .sort(
       (a, b) =>
@@ -1448,7 +1461,8 @@ export function matchAgentsToQuestion(
         b.matchedTerms.length - a.matchedTerms.length ||
         a.agent.slug.localeCompare(b.agent.slug),
     )
-    .slice(0, 3);
+    // One suggestion: the best match. More cards read as noise.
+    .slice(0, 1);
 
   return suggestions.map(({ agent, score, matchedTerms, matchedConcepts, matchedResources }) => ({
     agentSlug: agent.slug,
