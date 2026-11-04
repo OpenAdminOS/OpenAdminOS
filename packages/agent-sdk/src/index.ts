@@ -242,10 +242,13 @@ export interface TenantTierProbeWarning {
  */
 export interface TenantCheckProgress {
   tenantId: string;
-  /** Check again, Retry license check, or Add access. */
+  /** Check again, a license check (Retry license check or after connect), or Add access. */
   kind: "permissions" | "license" | "access";
-  /** `sign-in` while a Microsoft sign-in window is open for the check. */
-  phase: "checking" | "sign-in";
+  /**
+   * `sign-in` while a Microsoft sign-in window is open for the check,
+   * `licenses` while the license check runs.
+   */
+  phase: "checking" | "sign-in" | "licenses";
 }
 
 /**
@@ -671,10 +674,16 @@ export interface TenantRecord {
   entraTierDetectedAt?: string;
   /**
    * Why the last Entra tier and license probe did not finish, for example
-   * another account signing in. The stored tier and licenses are kept.
-   * Cleared by the next probe that finishes, a new sign-in or new grants.
+   * another account signing in or a cancel. The stored tier and licenses
+   * are kept. Cleared by the next probe that finishes or a new sign-in.
    */
   tierProbeWarning?: TenantTierProbeWarning;
+  /**
+   * Changes on every connect and reconnect. A check or license probe that
+   * started on another connection saves nothing. Absent on tenants
+   * connected before it was recorded.
+   */
+  connectionId?: string;
   /** Active Intune service plan, from the existing subscribed-SKU inventory. */
   intuneLicensed?: boolean | undefined;
   /**
@@ -2943,8 +2952,9 @@ export interface OpenAdminOSApi {
   retryTenantLicenseCheck(tenantId: string): Promise<AppState>;
   /**
    * Cancel the Check again, license check or Add access running for a
-   * tenant. The call that started it rejects, and grants, tier and
-   * licenses stay as they were before that check.
+   * tenant. The call that started it rejects with a message that says
+   * what was kept. Grants from a verified token stay saved; the Entra
+   * tier and licenses stay as they were.
    */
   cancelTenantCheck(tenantId: string): Promise<void>;
   /** Add or reactivate the built-in fictional tenant. This is idempotent. */

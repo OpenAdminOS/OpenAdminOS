@@ -172,10 +172,12 @@ describe("Entra tier probe interactive fallback", () => {
     it(`keeps the stored tier and licences when ${label} signs in`, async () => {
       const fixture = await makeFixture(account, licensed);
       try {
-        await assert.rejects(fixture.store.probeEntraTier(licensed, { force: true }), { name: "TenantAccountMismatchError" });
+        const state = await fixture.store.retryTenantLicenseCheck(licensed.id);
+        assert.equal(state.tenants.find((t) => t.id === TENANT.id)?.tierProbeWarning?.reason, "account-mismatch");
         await settle();
         assert.deepEqual(fixture.loginHints, [TENANT.username]);
-        assert.equal(fixture.fetches.length, 0);
+        // Building the app state reads other endpoints; Graph is never asked.
+        assert.deepEqual(fixture.fetches.filter((f) => f.url.includes("graph.microsoft.com")), []);
         const stored = (await fixture.store.getAppState()).tenants.find((t) => t.id === TENANT.id);
         assert.equal(stored?.entraTier, "p1");
         assert.equal(stored?.entraTierDetectedAt, licensed.entraTierDetectedAt);
@@ -190,9 +192,10 @@ describe("Entra tier probe interactive fallback", () => {
   it("records the tier when the connected account signs in", async () => {
     const fixture = await makeFixture({ homeAccountId: TENANT.homeAccountId, tenantId: TENANT.id, username: TENANT.username }, licensed);
     try {
-      await fixture.store.probeEntraTier(licensed, { force: true });
-      assert.equal(fixture.fetches.length, 1);
-      assert.match(fixture.fetches[0]?.url ?? "", /\/subscribedSkus$/);
+      await fixture.store.retryTenantLicenseCheck(licensed.id);
+      const graph = fixture.fetches.filter((f) => f.url.includes("graph.microsoft.com"));
+      assert.equal(graph.length, 1);
+      assert.match(graph[0]?.url ?? "", /\/subscribedSkus$/);
       const stored = (await fixture.store.getAppState()).tenants.find((t) => t.id === TENANT.id);
       assert.notEqual(stored?.entraTierDetectedAt, licensed.entraTierDetectedAt);
     } finally {

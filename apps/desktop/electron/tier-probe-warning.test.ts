@@ -64,6 +64,8 @@ async function makeFixture(options: {
   interactive?: (input: InteractiveInput) => Promise<unknown>;
   /** Replaces the silent `.default` request that Check again makes. */
   silentDefault?: (request: { scopes: string[] }) => Promise<unknown>;
+  /** Replaces the token cache's account list. */
+  accounts?: () => Promise<unknown[]>;
   deadlineMs?: number;
 }) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-tier-warning-"));
@@ -92,7 +94,7 @@ async function makeFixture(options: {
   });
   Object.defineProperty(store, "msalClientForTenant", { value: () => ({
     getTokenCache: () => ({
-      getAllAccounts: async () => [CONNECTED],
+      getAllAccounts: options.accounts ?? (async () => [CONNECTED]),
       getAccountByHomeId: async (id: string) => (id === CONNECTED.homeAccountId ? CONNECTED : null),
     }),
     acquireTokenSilent: async (request: { scopes: string[] }) => {
@@ -117,6 +119,15 @@ async function makeFixture(options: {
   return {
     store,
     fetches,
+    /** Holds the store's write queue until the returned function is called. */
+    holdWrites(): () => void {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      void (store as unknown as { serialize(work: () => Promise<void>): Promise<void> }).serialize(() => gate);
+      return release;
+    },
     async tenant(): Promise<TenantRecord | undefined> {
       return (await store.getAppState()).tenants.find((entry) => entry.id === CONNECTED.tenantId);
     },
@@ -435,8 +446,11 @@ describe("retrying a license check", () => {
   });
 });
 
+const CANCELLED_AFTER_ACCESS =
+  "Access was added. The license check was cancelled; the Entra tier and licenses are as they were. Retry license check to update them.";
+
 describe("cancelling and timing out a tenant check", () => {
-  it("shows the open Microsoft sign-in, and a cancel leaves the grants as they were", async () => {
+  it("shows the open Microsoft sign-in, and a cancel before a token changes nothing", async () => {
     const fixture = await makeFixture({
       tenants: [OWN],
       signIns: [],
@@ -457,7 +471,7 @@ describe("cancelling and timing out a tenant check", () => {
       fixture.store.cancelTenantCheck(OWN.id);
       await assert.rejects(pending, {
         name: "TenantCheckCancelledError",
-        message: "Check again was cancelled. Permissions, Entra tier and licenses are as they were.",
+        message: "Check again was cancelled. Nothing changed.",
       });
       const state = await fixture.store.getAppState();
       assert.equal(state.tenantChecks, undefined);
@@ -470,20 +484,95 @@ describe("cancelling and timing out a tenant check", () => {
     }
   });
 
-  it("a cancel during the license fetch aborts it and saves neither grants nor a warning", async () => {
+  it("Add access cancelled during sign-in says nothing changed", async () => {
+    const fixture = await makeFixture({ tenants: [SHARED], signIns: [], interactive: waitForAbort });
+    try {
+      const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
+      pending.catch(() => undefined);
+      await until(async () =>
+        (await fixture.store.getAppState()).tenantChecks?.[0]?.phase === "sign-in",
+      );
+      fixture.store.cancelTenantCheck(SHARED.id);
+      await assert.rejects(pending, { message: "Sign-in was cancelled. Nothing changed." });
+      assert.deepEqual((await fixture.tenant())?.grantedScopes, SHARED.grantedScopes);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("Check again cancelled during the license fetch keeps the new grants and records the cancel", async () => {
     const seen: AbortSignal[] = [];
     const fixture = await makeFixture({ tenants: [OWN], signIns: [CONNECTED], respond: hangingFetch(seen) });
     try {
       const pending = fixture.store.refreshTenantGrants(OWN.id);
       pending.catch(() => undefined);
       await until(async () => seen.length > 0);
+      assert.equal((await fixture.store.getAppState()).tenantChecks?.[0]?.phase, "licenses");
       fixture.store.cancelTenantCheck(OWN.id);
-      await assert.rejects(pending, { name: "TenantCheckCancelledError" });
+      await assert.rejects(pending, {
+        name: "TenantCheckCancelledError",
+        message:
+          "Permissions were updated. The license check was cancelled; the Entra tier and licenses are as they were. Retry license check to update them.",
+      });
       assert.equal(seen[0]?.aborted, true);
+      const warning = await waitFor(async () => (await fixture.tenant())?.tierProbeWarning);
+      assert.equal(warning.reason, "cancelled");
       const tenant = await fixture.tenant();
-      assert.deepEqual(tenant?.grantedScopes, OWN.grantedScopes);
-      assert.equal(tenant?.tierProbeWarning, undefined);
+      assert.ok(tenant?.grantedScopes?.includes("graph:SecurityEvents.Read.All"));
       assertTierKept(tenant);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("Add access cancelled during the license check keeps the new access and says so", async () => {
+    const seen: AbortSignal[] = [];
+    const fixture = await makeFixture({ tenants: [SHARED], signIns: [CONNECTED], respond: hangingFetch(seen) });
+    try {
+      const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
+      pending.catch(() => undefined);
+      await until(async () => seen.length > 0);
+      fixture.store.cancelTenantCheck(SHARED.id);
+      await assert.rejects(pending, { name: "TenantCheckCancelledError", message: CANCELLED_AFTER_ACCESS });
+      const warning = await waitFor(async () => (await fixture.tenant())?.tierProbeWarning);
+      assert.equal(warning.reason, "cancelled");
+      assert.equal(warning.message, "The license check was cancelled.");
+      const tenant = await fixture.tenant();
+      assert.ok(tenant?.grantedScopes?.includes("graph:SecurityAlert.Read.All"));
+      assertTierKept(tenant);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("a cancel while the grants wait behind another write still saves them and says so", async () => {
+    let signedIn = false;
+    const fixture = await makeFixture({
+      tenants: [SHARED],
+      signIns: [],
+      interactive: async ({ scopes }) => {
+        signedIn = true;
+        return { account: CONNECTED, tenantId: CONNECTED.tenantId, scopes, accessToken: "interactive-token" };
+      },
+      respond: skusResponse,
+    });
+    try {
+      const release = fixture.holdWrites();
+      const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
+      pending.catch(() => undefined);
+      await until(async () => signedIn);
+      fixture.store.cancelTenantCheck(SHARED.id);
+      await assert.rejects(pending, { name: "TenantCheckCancelledError", message: CANCELLED_AFTER_ACCESS });
+      assert.equal((await fixture.store.getAppState()).tenantChecks, undefined);
+      release();
+      const tenant = await waitFor(async () => {
+        const stored = await fixture.tenant();
+        return stored?.tierProbeWarning ? stored : undefined;
+      });
+      assert.ok(tenant.grantedScopes?.includes("graph:SecurityAlert.Read.All"));
+      assert.equal(tenant.tierProbeWarning?.reason, "cancelled");
+      assertTierKept(tenant);
+      assert.deepEqual(fixture.fetches.filter((url) => url.endsWith("/subscribedSkus")), []);
     } finally {
       await fixture.close();
     }
@@ -501,7 +590,8 @@ describe("cancelling and timing out a tenant check", () => {
       fixture.store.cancelTenantCheck(warned.id);
       await assert.rejects(pending, {
         name: "TenantCheckCancelledError",
-        message: "License check cancelled. The stored Entra tier and licenses are kept.",
+        message:
+          "The license check was cancelled; the Entra tier and licenses are as they were. Retry license check to update them.",
       });
       const tenant = await fixture.tenant();
       assert.deepEqual(tenant?.tierProbeWarning, OLD_WARNING);
@@ -521,7 +611,7 @@ describe("cancelling and timing out a tenant check", () => {
     try {
       await assert.rejects(fixture.store.refreshTenantGrants(OWN.id), {
         name: "TenantCheckTimeoutError",
-        message: "Check again did not finish within 1 second. Permissions are unchanged. Choose Check again to try again.",
+        message: "Check again did not finish within 1 second. Nothing changed. Choose Check again to try again.",
       });
       const tenant = await fixture.tenant();
       assert.deepEqual(tenant?.grantedScopes, OWN.grantedScopes);
@@ -531,16 +621,39 @@ describe("cancelling and timing out a tenant check", () => {
     }
   });
 
-  it("a license fetch that does not answer before the deadline is saved as a timeout warning", async () => {
+  it("a stalled token cache read reaches the deadline and releases the tenant", async () => {
+    const fixture = await makeFixture({
+      tenants: [OWN],
+      signIns: [],
+      accounts: () => new Promise(() => undefined),
+      deadlineMs: 50,
+    });
+    try {
+      await assert.rejects(fixture.store.refreshTenantGrants(OWN.id), { name: "TenantCheckTimeoutError" });
+      assert.equal((await fixture.store.getAppState()).tenantChecks, undefined);
+      // The next check starts instead of reporting a check in progress.
+      await assert.rejects(fixture.store.retryTenantLicenseCheck(OWN.id), { name: "TenantCheckTimeoutError" });
+      assertTierKept(await fixture.tenant());
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("a license fetch that does not answer before the deadline keeps the new grants and saves a timeout warning", async () => {
     const seen: AbortSignal[] = [];
     const fixture = await makeFixture({ tenants: [OWN], signIns: [CONNECTED], respond: hangingFetch(seen), deadlineMs: 80 });
     try {
-      const state = await fixture.store.refreshTenantGrants(OWN.id);
-      const tenant = state.tenants.find((entry) => entry.id === OWN.id);
+      await assert.rejects(fixture.store.refreshTenantGrants(OWN.id), {
+        name: "TenantCheckTimeoutError",
+        message:
+          "Permissions were updated. The license check did not finish within 1 second; the Entra tier and licenses are as they were. Retry license check to update them.",
+      });
+      const warning = await waitFor(async () => (await fixture.tenant())?.tierProbeWarning);
+      assert.equal(warning.reason, "timeout");
+      assert.equal(warning.message, "The license check did not finish within 1 second.");
+      const tenant = await fixture.tenant();
       assert.ok(tenant?.grantedScopes?.includes("graph:SecurityEvents.Read.All"));
       assertTierKept(tenant);
-      assert.equal(tenant?.tierProbeWarning?.reason, "timeout");
-      assert.equal(tenant?.tierProbeWarning?.message, "Microsoft did not answer within 1 second.");
       assert.equal(seen[0]?.aborted, true);
     } finally {
       await fixture.close();
@@ -548,3 +661,75 @@ describe("cancelling and timing out a tenant check", () => {
   });
 });
 
+describe("one operation per tenant connection", () => {
+  it("a reconnect during a running check discards the old check's result", async () => {
+    const lateToken = { resolve: (_value: unknown) => undefined as void };
+    let calls = 0;
+    const fixture = await makeFixture({
+      tenants: [{ ...SHARED, connectionId: "connection-1" }],
+      signIns: [],
+      // Add access gets a sign-in that ignores its signal and answers late;
+      // the reconnect signs in at once.
+      interactive: ({ scopes }) => {
+        calls += 1;
+        if (calls === 1) return new Promise((resolve) => { lateToken.resolve = resolve; });
+        return Promise.resolve({ account: CONNECTED, tenantId: CONNECTED.tenantId, scopes, accessToken: "token" });
+      },
+    });
+    try {
+      const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
+      pending.catch(() => undefined);
+      await until(async () =>
+        (await fixture.store.getAppState()).tenantChecks?.[0]?.phase === "sign-in",
+      );
+      await fixture.store.connectTenant({});
+      await assert.rejects(pending, { name: "TenantCheckSupersededError" });
+      lateToken.resolve({
+        account: CONNECTED,
+        tenantId: CONNECTED.tenantId,
+        scopes: ["SecurityAlert.Read.All", "SecurityIncident.Read.All"],
+        accessToken: "late-token",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const tenant = await fixture.tenant();
+      assert.notEqual(tenant?.connectionId, "connection-1");
+      assert.equal(tenant?.grantedScopes?.includes("graph:SecurityAlert.Read.All"), false);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("a slow background license check cannot overwrite a newer successful retry", async () => {
+    const lateAnswer = { resolve: (_value: Response) => undefined as void };
+    let skuCalls = 0;
+    const fixture = await makeFixture({
+      tenants: [],
+      signIns: [CONNECTED],
+      // The first /subscribedSkus request ignores its signal and answers late.
+      respond: () => {
+        skuCalls += 1;
+        if (skuCalls === 1) return new Promise((resolve) => { lateAnswer.resolve = resolve; });
+        return skusResponse();
+      },
+    });
+    try {
+      await fixture.store.connectTenant({});
+      await until(async () => skuCalls === 1);
+      assert.deepEqual((await fixture.store.getAppState()).tenantChecks, [
+        { tenantId: CONNECTED.tenantId, kind: "license", phase: "licenses" },
+      ]);
+      await assert.rejects(fixture.store.retryTenantLicenseCheck(CONNECTED.tenantId), { name: "TenantCheckBusyError" });
+      fixture.store.cancelTenantCheck(CONNECTED.tenantId);
+      await until(async () => (await fixture.store.getAppState()).tenantChecks === undefined);
+      const retried = await fixture.store.retryTenantLicenseCheck(CONNECTED.tenantId);
+      assert.equal(retried.tenants[0]?.entraTier, "p2");
+      lateAnswer.resolve(Response.json({ value: [] }));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      const tenant = await fixture.tenant();
+      assert.equal(tenant?.entraTier, "p2");
+      assert.equal(tenant?.tierProbeWarning, undefined);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
