@@ -11,8 +11,10 @@ import {
   IconClose,
   IconPlay,
   IconPlus,
+  IconRefresh,
   IconSettings,
 } from "./icons";
+import { licensesNotChecked, useTenantCheck } from "./ServiceAccess";
 import { Modal, ModalHeader } from "./Modal";
 import { Pill } from "./Pill";
 import { TenantTile } from "./TenantTile";
@@ -20,6 +22,7 @@ import { useToast } from "./Toast";
 import { Tooltip } from "./ui";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import { tenantRegistrationSummary } from "../shared/app-registration";
+import type { TenantRecord } from "../shared/openAdminOS";
 
 const MENU_ITEM_CLASS =
   "flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]";
@@ -190,7 +193,9 @@ export function TenantSwitcher() {
                       <span className="min-w-0 flex-1">
                         <span className="block truncate text-base font-medium text-[var(--color-text)]">{tenant.displayName}</span>
                         <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
-                          {tenant.kind === "sample" ? `${PILOT_COPY.modeName} · fictional company` : `${domain} · ${entraTierLabel(tenant.entraTier)}`}
+                          {tenant.kind === "sample"
+                            ? `${PILOT_COPY.modeName} · fictional company`
+                            : `${domain} · ${!tenant.entraTier && licensesNotChecked(tenant) ? SERVICE_COPY.licensesNotChecked : entraTierLabel(tenant.entraTier)}`}
                         </span>
                         {registration ? (
                           <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
@@ -205,6 +210,7 @@ export function TenantSwitcher() {
                       </span>
                       {active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
                     </button>
+                    {tenant.tierProbeWarning ? <SwitcherLicenseRetry tenant={tenant} /> : null}
                     <button
                       type="button"
                       aria-label={tenant.kind === "sample" ? PILOT_COPY.leaveAction : `Disconnect ${tenant.displayName}`}
@@ -314,5 +320,42 @@ export function TenantSwitcher() {
         </div>
       </Modal>
     </>
+  );
+}
+
+/**
+ * Retry license check from the tenant menu. While it runs the same button
+ * cancels it, and the result is reported in a toast.
+ */
+function SwitcherLicenseRetry({ tenant }: { tenant: TenantRecord }) {
+  const { retryTenantLicenseCheck } = useAppState();
+  const toast = useToast();
+  const check = useTenantCheck(tenant.id);
+  const label = check.running
+    ? SERVICE_COPY.cancelLicenseCheckFor(tenant.displayName)
+    : SERVICE_COPY.retryLicenseCheckFor(tenant.displayName);
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      title={check.running && check.signingIn ? SERVICE_COPY.waitingForSignIn : label}
+      disabled={check.cancelling || (!check.running && check.progress !== undefined)}
+      onClick={() => {
+        if (check.running) {
+          check.cancel();
+          return;
+        }
+        void check.run(() => retryTenantLicenseCheck(tenant.id)).then((result) => {
+          if (result.status === "cancelled") toast.info(SERVICE_COPY.checkCancelled.license);
+          else if (result.status === "failed") toast.error(result.message);
+          else if (result.value.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning) {
+            toast.info(SERVICE_COPY.licenseCheckStillFailing);
+          } else toast.success(SERVICE_COPY.licenseCheckFinished);
+        });
+      }}
+      className="rounded-[7px] p-1.5 text-[var(--color-warning)] hover:bg-[var(--color-warning-soft)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-warning)]"
+    >
+      {check.running ? <IconClose size={11} /> : <IconRefresh size={11} />}
+    </button>
   );
 }

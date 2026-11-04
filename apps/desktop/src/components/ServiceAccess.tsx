@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
@@ -19,6 +19,7 @@ import {
   type ServiceId,
   type ServicePart,
   type ServiceScope,
+  type TenantCheckProgress,
   type TenantRecord,
 } from "../shared/openAdminOS";
 import {
@@ -27,6 +28,83 @@ import {
   generateRequiredResourceAccessSnippet,
 } from "../setup/registration-script";
 import { useAppState } from "../state";
+
+/**
+ * True when the license check cannot run because the tenant has not
+ * granted Organization.Read.All. A designed "not checked" state, not a
+ * warning.
+ */
+export function licensesNotChecked(tenant: TenantRecord): boolean {
+  return (
+    tenant.kind !== "sample" &&
+    tenant.grantedScopes !== undefined &&
+    !grantedScopeSet(tenant).has("Organization.Read.All")
+  );
+}
+
+type TenantCheckResult<T> =
+  | { status: "done"; value: T }
+  | { status: "cancelled" }
+  | { status: "failed"; message: string };
+
+/**
+ * Runs a host tenant check (Check again, Retry license check, Add access)
+ * with a cancel that aborts the host operation. `progress` is the host's
+ * view, including whether a Microsoft sign-in is open.
+ */
+export function useTenantCheck(tenantId: string) {
+  const { state, cancelTenantCheck } = useAppState();
+  const progress: TenantCheckProgress | undefined = state.tenantChecks?.find(
+    (entry) => entry.tenantId === tenantId,
+  );
+  const cancelRequested = useRef(false);
+  const [running, setRunning] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
+  const run = async <T,>(action: () => Promise<T>): Promise<TenantCheckResult<T>> => {
+    cancelRequested.current = false;
+    setRunning(true);
+    try {
+      return { status: "done", value: await action() };
+    } catch (caught) {
+      if (cancelRequested.current) return { status: "cancelled" };
+      return { status: "failed", message: caught instanceof Error ? caught.message : String(caught) };
+    } finally {
+      setRunning(false);
+      setCancelling(false);
+    }
+  };
+  const cancel = () => {
+    cancelRequested.current = true;
+    setCancelling(true);
+    void cancelTenantCheck(tenantId).catch(() => undefined);
+  };
+  const signingIn = progress?.phase === "sign-in";
+  return { progress, running, cancelling, signingIn, run, cancel };
+}
+
+/** The line shown while a tenant check runs, with its Cancel action. */
+export function TenantCheckProgressLine({
+  label,
+  signingIn,
+  cancelling,
+  onCancel,
+  cancelLabel,
+}: {
+  label: string;
+  signingIn: boolean;
+  cancelling: boolean;
+  onCancel: () => void;
+  cancelLabel?: string;
+}) {
+  return (
+    <div role="status" className="mt-2 flex flex-wrap items-center gap-2 text-xs text-[var(--color-text-soft)]">
+      <span className="min-w-0 flex-1">{signingIn ? SERVICE_COPY.waitingForSignIn : label}</span>
+      <Button size="sm" variant="ghost" disabled={cancelling} aria-label={cancelLabel} onClick={onCancel}>
+        {cancelling ? SERVICE_COPY.cancellingCheck : SERVICE_COPY.cancelCheck}
+      </Button>
+    </div>
+  );
+}
 
 /** True when the tenant signs in with the admin's own app registration. */
 export function usesOwnRegistration(tenant: TenantRecord): boolean {
@@ -128,6 +206,7 @@ function ServiceAccessBody({
   onClose: () => void;
 }) {
   const { addTenantAccess, refreshTenantGrants } = useAppState();
+  const tenantCheck = useTenantCheck(tenant.id);
   const service = serviceById(serviceId);
   const ownRegistration = usesOwnRegistration(tenant);
   const missing = missingServiceParts(tenant, serviceId);
@@ -175,6 +254,26 @@ function ServiceAccessBody({
       setBusy(false);
     }
   };
+
+  // Check again and Add access run in the host with a cancel and a deadline.
+  const runCheck = async (
+    kind: "permissions" | "access",
+    action: () => Promise<{ message: string | null; warning?: string }>,
+  ) => {
+    setBusy(true);
+    setError(null);
+    setStatus(null);
+    setWarning(null);
+    const result = await tenantCheck.run(action);
+    setBusy(false);
+    if (result.status === "cancelled") setStatus(SERVICE_COPY.checkCancelled[kind]);
+    else if (result.status === "failed") setError(result.message);
+    else {
+      if (result.value.warning) setWarning(result.value.warning);
+      if (result.value.message) setStatus(result.value.message);
+    }
+  };
+  const checking = tenantCheck.running;
 
   const copy = (label: string, text: () => string) =>
     run(async () => {
@@ -247,8 +346,26 @@ function ServiceAccessBody({
             <p>{SETUP_COPY.delegatedPermissionsNote}</p>
           </div>
         )}
+        {checking ? (
+          <p role="status" className="text-sm text-[var(--color-text-soft)]">
+            {tenantCheck.signingIn
+              ? SERVICE_COPY.waitingForSignIn
+              : ownRegistration
+                ? SERVICE_COPY.checkingPermissions
+                : SERVICE_COPY.addingAccess}
+          </p>
+        ) : null}
         {status && (
-          <p role="status" className="text-sm text-[var(--color-success)]">{status}</p>
+          <p
+            role="status"
+            className={`text-sm ${
+              status === SERVICE_COPY.checkCancelled.permissions || status === SERVICE_COPY.checkCancelled.access
+                ? "text-[var(--color-text-soft)]"
+                : "text-[var(--color-success)]"
+            }`}
+          >
+            {status}
+          </p>
         )}
         {warning && (
           <div role="alert" className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
@@ -261,9 +378,15 @@ function ServiceAccessBody({
           </div>
         )}
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="ghost" disabled={busy} onClick={close}>
-            {missing.length === 0 ? "Close" : "Cancel"}
-          </Button>
+          {checking ? (
+            <Button variant="ghost" disabled={tenantCheck.cancelling} onClick={tenantCheck.cancel}>
+              {tenantCheck.cancelling ? SERVICE_COPY.cancellingCheck : SERVICE_COPY.cancelCheck}
+            </Button>
+          ) : (
+            <Button variant="ghost" disabled={busy} onClick={close}>
+              {missing.length === 0 ? "Close" : "Cancel"}
+            </Button>
+          )}
           {ownRegistration && tenant.appRegistration ? (
             <>
               <Button
@@ -294,16 +417,20 @@ function ServiceAccessBody({
                 variant="primary"
                 disabled={busy}
                 onClick={() =>
-                  void run(async () => {
+                  void runCheck("permissions", async () => {
                     const next = await refreshTenantGrants(tenant.id);
                     const probe = next.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning;
-                    if (!probe) return SERVICE_COPY.checkedAgain;
-                    setWarning(SERVICE_COPY.checkedAgainWithWarning(probe.message));
-                    return null;
+                    return probe
+                      ? { message: null, warning: SERVICE_COPY.checkedAgainWithWarning(probe.message) }
+                      : { message: SERVICE_COPY.checkedAgain };
                   })
                 }
               >
-                {busy ? "Checking" : SERVICE_COPY.checkAgain}
+                {checking && tenantCheck.signingIn
+                  ? SERVICE_COPY.waitingForSignInButton
+                  : checking
+                    ? "Checking"
+                    : SERVICE_COPY.checkAgain}
               </Button>
             </>
           ) : missing.length > 0 ? (
@@ -311,14 +438,21 @@ function ServiceAccessBody({
               variant="primary"
               disabled={busy || partIds.length === 0}
               onClick={() =>
-                void run(async () => {
-                  await addTenantAccess(tenant.id, partIds);
+                void runCheck("access", async () => {
+                  const next = await addTenantAccess(tenant.id, partIds);
+                  const probe = next.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning;
+                  // A license check that did not finish stays visible here.
+                  if (probe) return { message: null, warning: SERVICE_COPY.accessAddedWithWarning(probe.message) };
                   onClose();
-                  return null;
+                  return { message: null };
                 })
               }
             >
-              {busy ? "Waiting for Microsoft" : "Continue to Microsoft"}
+              {checking && tenantCheck.signingIn
+                ? SERVICE_COPY.waitingForSignInButton
+                : checking
+                  ? SERVICE_COPY.addingAccess
+                  : "Continue to Microsoft"}
             </Button>
           ) : null}
         </div>
@@ -454,10 +588,44 @@ export function ServiceNotConnectedNotice({
 /**
  * A tenant whose Entra tier and license probe did not finish, for example
  * because another account signed in. The stored tier and licenses stay.
+ * Retry license check runs only the probe, with a cancel.
  */
 export function TenantProbeWarning({ tenant }: { tenant: TenantRecord }) {
+  const { retryTenantLicenseCheck } = useAppState();
+  const check = useTenantCheck(tenant.id);
+  const [result, setResult] = useState<{ tone: "success" | "neutral" | "danger"; text: string } | null>(null);
   const warning = tenant.tierProbeWarning;
-  if (!warning) return null;
+  const retry = async () => {
+    setResult(null);
+    const outcome = await check.run(() => retryTenantLicenseCheck(tenant.id));
+    if (outcome.status === "cancelled") {
+      setResult({ tone: "neutral", text: SERVICE_COPY.checkCancelled.license });
+    } else if (outcome.status === "failed") {
+      setResult({ tone: "danger", text: outcome.message });
+    } else {
+      const after = outcome.value.tenants.find((entry) => entry.id === tenant.id);
+      setResult(
+        after?.tierProbeWarning
+          ? { tone: "neutral", text: SERVICE_COPY.licenseCheckStillFailing }
+          : { tone: "success", text: SERVICE_COPY.licenseCheckFinished },
+      );
+    }
+  };
+  const resultLine = result ? (
+    <p
+      role={result.tone === "danger" ? "alert" : "status"}
+      className={`mt-2 text-xs ${
+        result.tone === "success"
+          ? "text-[var(--color-success)]"
+          : result.tone === "danger"
+            ? "text-[var(--color-danger)]"
+            : "text-[var(--color-text-soft)]"
+      }`}
+    >
+      {result.text}
+    </p>
+  ) : null;
+  if (!warning) return resultLine;
   return (
     <div
       role="alert"
@@ -467,6 +635,39 @@ export function TenantProbeWarning({ tenant }: { tenant: TenantRecord }) {
       <span className="font-medium text-[var(--color-warning)]">{SERVICE_COPY.tierProbeWarningTitle}</span>{" "}
       <span className="text-[var(--color-text)]">{warning.message}</span>{" "}
       <span className="text-[var(--color-text-soft)]">{SERVICE_COPY.tierProbeWarningKept}</span>
+      {check.running ? (
+        <TenantCheckProgressLine
+          label={SERVICE_COPY.checkingLicenses}
+          signingIn={check.signingIn}
+          cancelling={check.cancelling}
+          onCancel={check.cancel}
+          cancelLabel={SERVICE_COPY.cancelLicenseCheckFor(tenant.displayName)}
+        />
+      ) : (
+        <div className="mt-2">
+          <Button
+            size="sm"
+            variant="secondary"
+            disabled={check.progress !== undefined}
+            aria-label={SERVICE_COPY.retryLicenseCheckFor(tenant.displayName)}
+            onClick={() => void retry()}
+          >
+            {SERVICE_COPY.retryLicenseCheck}
+          </Button>
+        </div>
+      )}
+      {resultLine}
+    </div>
+  );
+}
+
+/** The designed state for a tenant whose licenses cannot be checked yet. */
+export function TenantLicensesNotChecked({ tenant }: { tenant: TenantRecord }) {
+  if (!licensesNotChecked(tenant) || tenant.tierProbeWarning) return null;
+  return (
+    <div className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+      <span className="font-medium text-[var(--color-text-soft)]">{SERVICE_COPY.licensesNotChecked}.</span>{" "}
+      {SERVICE_COPY.licensesNotCheckedBody}
     </div>
   );
 }

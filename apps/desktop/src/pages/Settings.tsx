@@ -97,8 +97,12 @@ import { PilotProductionPage } from "../components/PilotMode";
 import { useToast } from "../components/Toast";
 import {
   ServiceAccessDialog,
+  TenantCheckProgressLine,
+  TenantLicensesNotChecked,
   TenantProbeWarning,
   ServiceStatusBadge,
+  licensesNotChecked,
+  useTenantCheck,
   usesOwnRegistration,
 } from "../components/ServiceAccess";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -1334,7 +1338,8 @@ function TenantServices({
 }) {
   const { refreshTenantGrants } = useAppState();
   const ownRegistration = usesOwnRegistration(tenant);
-  const [checking, setChecking] = useState(false);
+  const tenantCheck = useTenantCheck(tenant.id);
+  const checking = tenantCheck.running;
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checkStatus, setCheckStatus] = useState<string | null>(null);
   const [checkWarning, setCheckWarning] = useState<string | null>(null);
@@ -1353,30 +1358,53 @@ function TenantServices({
             size="sm"
             variant="secondary"
             leadingIcon={<IconRefresh size={12} />}
-            disabled={checking}
+            disabled={checking || tenantCheck.progress !== undefined}
             title={SERVICE_COPY.checkAgainHint}
             onClick={() => {
-              setChecking(true);
               setCheckError(null);
               setCheckStatus(null);
               setCheckWarning(null);
-              void refreshTenantGrants(tenant.id)
-                .then((next) => {
-                  const probe = next.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning;
+              void tenantCheck.run(() => refreshTenantGrants(tenant.id)).then((result) => {
+                if (result.status === "cancelled") {
+                  setCheckStatus(SERVICE_COPY.checkCancelled.permissions);
+                } else if (result.status === "failed") {
+                  setCheckError(result.message);
+                } else {
+                  const probe = result.value.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning;
                   if (probe) setCheckWarning(SERVICE_COPY.checkedAgainWithWarning(probe.message));
                   else setCheckStatus(SERVICE_COPY.checkedAgain);
-                })
-                .catch((caught) =>
-                  setCheckError(caught instanceof Error ? caught.message : String(caught)),
-                )
-                .finally(() => setChecking(false));
+                }
+              });
             }}
           >
-            {checking ? "Checking" : SERVICE_COPY.checkAgain}
+            {checking && tenantCheck.signingIn
+              ? SERVICE_COPY.waitingForSignInButton
+              : checking
+                ? "Checking"
+                : SERVICE_COPY.checkAgain}
           </UiButton>
         ) : null}
       </div>
-      {checkStatus && <p role="status" className="mt-2 text-xs text-[var(--color-success)]">{checkStatus}</p>}
+      {checking ? (
+        <TenantCheckProgressLine
+          label={SERVICE_COPY.checkingPermissions}
+          signingIn={tenantCheck.signingIn}
+          cancelling={tenantCheck.cancelling}
+          onCancel={tenantCheck.cancel}
+        />
+      ) : null}
+      {checkStatus && (
+        <p
+          role="status"
+          className={`mt-2 text-xs ${
+            checkStatus === SERVICE_COPY.checkCancelled.permissions
+              ? "text-[var(--color-text-soft)]"
+              : "text-[var(--color-success)]"
+          }`}
+        >
+          {checkStatus}
+        </p>
+      )}
       {checkWarning && (
         <p role="alert" className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-1.5 text-xs text-[var(--color-warning)]">
           {checkWarning}
@@ -1510,7 +1538,7 @@ function TenantRow({
           <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
             {tenant.kind === "sample"
               ? "Fictional company, stored on this device"
-              : `${domain} · ${entraLicenseName ?? "Entra tier not available"}`}
+              : `${domain} · ${entraLicenseName ?? (licensesNotChecked(tenant) ? SERVICE_COPY.licensesNotChecked : "Entra tier not available")}`}
           </div>
           {registration ? (
             <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
@@ -1518,6 +1546,7 @@ function TenantRow({
             </div>
           ) : null}
           <TenantProbeWarning tenant={tenant} />
+          <TenantLicensesNotChecked tenant={tenant} />
         </div>
         <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample data" : licenses.map((license) => license.displayName).join(", ")}>
           {tenant.kind === "sample"

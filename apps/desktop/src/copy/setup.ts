@@ -191,6 +191,28 @@ export const SERVICE_COPY = {
   tierProbeWarningTitle: "License check did not finish.",
   tierProbeWarningKept: "The stored Entra tier and licenses are kept.",
   tierProbeWarningShort: "License check did not finish",
+  retryLicenseCheck: "Retry license check",
+  retryLicenseCheckFor: (tenant: string) => `Retry license check for ${tenant}`,
+  cancelLicenseCheckFor: (tenant: string) => `Cancel license check for ${tenant}`,
+  licenseCheckFinished: "License check finished. The Entra tier and licenses are up to date.",
+  licenseCheckStillFailing: "Tried again. The license check still did not finish.",
+  licensesNotChecked: "Licenses not checked",
+  licensesNotCheckedBody:
+    "The license check needs Organization.Read.All, which comes with Users and groups in Intune or Entra.",
+  checkingPermissions: "Checking permissions.",
+  checkingLicenses: "Checking licenses.",
+  addingAccess: "Saving the new access and checking licenses.",
+  waitingForSignIn: "Waiting for Microsoft sign-in. Finish it in your browser, or cancel.",
+  waitingForSignInButton: "Waiting for Microsoft sign-in",
+  cancelCheck: "Cancel",
+  cancellingCheck: "Cancelling",
+  checkCancelled: {
+    permissions: "Check again was cancelled. Permissions, Entra tier and licenses are as they were.",
+    license: "License check cancelled. The stored Entra tier and licenses are kept.",
+    access: "Add access was cancelled. The tenant's permissions are unchanged.",
+  },
+  accessAddedWithWarning: (message: string) =>
+    `Access added, but the license check did not finish. ${message}`,
   copied: (label: string) => `${label} copied.`,
   alreadyConnected: (service: string, tenant: string) =>
     `${service} is connected for ${tenant}. Every part is granted.`,
