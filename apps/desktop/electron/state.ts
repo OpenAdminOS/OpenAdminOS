@@ -6180,8 +6180,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (this.tenantChecks.has(tenant.id)) throw new TenantCheckBusyError();
     const controller = new AbortController();
     const deadlineMs = this.tenantCheckDeadlineMs;
-    const timer = setTimeout(() => entry.stop("timeout"), deadlineMs);
-    timer.unref?.();
     const entry = {
       progress: { tenantId: tenant.id, kind, phase: "checking" } as TenantCheckProgress,
       controller,
@@ -6211,6 +6209,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       probing: kind === "license" && needsTierProbe(tenant),
       committed: false,
     };
+    // A referenced timer keeps the deadline real in any process; it is cleared
+    // in the finally block below whichever way the operation ends.
+    const timer = setTimeout(() => entry.stop("timeout"), deadlineMs);
     try {
       return await awaitWithSignal(work(operation), controller.signal);
     } catch (error) {
