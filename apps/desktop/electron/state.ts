@@ -32,7 +32,7 @@ import {
   withTenantDataOutputFilter,
   wrapConnector,
   findRegistryAgentById,
-  listAllRegistryAgents,
+  listAllRegistryAgentsWithIssues,
   listBuiltInRegistryAgents,
   listRegisteredConnectors,
   loadAgentManifestPreview,
@@ -154,6 +154,7 @@ import {
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   grantedScopeSet,
   grantsFromTokenScopes,
+  invalidAgentManifestCopy,
   mergeGrantedScopes,
   missingServiceCopy,
   qualifyScope,
@@ -176,6 +177,7 @@ import {
   type AppState,
   type ProviderId,
   type ProviderSummary,
+  type InvalidAgentManifest,
   type RegistryAgentSummary,
   type RunRecord,
   type UpdateChannel,
@@ -518,6 +520,16 @@ function sanitizeNonNegativeInteger(value: unknown): number | undefined {
     return undefined;
   }
   return Math.round(value);
+}
+
+/** Matches an installed agent to an invalid manifest by its folder on disk. */
+function manifestErrorFor(
+  agent: AgentSummary,
+  invalid: readonly InvalidAgentManifest[],
+): string | undefined {
+  if (!agent.registryPath) return undefined;
+  const path = agent.registryPath.replace(/\\/g, "/");
+  return invalid.find((entry) => entry.registryPath.replace(/\\/g, "/") === path)?.reason;
 }
 
 function scheduleDueAtMs(agent: AgentSummary, nowMs: number): number {
@@ -1467,6 +1479,7 @@ export class AppStateStore {
         host.selfTrainingPromptOverlay(tenantId, agentSlug),
       recordLearningEventSafely: (input) => host.recordLearningEventSafely(input),
       notifyRunFinished: (run) => host.notifyRunFinished(run),
+      agentManifestError: (agent) => host.agentManifestError(agent),
       emitStateChanged: (reason, runId) => host.emitStateChanged(reason, runId),
       enqueueRunDeliveries: (run) => host.enqueueRunDeliveries(run),
       processPendingRunDeliveries: () => host.processPendingRunDeliveries(),
@@ -2447,17 +2460,21 @@ export class AppStateStore {
       persisted.activeModelByProviderId,
     ).model;
 
-    const registryAgents = this.listRegistryAgents();
+    const { agents: registryAgents, invalid: invalidAgents } = this.listRegistryWithIssues();
     const installedAgents = this.decorateInstalledWithUpdateInfo(
       persisted.installedAgents,
       registryAgents,
-    );
+    ).map((agent) => {
+      const manifestError = manifestErrorFor(agent, invalidAgents);
+      return manifestError ? { ...agent, manifestError } : agent;
+    });
 
     const state: AppState = {
       activeProviderId: activeProvider?.id ?? "ollama",
       appVersion: this.appVersion,
       providers,
       registryAgents,
+      invalidAgents,
       installedAgents,
       runs: persisted.runs,
       trust: deriveTrustState({
@@ -2498,21 +2515,46 @@ export class AppStateStore {
   }
 
   listRegistryAgents(): RegistryAgentSummary[] {
+    return this.listRegistryWithIssues().agents;
+  }
+
+  /**
+   * Registry agents plus the local manifests that failed validation. An
+   * invalid manifest is listed, never thrown, so it cannot stop tenants,
+   * installed agents and history from loading.
+   */
+  private listRegistryWithIssues(): {
+    agents: RegistryAgentSummary[];
+    invalid: InvalidAgentManifest[];
+  } {
     if (!this.registryCacheEntries) {
       // Before first HTTP fetch: fall back to filesystem scan (dev + cold start).
-      return listAllRegistryAgents(this.userAgentsDir).map((agent) =>
-        withAgentCompatibility(agent, this.appVersion),
-      );
+      const listing = listAllRegistryAgentsWithIssues(this.userAgentsDir);
+      return {
+        agents: listing.agents.map((agent) => withAgentCompatibility(agent, this.appVersion)),
+        invalid: listing.invalid,
+      };
     }
     // HTTP cache populated: use it as base and overlay user-authored agents.
     const dir = this.userAgentsDir;
+    const listing = dir
+      ? listAllRegistryAgentsWithIssues(dir)
+      : { agents: [], invalid: [] };
     const userAgents = dir
-      ? listAllRegistryAgents(dir).filter((a) => a.registryPath?.startsWith(dir))
+      ? listing.agents.filter((a) => a.registryPath?.startsWith(dir))
       : [];
     const bySlug = new Map<string, RegistryAgentSummary>();
     for (const a of this.registryCacheEntries) bySlug.set(a.slug, a);
     for (const a of userAgents) bySlug.set(a.slug, withAgentCompatibility(a, this.appVersion));
-    return [...bySlug.values()].sort((l, r) => l.name.localeCompare(r.name));
+    return {
+      agents: [...bySlug.values()].sort((l, r) => l.name.localeCompare(r.name)),
+      invalid: listing.invalid.filter((entry) => entry.source === "user"),
+    };
+  }
+
+  /** The validation error of an installed agent's manifest on disk. */
+  private agentManifestError(agent: AgentSummary): string | undefined {
+    return manifestErrorFor(agent, this.listRegistryWithIssues().invalid);
   }
 
   async getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined> {
@@ -4094,6 +4136,8 @@ export class AppStateStore {
       }
       const next = [...persisted.installedAgents];
       const existing = next[idx];
+      const manifestError = schedule?.enabled ? this.agentManifestError(existing) : undefined;
+      if (manifestError) throw new Error(invalidAgentManifestCopy(existing.name, manifestError));
       if (schedule === null) {
         const { schedule: _, ...rest } = existing;
         next[idx] = rest;
@@ -4224,10 +4268,17 @@ export class AppStateStore {
       return;
     }
 
+    const invalid = this.listRegistryWithIssues().invalid;
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
+      // The Agents page shows an invalid manifest as unavailable; its
+      // schedule waits until the manifest is fixed.
+      if (manifestErrorFor(agent, invalid)) {
+        console.info(`[scheduler] skipped "${agent.slug}" because its manifest is invalid`);
+        continue;
+      }
 
       // Skip if there's already an in-flight run for this agent because we
       // don't want a long-running agent to queue more copies of itself.

@@ -13,6 +13,7 @@ import {
 import {
   agentServiceIds,
   formatServiceList,
+  invalidAgentManifestCopy,
   missingServicesForAgent,
   uncoveredScopesCopy,
   unmappedScopesCopy,
@@ -97,6 +98,8 @@ export interface RunServiceHost {
     payload: unknown;
   }): void;
   notifyRunFinished(run: RunRecord): void;
+  /** The validation error of the agent's manifest on disk, if it is invalid. */
+  agentManifestError?(agent: AgentSummary): string | undefined;
   emitStateChanged(reason: string, runId?: string): void;
   enqueueRunDeliveries(run: RunRecord): Promise<void>;
   processPendingRunDeliveries(): Promise<void>;
@@ -219,6 +222,10 @@ export class RunService {
       if (!agent) {
         throw new Error(`Agent is not installed: ${agentSlug}`);
       }
+      // A manifest that no longer validates cannot be trusted to run,
+      // manually, from Chat or from a schedule.
+      const manifestError = this.host.agentManifestError?.(agent);
+      if (manifestError) throw new Error(invalidAgentManifestCopy(agent.name, manifestError));
       // Pilot runs use prepared text instead of a provider, and only the
       // pilot agents can run on the pilot tenant. Refuse everything else
       // before any provider or Graph work.

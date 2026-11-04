@@ -4,6 +4,8 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
+import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
+import { AGENT_COPY } from "../copy";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -131,6 +133,12 @@ export default function AgentDetail({
   const [previewLoading, setPreviewLoading] = useState(true);
   const [configureOpen, setConfigureOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [editInvalidOpen, setEditInvalidOpen] = useState(false);
+  const invalidEntry = agent?.manifestError
+    ? state.invalidAgents?.find((entry) => entry.registryPath === agent.registryPath)
+    : undefined;
+  const editableInvalid =
+    invalidEntry?.source === "user" && invalidEntry.sourceText !== undefined ? invalidEntry : undefined;
   const [communityShareOpen, setCommunityShareOpen] = useState(false);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [hubInstallConfirm, setHubInstallConfirm] = useState(false);
@@ -490,7 +498,7 @@ export default function AgentDetail({
               <Button
                 variant="secondary"
                 size="sm"
-                disabled={agent.compatibility?.supported === false}
+                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
                 onClick={() => queueRunPreflight({ dryRun: true })}
               >
                 Dry run
@@ -504,7 +512,7 @@ export default function AgentDetail({
               <Button
                 variant="primary"
                 size="sm"
-                disabled={agent.compatibility?.supported === false}
+                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
                 onClick={() => queueRunPreflight()}
               >
                 Run
@@ -514,7 +522,7 @@ export default function AgentDetail({
                 providers={state.providers}
                 activeProviderId={state.activeProviderId}
                 activeModelByProviderId={state.activeModelByProviderId}
-                disabled={agent.compatibility?.supported === false}
+                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
                 onRun={(choice) => {
                   queueRunPreflight(choice);
                 }}
@@ -602,6 +610,7 @@ export default function AgentDetail({
           {agent.compatibility?.supported === false ? (
             <Badge tone="warning">Incompatible</Badge>
           ) : null}
+          {agent.manifestError ? <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge> : null}
           {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
           <ServiceChips services={agentServiceIds(agent)} />
         </div>
@@ -609,6 +618,16 @@ export default function AgentDetail({
           <ServiceNotConnectedNotice
             tenant={activeTenant}
             serviceIds={missingAgentServices.map((service) => service.id)}
+          />
+        ) : null}
+        {agent.manifestError ? (
+          <InvalidAgentNotice
+            name={agent.name}
+            reason={agent.manifestError}
+            manifestPath={invalidEntry?.manifestPath}
+            bundled={invalidEntry?.source === "bundled"}
+            onEdit={editableInvalid ? () => setEditInvalidOpen(true) : undefined}
+            onUninstall={() => setUninstallOpen(true)}
           />
         ) : null}
         {agent.compatibility?.supported === false && (
@@ -895,6 +914,14 @@ export default function AgentDetail({
           onSave={(values) => updateAgentSettings(agent.slug, values)}
         />
       )}
+      {editableInvalid ? (
+        <NewAgentModal
+          open={editInvalidOpen}
+          onClose={() => setEditInvalidOpen(false)}
+          initialYamlSource={editableInvalid.sourceText}
+          editingSlug={editableInvalid.folder}
+        />
+      ) : null}
       {preview?.isUserAuthored && (
         <NewAgentModal
           open={editOpen}

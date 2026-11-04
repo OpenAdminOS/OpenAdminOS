@@ -11,7 +11,7 @@ import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
 import { ServiceChips } from "../components/ServiceAccess";
-import { SERVICE_COPY } from "../copy";
+import { AGENT_COPY, SERVICE_COPY } from "../copy";
 import {
   IconChevronDown,
   IconBolt,
@@ -40,6 +40,7 @@ import {
   isServiceId,
   serviceById,
   type AgentSummary,
+  type InvalidAgentManifest,
   type RegistryAgentSummary,
   type RunRecord,
   type ServiceId,
@@ -80,6 +81,14 @@ export default function AgentsHome() {
   const [bulkRunning, setBulkRunning] = useState<"due" | "all" | null>(null);
   const [schedulerRegistered, setSchedulerRegistered] = useState<boolean | null>(null);
   const resumedBatchRef = useRef<string | null>(null);
+  const [editingInvalid, setEditingInvalid] = useState<InvalidAgentManifest | null>(null);
+  const invalidAgents = state.invalidAgents ?? [];
+  const invalidEntryFor = (agent: AgentSummary | undefined) =>
+    agent?.manifestError
+      ? invalidAgents.find((entry) => entry.registryPath === agent.registryPath)
+      : undefined;
+  const editableInvalid = (entry: InvalidAgentManifest | undefined) =>
+    entry?.source === "user" && entry.sourceText !== undefined ? entry : undefined;
 
   const source: LibrarySource = searchParams.get("source") === "hub" ? "hub" : "installed";
   const modeParam = searchParams.get("mode");
@@ -347,11 +356,20 @@ export default function AgentsHome() {
   };
 
   function installedAgentMenu(row: LibraryRow): MenuEntry[] {
+    const editable = editableInvalid(invalidEntryFor(row.installed));
     return [
+      ...(editable
+        ? [{
+            id: "edit-manifest",
+            label: AGENT_COPY.invalidEditAction,
+            onSelect: () => setEditingInvalid(editable),
+          }]
+        : []),
       {
         id: "schedule",
         label: "Schedule",
         icon: <IconClock size={13} />,
+        disabled: Boolean(row.installed?.manifestError),
         onSelect: () => openAgent(row.slug, "schedule"),
       },
       {
@@ -545,6 +563,11 @@ export default function AgentsHome() {
                     <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
                     <span className="mt-1 block"><ServiceChips services={agentServiceIds(row.display)} /></span>
                     {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
+                    {row.installed?.manifestError ? (
+                      <span className="mt-0.5 block truncate text-xs text-[var(--color-danger)]" title={row.installed.manifestError}>
+                        {AGENT_COPY.invalidRowHint} {row.installed.manifestError}
+                      </span>
+                    ) : null}
                   </button>
                   {scheduled && row.installed ? (
                     <ScheduleUsageForecast agent={row.installed} intervalSeconds={row.installed.schedule!.intervalSeconds} compact />
@@ -557,7 +580,8 @@ export default function AgentsHome() {
                         size="sm"
                         variant="ghost"
                         leadingIcon={<IconPlay size={13} />}
-                        disabled={row.display.compatibility?.supported === false}
+                        disabled={row.display.compatibility?.supported === false || Boolean(row.installed.manifestError)}
+                        title={row.installed.manifestError ? AGENT_COPY.invalidRowHint : undefined}
                         onClick={() => void runAgent(row.installed!)}
                       >
                         Run
@@ -578,7 +602,16 @@ export default function AgentsHome() {
               </div>
             );
           })}
-          {rows.length === 0 ? (
+          {source === "hub"
+            ? invalidAgents.map((entry) => (
+                <InvalidAgentRow
+                  key={`invalid-${entry.registryPath}`}
+                  entry={entry}
+                  onEdit={editableInvalid(entry) ? () => setEditingInvalid(entry) : undefined}
+                />
+              ))
+            : null}
+          {rows.length === 0 && (source !== "hub" || invalidAgents.length === 0) ? (
             <div role="status" className="px-6 py-12 text-center">
               <div className="font-medium text-[var(--color-text)]">{source === "hub" ? "No hub agents match" : "No installed agents match"}</div>
               <p className="mt-1 text-sm text-[var(--color-text-muted)]">
@@ -589,6 +622,48 @@ export default function AgentsHome() {
         </div>
       </section>
       <NewAgentModal open={addFlow === "agent"} onClose={closeAddFlow} />
+      {editingInvalid ? (
+        <NewAgentModal
+          open
+          onClose={() => setEditingInvalid(null)}
+          initialYamlSource={editingInvalid.sourceText}
+          editingSlug={editingInvalid.folder}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** A local manifest that failed validation, listed as unavailable. */
+function InvalidAgentRow({
+  entry,
+  onEdit,
+}: {
+  entry: InvalidAgentManifest;
+  onEdit?: () => void;
+}) {
+  return (
+    <div className="calm-list-row group" aria-label={`${entry.id} ${AGENT_COPY.invalidBadge.toLowerCase()}`}>
+      <span className="calm-row-icon text-[var(--color-danger)]">
+        <IconShield size={16} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="truncate font-medium text-[var(--color-text)]">{entry.id}</span>
+          <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge>
+        </span>
+        <span className="mt-0.5 block text-sm text-[var(--color-danger)]">
+          {AGENT_COPY.invalidTitle}. {entry.reason}
+        </span>
+        <span className="mt-0.5 block truncate font-mono text-xs text-[var(--color-text-muted)]" title={entry.manifestPath}>
+          {entry.manifestPath}
+        </span>
+      </div>
+      {onEdit ? (
+        <div className="calm-row-actions flex shrink-0 items-center gap-1">
+          <Button size="sm" variant="secondary" onClick={onEdit}>{AGENT_COPY.invalidEditAction}</Button>
+        </div>
+      ) : null}
     </div>
   );
 }
