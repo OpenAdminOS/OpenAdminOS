@@ -18,6 +18,7 @@ import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./se
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
+  MCP_TOOL_RULES,
   mcpChatToolName,
   mcpPrivateTermsForTenant,
   type IntuneChatToolContext,
@@ -637,6 +638,16 @@ const fetchTool: McpChatTool = {
 const callFetch = JSON.stringify({ tool: fetchTool.name, params: { url: "https://learn.microsoft.com/x" } });
 
 describe("The MCP query writer boundary", () => {
+  it("tells the answering model the query is written from the current question only", async () => {
+    await withStore(async (store) => {
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      await runAgenticChat({ ...input(store, scriptedLlm(['{"final":true,"answer":"Done."}'], prompts), mcpContext([])), questionKind: "docs" });
+      assert.ok(prompts[0]!.system!.includes(MCP_TOOL_RULES));
+      assert.match(MCP_TOOL_RULES, /from the admin's current question and the tool's schema only/);
+      assert.doesNotMatch(MCP_TOOL_RULES, /own messages/);
+    });
+  });
+
   it("blocks a percent-encoded tenant name and an ID with zero-width characters", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
