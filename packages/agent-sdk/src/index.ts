@@ -202,11 +202,6 @@ export interface AgentSummary extends AgentContract {
   manifestError?: string;
 }
 
-/**
- * A bundled or local agent manifest that failed validation. Registry
- * enumeration lists it here instead of throwing, so one bad manifest
- * never blocks the other agents, tenants or history from loading.
- */
 export interface TenantTierProbeWarning {
   /** The failure, such as the TenantAccountMismatchError recovery text. */
   message: string;
@@ -216,6 +211,11 @@ export interface TenantTierProbeWarning {
   at: string;
 }
 
+/**
+ * A bundled or local agent manifest that failed validation. Registry
+ * enumeration lists it here instead of throwing, so one bad manifest
+ * never blocks the other agents, tenants or history from loading.
+ */
 export interface InvalidAgentManifest {
   /** `descriptor.id` when the manifest names one, otherwise the folder name. */
   id: string;
