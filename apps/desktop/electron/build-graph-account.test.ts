@@ -25,19 +25,21 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-async function makeFixture(account: Account) {
+async function makeFixture(account: Account, tenant: TenantRecord = TENANT) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-build-graph-"));
   const filePath = join(dir, "state.json");
   await writeFile(filePath, JSON.stringify({
-    activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [TENANT], activeTenantId: TENANT.id,
+    activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
   }));
   const loginHints: Array<string | undefined> = [];
+  const authorities: Array<string | undefined> = [];
   const store = new AppStateStore({
     filePath, userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined },
     tokenStoreFor: () => ({ read: async () => "", write: async () => undefined }),
-    interactiveSignIn: async ({ scopes, loginHint }) => {
+    interactiveSignIn: async ({ scopes, loginHint, authority }) => {
       loginHints.push(loginHint);
+      authorities.push(authority);
       return {
         account,
         scopes: [...(scopes ?? []), "Policy.Read.All"],
@@ -67,6 +69,7 @@ async function makeFixture(account: Account) {
   return {
     store,
     loginHints,
+    authorities,
     fetches,
     async graph(): Promise<RunGraphApi> {
       const built = await buildGraph(TENANT.id, ["DeviceManagementManagedDevices.Read.All"]);
@@ -119,6 +122,53 @@ describe("buildGraph interactive fallback", () => {
         ...(TENANT.grantedScopes ?? []),
         "graph:Policy.Read.All",
       ].sort());
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+const MISMATCHED: ReadonlyArray<readonly [string, Account]> = [
+  ["a different account", { homeAccountId: "other.fabrikam-tenant-id", tenantId: "fabrikam-tenant-id", username: "it@fabrikam.example" }],
+  ["the same account in another directory", { homeAccountId: TENANT.homeAccountId, tenantId: "fabrikam-tenant-id", username: TENANT.username }],
+];
+
+describe("Entra tier probe interactive fallback", () => {
+  const licensed: TenantRecord = {
+    ...TENANT,
+    grantedScopes: [...(TENANT.grantedScopes ?? []), "graph:Organization.Read.All"],
+    entraTier: "p1",
+    entraTierDetectedAt: "2026-11-01T10:00:00.000Z",
+    relevantLicenses: [{ skuPartNumber: "AAD_PREMIUM", displayName: "Microsoft Entra ID P1", enabledUnits: 5, consumedUnits: 3 }],
+  };
+
+  for (const [label, account] of MISMATCHED) {
+    it(`keeps the stored tier and licences when ${label} signs in`, async () => {
+      const fixture = await makeFixture(account, licensed);
+      try {
+        await assert.rejects(fixture.store.probeEntraTier(licensed, { force: true }), { name: "TenantAccountMismatchError" });
+        await settle();
+        assert.deepEqual(fixture.loginHints, [TENANT.username]);
+        assert.equal(fixture.fetches.length, 0);
+        const stored = (await fixture.store.getAppState()).tenants.find((t) => t.id === TENANT.id);
+        assert.equal(stored?.entraTier, "p1");
+        assert.equal(stored?.entraTierDetectedAt, licensed.entraTierDetectedAt);
+        assert.deepEqual(stored?.relevantLicenses, licensed.relevantLicenses);
+        assert.deepEqual(stored?.grantedScopes, licensed.grantedScopes);
+      } finally {
+        await fixture.close();
+      }
+    });
+  }
+
+  it("records the tier when the connected account signs in", async () => {
+    const fixture = await makeFixture({ homeAccountId: TENANT.homeAccountId, tenantId: TENANT.id, username: TENANT.username }, licensed);
+    try {
+      await fixture.store.probeEntraTier(licensed, { force: true });
+      assert.equal(fixture.fetches.length, 1);
+      assert.match(fixture.fetches[0]?.url ?? "", /\/subscribedSkus$/);
+      const stored = (await fixture.store.getAppState()).tenants.find((t) => t.id === TENANT.id);
+      assert.notEqual(stored?.entraTierDetectedAt, licensed.entraTierDetectedAt);
     } finally {
       await fixture.close();
     }

@@ -5940,9 +5940,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         return signIn;
       },
     });
-    const result = await probeSubscribedSkus(
-      (scopes) => session.acquireTokenForScopes(scopes),
-    );
+    // The probe reads any failure as an unknown tier. Another account or
+    // directory is not a probe result, so it must not replace what is stored.
+    let mismatch: TenantAccountMismatchError | undefined;
+    const result = await probeSubscribedSkus(async (scopes) => {
+      try {
+        return await session.acquireTokenForScopes(scopes);
+      } catch (error) {
+        if (error instanceof TenantAccountMismatchError) mismatch = error;
+        throw error;
+      }
+    });
+    if (mismatch) throw mismatch;
     const detected = result?.tier ?? "unknown";
     const relevantLicenses = result?.relevantLicenses ?? [];
     // Surface SKUs we recognise but couldn't map to a friendly name.
