@@ -84,7 +84,7 @@ interface Harness {
   script(replies: unknown[]): void;
 }
 
-async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean } = {}): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean; chunkDelayMs?: number } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
@@ -94,6 +94,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
   const graphPaths: string[] = [];
   const prompts: Array<{ system: string; prompt: string }> = [];
   let replies: string[] = [];
+  const chunkDelayMs = options.chunkDelayMs;
   let reply = 0;
   const learn = MCP_CATALOG.find((entry) => entry.id === "microsoft-learn")!;
   const kql = MCP_CATALOG.find((entry) => entry.id === "kql-search")!;
@@ -121,6 +122,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
         const text = replies[Math.min(reply++, replies.length - 1)]!;
         let accumulated = "";
         for (const delta of text.split(/(?<= )/)) {
+          if (chunkDelayMs) await new Promise((resolve) => setTimeout(resolve, chunkDelayMs));
           accumulated += delta;
           yield { delta, accumulated, done: false, model: "llama3.1:8b" };
         }
@@ -244,6 +246,24 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.ok(deltas.slice(0, -1).some((content) => content.startsWith("The Microsoft documentation says Defender") && !content.endsWith("extension.")));
       assert.equal(deltas.at(-1), "The Microsoft documentation says Defender for Endpoint on macOS needs full disk access and a system extension.");
       assert.equal(result.assistantMessage.content, deltas.at(-1));
+    }, { incremental: true, chunkDelayMs: 40 });
+  });
+
+  it("sends live answer text at most every few frames, and the whole answer at the end", async () => {
+    await withHarness(async ({ store, script }) => {
+      const answer = Array.from({ length: 120 }, (_, index) => `word${index}`).join(" ");
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
+        { final: true, answer },
+      ]);
+      const deltas: string[] = [];
+      const result = await store.streamIntuneChatMessage({ content: DOCS_QUESTION }, (event) => {
+        if (event.type === "delta") deltas.push(event.content);
+      });
+      // 120 chunks arrived at once: the first is sent live, then the stored answer.
+      assert.ok(deltas.length <= 3, `${deltas.length} live updates`);
+      assert.equal(deltas.at(-1), answer);
+      assert.equal(result.assistantMessage.content, answer);
     }, { incremental: true });
   });
 
@@ -417,7 +437,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.ok(deltas.every((content) => !/Microsoft Learn says/.test(content)), "no live delta attributes text to Learn");
       assert.equal(deltas.at(-1), "The Microsoft documentation says Defender for Endpoint on macOS needs full disk access.");
       assert.equal(result.assistantMessage.content, deltas.at(-1));
-    });
+    }, { chunkDelayMs: 40 });
   });
 
   it("falls back to the keyword kind when the model gives none, and never treats an ambiguous tenant question as docs-only", async () => {

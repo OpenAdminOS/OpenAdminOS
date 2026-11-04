@@ -2412,6 +2412,17 @@ export class IntuneChatService {
       });
     };
 
+    // Live text carries the whole answer so far, so a dropped update loses
+    // nothing: updates are sent at most every LIVE_TEXT_INTERVAL_MS, and the
+    // stored answer is always sent in full at the end. Withdrawing is never held back.
+    let lastLiveAt = 0;
+    const emitLive = (content: string, delta?: string) => {
+      const now = Date.now();
+      if (content !== "" && now - lastLiveAt < LIVE_TEXT_INTERVAL_MS) return;
+      lastLiveAt = now;
+      emitDelta(content, delta);
+    };
+
     const directVoiceAnswer = accessBlockedMessage || answerPlan?.sources.kind === "docs"
       ? undefined
       : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
@@ -2484,7 +2495,7 @@ export class IntuneChatService {
           assistantContent = chunk.accumulated;
           if (assistantContent.trim()) finishAnswerStep.writing();
           // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
-          emitDelta(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
+          emitLive(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
         }
         assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
         emitDelta(assistantContent, "");
@@ -2545,7 +2556,7 @@ export class IntuneChatService {
               maxTokens: chatBudget.maxTokens,
               signal: options.signal,
               // The final answer streams as it arrives; the stored answer below replaces it.
-              ...(options.voice ? {} : { onAnswerText: (text: string, learn: boolean) => emitDelta(relabelUnverifiedLearn(text, learn)) }),
+              ...(options.voice ? {} : { onAnswerText: (text: string, learn: boolean) => emitLive(relabelUnverifiedLearn(text, learn)) }),
               onToolStart: (event) => {
                 toolSteps.start(event.tool, event.params);
                 const stepId = `tool-${progressToolSteps.length + 1}-${event.tool}`;
@@ -3296,6 +3307,9 @@ function refreshedResourceSet(result: GraphCacheRefreshResult | undefined): Set<
  * it for a docs or mixed kind whose sources leave Learn out, never for a
  * tenant kind, and when Learn fails, is blocked or returns nothing.
  */
+/** How often live answer text is sent while it streams: about every other frame. */
+const LIVE_TEXT_INTERVAL_MS = 32;
+
 function indexWaits(sources: ChatSourcePlan, modelClassifies: boolean): boolean {
   return sources.learnFirst || modelClassifies;
 }
