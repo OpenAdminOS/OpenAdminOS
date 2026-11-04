@@ -110,6 +110,8 @@ export function planChatSources(input: {
 }): ChatSourcePlan {
   const lower = input.question.toLowerCase();
   const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
+  // TODO(ugur): a server the model declares becomes required, so the timeline's sources are the ones that
+  // run. Confirm, or show declared sources without enforcing them.
   for (const server of input.servers) if (input.declaredServerIds?.includes(server.id)) chosen.set(server.id, server);
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
