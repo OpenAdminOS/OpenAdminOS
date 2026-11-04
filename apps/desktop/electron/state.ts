@@ -273,6 +273,7 @@ import {
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
+  canonicalClientId,
   createLocalOnlyTenantSession,
   entryToRegistrySummary,
   forgetAppRegistration,
@@ -285,6 +286,8 @@ import {
   sanitizeSavedAppRegistrations,
   SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH,
   tenantNamesById,
+  tokenCacheForPartition,
+  tokenCachePartition,
 } from "./state-helpers.js";
 import { lookupEndpoint } from "./graph-catalog.js";
 export { __agentDraftTestUtils } from "./agent-draft-helpers.js";
@@ -982,7 +985,7 @@ function requireClientId(value: string): string {
       "Application (client) ID must be a GUID from your Entra app registration.",
     );
   }
-  return trimmed;
+  return canonicalClientId(trimmed);
 }
 
 function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
@@ -1135,9 +1138,18 @@ export interface AppStateStoreOptions {
   /**
    * Factory for a per-client-id token cache when a tenant is connected
    * with a bring-your-own app registration. Custom registrations must
-   * not share the default identity's cache. Omit in tests.
+   * not share the default identity's cache. Receives the canonical
+   * (lower case) client ID from `tokenCachePartition`. Omit in tests.
    */
-  tokenStoreFor?(clientId: string): TokenCacheStorage;
+  tokenStoreFor?(partition: string): TokenCacheStorage;
+  /**
+   * Token cache files for a partition that were named with a differently
+   * cased client ID before client IDs were stored in one case, and that
+   * still exist next to the canonical file. Their accounts stay readable
+   * and are removed together with the canonical file's, so disconnect
+   * never leaves a refresh token behind. The files are never deleted.
+   */
+  legacyTokenStoresFor?(partition: string): TokenCacheStorage[];
   /**
    * Base URL for the opt-in usage-telemetry collector. Empty (the
    * default) means usage pings never fire regardless of the user's
@@ -1223,6 +1235,7 @@ export class AppStateStore {
     | undefined;
   private readonly msalClients = new Map<string, PublicClientApplication>();
   private readonly tokenStoreFor: AppStateStoreOptions["tokenStoreFor"];
+  private readonly legacyTokenStoresFor: AppStateStoreOptions["legacyTokenStoresFor"];
   private readonly statsApiUrl: string;
   private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
@@ -1275,6 +1288,7 @@ export class AppStateStore {
       this.onStateChanged = undefined;
       this.statsApiUrl = "";
       this.tokenStoreFor = undefined;
+      this.legacyTokenStoresFor = undefined;
       this.usageTelemetryUrl = "";
       this.appVersion = "0.0.0";
       this.sandboxedCodeDefault = false;
@@ -1303,6 +1317,7 @@ export class AppStateStore {
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
       this.tokenStoreFor = options.tokenStoreFor;
+      this.legacyTokenStoresFor = options.legacyTokenStoresFor;
       // No default: usage telemetry stays inert until a collector URL is
       // configured for the build AND the user opts in. // TODO(ugur):
       // decide where the usage collector is hosted and set it here.
@@ -2073,65 +2088,92 @@ export class AppStateStore {
   }
 
   /**
-   * MSAL clients are cached per (clientId, authority). Tokens are bound
-   * to the client id that issued them, so silent refresh for a tenant
-   * must reuse the exact registration it was connected with. Custom
-   * registrations get their own token cache file; the default identity
-   * keeps the original `tokens.bin` so existing installs are untouched.
+   * MSAL clients are cached per (token cache partition, authority). Tokens
+   * are bound to the client id that issued them, so silent refresh for a
+   * tenant must reuse the exact registration it was connected with. The
+   * partition is the canonical (lower case) client ID, so differently
+   * cased IDs share one client and one cache. Custom registrations get
+   * their own token cache file; the default identity keeps the original
+   * `tokens.bin` so existing installs are untouched.
    */
   private msalClientFor(
     registration: TenantAppRegistration | undefined,
   ): PublicClientApplication {
-    const clientId = registration?.clientId ?? defaultClientId();
+    const partition = tokenCachePartition(registration);
     const authority = registration?.authority ?? DEFAULT_AUTHORITY;
-    const key = `${clientId}|${authority}`;
+    const key = `${partition}|${authority}`;
     const cached = this.msalClients.get(key);
     if (cached) return cached;
 
-    const isDefault = clientId === defaultClientId();
     const store =
-      isDefault || !this.tokenStoreFor
+      partition === tokenCachePartition(undefined) || !this.tokenStoreFor
         ? this.tokenStore
-        : this.tokenStoreFor(clientId);
+        : this.tokenStoreFor(partition);
+    const legacyStores = this.legacyTokenStoresFor?.(partition) ?? [];
     const cacheStorage: TokenCacheStorage = {
-      read: () => store.read(),
+      read: async () =>
+        tokenCacheForPartition(
+          await store.read(),
+          await Promise.all(legacyStores.map((legacy) => legacy.read().catch(() => ""))),
+          partition,
+        ),
       write: (serialized) => store.write(serialized),
     };
-    const client = createMsalClient({ storage: cacheStorage, clientId, authority });
+    const client = createMsalClient({ storage: cacheStorage, clientId: partition, authority });
     this.msalClients.set(key, client);
     return client;
+  }
+
+  /**
+   * Remove one account from a registration's token cache, and from any
+   * legacy cache file of the same partition first, because the partition's
+   * client reads those too and would otherwise bring the account back.
+   * Only that account's entries change; other accounts in the same files
+   * are untouched, and no file is deleted.
+   */
+  private async removeCachedAccount(
+    registration: TenantAppRegistration | undefined,
+    homeAccountId: string,
+  ): Promise<void> {
+    const partition = tokenCachePartition(registration);
+    for (const legacy of this.legacyTokenStoresFor?.(partition) ?? []) {
+      await removeAccount({
+        client: createMsalClient({
+          storage: {
+            read: async () => tokenCacheForPartition(await legacy.read(), [], partition),
+            write: (serialized) => legacy.write(serialized),
+          },
+          clientId: partition,
+        }),
+        homeAccountId,
+      });
+    }
+    await removeAccount({ client: this.msalClientFor(registration), homeAccountId });
   }
 
   /**
    * Reconnecting a tenant with a different app registration leaves the
    * previous client's refresh token on disk. Remove that account unless
    * another connected tenant still signs in with the same account from the
-   * same token cache. Token caches are partitioned by client ID only, not by
-   * authority (see `msalClientFor`), so an authority change alone never
-   * removes anything. Client IDs are compared case-insensitively: GUIDs are
-   * accepted in either case, and on case-insensitive filesystems (macOS,
-   * Windows) differently cased IDs resolve to the same token cache file.
-   * Failure leaves an unused cached account behind, never a broken
-   * connection, so it is logged rather than surfaced.
+   * same token cache. Token caches are partitioned by canonical client ID
+   * only, not by authority (see `msalClientFor`), so an authority or letter
+   * case change alone never removes anything. Failure leaves an unused
+   * cached account behind, never a broken connection, so it is logged
+   * rather than surfaced.
    */
   private async forgetReplacedSignIn(previous: TenantRecord, current: TenantRecord): Promise<void> {
     if (previous.kind === "sample") return;
-    const cachePartition = (registration: TenantAppRegistration | undefined) =>
-      (registration?.clientId ?? defaultClientId()).toLowerCase();
-    const previousPartition = cachePartition(previous.appRegistration);
-    if (previousPartition === cachePartition(current.appRegistration)) return;
+    const previousPartition = tokenCachePartition(previous.appRegistration);
+    if (previousPartition === tokenCachePartition(current.appRegistration)) return;
     const stillUsed = (await this.read()).tenants.some(
       (tenant) =>
         tenant.kind !== "sample" &&
         tenant.homeAccountId === previous.homeAccountId &&
-        cachePartition(tenant.appRegistration) === previousPartition,
+        tokenCachePartition(tenant.appRegistration) === previousPartition,
     );
     if (stillUsed) return;
     try {
-      await removeAccount({
-        client: this.msalClientFor(previous.appRegistration),
-        homeAccountId: previous.homeAccountId,
-      });
+      await this.removeCachedAccount(previous.appRegistration, previous.homeAccountId);
     } catch (cause) {
       console.warn(
         `[tenants] the previous sign-in for ${previous.id} could not be removed from its token cache: ${cause instanceof Error ? cause.message : String(cause)}`,
@@ -5853,10 +5895,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const target = persisted.tenants.find((tenant) => tenant.id === id);
       if (target && target.kind !== "sample") {
         try {
-          await removeAccount({
-            client: this.msalClientForTenant(target),
-            homeAccountId: target.homeAccountId,
-          });
+          await this.removeCachedAccount(target.appRegistration, target.homeAccountId);
         } catch (cause) {
           const detail = cause instanceof Error ? cause.message : String(cause);
           throw new Error(
@@ -6197,19 +6236,35 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // client to those records so they keep refreshing silently instead
       // of forcing every existing install to reconnect. New connections
       // use the OpenAdminOS registration.
+      //
+      // Client IDs are stored in canonical lower case. Records saved before
+      // that keep the case the user typed; normalize them so they resolve to
+      // the same MSAL client and token cache as a new connection would.
       const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : []).map(
-        (tenant) =>
-          isPlainRecordValue(tenant) &&
-          tenant.kind !== "sample" &&
-          tenant.appRegistration === undefined
+        (tenant) => {
+          if (!isPlainRecordValue(tenant) || tenant.kind === "sample") return tenant;
+          const registration = tenant.appRegistration;
+          if (registration === undefined) {
+            return {
+              ...tenant,
+              appRegistration: {
+                kind: "openadminos" as const,
+                clientId: GRAPH_CLI_CLIENT_ID,
+              },
+            };
+          }
+          return isPlainRecordValue(registration) &&
+            typeof registration.clientId === "string" &&
+            registration.clientId !== canonicalClientId(registration.clientId)
             ? {
                 ...tenant,
                 appRegistration: {
-                  kind: "openadminos" as const,
-                  clientId: GRAPH_CLI_CLIENT_ID,
+                  ...registration,
+                  clientId: canonicalClientId(registration.clientId),
                 },
               }
-            : tenant,
+            : tenant;
+        },
       );
       const activeTenantId =
         typeof parsed.activeTenantId === "string" &&

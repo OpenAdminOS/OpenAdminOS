@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
+import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS, defaultClientId } from "@openadminos/runtime";
 import {
   graphAccessDenialFromError,
   graphAccessDenialText,
@@ -122,18 +122,103 @@ const CLIENT_ID_PATTERN =
 const DIRECTORY_ID_PATTERN = /^[0-9a-zA-Z.-]{1,100}$/;
 export const SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH = 80;
 
+/**
+ * The one form of an application (client) ID that the app stores and
+ * compares. Entra accepts client IDs in any letter case, so differently
+ * cased input must resolve to the same MSAL client and token cache.
+ */
+export function canonicalClientId(clientId: string): string {
+  return clientId.trim().toLowerCase();
+}
+
+/**
+ * The token cache a registration's tokens live in. Caches are partitioned
+ * by canonical client ID only, never by authority. MSAL clients, token
+ * cache files, and account cleanup all resolve through this.
+ */
+export function tokenCachePartition(registration: { clientId: string } | undefined): string {
+  return canonicalClientId(registration?.clientId ?? defaultClientId());
+}
+
+const TOKEN_CACHE_CLIENT_SECTIONS = ["IdToken", "AccessToken", "RefreshToken", "AppMetadata"];
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The serialized MSAL cache a partition's client reads. `legacy` holds
+ * caches from files named before client IDs were stored in one case; their
+ * entries are merged under the primary cache, which wins on key collisions
+ * (MSAL keys are lower case, so the same credential collapses to one
+ * entry). Credentials written by a client configured with a differently
+ * cased client ID get the canonical ID, because MSAL matches client IDs
+ * case-sensitively and would never find them otherwise. A legacy cache that
+ * is not valid JSON is left out; a primary cache that is not valid JSON is
+ * returned unchanged so MSAL reports it as before.
+ */
+export function tokenCacheForPartition(
+  primary: string,
+  legacy: string[],
+  partition: string,
+): string {
+  const parse = (serialized: string): Record<string, unknown> | undefined => {
+    try {
+      const value: unknown = JSON.parse(serialized);
+      return isPlainJsonObject(value) ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const legacyCaches = legacy
+    .filter((serialized) => serialized.length > 0)
+    .map(parse)
+    .filter((cache): cache is Record<string, unknown> => cache !== undefined);
+  const primaryCache = primary.length > 0 ? parse(primary) : {};
+  if (!primaryCache) return primary;
+
+  let changed = legacyCaches.length > 0;
+  const merged: Record<string, unknown> = {};
+  for (const cache of [...legacyCaches, primaryCache]) {
+    for (const [section, entries] of Object.entries(cache)) {
+      const previous = merged[section];
+      merged[section] =
+        isPlainJsonObject(previous) && isPlainJsonObject(entries)
+          ? { ...previous, ...entries }
+          : entries;
+    }
+  }
+  for (const section of TOKEN_CACHE_CLIENT_SECTIONS) {
+    const entries = merged[section];
+    if (!isPlainJsonObject(entries)) continue;
+    for (const [key, entry] of Object.entries(entries)) {
+      if (
+        isPlainJsonObject(entry) &&
+        typeof entry.client_id === "string" &&
+        entry.client_id !== partition &&
+        entry.client_id.toLowerCase() === partition
+      ) {
+        entries[key] = { ...entry, client_id: partition };
+        changed = true;
+      }
+    }
+  }
+  if (!changed) return primary;
+  return JSON.stringify(merged);
+}
+
 function savedRegistrationKey(entry: {
   clientId: string;
   directoryTenantId?: string | undefined;
 }): string {
-  return `${entry.clientId.toLowerCase()}|${(entry.directoryTenantId ?? "").toLowerCase()}`;
+  return `${canonicalClientId(entry.clientId)}|${(entry.directoryTenantId ?? "").toLowerCase()}`;
 }
 
 /**
  * Validate remembered custom registrations read from state.json. Drops
  * anything that is not a public client id plus optional directory and
- * label, dedupes by client id and directory, keeps the most recent use
- * first, and bounds the list.
+ * label, stores client IDs in canonical lower case, dedupes by client id
+ * and directory, keeps the most recent use first, and bounds the list.
  */
 export function sanitizeSavedAppRegistrations(value: unknown): SavedAppRegistration[] {
   if (!Array.isArray(value)) return [];
@@ -141,7 +226,7 @@ export function sanitizeSavedAppRegistrations(value: unknown): SavedAppRegistrat
   for (const candidate of value) {
     if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) continue;
     const record = candidate as Record<string, unknown>;
-    const clientId = typeof record.clientId === "string" ? record.clientId.trim() : "";
+    const clientId = typeof record.clientId === "string" ? canonicalClientId(record.clientId) : "";
     if (!CLIENT_ID_PATTERN.test(clientId)) continue;
     if (typeof record.lastUsedAt !== "string" || !Number.isFinite(Date.parse(record.lastUsedAt))) continue;
     const entry: SavedAppRegistration = { clientId, lastUsedAt: record.lastUsedAt };

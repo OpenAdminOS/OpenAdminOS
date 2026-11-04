@@ -36,7 +36,83 @@ function assertSignIns(
   for (const signIn of signIns) assert.deepEqual(signIn, expected);
 }
 
-async function makeFixture(initial: Record<string, unknown> = {}) {
+const HOME_ACCOUNT_ID = "home-account.contoso-tenant-id";
+const OTHER_HOME_ACCOUNT_ID = "other-account.fabrikam-tenant-id";
+const ENVIRONMENT = "login.microsoftonline.com";
+
+/** A serialized MSAL cache holding one account and its refresh token. */
+function cacheWithAccount(clientId: string, homeAccountId = HOME_ACCOUNT_ID): string {
+  const [localAccountId, realm] = homeAccountId.split(".") as [string, string];
+  return JSON.stringify({
+    Account: {
+      [`${homeAccountId}-${ENVIRONMENT}-${realm}`]: {
+        home_account_id: homeAccountId,
+        environment: ENVIRONMENT,
+        realm,
+        local_account_id: localAccountId,
+        username: "admin@contoso.example",
+        authority_type: "MSSTS",
+      },
+    },
+    IdToken: {},
+    AccessToken: {},
+    RefreshToken: {
+      [`${homeAccountId}-${ENVIRONMENT}-refreshtoken-${clientId}----`.toLowerCase()]: {
+        home_account_id: homeAccountId,
+        environment: ENVIRONMENT,
+        credential_type: "RefreshToken",
+        client_id: clientId,
+        secret: `refresh-token-for-${homeAccountId}`,
+      },
+    },
+    AppMetadata: {},
+  });
+}
+
+function mergeCaches(...caches: string[]): string {
+  const merged: Record<string, Record<string, unknown>> = {};
+  for (const cache of caches) {
+    for (const [section, entries] of Object.entries(JSON.parse(cache) as Record<string, Record<string, unknown>>)) {
+      merged[section] = { ...merged[section], ...entries };
+    }
+  }
+  return JSON.stringify(merged);
+}
+
+interface MemoryTokenStore extends TokenCacheStorage {
+  contents(): string;
+}
+
+function memoryStore(initial = ""): MemoryTokenStore {
+  let contents = initial;
+  return {
+    read: async () => contents,
+    write: async (serialized) => {
+      contents = serialized;
+    },
+    contents: () => contents,
+  };
+}
+
+/** Home account IDs that still have an account or a refresh token in a store. */
+function cachedAccounts(store: MemoryTokenStore): string[] {
+  if (!store.contents()) return [];
+  const cache = JSON.parse(store.contents()) as Record<string, Record<string, { home_account_id: string }>>;
+  const ids = new Set<string>();
+  for (const section of ["Account", "RefreshToken"]) {
+    for (const entry of Object.values(cache[section] ?? {})) ids.add(entry.home_account_id);
+  }
+  return [...ids].sort();
+}
+
+async function makeFixture(
+  initial: Record<string, unknown> = {},
+  stores: {
+    tokenStore?: TokenCacheStorage;
+    perClientStores?: Map<string, TokenCacheStorage>;
+    legacyTokenStores?: Map<string, TokenCacheStorage[]>;
+  } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-custom-registration-"));
   const statePath = join(dir, "state.json");
   await writeFile(
@@ -44,8 +120,12 @@ async function makeFixture(initial: Record<string, unknown> = {}) {
     JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [], ...initial }),
     "utf8",
   );
-  const defaultStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
-  const perClientStores = new Map<string, TokenCacheStorage>();
+  const defaultStore: TokenCacheStorage = stores.tokenStore ?? {
+    read: async () => "",
+    write: async () => undefined,
+  };
+  const perClientStores = stores.perClientStores ?? new Map<string, TokenCacheStorage>();
+  const legacyTokenStores = stores.legacyTokenStores;
   const signIns: Array<{ clientId: string; authority: string }> = [];
   const store = new AppStateStore({
     filePath: statePath,
@@ -57,6 +137,9 @@ async function makeFixture(initial: Record<string, unknown> = {}) {
       perClientStores.set(clientId, created);
       return created;
     },
+    ...(legacyTokenStores
+      ? { legacyTokenStoresFor: (partition: string) => legacyTokenStores.get(partition) ?? [] }
+      : {}),
     userDataPath: dir,
     statsApiUrl: "",
     appVersion: "0.7.2",
@@ -453,6 +536,164 @@ describe("reconnecting a tenant with a different app registration", () => {
       });
 
       assert.deepEqual(removed, []);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+describe("client ID letter case and token cache selection", () => {
+  const UPPER_DEFAULT_CLIENT_ID = OPENADMINOS_CLIENT_ID.toUpperCase();
+  const UPPER_CUSTOM_CLIENT_ID = CUSTOM_CLIENT_ID.toUpperCase();
+
+  function accountsVisibleTo(client: unknown): Promise<Array<{ homeAccountId: string }>> {
+    return (client as { getTokenCache(): { getAllAccounts(): Promise<Array<{ homeAccountId: string }>> } })
+      .getTokenCache()
+      .getAllAccounts();
+  }
+
+  it("stores the OpenAdminOS client ID typed in upper case as a custom registration on the shared cache, so disconnect after switching to the OpenAdminOS app removes its refresh token", async () => {
+    const tokenStore = memoryStore(cacheWithAccount(OPENADMINOS_CLIENT_ID));
+    const fixture = await makeFixture({}, { tokenStore });
+    try {
+      const custom = await fixture.store.connectTenant({
+        appRegistration: { clientId: UPPER_DEFAULT_CLIENT_ID },
+      });
+      assert.deepEqual(custom.tenants[0]?.appRegistration, {
+        kind: "custom",
+        clientId: OPENADMINOS_CLIENT_ID,
+        authority: DEFAULT_AUTHORITY,
+      });
+      assert.deepEqual(
+        custom.savedAppRegistrations?.map((entry) => entry.clientId),
+        [OPENADMINOS_CLIENT_ID],
+      );
+      assertSignIns(fixture.signIns, { clientId: OPENADMINOS_CLIENT_ID, authority: DEFAULT_AUTHORITY });
+      assert.equal(fixture.perClientStores.size, 0);
+
+      await fixture.store.connectTenant({});
+      assert.equal(fixture.perClientStores.size, 0);
+      assert.deepEqual(cachedAccounts(tokenStore), [HOME_ACCOUNT_ID]);
+
+      const state = await fixture.store.disconnectTenant("contoso-tenant-id");
+      assert.equal(state.tenants.length, 0);
+      assert.deepEqual(cachedAccounts(tokenStore), []);
+      assert.equal(fixture.perClientStores.size, 0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps a stored upper case OpenAdminOS custom record signed in from its legacy cache and removes it from both caches on disconnect", async () => {
+    const tokenStore = memoryStore(cacheWithAccount(OPENADMINOS_CLIENT_ID, OTHER_HOME_ACCOUNT_ID));
+    const legacyStore = memoryStore(cacheWithAccount(UPPER_DEFAULT_CLIENT_ID));
+    const fixture = await makeFixture(
+      {
+        tenants: [
+          {
+            id: "contoso-tenant-id",
+            displayName: "contoso.example",
+            username: "admin@contoso.example",
+            homeAccountId: HOME_ACCOUNT_ID,
+            addedAt: "2026-11-01T10:00:00.000Z",
+            appRegistration: { kind: "custom", clientId: UPPER_DEFAULT_CLIENT_ID, authority: DEFAULT_AUTHORITY },
+          },
+        ],
+        activeTenantId: "contoso-tenant-id",
+      },
+      { tokenStore, legacyTokenStores: new Map([[OPENADMINOS_CLIENT_ID, [legacyStore]]]) },
+    );
+    try {
+      const loaded = await fixture.store.getAppState();
+      assert.equal(loaded.tenants[0]?.appRegistration?.clientId, OPENADMINOS_CLIENT_ID);
+      const client = fixture.internal.msalClientFor(loaded.tenants[0]?.appRegistration);
+      assert.equal(client, fixture.internal.msalClientFor(undefined));
+      assert.deepEqual(
+        (await accountsVisibleTo(client)).map((account) => account.homeAccountId).sort(),
+        [HOME_ACCOUNT_ID, OTHER_HOME_ACCOUNT_ID].sort(),
+      );
+
+      await fixture.store.connectTenant({});
+      await fixture.store.disconnectTenant("contoso-tenant-id");
+
+      assert.deepEqual(cachedAccounts(legacyStore), []);
+      assert.deepEqual(cachedAccounts(tokenStore), [OTHER_HOME_ACCOUNT_ID]);
+      assert.equal(fixture.perClientStores.size, 0);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("resolves a custom client ID in either case to one token store and removes the account from it when switching to the OpenAdminOS app", async () => {
+    const customStore = memoryStore(cacheWithAccount(CUSTOM_CLIENT_ID));
+    const tokenStore = memoryStore(cacheWithAccount(OPENADMINOS_CLIENT_ID, OTHER_HOME_ACCOUNT_ID));
+    const fixture = await makeFixture(
+      {},
+      { tokenStore, perClientStores: new Map([[CUSTOM_CLIENT_ID, customStore]]) },
+    );
+    try {
+      const upper = await fixture.store.connectTenant({
+        appRegistration: { clientId: UPPER_CUSTOM_CLIENT_ID },
+      });
+      assert.equal(upper.tenants[0]?.appRegistration?.clientId, CUSTOM_CLIENT_ID);
+      await fixture.store.connectTenant({ appRegistration: { clientId: CUSTOM_CLIENT_ID } });
+      assert.equal(
+        fixture.internal.msalClientFor({ kind: "custom", clientId: UPPER_CUSTOM_CLIENT_ID }),
+        fixture.internal.msalClientFor({ kind: "custom", clientId: CUSTOM_CLIENT_ID }),
+      );
+      assert.deepEqual([...fixture.perClientStores.keys()], [CUSTOM_CLIENT_ID]);
+      assert.deepEqual(cachedAccounts(customStore), [HOME_ACCOUNT_ID]);
+
+      await fixture.store.connectTenant({});
+
+      assert.deepEqual(cachedAccounts(customStore), []);
+      assert.deepEqual(cachedAccounts(tokenStore), [OTHER_HOME_ACCOUNT_ID]);
+      assert.deepEqual([...fixture.perClientStores.keys()], [CUSTOM_CLIENT_ID]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("removes a stored upper case custom record's account from its legacy and canonical caches and leaves other accounts in place", async () => {
+    const customStore = memoryStore(cacheWithAccount(CUSTOM_CLIENT_ID));
+    const legacyStore = memoryStore(
+      mergeCaches(
+        cacheWithAccount(UPPER_CUSTOM_CLIENT_ID),
+        cacheWithAccount(UPPER_CUSTOM_CLIENT_ID, OTHER_HOME_ACCOUNT_ID),
+      ),
+    );
+    const tokenStore = memoryStore();
+    const fixture = await makeFixture(
+      {
+        tenants: [
+          {
+            id: "contoso-tenant-id",
+            displayName: "contoso.example",
+            username: "admin@contoso.example",
+            homeAccountId: HOME_ACCOUNT_ID,
+            addedAt: "2026-11-01T10:00:00.000Z",
+            appRegistration: { kind: "custom", clientId: UPPER_CUSTOM_CLIENT_ID, authority: DEFAULT_AUTHORITY },
+          },
+        ],
+        activeTenantId: "contoso-tenant-id",
+      },
+      {
+        tokenStore,
+        perClientStores: new Map([[CUSTOM_CLIENT_ID, customStore]]),
+        legacyTokenStores: new Map([[CUSTOM_CLIENT_ID, [legacyStore]]]),
+      },
+    );
+    try {
+      const loaded = await fixture.store.getAppState();
+      assert.equal(loaded.tenants[0]?.appRegistration?.clientId, CUSTOM_CLIENT_ID);
+
+      await fixture.store.connectTenant({});
+
+      // The partition's client reads both files and writes the canonical
+      // one, so the other account is carried into it rather than lost.
+      assert.deepEqual(cachedAccounts(legacyStore), [OTHER_HOME_ACCOUNT_ID]);
+      assert.deepEqual(cachedAccounts(customStore), [OTHER_HOME_ACCOUNT_ID]);
+      assert.deepEqual([...fixture.perClientStores.keys()], [CUSTOM_CLIENT_ID]);
     } finally {
       await fixture.close();
     }
