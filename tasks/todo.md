@@ -986,3 +986,7 @@ Microsoft Graph app ID: 00000003-0000-0000-c000-000000000000.
 Not covered by this check:
 - The `.default` delegated sign-in. Lokka runs app-only, so it cannot exercise this. It needs a live sign-in with an own registration in the lab tenant.
 - The Defender endpoints. The Lokka app lacks SecurityAlert, SecurityIncident and ThreatHunting permissions. Before the Defender service ships, verify the alerts, incidents and Secure Score endpoints with a delegated or permissioned connection.
+
+Checked with Lokka on 2026-11-04: `GET /v1.0/oauth2PermissionGrants?$filter=clientId eq '<service principal id>'&$select=id,clientId,consentType,resourceId,scope` works. It returns one grant per resource, with `consentType` `AllPrincipals` and a space-separated `scope`. This is the read path behind `Get-MgOauth2PermissionGrant -Filter "clientId eq ..."` in the extend script. One app in the lab carries grants for two resources, so the script must keep filtering on `resourceId` (it does).
+
+Still to test in the lab before merge: the writes in the extend script (`PATCH /applications/{id}` requiredResourceAccess and `PATCH /oauth2PermissionGrants/{id}` scope), and the `.default` delegated sign-in with an own registration.
