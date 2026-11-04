@@ -895,3 +895,58 @@ Decided 2026-11-03: a connection is stored per tenant, and the user can reuse it
 3. A credential belongs to a connection, not to a listing. A connection is defined by the publisher (verified domain plus connection id) and lists the hosts it may be sent to. Listings from the same publisher that name the same connection share it, so the user enters a secret once.
 4. Connections are stored in the OS keychain through safeStorage, bound to a tenant, and are only attached to requests to the hosts the connection declares. A sandboxed local server receives the secret only at spawn and can only reach the declared hosts.
 5. Settings shows each connection, the listings using it, when it was added, and lets the user rotate, sign out or delete it. Removing the last listing that uses a connection asks whether to delete the credential.
+
+# Services as modules (2026-11-04)
+
+Branch `services/modular`, stacked on `tenant/own-app-registration` (PR #162). Worktree `.claude/worktrees/services-modular`.
+
+## Why
+
+An admin who only works in Intune still consents to Entra and Defender reads. Every permission area starts selected, and the required "directory" area includes `Directory.Read.All`. Areas mix services: "Apps" covers both Intune and Entra, and "Security and sign-ins" covers both Entra and Defender. Agents, cache resources, pages, the setup script and the docs know nothing about services. An own app registration requests a fixed list and never checks what it was granted. A finished run marks an agent's declared scopes as granted (`runs.ts`), which hides real gaps. Everything assumes Microsoft Graph.
+
+## Decisions (user, 2026-11-04)
+
+- Baseline is sign-in only: `openid`, `profile`, `offline_access`, `User.Read`. Each service pulls in the shared scopes it needs.
+- Own app registration: sign in with the registration's `.default` scope, read what was granted, and switch on the matching services. Missing services show the exact permissions to add, a script that adds them to the existing app, and Check again.
+- First wave: Intune, Entra and Defender, all on Graph. Exchange, Teams and SharePoint are documented as planned. The scope model records the audience so they can be added later.
+- Build now, stacked on PR #162.
+
+## Acceptance criteria
+
+1. One service registry in `packages/agent-sdk` is the only source for services, parts, scopes, reasons, audience, cache resources, roles and licences. Every default read scope belongs to at least one part. Shared scopes are deduplicated. The baseline is exactly the four sign-in scopes. `Directory.Read.All` is not in any service and is requested only when an agent that declares it runs.
+2. Connecting with the shared app shows a picker by service, and each service expands to its parts. At least one service is required. Intune-only consent requests the baseline plus the Intune part scopes and nothing else, which a test asserts exactly. Preselection is flagged as `TODO(ugur)`.
+3. From Settings, and from any "not connected" state, a service can be added later. Consent is requested for that service only and merged with the existing grants.
+4. With an own registration:
+   - Sign-in uses `https://graph.microsoft.com/.default`, and granted scopes come from the token.
+   - A service or part switches on only when all of its scopes are granted.
+   - A missing part lists its exact permissions. It offers a PowerShell script that adds them to the existing app ID, keeps the permissions the app already has, and grants consent. It also offers a `requiredResourceAccess` JSON snippet and a Check again action that gets a new token.
+   - The script can still create a new registration, now per service.
+5. Grants reflect the token only. The run-time merge of declared scopes into `grantedScopes` is removed. Tenants without `grantedScopes` keep the current all-defaults behaviour until their next sign-in. Stored grants carry their audience, with a migration and tests.
+6. The app adapts to connected services:
+   - Chat names a missing service, for example "Defender is not connected for this tenant. Add it in Settings, Tenants."
+   - Cache refresh skips resources of services that are not connected.
+   - Agents and the Marketplace show which services an agent needs and filter by service.
+   - Navigation shows a designed "not connected" state instead of an error.
+7. Agent manifests declare `services`, which the schema and SDK types accept. The registry QA fails when an agent's scopes are not covered by its services. All bundled and registry agents are updated, and `agents/index.json` is regenerated.
+8. Docs, with `docs/gitbook` as the source and `npm run docs:check` passing:
+   - a generated "Permissions by service" reference, built from the registry;
+   - Intune, Entra and Defender guides covering what each service does, its permissions with reasons, the least-privilege roles, licences, the Chat questions it answers and its agents;
+   - a "Planned services" page for Exchange, Teams and SharePoint;
+   - setup pages split into "Shared app" and "Own app registration", the latter with per-service tables, the script and the manifest snippet;
+   - a roles guide;
+   - a troubleshooting page for consent errors;
+   - authoring docs that require `services` and least-privilege scopes;
+   - a SPEC section on services, with wording reframed from Intune-first to "Microsoft 365, starting with Intune, Entra and Defender";
+   - a CHANGELOG line.
+9. Every scope name, permission ID and endpoint in the registry is verified with Lokka and the msgraph skill. Results are recorded below.
+10. Typecheck, electron, renderer (Node 22), runtime, qa and docs:check are green. The UI is checked with screenshots in light and dark. A separate Claude evaluator and the GPT-6.1-Sol review of the whole diff pass before any PR.
+
+## Out of scope
+
+- The Exchange, Teams and SharePoint implementations, and non-Graph tokens. The model only records the audience.
+- Defender advanced hunting (`ThreatHunting.Read.All`) as a Chat tool. It is listed as a planned Defender part.
+- Renaming internal `intune-chat` ids.
+
+## Lokka verification
+
+(filled during the build)
