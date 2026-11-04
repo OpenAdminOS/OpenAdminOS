@@ -2,6 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { collectTenantValues, type TenantValueIndex } from "./tenant-values.js";
+
+/** Cached resources whose rows describe people, groups, devices or their activity. */
+const TENANT_IDENTITY_RESOURCES = [
+  "users", "groups", "managedDevices", "entraDevices", "windowsAutopilotDevices", "autopilotEvents",
+  "signIns", "directoryAudits", "intuneAuditEvents", "managedDeviceEncryptionStates", "troubleshootingEvents",
+] as const;
 import type {
   ChatInvestigationMode,
   ChatInvestigationSettings,
@@ -2273,25 +2280,42 @@ export class IntelligenceSqliteStore {
   }
 
   /**
-   * Identity values of cached users, groups and devices: ids, names, UPNs,
-   * mail and serial numbers. The MCP egress check refuses queries that
-   * contain one, which also covers values an earlier answer surfaced.
+   * Adds the identity values of every cached row that describes people,
+   * groups, devices or their activity, using the same key rule as tool
+   * observations. Policy and app catalogs are left out: their names are
+   * mostly vendor product names, and those still taint a conversation
+   * once a tool result shows them. Rows are streamed, with no limit.
    */
-  tenantIdentityValues(tenantId: string, limit = 20_000): string[] {
-    const resources = ["users", "groups", "managedDevices", "entraDevices", "windowsAutopilotDevices"];
-    const placeholders = resources.map(() => "?").join(", ");
-    const fields = ["displayName", "userPrincipalName", "mail", "deviceName", "managedDeviceName", "serialNumber", "userDisplayName", "emailAddress"];
-    const source = `FROM graph_resources WHERE tenant_id = ? AND resource IN (${placeholders})`;
-    const selects = [
-      `SELECT graph_id AS value ${source}`,
-      `SELECT display_name AS value ${source}`,
-      ...fields.map((field) => `SELECT json_extract(raw_json, '$.${field}') AS value ${source}`),
-    ];
-    const args = selects.flatMap(() => [tenantId, ...resources]);
+  collectTenantIdentityValues(tenantId: string, into: TenantValueIndex): void {
+    const placeholders = TENANT_IDENTITY_RESOURCES.map(() => "?").join(", ");
     const rows = this.db
-      .prepare(`SELECT DISTINCT value FROM (${selects.join(" UNION ALL ")}) WHERE typeof(value) = 'text' LIMIT ?`)
-      .all(...args, Math.max(1, Math.floor(limit))) as Array<{ value: string }>;
+      .prepare(`SELECT graph_id, display_name, raw_json FROM graph_resources WHERE tenant_id = ? AND resource IN (${placeholders})`)
+      .iterate(tenantId, ...TENANT_IDENTITY_RESOURCES) as Iterable<{ graph_id: string; display_name: string | null; raw_json: string }>;
+    for (const row of rows) {
+      into.add(row.graph_id);
+      into.add(row.display_name);
+      collectTenantValues(readJson<unknown>(row.raw_json, {}), into);
+    }
+  }
+
+  /** Tenant values that earlier turns of a conversation observed. */
+  listChatTenantValues(conversationId: string): string[] {
+    const rows = this.db
+      .prepare(`SELECT value FROM chat_tenant_values WHERE conversation_id = ?`)
+      .all(conversationId) as Array<{ value: string }>;
     return rows.map((row) => row.value);
+  }
+
+  addChatTenantValues(conversationId: string, values: Iterable<string>): void {
+    const insert = this.db.prepare(`INSERT OR IGNORE INTO chat_tenant_values (conversation_id, value) VALUES (?, ?)`);
+    this.db.exec("BEGIN");
+    try {
+      for (const value of values) insert.run(conversationId, value);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   queryGraphCache(input: {
@@ -3422,6 +3446,12 @@ export class IntelligenceSqliteStore {
         error TEXT,
         created_at TEXT NOT NULL,
         completed_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS chat_tenant_values (
+        conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+        value TEXT NOT NULL,
+        PRIMARY KEY (conversation_id, value)
       );
 
       CREATE TABLE IF NOT EXISTS graph_resources (

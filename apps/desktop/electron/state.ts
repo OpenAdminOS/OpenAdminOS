@@ -208,7 +208,8 @@ import {
 } from "./registry-client.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } from "./intune-chat/service.js";
-import { addTenantValue, mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatTool } from "./intune-chat/tools.js";
+import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatTool } from "./intune-chat/tools.js";
+import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
 import { McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
@@ -1800,12 +1801,11 @@ export class AppStateStore {
       }
     }
     if (tools.length === 0) return undefined;
-    const tenantValues = new Set<string>();
-    for (const value of this.intelligenceStore?.tenantIdentityValues(tenant.id) ?? []) addTenantValue(tenantValues, value);
     return {
       tools,
       privateTerms: mcpPrivateTermsForTenant(tenant),
-      tenantValues,
+      tenantValues: new TenantValueIndex(),
+      seedTenantValues: (into) => this.requireIntelligenceStore().collectTenantIdentityValues(tenant.id, into),
       call: (tool, args, signal) => {
         const entry = this.requireMcpCatalogEntry(tool.serverId);
         return this.mcpHost.callTool(entry, tool.tool, args, signal);

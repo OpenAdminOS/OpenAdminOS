@@ -13,8 +13,8 @@ import {
 import { runAgenticChat } from "./agentic-loop.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
+import { TenantValueIndex } from "./tenant-values.js";
 import {
-  addTenantValue,
   mcpChatToolName,
   mcpPrivateTermsForTenant,
   type IntuneChatToolContext,
@@ -44,7 +44,7 @@ function mcpContext(calls: Array<{ tool: string; args: Record<string, unknown> }
   return {
     tools: [docsTool],
     privateTerms: mcpPrivateTermsForTenant(tenant),
-    tenantValues: new Set(),
+    tenantValues: new TenantValueIndex(),
     async call(tool, args) {
       calls.push({ tool: tool.tool, args });
       return { text, truncated: false };
@@ -246,15 +246,70 @@ describe("MCP tools in the Chat loop", () => {
       store.replaceGraphResources({ tenantId: tenant.id, resource: "users", label: "Users", scopeSet: [],
         refreshedAt: "2026-06-01T10:00:00.000Z",
         rows: [{ id: "user-1", displayName: "Avery Quinlan", userPrincipalName: "avery@contoso.example", userType: "Member" }] });
-      const seeded = store.tenantIdentityValues(tenant.id);
-      assert.ok(seeded.includes("Avery Quinlan"));
-      assert.ok(seeded.includes("user-1"));
-      assert.ok(!seeded.includes("Member"));
-      const context = mcpContext([]);
-      for (const value of seeded) addTenantValue(context.tenantValues, value);
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "signIns", label: "Sign-ins", scopeSet: [],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "signin-1", userDisplayName: "Avery Quinlan", deviceDetail: { deviceId: "kiosk-device-0042", operatingSystem: "Windows" } }] });
+      const seeded = new TenantValueIndex();
+      store.collectTenantIdentityValues(tenant.id, seeded);
+      // Same key rule as tool observations: identity keys, nested keys ending in Id, no common values.
+      assert.ok(seeded.matches("avery quinlan"));
+      assert.ok(seeded.matches("user-1"));
+      assert.ok(seeded.matches("kiosk-device-0042"));
+      assert.ok(!seeded.matches("member"));
+      assert.ok(!seeded.matches("windows"));
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const context = { ...mcpContext(calls), seedTenantValues: (into: TenantValueIndex) => store.collectTenantIdentityValues(tenant.id, into) };
       const result = await runAgenticChat(input(store, scriptedLlm([callDocs("reset MFA for Avery Quinlan"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), context));
       assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
+      assert.equal(calls.length, 0);
     });
+  });
+
+  it("compares each arg value as plain text, so quotes and backslashes cannot hide a tenant value", async () => {
+    await withStore(async (store) => {
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "device-88", deviceName: "LAB\\KIOSK-07" }, { id: "device-89", deviceName: "Ana's \"Mac\"" }] });
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const result = await runAgenticChat(input(store, scriptedLlm([
+        '{"tool":"query_cache","params":{"resource":"managedDevices"}}',
+        JSON.stringify({ tool: docsTool.name, params: { query: "reset LAB\\KIOSK-07" } }),
+        JSON.stringify({ tool: docsTool.name, params: { query: "why is Ana's \"Mac\" stale" } }),
+        '{"final":true,"answer":"Done."}',
+      ]), mcpContext(calls)));
+      assert.equal(result.toolTrace[1]!.mcpSource?.blocked, true);
+      assert.equal(result.toolTrace[2]!.mcpSource?.blocked, true);
+      assert.equal(calls.length, 0);
+    });
+  });
+
+  it("fails closed when the cache seed cannot be read", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const context = { ...mcpContext(calls), seedTenantValues: () => { throw new Error("database is locked"); } };
+      const result = await runAgenticChat(input(store, scriptedLlm([callDocs("Intune compliance grace period"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), context));
+      assert.match(result.toolTrace[0]!.error!, /database is locked/);
+      assert.equal(calls.length, 0);
+    });
+  });
+
+  it("keeps observed tenant values per conversation and drops them with the conversation", async () => {
+    await withStore(async (store) => {
+      store.createConversation({ id: "conversation-1", title: "Devices", tenantId: tenant.id, now: "2026-06-01T10:00:00.000Z" });
+      store.addChatTenantValues("conversation-1", ["live-only-99", "avery quinlan"]);
+      store.addChatTenantValues("conversation-1", ["live-only-99"]);
+      assert.deepEqual(store.listChatTenantValues("conversation-1").sort(), ["avery quinlan", "live-only-99"]);
+      store.deleteConversation("conversation-1");
+      assert.deepEqual(store.listChatTenantValues("conversation-1"), []);
+    });
+  });
+
+  it("matches values in large indexes without a cap", () => {
+    const index = new TenantValueIndex();
+    for (let i = 0; i < 200_000; i += 1) index.add(`device-${i.toString().padStart(6, "0")}`);
+    assert.equal(index.size, 200_000);
+    assert.ok(index.matches("why is device-199999 offline"));
+    assert.ok(!index.matches("why is a device offline"));
   });
 
   it("validates params against the schema and size limits before sending", async () => {

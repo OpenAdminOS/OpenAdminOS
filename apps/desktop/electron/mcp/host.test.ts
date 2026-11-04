@@ -265,6 +265,52 @@ describe("MCP installs in app state", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
+  it("blocks a tenant value that an earlier turn of the conversation saw live", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-history-"));
+    const statePath = join(dir, "state.json");
+    const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
+    await writeFile(statePath, JSON.stringify({
+      activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
+      installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
+    }));
+    const replies = [
+      JSON.stringify({ tool: "graph_get", params: { path: "/deviceManagement/deviceHealthScripts" } }),
+      JSON.stringify({ final: true, answer: "One remediation script exists." }),
+      JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "how to fix Nightly Purge Zeta failures" } }),
+      JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "Intune remediation script failures" } }),
+      JSON.stringify({ final: true, answer: "Check the script output in the remediation report." }),
+    ];
+    let reply = 0;
+    const store = new AppStateStore({
+      filePath: statePath, userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
+      graphFactory: () => ({
+        listManagedDevices: async () => [],
+        retireManagedDevice: async () => { throw new Error("no writes"); },
+        request: async (request) => request.path === "/deviceManagement/deviceHealthScripts" && !request.query?.["$skiptoken"]
+          ? { value: [{ id: "script-1", displayName: "Nightly Purge Zeta" }] }
+          : { value: [] },
+      }),
+      llmFactory: () => ({
+        available: true, defaultModel: "llama3.1:8b",
+        async complete() { return { text: replies[Math.min(reply++, replies.length - 1)]!, model: "llama3.1:8b" }; },
+        async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
+      }),
+    });
+    try {
+      await store.installMcpServer("test-docs");
+      const first = await store.sendIntuneChatMessage({ content: "Which remediation scripts exist?" });
+      assert.ok(first.assistantMessage.toolTrace?.some((entry) => entry.tool === "graph_get" && !entry.error));
+      const second = await store.sendIntuneChatMessage({ conversationId: first.conversation.id, content: "How do I fix its failures?" });
+      const mcpCalls = (second.assistantMessage.toolTrace ?? []).filter((entry) => entry.mcpSource);
+      assert.equal(mcpCalls[0]?.mcpSource?.blocked, true);
+      assert.match(mcpCalls[0]!.error!, /contained tenant data from this conversation/);
+      assert.equal(mcpCalls[1]?.mcpSource?.blocked, undefined);
+      assert.equal(mcpCalls[1]?.error, undefined);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("rejects servers outside the catalog and toggles on servers that are not installed", async () => {
     await withStore(async (store) => {
       await assert.rejects(store.installMcpServer("evil"), /not in the Marketplace catalog/);

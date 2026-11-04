@@ -18,6 +18,7 @@ import { fenceTenantData } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { cleanMcpDescription, cleanMcpSchema } from "../mcp/host.js";
+import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
   GRAPH_CACHE_RESOURCES,
@@ -77,11 +78,16 @@ export interface McpChatContext {
   /** Tenant names and domains that must never appear in a tool query. */
   privateTerms: readonly string[];
   /**
-   * Lowercased identity values seen in this answer: seeded from the local
-   * cache of users, groups and devices, and extended with every tenant tool
-   * observation in the loop. A query containing one is never sent.
+   * Tenant values from earlier turns of this conversation. Together with
+   * the cache seed and this turn's observations, a query containing one
+   * is never sent.
    */
-  tenantValues: Set<string>;
+  tenantValues: TenantValueIndex;
+  /**
+   * Adds the identity values of the local cache. Runs once, on the first
+   * MCP call of an answer; if it fails, the call fails and nothing is sent.
+   */
+  seedTenantValues?: (into: TenantValueIndex) => void;
 }
 
 /** The host refused an MCP call before anything was sent. */
@@ -89,49 +95,6 @@ export class McpQueryBlockedError extends Error {}
 
 export const MCP_ARG_STRING_LIMIT = 500;
 export const MCP_ARGS_LIMIT = 2_000;
-
-/**
- * Keys whose string values identify tenant objects. Taking only these, plus
- * every key ending in Id, keeps the egress check precise: a generic walk
- * over all strings would also capture operating systems, states and
- * setting values and block ordinary public questions.
- */
-const TENANT_IDENTITY_KEYS = new Set([
-  "id", "displayName", "userPrincipalName", "mail", "mailNickname", "email", "emailAddress",
-  "userDisplayName", "userName", "givenName", "surname", "onPremisesSamAccountName",
-  "deviceName", "managedDeviceName", "hostName", "serialNumber", "imei", "meid",
-  "wiFiMacAddress", "ethernetMacAddress", "phoneNumber", "groupTag", "name",
-]);
-
-/** Values too common to identify anything; they stay usable in public questions. */
-const COMMON_VALUES = new Set([
-  "true", "false", "null", "none", "unknown", "default", "enabled", "disabled", "compliant",
-  "noncompliant", "windows", "macos", "android", "linux", "ipados", "all users", "all devices",
-  "microsoft", "intune", "entra", "azure", "member", "guest", "user", "device", "group",
-]);
-
-export function addTenantValue(into: Set<string>, value: unknown): void {
-  if (typeof value !== "string") return;
-  const normalized = value.trim().toLowerCase();
-  if (normalized.length < 4 || normalized.length > 300 || COMMON_VALUES.has(normalized)) return;
-  into.add(normalized);
-}
-
-/** Collects identity values from a tenant tool result. */
-export function collectTenantValues(value: unknown, into: Set<string>, depth = 0): void {
-  if (depth > 8 || into.size > 50_000 || value === null || typeof value !== "object") return;
-  if (Array.isArray(value)) {
-    for (const item of value) collectTenantValues(item, into, depth + 1);
-    return;
-  }
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    if (typeof child === "string") {
-      if (TENANT_IDENTITY_KEYS.has(key) || /Id$/.test(key)) addTenantValue(into, child);
-    } else {
-      collectTenantValues(child, into, depth + 1);
-    }
-  }
-}
 
 /** Tools whose results describe the tenant. Endpoint search and web research do not. */
 const TENANT_RESULT_TOOLS = new Set(["list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift"]);
@@ -217,6 +180,8 @@ export function tenantDataSourceForTool(tool: IntuneChatInvestigationToolName, p
 }
 
 export interface IntuneChatToolContext {
+  /** Identity values from this turn's tenant tool results, for the MCP egress check. */
+  tenantObservations?: TenantValueIndex;
   webSearch?: WebSearch;
   /** Installed MCP tools. Chat only; never set for the external gateway. */
   mcp?: McpChatContext;
@@ -411,7 +376,10 @@ export async function executeIntuneChatTool(
   try {
     const result = await executeToolUnchecked(ctx, tool, params);
     // Tenant values this answer has seen can never leave in a later MCP query.
-    if (ctx.mcp && TENANT_RESULT_TOOLS.has(tool)) collectTenantValues(result, ctx.mcp.tenantValues);
+    if (TENANT_RESULT_TOOLS.has(tool)) {
+      if (ctx.tenantObservations) collectTenantValues(result, ctx.tenantObservations);
+      if (ctx.mcp) collectTenantValues(result, ctx.mcp.tenantValues);
+    }
     const completedAtMs = Date.now();
     // refresh_resource reports failure in its result body instead of
     // throwing. Without this, the trace looked successful, the loop
@@ -566,18 +534,27 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   const entry = ctx.mcp?.tools.find((candidate) => candidate.name === tool);
   if (!ctx.mcp || !entry) throw new Error(`${tool} is not an installed MCP tool. Use only the tools listed in this session.`);
   const args = validateMcpArgs(entry, params);
-  const query = JSON.stringify(args).toLowerCase();
+  // Each arg value is checked as plain lowercased text. Checking serialized
+  // JSON would compare tenant values against escaped quotes and backslashes.
+  const leaves = Object.values(args)
+    .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+    .map((value) => String(value).toLowerCase());
   // Defence in depth for the prompt rule. Injected text in tenant data or
   // in third-party results can steer the model, so identifiers that are
   // certainly private never leave the device, whatever the model wrote.
-  if (/\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i.test(query) ||
-    ctx.mcp.privateTerms.some((term) => query.includes(term.toLowerCase()))) {
+  const privateTerms = ctx.mcp.privateTerms.map((term) => term.toLowerCase());
+  if (leaves.some((leaf) => /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i.test(leaf) ||
+    privateTerms.some((term) => leaf.includes(term)))) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained a tenant name, domain, email address, ID, IP address or credential. Nothing was sent to ${entry.host}. Rephrase it as a public question.`);
   }
-  for (const value of ctx.mcp.tenantValues) {
-    if (query.includes(value)) {
-      throw new McpQueryBlockedError(`the ${entry.serverName} query contained tenant data from this conversation, such as a user, device or group name or an ID. Nothing was sent to ${entry.host}. Rephrase it as a public question without tenant values.`);
-    }
+  if (ctx.mcp.seedTenantValues) {
+    ctx.mcp.seedTenantValues(ctx.mcp.tenantValues);
+    ctx.mcp.seedTenantValues = undefined;
+  }
+  const indexes = [ctx.mcp.tenantValues, ...(ctx.tenantObservations ? [ctx.tenantObservations] : [])];
+  if (leaves.some((leaf) => indexes.some((index) => index.matches(leaf)))) {
+    throw new McpQueryBlockedError(`the ${entry.serverName} query contained tenant data from this conversation, such as a user, device or group name or an ID. Nothing was sent to ${entry.host}. Rephrase it as a public question without tenant values.`);
   }
   const result = await ctx.mcp.call(entry, args, ctx.signal);
   return {

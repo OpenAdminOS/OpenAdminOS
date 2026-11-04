@@ -122,6 +122,7 @@ import {
   type PlannedChatContext,
 } from "./planner.js";
 import { executeIntuneChatTool, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
+import { TenantValueIndex } from "./tenant-values.js";
 import { answerPilotChatMessage } from "./pilot-chat.js";
 import { PILOT_COPY } from "../../src/shared/pilot-mode.js";
 
@@ -1821,9 +1822,10 @@ export class IntuneChatService {
             providerId,
             model: selectedModel ?? llm.defaultModel,
           });
-          const mcp = await this.mcpToolsFor(tenant);
+          const mcp = await this.mcpToolsFor(tenant, conversation.id);
           if (capability.enabled) {
-            const agentic = await runAgenticChat({
+            const tenantObservations = new TenantValueIndex();
+            const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               documentation: await this.retrieveDocumentationSafely(modelQuestion),
               tenant,
@@ -1831,12 +1833,12 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant), ...mcp },
+              tools: { ...this.buildChatToolContext(tenant), ...mcp, tenantObservations },
               plannedResources: planned.resources,
               agentSuggestions,
               generatedAt: answerGeneratedAt,
               maxTokens: chatBudget.maxTokens,
-            });
+            }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
@@ -2350,7 +2352,8 @@ export class IntuneChatService {
             model: selectedModel ?? llm.defaultModel,
           });
           // Voice keeps its own bounded tool set; MCP tools are Chat only.
-          const mcp = options.voice ? {} : await this.mcpToolsFor(tenant);
+          const mcp = options.voice ? {} : await this.mcpToolsFor(tenant, conversation.id);
+          const tenantObservations = new TenantValueIndex();
           if (capability.enabled || options.webSearch) {
             sendProgress({
               message: "Investigative mode started.",
@@ -2363,7 +2366,7 @@ export class IntuneChatService {
                 schedule: store.getGraphCacheRefreshSchedule(tenant.id),
               },
             });
-            const agentic = await runAgenticChat({
+            const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               documentation: options.voice && options.webSearch
                 ? []
@@ -2373,7 +2376,7 @@ export class IntuneChatService {
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
               llm,
-              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp },
+              tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
               agentSuggestions: options.voice ? [] : agentSuggestions,
@@ -2430,7 +2433,7 @@ export class IntuneChatService {
                   modelStatus: "active",
                 });
               },
-            });
+            }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
@@ -2666,9 +2669,24 @@ export class IntuneChatService {
     }
   }
 
-  private async mcpToolsFor(tenant: TenantRecord): Promise<{ mcp?: McpChatContext }> {
+  /** MCP tools for one answer, with the tenant values earlier turns observed. */
+  private async mcpToolsFor(tenant: TenantRecord, conversationId: string): Promise<{ mcp?: McpChatContext }> {
     const mcp = await this.host.mcpChatContext?.(tenant);
-    return mcp && mcp.tools.length > 0 ? { mcp } : {};
+    if (!mcp || mcp.tools.length === 0) return {};
+    mcp.tenantValues.addAll(this.host.requireIntelligenceStore().listChatTenantValues(conversationId));
+    return { mcp };
+  }
+
+  /**
+   * Stores what the turn's tenant tools observed, also when the loop
+   * fails, so later turns and MCP servers installed later still see it.
+   */
+  private async rememberingTenantValues<T>(conversationId: string, observations: TenantValueIndex, run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } finally {
+      if (observations.size > 0) this.host.requireIntelligenceStore().addChatTenantValues(conversationId, observations.values());
+    }
   }
 
   private buildChatToolContext(tenant: TenantRecord, signal?: AbortSignal): IntuneChatToolContext {
