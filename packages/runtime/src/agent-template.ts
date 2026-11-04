@@ -28,7 +28,13 @@ import type {
   WriteStep,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, writeLimitsValidationIssue } from "@openadminos/agent-sdk";
+import {
+  AVAILABLE_SERVICES,
+  assertWritePlanLimits,
+  servicesForScopes,
+  writeLimitsValidationIssue,
+  type ServiceId,
+} from "@openadminos/agent-sdk";
 
 import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
@@ -96,6 +102,25 @@ export function parseAgentTemplate(source: string): AgentTemplate {
         "descriptor.requiresEntraTier",
         `expected "free", "p1", or "p2", got ${JSON.stringify(t)}`,
       );
+    }
+  }
+
+  if (descriptor.services !== undefined) {
+    const available = new Set<string>(AVAILABLE_SERVICES.map((service) => service.id));
+    const services = descriptor.services;
+    if (!Array.isArray(services) || services.length === 0) {
+      throw new ManifestValidationError("descriptor.services", "must list at least one service");
+    }
+    for (const [index, service] of services.entries()) {
+      if (typeof service !== "string" || !available.has(service)) {
+        throw new ManifestValidationError(
+          `descriptor.services[${index}]`,
+          `expected one of ${[...available].map((id) => JSON.stringify(id)).join(", ")}, got ${JSON.stringify(service)}`,
+        );
+      }
+    }
+    if (new Set(services).size !== services.length) {
+      throw new ManifestValidationError("descriptor.services", "must not list a service twice");
     }
   }
 
@@ -1629,6 +1654,13 @@ export function agentTemplateToModule(manifest: AgentTemplate): AgentModule {
   return buildReadAgentModule(manifest);
 }
 
+/** The declared services, or the services the scopes need. */
+function manifestServices(manifest: AgentTemplate): ServiceId[] {
+  return manifest.descriptor.services
+    ? [...manifest.descriptor.services]
+    : servicesForScopes(collectScopes(manifest));
+}
+
 function commonMetadata(manifest: AgentTemplate) {
   const descriptor = manifest.descriptor;
   return {
@@ -1640,6 +1672,7 @@ function commonMetadata(manifest: AgentTemplate) {
     tier: descriptor.tier ?? "agent",
     requiresEntraTier: descriptor.requiresEntraTier ?? "free",
     scopes: collectScopes(manifest),
+    services: manifestServices(manifest),
     author: descriptor.author,
     version: descriptor.version,
     minAppVersion: descriptor.minAppVersion,
@@ -1766,6 +1799,7 @@ export function agentTemplateToRegistrySummary(
   tier: AgentTier;
   requiresEntraTier: RequiredEntraTier;
   scopes: string[];
+  services: ServiceId[];
   author: AgentAuthor;
   version: string;
   minAppVersion?: string;
@@ -1787,6 +1821,7 @@ export function agentTemplateToRegistrySummary(
     tier: descriptor.tier ?? "agent",
     requiresEntraTier: descriptor.requiresEntraTier ?? "free",
     scopes: collectScopes(manifest),
+    services: manifestServices(manifest),
     author: descriptor.author,
     version: descriptor.version,
     minAppVersion: descriptor.minAppVersion,

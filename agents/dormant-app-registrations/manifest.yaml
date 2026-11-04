@@ -16,6 +16,8 @@ descriptor:
   category: apps
   tier: agent
   requiresEntraTier: free
+  services:
+    - entra
   mode: read
   preferredModel: llama3.1:8b
 

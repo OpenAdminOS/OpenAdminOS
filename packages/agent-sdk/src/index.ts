@@ -130,6 +130,12 @@ export interface AgentContract {
    */
   requiresEntraTier: RequiredEntraTier;
   scopes: string[];
+  /**
+   * Services the agent reads or changes. Every declared scope must belong
+   * to one of them. Absent on agents installed before services existed;
+   * derive it with `servicesForScopes(scopes)`.
+   */
+  services?: ServiceId[];
   author: AgentAuthor;
   version: string;
   preferredModel?: string;
@@ -3426,6 +3432,12 @@ export interface AgentTemplate {
      * `free` at parse time. See {@link RequiredEntraTier}.
      */
     requiresEntraTier?: RequiredEntraTier;
+    /**
+     * Services this agent needs, for example `[intune]`. Required for
+     * registry agents; the registry QA fails when a declared scope is not
+     * covered by these services. Derived from the scopes when absent.
+     */
+    services?: ServiceId[];
     mode: AgentMode;
     writeLimits?: WriteLimits;
     preferredModel?: string;

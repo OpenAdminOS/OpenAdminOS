@@ -21,6 +21,10 @@ descriptor:
     verified: true
   category: devices
   requiresEntraTier: free
+  # TODO(ugur): Intune covers every declared scope, including the Entra
+  # device read. Confirm whether this agent should also list entra.
+  services:
+    - intune
   mode: write
   preferredModel: llama3.1:8b
 

@@ -17,6 +17,10 @@ descriptor:
   category: policies
   tier: agent
   requiresEntraTier: p1
+  # TODO(ugur): reads Entra directory audits only. Confirm whether Intune
+  # audit events belong here too.
+  services:
+    - entra
   mode: read
   preferredModel: llama3.1:8b
 

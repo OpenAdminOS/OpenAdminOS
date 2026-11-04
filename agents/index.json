@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 8,
+  "revision": 9,
   "agents": [
     {
       "id": "compliance-overview",
@@ -20,9 +20,12 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/compliance-overview/manifest.yaml",
-      "manifestSha256": "5fa20fe11c97cd25da99e291c214f386b714823f01ed8fc8a5fc40cf2bd18ddf"
+      "manifestSha256": "323f0b85930aea0189f02b409a7d511fd294ab41b2116dd32f7ddf042c17c5f1"
     },
     {
       "id": "conditional-access-explainer",
@@ -42,9 +45,12 @@
       "scopes": [
         "Policy.Read.All"
       ],
+      "services": [
+        "entra"
+      ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/conditional-access-explainer/manifest.yaml",
-      "manifestSha256": "d5aee8cbacfd904318ad103c12d136ec1a407d4c1c85f10d8a55cd2625aacdff"
+      "manifestSha256": "db3b663fe293bc1f8ba43325a5a71371d6f4696c5ad19c00f6ad6cb242a6835a"
     },
     {
       "id": "dormant-app-registrations",
@@ -64,9 +70,12 @@
       "scopes": [
         "Application.Read.All"
       ],
+      "services": [
+        "entra"
+      ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/dormant-app-registrations/manifest.yaml",
-      "manifestSha256": "5612b44b2c9edd8c80860035bf0cccb81b93f850549a2b3a635a13076b9f561f"
+      "manifestSha256": "2b4cb2b7222ad939878a0bcd8d3d32b409de05363ccecfd31823a773d7ed17fd"
     },
     {
       "id": "find-inactive-devices",
@@ -86,9 +95,12 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/find-inactive-devices/manifest.yaml",
-      "manifestSha256": "cd222f69430596218129b280378b8765d2746945028c1e411c8e7f0022e1d64c"
+      "manifestSha256": "6f22dfd3f048072719bfa01e93545dc1f017a96d53183de425541f61723dfd84"
     },
     {
       "id": "intune-device-posture-auditor",
@@ -108,6 +120,9 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.2.3",
       "execution": {
         "kind": "script",
@@ -117,7 +132,7 @@
         "timeoutMs": 45000
       },
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/intune-device-posture-auditor/manifest.yaml",
-      "manifestSha256": "2371a9a8ef22ba4e116a4bec67fa791bee80b27fca7b1866740f0fb865e03756"
+      "manifestSha256": "620c88c0e0d6ed279c22fdba45f7ea7317fe7a75b8311167003723190ab6c712"
     },
     {
       "id": "offboarding-agent",
@@ -139,9 +154,12 @@
         "Device.Read.All",
         "DeviceManagementManagedDevices.PrivilegedOperations.All"
       ],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml",
-      "manifestSha256": "2ca22be2f81828bfb43132caf967ceeaac8b98d573049866ef4b5e39fd094ef0"
+      "manifestSha256": "fb913672cb905d43dda60b719bfefa9472ab27b5c4fcbac8257184cc2c8ca949"
     },
     {
       "id": "os-update-posture",
@@ -161,9 +179,12 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/os-update-posture/manifest.yaml",
-      "manifestSha256": "5af5e9932f1c34c7726b07066bdf04b1edcf4d50fe77c0e0629f325104bd4ff8"
+      "manifestSha256": "1477047a64f0c4f5024f6b1abdee4db804b8c4255127261b642cfdad4dd15dd7"
     },
     {
       "id": "risky-sign-in-triage",
@@ -183,9 +204,12 @@
       "scopes": [
         "IdentityRiskyUser.Read.All"
       ],
+      "services": [
+        "entra"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/risky-sign-in-triage/manifest.yaml",
-      "manifestSha256": "1b6ad7a0b409cfb4d358c366abcffa9f2b9990d7335a7f1a87464d755705b5fa"
+      "manifestSha256": "d06c1358163d9b034c620cfafc96ee8fdfa56b4e84054c56ad3bfc4a32b6cc40"
     },
     {
       "id": "secure-score-prioritizer",
@@ -205,9 +229,12 @@
       "scopes": [
         "SecurityEvents.Read.All"
       ],
+      "services": [
+        "defender"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/secure-score-prioritizer/manifest.yaml",
-      "manifestSha256": "dcee2840ee7a8d870217a8be267517d1d69252482c9071971f3577c554989d4f"
+      "manifestSha256": "69fe084072266f71d4dddfe82fa2c98c222fc661a51fb1cdd3af607c0bee9c7a"
     },
     {
       "id": "sign-in-failure-explainer",
@@ -227,9 +254,12 @@
       "scopes": [
         "AuditLog.Read.All"
       ],
+      "services": [
+        "entra"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/sign-in-failure-explainer/manifest.yaml",
-      "manifestSha256": "a9f95dd9d1ad061e48ee57a01adb953f857a590665d2e604b100ef0fe66b75f4"
+      "manifestSha256": "3e4b94c55d2457a199b12b5036ab20558f3e689038b81f5c74fdb727178bf452"
     },
     {
       "id": "stale-guest-cleanup",
@@ -251,9 +281,12 @@
         "AuditLog.Read.All",
         "User.ReadWrite.All"
       ],
+      "services": [
+        "entra"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/stale-guest-cleanup/manifest.yaml",
-      "manifestSha256": "4f9a0e5ceec07e83913215ef4aee5f242a88430ca4671329f2a9d7cffd9f2851"
+      "manifestSha256": "fd279b56db7389d9d4f511177844a9c460f62d18cb51314ffccc62aedc09d492"
     },
     {
       "id": "team-evidence-review",
@@ -271,9 +304,12 @@
         "verified": true
       },
       "scopes": [],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-evidence-review/manifest.yaml",
-      "manifestSha256": "a26c849387968867ab54091fbfca16d51c1c6ad10db4fbef7ff07da4a28bf97c"
+      "manifestSha256": "a087097ccc350a38e79c2b57791b54d677f7402d03e74396bf249e95904e0ec4"
     },
     {
       "id": "team-script-draft",
@@ -291,9 +327,12 @@
         "verified": true
       },
       "scopes": [],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.6.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-script-draft/manifest.yaml",
-      "manifestSha256": "5fab6b6e65e322e85d7e639ffff24991ca8ba93f7aa592fd336af7ab1aa24e90"
+      "manifestSha256": "c98ba1b7dc0ca59b95ce95dc2a037bd3a8d799bb4e3dee3cdb96d6ec4e2c0c25"
     },
     {
       "id": "tenant-change-audit",
@@ -314,9 +353,12 @@
         "AuditLog.Read.All",
         "Directory.Read.All"
       ],
+      "services": [
+        "entra"
+      ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml",
-      "manifestSha256": "8c4f8bbdda80d9b1655df9fb8dfd326cd53d48725047979ed3fccfcf1dc23574"
+      "manifestSha256": "2e08b1bf951a751ef056b7633496904ccb5e78b38af01c448c6683d31542227a"
     },
     {
       "id": "tenant-health-report",
@@ -336,9 +378,12 @@
       "scopes": [
         "DeviceManagementManagedDevices.Read.All"
       ],
+      "services": [
+        "intune"
+      ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-health-report/manifest.yaml",
-      "manifestSha256": "460bcc85932a98e50fd49e31564ecc73000daab4cf69db5c1a6d68f8524a54b9"
+      "manifestSha256": "ee3aa9d97456f54b0ef0526da6d30eaee439e39a54cecf6db4ae06bc3dc932c2"
     },
     {
       "id": "user-license-overview",
@@ -358,9 +403,12 @@
       "scopes": [
         "User.Read.All"
       ],
+      "services": [
+        "entra"
+      ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/user-license-overview/manifest.yaml",
-      "manifestSha256": "65bbf2b0c3de73a41a9525bf675c72b675945f0ad1b7e24d86a65456553eea67"
+      "manifestSha256": "a1a52c3f21ed7fca21b6a76e84d4721e790c64abaa8c7fa3bc148f464730f856"
     }
   ]
 }

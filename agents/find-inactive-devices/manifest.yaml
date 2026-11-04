@@ -19,6 +19,8 @@ descriptor:
     verified: true
   category: devices
   requiresEntraTier: free
+  services:
+    - intune
   mode: read
   preferredModel: llama3.1:8b
 

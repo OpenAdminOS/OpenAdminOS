@@ -179,3 +179,61 @@ function walk(skills: TemplateStep[], visit: (skill: TemplateStep) => void): voi
     if (skill.format === "map") walk(skill.settings.do, visit);
   }
 }
+
+describe("agent template services", () => {
+  const manifest = (services: string) => `
+descriptor:
+  id: services-check
+  name: Services check
+  description: Exercises the services declaration.
+  version: 1.0.0
+  author:
+    name: OpenAdminOS
+  category: policies
+  mode: read
+${services}
+skills:
+  - id: policies
+    format: graph
+    label: Load policies
+    settings:
+      method: GET
+      path: /identity/conditionalAccess/policies
+      scopes:
+        - Policy.Read.All
+definition:
+  result:
+    summary: Done.
+`;
+
+  it("carries declared services into the registry summary", () => {
+    const summary = agentTemplateToRegistrySummary(
+      parseAgentTemplate(manifest("  services:\n    - entra")),
+    );
+    assert.deepEqual(summary.services, ["entra"]);
+  });
+
+  it("derives services from the scopes when the manifest omits them", () => {
+    const summary = agentTemplateToRegistrySummary(parseAgentTemplate(manifest("")));
+    assert.deepEqual(summary.services, ["entra"]);
+  });
+
+  it("rejects unknown, planned, empty and duplicate services", () => {
+    for (const [services, pattern] of [
+      ["  services:\n    - exchange", /descriptor\.services\[0\]/],
+      ["  services: []", /must list at least one service/],
+      ["  services:\n    - entra\n    - entra", /must not list a service twice/],
+    ] as const) {
+      assert.throws(() => parseAgentTemplate(manifest(services)), pattern);
+    }
+  });
+
+  it("declares services for every bundled agent", () => {
+    for (const slug of readdirSync(agentsRoot)) {
+      const manifestPath = join(agentsRoot, slug, "manifest.yaml");
+      if (!existsSync(manifestPath)) continue;
+      const parsed = parseAgentTemplate(readFileSync(manifestPath, "utf8"));
+      assert.ok((parsed.descriptor.services ?? []).length > 0, `${slug} declares no services`);
+    }
+  });
+});

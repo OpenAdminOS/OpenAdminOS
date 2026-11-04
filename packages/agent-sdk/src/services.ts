@@ -735,3 +735,53 @@ export function grantsFromTokenScopes(scopes: readonly string[] | null | undefin
   }
   return [...grants];
 }
+
+/** Services that list the scope in a part, planned parts included, or as agent-only. */
+function servicesOwningScope(scope: string): ServiceId[] {
+  const name = normalizeGraphScopeName(scope);
+  return AVAILABLE_SERVICES.filter(
+    (service) =>
+      service.parts.some((part) => part.scopes.some((entry) => entry.name === name)) ||
+      service.agentOnlyScopes.some((entry) => entry.name === name),
+  ).map((service) => service.id);
+}
+
+const BASELINE_NAMES: ReadonlySet<string> = new Set(BASELINE_SCOPES);
+
+// A scope several services share, such as User.Read.All, is attributed to
+// the first service in this order when no other scope settles it.
+const SHARED_SCOPE_PREFERENCE: readonly ServiceId[] = ["entra", "intune", "defender"];
+
+/**
+ * The smallest set of services that covers the scopes. Used when a
+ * manifest does not declare `services`, and to suggest a declaration.
+ */
+export function servicesForScopes(scopes: readonly string[]): ServiceId[] {
+  const owners = scopes
+    .filter((scope) => !BASELINE_NAMES.has(normalizeGraphScopeName(scope)))
+    .map(servicesOwningScope)
+    .filter((ids) => ids.length > 0);
+  const selected = new Set<ServiceId>();
+  for (const ids of owners) if (ids.length === 1) selected.add(ids[0]!);
+  for (const ids of owners) {
+    if (ids.some((id) => selected.has(id))) continue;
+    selected.add(SHARED_SCOPE_PREFERENCE.find((id) => ids.includes(id)) ?? ids[0]!);
+  }
+  return AVAILABLE_SERVICES.filter((service) => selected.has(service.id)).map((service) => service.id);
+}
+
+/**
+ * Declared scopes that none of the declared services lists. Baseline
+ * sign-in scopes are always covered. Unknown scopes are never covered,
+ * so a new scope has to be added to the registry first.
+ */
+export function scopesNotCoveredByServices(
+  scopes: readonly string[],
+  services: readonly ServiceId[],
+): string[] {
+  const declared = new Set(services);
+  return scopes.filter((scope) => {
+    if (BASELINE_NAMES.has(normalizeGraphScopeName(scope))) return false;
+    return !servicesOwningScope(scope).some((id) => declared.has(id));
+  });
+}

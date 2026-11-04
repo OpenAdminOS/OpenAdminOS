@@ -24,6 +24,8 @@ descriptor:
   category: compliance
   tier: dashboard
   requiresEntraTier: free
+  services:
+    - intune
   mode: read
   preferredModel: llama3.1:8b
 

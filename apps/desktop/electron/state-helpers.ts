@@ -1,9 +1,11 @@
 import { createHash } from "node:crypto";
 import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
 import {
+  AVAILABLE_SERVICES,
   graphAccessDenialFromError,
   graphAccessDenialText,
   SAVED_APP_REGISTRATION_LIMIT,
+  servicesForScopes,
   type GraphAccessDenial,
   type SavedAppRegistration,
 } from "@openadminos/agent-sdk";
@@ -76,6 +78,13 @@ export function entryToRegistrySummary(
     tier: entry.tier,
     requiresEntraTier: entry.requiresEntraTier ?? "free",
     scopes: entry.scopes,
+    // Index entries are untrusted input: keep only known services, and
+    // derive them from the scopes for indexes built before services.
+    services: Array.isArray(entry.services)
+      ? entry.services.filter((service) =>
+          AVAILABLE_SERVICES.some((available) => available.id === service),
+        )
+      : servicesForScopes(entry.scopes),
     author: entry.author,
     manifestUrl: entry.manifestUrl,
     manifestSha256: entry.manifestSha256,
