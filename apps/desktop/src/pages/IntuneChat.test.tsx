@@ -1332,6 +1332,7 @@ describe("IntuneChat conversation routes", () => {
             content: "Defender for Endpoint on macOS needs full disk access [1].",
             questionKind: "docs" as const,
             followUps: [followUp, "Which Macs miss the system extension profile?"],
+            tenantFollowUps: [followUp],
             documentationSources: [{ citation: 1, kind: "mcp" as const, title: "Microsoft Defender for Endpoint on Mac", url: "https://learn.microsoft.com/mac", serverName: "Microsoft Learn", host: "learn.microsoft.com" }],
             steps: [{ id: "s1", kind: "plan" as const, title: "Read the question", status: "completed" as const, origin: "device" as const, originLabel: "On device", startedAt: "", durationMs: 1 }],
           },
@@ -1360,7 +1361,7 @@ describe("IntuneChat conversation routes", () => {
       expect(bridge.sendIntuneChatMessage).not.toHaveBeenCalled();
     });
 
-    it("hides the ghost text on Escape or typing, and fills the composer from a chip", async () => {
+    it("hides the ghost text on Escape or typing, and fills the composer from the one follow-up chip", async () => {
       const user = userEvent.setup();
       const bridge = setup();
       const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
@@ -1370,24 +1371,52 @@ describe("IntuneChat conversation routes", () => {
       expect(composer).not.toHaveAttribute("placeholder", followUp);
       expect(screen.queryByText(/press Tab to use it/)).toBeNull();
 
-      const chips = screen.getByRole("group", { name: "Follow-up questions" });
-      await user.click(within(chips).getByRole("button", { name: "Which Macs miss the system extension profile?" }));
-      expect(composer).toHaveValue("Which Macs miss the system extension profile?");
+      // One quiet chip: the first follow-up, tagged because the docs answer's follow-up reads tenant data.
+      expect(screen.queryByRole("button", { name: "Which Macs miss the system extension profile?" })).toBeNull();
+      await user.click(screen.getByRole("button", { name: new RegExp(`^${followUp},\\s*Uses tenant data$`) }));
+      expect(composer).toHaveValue(followUp);
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     });
 
-    it("names what a docs answer used above it, not tenant data, and keeps how it was made in the step summary", async () => {
+    it("shows no tenant above a docs answer, names Microsoft Learn once in the step summary, and keeps how it was made there", async () => {
       const user = userEvent.setup();
       setup();
       expect(await screen.findByText(/needs full disk access/)).toBeInTheDocument();
       const log = screen.getByRole("log", { name: "Conversation" });
-      const header = within(log).getByText("Contoso IT").parentElement!;
-      expect(header).toHaveTextContent(/^CIContoso IT·Microsoft Learn$/);
+      // No tenant chip: the answer never touched the tenant.
+      expect(within(log).queryByText("Contoso IT")).toBeNull();
+      expect(within(log).getByRole("button", { name: /1 step/ })).toHaveTextContent("Microsoft Learn · Tenant not used");
+      const answer = within(log).getAllByRole("article").at(-1)!;
+      expect(within(answer).getAllByText(/Microsoft Learn/).filter((node) => !node.closest("[role=tooltip]"))).toHaveLength(1);
       expect(within(log).queryByText("Tenant data")).toBeNull();
       expect(within(log).queryByText("How I checked")).toBeNull();
       expect(within(log).queryByText(/data from/)).toBeNull();
       await user.click(within(log).getByRole("button", { name: /1 step/ }));
       expect(within(log).getByRole("list", { name: "Steps" })).toBeInTheDocument();
+    });
+
+    it("keeps the tenant chip on a mixed answer, with documentation and tenant blocks labelled", async () => {
+      const conversation: IntuneChatConversation = {
+        id: "conversation-mixed", title: "Macs and Defender", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+      };
+      const bridge = makeMockBridge({
+        listIntuneChatConversations: vi.fn(async () => [conversation]),
+        getIntuneChatMessages: vi.fn(async () => [{
+          id: "a-mixed", conversationId: conversation.id, role: "assistant" as const, status: "completed" as const, createdAt: conversation.updatedAt,
+          content: "Defender needs full disk access [1].\n\n2 of your 5 Macs are noncompliant.",
+          questionKind: "mixed" as const,
+          documentationSources: [{ citation: 1, kind: "mcp" as const, title: "Microsoft Defender for Endpoint on Mac", url: "https://learn.microsoft.com/mac", serverName: "Microsoft Learn", host: "learn.microsoft.com" }],
+          toolTrace: [{ id: "t1", tool: "query_cache" as const, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "" }],
+          steps: [{ id: "s1", kind: "tool" as const, title: "Queried cached data", status: "completed" as const, origin: "device" as const, originLabel: "On device", startedAt: "", durationMs: 1 }],
+        }]),
+      });
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-mixed", bridge });
+      expect(await screen.findByText(/are noncompliant/)).toBeInTheDocument();
+      const log = screen.getByRole("log", { name: "Conversation" });
+      expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
+      expect(within(log).getByRole("region", { name: "Microsoft Learn" })).toBeInTheDocument();
+      expect(within(log).getByRole("region", { name: "Your tenant" })).toBeInTheDocument();
+      expect(within(log).getByRole("button", { name: /1 step/ })).not.toHaveTextContent("Tenant not used");
     });
 
     it("streams each step live, then folds them into the summary line", async () => {
@@ -1436,7 +1465,7 @@ describe("IntuneChat conversation routes", () => {
       // The progress line stays briefly after the answer, then the summary replaces the live timeline.
       const summary = await screen.findByRole("button", { name: /3 steps/ }, { timeout: 4000 });
       expect(summary).toHaveAttribute("aria-expanded", "false");
-      expect(summary).toHaveTextContent("Left this device: search text to learn.microsoft.com and answer context to OpenAI");
+      expect(screen.getByRole("button", { name: "Sent: search text to learn.microsoft.com, answer context to OpenAI" })).toHaveAttribute("aria-expanded", "false");
     });
 
     it("stops offering the ghost text once the admin types", async () => {

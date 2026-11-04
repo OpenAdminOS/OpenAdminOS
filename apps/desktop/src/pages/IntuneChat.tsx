@@ -79,7 +79,7 @@ import {
   shouldSubmitComposerKey,
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
-import { answerSources, appendOnlySteps, currentStepTitle } from "../shared/chat-steps";
+import { appendOnlySteps, currentStepTitle, renumberCitations, tenantNotUsed, usedTenantEvidence } from "../shared/chat-steps";
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
@@ -87,7 +87,7 @@ import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
-import { AnswerBody, FollowUpChips, SourceCards, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
+import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
@@ -1420,7 +1420,8 @@ function IntuneChatContent() {
   };
 
   const handleCopyMessage = async (message: IntuneChatMessage) => {
-    const text = message.content.trim();
+    // An answer is copied with the citation numbers it shows.
+    const text = (message.role === "assistant" ? renumberCitations(message.content, message.documentationSources ?? []) : message.content).trim();
     if (!text) return;
     try {
       await copyTextToClipboard(text);
@@ -1993,8 +1994,13 @@ function IntuneChatContent() {
                           onOpenAgent={(slug) => navigate(`/agents/${encodeURIComponent(slug)}`)}
                         />
                       ) : null}
-                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.length ? (
-                        <FollowUpChips followUps={message.followUps} disabled={sending} onPick={fillComposer} />
+                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.[0] ? (
+                        <FollowUpChip
+                          followUp={message.followUps[0]}
+                          usesTenant={tenantNotUsed(message) && (message.tenantFollowUps ?? []).includes(message.followUps[0])}
+                          disabled={sending}
+                          onPick={fillComposer}
+                        />
                       ) : null}
                       {!pilot && message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
                         <SuggestedAgentsBlock
@@ -4253,7 +4259,7 @@ function ChatMessageBubble({
       )}
       {displayContent ? <AnswerBody message={message} content={displayContent} /> : null}
       <AnswerSources trace={message.toolTrace ?? []} />
-      {!progress && displayContent ? <SourceCards message={message} content={displayContent} /> : null}
+      {!progress && displayContent ? <SourceList message={message} content={displayContent} /> : null}
       {!progress ? (
         <div className={`-ml-1.5 mt-1 flex gap-0.5 transition-opacity ${latestAssistant ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
           <IconButton
@@ -4287,9 +4293,10 @@ function ChatMessageBubble({
 }
 
 /**
- * The line above an answer: the tenant, what the answer used ("Microsoft
- * Learn", "Microsoft Learn and your tenant"), and how old the tenant data
- * was. How the answer was made is in the step summary below it.
+ * The line above an answer: the tenant and how old its data was. What the
+ * answer used is named once, in the step summary below it. A docs answer
+ * that never touched the tenant shows no tenant here; its summary says
+ * "Tenant not used".
  */
 function AnswerScopeDisclosure({
   tenant,
@@ -4302,11 +4309,9 @@ function AnswerScopeDisclosure({
 }) {
   const notice = message.engineNotice;
   const sources = message.sources ?? [];
-  const used = answerSources(message).map((source) => (source === "docs index" ? "the local docs index" : source));
+  const docsOnly = !multiTenant && tenantNotUsed(message);
   // Older answers stored tenant rows as sources without a tenant marker.
-  if (!used.includes("your tenant") && sources.some((source) => source.rows > 0 && !source.error)) used.push("your tenant");
-  const tenantUsed = used.includes("your tenant");
-  const label = used.length > 0 ? used.join(", ").replace(/, ([^,]*)$/, " and $1") : "No sources";
+  const tenantUsed = usedTenantEvidence(message) || ((message.steps ?? []).length === 0 && sources.some((source) => source.rows > 0 && !source.error));
   // The stalest source bounds how current the answer can be. Showing
   // the newest refresh let a header claim "data from just now" while the
   // rows the answer used were hours old.
@@ -4326,22 +4331,22 @@ function AnswerScopeDisclosure({
 
   return (
     <>
-    <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
-      {multiTenant ? (
-        <MultiTenantTile size="xs" />
-      ) : tenant ? (
-        <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
-      ) : null}
-      <span>{scopeName}</span>
-      <span aria-hidden="true" className="opacity-60">·</span>
-      <span>{label.charAt(0).toUpperCase() + label.slice(1)}</span>
-      {refreshedAt ? (
-        <>
-          <span aria-hidden="true" className="opacity-60">·</span>
-          <span>{sources.length > 1 ? "oldest data from " : "data from "}{formatRelativeAge(refreshedAt)}</span>
-        </>
-      ) : null}
-    </div>
+    {docsOnly ? null : (
+      <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
+        {multiTenant ? (
+          <MultiTenantTile size="xs" />
+        ) : tenant ? (
+          <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
+        ) : null}
+        <span>{scopeName}</span>
+        {refreshedAt ? (
+          <>
+            <span aria-hidden="true" className="opacity-60">·</span>
+            <span>{sources.length > 1 ? "oldest data from " : "data from "}{formatRelativeAge(refreshedAt)}</span>
+          </>
+        ) : null}
+      </div>
+    )}
     {notice ? (
       // A fallback or repair notice changes how much the answer can be
       // trusted, so it stays visible next to the answer.

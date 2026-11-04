@@ -19,6 +19,8 @@ export interface TooltipProps {
   /** Stretch the trigger wrapper to the full width of its container. */
   fullWidth?: boolean;
   className?: string;
+  /** Width classes of the tip, for a popover with more than a label. */
+  panelClassName?: string;
 }
 
 const GAP = 8;
@@ -71,6 +73,7 @@ export function Tooltip({
   disabled = false,
   fullWidth = false,
   className = "",
+  panelClassName = "max-w-56",
 }: TooltipProps) {
   const id = useId();
   const triggerRef = useRef<HTMLSpanElement>(null);
@@ -146,7 +149,7 @@ export function Tooltip({
           ref={tipRef}
           id={id}
           role="tooltip"
-          className={`pointer-events-none fixed left-0 top-0 z-[120] flex w-max max-w-56 items-center whitespace-normal rounded-[8px] bg-[var(--color-tip-bg)] px-[9px] py-[5px] text-xs leading-4 text-[var(--color-tip-fg)] shadow-[var(--shadow-pop)] transition-[opacity,visibility] duration-100 ${
+          className={`pointer-events-none fixed left-0 top-0 z-[120] flex w-max ${panelClassName} items-center whitespace-normal rounded-[8px] bg-[var(--color-tip-bg)] px-[9px] py-[5px] text-xs leading-4 text-[var(--color-tip-fg)] shadow-[var(--shadow-pop)] transition-[opacity,visibility] duration-100 ${
             open ? "visible opacity-100" : "invisible opacity-0"
           }`}
         >

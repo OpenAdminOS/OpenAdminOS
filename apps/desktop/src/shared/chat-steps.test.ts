@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
 
 import type { IntuneChatDocumentationSource, IntuneChatStep, IntuneChatToolTraceEntry } from "./openAdminOS";
-import { normalizeSourceUrl, sourcesForCards, splitAnswerBlocks, summarizeSteps, usedTenantEvidence } from "./chat-steps";
+import {
+  egressEntries,
+  mainLearnPage,
+  normalizeSourceUrl,
+  numberCitations,
+  orderCitationRuns,
+  originCounts,
+  renumberCitations,
+  sourcesHeadingDetail,
+  splitAnswerBlocks,
+  summarizeSteps,
+  tenantNotUsed,
+  usedTenantEvidence,
+} from "./chat-steps";
 
 const step = (overrides: Partial<IntuneChatStep>): IntuneChatStep => ({
   id: overrides.id ?? Math.random().toString(36), kind: "tool", title: "Step", status: "completed", origin: "device",
@@ -34,7 +47,11 @@ describe("step summary", () => {
     // All five started at once here, so the run took as long as the longest.
     expect(summary.totalMs).toBe(3400);
     expect(summary.sources).toBe("Microsoft Learn and docs index");
-    expect(summary.egress).toBe("Left this device: search text to learn.microsoft.com and answer context to OpenAI");
+    expect(summary.egress).toBe("Sent: search text to learn.microsoft.com, answer context to OpenAI");
+    expect(summary.sent.map((entry) => [entry.where, entry.items])).toEqual([
+      ["learn.microsoft.com", ["Defender on macOS"]],
+      ["OpenAI", ["The question, recent turns of this chat, and the results of the steps that ran for this answer."]],
+    ]);
   });
 
   it("names Microsoft Learn from its source cards when no trace was stored, and times the run by wall clock", () => {
@@ -54,20 +71,63 @@ describe("step summary", () => {
 
   it("lists requests to Microsoft Graph, and says nothing left the device only when nothing did", () => {
     const summary = summarizeSteps({ steps: [step({ kind: "graph-refresh", origin: "graph", originLabel: "Microsoft Graph" }), step({ kind: "answer" })], toolTrace: [cacheTrace] });
-    expect(summary.egress).toBe("Left this device: requests to Microsoft Graph");
+    expect(summary.egress).toBe("Sent: requests to Microsoft Graph");
     const hosted = summarizeSteps({ steps: [step({ kind: "tool", origin: "graph", originLabel: "Microsoft Graph" }), step({ kind: "answer", origin: "model", originLabel: "OpenAI Codex" })] });
-    expect(hosted.egress).toBe("Left this device: requests to Microsoft Graph and answer context to OpenAI Codex");
+    expect(hosted.egress).toBe("Sent: requests to Microsoft Graph, answer context to OpenAI Codex");
     expect(summarizeSteps({ steps: [step({ kind: "tool" }), step({ kind: "answer" })] }).egress).toBe("Nothing left this device");
     expect(summary.sources).toBe("your tenant");
     expect(usedTenantEvidence({ toolTrace: [{ ...cacheTrace, error: "failed" }] })).toBe(false);
   });
 });
 
+describe("folded line", () => {
+  it("counts steps per origin, naming the MCP hosts and the model provider", () => {
+    expect(originCounts([
+      step({ kind: "plan" }),
+      step({ kind: "answer", origin: "model", originLabel: "OpenAI Codex" }),
+      step({ kind: "mcp", origin: "third-party", originLabel: "learn.microsoft.com" }),
+      step({ kind: "graph-refresh", origin: "graph", originLabel: "Microsoft Graph" }),
+      step({ kind: "mcp", origin: "third-party", originLabel: "www.kqlsearch.com" }),
+      step({ kind: "answer", origin: "model", originLabel: "OpenAI Codex" }),
+    ])).toEqual([
+      { origin: "device", label: "On device", count: 1 },
+      { origin: "graph", label: "Microsoft Graph", count: 1 },
+      { origin: "third-party", label: "learn.microsoft.com and www.kqlsearch.com", count: 2 },
+      { origin: "model", label: "OpenAI Codex", count: 2 },
+    ]);
+  });
+
+  it("lists exactly what each place received, and nothing for a local model", () => {
+    expect(egressEntries([
+      step({ kind: "graph-refresh", origin: "graph", originLabel: "Microsoft Graph", title: "Refreshed tenant data", detail: "Managed devices" }),
+      step({ kind: "mcp", origin: "third-party", originLabel: "learn.microsoft.com", sent: "Defender on macOS" }),
+      step({ kind: "mcp", origin: "third-party", originLabel: "learn.microsoft.com", sent: "Defender prerequisites" }),
+    ]).map((entry) => [entry.where, entry.what, entry.items])).toEqual([
+      ["Microsoft Graph", ["requests"], ["Refreshed tenant data: Managed devices"]],
+      ["learn.microsoft.com", ["search text"], ["Defender on macOS", "Defender prerequisites"]],
+    ]);
+    expect(egressEntries([step({ kind: "answer", origin: "device", originLabel: "On device" })])).toEqual([]);
+  });
+
+  it("says the tenant was not used only for a docs answer that read no tenant data", () => {
+    expect(tenantNotUsed({ questionKind: "docs" })).toBe(true);
+    expect(tenantNotUsed({ questionKind: "docs", toolTrace: [cacheTrace] })).toBe(false);
+    expect(tenantNotUsed({ questionKind: "docs", tenantContext: true })).toBe(false);
+    expect(tenantNotUsed({ questionKind: "mixed" })).toBe(false);
+    expect(tenantNotUsed({})).toBe(false);
+  });
+});
+
 describe("answer blocks", () => {
-  it("labels a docs answer from its cited sources, never from model text", () => {
+  it("leaves a docs answer unlabelled: the step summary names its source", () => {
     expect(splitAnswerBlocks("Microsoft Learn says X [2].", { documentationSources: [learn, index], tenantEvidence: false }))
-      .toEqual([{ kind: "docs", label: "Docs index", text: "Microsoft Learn says X [2]." }]);
-    expect(splitAnswerBlocks("X [1] and Y [2].", { documentationSources: [learn, index], tenantEvidence: false })[0]!.label).toBe("Microsoft Learn and Docs index");
+      .toEqual([{ kind: "docs", text: "Microsoft Learn says X [2]." }]);
+  });
+
+  it("labels blocks only when an answer has both documentation and tenant blocks", () => {
+    expect(splitAnswerBlocks("X [1].\n\nY [1].", { documentationSources: [learn], tenantEvidence: true })).toEqual([{ kind: "docs", text: "X [1].\n\nY [1]." }]);
+    const mixed = splitAnswerBlocks("X [1].\n\n5 devices run macOS.", { documentationSources: [learn], tenantEvidence: true });
+    expect(mixed.map((block) => block.label)).toEqual(["Microsoft Learn", "Your tenant"]);
   });
 
   it("separates documentation and tenant blocks and keeps code with its paragraph", () => {
@@ -97,13 +157,45 @@ describe("answer blocks", () => {
       article(4, "https://learn.microsoft.com/en-us/defender-endpoint/mac-install-with-intune/#deploy"),
       { ...learn, citation: 6, title: "Onboard devices to Microsoft Defender for Business", url: "https://learn.microsoft.com/defender-business/mdb-onboard-devices#mac" },
     ];
-    const cards = sourcesForCards("Deploy the profiles [4] and onboard [6], see also [2].", sources);
-    expect(cards.sources.map((card) => [card.citation, card.citations])).toEqual([[2, [2, 4]], [6, [6]]]);
+    const numbering = numberCitations("Deploy the profiles [4] and onboard [6], see also [2].", sources);
+    expect(numbering.cited.map((card) => [card.display, card.citation, card.citations, card.uses])).toEqual([[1, 2, [2, 4], 2], [2, 6, [6], 1]]);
     expect(normalizeSourceUrl("https://Learn.Microsoft.com/en-us/Intune/x/#y")).toBe("https://learn.microsoft.com/intune/x");
   });
+});
 
-  it("shows cards for cited sources only, and MCP results when nothing is cited", () => {
-    expect(sourcesForCards("X [2] and [9].", [learn, index])).toEqual({ cited: true, sources: [{ ...index, citations: [2] }] });
-    expect(sourcesForCards("No citations.", [learn, index])).toEqual({ cited: false, sources: [{ ...learn, citations: [1] }] });
+describe("citation numbering", () => {
+  const source = (citation: number, title = `Article ${citation}`): IntuneChatDocumentationSource => ({ ...learn, citation, title, url: `https://learn.microsoft.com/a${citation}` });
+  const sources = [1, 3, 4, 5, 6, 8].map((n) => source(n));
+
+  it("numbers only cited sources, 1..N in order of first appearance, and lists the rest as consulted", () => {
+    const content = "Start with a pilot [3]. Confirm licensing [4][1]. Go to the connector [8]. Again [3]. `[5]` is code. [9] is unknown.";
+    const numbering = numberCitations(content, sources);
+    expect(numbering.cited.map((card) => [card.citation, card.display])).toEqual([[3, 1], [4, 2], [1, 3], [8, 4]]);
+    expect(numbering.consulted.map((card) => card.citation)).toEqual([5, 6]);
+    expect(numbering.displayFor(4)).toBe(2);
+    expect(numbering.displayFor(9)).toBeUndefined();
+  });
+
+  it("orders adjacent chips by shown number and copies the text with shown numbers", () => {
+    const content = "Licensing [4][1] and the pilot [1]. Unknown [9]. Code `[4]`.";
+    expect(orderCitationRuns(content, sources)).toBe("Licensing [4][1] and the pilot [1]. Unknown [9]. Code `[4]`.");
+    expect(renumberCitations(content, sources)).toBe("Licensing [1][2] and the pilot [2]. Unknown [9]. Code `[4]`.");
+    expect(renumberCitations("Later [6] first [1][6].", sources)).toBe("Later [1] first [1][2].");
+  });
+
+  it("numbers the same after a reload, since it reads only the stored answer and its sources", () => {
+    const content = "A [5]. B [3]. C [5].";
+    expect(numberCitations(content, sources).cited.map((card) => card.display)).toEqual(numberCitations(content, JSON.parse(JSON.stringify(sources))).cited.map((card) => card.display));
+  });
+
+  it("names the third-party hosts once as not verified, and the local index", () => {
+    expect(sourcesHeadingDetail([learn, { ...learn, citation: 3 }])).toBe("learn.microsoft.com, not verified by OpenAdminOS");
+    expect(sourcesHeadingDetail([learn, { ...learn, citation: 3, host: "www.kqlsearch.com" }, index])).toBe("learn.microsoft.com and www.kqlsearch.com, not verified by OpenAdminOS · local docs index on this device");
+  });
+
+  it("offers Open in Learn when one Learn page supplies more than half of the citations", () => {
+    expect(mainLearnPage(numberCitations("A [1]. B [1]. C [3].", sources))?.citation).toBe(1);
+    expect(mainLearnPage(numberCitations("A [1]. B [3].", sources))).toBeUndefined();
+    expect(mainLearnPage(numberCitations("A [2]. B [2]. C [1].", [index, { ...index, citation: 1, file: "x.md" }]))).toBeUndefined();
   });
 });
