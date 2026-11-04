@@ -650,6 +650,30 @@ function containsPrivateTerm(text: string, terms: readonly string[]): boolean {
   });
 }
 
+/** Email addresses, GUIDs, IPv4 addresses and credential prefixes. */
+const PRIVATE_PATTERN = /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i;
+
+/**
+ * Whether text holds tenant data by the same rules as the MCP egress
+ * check: private patterns, the tenant's names and domain, and the tenant
+ * values of the cache, this answer and the conversation. Fails closed if
+ * the cache index cannot be read.
+ */
+export function holdsTenantData(ctx: IntuneChatToolContext, text: string): boolean {
+  if (PRIVATE_PATTERN.test(text) || hasMixedScriptToken(text)) return true;
+  if (ctx.mcp) {
+    const privateTerms = new TenantValueIndex();
+    privateTerms.addAll(ctx.mcp.privateTerms.tokens);
+    if (privateTerms.matches(text) || containsPrivateTerm(text, ctx.mcp.privateTerms.compact)) return true;
+  }
+  try {
+    const indexes = [ctx.mcp?.tenantValues, ctx.mcp?.cachedTenantValues?.(), ctx.tenantObservations];
+    return indexes.some((index) => index?.matches(text));
+  } catch {
+    return true;
+  }
+}
+
 async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName, params: unknown): Promise<unknown> {
   const entry = ctx.mcp?.tools.find((candidate) => candidate.name === tool);
   if (!ctx.mcp || !entry) throw new Error(`${tool} is not an installed MCP tool. Use only the tools listed in this session.`);
@@ -671,7 +695,7 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   // certainly private never leave the device, whatever the model wrote.
   const privateTerms = new TenantValueIndex();
   privateTerms.addAll(ctx.mcp.privateTerms.tokens);
-  if (leaves.some((leaf) => /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i.test(leaf)) ||
+  if (leaves.some((leaf) => PRIVATE_PATTERN.test(leaf)) ||
     privateTerms.matches(joined) || containsPrivateTerm(joined, ctx.mcp.privateTerms.compact)) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained a tenant name, domain, email address, ID, IP address or credential. Nothing was sent to ${entry.host}. Rephrase it as a public question.`);
   }

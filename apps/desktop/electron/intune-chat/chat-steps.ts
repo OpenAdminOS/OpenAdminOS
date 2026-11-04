@@ -307,17 +307,20 @@ export function formatIndexVersion(version: string): string {
     : date.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
 }
 
+const LINK = /\bhttps?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|io|dev|app|cloud|ms)\b/i;
+
 /**
  * Follow-ups the model returned in `next`: at most two, trimmed, at most
- * 120 characters, and only read-only questions.
+ * 120 characters, only read-only questions, no links, and nothing the
+ * caller's tenant data check rejects.
  */
-export function validFollowUps(value: unknown): string[] {
+export function validFollowUps(value: unknown, holdsTenantData: (text: string) => boolean = () => false): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const item of value) {
     if (typeof item !== "string") continue;
     const text = item.replace(/\s+/g, " ").trim();
-    if (!text || text.length > 120 || planChatContext(text).hasWriteIntent) continue;
+    if (!text || text.length > 120 || LINK.test(text) || planChatContext(text).hasWriteIntent || holdsTenantData(text)) continue;
     if (!out.some((existing) => existing.toLowerCase() === text.toLowerCase())) out.push(text);
     if (out.length === 2) break;
   }

@@ -119,6 +119,8 @@ describe("follow-ups", () => {
       "Which Macs miss the system extension profile?", "Show onboarding state",
     ]);
     assert.deepEqual(validFollowUps("not a list"), []);
+    assert.deepEqual(validFollowUps(["Read https://evil.example/x", "Open www.contoso.com", "See learn.microsoft.com", "Which Macs miss the profile?"]), ["Which Macs miss the profile?"]);
+    assert.deepEqual(validFollowUps(["Why is MAC-07 offline?", "Which Macs are offline?"], (text) => /MAC-07/.test(text)), ["Which Macs are offline?"]);
   });
 
   it("offers a tenant check for a docs question with a tenant tie-in, counted from the cache", () => {
@@ -252,6 +254,11 @@ describe("agentic loop sources", () => {
       assert.match(prompts[2]!.prompt, /"cite": "\[1\]"/);
       assert.deepEqual(result.documentationSources?.map((source) => [source.citation, source.kind, source.url]), [[1, "mcp", "https://learn.microsoft.com/defender-endpoint/microsoft-defender-endpoint-mac"]]);
       assert.deepEqual(result.followUps, ["Check our Macs for the system extension profile"]);
+      // The tenant name and observed values are rejected the same way as MCP queries.
+      const tainted = await runAgenticChat(loopInput(store, scripted([callLearn, JSON.stringify({ final: true, answer: "Done [1].", next: ["Which Contoso devices need the profile?", "Ask admin@contoso.example", "Which Macs need the profile?"] })], []),
+        learnContext(async () => ({ text: "docs", truncated: false })), { questionKind: "docs" }));
+      assert.equal(tainted.ok, true);
+      if (tainted.ok) assert.deepEqual(tainted.followUps, ["Which Macs need the profile?"]);
     });
   });
 

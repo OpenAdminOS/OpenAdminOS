@@ -19,6 +19,7 @@ import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, type DocsIndexPassag
 import {
   MCP_TOOL_RULES,
   executeIntuneChatTool,
+  holdsTenantData,
   isMcpChatToolName,
   isTenantTool,
   mcpSourceLinesForPrompt,
@@ -359,7 +360,8 @@ export async function runAgenticChat(
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
         documentationSources: citations.sources,
-        followUps: validFollowUps(action.next),
+        // Injected text can steer next, so links and tenant values never become a suggestion.
+        followUps: validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)),
       };
     }
 
