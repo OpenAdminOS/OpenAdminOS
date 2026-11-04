@@ -1095,3 +1095,22 @@ Same branch, from head 86bb18f. Findings from the GPT-6.1-Sol review (G) and the
 Checks: typecheck clean; electron 772 of 772; renderer 53 files, 402 tests under Node 22 (the known flaky "finds a setting" failed once in the full run and passed alone); runtime 225 pass, 0 fail; qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
 
 Open: the round 2 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, and a live check with a real local model that the query writer writes usable Learn queries.
+
+## Review round 2 (marketplace)
+
+Same branch, from head 08ad4e4. Findings from the GPT-6.1-Sol review (G) and the separate Claude evaluator (E).
+
+Owner decision (2026-11-05): "Disclose + current message only". The query writer sees only the admin's current question, not earlier messages and not queries already sent in earlier turns. The UI states plainly that the admin's words in the question can be sent to the named host after a best-effort filter. Every query is shown in its step. No extra clicks.
+
+| Finding | Resolution | Commit |
+| --- | --- | --- |
+| G1 (blocking, privacy): the query writer got the admin's earlier messages, so a tenant field quoted earlier (`streetAddress: "420 Cedar Avenue"`) could be written into a later docs query. | The writer gets only the current question (`adminQuestion`; on voice the current utterance), the fenced tool description and schema, and titles, links and queries of MCP calls in the same answer. `adminMessagesOf` is gone; the MCP step reads "writing the query from your question". Tests: loop test with the address in the model's question but not in the writer prompt or the sent params; end to end over three turns with persisted history, where the earlier address, the earlier Learn result title and the earlier query never reach the later writer prompt and the sent query is exactly the later question. | 0dabef2 |
+| G2: the disclosure claimed tenant data stays on the device and that the model is told to send only public questions. | One text in the composer line, the shield tooltip, the status strip tooltip and the install review: "MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to <hosts>. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail." With a local model and MCP on, the composer says "Local model. Graph and cache data stay on this device." and the stored-data line no longer claims prompts stay. Acknowledgement: "I understand that words from my question can be sent to <host>." SPEC, CHANGELOG and writer comments aligned. Renderer tests for copy, local line, hosted shield, status strip tooltip and install review. | 4ac2f4c |
+| G3 (nit): `parseParams` took JSON out of prose. | After one optional outer fence, the whole body must parse as one JSON object; anything else sends nothing and shows the designed not-sent step. Unit cases and a loop test with prose around a valid object. | d5737ca |
+| E low 1: a connection check could reinstall a server uninstalled between its read and capturing the uninstall counter. | The counter is captured before the read, and the serialized write returns without writing when a check finds the server gone. Test for both races; the first fails on the old code. | 3d6edde |
+| E low 2: an empty voice answer said the model "described a lookup without finishing it". | New `empty-answer` reason; voice says "The reasoning model returned an empty answer. No completed answer is available. Retry or open Chat to inspect the evidence."; desktop keeps "The model returned an empty answer N times. Deterministic retrieval was used instead." Loop and voice tests. | e0922ad |
+| E nit 3: orphaned `withMcpSkippedNotice` doc comment. | It sat above `adminMessagesOf`; removing that function put the comment back on `withMcpSkippedNotice`. | 0dabef2 |
+
+Checks: typecheck clean; electron 777 of 777; renderer 53 files, 403 tests under Node 22; runtime 225 pass, 0 fail (227 tests); qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
+
+Open: the round 3 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, and a live check with a real local model that the query writer writes usable Learn queries from the current question alone.
