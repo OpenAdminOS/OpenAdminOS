@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import {
   availableScopeSet,
+  formatServiceList,
   missingServiceCopy,
   notGrantedServiceForScopes,
   resolveProviderDefaultModel,
@@ -130,22 +131,36 @@ type WorkspacePromptContextPayload = {
   promptBlock: string;
 };
 
+interface TenantResourceRestriction {
+  /** Every planned resource was dropped: the whole answer. */
+  blocked?: string;
+  /** Some were dropped: one line appended to the answer that names them. */
+  omitted?: string;
+}
+
 function restrictPlannedResourcesForTenant(
   planned: PlannedChatContext,
   tenant: TenantRecord,
-): string | undefined {
+): TenantResourceRestriction {
   const originalResources = [...planned.resources];
   const available = availableScopeSet(tenant);
-  planned.resources = originalResources.filter((resource) =>
-    definitionForResource(resource).scopes.every((scope) => available.has(scope)),
-  );
-  if (originalResources.length === 0 || planned.resources.length > 0) {
-    return undefined;
-  }
-  return (
-    missingServiceCopy(tenant, requiredScopesForResources(originalResources)) ??
-    `This question needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`
-  );
+  const isAvailable = (resource: GraphCacheResourceKind) =>
+    definitionForResource(resource).scopes.every((scope) => available.has(scope));
+  planned.resources = originalResources.filter(isAvailable);
+  const dropped = originalResources.filter((resource) => !isAvailable(resource));
+  if (dropped.length === 0) return {};
+  const reason =
+    missingServiceCopy(tenant, requiredScopesForResources(dropped)) ??
+    `This question needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+  if (planned.resources.length === 0) return { blocked: reason };
+  const labels = dropped.map((resource) => definitionForResource(resource).label);
+  return { omitted: `Not included in this answer: ${formatServiceList(labels)}. ${reason}` };
+}
+
+/** Appends the left-out line to a completed answer so it is never silent. */
+function withOmittedNotice(content: string, omitted: string | undefined): string {
+  if (!omitted) return content;
+  return content.trim() ? `${content.trimEnd()}\n\n${omitted}` : omitted;
 }
 
 type GraphCacheRefreshProgressEvent =
@@ -1657,7 +1672,8 @@ export class IntuneChatService {
       ? ["managedDevices" as const]
       : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const accessBlockedMessage = restrictPlannedResourcesForTenant(planned, tenant);
+    const restriction = restrictPlannedResourcesForTenant(planned, tenant);
+    const accessBlockedMessage = restriction.blocked;
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1870,6 +1886,9 @@ export class IntuneChatService {
       }
     }
 
+    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent) {
+      assistantContent = withOmittedNotice(assistantContent, restriction.omitted);
+    }
     const assistantMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2015,7 +2034,8 @@ export class IntuneChatService {
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const accessBlockedMessage = restrictPlannedResourcesForTenant(planned, tenant);
+    const restriction = restrictPlannedResourcesForTenant(planned, tenant);
+    const accessBlockedMessage = restriction.blocked;
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2541,6 +2561,10 @@ export class IntuneChatService {
       assistantContent += "\n\nPublic web sources:\n" + webSources.map(source =>
         `- [${source.title.replace(/[\[\]\\\n\r]/g, " ") || "Source"}](<${source.url.replace(/>/g, "%3E")}>)`
       ).join("\n");
+      emitDelta(assistantContent, "");
+    }
+    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && restriction.omitted) {
+      assistantContent = withOmittedNotice(assistantContent, restriction.omitted);
       emitDelta(assistantContent, "");
     }
     const assistantMessage: IntuneChatMessage = {

@@ -8,6 +8,7 @@ import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
+import { partIdsFor, qualifyScope, requestedScopes } from "@openadminos/agent-sdk";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -2074,3 +2075,71 @@ it("treats a partly granted Defender part as not connected in Chat", async () =>
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+for (const path of ["send", "stream"] as const) {
+  it(`names the resources a partial answer leaves out (${path})`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), `openadminos-chat-partial-${path}-`));
+    const filePath = join(dir, "state.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        activeProviderId: "ollama",
+        activeModelByProviderId: { ollama: "mock-chat" },
+        activeTenantId: "tenant-intune-only",
+        tenants: [
+          {
+            id: "tenant-intune-only",
+            displayName: "Intune team",
+            username: "admin@example.test",
+            homeAccountId: "intune-only",
+            addedAt: new Date().toISOString(),
+            grantedScopes: requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name)),
+          },
+        ],
+        installedAgents: [],
+        runs: [],
+      }),
+    );
+    const graphPaths: string[] = [];
+    const store = new AppStateStore({
+      filePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        request: async (input: { path?: string }) => {
+          graphPaths.push(input.path ?? "unknown");
+          return { value: [] };
+        },
+      } as unknown as RunGraphApi),
+      llmFactory: () => ({
+        available: true,
+        async complete() {
+          return { text: "No managed devices are cached.", model: "mock-chat" };
+        },
+        async *stream() {
+          const text = "No managed devices are cached.";
+          yield { delta: text, accumulated: text, done: false, model: "mock-chat" };
+          yield { delta: "", accumulated: text, done: true, model: "mock-chat" };
+        },
+      }),
+    });
+    try {
+      const input = { content: "Show devices with security alerts" };
+      const result = path === "send"
+        ? await store.sendIntuneChatMessage(input)
+        : await store.streamIntuneChatMessage(input, () => undefined);
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.equal(
+        result.assistantMessage.content,
+        "No managed devices are cached.\n\nNot included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Settings, Tenants.",
+      );
+      assert.equal(graphPaths.some((entry) => entry.includes("/security/")), false);
+      const messages = await store.getIntuneChatMessages(result.conversation.id);
+      assert.match(messages[1]?.content ?? "", /Not included in this answer: Defender alerts and Defender incidents\./);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}
