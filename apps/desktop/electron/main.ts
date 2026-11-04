@@ -6463,6 +6463,19 @@ function registerIpcHandlers() {
       store.refreshTenantGrants(requireBoundedString(tenantId, "tenantId", 256)),
     ),
   );
+  ipcMain.handle(
+    "openadminos:retry-tenant-license-check",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.retryTenantLicenseCheck(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
+  // Aborts the host operation: its signal reaches MSAL and the Graph fetch.
+  ipcMain.handle(
+    "openadminos:cancel-tenant-check",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.cancelTenantCheck(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
   ipcMain.handle("openadminos:add-sample-tenant", handleTrusted(() =>
     store.addSampleTenant(),
   ));

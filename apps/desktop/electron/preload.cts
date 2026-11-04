@@ -465,6 +465,10 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:add-tenant-access", tenantId, partIds),
   refreshTenantGrants: (tenantId) =>
     ipcRenderer.invoke("openadminos:refresh-tenant-grants", tenantId),
+  retryTenantLicenseCheck: (tenantId) =>
+    ipcRenderer.invoke("openadminos:retry-tenant-license-check", tenantId),
+  cancelTenantCheck: (tenantId) =>
+    ipcRenderer.invoke("openadminos:cancel-tenant-check", tenantId),
   addSampleTenant: () => ipcRenderer.invoke("openadminos:add-sample-tenant"),
   cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>

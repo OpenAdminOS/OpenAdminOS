@@ -19,7 +19,7 @@ function ownRegistrationTenant(warned: boolean): TenantRecord {
     grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"],
     entraTier: "p1",
     ...(warned
-      ? { tierProbeWarning: { message: MISMATCH, accountMismatch: true, at: "2026-11-04T10:00:00.000Z" } }
+      ? { tierProbeWarning: { message: MISMATCH, reason: "account-mismatch", accountMismatch: true, at: "2026-11-04T10:00:00.000Z" } }
       : {}),
   };
 }

@@ -202,13 +202,50 @@ export interface AgentSummary extends AgentContract {
   manifestError?: string;
 }
 
+/** Why a tenant's license check did not finish. */
+export type TenantTierProbeFailureReason =
+  /** Graph answered `/subscribedSkus` with an HTTP error; `status` says which. */
+  | "http"
+  /** Graph could not be reached. */
+  | "network"
+  /** Graph or the check did not finish in time. */
+  | "timeout"
+  /** Graph answered without a list of subscriptions. */
+  | "malformed"
+  /** The Microsoft sign-in for the check was cancelled. */
+  | "cancelled"
+  /** Another account or directory signed in. */
+  | "account-mismatch"
+  /** No token could be acquired for Organization.Read.All. */
+  | "sign-in";
+
+/**
+ * A license check that did not finish. The stored Entra tier and licenses
+ * stay as they were; only a check that gets an answer replaces them and
+ * clears this warning.
+ */
 export interface TenantTierProbeWarning {
   /** The failure, such as the TenantAccountMismatchError recovery text. */
   message: string;
+  reason: TenantTierProbeFailureReason;
+  /** The HTTP status when `reason` is `http`. */
+  status?: number;
   /** True when another account or directory signed in. */
   accountMismatch: boolean;
   /** ISO timestamp of the failed probe. */
   at: string;
+}
+
+/**
+ * A permissions or license check running in the host for a tenant. Derived
+ * on every `getAppState()` read, not persisted.
+ */
+export interface TenantCheckProgress {
+  tenantId: string;
+  /** Check again, Retry license check, or Add access. */
+  kind: "permissions" | "license" | "access";
+  /** `sign-in` while a Microsoft sign-in window is open for the check. */
+  phase: "checking" | "sign-in";
 }
 
 /**
@@ -1007,6 +1044,8 @@ export interface AppState {
   registryAgents: RegistryAgentSummary[];
   /** Local manifests that failed validation, shown as unavailable agents. */
   invalidAgents?: InvalidAgentManifest[];
+  /** Permissions and license checks in progress, one per tenant at most. */
+  tenantChecks?: TenantCheckProgress[];
   installedAgents: AgentSummary[];
   runs: RunRecord[];
   trust: TrustState;
@@ -2897,6 +2936,17 @@ export interface OpenAdminOSApi {
    * token carries and replace the tenant's grants with them.
    */
   refreshTenantGrants(tenantId: string): Promise<AppState>;
+  /**
+   * Run only the license check for a tenant, for example after it did not
+   * finish. Grants are not read or changed.
+   */
+  retryTenantLicenseCheck(tenantId: string): Promise<AppState>;
+  /**
+   * Cancel the Check again, license check or Add access running for a
+   * tenant. The call that started it rejects, and grants, tier and
+   * licenses stay as they were before that check.
+   */
+  cancelTenantCheck(tenantId: string): Promise<void>;
   /** Add or reactivate the built-in fictional tenant. This is idempotent. */
   addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
