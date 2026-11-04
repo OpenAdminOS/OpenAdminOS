@@ -1145,7 +1145,7 @@ describe("IntuneChat conversation routes", () => {
 
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-mcp-1", bridge });
 
-    await user.click(await screen.findByText("How I checked"));
+    await user.click(await screen.findByRole("button", { name: "How the answer was made" }));
     await user.click(screen.getByRole("button", { name: /What ran/ }));
     expect(screen.getByText("MCP tool · Microsoft Learn at learn.microsoft.com · third-party content, not tenant evidence")).toBeInTheDocument();
   });
@@ -1312,7 +1312,7 @@ describe("IntuneChat conversation routes", () => {
 
     expect(await screen.findByText("Two devices need review.")).toBeInTheDocument();
     expect(screen.getByText(notice)).toBeVisible();
-    await user.click(screen.getByText("How I checked"));
+    await user.click(screen.getByRole("button", { name: "How the answer was made" }));
     expect(screen.getByText(notice)).toBeVisible();
   });
 
@@ -1374,6 +1374,20 @@ describe("IntuneChat conversation routes", () => {
       await user.click(within(chips).getByRole("button", { name: "Which Macs miss the system extension profile?" }));
       expect(composer).toHaveValue("Which Macs miss the system extension profile?");
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    });
+
+    it("names what a docs answer used above it, not tenant data, and keeps how it was made in the step summary", async () => {
+      const user = userEvent.setup();
+      setup();
+      expect(await screen.findByText(/needs full disk access/)).toBeInTheDocument();
+      const log = screen.getByRole("log", { name: "Conversation" });
+      const header = within(log).getByText("Contoso IT").parentElement!;
+      expect(header).toHaveTextContent(/^CIContoso IT·Microsoft Learn$/);
+      expect(within(log).queryByText("Tenant data")).toBeNull();
+      expect(within(log).queryByText("How I checked")).toBeNull();
+      expect(within(log).queryByText(/data from/)).toBeNull();
+      await user.click(within(log).getByRole("button", { name: /1 step/ }));
+      expect(within(log).getByRole("list", { name: "Steps" })).toBeInTheDocument();
     });
 
     it("streams each step live, then folds them into the summary line", async () => {
@@ -1561,7 +1575,7 @@ describe("IntuneChat conversation routes", () => {
     expect(screen.queryByRole("list", { name: "Sources" })).not.toBeInTheDocument();
     expect(screen.queryByText("· 9 rows")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("How I checked"));
+    await user.click(screen.getByRole("button", { name: "How the answer was made" }));
     expect(screen.getByText("Sources")).toBeVisible();
   });
 });

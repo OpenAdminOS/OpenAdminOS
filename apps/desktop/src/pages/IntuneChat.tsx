@@ -79,7 +79,7 @@ import {
   shouldSubmitComposerKey,
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
-import { appendOnlySteps, currentStepTitle } from "../shared/chat-steps";
+import { answerSources, appendOnlySteps, currentStepTitle } from "../shared/chat-steps";
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRun, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
@@ -4235,14 +4235,8 @@ function ChatMessageBubble({
         <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
       ) : (
         <>
-          <AnswerScopeDisclosure
-            tenant={tenant}
-            multiTenant={multiTenant}
-            notice={message.engineNotice}
-            sources={message.sources ?? []}
-            trace={message.toolTrace ?? []}
-          />
-          <StepSummary message={message} />
+          <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} />
+          <StepSummary message={message} details={tenant?.kind === "sample" && !multiTenant ? undefined : <AnswerDetails message={message} />} />
         </>
       )}
       {displayContent ? <AnswerBody message={message} content={displayContent} /> : null}
@@ -4280,28 +4274,32 @@ function ChatMessageBubble({
   );
 }
 
+/**
+ * The line above an answer: the tenant, what the answer used ("Microsoft
+ * Learn", "Microsoft Learn and your tenant"), and how old the tenant data
+ * was. How the answer was made is in the step summary below it.
+ */
 function AnswerScopeDisclosure({
   tenant,
   multiTenant,
-  notice,
-  sources,
-  trace,
+  message,
 }: {
   tenant?: TenantRecord;
   multiTenant: boolean;
-  notice?: string;
-  sources: IntuneChatSource[];
-  trace: IntuneChatToolTraceEntry[];
+  message: IntuneChatMessage;
 }) {
+  const notice = message.engineNotice;
+  const sources = message.sources ?? [];
+  const used = answerSources(message).map((source) => (source === "docs index" ? "the local docs index" : source));
+  // Older answers stored tenant rows as sources without a tenant marker.
+  if (!used.includes("your tenant") && sources.some((source) => source.rows > 0 && !source.error)) used.push("your tenant");
+  const tenantUsed = used.includes("your tenant");
+  const label = used.length > 0 ? used.join(", ").replace(/, ([^,]*)$/, " and $1") : "No sources";
   // The stalest source bounds how current the answer can be. Showing
   // the newest refresh let a header claim "data from just now" while the
   // rows the answer used were hours old.
-  const refreshedAt = oldestTimestamp(
-    sources.flatMap((source) => source.refreshedAt ?? []),
-  );
-  const resourceNames = [...new Set(sources.map((source) => source.label))].join(", ");
+  const refreshedAt = tenantUsed ? oldestTimestamp(sources.flatMap((source) => source.refreshedAt ?? [])) : undefined;
   const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
-  const hasDetails = Boolean(sources.length > 0 || trace.length > 0);
 
   if (tenant?.kind === "sample" && !multiTenant) {
     return (
@@ -4316,43 +4314,43 @@ function AnswerScopeDisclosure({
 
   return (
     <>
-    <details className="group/details mb-2.5">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-md text-sm text-[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] [&::-webkit-details-marker]:hidden">
-        {multiTenant ? (
-          <MultiTenantTile size="xs" />
-        ) : tenant ? (
-          <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
-        ) : null}
-        <span>{scopeName}</span>
-        <span aria-hidden="true" className="opacity-60">·</span>
-        <span>{resourceNames || "Tenant data"}</span>
-        {refreshedAt ? (
-          <>
-            <span aria-hidden="true" className="opacity-60">·</span>
-            <span>{sources.length > 1 ? "oldest data from " : "data from "}{formatRelativeAge(refreshedAt)}</span>
-          </>
-        ) : null}
-        <span aria-hidden="true" className="opacity-60">·</span>
-        <span className="inline-flex items-center gap-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-          How I checked
-          <IconChevronRight size={13} className="transition-transform duration-150 group-open/details:rotate-90" />
-        </span>
-      </summary>
-      <div className="mt-2 border-l-2 border-[var(--color-border)] pl-3 text-sm text-[var(--color-text-soft)]">
-        {sources.length > 0 ? <SourceDetails sources={sources} /> : null}
-        {trace.length > 0 ? <ToolTraceDetails trace={trace} /> : null}
-        {!hasDetails ? <div className="py-1">No source trace was stored for this answer.</div> : null}
-      </div>
-    </details>
+    <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
+      {multiTenant ? (
+        <MultiTenantTile size="xs" />
+      ) : tenant ? (
+        <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
+      ) : null}
+      <span>{scopeName}</span>
+      <span aria-hidden="true" className="opacity-60">·</span>
+      <span>{label.charAt(0).toUpperCase() + label.slice(1)}</span>
+      {refreshedAt ? (
+        <>
+          <span aria-hidden="true" className="opacity-60">·</span>
+          <span>{sources.length > 1 ? "oldest data from " : "data from "}{formatRelativeAge(refreshedAt)}</span>
+        </>
+      ) : null}
+    </div>
     {notice ? (
       // A fallback or repair notice changes how much the answer can be
-      // trusted, so it stays visible next to the answer instead of
-      // hiding inside the collapsed details.
+      // trusted, so it stays visible next to the answer.
       <div role="status" className="mb-2.5 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
         {notice}
       </div>
     ) : null}
     </>
+  );
+}
+
+/** The tenant sources and tool calls of an answer, shown when its step summary is expanded. */
+function AnswerDetails({ message }: { message: IntuneChatMessage }) {
+  const sources = message.sources ?? [];
+  const trace = message.toolTrace ?? [];
+  if (sources.length === 0 && trace.length === 0) return null;
+  return (
+    <div className="mb-4 border-l-2 border-[var(--color-border)] pl-3 text-sm text-[var(--color-text-soft)]">
+      {sources.length > 0 ? <SourceDetails sources={sources} /> : null}
+      {trace.length > 0 ? <ToolTraceDetails trace={trace} /> : null}
+    </div>
   );
 }
 

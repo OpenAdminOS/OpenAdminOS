@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 import type { IntuneChatDocumentationSource, IntuneChatMessage, IntuneChatSource, IntuneChatStep } from "../../shared/openAdminOS";
 import {
@@ -93,12 +93,33 @@ export function StepSkeleton() {
   );
 }
 
-/** The folded line after an answer. It expands to the full timeline. */
-export function StepSummary({ message }: { message: IntuneChatMessage }) {
+/**
+ * The folded line after an answer. It expands to the full timeline and,
+ * below it, the tenant sources and tool calls: the one place to see how
+ * the answer was made. An older answer with no steps shows the details only.
+ */
+export function StepSummary({ message, details }: { message: IntuneChatMessage; details?: ReactNode }) {
   const [open, setOpen] = useState(false);
   const timelineId = useId();
   const steps = message.steps ?? [];
-  if (steps.length === 0) return null;
+  if (steps.length === 0) {
+    if (!details) return null;
+    return (
+      <>
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-controls={timelineId}
+          onClick={() => setOpen((value) => !value)}
+          className="mb-3 flex items-center gap-1 rounded-md text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+        >
+          <IconChevronRight size={13} className={`transition-transform duration-150 ${open ? "rotate-90" : ""}`} />
+          How the answer was made
+        </button>
+        <div id={timelineId} hidden={!open}>{open ? details : null}</div>
+      </>
+    );
+  }
   const summary = summarizeSteps(message);
   return (
     <>
@@ -118,7 +139,12 @@ export function StepSummary({ message }: { message: IntuneChatMessage }) {
         <span className="text-xs text-[var(--color-text-muted)] sm:ml-auto">{summary.egress}</span>
       </button>
       <div id={timelineId} hidden={!open}>
-        {open ? <StepTimeline steps={steps} /> : null}
+        {open ? (
+          <>
+            <StepTimeline steps={steps} />
+            {details}
+          </>
+        ) : null}
       </div>
     </>
   );
