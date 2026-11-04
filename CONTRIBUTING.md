@@ -35,7 +35,7 @@ The runtime hard-fails any LLM step reached without a connected provider (no sil
 
 ## Quality gate for agents
 
-Every registry agent declares its Graph contract in `manifest.yaml` through its Graph skills (method, path, scopes, and optional selected fields). Before opening a PR for an agent change, run:
+Every registry agent declares its Graph contract in `manifest.yaml` through its Graph skills (method, path, scopes, and optional selected fields), and the Microsoft 365 services it needs in `descriptor.services` (`intune`, `entra` or `defender`). Declare the least-privileged scopes that cover the agent's operations; `Directory.Read.All` and write scopes are requested only when the agent runs. Before opening a PR for an agent change, run:
 
 ```
 eval $(scripts/setup-qa.sh)
@@ -56,6 +56,7 @@ npm run qa
 - Every `select` field exists on the operation's resource type.
 - A best-effort lookup of curated samples backing each GET operation (warning when none found).
 - Every agent includes at least one `format: llm` step (`uses-llm` check, hard fail).
+- `descriptor.services` is present, lists only available services, and covers every declared scope according to the service registry in `packages/agent-sdk/src/services.ts` (`services-cover-scopes` check, hard fail).
 
 The synthetic Graph fixture in `@openadminos/runtime` is also cross-checked against the real `managedDevice` schema. Adding a field to the fixture that doesn't exist on Graph fails the gate.
 

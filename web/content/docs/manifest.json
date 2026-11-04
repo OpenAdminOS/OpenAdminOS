@@ -33,6 +33,20 @@
           "route": "basics/connect-tenant",
           "path": "basics/connect-tenant",
           "children": []
+        },
+        {
+          "title": "Connect with the shared app",
+          "source": "getting-started/connect-shared-app.md",
+          "route": "basics/connect-shared-app",
+          "path": "basics/connect-shared-app",
+          "children": []
+        },
+        {
+          "title": "Own app registration",
+          "source": "getting-started/own-app-registration.md",
+          "route": "basics/own-app-registration",
+          "path": "basics/own-app-registration",
+          "children": []
         }
       ]
     },
@@ -73,6 +87,13 @@
           "source": "generated/reference/permissions-by-service.md",
           "route": "services/permissions-by-service",
           "path": "services/permissions-by-service",
+          "children": []
+        },
+        {
+          "title": "Roles",
+          "source": "guides/roles.md",
+          "route": "services/roles",
+          "path": "services/roles",
           "children": []
         }
       ]
@@ -176,6 +197,19 @@
           "source": "trust/eu-ai-act.md",
           "route": "trust-model/eu-ai-act",
           "path": "trust-model/eu-ai-act",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Troubleshooting",
+      "slug": "troubleshooting",
+      "pages": [
+        {
+          "title": "Consent and sign-in errors",
+          "source": "troubleshooting/consent-errors.md",
+          "route": "troubleshooting/consent-errors",
+          "path": "troubleshooting/consent-errors",
           "children": []
         }
       ]
@@ -413,6 +447,14 @@
       "destination": "basics/connect-tenant"
     },
     {
+      "source": "getting-started/connect-shared-app",
+      "destination": "basics/connect-shared-app"
+    },
+    {
+      "source": "getting-started/own-app-registration",
+      "destination": "basics/own-app-registration"
+    },
+    {
       "source": "generated/services/intune",
       "destination": "services/intune"
     },
@@ -427,6 +469,10 @@
     {
       "source": "generated/reference/permissions-by-service",
       "destination": "services/permissions-by-service"
+    },
+    {
+      "source": "guides/roles",
+      "destination": "services/roles"
     },
     {
       "source": "trust/local-first",
@@ -561,6 +607,10 @@
       "destination": "trust-model/local-first"
     },
     {
+      "source": "troubleshooting",
+      "destination": "troubleshooting/consent-errors"
+    },
+    {
       "source": "developers",
       "destination": "developers/architecture"
     },
@@ -579,6 +629,10 @@
     {
       "source": "generated/reference",
       "destination": "services/permissions-by-service"
+    },
+    {
+      "source": "guides",
+      "destination": "services/roles"
     },
     {
       "source": "trust",

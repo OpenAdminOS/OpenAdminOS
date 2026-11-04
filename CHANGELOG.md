@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Services as modules: connect Intune, Entra and Defender one at a time, each split into parts with the exact Microsoft Graph scopes and reasons; own app registrations sign in with `.default`, switch on what was granted and offer a script, a manifest snippet and Check again for the rest; agents declare `services`; new docs cover permissions by service, each service, own app registration, roles and consent errors.
 - The connect dialog opens with two equal choices, OpenAdminOS app or your own app registration, neither preselected; own registrations are remembered on the device, each tenant shows its registration, sign-in errors name the registration with specific fixes, and scheduled Teams and Outlook delivery now uses the tenant's own registration.
 - Public roadmap at roadmap.openadminos.com: four stages from the desktop available today to team features and a vendor ecosystem, each item tracked as a public issue.
 - Add a code of conduct (Contributor Covenant 2.1) and a security policy with private vulnerability reporting and the scope of what to report.

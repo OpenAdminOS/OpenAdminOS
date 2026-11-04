@@ -22,6 +22,27 @@ Drafting follows the active provider's data-flow rules. Local providers such as 
 
 Preflight checks the provider, manifest shape, Graph scopes, Graph endpoints, connector declarations, settings, and write-confirmation requirements.
 
+## Services And Scopes
+
+Every agent declares the Microsoft 365 services it needs in `descriptor.services`: `intune`, `entra` or `defender`. Each Graph scope the agent declares must belong to one of those services; the [Permissions by service](../generated/reference/permissions-by-service.md) reference shows where each scope belongs. An agent cannot run while one of its services is not connected for the tenant, and the Agents list and Marketplace show which services each agent needs.
+
+```yaml
+descriptor:
+  id: stale-guest-cleanup
+  # ...
+  services:
+    - entra
+  mode: write
+```
+
+Use the least-privileged scopes that cover the agent's Graph operations:
+
+- Prefer scopes that a service part already requests, such as `User.Read.All` or `Policy.Read.All`. A tenant that connected the service then needs no extra consent.
+- Do not declare `Directory.Read.All` when a narrower read scope works. It is not part of any service and is requested only when the agent runs.
+- Declare write scopes only on `write` steps. They are requested when the agent runs, and every write still pauses for diff confirmation.
+
+Registry agents must declare `services`; the registry QA check `services-cover-scopes` fails without it, or when a scope is not covered. A local agent without `services` gets them derived from its scopes, but declaring them keeps the agent ready for a community submission.
+
 For write agents, preflight verifies the confirmation gate but does not apply Graph changes. A write agent still pauses for confirmation every time it produces a non-empty write plan.
 
 A write manifest can declare `descriptor.writeLimits.maxActions` and optional `maxActionsPerOperation` values keyed by action kind, such as `graph-write` or `retire-managed-device`. Each value must be a positive integer up to 1,000. The total defaults to 100 actions when no limits are declared. Read agents cannot declare write limits. Limits appear in the permissions preview and cannot be bypassed by approving a plan.
