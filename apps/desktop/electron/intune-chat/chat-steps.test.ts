@@ -292,8 +292,11 @@ describe("follow-ups", () => {
   it("offers a tenant check for a docs question with a tenant tie-in, counted from the cache", () => {
     const question = "What does the microsoft learn say about defender for macos?";
     const base = { question, kind: "docs" as const, tieInResources: planChatContext(question).resources };
-    assert.equal(tenantTieInFollowUp({ ...base, deviceCountsByOs: { macOS: 5, Windows: 4 } }), "Check our 5 macOS devices for Defender in Intune");
-    assert.equal(tenantTieInFollowUp({ ...base }), "Check our macOS devices for Defender in Intune");
+    // Defender status is not in the device records, so the tie-in asks for what they hold.
+    assert.equal(tenantTieInFollowUp({ ...base, deviceCountsByOs: { macOS: 5, Windows: 4 } }), "Show compliance and last sync for our 5 macOS devices");
+    assert.equal(tenantTieInFollowUp({ ...base }), "Show compliance and last sync for our macOS devices");
+    const fileVault = "How do I enable FileVault on macOS?";
+    assert.equal(tenantTieInFollowUp({ question: fileVault, kind: "docs", tieInResources: ["managedDevices"], deviceCountsByOs: { macOS: 5 } }), "Check our 5 macOS devices for FileVault in Intune");
     assert.equal(tenantTieInFollowUp({ ...base, deviceCountsByOs: { Windows: 4 } }), undefined);
     assert.equal(tenantTieInFollowUp({ ...base, kind: "tenant" }), undefined);
     const kqlQuestion = "Write a KQL query that lists failed sign-ins in the last 24 hours";

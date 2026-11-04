@@ -85,6 +85,9 @@ function isEvidenceResult(tool: string, result: unknown): boolean {
 }
 const DEFAULT_OBSERVATION_CHAR_BUDGET = 36_000;
 
+/** Follow-ups must lead somewhere: a check no tool can answer ends in "the data does not show". */
+const FOLLOW_UP_SCOPE = "Suggest only what the tools listed here can answer. Never suggest checking data no listed tool returns, such as Defender for Endpoint status on devices.";
+
 export const AGENTIC_TOOL_PROTOCOL = [
   "Use one tool call per iteration.",
   "To call a tool, respond with only a fenced JSON block:",
@@ -96,6 +99,7 @@ export const AGENTIC_TOOL_PROTOCOL = [
   "When you have enough evidence, return:",
   '```json\n{"final":true,"answer":"...","next":["..."]}\n```',
   "next is optional: up to two short read-only questions the admin could ask next, each under 120 characters.",
+  FOLLOW_UP_SCOPE,
 ].join("\n");
 
 /** What the first reply adds while the model classifies the question. */
@@ -120,6 +124,7 @@ const DOCS_TOOL_PROTOCOL = [
   "When you are done, return:",
   '```json\n{"final":true,"answer":"...","next":["..."]}\n```',
   "next is optional: up to two short read-only questions the admin could ask next, each under 120 characters. One may offer to check the tenant.",
+  FOLLOW_UP_SCOPE,
 ].join("\n");
 
 export interface RunAgenticChatInput {

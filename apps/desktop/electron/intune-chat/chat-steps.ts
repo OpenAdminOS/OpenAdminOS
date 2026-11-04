@@ -555,6 +555,9 @@ const PLATFORMS: ReadonlyArray<[RegExp, string]> = [
   [/\bwindows\b/i, "Windows"],
 ];
 
+/** Topics the cached Intune device records answer: compliance state and encryption. */
+const DEVICE_RECORD_TOPICS = new Set(["compliance", "encryption", "BitLocker", "FileVault"]);
+
 const TOPICS = [
   "Defender", "BitLocker", "FileVault", "LAPS", "Autopilot", "Windows Hello", "Conditional Access", "Platform SSO",
   "Company Portal", "Windows Update", "app protection", "compliance", "encryption",
@@ -582,7 +585,10 @@ export function tenantTieInFollowUp(input: {
       : undefined;
     if (count === 0) return undefined;
     const devices = count === undefined ? `${platform} devices` : `${count} ${platform} ${count === 1 ? "device" : "devices"}`;
-    return `Check our ${devices}${topic ? ` for ${topic}` : ""} in Intune`;
+    // Only what the device records hold. Defender status, for one, is not in them, so a
+    // "Check for Defender" follow-up led to an answer that could not tell.
+    if (topic && DEVICE_RECORD_TOPICS.has(topic)) return `Check our ${devices} for ${topic} in Intune`;
+    return `Show compliance and last sync for our ${devices}`;
   }
   // The planner lists the most relevant resource first.
   // TODO(ugur): this generic wording is used for every non-device tie-in, such as a KQL

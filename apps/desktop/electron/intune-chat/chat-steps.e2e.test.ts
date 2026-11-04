@@ -218,7 +218,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         [2, "mcp", "Microsoft Learn", "https://learn.microsoft.com/defender-endpoint/mac-requirements"],
       ]);
       assert.match(message.content, /^Microsoft Learn says/);
-      assert.deepEqual(message.followUps, ["Check our 5 macOS devices for Defender in Intune", "Which Macs miss the system extension profile?"]);
+      assert.deepEqual(message.followUps, ["Show compliance and last sync for our 5 macOS devices", "Which Macs miss the system extension profile?"]);
 
       // A reload shows the same steps, sources and follow-ups.
       const reloaded = (await store.getIntuneChatMessages(result.conversation.id)).at(-1)!;
@@ -393,7 +393,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.deepEqual(kinds(message.steps), ["plan", "answer"]);
       assert.match(message.steps![0]!.detail!, /Documentation question\. No documentation source is available/);
       assert.match(message.engineNotice ?? "", /Installed MCP tools were not used because Chat is set to deterministic retrieval/);
-      assert.deepEqual(message.followUps, ["Check our 5 macOS devices for Defender in Intune"]);
+      assert.deepEqual(message.followUps, ["Show compliance and last sync for our 5 macOS devices"]);
       assert.deepEqual(graphPaths, []);
       assert.equal(message.tenantContext, undefined, "a docs answer carries no tenant rows");
 

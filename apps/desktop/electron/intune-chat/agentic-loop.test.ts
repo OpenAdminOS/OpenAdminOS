@@ -860,4 +860,25 @@ describe("answer prompt", () => {
       assert.doesNotMatch(system, /be explicit when tenant context|selected provider is (?:hosted|local)|say what the documentation does not cover|tenant is not checked/);
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
+
+  it("asks for follow-ups the listed tools can answer, in the docs and the tenant protocol", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-next-"));
+    const store = seededStore(dir);
+    try {
+      const systems: string[] = [];
+      const llm: RunLlmApi = {
+        available: true,
+        async complete(options) {
+          systems.push(options.system ?? "");
+          return { text: systems.length === 1 ? '{"tool":"query_cache","params":{"resource":"managedDevices"}}' : '{"final":true,"answer":"Done."}', model: "m" };
+        },
+        async *stream() {},
+      };
+      await runAgenticChat({ ...baseInput(store, llm), questionKind: "docs" });
+      await runAgenticChat({ ...baseInput(store, llm), questionKind: "tenant" });
+      for (const system of [systems[0]!, systems.at(-1)!]) {
+        assert.match(system, /Suggest only what the tools listed here can answer\. Never suggest checking data no listed tool returns, such as Defender for Endpoint status on devices\./);
+      }
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
 });
