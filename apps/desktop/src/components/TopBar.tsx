@@ -49,8 +49,8 @@ export function TopBar() {
         ) : null}
         <TenantSwitcher />
       </div>
-      <div ref={setTitleTarget} className="app-region-no-drag pointer-events-auto absolute left-1/2 min-w-0 max-w-[34%] -translate-x-1/2 truncate text-sm font-medium text-[var(--color-text-soft)]" />
-      <div className="ml-auto flex min-w-0 items-center gap-2">
+      <div ref={setTitleTarget} className="app-region-no-drag pointer-events-auto min-w-0 flex-1 truncate px-4 text-center text-sm font-medium text-[var(--color-text-soft)]" />
+      <div className="flex min-w-0 shrink items-center gap-2">
         <div ref={setActionsTarget} className="app-region-no-drag flex shrink-0 items-center gap-1" />
         <Tooltip content={boundary.tooltip} side="bottom">
           {boundary.kind === "none" ? (
