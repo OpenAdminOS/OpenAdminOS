@@ -1114,3 +1114,19 @@ Owner decision (2026-11-05): "Disclose + current message only". The query writer
 Checks: typecheck clean; electron 777 of 777; renderer 53 files, 403 tests under Node 22; runtime 225 pass, 0 fail (227 tests); qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
 
 Open: the round 3 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, and a live check with a real local model that the query writer writes usable Learn queries from the current question alone.
+
+## Review round 3 (marketplace)
+
+Same branch, from head 0703e27. Findings from the GPT-6.1-Sol review (G) and the separate Claude evaluator (E).
+
+| Finding | Resolution | Commit |
+| --- | --- | --- |
+| G1 (blocking, privacy): follow-ups written by the answering model after it read tenant data could carry an unindexed field (`streetAddress: "420 Cedar Avenue"`) into a suggestion; sent by the admin, it became the query writer's current question. | After an answer that read tenant data (a tenant or mixed kind, a Graph refresh or any tenant tool), the model's `next` is dropped, in the loop and again in `answerFollowUps`, which every surface reads (stored message, chip, composer ghost text; voice shows no follow-ups). Such an answer offers only `tenantAnswerFollowUp`: the device template built from the platform the question names and the cached count, and only when it does not repeat the question; otherwise none. Docs answers that read no tenant data keep the model's follow-ups. `title` stays model-written with its checks. Tests: loop test with a `graph_get` result holding the address and the model returning it in `next`; end to end over two turns where the stored follow-ups hold no address, the admin sends the offered one, and the address never reaches the query writer prompt or the sent params; unit cases for the template and the near-duplicate rule. TODO(ugur) in code: tenant answers on other resources now offer no follow-up. | 4a8abf8 |
+| G2: once the source repair budget was spent, a final answer that never called a required source was accepted silently. | The kept answer ends with "Microsoft Learn was not consulted for this answer. The model answered without calling it." (names joined, plural form for several). Test with three final replies and no tool call. | 0c749e4 |
+| G3 (nit): `MCP_TOOL_RULES` said the query is written from "the admin's own messages". | Now "from the admin's current question and the tool's schema only". Test. | 7a6d271 |
+| E low: the hosted send confirmation named only the hosted provider. | The prompt carries the enabled MCP hosts (`chatToolHosts`, shared with the status strip), `deriveTrustCopy` gets them, and "What leaves this device" adds the tool host disclosure. Renderer tests with Learn enabled and with no server enabled. | 5e3ec4d |
+| E nit: SPEC and the round 2 record said "on voice the current utterance". | Replaced: voice offers no MCP tools. | 0fb13fe |
+
+Checks (Node 22): typecheck clean; electron 782 of 782; renderer 53 files, 405 tests (the known flaky "finds a setting" failed once in the full run and passed alone); runtime 225 pass, 0 fail (227 tests); qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
+
+Open: the round 4 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, the per-resource follow-up question for tenant answers, and a live check with a real local model.
