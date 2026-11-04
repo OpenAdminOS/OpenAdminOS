@@ -1033,6 +1033,8 @@ export type McpServerAuth = "none";
 export interface McpServerToolSummary {
   name: string;
   description: string;
+  /** Why Chat does not offer this tool, for example an oversized schema. */
+  unavailable?: string;
 }
 
 /**

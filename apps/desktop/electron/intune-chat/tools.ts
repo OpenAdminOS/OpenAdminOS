@@ -134,6 +134,9 @@ function validateMcpArgs(entry: McpChatTool, params: unknown): Record<string, un
       }
     }
     const declared = properties?.[key]?.type;
+    if (Array.isArray(value) && (declared === "string" || declared === "number" || declared === "integer" || declared === "boolean")) {
+      reject(`${entry.tool} param ${key} takes one value, not a list.`);
+    }
     const expected = declared === "integer" ? "number" : declared;
     if (typeof expected === "string" && expected !== "array" && !Array.isArray(value) && typeof value !== expected) {
       reject(`${entry.tool} param ${key} must be of type ${String(declared)}.`);
@@ -169,10 +172,15 @@ export const MCP_TOOL_RULES = [
  * are fenced as third-party content.
  */
 export function mcpToolDefinitionsForPrompt(tools: readonly McpChatTool[]): string {
-  return tools.map((tool) => [
-    `- ${tool.name}: ${tool.serverName} (sends params to ${tool.host}). Description and params schema from the server:`,
-    `  ${fenceTenantData({ description: cleanMcpDescription(tool.description), params: cleanMcpSchema(tool.inputSchema) }, `third-party:${tool.host}:tool`)}`,
-  ].join("\n")).join("\n");
+  return tools.flatMap((tool) => {
+    const params = cleanMcpSchema(tool.inputSchema);
+    // A schema that cannot be passed on is never offered; the Marketplace shows why.
+    if (!params) return [];
+    return [[
+      `- ${tool.name}: ${tool.serverName} (sends params to ${tool.host}). Description and params schema from the server:`,
+      `  ${fenceTenantData({ description: cleanMcpDescription(tool.description), params }, `third-party:${tool.host}:tool`)}`,
+    ].join("\n")];
+  }).join("\n");
 }
 
 export function tenantDataSourceForTool(tool: IntuneChatInvestigationToolName, params: unknown): string {

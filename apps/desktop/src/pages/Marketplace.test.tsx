@@ -131,10 +131,14 @@ describe("Marketplace", () => {
   it("turns an installed server off and uninstalls it", async () => {
     const user = userEvent.setup();
     const bridge = render("/marketplace?server=kql-search", {
-      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true, tools: [{ name: "search_kql_queries", description: "Search KQL." }] } }),
+      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true, tools: [
+        { name: "search_kql_queries", description: "Search KQL." },
+        { name: "huge_tool", description: "Too many params.", unavailable: "Not offered to Chat: its parameter schema is too large to pass to a model, even without descriptions." },
+      ] } }),
     });
     const dialog = await screen.findByRole("dialog", { name: "KQL Search details" });
     expect(within(dialog).getByText("search_kql_queries")).toBeInTheDocument();
+    expect(within(dialog).getByText(/its parameter schema is too large to pass to a model/)).toBeInTheDocument();
     await user.click(within(dialog).getByRole("switch", { name: /Available in Chat/ }));
     await waitFor(() => expect(bridge.setMcpServerEnabled).toHaveBeenCalledWith("kql-search", false));
     await user.click(within(dialog).getByRole("button", { name: "Uninstall" }));

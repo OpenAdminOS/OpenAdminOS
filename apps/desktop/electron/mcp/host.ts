@@ -18,7 +18,12 @@ export interface McpToolInfo {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
+  /** Set when the tool cannot be offered to Chat; shown in the Marketplace. */
+  unavailable?: string;
 }
+
+export const MCP_SCHEMA_UNAVAILABLE =
+  "Not offered to Chat: its parameter schema is too large to pass to a model, even without descriptions.";
 
 export interface McpConnectResult {
   serverName?: string;
@@ -65,11 +70,31 @@ export function cleanMcpDescription(text: unknown): string {
   return flat.length <= MCP_DESCRIPTION_LIMIT ? flat : `${flat.slice(0, MCP_DESCRIPTION_LIMIT - 3)}...`;
 }
 
-/** An oversized or malformed schema is replaced by a plain object schema. */
-export function cleanMcpSchema(schema: unknown): Record<string, unknown> {
+/**
+ * A schema within the limit is kept. An oversized one keeps its property
+ * names, types and required list without descriptions. If that is still
+ * too large, the result is undefined and the tool is not offered to Chat.
+ */
+export function cleanMcpSchema(schema: unknown): Record<string, unknown> | undefined {
   if (!schema || typeof schema !== "object" || Array.isArray(schema)) return { type: "object" };
-  const serialized = JSON.stringify(schema);
-  return serialized.length <= MCP_SCHEMA_LIMIT ? schema as Record<string, unknown> : { type: "object" };
+  const record = schema as Record<string, unknown>;
+  if (JSON.stringify(record).length <= MCP_SCHEMA_LIMIT) return record;
+  const properties = record.properties && typeof record.properties === "object" && !Array.isArray(record.properties)
+    ? record.properties as Record<string, unknown>
+    : {};
+  const typeOf = (value: unknown) => {
+    const type = value && typeof value === "object" ? (value as { type?: unknown }).type : undefined;
+    return typeof type === "string" || Array.isArray(type) ? { type } : {};
+  };
+  const reduced: Record<string, unknown> = {
+    type: "object",
+    properties: Object.fromEntries(Object.entries(properties).map(([name, value]) => {
+      const items = value && typeof value === "object" ? (value as { items?: unknown }).items : undefined;
+      return [name, { ...typeOf(value), ...(items ? { items: typeOf(items) } : {}) }];
+    })),
+    ...(Array.isArray(record.required) ? { required: record.required.filter((key) => typeof key === "string") } : {}),
+  };
+  return JSON.stringify(reduced).length <= MCP_SCHEMA_LIMIT ? reduced : undefined;
 }
 
 interface Session {
@@ -117,7 +142,7 @@ export class McpHost {
     signal?: AbortSignal,
   ): Promise<McpCallResult> {
     const session = await this.session(endpoint);
-    if (!session.tools.some((tool) => tool.name === name)) {
+    if (!session.tools.some((tool) => tool.name === name && !tool.unavailable)) {
       throw new McpHostError("unknown-tool", `${endpoint.name} does not list a tool named ${name}.`);
     }
     let result: Awaited<ReturnType<Client["callTool"]>>;
@@ -199,10 +224,12 @@ export class McpHost {
 
 function sanitizeTool(tool: { name: string; description?: string; inputSchema: unknown }): McpToolInfo | undefined {
   if (!TOOL_NAME.test(tool.name)) return undefined;
+  const inputSchema = cleanMcpSchema(tool.inputSchema);
   return {
     name: tool.name,
     description: cleanMcpDescription(tool.description),
-    inputSchema: cleanMcpSchema(tool.inputSchema),
+    inputSchema: inputSchema ?? { type: "object" },
+    ...(inputSchema ? {} : { unavailable: MCP_SCHEMA_UNAVAILABLE }),
   };
 }
 

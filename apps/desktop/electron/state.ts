@@ -1704,7 +1704,11 @@ export class AppStateStore {
         enabled: installed?.enabled === true,
         ...(installed ? { installedAt: installed.installedAt } : {}),
         ...(installed?.lastConnectedAt ? { lastConnectedAt: installed.lastConnectedAt } : {}),
-        tools: (installed?.tools ?? []).map((tool) => ({ name: tool.name, description: tool.description })),
+        tools: (installed?.tools ?? []).map((tool) => ({
+          name: tool.name,
+          description: tool.description,
+          ...(tool.unavailable ? { unavailable: tool.unavailable } : {}),
+        })),
       };
     });
   }
@@ -1789,6 +1793,7 @@ export class AppStateStore {
       const installed = persisted.mcpServers?.[entry.id];
       if (!installed?.enabled) continue;
       for (const tool of installed.tools) {
+        if (tool.unavailable) continue;
         tools.push({
           name: mcpChatToolName(entry.id, tool.name),
           serverId: entry.id,

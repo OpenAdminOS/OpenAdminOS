@@ -163,9 +163,12 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
               <div key={tool.name} className="grid gap-0.5 bg-[var(--color-bg-raised)] px-4 py-2.5 text-sm">
                 <div className="flex justify-between gap-3">
                   <code className="font-mono text-xs text-[var(--color-text)]">{tool.name}</code>
-                  <span className="text-xs text-[var(--color-success)]">Reads</span>
+                  {tool.unavailable
+                    ? <span className="text-xs text-[var(--color-warning)]">Not offered to Chat</span>
+                    : <span className="text-xs text-[var(--color-success)]">Reads</span>}
                 </div>
                 {tool.description ? <span className="line-clamp-2 text-xs text-[var(--color-text-muted)]">{tool.description}</span> : null}
+                {tool.unavailable ? <span className="text-xs text-[var(--color-warning)]">{tool.unavailable}</span> : null}
               </div>
             ))}
           </div>
