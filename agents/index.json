@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 10,
+  "revision": 11,
   "agents": [
     {
       "id": "compliance-overview",
@@ -159,7 +159,7 @@
       ],
       "minAppVersion": "0.1.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/offboarding-agent/manifest.yaml",
-      "manifestSha256": "fb913672cb905d43dda60b719bfefa9472ab27b5c4fcbac8257184cc2c8ca949"
+      "manifestSha256": "5680bf98914b2cfbf43c6d9d9d01b065a692644a57b0576230a6235bf6addba6"
     },
     {
       "id": "os-update-posture",
@@ -354,7 +354,7 @@
       ],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/tenant-change-audit/manifest.yaml",
-      "manifestSha256": "2e08b1bf951a751ef056b7633496904ccb5e78b38af01c448c6683d31542227a"
+      "manifestSha256": "e3898252d4f3730c338c7a2c84771a98149e68e6cb98b2bacc4b299723bffa12"
     },
     {
       "id": "tenant-health-report",

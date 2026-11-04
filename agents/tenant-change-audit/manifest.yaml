@@ -17,8 +17,7 @@ descriptor:
   category: policies
   tier: agent
   requiresEntraTier: p1
-  # TODO(ugur): reads Entra directory audits only. Confirm whether Intune
-  # audit events belong here too.
+  # Reads Entra directory audits only (decided 2026-11-04, SPEC.md 2a).
   services:
     - entra
   mode: read

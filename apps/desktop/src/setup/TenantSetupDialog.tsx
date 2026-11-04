@@ -242,8 +242,7 @@ function PermissionsStep({
     initialRegistration?.directoryTenantId ?? "",
   );
   const [registrationLabel, setRegistrationLabel] = useState(initialRegistration?.label ?? "");
-  // TODO(ugur): no service is preselected and at least one is required.
-  // Confirm whether a first connect should preselect a service.
+  // No service is preselected and at least one is required (SPEC.md 2a).
   const [selectedPartIds, setSelectedPartIds] = useState<Set<string>>(
     () =>
       new Set(

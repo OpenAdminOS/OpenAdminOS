@@ -132,12 +132,12 @@ const USERS_REASON =
   "Reads users, their licence assignments, location and last sign-in, so assignments, owners and audit entries show names rather than object IDs.";
 const GROUPS_REASON =
   "Reads groups and group membership, which policy, app and filter assignments target.";
-// TODO(ugur): Organization.Read.All sits in the people parts for now. It
-// also feeds the Entra tier and licence probe in the status strip.
+// Organization.Read.All sits in the people parts (SPEC.md 2a). It also feeds
+// the Entra tier and licence probe in the status strip.
 const ORGANIZATION_REASON =
   "Reads the tenant profile and /subscribedSkus so the status strip shows the Entra ID tier and licences, and agents that need P1 or P2 are badged.";
-// TODO(ugur): Device.Read.All is listed in both intune.devices and
-// entra.devices until the owner decides where it belongs.
+// Device.Read.All is listed in both intune.devices and entra.devices
+// (SPEC.md 2a).
 const ENTRA_DEVICES_REASON =
   "Reads Entra device objects for stale device checks, Autopilot matching and Intune versus Entra inventory comparisons.";
 
@@ -422,7 +422,7 @@ export const SERVICES: readonly ServiceDefinition[] = [
         chatExamples: ["Which high severity incidents are still open?"],
       },
       {
-        // TODO(ugur): Secure Score sits under Defender for now.
+        // Secure Score sits under Defender (SPEC.md 2a).
         id: "defender.score",
         service: "defender",
         title: "Secure Score",
@@ -466,8 +466,8 @@ export const SERVICES: readonly ServiceDefinition[] = [
       agentOnly("SecurityIncident.ReadWrite.All", "Updates Defender incidents, for example status and assignment. Requested only when a write agent that declares it runs."),
     ],
   },
-  // TODO(ugur): planned services and parts appear only in the docs for now.
-  // The app never lists or requests them.
+  // Planned services and parts appear only in the docs (SPEC.md 2a). The app
+  // never lists or requests them.
   {
     id: "exchange",
     title: "Exchange",
