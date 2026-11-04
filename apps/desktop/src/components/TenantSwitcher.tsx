@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { useAppState } from "../state";
-import { userFacingErrorReason } from "../copy";
+import { SERVICE_COPY, userFacingErrorReason } from "../copy";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Button } from "./Button";
 import {
@@ -111,7 +111,11 @@ export function TenantSwitcher() {
   const tooltip = activeTenant
     ? activeTenant.kind === "sample"
       ? "Pilot mode. Sample data from a fictional company. No Microsoft sign-in."
-      : `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.`
+      : `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.${
+          activeTenant.tierProbeWarning
+            ? ` ${SERVICE_COPY.tierProbeWarningTitle} ${activeTenant.tierProbeWarning.message}`
+            : ""
+        }`
     : state.tenants.length > 0
       ? "No active tenant. Choose a connected tenant."
       : "No tenant connected. Open setup to connect one.";
@@ -191,6 +195,11 @@ export function TenantSwitcher() {
                         {registration ? (
                           <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
                             {registration.text}
+                          </span>
+                        ) : null}
+                        {tenant.tierProbeWarning ? (
+                          <span className="mt-0.5 block truncate text-xs text-[var(--color-warning)]" title={tenant.tierProbeWarning.message}>
+                            {SERVICE_COPY.tierProbeWarningShort}. {tenant.tierProbeWarning.message}
                           </span>
                         ) : null}
                       </span>

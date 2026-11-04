@@ -142,6 +142,7 @@ function ServiceAccessBody({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
   const selectedParts = missing.filter((part) => selected.has(part.id));
   const scopes = uniqueScopes(selectedParts);
   const partIds = selectedParts.map((part) => part.id);
@@ -164,6 +165,7 @@ function ServiceAccessBody({
     setBusy(true);
     setError(null);
     setStatus(null);
+    setWarning(null);
     try {
       const message = await action();
       if (message) setStatus(message);
@@ -248,6 +250,11 @@ function ServiceAccessBody({
         {status && (
           <p role="status" className="text-sm text-[var(--color-success)]">{status}</p>
         )}
+        {warning && (
+          <div role="alert" className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+            {warning}
+          </div>
+        )}
         {error && (
           <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">
             {error}
@@ -288,8 +295,11 @@ function ServiceAccessBody({
                 disabled={busy}
                 onClick={() =>
                   void run(async () => {
-                    await refreshTenantGrants(tenant.id);
-                    return SERVICE_COPY.checkedAgain;
+                    const next = await refreshTenantGrants(tenant.id);
+                    const probe = next.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning;
+                    if (!probe) return SERVICE_COPY.checkedAgain;
+                    setWarning(SERVICE_COPY.checkedAgainWithWarning(probe.message));
+                    return null;
                   })
                 }
               >
@@ -437,6 +447,26 @@ export function ServiceNotConnectedNotice({
         open={adding !== null}
         onClose={() => setAdding(null)}
       />
+    </div>
+  );
+}
+
+/**
+ * A tenant whose Entra tier and license probe did not finish, for example
+ * because another account signed in. The stored tier and licenses stay.
+ */
+export function TenantProbeWarning({ tenant }: { tenant: TenantRecord }) {
+  const warning = tenant.tierProbeWarning;
+  if (!warning) return null;
+  return (
+    <div
+      role="alert"
+      aria-label={`${tenant.displayName} license check`}
+      className="mt-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-relaxed ring-1 ring-[var(--color-warning)]/25"
+    >
+      <span className="font-medium text-[var(--color-warning)]">{SERVICE_COPY.tierProbeWarningTitle}</span>{" "}
+      <span className="text-[var(--color-text)]">{warning.message}</span>{" "}
+      <span className="text-[var(--color-text-soft)]">{SERVICE_COPY.tierProbeWarningKept}</span>
     </div>
   );
 }

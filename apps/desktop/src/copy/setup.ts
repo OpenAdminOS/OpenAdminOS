@@ -186,6 +186,11 @@ export const SERVICE_COPY = {
   checkAgainHint:
     "Reads the permissions a new token carries from your app registration and switches on each part that is fully granted.",
   checkedAgain: "Permissions checked. Services follow what the new token carries.",
+  checkedAgainWithWarning: (message: string) =>
+    `Permissions checked, but the license check did not finish. ${message}`,
+  tierProbeWarningTitle: "License check did not finish.",
+  tierProbeWarningKept: "The stored Entra tier and licenses are kept.",
+  tierProbeWarningShort: "License check did not finish",
   copied: (label: string) => `${label} copied.`,
   alreadyConnected: (service: string, tenant: string) =>
     `${service} is connected for ${tenant}. Every part is granted.`,

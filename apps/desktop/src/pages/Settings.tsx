@@ -97,6 +97,7 @@ import { PilotProductionPage } from "../components/PilotMode";
 import { useToast } from "../components/Toast";
 import {
   ServiceAccessDialog,
+  TenantProbeWarning,
   ServiceStatusBadge,
   usesOwnRegistration,
 } from "../components/ServiceAccess";
@@ -1336,6 +1337,7 @@ function TenantServices({
   const [checking, setChecking] = useState(false);
   const [checkError, setCheckError] = useState<string | null>(null);
   const [checkStatus, setCheckStatus] = useState<string | null>(null);
+  const [checkWarning, setCheckWarning] = useState<string | null>(null);
   const grantedPartIds = new Set(grantedParts(tenant).map((part) => part.id));
   return (
     <section
@@ -1357,8 +1359,13 @@ function TenantServices({
               setChecking(true);
               setCheckError(null);
               setCheckStatus(null);
+              setCheckWarning(null);
               void refreshTenantGrants(tenant.id)
-                .then(() => setCheckStatus(SERVICE_COPY.checkedAgain))
+                .then((next) => {
+                  const probe = next.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning;
+                  if (probe) setCheckWarning(SERVICE_COPY.checkedAgainWithWarning(probe.message));
+                  else setCheckStatus(SERVICE_COPY.checkedAgain);
+                })
                 .catch((caught) =>
                   setCheckError(caught instanceof Error ? caught.message : String(caught)),
                 )
@@ -1370,6 +1377,11 @@ function TenantServices({
         ) : null}
       </div>
       {checkStatus && <p role="status" className="mt-2 text-xs text-[var(--color-success)]">{checkStatus}</p>}
+      {checkWarning && (
+        <p role="alert" className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-1.5 text-xs text-[var(--color-warning)]">
+          {checkWarning}
+        </p>
+      )}
       {checkError && (
         <p role="alert" className="mt-2 rounded-md bg-[var(--color-danger-soft)] px-2.5 py-1.5 text-xs text-[var(--color-danger)]">
           {checkError}
@@ -1505,6 +1517,7 @@ function TenantRow({
               {registration.text}
             </div>
           ) : null}
+          <TenantProbeWarning tenant={tenant} />
         </div>
         <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample data" : licenses.map((license) => license.displayName).join(", ")}>
           {tenant.kind === "sample"

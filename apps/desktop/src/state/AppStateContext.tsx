@@ -64,7 +64,8 @@ interface AppStateContextValue {
   cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: (options?: ConnectTenantOptions) => Promise<TenantRecord | undefined>;
   addTenantAccess: (tenantId: string, partIds: string[]) => Promise<void>;
-  refreshTenantGrants: (tenantId: string) => Promise<void>;
+  /** Resolves with the new state, so callers can show a tenant probe warning. */
+  refreshTenantGrants: (tenantId: string) => Promise<AppState>;
   addSampleTenant: () => Promise<TenantRecord>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
@@ -555,6 +556,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       const nextState = await api.refreshTenantGrants(tenantId);
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
+      return nextState;
     } catch (caughtError) {
       const tenantError = toError(caughtError);
       setError(tenantError);
