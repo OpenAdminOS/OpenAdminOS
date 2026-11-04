@@ -31,9 +31,25 @@ describe("step summary", () => {
       toolTrace: [mcpTrace("Microsoft Learn")],
     });
     expect(summary.count).toBe(5);
-    expect(summary.totalMs).toBe(4802);
+    // All five started at once here, so the run took as long as the longest.
+    expect(summary.totalMs).toBe(3400);
     expect(summary.sources).toBe("Microsoft Learn and docs index");
     expect(summary.egress).toBe("Left this device: search text to learn.microsoft.com and answer context to OpenAI");
+  });
+
+  it("names Microsoft Learn from its source cards when no trace was stored, and times the run by wall clock", () => {
+    const at = (seconds: number) => new Date(Date.UTC(2026, 10, 4, 11, 39, seconds)).toISOString();
+    const summary = summarizeSteps({
+      steps: [
+        step({ kind: "plan", startedAt: at(0), durationMs: 40 }),
+        // An older model step that spanned the Learn call.
+        step({ kind: "answer", origin: "model", originLabel: "OpenAI Codex", startedAt: at(1), durationMs: 26_000 }),
+        step({ kind: "mcp", origin: "third-party", originLabel: "learn.microsoft.com", sent: "Defender on macOS", startedAt: at(10), durationMs: 1_200 }),
+      ],
+      documentationSources: [learn, { ...learn, citation: 2, url: "https://learn.microsoft.com/other" }],
+    });
+    expect(summary.sources).toBe("Microsoft Learn");
+    expect(summary.totalMs).toBe(27_000);
   });
 
   it("says nothing left the device for a local model with no MCP call", () => {

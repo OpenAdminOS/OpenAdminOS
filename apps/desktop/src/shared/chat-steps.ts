@@ -53,6 +53,35 @@ export function usedTenantEvidence(message: Pick<IntuneChatMessage, "steps" | "t
 }
 
 /**
+ * What an answer used: the MCP servers that answered, the local docs
+ * index and the tenant. Read from the citation targets, the steps and the
+ * trace, so a message whose trace was not stored still names Learn.
+ */
+export function answerSources(message: Pick<IntuneChatMessage, "steps" | "documentationSources" | "toolTrace" | "tenantContext">): string[] {
+  const documentation = message.documentationSources ?? [];
+  const servers = new Set([
+    ...documentation.filter((source) => source.kind === "mcp").map((source) => source.serverName ?? "MCP server"),
+    ...(message.toolTrace ?? []).filter((entry) => entry.mcpSource && !entry.error).map((entry) => entry.mcpSource!.serverName),
+  ]);
+  return [
+    ...servers,
+    ...(documentation.some((source) => source.kind === "docs-index") ? ["docs index"] : []),
+    ...(usedTenantEvidence(message) ? ["your tenant"] : []),
+  ];
+}
+
+/**
+ * How long the run took, first start to last end. Steps can overlap (an
+ * older model step spanned its tool calls), so durations are not summed;
+ * steps without a usable start time fall back to the sum.
+ */
+function wallTimeMs(steps: readonly IntuneChatStep[]): number {
+  const spans = steps.map((step) => ({ start: Date.parse(step.startedAt), end: Date.parse(step.startedAt) + (step.durationMs ?? 0) }));
+  if (spans.length === 0 || spans.some((span) => !Number.isFinite(span.start))) return steps.reduce((sum, step) => sum + (step.durationMs ?? 0), 0);
+  return Math.max(...spans.map((span) => span.end)) - Math.min(...spans.map((span) => span.start));
+}
+
+/**
  * The folded line after an answer: how many steps, how long, which
  * sources, and what left the device and where it went. Labels come from
  * the steps and the citation targets, never from model text.
@@ -64,12 +93,7 @@ export function summarizeSteps(message: Pick<IntuneChatMessage, "steps" | "docum
   egress: string;
 } {
   const steps = message.steps ?? [];
-  const servers = [...new Set((message.toolTrace ?? []).filter((entry) => entry.mcpSource && !entry.error).map((entry) => entry.mcpSource!.serverName))];
-  const sources = [
-    ...servers,
-    ...((message.documentationSources ?? []).some((source) => source.kind === "docs-index") ? ["docs index"] : []),
-    ...(usedTenantEvidence(message) ? ["your tenant"] : []),
-  ];
+  const sources = answerSources(message);
   // TODO(ugur): Graph refresh and graph_get requests leave the device too, but carry only the
   // request, not tenant data from the device. They are not listed here; confirm that reading.
   const sent = new Map<string, Set<string>>();
@@ -85,7 +109,7 @@ export function summarizeSteps(message: Pick<IntuneChatMessage, "steps" | "docum
     : `Left this device: ${joinList([...sent].map(([where, what]) => `${joinList([...what])} to ${where}`))}`;
   return {
     count: steps.length,
-    totalMs: steps.reduce((sum, step) => sum + (step.durationMs ?? 0), 0),
+    totalMs: wallTimeMs(steps),
     sources: sources.length > 0 ? joinList(sources) : "no sources",
     egress,
   };
