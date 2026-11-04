@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { deriveTrustCopy } from "../copy";
-import { resolveProviderDefaultModel } from "../shared/openAdminOS";
+import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
@@ -45,6 +45,16 @@ export type DataBoundary =
 interface DataBoundaryContextValue {
   boundary: DataBoundary;
   setVoiceHosted: Dispatch<SetStateAction<boolean>>;
+}
+
+/**
+ * Hosts of the installed, enabled MCP servers that Chat queries can reach.
+ * None when the model is too small for tool use: it is never offered the
+ * tools, so it never sends a query to them.
+ */
+export function chatToolHosts(state: Pick<AppState, "mcpServers" | "chatToolUse">): string[] {
+  if (state.chatToolUse?.available === false) return [];
+  return (state.mcpServers ?? []).filter((server) => server.installed && server.enabled).map((server) => server.host);
 }
 
 const DataBoundaryContext = createContext<DataBoundaryContextValue | undefined>(undefined);
@@ -105,13 +115,7 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       provider,
       ...(model ? { model } : {}),
       scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
-      // Hosts are named only when the model is offered the tools; a model
-      // too small for tool use never sends a query to them.
-      toolHosts: state.chatToolUse?.available === false
-        ? []
-        : (state.mcpServers ?? [])
-          .filter((server) => server.installed && server.enabled)
-          .map((server) => server.host),
+      toolHosts: chatToolHosts(state),
     });
     const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
     const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";

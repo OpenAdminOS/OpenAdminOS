@@ -38,6 +38,7 @@ import {
   useConversations,
   useConversationsOptional,
   ConversationWorkspaceProvider,
+  chatToolHosts,
   useDataBoundaryOptional,
   useShellChromeOptional,
   useUpdateStateOptional,
@@ -135,6 +136,8 @@ type HostedChatConsentPrompt = {
   model?: string;
   workspaceContext?: WorkspacePromptContextInput;
   workspaceContextSummary?: WorkspacePromptContextSummary;
+  /** Hosts of the enabled MCP servers this answer can query. */
+  toolHosts?: string[];
 };
 
 type HostedProviderConsentInput = NonNullable<
@@ -726,6 +729,7 @@ function IntuneChatContent() {
         ...(activeModel ? { model: activeModel } : {}),
         ...(workspaceContext ? { workspaceContext } : {}),
         ...(contextSummary ? { workspaceContextSummary: contextSummary } : {}),
+        toolHosts: chatToolHosts(state),
       });
       setRememberHostedConsent(false);
       return;
@@ -3965,6 +3969,7 @@ function HostedChatConsentModal({
       : { name: "Hosted provider", isLocal: false },
     ...(prompt?.model ? { model: prompt.model } : {}),
     scope: { tenantNames: prompt ? [prompt.tenantName] : [] },
+    ...(prompt?.toolHosts ? { toolHosts: prompt.toolHosts } : {}),
     ...(prompt?.workspaceContextSummary
       ? {
           attachments: {
@@ -4017,6 +4022,7 @@ function HostedChatConsentModal({
                 {prompt?.workspaceContextSummary
                   ? " Selected workspace evidence, notes, and instructions are included in this response prompt."
                   : ""}
+                {trustCopy.toolHosts ? ` ${trustCopy.toolHosts.detail}` : ""}
               </p>
             </div>
           </div>

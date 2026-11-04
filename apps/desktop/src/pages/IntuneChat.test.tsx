@@ -801,6 +801,39 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(sent?.hostedProviderConsent).not.toHaveProperty("remember");
   });
 
+  it("names the enabled MCP hosts in what leaves this device", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        activeProviderId: "openai",
+        activeModelByProviderId: { openai: "gpt-5" },
+        mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: false } }),
+      }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.type(composer, "How long is the Intune compliance grace period?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const heading = await screen.findByText("What leaves this device");
+    const detail = heading.parentElement?.querySelector("p")?.textContent ?? "";
+    expect(detail).toContain("sent to the hosted provider for this response.");
+    expect(detail).toContain("MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com.");
+    expect(detail).not.toContain("kqlsearch");
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("names no MCP host in the confirmation when no server is enabled", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.type(composer, "Which Windows devices are stale?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const heading = await screen.findByText("What leaves this device");
+    expect(heading.parentElement?.querySelector("p")?.textContent ?? "").not.toContain("MCP queries");
+  });
+
   it("uses the mocked hosted provider state", () => {
     expect(mockProviders.find((provider) => provider.id === "openai")?.isLocal).toBe(false);
   });
