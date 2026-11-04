@@ -937,3 +937,35 @@ The `@` picker, parallel tool calls, and changing the local index content.
 - Criterion 10: the live check in the running app is still open, because the main-process changes need a restart of the running dev instance. The end-to-end test stands in for it until then.
 - Found while testing: a final answer containing a fenced KQL block was read as malformed tool JSON and fell back to deterministic retrieval. Fixed in its own commit.
 
+
+# Model-declared question kinds with a keyword veto (2026-11-04)
+
+Same branch, `marketplace/first-wave`. Runs locally only.
+
+## Why
+
+A keyword classifier decided docs, tenant or mixed before the loop. A docs label skips the tenant refresh and tenant tools, so a tenant question misread as docs could get invented tenant facts. Reviews kept finding phrasings that slipped through, and the rule became so strict that most docs questions turned mixed and paid for a tenant refresh they did not need.
+
+## Decision (user, 2026-11-04)
+
+The answering model classifies the question, and the keyword rule stays as a veto.
+
+## Acceptance criteria
+
+1. No extra model call. The model's first response in the agentic loop declares the question kind (docs, tenant or mixed) and the sources it intends to use, as part of the existing JSON protocol. A malformed or missing kind gets the existing repair once, then falls back to the keyword classification.
+2. The final kind is docs only when the model says docs and the keyword tenant-reference checks (TENANT_REFERENCE, TENANT_STATE, TENANT_VALUE, or a named tenant-state phrase) find no tenant reference. The planned-resources fallback is not a veto. Tenant or mixed from the model is used as given. Docs with the veto firing becomes mixed. The kind can be upgraded later but never downgraded.
+3. Lazy tenant refresh in the agentic path. graph-cache-refresh no longer runs before the loop. It runs once the kind resolves to tenant or mixed, before the first tenant tool executes, or when a docs-labelled run calls a tenant tool; then the kind is upgraded to mixed, the refresh runs and the tool executes. A docs question that stays docs triggers no refresh and no Graph calls.
+4. The evidence guard uses the final kind. Tenant and mixed answers still need tenant evidence.
+5. The deterministic path (small models and fallbacks) keeps the keyword classification and today's pre-refresh.
+6. Timeline: "Read the question" appears at once and updates with the model's kind and sources when the first response arrives. A veto says so in plain words ("Treated as docs and tenant: the question mentions your tenant."). The refresh step appears where it actually ran. Upgrades show as a visible step.
+7. The prompt tells the model how to classify: docs means public product knowledge only, with no fact about this tenant needed; when unsure, mixed. Short.
+8. Tests, each written to fail without its fix: model docs plus a tenant reference gives mixed; model tenant for "What are unmanaged devices?" gives tenant with a refresh; a missing or malformed kind falls back to keywords; the Defender for macOS question, "How do I enroll macOS devices?" and "Is there a script to find stale devices?" give docs with no refresh and no Graph calls when the model says docs; an upgrade gives mixed, a refresh, then the tool; the deterministic path is unchanged; the existing end-to-end tests for the three questions still pass, adjusted only where the protocol changed.
+9. SPEC.md "Question kinds" rewritten, CHANGELOG [Unreleased] updated, these steps ticked.
+
+## Steps
+
+- [ ] Planner: export the tenant-reference check and the kind resolution with its veto
+- [ ] Loop: kind and sources on the first reply, one repair, keyword fallback, upgrade on a tenant tool, lazy refresh hook, evidence guard on the final kind
+- [ ] Service: lazy refresh in the agentic path, plan step resolved by the model, deterministic path unchanged
+- [ ] Tests for criterion 8
+- [ ] SPEC, CHANGELOG
