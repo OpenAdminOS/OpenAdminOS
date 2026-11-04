@@ -99,7 +99,10 @@ Agents may declare these. They are never requested when a tenant is connected, o
 | --- | --- |
 | `Directory.Read.All` | Reads broad directory data. Never requested at connect, only when an agent that declares it runs. |
 | `User.ReadWrite.All` | Changes users. Requested only when a write agent that declares it runs. |
+| `Group.Read.All` | Reads all groups and their properties. Older agents declare it where GroupMember.Read.All is enough. Requested only when an agent that declares it runs. |
 | `Group.ReadWrite.All` | Changes groups. Requested only when a write agent that declares it runs. |
+| `GroupMember.ReadWrite.All` | Changes group memberships. Requested only when a write agent that declares it runs. |
+| `IdentityRiskyUser.ReadWrite.All` | Confirms or dismisses risky users. Requested only when a write agent that declares it runs. |
 | `Directory.ReadWrite.All` | Changes directory objects. Requested only when a write agent that declares it runs. |
 | `Application.ReadWrite.All` | Changes app registrations. Requested only when a write agent that declares it runs. |
 | `RoleManagement.ReadWrite.Directory` | Changes directory role assignments. Requested only when a write agent that declares it runs. |

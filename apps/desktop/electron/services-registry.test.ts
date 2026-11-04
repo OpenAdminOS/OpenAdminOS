@@ -26,6 +26,9 @@ import {
   serviceForScope,
   serviceStatus,
   toResourceScope,
+  servicesForScopes,
+  unmappedScopes,
+  unmappedScopesCopy,
 } from "@openadminos/agent-sdk";
 
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
@@ -348,5 +351,25 @@ describe("agent services", () => {
     );
     assert.deepEqual(missingServicesForAgent({}, ["defender"]), []);
     assert.deepEqual(missingServicesForAgent({ kind: "sample", grantedScopes: [] }, ["defender"]), []);
+  });
+});
+
+describe("legacy scope inference", () => {
+  it("maps known legacy read and write scopes to their service", () => {
+    assert.deepEqual(servicesForScopes(["Group.Read.All"]), ["entra"]);
+    assert.deepEqual(servicesForScopes(["Group.ReadWrite.All", "GroupMember.ReadWrite.All", "IdentityRiskyUser.ReadWrite.All"]), ["entra"]);
+    assert.deepEqual(servicesForScopes(["SecurityAlert.ReadWrite.All", "SecurityIncident.ReadWrite.All"]), ["defender"]);
+  });
+
+  it("names scopes no service lists and ignores sign-in scopes", () => {
+    assert.deepEqual(
+      unmappedScopes(["openid", "User.Read", "Group.Read.All", "https://graph.microsoft.com/Sites.Read.All", "Sites.Read.All"]),
+      ["Sites.Read.All"],
+    );
+    assert.equal(unmappedScopesCopy(["Group.Read.All"]), undefined);
+    assert.equal(
+      unmappedScopesCopy(["Sites.Read.All", "Mail.Read"]),
+      "This agent uses Sites.Read.All and Mail.Read, which OpenAdminOS does not map to a service yet. It cannot run until those scopes are added to the service registry. Report it to the agent author or to OpenAdminOS.",
+    );
   });
 });

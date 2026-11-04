@@ -369,6 +369,30 @@ definition:
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+it("blocks a legacy agent that uses a scope no service lists", async () => {
+  const h = harness();
+  const legacy = { id: "legacy", slug: "legacy", name: "Legacy sites report", description: "Reads sites and groups",
+    mode: "read", version: "1.0.0", installedAt: new Date().toISOString(), category: "compliance", tier: "agent",
+    requiresEntraTier: "free", scopes: ["Group.Read.All", "Sites.Read.All"], author: { name: "Test" } } as AgentSummary;
+  Object.assign(h.host, { appVersion: "0.7.2", listProviders: async () => [{ id: "ollama", status: "connected", models: ["test"], isLocal: true }],
+    providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  await h.host.write({ ...h.state(), installedAgents: [legacy], activeTenantId: "tenant-a", tenants: [{ id: "tenant-a", displayName: "Contoso" }] as any });
+  await assert.rejects(
+    h.service.startRun("legacy", {}),
+    /^Error: This agent uses Sites\.Read\.All, which OpenAdminOS does not map to a service yet\. It cannot run until that scope is added to the service registry\. Report it to the agent author or to OpenAdminOS\.$/,
+  );
+  assert.deepEqual(h.state().runs, []);
+
+  // Group.Read.All alone maps to Entra, so a legacy manifest with it still
+  // gets a service preflight instead of passing with no dependency.
+  const groupsOnly = { ...legacy, scopes: ["Group.Read.All"] };
+  await h.host.write({ ...h.state(), installedAgents: [groupsOnly], tenants: [{ id: "tenant-a", displayName: "Contoso", grantedScopes: ["graph:DeviceManagementApps.Read.All"] }] as any });
+  await assert.rejects(
+    h.service.startRun("legacy", {}),
+    /^Error: Legacy sites report needs Entra, which is not connected for Contoso\./,
+  );
+});
+
 it("refuses to start an agent whose service is not connected for the tenant", async () => {
   const h = harness();
   const agent = { id: "score", slug: "score", name: "Secure score prioritizer", description: "Ranks Secure Score actions",

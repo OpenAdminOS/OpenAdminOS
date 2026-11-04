@@ -385,7 +385,10 @@ export const SERVICES: readonly ServiceDefinition[] = [
     agentOnlyScopes: [
       agentOnly("Directory.Read.All", "Reads broad directory data. Never requested at connect, only when an agent that declares it runs."),
       agentOnly("User.ReadWrite.All", "Changes users. Requested only when a write agent that declares it runs."),
+      agentOnly("Group.Read.All", "Reads all groups and their properties. Older agents declare it where GroupMember.Read.All is enough. Requested only when an agent that declares it runs."),
       agentOnly("Group.ReadWrite.All", "Changes groups. Requested only when a write agent that declares it runs."),
+      agentOnly("GroupMember.ReadWrite.All", "Changes group memberships. Requested only when a write agent that declares it runs."),
+      agentOnly("IdentityRiskyUser.ReadWrite.All", "Confirms or dismisses risky users. Requested only when a write agent that declares it runs."),
       agentOnly("Directory.ReadWrite.All", "Changes directory objects. Requested only when a write agent that declares it runs."),
       agentOnly("Application.ReadWrite.All", "Changes app registrations. Requested only when a write agent that declares it runs."),
       agentOnly("RoleManagement.ReadWrite.Directory", "Changes directory role assignments. Requested only when a write agent that declares it runs."),
@@ -459,6 +462,8 @@ export const SERVICES: readonly ServiceDefinition[] = [
     ],
     agentOnlyScopes: [
       agentOnly("SecurityEvents.ReadWrite.All", "Changes Secure Score control states. Requested only when a write agent that declares it runs."),
+      agentOnly("SecurityAlert.ReadWrite.All", "Updates Defender alerts, for example status and classification. Requested only when a write agent that declares it runs."),
+      agentOnly("SecurityIncident.ReadWrite.All", "Updates Defender incidents, for example status and assignment. Requested only when a write agent that declares it runs."),
     ],
   },
   // TODO(ugur): planned services and parts appear only in the docs for now.
@@ -876,6 +881,30 @@ export function servicesForScopes(scopes: readonly string[]): ServiceId[] {
     selected.add(SHARED_SCOPE_PREFERENCE.find((id) => ids.includes(id)) ?? ids[0]!);
   }
   return AVAILABLE_SERVICES.filter((service) => selected.has(service.id)).map((service) => service.id);
+}
+
+/**
+ * Scopes that no service lists, baseline and OIDC scopes excepted. An
+ * agent that uses one has a dependency OpenAdminOS cannot check, so
+ * preflight blocks it instead of treating the scope as no dependency.
+ */
+export function unmappedScopes(scopes: readonly string[]): string[] {
+  return [
+    ...new Set(
+      scopes
+        .map(normalizeGraphScopeName)
+        .filter((name) => !BASELINE_NAMES.has(name) && !OIDC_SCOPES.has(name))
+        .filter((name) => servicesOwningScope(name).length === 0),
+    ),
+  ];
+}
+
+/** The blocked-state copy for an agent that uses unmapped scopes, or undefined. */
+export function unmappedScopesCopy(scopes: readonly string[]): string | undefined {
+  const unmapped = unmappedScopes(scopes);
+  if (unmapped.length === 0) return undefined;
+  const one = unmapped.length === 1;
+  return `This agent uses ${formatServiceList(unmapped)}, which OpenAdminOS does not map to a service yet. It cannot run until ${one ? "that scope is" : "those scopes are"} added to the service registry. Report it to the agent author or to OpenAdminOS.`;
 }
 
 /**

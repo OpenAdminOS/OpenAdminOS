@@ -14,6 +14,7 @@ import {
   agentServiceIds,
   formatServiceList,
   missingServicesForAgent,
+  unmappedScopesCopy,
   resolveProviderDefaultModel,
   resolveRunModel,
   type AgentSummary,
@@ -428,6 +429,11 @@ export class RunService {
           );
         }
       }
+
+      // A scope no service lists is a dependency that cannot be checked.
+      // Block the run rather than treat it as needing no service.
+      const unmapped = unmappedScopesCopy(agent.scopes);
+      if (unmapped) throw new Error(unmapped);
 
       // Service preflight: an agent whose service is not connected for
       // this tenant cannot reach its data. Refuse with the service to add.

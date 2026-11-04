@@ -50,6 +50,8 @@ Agents may declare these. They are never requested when a tenant is connected, o
 | Scope | Reason |
 | --- | --- |
 | `SecurityEvents.ReadWrite.All` | Changes Secure Score control states. Requested only when a write agent that declares it runs. |
+| `SecurityAlert.ReadWrite.All` | Updates Defender alerts, for example status and classification. Requested only when a write agent that declares it runs. |
+| `SecurityIncident.ReadWrite.All` | Updates Defender incidents, for example status and assignment. Requested only when a write agent that declares it runs. |
 
 ## Roles
 

@@ -49,6 +49,7 @@ import {
   missingPartsForScopes,
   missingServicesForAgent,
   partLabel,
+  unmappedScopesCopy,
   type ServiceId,
   resolveRunModel,
   type AgentManifestPreview,
@@ -2612,7 +2613,9 @@ function RunPreflightModal({
         (part) => !missingServices.some((service) => service.id === part.service),
       )
     : [];
-  const canStart = Boolean(activeTenant) && !deliverySaving && missingServices.length === 0;
+  const unmappedCopy = unmappedScopesCopy(agent.scopes);
+  const canStart =
+    Boolean(activeTenant) && !deliverySaving && missingServices.length === 0 && !unmappedCopy;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -2631,6 +2634,11 @@ function RunPreflightModal({
           <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             Hosted provider selected. Tenant prompts and agent context are sent
             through {providerName}'s local CLI and leave this device.
+          </div>
+        )}
+        {unmappedCopy && (
+          <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {unmappedCopy}
           </div>
         )}
         {activeTenant && missingServices.length > 0 ? (
