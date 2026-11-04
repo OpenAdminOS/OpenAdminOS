@@ -582,6 +582,40 @@ describe("MCP installs in app state", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
+  it("does not reinstall a server that an uninstall removed while its connection was checked", async () => {
+    await withStore(async (store, statePath) => {
+      await store.installMcpServer("test-docs");
+      const internals = store as unknown as { read(): Promise<unknown>; mcpHost: McpHost };
+      const read = internals.read.bind(store);
+      // The uninstall lands right after the check read the server as installed.
+      let raced = false;
+      internals.read = async () => {
+        const state = await read();
+        if (!raced) { raced = true; await store.uninstallMcpServer("test-docs"); }
+        return state;
+      };
+      await assert.rejects(store.checkMcpServer("test-docs"), /^Error: Test Docs was uninstalled while its connection was checked\. Its tool list was not saved\.$/);
+      internals.read = read;
+      assert.equal((await store.listMcpServers()).find((entry) => entry.id === "test-docs")!.installed, false);
+      await readFile(statePath, "utf8").then((raw) => assert.equal(JSON.parse(raw).mcpServers, undefined), () => undefined);
+
+      // Removed without an uninstall while it connected, for example by another write: the check still writes nothing.
+      await store.installMcpServer("test-docs");
+      const host = internals.mcpHost;
+      const connect = host.connect.bind(host);
+      host.connect = async (entry) => {
+        const connected = await connect(entry);
+        const raw = JSON.parse(await readFile(statePath, "utf8")) as { mcpServers?: unknown };
+        delete raw.mcpServers;
+        await writeFile(statePath, JSON.stringify(raw));
+        return connected;
+      };
+      await assert.rejects(store.checkMcpServer("test-docs"), /was uninstalled while its connection was checked/);
+      host.connect = connect;
+      assert.equal((await store.listMcpServers()).find((entry) => entry.id === "test-docs")!.installed, false);
+    });
+  });
+
   it("rejects servers outside the catalog and toggles on servers that are not installed", async () => {
     await withStore(async (store) => {
       await assert.rejects(store.installMcpServer("evil"), /not in the Marketplace catalog/);

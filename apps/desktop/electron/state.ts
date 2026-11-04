@@ -1743,10 +1743,11 @@ export class AppStateStore {
 
   private async connectMcpServer(serverId: string, requireInstalled: boolean): Promise<McpServerSummary[]> {
     const entry = this.requireMcpCatalogEntry(serverId);
+    // Captured before the installed check: an uninstall between that read and here would otherwise go unnoticed.
+    const uninstalls = this.mcpUninstalls.get(serverId) ?? 0;
     if (requireInstalled && !(await this.read()).mcpServers?.[serverId]) {
       throw new Error(`${entry.name} is not installed. Install it from the Marketplace first.`);
     }
-    const uninstalls = this.mcpUninstalls.get(serverId) ?? 0;
     const connected = await this.mcpHost.connect(entry);
     const now = this.clock().toISOString();
     const written = await this.serialize(async () => {
@@ -1754,6 +1755,8 @@ export class AppStateStore {
       if ((this.mcpUninstalls.get(serverId) ?? 0) !== uninstalls) return false;
       const current = await this.read();
       const existing = current.mcpServers?.[serverId];
+      // A check refreshes an installed server and never installs one that is gone.
+      if (requireInstalled && !existing) return false;
       await this.write({
         ...current,
         mcpServers: {
