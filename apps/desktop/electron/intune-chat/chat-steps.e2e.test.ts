@@ -327,6 +327,27 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     });
   });
 
+  it("does not search the local docs index for a tenant question, in the tool loop or the deterministic path", async () => {
+    await withHarness(async ({ store, docsSearches, prompts, script }) => {
+      script([
+        { kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "macOS" }, limit: 5 } },
+        { final: true, answer: "5 Macs are cached; 2 are noncompliant." },
+      ]);
+      const message = (await store.streamIntuneChatMessage({ content: "Check our 5 macOS devices for Defender in Intune" }, () => {})).assistantMessage;
+      assert.equal(message.questionKind, "tenant");
+      assert.ok(!kinds(message.steps).includes("docs-index"));
+      assert.deepEqual(docsSearches, []);
+      assert.equal(message.documentationSources, undefined);
+      assert.ok(prompts.every((entry) => !entry.prompt.includes("passages from the local docs index")));
+
+      await store.setChatInvestigationMode("always-deterministic");
+      script(["2 of the 5 Macs are noncompliant."]);
+      const direct = (await store.sendIntuneChatMessage({ content: "Which of our macOS devices are noncompliant?" })).assistantMessage;
+      assert.equal(direct.questionKind, "tenant");
+      assert.deepEqual(docsSearches, []);
+    }, { docsIndex: true });
+  });
+
   it("does not label the answer Microsoft Learn when the Learn call was blocked", async () => {
     await withHarness(async ({ store, script }) => {
       script([

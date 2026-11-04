@@ -134,7 +134,6 @@ import {
   ON_DEVICE,
   formatIndexVersion,
   learnAnswered,
-  LEARN_SERVER_ID,
   mergeFollowUps,
   namedServers,
   planChatSources,
@@ -1857,7 +1856,8 @@ export class IntuneChatService {
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
-        const documentation = await this.searchDocsIndex(modelQuestion, steps);
+        // A tenant question is answered from tenant data; the local docs index is not searched for it.
+        const documentation = answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
         const citations = new CitationRegistry();
         citations.addPassages(documentation);
         documentationSources = citations.sources;
@@ -1895,8 +1895,8 @@ export class IntuneChatService {
           if (capability.enabled) {
             const tenantObservations = new TenantValueIndex();
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
-            const learnFirst = learnMayLead(answerPlan.sources, lazyRefresh, mcp.mcp);
-            const documentation = learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
+            const learnFirst = indexWaits(answerPlan.sources, lazyRefresh);
+            const documentation = learnFirst || answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
@@ -2459,7 +2459,7 @@ export class IntuneChatService {
         const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true), options.voice ? VOICE_ANSWER_INSTRUCTIONS : ""].filter(Boolean).join("\n");
         const streamDocumentation = options.voice
           ? await this.retrieveDocumentationSafely(content)
-          : await this.searchDocsIndex(modelQuestion, steps);
+          : answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
         const documentation = options.voice ? streamDocumentation.slice(0, 2).map(d => ({ ...d, text: d.text.slice(0, 600) })) : streamDocumentation;
         const citations = new CitationRegistry();
         citations.addPassages(documentation);
@@ -2520,10 +2520,10 @@ export class IntuneChatService {
               },
             });
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
-            const learnFirst = answerPlan ? learnMayLead(answerPlan.sources, lazyRefresh, mcp.mcp) : false;
+            const learnFirst = answerPlan ? indexWaits(answerPlan.sources, lazyRefresh) : false;
             const documentation = options.voice
               ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
-              : learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
+              : learnFirst || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
@@ -3290,14 +3290,14 @@ function refreshedResourceSet(result: GraphCacheRefreshResult | undefined): Set<
  * refreshed only once the kind needs it.
  */
 /**
- * Whether the local docs index waits for Microsoft Learn. It does when
- * Learn is the chosen source, and while the model has yet to classify a
- * question with Learn installed: a docs answer then asks Learn first, and
- * the loop loads the index only when the decided sources leave Learn out
- * or Learn fails, is blocked or returns nothing.
+ * Whether the local docs index waits instead of going into the prompt up
+ * front. It waits when Microsoft Learn is the chosen source, and always
+ * while the model has yet to classify the question: the loop then loads
+ * it for a docs or mixed kind whose sources leave Learn out, never for a
+ * tenant kind, and when Learn fails, is blocked or returns nothing.
  */
-function learnMayLead(sources: ChatSourcePlan, modelClassifies: boolean, mcp: McpChatContext | undefined): boolean {
-  return sources.learnFirst || (modelClassifies && Boolean(mcp?.servers?.some((server) => server.id === LEARN_SERVER_ID)));
+function indexWaits(sources: ChatSourcePlan, modelClassifies: boolean): boolean {
+  return sources.learnFirst || modelClassifies;
 }
 
 function modelClassification(

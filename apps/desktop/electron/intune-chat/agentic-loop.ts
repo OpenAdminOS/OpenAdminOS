@@ -408,6 +408,8 @@ export async function runAgenticChat(
       const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", action.sources);
       required = new Set(plan.requiredServerIds);
       classification = plan.detail;
+      // A tenant question gets no local docs index; docs and mixed load it unless Learn leads.
+      if (questionKind === "tenant") fallbackPending = false;
       const loadIndex = !plan.learnFirst && fallbackPending && input.documentationFallback;
       const tenantData = questionKind !== "docs";
       afterClassification = async () => {
