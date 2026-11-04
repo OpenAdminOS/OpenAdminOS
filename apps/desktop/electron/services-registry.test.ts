@@ -8,6 +8,7 @@ import {
   GRAPH_DELEGATED_PERMISSION_IDS,
   SERVICES,
   SERVICE_PARTS,
+  availableScopeSet,
   grantedParts,
   grantedScopeSet,
   grantsFromTokenScopes,
@@ -245,6 +246,49 @@ describe("grant status", () => {
     assert.equal(partLabel(SERVICE_PARTS.find((part) => part.id === "defender.score")!), "Defender Secure Score");
     assert.equal(serviceForScope("User.ReadWrite.All")?.id, "entra");
     assert.equal(serviceForScope("Directory.Read.All")?.id, "entra");
+  });
+});
+
+describe("available scopes", () => {
+  // An own registration granted only one of the two Defender alerts and
+  // incidents scopes.
+  const alertOnly = { displayName: "Contoso", grantedScopes: ["graph:User.Read", "graph:SecurityAlert.Read.All"] };
+
+  it("counts a part scope only when a part that lists it is fully granted", () => {
+    const available = availableScopeSet(alertOnly);
+    assert.equal(available.has("SecurityAlert.Read.All"), false);
+    assert.equal(available.has("User.Read"), true);
+    assert.equal(serviceStatus(alertOnly, "defender"), "missing");
+    assert.deepEqual(notGrantedServiceForScopes(alertOnly, ["SecurityAlert.Read.All"]), {
+      serviceId: "defender",
+      service: "Defender",
+      partId: "defender.incidents",
+      part: "Defender alerts and incidents",
+      serviceMissing: true,
+    });
+    assert.equal(
+      missingServiceCopy(alertOnly, ["SecurityAlert.Read.All"]),
+      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+    );
+  });
+
+  it("keeps a shared scope available through any fully granted part", () => {
+    const intunePeople = SERVICE_PARTS.find((part) => part.id === "intune.people")!;
+    const available = availableScopeSet({ grantedScopes: intunePeople.scopes.map((scope) => qualifyScope(scope.name)) });
+    for (const scope of intunePeople.scopes) assert.equal(available.has(scope.name), true);
+  });
+
+  it("counts granted scopes that no part lists", () => {
+    assert.equal(availableScopeSet({ grantedScopes: ["graph:Directory.Read.All"] }).has("Directory.Read.All"), true);
+  });
+
+  it("treats unrecorded grants and the sample tenant as fully connected", () => {
+    assert.deepEqual([...availableScopeSet({})].sort(), [...DEFAULT_GRAPH_READ_SCOPE_NAMES].sort());
+    assert.deepEqual(
+      [...availableScopeSet({ kind: "sample", grantedScopes: [] })].sort(),
+      [...DEFAULT_GRAPH_READ_SCOPE_NAMES].sort(),
+    );
+    assert.equal(notGrantedServiceForScopes({}, ["SecurityAlert.Read.All"]), undefined);
   });
 });
 

@@ -7,7 +7,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
-  grantedScopeSet,
+  availableScopeSet,
   missingServiceCopy,
   notGrantedServiceForScopes,
   resolveProviderDefaultModel,
@@ -135,9 +135,9 @@ function restrictPlannedResourcesForTenant(
   tenant: TenantRecord,
 ): string | undefined {
   const originalResources = [...planned.resources];
-  const granted = grantedScopeSet(tenant);
+  const available = availableScopeSet(tenant);
   planned.resources = originalResources.filter((resource) =>
-    definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
+    definitionForResource(resource).scopes.every((scope) => available.has(scope)),
   );
   if (originalResources.length === 0 || planned.resources.length > 0) {
     return undefined;
@@ -2687,7 +2687,8 @@ export class IntuneChatService {
       tenantId,
       store,
       signal,
-      grantedScopes: grantedScopeSet(tenant),
+      // A partly granted part is not usable, matching Settings.
+      grantedScopes: availableScopeSet(tenant),
       graphForScopes: async (scopes) => {
         const uniqueScopes = [...new Set(scopes)].sort();
         return this.host.graphFactory

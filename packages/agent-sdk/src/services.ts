@@ -644,6 +644,28 @@ export function grantedParts(input: GrantSource): ServicePart[] {
   return SERVICE_PARTS.filter((part) => partIsGranted(part, input));
 }
 
+const PART_SCOPE_NAMES: ReadonlySet<string> = new Set(
+  SERVICE_PARTS.flatMap((part) => part.scopes.map((scope) => scope.name)),
+);
+
+/**
+ * Bare Graph scope names the app may use for a tenant. Chat, cache
+ * refresh, Changes and agent preflight gate on this, and it follows the
+ * same rule as serviceStatus and grantedParts in Settings: a scope that a
+ * part lists counts only when a part that lists it is fully granted, so data is never read for a service that Settings
+ * shows as not connected. Granted scopes that no part lists, such as
+ * agent-only scopes consented at run time, count as granted.
+ */
+export function availableScopeSet(input: GrantSource): Set<string> {
+  const granted = grantedScopeSet(input, "graph");
+  const available = new Set([...granted].filter((name) => !PART_SCOPE_NAMES.has(name)));
+  for (const part of SERVICE_PARTS) {
+    if (!part.scopes.every((scope) => scope.audience !== "graph" || granted.has(scope.name))) continue;
+    for (const scope of part.scopes) available.add(scope.name);
+  }
+  return available;
+}
+
 export type ServiceConnectionStatus = "connected" | "partial" | "missing";
 
 export function serviceStatus(input: GrantSource, serviceId: ServiceId): ServiceConnectionStatus {
@@ -722,7 +744,7 @@ export function notGrantedServiceForScopes(
   tenant: GrantSource,
   scopes: readonly string[],
 ): NotGrantedService | undefined {
-  const [part] = missingPartsForScopes(scopes, grantedScopeSet(tenant));
+  const [part] = missingPartsForScopes(scopes, availableScopeSet(tenant));
   if (!part) return undefined;
   const service = serviceById(part.service);
   return {
@@ -750,7 +772,7 @@ export function missingServiceCopy(
   tenant: GrantSource & { displayName?: string },
   scopes: readonly string[],
 ): string | undefined {
-  const parts = missingPartsForScopes(scopes, grantedScopeSet(tenant));
+  const parts = missingPartsForScopes(scopes, availableScopeSet(tenant));
   if (parts.length === 0) return undefined;
   const missingServices = AVAILABLE_SERVICES.filter(
     (service) =>

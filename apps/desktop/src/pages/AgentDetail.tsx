@@ -45,7 +45,7 @@ import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   agentServiceIds,
-  grantedScopeSet,
+  availableScopeSet,
   missingPartsForScopes,
   missingServicesForAgent,
   partLabel,
@@ -2608,7 +2608,7 @@ function RunPreflightModal({
     ? missingServicesForAgent(activeTenant, agentServiceIds(agent))
     : [];
   const missingParts = activeTenant && !pilot
-    ? missingPartsForScopes(agent.scopes, grantedScopeSet(activeTenant)).filter(
+    ? missingPartsForScopes(agent.scopes, availableScopeSet(activeTenant)).filter(
         (part) => !missingServices.some((service) => service.id === part.service),
       )
     : [];

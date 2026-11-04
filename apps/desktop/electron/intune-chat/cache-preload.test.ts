@@ -310,3 +310,53 @@ it("refresh reports resources of an unconnected service as skipped, not failed",
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("refresh skips alerts when only one scope of the Defender part is granted", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "alert-only-refresh-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeTenantId: "tenant-1",
+      activeProviderId: "ollama",
+      tenants: [
+        {
+          id: "tenant-1",
+          displayName: "Alerts only",
+          homeAccountId: "test",
+          username: "test@example.invalid",
+          addedAt: new Date().toISOString(),
+          grantedScopes: ["graph:User.Read", "graph:SecurityAlert.Read.All"],
+        },
+      ],
+      installedAgents: [],
+      runs: [],
+    }),
+  );
+  const graphPaths: string[] = [];
+  const store = new AppStateStore({
+    filePath,
+    userDataPath: dir,
+    statsApiUrl: "",
+    tokenStore: { read: async () => "", write: async () => {} },
+    graphFactory: () => ({
+      request: async (input: { path?: string }) => {
+        graphPaths.push(input.path ?? "unknown");
+        return { value: [] };
+      },
+    } as unknown as RunGraphApi),
+  });
+  try {
+    const result = await store.refreshGraphCache({ tenantId: "tenant-1", resources: ["securityAlerts"] });
+    assert.deepEqual(
+      result.resources.map((entry) => [entry.resource, entry.ok, entry.skipped]),
+      [["securityAlerts", false, "not-connected"]],
+    );
+    assert.equal(result.resources[0]?.notGrantedService?.partId, "defender.incidents");
+    assert.equal(result.resources[0]?.notGrantedService?.serviceMissing, true);
+    assert.deepEqual(graphPaths, []);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});

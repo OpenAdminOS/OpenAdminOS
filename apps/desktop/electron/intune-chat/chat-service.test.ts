@@ -2011,3 +2011,66 @@ it("names a service that is not connected instead of a scope", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+it("treats a partly granted Defender part as not connected in Chat", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-alert-only-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeProviderId: "ollama",
+      activeModelByProviderId: { ollama: "mock-chat" },
+      activeTenantId: "tenant-alert-only",
+      tenants: [
+        {
+          id: "tenant-alert-only",
+          displayName: "Alerts only",
+          username: "admin@example.test",
+          homeAccountId: "alert-only",
+          addedAt: new Date().toISOString(),
+          grantedScopes: ["graph:User.Read", "graph:SecurityAlert.Read.All"],
+        },
+      ],
+      installedAgents: [],
+      runs: [],
+    }),
+  );
+  let graphCalls = 0;
+  let llmCalls = 0;
+  const store = new AppStateStore({
+    filePath,
+    tokenStore,
+    userDataPath: dir,
+    statsApiUrl: "",
+    graphFactory: () => ({
+      request: async () => {
+        graphCalls += 1;
+        return { value: [] };
+      },
+    } as unknown as RunGraphApi),
+    llmFactory: () => {
+      llmCalls += 1;
+      return {
+        available: true,
+        async complete() {
+          return { text: "Unexpected model answer.", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      };
+    },
+  });
+  try {
+    const result = await store.sendIntuneChatMessage({ content: "Show recent security alerts" });
+    assert.equal(
+      result.assistantMessage.content,
+      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+    );
+    assert.equal(graphCalls, 0);
+    assert.equal(llmCalls, 0);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
