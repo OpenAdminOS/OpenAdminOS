@@ -1,6 +1,6 @@
-import { createContext, useContext, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { IconCopy } from "./icons";
+import { IconCheck, IconCopy } from "./icons";
 
 /**
  * Renders a constrained subset of Markdown as React nodes, using the same
@@ -47,17 +47,48 @@ export function MarkdownPreview({
   className,
   numberedSections = true,
   tableTools = false,
+  copySteps = false,
 }: {
   source: string;
   className?: string;
   numberedSections?: boolean;
   tableTools?: boolean;
+  /** A copy button on each item of a numbered list, copying that step as plain text. */
+  copySteps?: boolean;
 }) {
   const blocks = parseBlocks(source, numberedSections);
+  const options = { tableTools, copySteps };
   return (
     <div className={className}>
-      {blocks.map((block, idx) => renderBlock(block, idx, tableTools))}
+      {blocks.map((block, idx) => renderBlock(block, idx, options))}
     </div>
+  );
+}
+
+/** One numbered step as plain text: Markdown markers and citation numbers removed. */
+export function plainStepText(source: string): string {
+  return stripMarkdownToPlainText(source).replace(/\s*\[\d{1,2}\](?!\()/g, "").trim();
+}
+
+function CopyStepButton({ text, step }: { text: string; step: number }) {
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? `Copied step ${step}` : `Copy step ${step}`}
+      title={copied ? "Copied" : `Copy step ${step}`}
+      onClick={() => {
+        void copyTextToClipboard(text).then(() => setCopied(true), () => setCopied(false));
+      }}
+      className="absolute right-0 top-[3px] inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] group-hover/step:opacity-100 group-focus-within/step:opacity-100"
+    >
+      {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+    </button>
   );
 }
 
@@ -198,7 +229,13 @@ function parseBlocks(input: string, numberedSections = true, depth = 0): Block[]
   return blocks;
 }
 
-function renderBlock(block: Block, index: number, tableTools = false): ReactNode {
+interface RenderOptions {
+  tableTools: boolean;
+  copySteps: boolean;
+}
+
+function renderBlock(block: Block, index: number, options: RenderOptions): ReactNode {
+  const { tableTools } = options;
   switch (block.kind) {
     case "heading": {
       const headingClasses: Record<number, string> = {
@@ -263,7 +300,7 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
           className="mt-2 list-disc space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
-            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, tableTools))}</li>
+            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, options))}</li>
           ))}
         </ul>
       );
@@ -275,12 +312,16 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
           className="mt-2 list-decimal space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
-            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, tableTools))}</li>
+            <li key={idx} className={options.copySteps ? "group/step relative pr-7" : undefined}>
+              {renderInline(item.text)}
+              {item.children.map((child, childIndex) => renderBlock(child, childIndex, options))}
+              {options.copySteps ? <CopyStepButton text={plainStepText(item.text)} step={(block.start ?? 1) + idx} /> : null}
+            </li>
           ))}
         </ol>
       );
     case "quote":
-      return <blockquote key={index} className="my-2 border-l-2 border-[var(--color-border-strong)] pl-3 text-[var(--color-text-muted)]">{block.blocks.map((child, i) => renderBlock(child, i, tableTools))}</blockquote>;
+      return <blockquote key={index} className="my-2 border-l-2 border-[var(--color-border-strong)] pl-3 text-[var(--color-text-muted)]">{block.blocks.map((child, i) => renderBlock(child, i, options))}</blockquote>;
     case "table":
       return (
         <div key={index} className="group/table relative my-3 max-w-full overflow-auto" role="region" aria-label="Table" tabIndex={0}>
