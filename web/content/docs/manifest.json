@@ -37,6 +37,47 @@
       ]
     },
     {
+      "title": "Services",
+      "slug": "services",
+      "pages": [
+        {
+          "title": "Intune",
+          "source": "generated/services/intune.md",
+          "route": "services/intune",
+          "path": "services/intune",
+          "children": []
+        },
+        {
+          "title": "Entra",
+          "source": "generated/services/entra.md",
+          "route": "services/entra",
+          "path": "services/entra",
+          "children": []
+        },
+        {
+          "title": "Defender",
+          "source": "generated/services/defender.md",
+          "route": "services/defender",
+          "path": "services/defender",
+          "children": []
+        },
+        {
+          "title": "Planned services",
+          "source": "services/planned.md",
+          "route": "services/planned",
+          "path": "services/planned",
+          "children": []
+        },
+        {
+          "title": "Permissions by service",
+          "source": "generated/reference/permissions-by-service.md",
+          "route": "services/permissions-by-service",
+          "path": "services/permissions-by-service",
+          "children": []
+        }
+      ]
+    },
+    {
       "title": "Features",
       "slug": "features",
       "pages": [
@@ -372,6 +413,22 @@
       "destination": "basics/connect-tenant"
     },
     {
+      "source": "generated/services/intune",
+      "destination": "services/intune"
+    },
+    {
+      "source": "generated/services/entra",
+      "destination": "services/entra"
+    },
+    {
+      "source": "generated/services/defender",
+      "destination": "services/defender"
+    },
+    {
+      "source": "generated/reference/permissions-by-service",
+      "destination": "services/permissions-by-service"
+    },
+    {
       "source": "trust/local-first",
       "destination": "trust-model/local-first"
     },
@@ -492,6 +549,10 @@
       "destination": ""
     },
     {
+      "source": "services",
+      "destination": "services/intune"
+    },
+    {
       "source": "features",
       "destination": "features/intune-chat"
     },
@@ -508,16 +569,20 @@
       "destination": "basics/installation"
     },
     {
-      "source": "trust",
-      "destination": "trust-model/local-first"
+      "source": "generated/services",
+      "destination": "services/intune"
     },
     {
       "source": "generated",
-      "destination": "agents/agent-catalog"
+      "destination": "services/intune"
     },
     {
       "source": "generated/reference",
-      "destination": "agents/graph-scope-matrix"
+      "destination": "services/permissions-by-service"
+    },
+    {
+      "source": "trust",
+      "destination": "trust-model/local-first"
     },
     {
       "source": "generated/agents",

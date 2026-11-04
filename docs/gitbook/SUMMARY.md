@@ -7,6 +7,14 @@
 - [First run](getting-started/first-run.md)
 - [Connect a tenant](getting-started/connect-tenant.md)
 
+## Services
+
+- [Intune](generated/services/intune.md)
+- [Entra](generated/services/entra.md)
+- [Defender](generated/services/defender.md)
+- [Planned services](services/planned.md)
+- [Permissions by service](generated/reference/permissions-by-service.md)
+
 ## Features
 
 - [Tenant Chat](features/intune-chat.md)
