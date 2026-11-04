@@ -22,7 +22,7 @@
     "descriptor": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["id", "name", "description", "version", "author", "category", "mode"],
+      "required": ["id", "name", "description", "version", "author", "category", "mode", "services"],
       "properties": {
         "id": {
           "type": "string",
@@ -56,6 +56,12 @@
           "type": "string",
           "enum": ["free", "p1", "p2"],
           "description": "Minimum Entra ID licensing tier needed for the agent's Graph calls to return useful data. Defaults to 'free'. Set 'p1' for agents reading auditLogs/signIns, /auditLogs/directoryAudits, /identity/conditionalAccess/policies, or relying on signInActivity being populated. Set 'p2' for /identityProtection/riskDetections and other P2-gated resources."
+        },
+        "services": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "enum": ["intune", "entra", "defender"] },
+          "description": "Microsoft 365 services the agent needs. Every declared scope must belong to one of these services in the OpenAdminOS service registry (packages/agent-sdk/src/services.ts). An empty list is allowed only for an agent that declares no Graph scopes beyond the sign-in baseline (openid, profile, offline_access, User.Read), such as one that reviews evidence the host supplies. A scope the service registry does not list is never covered. The manifest parser, the registry QA check services-cover-scopes and run preflight enforce this, and a manifest without services gets them derived from its scopes."
         },
         "mode": {
           "type": "string",

@@ -469,14 +469,22 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-requested-scopes"),
   connectTenant: (options?) =>
     ipcRenderer.invoke("openadminos:connect-tenant", options),
-  addTenantAccess: (tenantId, areaId) =>
-    ipcRenderer.invoke("openadminos:add-tenant-access", tenantId, areaId),
+  addTenantAccess: (tenantId, partIds) =>
+    ipcRenderer.invoke("openadminos:add-tenant-access", tenantId, partIds),
+  refreshTenantGrants: (tenantId) =>
+    ipcRenderer.invoke("openadminos:refresh-tenant-grants", tenantId),
+  retryTenantLicenseCheck: (tenantId) =>
+    ipcRenderer.invoke("openadminos:retry-tenant-license-check", tenantId),
+  cancelTenantCheck: (tenantId) =>
+    ipcRenderer.invoke("openadminos:cancel-tenant-check", tenantId),
   addSampleTenant: () => ipcRenderer.invoke("openadminos:add-sample-tenant"),
   cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:set-active-tenant", id),
   disconnectTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:disconnect-tenant", id),
+  removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) =>
+    ipcRenderer.invoke("openadminos:remove-saved-app-registration", clientId, directoryTenantId),
   getAgentManifest: (slug: string) =>
     ipcRenderer.invoke("openadminos:get-agent-manifest", slug),
   updateAgentSettings: (slug: string, values: Record<string, unknown>) =>

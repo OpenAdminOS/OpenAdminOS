@@ -179,3 +179,115 @@ function walk(skills: TemplateStep[], visit: (skill: TemplateStep) => void): voi
     if (skill.format === "map") walk(skill.settings.do, visit);
   }
 }
+
+describe("agent template services", () => {
+  const manifest = (services: string) => `
+descriptor:
+  id: services-check
+  name: Services check
+  description: Exercises the services declaration.
+  version: 1.0.0
+  author:
+    name: OpenAdminOS
+  category: policies
+  mode: read
+${services}
+skills:
+  - id: policies
+    format: graph
+    label: Load policies
+    settings:
+      method: GET
+      path: /identity/conditionalAccess/policies
+      scopes:
+        - Policy.Read.All
+definition:
+  result:
+    summary: Done.
+`;
+
+  it("carries declared services into the registry summary", () => {
+    const summary = agentTemplateToRegistrySummary(
+      parseAgentTemplate(manifest("  services:\n    - entra")),
+    );
+    assert.deepEqual(summary.services, ["entra"]);
+  });
+
+  it("derives services from the scopes when the manifest omits them", () => {
+    const summary = agentTemplateToRegistrySummary(parseAgentTemplate(manifest("")));
+    assert.deepEqual(summary.services, ["entra"]);
+  });
+
+  it("rejects unknown, planned, empty and duplicate services", () => {
+    for (const [services, pattern] of [
+      ["  services:\n    - exchange", /descriptor\.services\[0\]/],
+      ["  services: []", /must list at least one service when the agent declares Graph scopes \(Policy\.Read\.All\)/],
+      ["  services:\n    - entra\n    - entra", /must not list a service twice/],
+    ] as const) {
+      assert.throws(() => parseAgentTemplate(manifest(services)), pattern);
+    }
+  });
+
+  it("rejects a declaration that does not cover every scope", () => {
+    const intune = manifest("  services:\n    - entra")
+      .replace("Policy.Read.All", "DeviceManagementManagedDevices.Read.All")
+      .replace("/identity/conditionalAccess/policies", "/deviceManagement/managedDevices");
+    assert.throws(
+      () => parseAgentTemplate(intune),
+      /descriptor\.services: \[entra\] does not cover DeviceManagementManagedDevices\.Read\.All; these scopes belong to intune/,
+    );
+    const both = intune.replace("    - entra", "    - entra\n    - intune");
+    assert.deepEqual(agentTemplateToRegistrySummary(parseAgentTemplate(both)).services, ["entra", "intune"]);
+  });
+
+  it("never treats a scope the registry does not map as covered", () => {
+    const unmapped = manifest("  services:\n    - entra").replace("Policy.Read.All", "Example.Read.All");
+    assert.throws(() => parseAgentTemplate(unmapped), /\[entra\] does not cover Example\.Read\.All/);
+  });
+
+  it("accepts an empty list for an agent that declares no Graph scopes", () => {
+    const noGraph = `descriptor:
+  id: evidence-only
+  name: Evidence only
+  description: Reviews supplied evidence.
+  version: 1.0.0
+  author:
+    name: Test
+    handle: test
+  category: compliance
+  services: []
+  mode: read
+skills:
+  - id: review
+    format: llm
+    label: Review
+    settings:
+      prompt: Review the evidence.
+definition:
+  result:
+    summary: Done.
+`;
+    const summary = agentTemplateToRegistrySummary(parseAgentTemplate(noGraph));
+    assert.deepEqual(summary.services, []);
+    assert.deepEqual(summary.scopes, []);
+  });
+
+  it("accepts an empty list for an agent whose only scope is the sign-in User.Read", () => {
+    const signInOnly = manifest("  services: []").replace("Policy.Read.All", "User.Read").replace("/identity/conditionalAccess/policies", "/me");
+    const summary = agentTemplateToRegistrySummary(parseAgentTemplate(signInOnly));
+    assert.deepEqual(summary.services, []);
+    assert.deepEqual(summary.scopes, ["User.Read"]);
+  });
+
+  it("declares services for every bundled agent, empty only without Graph scopes", () => {
+    for (const slug of readdirSync(agentsRoot)) {
+      const manifestPath = join(agentsRoot, slug, "manifest.yaml");
+      if (!existsSync(manifestPath)) continue;
+      const parsed = parseAgentTemplate(readFileSync(manifestPath, "utf8"));
+      assert.ok(parsed.descriptor.services, `${slug} declares no services`);
+      if (parsed.descriptor.services.length === 0) {
+        assert.deepEqual(agentTemplateToRegistrySummary(parsed).scopes, [], `${slug} reads Graph without a service`);
+      }
+    }
+  });
+});

@@ -163,6 +163,8 @@ describe("Agents schedule actions", () => {
 
     await user.click(await screen.findByRole("button", { name: "Schedule actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Run due now (1)" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       await screen.findByRole("button", {
         name: /Approve \d+ read scopes and continue to Microsoft/,

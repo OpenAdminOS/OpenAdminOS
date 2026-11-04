@@ -1,6 +1,6 @@
 # AGENTS.md — Operating Instructions
 
-You are building **OpenAdminOS** — an open-source, local-first desktop platform for Microsoft Intune & Entra administrators to run AI agents against their tenants. This file tells you how to work on this codebase. Read it fully before doing anything else.
+You are building **OpenAdminOS**: an open-source, local-first desktop platform for Microsoft 365 administrators, starting with Intune, Entra and Defender, to run AI agents against their tenants. This file tells you how to work on this codebase. Read it fully before doing anything else.
 
 ---
 

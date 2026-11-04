@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>31 · Service not connected · OpenAdminOS</title>
+  <link rel="stylesheet" href="_design.css">
+  <style>
+    @font-face { font-family: Geist; src: url('../../node_modules/@fontsource-variable/geist/files/geist-latin-wght-normal.woff2'); font-display: swap; }
+    @font-face { font-family: Newsreader; src: url('../../node_modules/@fontsource-variable/newsreader/files/newsreader-latin-wght-normal.woff2'); font-display: swap; }
+    :root { --warning-soft: rgba(229,198,120,.1); --success-soft: rgba(156,200,143,.1); }
+    body { height: auto; min-height: 100vh; overflow: auto; font-size: 14px; letter-spacing: 0; }
+    button, select { font: inherit; cursor: pointer; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+    .shell { display: grid; grid-template-columns: 268px minmax(0,1fr); min-height: 100vh; }
+    aside { background: var(--bg-1); border-right: 1px solid var(--border); padding: 16px 20px; }
+    .brand { display: flex; gap: 12px; align-items: center; padding: 0 0 24px; font-family: Newsreader, Georgia, serif; font-size: 24px; }
+    .mark { font-size: 30px; letter-spacing: -4px; padding-right: 4px; }
+    nav { display: grid; gap: 6px; color: var(--text-1); }
+    nav span { padding: 8px 12px; border-radius: 8px; }
+    nav .current { color: var(--text-0); background: var(--bg-3); }
+    main { min-width: 0; }
+    .top { height: 52px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 0 32px; border-bottom: 1px solid var(--border); font-size: 13px; }
+    .local { color: var(--success); }
+    .content { max-width: 960px; padding: 28px 32px 48px; margin: auto; }
+    .reference { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-bottom: 24px; color: var(--text-2); font-size: 13px; }
+    select { background: var(--bg-2); color: var(--text-0); border: 1px solid var(--border); padding: 6px 10px; border-radius: 8px; }
+    h1 { font-family: Newsreader, Georgia, serif; font-size: 28px; font-weight: 500; margin: 0 0 20px; }
+    h2 { font-size: 15px; font-weight: 600; }
+    h3 { font-size: 13px; font-weight: 600; margin: 32px 0 10px; color: var(--text-2); }
+    p { color: var(--text-1); }
+    .muted { color: var(--text-2); font-size: 12px; }
+    .panel { max-width: 560px; margin: 24px auto; background: var(--bg-2); border: 1px solid var(--border); border-radius: 12px; padding: 24px; }
+    .head { display: flex; gap: 12px; align-items: flex-start; }
+    .icon { width: 36px; height: 36px; flex: none; border-radius: 8px; background: var(--bg-1); border: 1px solid var(--border); display: grid; place-items: center; color: var(--text-2); }
+    .service { margin-top: 16px; display: flex; gap: 12px; align-items: center; background: var(--bg-1); border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+    .service > div { flex: 1; min-width: 0; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 1px 7px; font-size: 12px; font-weight: 500; color: var(--text-1); background: var(--bg-3); }
+    .badge::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+    .badge.ok { color: var(--success); background: var(--success-soft); }
+    .badge.ok::before { background: var(--success); }
+    .badge.part { color: var(--warning); background: var(--warning-soft); }
+    .badge.part::before { background: var(--warning); }
+    button { border-radius: 8px; padding: 6px 12px; background: var(--bg-3); color: var(--text-0); border: 1px solid var(--border); font-size: 13px; }
+    button:hover { background: var(--bg-4); }
+    button.primary { background: var(--accent); color: var(--bg-0); border-color: transparent; }
+    button.ghost { background: transparent; border-color: transparent; color: var(--text-1); }
+    .end { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    .tenants { background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+    .tenant { padding: 12px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; }
+    .services { padding: 12px 16px; background: var(--bg-1); }
+    .row { padding: 10px 0; border-top: 1px solid var(--border); }
+    .row:first-of-type { border-top: 0; }
+    .line { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .line .name { min-width: 72px; font-weight: 500; }
+    .line button { margin-left: auto; }
+    .parts { margin-top: 6px; display: flex; flex-wrap: wrap; gap: 6px; font-size: 12px; color: var(--text-1); }
+    .parts span { display: inline-flex; align-items: center; gap: 5px; }
+    .parts span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+    .parts .off { padding: 1px 6px; border: 1px solid var(--border); border-radius: 6px; color: var(--text-2); }
+    .parts .off::before { background: var(--text-3); }
+    code { font-family: ui-monospace, monospace; font-size: 12px; color: var(--text-2); overflow-wrap: anywhere; }
+    .notice { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; background: var(--warning-soft); border: 1px solid rgba(229,198,120,.25); border-radius: 8px; padding: 12px 16px; }
+    [hidden] { display: none !important; }
+    @media (max-width: 1000px) { .shell { grid-template-columns: 1fr; } aside { display: none; } .top, .content { padding-left: 16px; padding-right: 16px; } }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
+      <nav aria-label="Design reference navigation"><span>Chat</span><span>Agent Team</span><span>Agents</span><span>Runs</span><span class="current">Changes</span><span>Settings</span></nav>
+    </aside>
+    <main>
+      <div class="top"><span>Contoso · Active tenant</span><span class="local">Local-only · No data leaves this device</span></div>
+      <div class="content">
+        <div class="reference">
+          <span>Design reference 31</span>
+          <label for="registration">Sign-in</label>
+          <select id="registration"><option value="shared">OpenAdminOS app</option><option value="own">Own app registration</option></select>
+        </div>
+
+        <h1>Changes</h1>
+        <section class="panel" aria-labelledby="gate-title">
+          <div class="head">
+            <span class="icon" aria-hidden="true">&#9673;</span>
+            <div>
+              <h2 id="gate-title">Intune and Entra are not connected for Contoso</h2>
+              <p class="muted" data-shared>Changes reads data from Intune or Entra. Add the service to ask Microsoft for consent to its read scopes only. Your other services stay as they are.</p>
+              <p class="muted" data-own hidden>Changes reads data from Intune or Entra. Add the permissions to your app registration, grant admin consent, then choose Check again.</p>
+            </div>
+          </div>
+          <div class="service"><div><strong>Intune</strong> <span class="badge">Not connected</span><p class="muted">Managed devices, compliance and configuration policies, apps, scripts and Autopilot.</p></div><button class="primary"><span data-shared>Add Intune</span><span data-own hidden>Add Intune permissions</span></button></div>
+          <div class="service"><div><strong>Entra</strong> <span class="badge">Not connected</span><p class="muted">Users, groups, app registrations, roles, Conditional Access, sign-in logs and risk signals.</p></div><button class="primary"><span data-shared>Add Entra</span><span data-own hidden>Add Entra permissions</span></button></div>
+          <div class="end"><button class="ghost">Open Settings, Tenants</button></div>
+        </section>
+
+        <h3>Agent detail and run review</h3>
+        <div class="notice">
+          <span><strong>Needs Defender, not connected.</strong> <span class="muted">Runs against Contoso are blocked until the service is added.</span></span>
+          <button><span data-shared>Add Defender</span><span data-own hidden>Add Defender permissions</span></button>
+        </div>
+
+        <h3>Settings, Tenants</h3>
+        <div class="tenants">
+          <div class="tenant"><span><strong>Contoso</strong> <span class="muted">contoso.com · Microsoft Entra ID P2</span></span><span class="muted" data-own hidden>Own app registration aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee</span></div>
+          <section class="services" aria-label="Contoso services">
+            <div class="line"><span class="muted">Services</span><button data-own hidden>Check again</button></div>
+            <div class="row">
+              <div class="line"><span class="name">Intune</span><span class="badge ok">Connected</span><span class="muted">3 of 3 parts</span></div>
+              <div class="parts"><span>Users and groups</span><span>Devices and configuration</span><span>Apps</span></div>
+            </div>
+            <div class="row">
+              <div class="line"><span class="name">Entra</span><span class="badge part">Partial</span><span class="muted">2 of 6 parts</span><button><span data-shared>Add access</span><span data-own hidden>Add permissions</span></button></div>
+              <div class="parts"><span>Users and groups</span><span>Devices</span><span class="off">App registrations</span><span class="off">Roles and domains</span><span class="off">Conditional Access and policies</span><span class="off">Sign-in logs</span></div>
+              <p data-own hidden><code>Missing: Application.Read.All, RoleManagement.Read.Directory, AdministrativeUnit.Read.All, Domain.Read.All, Policy.Read.All, AuditLog.Read.All, IdentityRiskyUser.Read.All</code></p>
+            </div>
+            <div class="row">
+              <div class="line"><span class="name">Defender</span><span class="badge">Not connected</span><span class="muted">0 of 2 parts</span><button><span data-shared>Add access</span><span data-own hidden>Add permissions</span></button></div>
+              <div class="parts"><span class="off">Alerts and incidents</span><span class="off">Secure Score</span></div>
+              <p data-own hidden><code>Missing: SecurityAlert.Read.All, SecurityIncident.Read.All, SecurityEvents.Read.All</code></p>
+            </div>
+          </section>
+        </div>
+        <p class="muted" style="margin-top:12px" data-own hidden>Add permissions opens the exact permissions with Copy script (adds them to the existing app ID and keeps what it has), Copy JSON snippet (merge into requiredResourceAccess) and Check again.</p>
+      </div>
+    </main>
+  </div>
+  <script>
+    const select = document.getElementById('registration');
+    const apply = () => {
+      const own = select.value === 'own';
+      document.querySelectorAll('[data-own]').forEach((node) => { node.hidden = !own; });
+      document.querySelectorAll('[data-shared]').forEach((node) => { node.hidden = own; });
+    };
+    select.addEventListener('change', apply);
+    apply();
+  </script>
+</body>
+</html>

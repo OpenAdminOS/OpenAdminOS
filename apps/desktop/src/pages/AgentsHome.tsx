@@ -11,6 +11,8 @@ import { NewAgentModal } from "../components/NewAgentModal";
 import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
+import { ServiceChips } from "../components/ServiceAccess";
+import { AGENT_COPY, SERVICE_COPY } from "../copy";
 import {
   IconChevronDown,
   IconBolt,
@@ -32,7 +34,16 @@ import {
 } from "../components/ui";
 import type { AgentDisplay } from "../shared/agent-display";
 import { formatAgentDisplayName } from "../shared/agent-display";
-import type { AgentSummary, RunRecord } from "../shared/openAdminOS";
+import {
+  AVAILABLE_SERVICES,
+  agentServiceIds,
+  isServiceId,
+  serviceById,
+  type AgentSummary,
+  type InvalidAgentManifest,
+  type RunRecord,
+  type ServiceId,
+} from "../shared/openAdminOS";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { useAppState } from "../state";
@@ -61,10 +72,20 @@ export default function AgentsHome() {
   const [bulkRunning, setBulkRunning] = useState<"due" | "all" | null>(null);
   const [schedulerRegistered, setSchedulerRegistered] = useState<boolean | null>(null);
   const resumedBatchRef = useRef<string | null>(null);
+  const [editingInvalid, setEditingInvalid] = useState<InvalidAgentManifest | null>(null);
+  const invalidAgents = state.invalidAgents ?? [];
+  const invalidEntryFor = (agent: AgentSummary | undefined) =>
+    agent?.manifestError
+      ? invalidAgents.find((entry) => entry.registryPath === agent.registryPath)
+      : undefined;
+  const editableInvalid = (entry: InvalidAgentManifest | undefined) =>
+    entry?.source === "user" && entry.sourceText !== undefined ? entry : undefined;
 
   const modeParam = searchParams.get("mode");
   const modeFilter: ModeFilter = modeParam === "read" || modeParam === "write" ? modeParam : "all";
   const categoryFilter = searchParams.get("category") || "all";
+  const serviceParam = searchParams.get("service");
+  const serviceFilter: ServiceId | "all" = isServiceId(serviceParam) ? serviceParam : "all";
   const scheduledOnly = searchParams.get("filter") === "scheduled";
   const activeTab = scheduledOnly ? "schedules" : "installed";
   const updatesOnly = searchParams.get("updates") === "available";
@@ -196,9 +217,11 @@ export default function AgentsHome() {
         .includes(normalizedQuery);
     const matchesMode = modeFilter === "all" || row.display.mode === modeFilter;
     const matchesCategory = categoryFilter === "all" || row.display.category === categoryFilter;
+    const matchesService =
+      serviceFilter === "all" || agentServiceIds(row.display).includes(serviceFilter);
     const matchesSchedule = !scheduledOnly || row.installed.schedule?.enabled === true;
     const matchesUpdates = !updatesOnly || Boolean(row.installed.updateAvailable);
-    return matchesQuery && matchesMode && matchesCategory && matchesSchedule && matchesUpdates;
+    return matchesQuery && matchesMode && matchesCategory && matchesService && matchesSchedule && matchesUpdates;
   });
 
   const setLibraryTab = (nextTab: string) => {
@@ -235,6 +258,15 @@ export default function AgentsHome() {
       const next = new URLSearchParams(current);
       if (category === "all") next.delete("category");
       else next.set("category", category);
+      return next;
+    });
+  };
+
+  const setServiceFilter = (service: ServiceId | "all") => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (service === "all") next.delete("service");
+      else next.set("service", service);
       return next;
     });
   };
@@ -292,11 +324,20 @@ export default function AgentsHome() {
   };
 
   function installedAgentMenu(row: LibraryRow): MenuEntry[] {
+    const editable = editableInvalid(invalidEntryFor(row.installed));
     return [
+      ...(editable
+        ? [{
+            id: "edit-manifest",
+            label: AGENT_COPY.invalidEditAction,
+            onSelect: () => setEditingInvalid(editable),
+          }]
+        : []),
       {
         id: "schedule",
         label: "Schedule",
         icon: <IconClock size={13} />,
+        disabled: Boolean(row.installed.manifestError),
         onSelect: () => openAgent(row.slug, "schedule"),
       },
       {
@@ -324,39 +365,66 @@ export default function AgentsHome() {
   const filterItems: MenuEntry[] = [
     {
       id: "mode-all",
-      label: `${modeFilter === "all" ? "✓ " : ""}All modes`,
+      label: "All modes",
+      checked: modeFilter === "all",
+      radio: true,
       onSelect: () => setModeFilter("all"),
     },
     {
       id: "mode-read",
-      label: `${modeFilter === "read" ? "✓ " : ""}Read mode`,
+      label: "Read mode",
+      checked: modeFilter === "read",
+      radio: true,
       onSelect: () => setModeFilter("read"),
     },
     {
       id: "mode-write",
-      label: `${modeFilter === "write" ? "✓ " : ""}Write mode`,
+      label: "Write mode",
+      checked: modeFilter === "write",
+      radio: true,
       onSelect: () => setModeFilter("write"),
     },
     { id: "mode-separator", type: "separator" },
     {
       id: "category-all",
-      label: `${categoryFilter === "all" ? "✓ " : ""}All categories`,
+      label: "All categories",
+      checked: categoryFilter === "all",
+      radio: true,
       onSelect: () => setCategoryFilter("all"),
     },
     ...categories.map((category) => ({
       id: `category-${category}`,
-      label: `${categoryFilter === category ? "✓ " : ""}${titleCase(category)}`,
+      label: titleCase(category),
+      checked: categoryFilter === category,
+      radio: true,
       onSelect: () => setCategoryFilter(category),
+    })),
+    { id: "service-separator", type: "separator" as const },
+    {
+      id: "service-all",
+      label: SERVICE_COPY.filterAll,
+      checked: serviceFilter === "all",
+      radio: true,
+      onSelect: () => setServiceFilter("all"),
+    },
+    ...AVAILABLE_SERVICES.map((service) => ({
+      id: `service-${service.id}`,
+      label: SERVICE_COPY.filterLabel(service.title),
+      checked: serviceFilter === service.id,
+      radio: true,
+      onSelect: () => setServiceFilter(service.id),
     })),
     { id: "filter-separator", type: "separator" as const },
     {
       id: "scheduled",
-      label: `${scheduledOnly ? "✓ " : ""}Scheduled only`,
+      label: "Scheduled only",
+      checked: scheduledOnly,
       onSelect: () => setScheduledOnly(!scheduledOnly),
     },
     {
       id: "updates",
-      label: `${updatesOnly ? "✓ " : ""}Updates available`,
+      label: "Updates available",
+      checked: updatesOnly,
       onSelect: () => setUpdatesOnly(!updatesOnly),
     },
   ];
@@ -414,7 +482,12 @@ export default function AgentsHome() {
         </div>
         <div className="mb-2 flex items-center justify-between gap-3 text-xs text-[var(--color-text-muted)]">
           <span>{rows.length} of {sourceRows.length} installed agents</span>
-          {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
+          <span className="flex items-center gap-2">
+            {serviceFilter !== "all" ? (
+              <Badge tone="info">{SERVICE_COPY.filterLabel(serviceById(serviceFilter).title)}</Badge>
+            ) : null}
+            {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
+          </span>
         </div>
         {scheduledOnly ? <SchedulesPausedNotice className="mb-3" /> : null}
         {scheduledOnly && scheduledAgents.length > 0 && schedulerRegistered === false ? (
@@ -458,7 +531,13 @@ export default function AgentsHome() {
                       </span>
                     </span>
                     <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
+                    <span className="mt-1 block"><ServiceChips services={agentServiceIds(row.display)} /></span>
                     {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
+                    {row.installed.manifestError ? (
+                      <span className="mt-0.5 block truncate text-xs text-[var(--color-danger)]" title={row.installed.manifestError}>
+                        {AGENT_COPY.invalidRowHint} {row.installed.manifestError}
+                      </span>
+                    ) : null}
                   </button>
                   {scheduled ? (
                     <ScheduleUsageForecast agent={row.installed} intervalSeconds={row.installed.schedule!.intervalSeconds} compact />
@@ -469,7 +548,8 @@ export default function AgentsHome() {
                     size="sm"
                     variant="ghost"
                     leadingIcon={<IconPlay size={13} />}
-                    disabled={row.display.compatibility?.supported === false}
+                    disabled={row.display.compatibility?.supported === false || Boolean(row.installed.manifestError)}
+                    title={row.installed.manifestError ? AGENT_COPY.invalidRowHint : undefined}
                     onClick={() => void runAgent(row.installed)}
                   >
                     Run
@@ -499,6 +579,14 @@ export default function AgentsHome() {
         </div>
       </section>
       <NewAgentModal open={addFlow === "agent"} onClose={closeAddFlow} />
+      {editingInvalid ? (
+        <NewAgentModal
+          open
+          onClose={() => setEditingInvalid(null)}
+          initialYamlSource={editingInvalid.sourceText}
+          editingSlug={editingInvalid.folder}
+        />
+      ) : null}
     </div>
   );
 }

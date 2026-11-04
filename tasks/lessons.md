@@ -33,3 +33,13 @@ Format:
 **Why:** During the v0.1.8 launch email draft I signed it "— Uli" because I extrapolated from the email username `ulimuli92@googlemail.com`. The user's actual name is **Ugur** (clearly visible in `/Users/ugurkoc/`, the `ugurkocde` GitHub login, and every prior commit's author). The test email went out with the wrong sign-off; the user caught it.
 
 **How to apply:** Before putting a name into any user-visible artifact (emails, READMEs, commit co-authorship, social copy), do a 5-second cross-check against `pwd`, `git config user.name`, `gh api user --jq .login`, or recent `git log --format='%an %ae'`. If any of those disagree with the email prefix, the path/git/gh signal wins.
+
+---
+
+## Mockups for new product surfaces must be designed, not wireframed
+
+**Pattern:** When asked for a mockup of a new user-facing surface (marketplace, store, showcase pages), deliver a finished visual design with a clear point of view: distinctive imagery, strong type hierarchy, and real visual polish. A grid of uniform text cards with filter controls is a wireframe, not a mockup.
+
+**Why:** The first marketplace mockup (`docs/mockups/25-marketplace.html`, 2026-11-03) was a plain card grid with dropdowns and a placement toggle. The user rejected it as bad UI and asked for something eye-catching. They also wanted Marketplace as its own sidebar item, not a tab inside Agents.
+
+**How to apply:** Before building, load the `frontend-design` skill and write a short design plan (palette, type, layout, the one memorable element). Keep the restrained brand for the app chrome, and let the content carry the visual weight (cover art, large serif headings). Check the result in a browser at desktop and narrow widths before showing it. Treat open product questions as questions for the user, not as toggles inside the mockup.

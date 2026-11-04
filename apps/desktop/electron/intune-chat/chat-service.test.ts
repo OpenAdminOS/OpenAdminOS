@@ -8,6 +8,7 @@ import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { RunGraphApi, RunLlmApi } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
+import { partIdsFor, qualifyScope, requestedScopes } from "@openadminos/agent-sdk";
 
 const tokenStore: TokenCacheStorage = {
   read: async () => "",
@@ -1933,7 +1934,7 @@ it("answers an ungranted area deterministically without calling Graph", async ()
     });
     assert.equal(
       result.assistantMessage.content,
-      "This question needs Devices and configuration access, which was not granted for Directory team. Add it in Settings, Tenants.",
+      "This needs Intune devices and configuration, which is not granted for Directory team. Add it in Settings, Tenants.",
     );
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);
@@ -1942,3 +1943,203 @@ it("answers an ungranted area deterministically without calling Graph", async ()
     await rm(dir, { recursive: true, force: true });
   }
 });
+it("names a service that is not connected instead of a scope", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-no-defender-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeProviderId: "ollama",
+      activeModelByProviderId: { ollama: "mock-chat" },
+      activeTenantId: "tenant-directory-only",
+      tenants: [
+        {
+          id: "tenant-directory-only",
+          displayName: "Directory team",
+          username: "admin@example.test",
+          homeAccountId: "directory-only",
+          addedAt: new Date().toISOString(),
+          grantedScopes: [
+            "User.Read.All",
+            "GroupMember.Read.All",
+            "Directory.Read.All",
+            "Organization.Read.All",
+          ],
+        },
+      ],
+      installedAgents: [],
+      runs: [],
+    }),
+  );
+  let graphCalls = 0;
+  let llmCalls = 0;
+  const store = new AppStateStore({
+    filePath,
+    tokenStore,
+    userDataPath: dir,
+    statsApiUrl: "",
+    graphFactory: () => ({
+      request: async () => {
+        graphCalls += 1;
+        return { value: [] };
+      },
+    } as unknown as RunGraphApi),
+    llmFactory: () => {
+      llmCalls += 1;
+      return {
+        available: true,
+        async complete() {
+          return { text: "Unexpected model answer.", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      };
+    },
+  });
+  try {
+    const result = await store.sendIntuneChatMessage({
+      content: "Show open security incidents",
+    });
+    assert.equal(
+      result.assistantMessage.content,
+      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+    );
+    assert.equal(graphCalls, 0);
+    assert.equal(llmCalls, 0);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+it("treats a partly granted Defender part as not connected in Chat", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-alert-only-"));
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeProviderId: "ollama",
+      activeModelByProviderId: { ollama: "mock-chat" },
+      activeTenantId: "tenant-alert-only",
+      tenants: [
+        {
+          id: "tenant-alert-only",
+          displayName: "Alerts only",
+          username: "admin@example.test",
+          homeAccountId: "alert-only",
+          addedAt: new Date().toISOString(),
+          grantedScopes: ["graph:User.Read", "graph:SecurityAlert.Read.All"],
+        },
+      ],
+      installedAgents: [],
+      runs: [],
+    }),
+  );
+  let graphCalls = 0;
+  let llmCalls = 0;
+  const store = new AppStateStore({
+    filePath,
+    tokenStore,
+    userDataPath: dir,
+    statsApiUrl: "",
+    graphFactory: () => ({
+      request: async () => {
+        graphCalls += 1;
+        return { value: [] };
+      },
+    } as unknown as RunGraphApi),
+    llmFactory: () => {
+      llmCalls += 1;
+      return {
+        available: true,
+        async complete() {
+          return { text: "Unexpected model answer.", model: "mock-chat" };
+        },
+        async *stream() {
+          yield { delta: "", accumulated: "", done: true, model: "mock-chat" };
+        },
+      };
+    },
+  });
+  try {
+    const result = await store.sendIntuneChatMessage({ content: "Show recent security alerts" });
+    assert.equal(
+      result.assistantMessage.content,
+      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+    );
+    assert.equal(graphCalls, 0);
+    assert.equal(llmCalls, 0);
+  } finally {
+    store.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+for (const path of ["send", "stream"] as const) {
+  it(`names the resources a partial answer leaves out (${path})`, async () => {
+    const dir = await mkdtemp(join(tmpdir(), `openadminos-chat-partial-${path}-`));
+    const filePath = join(dir, "state.json");
+    await writeFile(
+      filePath,
+      JSON.stringify({
+        activeProviderId: "ollama",
+        activeModelByProviderId: { ollama: "mock-chat" },
+        activeTenantId: "tenant-intune-only",
+        tenants: [
+          {
+            id: "tenant-intune-only",
+            displayName: "Intune team",
+            username: "admin@example.test",
+            homeAccountId: "intune-only",
+            addedAt: new Date().toISOString(),
+            grantedScopes: requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name)),
+          },
+        ],
+        installedAgents: [],
+        runs: [],
+      }),
+    );
+    const graphPaths: string[] = [];
+    const store = new AppStateStore({
+      filePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      graphFactory: () => ({
+        request: async (input: { path?: string }) => {
+          graphPaths.push(input.path ?? "unknown");
+          return { value: [] };
+        },
+      } as unknown as RunGraphApi),
+      llmFactory: () => ({
+        available: true,
+        async complete() {
+          return { text: "No managed devices are cached.", model: "mock-chat" };
+        },
+        async *stream() {
+          const text = "No managed devices are cached.";
+          yield { delta: text, accumulated: text, done: false, model: "mock-chat" };
+          yield { delta: "", accumulated: text, done: true, model: "mock-chat" };
+        },
+      }),
+    });
+    try {
+      const input = { content: "Show devices with security alerts" };
+      const result = path === "send"
+        ? await store.sendIntuneChatMessage(input)
+        : await store.streamIntuneChatMessage(input, () => undefined);
+      assert.equal(result.assistantMessage.status, "completed");
+      assert.equal(
+        result.assistantMessage.content,
+        "No managed devices are cached.\n\nNot included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Settings, Tenants.",
+      );
+      assert.equal(graphPaths.some((entry) => entry.includes("/security/")), false);
+      const messages = await store.getIntuneChatMessages(result.conversation.id);
+      assert.match(messages[1]?.content ?? "", /Not included in this answer: Defender alerts and Defender incidents\./);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+}

@@ -21,6 +21,10 @@ descriptor:
     verified: true
   category: devices
   requiresEntraTier: free
+  # Intune covers every declared scope, including the Entra device read
+  # (decided 2026-11-04, SPEC.md 2a).
+  services:
+    - intune
   mode: write
   preferredModel: llama3.1:8b
 

@@ -16,6 +16,8 @@ descriptor:
   category: devices
   tier: agent
   requiresEntraTier: free
+  services:
+    - intune
   mode: read
   preferredModel: llama3.1:8b
 

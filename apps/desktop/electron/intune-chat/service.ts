@@ -7,9 +7,12 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  availableScopeSet,
+  formatServiceList,
   grantedScopeSet,
-  missingPermissionAreasForScopes,
-  permissionAreaForScope,
+  missingPartsForScopes,
+  missingServiceCopy,
+  notGrantedServiceForScopes,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
   graphAccessDenialText,
@@ -159,24 +162,82 @@ type WorkspacePromptContextPayload = {
   promptBlock: string;
 };
 
+interface TenantResourceRestriction {
+  /** Every planned resource was dropped: the whole answer. */
+  blocked?: string;
+  /** Some were dropped: one line appended to the answer that names them. */
+  omitted?: string;
+}
+
 function restrictPlannedResourcesForTenant(
   planned: PlannedChatContext,
   tenant: TenantRecord,
-): string | undefined {
+): TenantResourceRestriction {
   const originalResources = [...planned.resources];
+  const available = availableScopeSet(tenant);
+  const isAvailable = (resource: GraphCacheResourceKind) =>
+    definitionForResource(resource).scopes.every((scope) => available.has(scope));
+  planned.resources = originalResources.filter(isAvailable);
+  const dropped = originalResources.filter((resource) => !isAvailable(resource));
+  if (dropped.length === 0) return {};
+  const reason =
+    missingServiceCopy(tenant, requiredScopesForResources(dropped)) ??
+    `This question needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+  if (planned.resources.length === 0) return { blocked: reason };
+  const labels = dropped.map((resource) => definitionForResource(resource).label);
+  return { omitted: `Not included in this answer: ${formatServiceList(labels)}. ${reason}` };
+}
+
+interface UnavailableTenantResources {
+  resources: GraphCacheResourceKind[];
+  /** Scopes the tenant still has to grant, for the readiness row. */
+  missingScopes: string[];
+  /** The service or part to add, for the recovery line. */
+  reason: string;
+  /** Names the left-out resources and the service or part to add. */
+  message: string;
+}
+
+/**
+ * Resources a tenant cannot read with its current grants, by the same
+ * part-level rule as single-tenant Chat. Multi-tenant Chat treats them
+ * as missing access, so old cache rows of a service that is not
+ * connected never count as a current result.
+ */
+function unavailableResourcesForTenant(
+  resources: readonly GraphCacheResourceKind[],
+  tenant: TenantRecord,
+): UnavailableTenantResources | undefined {
+  const available = availableScopeSet(tenant);
+  const unavailable = resources.filter(
+    (resource) => !definitionForResource(resource).scopes.every((scope) => available.has(scope)),
+  );
+  if (unavailable.length === 0) return undefined;
+  const needed = requiredScopesForResources(unavailable);
   const granted = grantedScopeSet(tenant);
-  planned.resources = originalResources.filter((resource) =>
-    definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
+  const partScopes = missingPartsForScopes(needed, available).flatMap((part) =>
+    part.scopes.filter((scope) => scope.audience === "graph").map((scope) => scope.name),
   );
-  if (originalResources.length === 0 || planned.resources.length > 0) {
-    return undefined;
-  }
-  const missingAreas = missingPermissionAreasForScopes(
-    requiredScopesForResources(originalResources),
-    granted,
-  );
-  const areaTitle = missingAreas[0]?.title ?? "additional Microsoft Graph";
-  return `This question needs ${areaTitle} access, which was not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+  const notGranted = (partScopes.length > 0 ? partScopes : needed).filter((scope) => !granted.has(scope));
+  const missingScopes = [
+    ...new Set(notGranted.length > 0 ? notGranted : needed.filter((scope) => !available.has(scope))),
+  ];
+  const labels = unavailable.map((resource) => definitionForResource(resource).label);
+  const reason =
+    missingServiceCopy(tenant, needed) ??
+    `This needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+  return {
+    resources: unavailable,
+    missingScopes,
+    reason,
+    message: `Not included: ${formatServiceList(labels)}. ${reason}`,
+  };
+}
+
+/** Appends the left-out line to a completed answer so it is never silent. */
+function withOmittedNotice(content: string, omitted: string | undefined): string {
+  if (!omitted) return content;
+  return content.trim() ? `${content.trimEnd()}\n\n${omitted}` : omitted;
 }
 
 type GraphCacheRefreshProgressEvent =
@@ -286,10 +347,8 @@ export class IntuneChatService {
       throw new Error("A cache preload is already running for this tenant.");
     if (options.resources?.length === 0)
       throw new Error("Select at least one resource to preload.");
-    const granted = grantedScopeSet(tenant);
-    const resources = sanitizeGraphResources(options.resources).filter((resource) =>
-      definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
-    );
+    // Resources of services that are not connected come back skipped.
+    const resources = sanitizeGraphResources(options.resources);
     const controller = new AbortController();
     const job: import("@openadminos/agent-sdk").GraphCachePreloadJob = {
       tenantId: tenant.id,
@@ -320,7 +379,7 @@ export class IntuneChatService {
         job.status = controller.signal.aborted
           ? "cancelled"
           : result.resources.length === resources.length &&
-              result.resources.every((r) => r.ok && !r.pageLimitReached)
+              result.resources.every((r) => r.skipped || (r.ok && !r.pageLimitReached))
             ? "complete"
             : "incomplete";
       })
@@ -713,6 +772,9 @@ export class IntuneChatService {
         tenant.status !== "failed" &&
         tenant.status !== "skipped",
     );
+    // Resources the refresh skipped because their service is not connected
+    // for the tenant. A skipped device read leaves nothing current to show.
+    const skippedNotes = new Map<string, { devicesSkipped: boolean; message: string }>();
     const refreshTenant = async (tenant: (typeof runnable)[number]) => {
       const startedAt = new Date().toISOString();
       job = updateJobTenantProgress(job, tenant.tenantId, {
@@ -731,7 +793,30 @@ export class IntuneChatService {
             tenantId: tenant.tenantId,
             resources: tenant.staleResources,
           });
-          const failedResources = refreshResult.resources.filter((resource) => !resource.ok);
+          const skippedResources = refreshResult.resources.filter((resource) => resource.skipped);
+          if (skippedResources.length > 0) {
+            // The refresh judged current grants, so the copy reads them too.
+            const record = (await this.host.read()).tenants.find((entry) => entry.id === tenant.tenantId);
+            const kinds = skippedResources.map((resource) => resource.resource);
+            const reason =
+              (record ? missingServiceCopy(record, requiredScopesForResources(kinds)) : undefined) ??
+              "Its service is not connected for this tenant. Add it in Settings, Tenants.";
+            const devicesSkipped = kinds.includes("managedDevices");
+            const message = `Not included: ${formatServiceList(skippedResources.map((resource) => resource.label))}. ${reason}`;
+            skippedNotes.set(tenant.tenantId, { devicesSkipped, message });
+            if (devicesSkipped) {
+              job = updateJobTenantProgress(job, tenant.tenantId, {
+                status: "skipped",
+                detail: message,
+                updatedAt: new Date().toISOString(),
+              });
+              persistJob();
+              return;
+            }
+          }
+          const failedResources = refreshResult.resources.filter(
+            (resource) => !resource.ok && !resource.skipped,
+          );
           if (
             failedResources.some((resource) => resource.resource === "managedDevices") ||
             failedResources.length === refreshResult.resources.length
@@ -790,6 +875,21 @@ export class IntuneChatService {
         });
         continue;
       }
+      const skippedNote = skippedNotes.get(tenant.tenantId);
+      if (skippedNote?.devicesSkipped) {
+        comparisons.push({
+          tenantId: tenant.tenantId,
+          tenantName: tenant.tenantName,
+          status: "skipped",
+          windowsDevices: 0,
+          compliant: 0,
+          nonCompliant: 0,
+          unknown: 0,
+          lastRefresh: tenant.cacheFreshness,
+          warnings: [skippedNote.message, ...tenant.warnings],
+        });
+        continue;
+      }
       if (!runnable.some((entry) => entry.tenantId === tenant.tenantId)) {
         comparisons.push({
           tenantId: tenant.tenantId,
@@ -822,10 +922,15 @@ export class IntuneChatService {
         row.operatingSystem.toLowerCase().includes("windows"),
       );
       deviceRows.push(...windowsRows);
-      comparisons.push(buildTenantComparison({
+      const comparison = buildTenantComparison({
         tenant,
         rows: windowsRows,
-      }));
+      });
+      comparisons.push(
+        skippedNote
+          ? { ...comparison, warnings: [skippedNote.message, ...comparison.warnings] }
+          : comparison,
+      );
       job = updateJobTenantProgress(job, tenant.tenantId, {
         status: "ready",
         detail: `${windowsRows.length.toLocaleString()} Windows device rows prepared.`,
@@ -853,6 +958,7 @@ export class IntuneChatService {
       rows: deviceRows,
     });
     const finalStatus =
+      skippedNotes.size > 0 ||
       comparisons.some((comparison) =>
         ["failed", "expired", "missing-scopes", "throttled", "skipped"].includes(
           comparison.status,
@@ -1190,8 +1296,13 @@ export class IntuneChatService {
       .filter((tenant) => selectedTenantSet.has(tenant.id))
       .map((tenant) => {
         const statusRows = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
-        const relevantStatus = statusRows.filter((status) =>
-          resources.includes(status.resource),
+        // Current grants decide first. Cache rows and earlier errors of a
+        // resource the tenant cannot read now say nothing about this run.
+        const unavailable = unavailableResourcesForTenant(resources, tenant);
+        const relevantStatus = statusRows.filter(
+          (status) =>
+            resources.includes(status.resource) &&
+            !unavailable?.resources.includes(status.resource),
         );
         const staleResources = relevantStatus
           .filter((status) => isGraphCacheStatusStale(status))
@@ -1208,7 +1319,10 @@ export class IntuneChatService {
         });
         const errors = issues.map(issue => issue.message);
         const accessDenials = issues.flatMap(issue => issue.denial ? [issue.denial] : []);
-        const missingScopes = [...new Set(accessDenials.flatMap(denial => denial.missingScopes))];
+        const missingScopes = [...new Set([
+          ...(unavailable?.missingScopes ?? []),
+          ...accessDenials.flatMap(denial => denial.missingScopes),
+        ])];
         const status = tenantReadinessStatus({
           missingScopes,
           staleResources,
@@ -1224,8 +1338,13 @@ export class IntuneChatService {
           cacheFreshness,
           staleResources,
           missingScopes,
-          warnings: readinessWarnings({ status, staleResources, errors }),
-          recovery: readinessRecovery(status, accessDenials),
+          warnings: [
+            ...(unavailable ? [unavailable.message] : []),
+            ...readinessWarnings({ status, staleResources, errors }),
+          ],
+          recovery: unavailable
+            ? [unavailable.reason, ...(accessDenials.length > 0 ? [readinessRecovery(status, accessDenials)] : [])].join(" ")
+            : readinessRecovery(status, accessDenials),
           ...(accessDenials.length > 0 ? { accessDenials } : {}),
         };
       });
@@ -1330,11 +1449,8 @@ export class IntuneChatService {
       resources: store
         .getGraphCacheStatus(resolvedTenant.id, [...GRAPH_CACHE_RESOURCES])
         .map((status) => {
-          const missingScope = status.scopeSet.find(
-            (scope) => !grantedScopeSet(resolvedTenant).has(scope),
-          );
-          const area = missingScope ? permissionAreaForScope(missingScope) : undefined;
-          return area ? { ...status, notGrantedArea: area.title } : status;
+          const notGrantedService = notGrantedServiceForScopes(resolvedTenant, status.scopeSet);
+          return notGrantedService ? { ...status, notGrantedService } : status;
         }),
       schedule: store.getGraphCacheRefreshSchedule(resolvedTenant.id),
       preload: this.preloadJobs.get(resolvedTenant.id)?.job,
@@ -1421,18 +1537,37 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted, options.tenantId);
-    const granted = grantedScopeSet(tenant);
-    const resources = sanitizeGraphResources(options.resources).filter((resource) =>
-      definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
-    );
+    // Resources whose service part is not granted are reported as skipped
+    // with the service to add, never refreshed and never counted as errors.
+    const requested = sanitizeGraphResources(options.resources);
+    const skipped: GraphCacheRefreshResult["resources"] = [];
+    const resources = requested.filter((resource) => {
+      const definition = definitionForResource(resource);
+      const notGrantedService = notGrantedServiceForScopes(tenant, definition.scopes);
+      if (!notGrantedService) return true;
+      skipped.push({
+        resource,
+        label: definition.label,
+        rows: 0,
+        ok: false,
+        skipped: "not-connected",
+        notGrantedService,
+      });
+      return false;
+    });
     const scopes = requiredScopesForResources(resources);
     const startedAt = new Date().toISOString();
+    let completed = 0;
+    for (const result of skipped) {
+      completed += 1;
+      onProgress?.({ type: "resource-complete", result, completed, total: requested.length });
+    }
     if (resources.length === 0) {
       return {
         tenantId: tenant.id,
         startedAt,
         finishedAt: new Date().toISOString(),
-        resources: [],
+        resources: skipped,
       };
     }
     const log = (level: RunLogLevel, message: string, metadata?: Record<string, unknown>) => {
@@ -1446,7 +1581,6 @@ export class IntuneChatService {
     const slots = new Array<GraphCacheRefreshResult["resources"][number] | undefined>(
       resources.length,
     );
-    let completed = 0;
 
     const refreshOne = async (resource: GraphCacheResourceKind, slot: number) => {
       const definition = definitionForResource(resource);
@@ -1457,7 +1591,7 @@ export class IntuneChatService {
         resource,
         label: definition.label,
         completed,
-        total: resources.length,
+        total: requested.length,
       });
       try {
         const query: Record<string, string> = { ...(request.query ?? {}) };
@@ -1516,7 +1650,7 @@ export class IntuneChatService {
           type: "resource-complete",
           result: slots[slot]!,
           completed,
-          total: resources.length,
+          total: requested.length,
         });
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
@@ -1552,7 +1686,7 @@ export class IntuneChatService {
           type: "resource-complete",
           result: slots[slot]!,
           completed,
-          total: resources.length,
+          total: requested.length,
         });
       }
     };
@@ -1578,14 +1712,17 @@ export class IntuneChatService {
     );
     await Promise.all(workers);
 
+    const results = new Map(
+      [...skipped, ...slots].flatMap((entry) => (entry ? [[entry.resource, entry] as const] : [])),
+    );
     return {
       tenantId: tenant.id,
       startedAt,
       finishedAt: new Date().toISOString(),
-      resources: slots.filter(
-        (entry): entry is GraphCacheRefreshResult["resources"][number] =>
-          entry !== undefined,
-      ),
+      resources: requested.flatMap((resource) => {
+        const entry = results.get(resource);
+        return entry ? [entry] : [];
+      }),
     };
   }
 
@@ -1677,7 +1814,8 @@ export class IntuneChatService {
       ? ["managedDevices" as const]
       : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const accessBlockedMessage = restrictPlannedResourcesForTenant(planned, tenant);
+    const restriction = restrictPlannedResourcesForTenant(planned, tenant);
+    const accessBlockedMessage = restriction.blocked;
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1954,6 +2092,10 @@ export class IntuneChatService {
 
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     answerPlan.settleKind();
+    // A docs answer reads no tenant data, so nothing tenant side was left out of it.
+    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && answerPlan.sources.kind !== "docs") {
+      assistantContent = withOmittedNotice(assistantContent, restriction.omitted);
+    }
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
@@ -2116,7 +2258,8 @@ export class IntuneChatService {
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const accessBlockedMessage = restrictPlannedResourcesForTenant(planned, tenant);
+    const restriction = restrictPlannedResourcesForTenant(planned, tenant);
+    const accessBlockedMessage = restriction.blocked;
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2298,7 +2441,9 @@ export class IntuneChatService {
               sendProgress({
                 message: event.result.ok
                   ? `Cached ${event.result.label}.`
-                  : `Could not refresh ${event.result.label}.`,
+                  : event.result.skipped
+                    ? `Skipped ${event.result.label}, its service is not connected.`
+                    : `Could not refresh ${event.result.label}.`,
                 stage: "refreshing-cache",
               });
             },
@@ -2737,6 +2882,11 @@ export class IntuneChatService {
     }
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     answerPlan?.settleKind();
+    // A docs answer reads no tenant data, so nothing tenant side was left out of it.
+    if (assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && restriction.omitted && answerPlan?.sources.kind !== "docs") {
+      assistantContent = withOmittedNotice(assistantContent, restriction.omitted);
+      emitDelta(assistantContent, "");
+    }
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
@@ -2963,13 +3113,19 @@ export class IntuneChatService {
       },
       finish: (result: GraphCacheRefreshResult) => {
         const ok = result.resources.filter((resource) => resource.ok);
+        // A resource of a service that is not connected is skipped, not failed.
+        const skipped = result.resources.filter((resource) => resource.skipped);
+        const failed = result.resources.filter((resource) => !resource.ok && !resource.skipped);
         const first = ok[0];
-        steps.finish(id, ok.length === 0
-          ? { status: "failed", title: "Could not refresh tenant data", detail: result.resources[0]?.error ?? "Every refresh failed." }
-          : {
-              title: "Refreshed tenant data",
-              detail: `${first!.label} · ${first!.rows.toLocaleString()} rows${ok.length > 1 ? ` and ${ok.length - 1} more` : ""}${ok.length < result.resources.length ? ` · ${result.resources.length - ok.length} failed` : ""}`,
-            });
+        const skippedDetail = skipped.length > 0 ? ` · ${skipped.length} skipped, service not connected` : "";
+        steps.finish(id, ok.length === 0 && failed.length === 0
+          ? { title: "Skipped tenant data", detail: `${skipped.map((resource) => resource.label).join(", ")} · service not connected` }
+          : ok.length === 0
+            ? { status: "failed", title: "Could not refresh tenant data", detail: failed[0]?.error ?? "Every refresh failed." }
+            : {
+                title: "Refreshed tenant data",
+                detail: `${first!.label} · ${first!.rows.toLocaleString()} rows${ok.length > 1 ? ` and ${ok.length - 1} more` : ""}${failed.length > 0 ? ` · ${failed.length} failed` : ""}${skippedDetail}`,
+              });
       },
     };
   }
@@ -3049,7 +3205,8 @@ export class IntuneChatService {
       // Titles and follow-ups are checked for tenant names and cached values also without an MCP server.
       privateTerms: mcpPrivateTermsForTenant(tenant),
       cachedTenantValues: () => store.tenantIdentityValues(tenantId),
-      grantedScopes: grantedScopeSet(tenant),
+      // A partly granted part is not usable, matching Settings.
+      grantedScopes: availableScopeSet(tenant),
       graphForScopes: async (scopes) => {
         const uniqueScopes = [...new Set(scopes)].sort();
         return this.host.graphFactory
@@ -3224,7 +3381,7 @@ export class IntuneChatService {
       const startedAt = new Date(nowMs).toISOString();
       try {
         const result = await this.refreshGraphCache({ tenantId: tenant.id });
-        const failures = result.resources.filter((resource) => !resource.ok);
+        const failures = result.resources.filter((resource) => !resource.ok && !resource.skipped);
         this.host.intelligenceStore.markGraphCacheRefreshScheduleRun({
           tenantId: tenant.id,
           startedAt,

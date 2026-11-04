@@ -19,17 +19,32 @@ import { SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   ConnectTenantOptions,
-  PermissionAreaId,
   ProviderId,
   ProviderSummary,
   RequestedScope,
+  SavedAppRegistration,
+  ServiceId,
   TenantRecord,
 } from "../shared/openAdminOS";
-import { PERMISSION_AREAS } from "../shared/openAdminOS";
+import {
+  AVAILABLE_SERVICES,
+  OPENADMINOS_APP_CLIENT_ID,
+  SERVICE_PARTS,
+  partIdsFor,
+  partLabel,
+  servicePartById,
+  serviceStatus,
+} from "../shared/openAdminOS";
+import { tenantRegistrationSummary } from "../shared/app-registration";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import type { PendingIntent } from "./pending-intent";
-import { groupRequestedScopes } from "./scope-groups";
+import {
+  groupRequestedScopes,
+  includedPartServices,
+  includedWithLabel,
+  type ScopeGroup,
+} from "./scope-groups";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   DEFAULT_REGISTRATION_DISPLAY_NAME,
@@ -59,11 +74,14 @@ export function TenantSetupDialog({
   agentName,
   providers,
   activeProviderId,
+  savedRegistrations = [],
+  editOptions,
   onClose,
   onConnect,
   pilotRemoved = false,
   onKeepWaiting,
   onTryAgain,
+  onEditSignIn,
   onSelectProvider,
   onRecheckProviders,
   onResume,
@@ -78,12 +96,18 @@ export function TenantSetupDialog({
   agentName?: string;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
+  /** Custom registrations remembered on this device, most recent first. */
+  savedRegistrations?: SavedAppRegistration[];
+  /** Options of the attempt the admin returned to edit after an error. */
+  editOptions?: ConnectTenantOptions;
   onClose: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
   /** True after a connect that ended pilot mode and removed its data. */
   pilotRemoved?: boolean;
   onKeepWaiting: () => void;
   onTryAgain: () => void;
+  /** Return from a failed sign-in to the sign-in options. */
+  onEditSignIn?: () => void;
   onSelectProvider: (id: ProviderId) => void;
   onRecheckProviders: () => void | Promise<void>;
   onResume: () => void;
@@ -100,25 +124,18 @@ export function TenantSetupDialog({
       <div className="sr-only" aria-live="polite" aria-atomic="true">
         {statusAnnouncement}
       </div>
-      {stage === "permissions" && (
+      {(stage === "permissions" || stage === "own-registration") && (
         <PermissionsStep
+          key={stage}
           intent={intent}
           agentName={agentName}
           scopes={scopes}
           scopesError={scopesError}
+          savedRegistrations={savedRegistrations}
           onCancel={onClose}
           onConnect={onConnect}
-        />
-      )}
-      {stage === "own-registration" && (
-        <PermissionsStep
-          intent={intent}
-          agentName={agentName}
-          scopes={scopes}
-          scopesError={scopesError}
-          onCancel={onClose}
-          onConnect={onConnect}
-          initialCustomOpen
+          {...(stage === "own-registration" ? { initialChoice: "own" as const } : {})}
+          {...(editOptions ? { initialOptions: editOptions } : {})}
         />
       )}
       {stage === "waiting" && <WaitingStep onCancel={onClose} />}
@@ -130,7 +147,12 @@ export function TenantSetupDialog({
         />
       )}
       {stage === "error" && (
-        <ErrorStep error={error} onTryAgain={onTryAgain} onCancel={onClose} />
+        <ErrorStep
+          error={error}
+          onTryAgain={onTryAgain}
+          onCancel={onClose}
+          {...(onEditSignIn ? { onEditSignIn } : {})}
+        />
       )}
       {stage === "provider" && (
         <ProviderStep
@@ -165,32 +187,74 @@ export function TenantSetupDialog({
   );
 }
 
+export type SignInChoice = "openadminos" | "own";
+
+const NEW_REGISTRATION = "new";
+const CLIENT_ID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const DIRECTORY_ID_PATTERN = /^[0-9a-zA-Z.-]{1,100}$/;
+
+function savedRegistrationKey(entry: { clientId: string; directoryTenantId?: string }): string {
+  return `${entry.clientId.toLowerCase()}|${(entry.directoryTenantId ?? "").toLowerCase()}`;
+}
+
 function PermissionsStep({
   intent,
   agentName,
   scopes,
   scopesError,
+  savedRegistrations,
   onCancel,
   onConnect,
-  initialCustomOpen = false,
+  initialChoice,
+  initialOptions,
 }: {
   intent: PendingIntent | null;
   agentName?: string;
   scopes: RequestedScope[] | null;
   scopesError: string | null;
+  savedRegistrations: SavedAppRegistration[];
   onCancel: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
-  initialCustomOpen?: boolean;
+  /** Set only by entry points that already expressed which app to use. */
+  initialChoice?: SignInChoice;
+  /** The options of an attempt the admin returns to after an error. */
+  initialOptions?: ConnectTenantOptions;
 }) {
   const groups = useMemo(() => groupRequestedScopes(scopes ?? []), [scopes]);
-  // Bring-your-own app registration: closed by default so the common
-  // path stays one button, but always visible as an option.
-  const [customOpen, setCustomOpen] = useState(initialCustomOpen);
-  const [clientId, setClientId] = useState("");
-  const [directoryTenantId, setDirectoryTenantId] = useState("");
-  const [selectedAreaIds, setSelectedAreaIds] = useState<Set<PermissionAreaId>>(
-    () => new Set(PERMISSION_AREAS.map((area) => area.id)),
+  const initialRegistration = initialOptions?.appRegistration;
+  // Neither app is preselected: the admin chooses before Approve enables.
+  const [choice, setChoice] = useState<SignInChoice | null>(
+    initialOptions ? (initialRegistration ? "own" : "openadminos") : initialChoice ?? null,
   );
+  const [savedSelection, setSavedSelection] = useState<string>(() => {
+    if (initialRegistration) {
+      const key = savedRegistrationKey(initialRegistration);
+      return savedRegistrations.some((entry) => savedRegistrationKey(entry) === key)
+        ? key
+        : NEW_REGISTRATION;
+    }
+    const mostRecent = savedRegistrations[0];
+    return mostRecent ? savedRegistrationKey(mostRecent) : NEW_REGISTRATION;
+  });
+  const [clientId, setClientId] = useState(initialRegistration?.clientId ?? "");
+  const [directoryTenantId, setDirectoryTenantId] = useState(
+    initialRegistration?.directoryTenantId ?? "",
+  );
+  const [registrationLabel, setRegistrationLabel] = useState(initialRegistration?.label ?? "");
+  // No service is preselected and at least one is required (SPEC.md 2a).
+  const [selectedPartIds, setSelectedPartIds] = useState<Set<string>>(
+    () =>
+      new Set(
+        (initialOptions?.partIds ?? []).filter((partId) => {
+          const part = servicePartById(partId);
+          return Boolean(part && !part.planned);
+        }),
+      ),
+  );
+  // Parts whose scopes the selected parts already request, such as Entra
+  // users and groups once Intune is selected. They show as included.
+  const includedParts = useMemo(() => includedPartServices(selectedPartIds), [selectedPartIds]);
   const [registrationDisplayName, setRegistrationDisplayName] = useState(
     DEFAULT_REGISTRATION_DISPLAY_NAME,
   );
@@ -199,31 +263,87 @@ function PermissionsStep({
   const [registrationSetupError, setRegistrationSetupError] = useState<string | null>(null);
   const [registrationSetupStatus, setRegistrationSetupStatus] = useState<string | null>(null);
   const [registrationActionError, setRegistrationActionError] = useState<string | null>(null);
-  const selectedGroups = groups.filter(
-    (group) => group.id === "other" || selectedAreaIds.has(group.id),
+  // Services share scopes such as User.Read.All, so count unique names.
+  const selectedScopeCount = new Set(
+    groups.flatMap((group) =>
+      group.parts
+        .filter((part) => group.id === "other" || selectedPartIds.has(part.id))
+        .flatMap((part) => part.scopes.map((scope) => scope.name)),
+    ),
+  ).size;
+  // Registry order, so the request and the script list parts the same way.
+  const selectedPartList = SERVICE_PARTS.filter((part) => selectedPartIds.has(part.id)).map(
+    (part) => part.id,
   );
-  const selectedScopeCount = selectedGroups.reduce(
-    (total, group) => total + group.scopes.length,
-    0,
-  );
-  const selectedAreaIdList = PERMISSION_AREAS.filter((area) =>
-    selectedAreaIds.has(area.id),
-  ).map((area) => area.id);
-  const toggleArea = (areaId: PermissionAreaId) => {
-    const area = PERMISSION_AREAS.find((candidate) => candidate.id === areaId);
-    if (area?.required) return;
-    setSelectedAreaIds((current) => {
-      const next = new Set(current);
-      if (next.has(areaId)) next.delete(areaId);
-      else next.add(areaId);
-      return next;
-    });
+  const savedChoice =
+    choice === "own" && savedSelection !== NEW_REGISTRATION
+      ? savedRegistrations.find((entry) => savedRegistrationKey(entry) === savedSelection)
+      : undefined;
+  const enteringNew = choice === "own" && !savedChoice;
+  const ownRegistration: NonNullable<ConnectTenantOptions["appRegistration"]> | undefined =
+    choice !== "own"
+      ? undefined
+      : savedChoice
+        ? {
+            clientId: savedChoice.clientId,
+            ...(savedChoice.directoryTenantId
+              ? { directoryTenantId: savedChoice.directoryTenantId }
+              : {}),
+            ...(savedChoice.label ? { label: savedChoice.label } : {}),
+          }
+        : {
+            clientId: clientId.trim(),
+            ...(directoryTenantId.trim() ? { directoryTenantId: directoryTenantId.trim() } : {}),
+            ...(registrationLabel.trim() ? { label: registrationLabel.trim() } : {}),
+          };
+  const blockedReason =
+    choice === null
+      ? SETUP_COPY.chooseSignInReason
+      : choice === "openadminos" && selectedPartList.length === 0
+        ? SETUP_COPY.selectServiceReason
+      : ownRegistration && ownRegistration.clientId.length === 0
+        ? SETUP_COPY.clientIdRequiredReason
+        : ownRegistration && !CLIENT_ID_PATTERN.test(ownRegistration.clientId)
+          ? SETUP_COPY.clientIdInvalidReason
+          : ownRegistration?.directoryTenantId &&
+              !DIRECTORY_ID_PATTERN.test(ownRegistration.directoryTenantId)
+            ? SETUP_COPY.directoryIdInvalidReason
+            : null;
+  const resetScript = () => {
     setRegistrationSetup(null);
     setRegistrationSetupStatus(null);
     setRegistrationActionError(null);
   };
+  // A service checkbox selects or clears all of its parts. A part another
+  // service already includes counts as selected.
+  const toggleService = (serviceId: ServiceId) => {
+    const partIds = partIdsFor([serviceId]);
+    setSelectedPartIds((current) => {
+      const next = new Set(current);
+      const included = includedPartServices(current);
+      const allSelected = partIds.every((partId) => next.has(partId) || included.has(partId));
+      for (const partId of partIds) {
+        if (allSelected) next.delete(partId);
+        else next.add(partId);
+      }
+      return next;
+    });
+    resetScript();
+  };
+  const togglePart = (partId: string) => {
+    setSelectedPartIds((current) => {
+      const next = new Set(current);
+      if (next.has(partId)) next.delete(partId);
+      else next.add(partId);
+      return next;
+    });
+    resetScript();
+  };
   const generateSetup = () => {
-    const validationError = validateRegistrationDisplayName(registrationDisplayName);
+    const validationError =
+      selectedPartList.length === 0
+        ? SETUP_COPY.selectServiceReason
+        : validateRegistrationDisplayName(registrationDisplayName);
     if (validationError) {
       setRegistrationSetupError(validationError);
       setRegistrationSetup(null);
@@ -233,7 +353,11 @@ function PermissionsStep({
     setRegistrationSetupStatus(null);
     setRegistrationActionError(null);
     setRegistrationSetup(
-      generateRegistrationSetup(registrationDisplayName, selectedAreaIdList),
+      generateRegistrationSetup({
+        mode: "create",
+        displayName: registrationDisplayName,
+        partIds: selectedPartList,
+      }),
     );
   };
   const copyRegistrationText = async (text: string, label: string) => {
@@ -275,7 +399,241 @@ function PermissionsStep({
           </div>
         )}
 
-        <div className="flex items-start gap-3 rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
+        <fieldset>
+          <legend className="text-xs font-medium text-[var(--color-text-muted)]">
+            {SETUP_COPY.signInChoiceLegend}
+          </legend>
+          <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
+            {SETUP_COPY.signInChoiceHint}
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <SignInChoiceCard
+              value="openadminos"
+              checked={choice === "openadminos"}
+              title={SETUP_COPY.openAdminOSAppTitle}
+              points={SETUP_COPY.openAdminOSAppPoints(OPENADMINOS_APP_CLIENT_ID)}
+              onSelect={setChoice}
+            />
+            <SignInChoiceCard
+              value="own"
+              checked={choice === "own"}
+              title={SETUP_COPY.ownRegistrationTitle}
+              points={SETUP_COPY.ownRegistrationPoints}
+              onSelect={setChoice}
+            />
+          </div>
+        </fieldset>
+
+        {choice === "own" && (
+          <div className="mt-4 space-y-3 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
+            {savedRegistrations.length > 0 && (
+              <fieldset>
+                <legend className="text-xs font-medium text-[var(--color-text-muted)]">
+                  {SETUP_COPY.savedRegistrationsLegend}
+                </legend>
+                <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+                  {SETUP_COPY.savedRegistrationsHint}
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {savedRegistrations.map((entry) => {
+                    const key = savedRegistrationKey(entry);
+                    return (
+                      <label
+                        key={key}
+                        className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-surface)] px-3 py-2 ring-1 ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)]"
+                      >
+                        <input
+                          type="radio"
+                          name="saved-app-registration"
+                          value={key}
+                          checked={savedSelection === key}
+                          onChange={() => setSavedSelection(key)}
+                          className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--color-accent)]"
+                        />
+                        <span className="min-w-0">
+                          <span className="block text-sm text-[var(--color-text)]">
+                            {entry.label ?? entry.clientId}
+                          </span>
+                          <span className="block break-all font-mono text-xs text-[var(--color-text-muted)]">
+                            {entry.label ? `${entry.clientId}` : null}
+                            {entry.label && entry.directoryTenantId ? " · " : null}
+                            {entry.directoryTenantId ?? (entry.label ? null : "Multi-tenant")}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                  <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-[var(--color-surface-hover)]">
+                    <input
+                      type="radio"
+                      name="saved-app-registration"
+                      value={NEW_REGISTRATION}
+                      checked={savedSelection === NEW_REGISTRATION}
+                      onChange={() => setSavedSelection(NEW_REGISTRATION)}
+                      className="h-4 w-4 shrink-0 accent-[var(--color-accent)]"
+                    />
+                    <span className="text-sm text-[var(--color-text-soft)]">
+                      {SETUP_COPY.newRegistrationOption}
+                    </span>
+                  </label>
+                </div>
+              </fieldset>
+            )}
+            {enteringNew && (
+              <>
+                <p className="text-sm leading-5 text-[var(--color-text-soft)]">
+                  {SETUP_COPY.ownRegistrationBody}
+                </p>
+                <p className="text-xs leading-5 text-[var(--color-text-muted)]">
+                  {SETUP_COPY.ownRegistrationNoSecret}
+                </p>
+                <label className="block text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.clientIdLabel}
+                  <input
+                    name="tenant-client-id"
+                    autoComplete="off"
+                    value={clientId}
+                    onChange={(event) => setClientId(event.target.value)}
+                    placeholder="00000000-0000-0000-0000-000000000000"
+                    spellCheck={false}
+                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  />
+                  <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+                    {SETUP_COPY.clientIdHint}
+                  </span>
+                </label>
+                <label className="block text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.directoryIdLabel}
+                  <input
+                    name="tenant-directory-id"
+                    autoComplete="off"
+                    value={directoryTenantId}
+                    onChange={(event) => setDirectoryTenantId(event.target.value)}
+                    placeholder="contoso.onmicrosoft.com"
+                    spellCheck={false}
+                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  />
+                  <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+                    {SETUP_COPY.directoryIdHint}
+                  </span>
+                </label>
+                <label className="block text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.registrationLabelLabel}
+                  <input
+                    name="tenant-registration-label"
+                    autoComplete="off"
+                    value={registrationLabel}
+                    maxLength={80}
+                    onChange={(event) => setRegistrationLabel(event.target.value)}
+                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                  />
+                  <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+                    {SETUP_COPY.registrationLabelHint}
+                  </span>
+                </label>
+                <section className="rounded-lg bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
+                  <h4 className="text-sm font-medium text-[var(--color-text)]">
+                    Generate a setup script for your admin
+                  </h4>
+                  <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
+                    The script creates a tenant-owned public client registration for the selected services. Review it before sending it to your Entra administrator.
+                  </p>
+                  <fieldset className="mt-3">
+                    <legend className="text-xs font-medium text-[var(--color-text-muted)]">
+                      {SETUP_COPY.scriptServicesLegend}
+                    </legend>
+                    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
+                      {AVAILABLE_SERVICES.map((service) => {
+                        const partIds = partIdsFor([service.id]);
+                        const selected = partIds.filter(
+                          (partId) => selectedPartIds.has(partId) || includedParts.has(partId),
+                        ).length;
+                        return (
+                          <label key={service.id} className="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-soft)]">
+                            <TriStateCheckbox
+                              ariaLabel={service.title}
+                              checked={selected === partIds.length}
+                              indeterminate={selected > 0 && selected < partIds.length}
+                              onChange={() => toggleService(service.id)}
+                            />
+                            {service.title}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
+                  <label className="mt-3 block text-sm text-[var(--color-text-soft)]">
+                    Application display name
+                    <input
+                      name="registration-display-name"
+                      autoComplete="off"
+                      value={registrationDisplayName}
+                      maxLength={REGISTRATION_DISPLAY_NAME_MAX_LENGTH}
+                      onChange={(event) => {
+                        setRegistrationDisplayName(event.target.value);
+                        setRegistrationSetup(null);
+                        setRegistrationSetupError(null);
+                        setRegistrationActionError(null);
+                      }}
+                      className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
+                    />
+                  </label>
+                  {registrationSetupError && (
+                    <p role="alert" className="mt-2 text-xs text-[var(--color-danger)]">
+                      {registrationSetupError}
+                    </p>
+                  )}
+                  <Button className="mt-3" size="sm" variant="secondary" onClick={generateSetup}>
+                    Generate setup script
+                  </Button>
+                  {registrationSetup && (
+                    <div className="mt-3 space-y-3">
+                      <label className="block text-xs text-[var(--color-text-muted)]">
+                        PowerShell script
+                        <textarea
+                          readOnly
+                          aria-label="PowerShell setup script"
+                          value={registrationSetup.script}
+                          rows={8}
+                          spellCheck={false}
+                          translate="no"
+                          className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 font-mono text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+                        />
+                      </label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.script, "Script")}>Copy script</Button>
+                        <Button size="sm" variant="secondary" onClick={() => void saveRegistrationScript()}>Save script</Button>
+                      </div>
+                      <label className="block text-xs text-[var(--color-text-muted)]">
+                        Message for your admin
+                        <textarea
+                          readOnly
+                          aria-label="Message for your admin"
+                          value={registrationSetup.message}
+                          rows={5}
+                          className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+                        />
+                      </label>
+                      <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.message, "Message")}>Copy message</Button>
+                      {registrationSetupStatus && (
+                        <p role="status" className="text-xs text-[var(--color-success)]">
+                          {registrationSetupStatus}
+                        </p>
+                      )}
+                      {registrationActionError && (
+                        <p role="alert" className="text-xs text-[var(--color-danger)]">
+                          {registrationActionError}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+          </div>
+        )}
+
+        <div className="mt-6 flex items-start gap-3 rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-success-soft)] text-[var(--color-success)] ring-1 ring-[var(--color-success)]/25">
             <IconShield size={17} />
           </div>
@@ -295,54 +653,57 @@ function PermissionsStep({
             <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
               {SETUP_COPY.tokenStorage}
             </p>
-            <p className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
-              {SETUP_COPY.appListing}
-            </p>
           </div>
         </div>
 
-        <div className="mt-6">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <div className="text-xs font-medium text-[var(--color-text-muted)]">
-                Read permissions
+        {choice === "own" ? (
+          <p className="mt-6 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            {SETUP_COPY.ownRegistrationServicesNote}
+          </p>
+        ) : (
+          <div className="mt-6">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className="text-xs font-medium text-[var(--color-text-muted)]">
+                  {SETUP_COPY.servicePickerLegend}
+                </div>
+                <p className="mt-1 text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.servicePickerHint}
+                </p>
               </div>
-              <p className="mt-1 text-sm text-[var(--color-text-soft)]">
-                Expand a group to review each exact Microsoft Graph scope and why it is needed.
-              </p>
+              {scopes && (
+                <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
+                  {selectedScopeCount} scopes selected
+                </span>
+              )}
             </div>
-            {scopes && (
-              <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
-                {selectedScopeCount} scopes selected
-              </span>
-            )}
-          </div>
 
-          <div className="mt-3 space-y-2">
-            {scopes === null && !scopesError && (
-              <div role="status" className="rounded-xl bg-[var(--color-bg-raised)] px-4 py-5 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-                Loading requested permissions…
-              </div>
-            )}
-            {scopesError && (
-              <div role="alert" className="rounded-xl bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-                {scopesError}
-              </div>
-            )}
-            {groups.map((group) => {
-              const areaId = group.id === "other" ? undefined : group.id;
-              return (
-                <ScopeDisclosure
+            <div className="mt-3 space-y-2">
+              {scopes === null && !scopesError && (
+                <div role="status" className="rounded-xl bg-[var(--color-bg-raised)] px-4 py-5 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+                  Loading requested permissions…
+                </div>
+              )}
+              {scopesError && (
+                <div role="alert" className="rounded-xl bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+                  {scopesError}
+                </div>
+              )}
+              {groups.map((group) => (
+                <ServiceDisclosure
                   key={group.id}
                   group={group}
-                  defaultOpen={false}
-                  checked={!areaId || selectedAreaIds.has(areaId)}
-                  onCheckedChange={areaId ? () => toggleArea(areaId) : undefined}
+                  selectedPartIds={selectedPartIds}
+                  includedParts={includedParts}
+                  onToggleService={
+                    group.id === "other" ? undefined : () => toggleService(group.id as ServiceId)
+                  }
+                  onTogglePart={togglePart}
                 />
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="mt-5 space-y-2 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-xs leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           <p>{SETUP_COPY.readOnlyNote}</p>
@@ -350,220 +711,169 @@ function PermissionsStep({
           <p>{SETUP_COPY.delegatedPermissionsNote}</p>
           <p>{SETUP_COPY.betaNote}</p>
         </div>
-
-        <div className="mt-4 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
-          <div className="text-xs font-medium text-[var(--color-text-muted)]">
-            {SETUP_COPY.appIdentityTitle}
-          </div>
-          {customOpen ? (
-            <div className="mt-2 space-y-3">
-              <p className="text-sm leading-5 text-[var(--color-text-soft)]">
-                {SETUP_COPY.ownRegistrationBody}
-              </p>
-              <p className="text-xs leading-5 text-[var(--color-text-muted)]">
-                {SETUP_COPY.ownRegistrationNoSecret}
-              </p>
-              <section className="rounded-lg bg-[var(--color-surface)] p-3 ring-1 ring-[var(--color-border-soft)]">
-                <h4 className="text-sm font-medium text-[var(--color-text)]">
-                  Generate a setup script for your admin
-                </h4>
-                <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
-                  The script creates a tenant-owned public client registration for the selected areas. Review it before sending it to your Entra administrator.
-                </p>
-                <label className="mt-3 block text-sm text-[var(--color-text-soft)]">
-                  Application display name
-                  <input
-                    name="registration-display-name"
-                    autoComplete="off"
-                    value={registrationDisplayName}
-                    maxLength={REGISTRATION_DISPLAY_NAME_MAX_LENGTH}
-                    onChange={(event) => {
-                      setRegistrationDisplayName(event.target.value);
-                      setRegistrationSetup(null);
-                      setRegistrationSetupError(null);
-                      setRegistrationActionError(null);
-                    }}
-                    className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
-                  />
-                </label>
-                {registrationSetupError && (
-                  <p role="alert" className="mt-2 text-xs text-[var(--color-danger)]">
-                    {registrationSetupError}
-                  </p>
-                )}
-                <Button className="mt-3" size="sm" variant="secondary" onClick={generateSetup}>
-                  Generate setup script
-                </Button>
-                {registrationSetup && (
-                  <div className="mt-3 space-y-3">
-                    <label className="block text-xs text-[var(--color-text-muted)]">
-                      PowerShell script
-                      <textarea
-                        readOnly
-                        aria-label="PowerShell setup script"
-                        value={registrationSetup.script}
-                        rows={8}
-                        spellCheck={false}
-                        translate="no"
-                        className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 font-mono text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-                      />
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.script, "Script")}>Copy script</Button>
-                      <Button size="sm" variant="secondary" onClick={() => void saveRegistrationScript()}>Save script</Button>
-                    </div>
-                    <label className="block text-xs text-[var(--color-text-muted)]">
-                      Message for your admin
-                      <textarea
-                        readOnly
-                        aria-label="Message for your admin"
-                        value={registrationSetup.message}
-                        rows={5}
-                        className="mt-1 w-full resize-y rounded-md bg-[var(--color-bg)] p-2 text-xs leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
-                      />
-                    </label>
-                    <Button size="sm" variant="secondary" onClick={() => void copyRegistrationText(registrationSetup.message, "Message")}>Copy message</Button>
-                    {registrationSetupStatus && (
-                      <p role="status" className="text-xs text-[var(--color-success)]">
-                        {registrationSetupStatus}
-                      </p>
-                    )}
-                    {registrationActionError && (
-                      <p role="alert" className="text-xs text-[var(--color-danger)]">
-                        {registrationActionError}
-                      </p>
-                    )}
-                  </div>
-                )}
-              </section>
-              <label className="block text-sm text-[var(--color-text-soft)]">
-                {SETUP_COPY.clientIdLabel}
-                <input
-                  name="tenant-client-id"
-                  autoComplete="off"
-                  value={clientId}
-                  onChange={(event) => setClientId(event.target.value)}
-                  placeholder="00000000-0000-0000-0000-000000000000"
-                  spellCheck={false}
-                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
-                />
-                <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
-                  {SETUP_COPY.clientIdHint}
-                </span>
-              </label>
-              <label className="block text-sm text-[var(--color-text-soft)]">
-                {SETUP_COPY.directoryIdLabel}
-                <input
-                  name="tenant-directory-id"
-                  autoComplete="off"
-                  value={directoryTenantId}
-                  onChange={(event) => setDirectoryTenantId(event.target.value)}
-                  placeholder="contoso.onmicrosoft.com"
-                  spellCheck={false}
-                  className="mt-1 w-full rounded-md bg-[var(--color-bg)] px-2.5 py-1.5 font-mono text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)] focus:outline-none focus:ring-[var(--color-accent)]"
-                />
-                <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
-                  {SETUP_COPY.directoryIdHint}
-                </span>
-              </label>
-              <button
-                type="button"
-                onClick={() => setCustomOpen(false)}
-                className="text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
-              >
-                {SETUP_COPY.useDefaultRegistration}
-              </button>
-            </div>
-          ) : (
-            <div className="mt-2 space-y-2">
-              <p className="text-sm leading-5 text-[var(--color-text-soft)]">
-                {SETUP_COPY.appIdentityDefault}
-              </p>
-              <button
-                type="button"
-                onClick={() => setCustomOpen(true)}
-                className="text-xs text-[var(--color-text-muted)] underline underline-offset-2 hover:text-[var(--color-text)]"
-              >
-                {SETUP_COPY.useOwnRegistration}
-              </button>
-            </div>
-          )}
-        </div>
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button
-          data-autofocus
-          variant="primary"
-          leadingIcon={<IconShield size={13} />}
-          disabled={
-            scopes === null ||
-            scopesError !== null ||
-            (customOpen && clientId.trim().length === 0)
-          }
-          onClick={() =>
-            onConnect({
-              permissionAreaIds: selectedAreaIdList,
-              ...(customOpen
-                ? {
-                    appRegistration: {
-                      clientId: clientId.trim(),
-                      ...(directoryTenantId.trim()
-                        ? { directoryTenantId: directoryTenantId.trim() }
-                        : {}),
-                    },
-                  }
-                : {}),
-            })
-          }
-        >
-          Approve {selectedScopeCount} read scopes and continue to Microsoft
-        </Button>
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-3 max-[720px]:flex-col-reverse max-[720px]:items-stretch">
+          {blockedReason && (
+            <p
+              id="setup-approve-blocked-reason"
+              className="max-w-[280px] text-right text-xs leading-5 text-[var(--color-text-muted)] max-[720px]:max-w-none max-[720px]:text-left"
+            >
+              {blockedReason}
+            </p>
+          )}
+          <Button
+            data-autofocus
+            variant="primary"
+            leadingIcon={<IconShield size={13} />}
+            aria-describedby={blockedReason ? "setup-approve-blocked-reason" : undefined}
+            disabled={scopes === null || scopesError !== null || blockedReason !== null}
+            onClick={() =>
+              onConnect(
+                // An own registration signs in with what the app was granted,
+                // so the services only shape the setup script for it. The
+                // ready step lists the services its permissions switched on.
+                ownRegistration
+                  ? { appRegistration: ownRegistration }
+                  : { partIds: selectedPartList },
+              )
+            }
+          >
+            {choice === "own"
+              ? SETUP_COPY.ownRegistrationSignIn
+              : `Approve ${selectedScopeCount} read scopes and continue to Microsoft`}
+          </Button>
+        </div>
       </DialogFooter>
     </>
   );
 }
 
-function ScopeDisclosure({
-  group,
-  defaultOpen,
+function SignInChoiceCard({
+  value,
   checked,
-  onCheckedChange,
+  title,
+  points,
+  onSelect,
 }: {
-  group: ReturnType<typeof groupRequestedScopes>[number];
-  defaultOpen: boolean;
+  value: SignInChoice;
   checked: boolean;
-  onCheckedChange?: () => void;
+  title: string;
+  points: readonly string[];
+  onSelect: (value: SignInChoice) => void;
 }) {
-  const [expanded, setExpanded] = useState(defaultOpen);
-  const panelId = `setup-scope-group-${group.id}`;
-  const checkboxId = `setup-scope-checkbox-${group.id}`;
+  const titleId = `setup-sign-in-${value}-title`;
+  const pointsId = `setup-sign-in-${value}-points`;
+  return (
+    <label
+      className={`flex cursor-pointer items-start gap-3 rounded-xl px-4 py-3 ring-1 transition-colors focus-within:ring-2 focus-within:ring-[var(--color-accent)] ${
+        checked
+          ? "bg-[var(--color-accent-soft)] ring-[var(--color-accent)]/45"
+          : "bg-[var(--color-surface)] ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)]"
+      }`}
+    >
+      <input
+        type="radio"
+        name="sign-in-app"
+        value={value}
+        checked={checked}
+        onChange={() => onSelect(value)}
+        aria-labelledby={titleId}
+        aria-describedby={pointsId}
+        className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-accent)] focus-visible:outline-none"
+      />
+      <span className="min-w-0 flex-1">
+        <span id={titleId} className="block text-base font-medium text-[var(--color-text)]">
+          {title}
+        </span>
+        <ul id={pointsId} className="mt-1.5 space-y-1 text-xs leading-5 text-[var(--color-text-soft)]">
+          {points.map((point) => (
+            <li key={point} className="break-words">{point}</li>
+          ))}
+        </ul>
+      </span>
+    </label>
+  );
+}
+
+function TriStateCheckbox({
+  ariaLabel,
+  checked,
+  indeterminate,
+  disabled,
+  describedBy,
+  onChange,
+}: {
+  ariaLabel: string;
+  checked: boolean;
+  indeterminate: boolean;
+  disabled?: boolean;
+  describedBy?: string;
+  onChange?: () => void;
+}) {
+  return (
+    <input
+      type="checkbox"
+      aria-label={ariaLabel}
+      aria-describedby={describedBy}
+      checked={checked}
+      aria-checked={indeterminate ? "mixed" : checked}
+      ref={(element) => {
+        if (element) element.indeterminate = indeterminate;
+      }}
+      disabled={disabled}
+      onChange={onChange}
+      className="h-4 w-4 shrink-0 accent-[var(--color-accent)] disabled:opacity-60"
+    />
+  );
+}
+
+function ServiceDisclosure({
+  group,
+  selectedPartIds,
+  includedParts,
+  onToggleService,
+  onTogglePart,
+}: {
+  group: ScopeGroup;
+  selectedPartIds: ReadonlySet<string>;
+  /** Unselected parts whose scopes other selected parts already request. */
+  includedParts: ReadonlyMap<string, readonly ServiceId[]>;
+  /** Absent for the Other group, whose rows are always requested. */
+  onToggleService?: () => void;
+  onTogglePart: (partId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = `setup-service-${group.id}`;
+  const selectable = Boolean(onToggleService);
+  const selectedParts = group.parts.filter(
+    (part) => selectedPartIds.has(part.id) || includedParts.has(part.id),
+  ).length;
+  const allSelected = !selectable || selectedParts === group.parts.length;
   return (
     <div className="overflow-hidden rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
       <div className="flex min-h-12 items-center gap-3 px-4 py-3">
-        <input
-          type="checkbox"
-          id={checkboxId}
-          aria-label={group.title}
-          checked={checked}
-          disabled={group.required || !onCheckedChange}
-          onChange={onCheckedChange}
-          className="h-4 w-4 shrink-0 accent-[var(--color-accent)] disabled:opacity-60"
-        />
-        <label
-          htmlFor={checkboxId}
-          className={`min-w-0 flex-1 ${onCheckedChange && !group.required ? "cursor-pointer" : "cursor-not-allowed"}`}
-        >
-          <span className="block text-base font-medium text-[var(--color-text)]">
-            {group.title} · {group.scopes.length} read scope{group.scopes.length === 1 ? "" : "s"}
-          </span>
-          <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">
-            {group.summary}
+        <label className={`flex min-w-0 flex-1 items-center gap-3 ${selectable ? "cursor-pointer" : "cursor-not-allowed"}`}>
+          <TriStateCheckbox
+            ariaLabel={group.title}
+            checked={allSelected}
+            indeterminate={selectable && selectedParts > 0 && !allSelected}
+            disabled={!selectable}
+            {...(onToggleService ? { onChange: onToggleService } : {})}
+          />
+          <span className="min-w-0">
+            <span className="block text-base font-medium text-[var(--color-text)]">
+              {group.title} · {group.scopes.length} read scope{group.scopes.length === 1 ? "" : "s"}
+            </span>
+            <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">
+              {group.summary}
+            </span>
           </span>
         </label>
         <button
           type="button"
-          aria-label={`Review ${group.title} scopes`}
+          aria-label={`Review ${group.title} parts and scopes`}
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={() => setExpanded((value) => !value)}
@@ -576,24 +886,56 @@ function ScopeDisclosure({
           />
         </button>
       </div>
-      <div
-        id={panelId}
-        hidden={!expanded}
-        className="border-t border-[var(--color-border-soft)]"
-      >
-          {group.scopes.map((scope) => (
-            <div key={scope.name} className="border-b border-[var(--color-border-soft)] px-4 py-3 last:border-b-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="break-all font-mono text-xs text-[var(--color-text)]">
-                  {scope.name}
+      <div id={panelId} hidden={!expanded} className="border-t border-[var(--color-border-soft)]">
+        {group.parts.map((part) => {
+          const registryPart = servicePartById(part.id);
+          const includedBy = selectedPartIds.has(part.id) ? undefined : includedParts.get(part.id);
+          const includedId = `${panelId}-${part.id}-included`;
+          return (
+            <div key={part.id} className="border-b border-[var(--color-border-soft)] px-4 py-3 last:border-b-0">
+              <label
+                className={`flex items-start gap-3 ${selectable && !includedBy ? "cursor-pointer" : ""}`}
+              >
+                {selectable ? (
+                  <span className="mt-0.5">
+                    <TriStateCheckbox
+                      ariaLabel={registryPart ? partLabel(registryPart) : part.title}
+                      checked={selectedPartIds.has(part.id) || Boolean(includedBy)}
+                      indeterminate={false}
+                      disabled={Boolean(includedBy)}
+                      {...(includedBy ? { describedBy: includedId } : {})}
+                      onChange={() => onTogglePart(part.id)}
+                    />
+                  </span>
+                ) : null}
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-[var(--color-text)]">{part.title}</span>
+                  <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">{part.summary}</span>
+                  {selectable && includedBy ? (
+                    <span id={includedId} className="mt-0.5 block text-xs leading-5 text-[var(--color-text-soft)]">
+                      {includedWithLabel(includedBy)}
+                    </span>
+                  ) : null}
                 </span>
-                <Badge tone="info"><StatusDot tone="info" /> Read</Badge>
-              </div>
-              <p className="mt-1.5 text-sm leading-5 text-[var(--color-text-soft)]">
-                {scope.rationale}
-              </p>
+              </label>
+              <ul className={`mt-2 space-y-2 ${selectable ? "pl-7" : ""}`}>
+                {part.scopes.map((scope) => (
+                  <li key={scope.name}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="break-all font-mono text-xs text-[var(--color-text)]">
+                        {scope.name}
+                      </span>
+                      <Badge tone="info"><StatusDot tone="info" /> Read</Badge>
+                    </div>
+                    <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
+                      {scope.rationale}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             </div>
-          ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -645,7 +987,17 @@ function TimeoutStep({
   );
 }
 
-function ErrorStep({ error, onTryAgain, onCancel }: { error: string | null; onTryAgain: () => void; onCancel: () => void }) {
+function ErrorStep({
+  error,
+  onTryAgain,
+  onCancel,
+  onEditSignIn,
+}: {
+  error: string | null;
+  onTryAgain: () => void;
+  onCancel: () => void;
+  onEditSignIn?: () => void;
+}) {
   return (
     <>
       <div className="flex min-h-[280px] flex-1 flex-col items-center justify-center px-6 py-10 text-center">
@@ -659,7 +1011,12 @@ function ErrorStep({ error, onTryAgain, onCancel }: { error: string | null; onTr
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>
-        <Button data-autofocus variant="primary" onClick={onTryAgain}>Try again</Button>
+        <div className="flex flex-wrap justify-end gap-2 max-[720px]:w-full max-[720px]:flex-col-reverse">
+          {onEditSignIn && (
+            <Button variant="secondary" onClick={onEditSignIn}>{SETUP_COPY.editSignIn}</Button>
+          )}
+          <Button data-autofocus variant="primary" onClick={onTryAgain}>Try again</Button>
+        </div>
       </DialogFooter>
     </>
   );
@@ -782,11 +1139,17 @@ function ReadyStep({
   onCancel: () => void;
   onResume: () => void;
 }) {
-  const registrationSummary = tenant?.appRegistration?.kind === "custom"
-    ? `Signed in with your app registration ${tenant.appRegistration.clientId}.`
-    : tenant?.appRegistration?.kind === "openadminos"
-      ? `The enterprise application OpenAdminOS (app ID ${tenant.appRegistration.clientId}) is now in ${tenant.displayName} with ${delegatedPermissionCount === undefined ? "delegated" : `${delegatedPermissionCount} delegated`} Microsoft Graph permissions, all read-only. Find it in Entra admin center under Enterprise applications.`
-      : "The tenant is connected and active. You can keep exploring or start a tenant-backed action.";
+  const registration = tenant?.appRegistration;
+  // Only the OpenAdminOS client is described as the OpenAdminOS enterprise
+  // application. Tenants pinned to an earlier client (connected before v0.5)
+  // can reach this step through provider setup without reconnecting.
+  const registrationSummary = registration?.kind === "custom"
+    ? `Signed in with your app registration ${registration.clientId}.`
+    : registration?.kind === "openadminos" && registration.clientId === OPENADMINOS_APP_CLIENT_ID
+      ? `The enterprise application OpenAdminOS (app ID ${registration.clientId}) is now in ${tenant?.displayName} with ${delegatedPermissionCount === undefined ? "delegated" : `${delegatedPermissionCount} delegated`} Microsoft Graph permissions, all read-only. Find it in Entra admin center under Enterprise applications.`
+      : registration && tenant
+        ? `Signed in with ${tenantRegistrationSummary(tenant)?.text ?? "an app registration"}, client ID ${registration.clientId}.`
+        : "The tenant is connected and active. You can keep exploring or start a tenant-backed action.";
 
   return (
     <>
@@ -806,6 +1169,21 @@ function ReadyStep({
         <p className="mt-5 text-base leading-6 text-[var(--color-text-soft)]">
           {registrationSummary}
         </p>
+        {tenant && tenant.kind !== "sample" && tenant.grantedScopes !== undefined ? (
+          <p className="mt-3 text-sm leading-5 text-[var(--color-text-muted)]">
+            {SETUP_COPY.connectedServicesSummary(
+              AVAILABLE_SERVICES.filter((service) => serviceStatus(tenant, service.id) !== "missing").map(
+                (service) =>
+                  serviceStatus(tenant, service.id) === "partial"
+                    ? `${service.title} (partial)`
+                    : service.title,
+              ),
+              AVAILABLE_SERVICES.filter((service) => serviceStatus(tenant, service.id) === "missing").map(
+                (service) => service.title,
+              ),
+            )}
+          </p>
+        ) : null}
         {intent && (
           <p className="mt-3 text-sm leading-5 text-[var(--color-text-muted)]">
             Your original action is ready. Continuing sends it through the normal tenant, provider, and confirmation checks.

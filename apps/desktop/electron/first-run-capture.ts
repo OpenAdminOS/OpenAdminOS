@@ -230,16 +230,8 @@ async function firstRunCaptureStepScript(
     await delay(200);
   };
 
-  const scrollDialogToBottom = async (selector: string) => {
-    const element = document.querySelector<HTMLElement>(selector);
-    let scrollParent = element?.parentElement;
-    while (
-      scrollParent &&
-      !["auto", "scroll"].includes(getComputedStyle(scrollParent).overflowY)
-    ) {
-      scrollParent = scrollParent.parentElement;
-    }
-    if (scrollParent) scrollParent.scrollTop = scrollParent.scrollHeight;
+  const scrollIntoDialogView = async (selector: string) => {
+    document.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: "center" });
     await delay(250);
   };
 
@@ -259,7 +251,10 @@ async function firstRunCaptureStepScript(
     await waitFor(
       () =>
         bodyText().includes("Connect a Microsoft 365 tenant") &&
-        Boolean(findButton("Approve and continue to Microsoft")),
+        buttons().some((button) => {
+          const text = button.textContent?.trim() ?? "";
+          return text.startsWith("Approve") && text.endsWith("continue to Microsoft");
+        }),
       "permissions stage",
     );
     (document.activeElement as HTMLElement | null)?.blur();
@@ -276,7 +271,7 @@ async function firstRunCaptureStepScript(
         bodyText().includes("No client secret is used."),
       "own registration form",
     );
-    await scrollDialogToBottom('input[name="tenant-client-id"]');
+    await scrollIntoDialogView('input[name="tenant-client-id"]');
     (document.activeElement as HTMLElement | null)?.blur();
     await delay(200);
     return;

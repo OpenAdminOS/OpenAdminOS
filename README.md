@@ -6,7 +6,7 @@
 
 <p>Runs on the admin's own computer. Company data never leaves the device.</p>
 
-<p>OpenAdminOS is a free, MIT-licensed desktop app for running auditable AI agents for IT administration. Microsoft 365, Intune and Entra are the starting point, not the only target. Agents are plain YAML you can read before you run, risky changes need typed confirmation, and no third-party app registration is required.</p>
+<p>OpenAdminOS is a free, MIT-licensed desktop app for running auditable AI agents for IT administration. Microsoft 365 is the starting point, beginning with Intune, Entra and Defender, and not the only target. Agents are plain YAML you can read before you run, risky changes need typed confirmation, and no third-party app registration is required.</p>
 
 [![CI](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/ci.yml)
 [![Release](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml/badge.svg)](https://github.com/OpenAdminOS/OpenAdminOS/actions/workflows/release.yml)
@@ -41,7 +41,7 @@ OpenAdminOS started with Microsoft 365 because that is where most IT administrat
 
 | System | What works |
 |---|---|
-| Microsoft 365, Intune, Entra (core) | Sign-in with your own admin identity, Chat over Intune, Entra and Defender data, drift and baselines, and 16 ready-made agents in the registry. |
+| Microsoft 365: Intune, Entra, Defender (core) | Sign-in with your own admin identity, connect only the services you need, Chat over Intune, Entra and Defender data, drift and baselines, and 16 ready-made agents in the registry. |
 | Microsoft Teams | Outbound delivery of run reports. |
 | Slack | Outbound delivery of run reports. |
 | Discord | Outbound delivery of run reports through a channel webhook. |

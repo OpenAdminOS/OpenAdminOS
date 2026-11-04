@@ -1,4 +1,5 @@
 import { awaitWithSignal } from "./cancellation.js";
+import { scopesFromAccessToken } from "./token-scopes.js";
 import { GraphAccessDeniedError, type GraphAccessContext } from "@openadminos/agent-sdk";
 import type {
   GraphRequestInput as SdkGraphRequestInput,
@@ -518,18 +519,6 @@ async function graphRequest<T>(input: GraphRequestInput): Promise<T> {
     throw new Error(
       `Graph responded with HTTP ${response.status} for ${input.url}: ${truncate(body, 200)}`,
     );
-  }
-}
-
-/** Decode only for diagnostics. Graph remains responsible for token validation. */
-function scopesFromAccessToken(token: string): string[] | undefined {
-  try {
-    const payload = token.split(".")[1];
-    if (!payload) return undefined;
-    const claims = JSON.parse(Buffer.from(payload, "base64url").toString("utf8"));
-    return typeof claims.scp === "string" ? claims.scp.split(/\s+/).filter(Boolean) : undefined;
-  } catch {
-    return undefined;
   }
 }
 

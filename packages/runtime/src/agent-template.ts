@@ -28,7 +28,14 @@ import type {
   WriteStep,
   WriteLimits,
 } from "@openadminos/agent-sdk";
-import { assertWritePlanLimits, writeLimitsValidationIssue } from "@openadminos/agent-sdk";
+import {
+  AVAILABLE_SERVICES,
+  assertWritePlanLimits,
+  scopesNotCoveredByServices,
+  servicesForScopes,
+  writeLimitsValidationIssue,
+  type ServiceId,
+} from "@openadminos/agent-sdk";
 
 import { PROMPT_INSTRUCTION_ROOTS, renderDeep, renderTemplate, renderPromptTemplate, type TemplateContext } from "./template-engine.js";
 import { stripTenantDataFences, withTenantDataInstructions } from "./tenant-data.js";
@@ -99,6 +106,27 @@ export function parseAgentTemplate(source: string): AgentTemplate {
     }
   }
 
+  if (descriptor.services !== undefined) {
+    const available = new Set<string>(AVAILABLE_SERVICES.map((service) => service.id));
+    const services = descriptor.services;
+    // An empty list is checked against the declared scopes once the
+    // skills are parsed: only agents that read no Graph data may use it.
+    if (!Array.isArray(services)) {
+      throw new ManifestValidationError("descriptor.services", "must be a list of services");
+    }
+    for (const [index, service] of services.entries()) {
+      if (typeof service !== "string" || !available.has(service)) {
+        throw new ManifestValidationError(
+          `descriptor.services[${index}]`,
+          `expected one of ${[...available].map((id) => JSON.stringify(id)).join(", ")}, got ${JSON.stringify(service)}`,
+        );
+      }
+    }
+    if (new Set(services).size !== services.length) {
+      throw new ManifestValidationError("descriptor.services", "must not list a service twice");
+    }
+  }
+
   if (skills.length === 0) {
     throw new ManifestValidationError("skills", "must contain at least one skill");
   }
@@ -144,12 +172,31 @@ export function parseAgentTemplate(source: string): AgentTemplate {
     }
   }
 
-  return {
+  const template: AgentTemplate = {
     descriptor: descriptor as AgentTemplate["descriptor"],
     ...(execution ? { execution } : {}),
     skills: validated,
     definition: definition as AgentTemplate["definition"],
   };
+  if (Array.isArray(descriptor.services)) {
+    // Every declared scope must belong to a declared service, so run
+    // preflight checks the services the agent really needs. Baseline
+    // sign-in scopes, such as User.Read, need no service; a scope the
+    // registry does not map is never covered.
+    const services = descriptor.services as ServiceId[];
+    const uncovered = scopesNotCoveredByServices(collectScopes(template), services);
+    if (uncovered.length > 0) {
+      const suggested = servicesForScopes(uncovered);
+      const suggest = suggested.length > 0 ? `; these scopes belong to ${suggested.join(", ")}` : "";
+      throw new ManifestValidationError(
+        "descriptor.services",
+        services.length === 0
+          ? `must list at least one service when the agent declares Graph scopes (${uncovered.join(", ")})`
+          : `[${services.join(", ")}] does not cover ${uncovered.join(", ")}${suggest}`,
+      );
+    }
+  }
+  return template;
 }
 
 function requireObject(obj: Record<string, unknown>, key: string): Record<string, unknown> {
@@ -1629,6 +1676,13 @@ export function agentTemplateToModule(manifest: AgentTemplate): AgentModule {
   return buildReadAgentModule(manifest);
 }
 
+/** The declared services, or the services the scopes need. */
+function manifestServices(manifest: AgentTemplate): ServiceId[] {
+  return manifest.descriptor.services
+    ? [...manifest.descriptor.services]
+    : servicesForScopes(collectScopes(manifest));
+}
+
 function commonMetadata(manifest: AgentTemplate) {
   const descriptor = manifest.descriptor;
   return {
@@ -1640,6 +1694,7 @@ function commonMetadata(manifest: AgentTemplate) {
     tier: descriptor.tier ?? "agent",
     requiresEntraTier: descriptor.requiresEntraTier ?? "free",
     scopes: collectScopes(manifest),
+    services: manifestServices(manifest),
     author: descriptor.author,
     version: descriptor.version,
     minAppVersion: descriptor.minAppVersion,
@@ -1766,6 +1821,7 @@ export function agentTemplateToRegistrySummary(
   tier: AgentTier;
   requiresEntraTier: RequiredEntraTier;
   scopes: string[];
+  services: ServiceId[];
   author: AgentAuthor;
   version: string;
   minAppVersion?: string;
@@ -1787,6 +1843,7 @@ export function agentTemplateToRegistrySummary(
     tier: descriptor.tier ?? "agent",
     requiresEntraTier: descriptor.requiresEntraTier ?? "free",
     scopes: collectScopes(manifest),
+    services: manifestServices(manifest),
     author: descriptor.author,
     version: descriptor.version,
     minAppVersion: descriptor.minAppVersion,

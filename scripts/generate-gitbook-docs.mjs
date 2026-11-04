@@ -31,6 +31,14 @@ import { load as parseYaml } from "js-yaml";
 import { buildDocsSite, parseSummary } from "./docs-site-routes.mjs";
 
 const { DEFAULT_WRITE_MAX_ACTIONS } = await tsImport("../packages/agent-sdk/src/write-limits.ts", import.meta.url);
+const {
+  SERVICES,
+  AVAILABLE_SERVICES,
+  BASELINE_SERVICE_SCOPES,
+  GRAPH_DELEGATED_PERMISSION_IDS,
+  MICROSOFT_GRAPH_APP_ID,
+  normalizeGraphScopeName,
+} = await tsImport("../packages/agent-sdk/src/services.ts", import.meta.url);
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -38,6 +46,7 @@ const docsRoot = join(repoRoot, "docs", "gitbook");
 const generatedRoot = join(docsRoot, "generated");
 const generatedAgentsRoot = join(generatedRoot, "agents");
 const generatedReferenceRoot = join(generatedRoot, "reference");
+const generatedServicesRoot = join(generatedRoot, "services");
 const agentsRoot = join(repoRoot, "agents");
 const registryPath = join(agentsRoot, "index.json");
 const webDocsRoot = join(repoRoot, "web", "content", "docs");
@@ -331,33 +340,233 @@ function agentCatalogPage(agents) {
   return lines.join("\n");
 }
 
+// Delegated Graph scopes a user can consent to without an administrator,
+// from the Lokka check of the Microsoft Graph service principal on
+// 2026-11-04 (tasks/todo.md, "Lokka verification"). Every other scope in
+// that table needs admin consent.
+const USER_CONSENT_SCOPES = new Set(["openid", "profile", "offline_access", "User.Read", "User.ReadBasic.All"]);
+
+function consentFor(name) {
+  if (!Object.hasOwn(GRAPH_DELEGATED_PERMISSION_IDS, name)) {
+    throw new Error(`${name} has no verified permission ID in packages/agent-sdk/src/services.ts.`);
+  }
+  return USER_CONSENT_SCOPES.has(name) ? "User" : "Admin";
+}
+
+function scopeCode(name) {
+  return `\`${mdEscape(name)}\``;
+}
+
+function agentLink(agent, prefix) {
+  return `[${mdEscape(agent.name)}](${prefix}${agent.slug}.md)`;
+}
+
+function agentsUsingScope(agents, name) {
+  return agents.filter((agent) => (agent.scopes ?? []).some((scope) => normalizeGraphScopeName(scope) === name));
+}
+
+function agentsForService(agents, serviceId) {
+  return agents.filter((agent) => (agent.services ?? []).includes(serviceId));
+}
+
 function scopeMatrixPage(agents) {
-  const scopeMap = new Map();
+  const lines = [
+    frontMatter("Graph scope matrix", "Microsoft Graph permission matrix for OpenAdminOS agents, grouped by service."),
+    "# Graph Scope Matrix",
+    "",
+    "This reference shows which agents require each Microsoft Graph scope, grouped by service. A scope that two services share, such as `User.Read.All`, is listed under both. Run-time scopes are never requested when a tenant is connected; they are requested when an agent that declares them runs. See [Permissions by service](permissions-by-service.md) for the reason behind each scope.",
+    "",
+  ];
+
+  const listed = new Set();
+  for (const service of AVAILABLE_SERVICES) {
+    lines.push(`## ${service.title}`, "", "| Scope | Part | Agents |", "| --- | --- | --- |");
+    for (const part of service.parts) {
+      for (const scope of part.scopes) {
+        listed.add(scope.name);
+        const users = agentsUsingScope(agents, scope.name);
+        lines.push(
+          `| ${scopeCode(scope.name)} | ${mdEscape(part.title)}${part.planned ? " (planned)" : ""} | ${users.length > 0 ? users.map((agent) => agentLink(agent, "../agents/")).join("<br>") : "None"} |`,
+        );
+      }
+    }
+    for (const scope of service.agentOnlyScopes) {
+      const users = agentsUsingScope(agents, scope.name);
+      if (users.length === 0) continue;
+      listed.add(scope.name);
+      lines.push(
+        `| ${scopeCode(scope.name)} | Run time only | ${users.map((agent) => agentLink(agent, "../agents/")).join("<br>")} |`,
+      );
+    }
+    lines.push("");
+  }
+
+  const other = new Map();
   for (const agent of agents) {
     for (const scope of agent.scopes ?? []) {
-      const entries = scopeMap.get(scope) ?? [];
-      entries.push(agent);
-      scopeMap.set(scope, entries);
+      const name = normalizeGraphScopeName(scope);
+      if (listed.has(name)) continue;
+      other.set(name, [...(other.get(name) ?? []), agent]);
+    }
+  }
+  if (other.size > 0) {
+    lines.push("## Outside A Service", "", "| Scope | Agents |", "| --- | --- |");
+    for (const [name, entries] of [...other.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      lines.push(`| ${scopeCode(name)} | ${entries.map((agent) => agentLink(agent, "../agents/")).join("<br>")} |`);
+    }
+    lines.push("");
+  }
+
+  return lines.join("\n");
+}
+
+function permissionsByServicePage() {
+  const lines = [
+    frontMatter(
+      "Permissions by service",
+      "Every delegated Microsoft Graph permission OpenAdminOS requests, by service and part, with the reason and the consent it needs.",
+    ),
+    "# Permissions By Service",
+    "",
+    "This page is generated from the service registry in `packages/agent-sdk/src/services.ts`, the same source the app uses for the connect dialog, Settings and the setup script. Every permission is delegated: OpenAdminOS acts as the signed-in admin and can only read what that account can read.",
+    "",
+    "Consent shows who can approve a permission. **Admin** means an administrator has to grant consent for the tenant before anyone can use it. **User** means a user can consent for themselves. Permission IDs are the delegated permission IDs on the Microsoft Graph service principal (app ID `" + MICROSOFT_GRAPH_APP_ID + "`). They are listed for the `requiredResourceAccess` manifest snippet; the setup script resolves them again at run time.",
+    "",
+    "## Sign-in",
+    "",
+    "With the OpenAdminOS app, every connection requests these four scopes plus the scopes of the parts you choose, and nothing else. With your own app registration, sign-in requests `https://graph.microsoft.com/.default` and `offline_access`, and the token carries whatever the registration has been granted.",
+    "",
+    "| Scope | Reason | Consent | Permission ID |",
+    "| --- | --- | --- | --- |",
+  ];
+  for (const scope of BASELINE_SERVICE_SCOPES) {
+    lines.push(`| ${scopeCode(scope.name)} | ${mdEscape(scope.reason)} | ${consentFor(scope.name)} | \`${scope.permissionId}\` |`);
+  }
+  lines.push("");
+
+  for (const service of AVAILABLE_SERVICES) {
+    lines.push(
+      `## ${service.title}`,
+      "",
+      `${sentence(service.summary)} [${service.title} guide](../services/${service.id}.md).`,
+      "",
+      "| Part | Scope | Reason | Consent | Permission ID |",
+      "| --- | --- | --- | --- | --- |",
+    );
+    for (const part of service.parts) {
+      for (const scope of part.scopes) {
+        lines.push(
+          `| ${mdEscape(part.title)}${part.planned ? " (planned, never requested)" : ""} | ${scopeCode(scope.name)} | ${mdEscape(scope.reason)} | ${consentFor(scope.name)} | \`${scope.permissionId}\` |`,
+        );
+      }
+    }
+    lines.push("");
+    if (service.agentOnlyScopes.length > 0) {
+      lines.push(
+        `### ${service.title} Run-Time Scopes`,
+        "",
+        "Never requested when a tenant is connected. An agent that declares one of these asks for consent when it runs, and a write still pauses for diff confirmation.",
+        "",
+        "| Scope | Reason |",
+        "| --- | --- |",
+      );
+      for (const scope of service.agentOnlyScopes) {
+        lines.push(`| ${scopeCode(scope.name)} | ${mdEscape(scope.reason)} |`);
+      }
+      lines.push("");
     }
   }
 
-  const lines = [
-    frontMatter("Graph scope matrix", "Microsoft Graph permission matrix for OpenAdminOS agents."),
-    "# Graph Scope Matrix",
-    "",
-    "This reference shows which agents require each Microsoft Graph scope.",
-    "",
-    "| Scope | Agents |",
-    "| --- | --- |",
-  ];
-
-  for (const [scope, entries] of [...scopeMap.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+  const planned = SERVICES.filter((service) => service.status === "planned");
+  if (planned.length > 0) {
     lines.push(
-      `| \`${mdEscape(scope)}\` | ${entries.map((agent) => `[${mdEscape(agent.name)}](../agents/${agent.slug}.md)`).join("<br>")} |`,
+      "## Planned Services",
+      "",
+      `${planned.map((service) => service.title).join(", ")} are planned and request nothing today. See [Planned services](../../services/planned.md).`,
+      "",
     );
   }
+  return lines.join("\n");
+}
 
-  lines.push("");
+function servicePage(service, agents) {
+  const parts = service.parts.filter((part) => !part.planned);
+  const plannedParts = service.parts.filter((part) => part.planned);
+  const scopeNames = [...new Set(parts.flatMap((part) => part.scopes.map((scope) => scope.name)))];
+  const lines = [
+    frontMatter(service.title, `What the ${service.title} service covers in OpenAdminOS, its permissions, roles and licences.`),
+    `# ${service.title}`,
+    "",
+    sentence(service.summary),
+    "",
+    `Connecting ${service.title} requests ${scopeNames.length} delegated Microsoft Graph read scope${scopeNames.length === 1 ? "" : "s"} on top of the four sign-in scopes. Choose all of its parts or only some of them in the connect dialog, and add the rest later in Settings, Tenants. A part is on only when every one of its scopes is granted. With your own app registration, OpenAdminOS reads the granted permissions from the token and switches on each part that is fully granted; see [Own app registration](../../getting-started/own-app-registration.md).`,
+    "",
+    "## Parts And Permissions",
+    "",
+  ];
+  for (const part of parts) {
+    lines.push(
+      `### ${part.title}`,
+      "",
+      sentence(part.summary),
+      "",
+      "| Scope | Reason | Consent |",
+      "| --- | --- | --- |",
+    );
+    for (const scope of part.scopes) {
+      lines.push(`| ${scopeCode(scope.name)} | ${mdEscape(scope.reason)} | ${consentFor(scope.name)} |`);
+    }
+    lines.push("");
+    if (part.chatExamples.length > 0) {
+      lines.push("Chat questions this part answers:", "");
+      for (const example of part.chatExamples) lines.push(`- ${mdEscape(example)}`);
+      lines.push("");
+    }
+  }
+  if (plannedParts.length > 0) {
+    lines.push("## Planned Parts", "", "These parts are documented only. OpenAdminOS never requests their scopes today.", "");
+    for (const part of plannedParts) {
+      lines.push(`- **${mdEscape(part.title)}**: ${sentence(part.summary)} Needs ${part.scopes.map((scope) => scopeCode(scope.name)).join(", ")}.`);
+    }
+    lines.push("");
+  }
+  if (service.agentOnlyScopes.length > 0) {
+    lines.push(
+      "## Run-Time Scopes",
+      "",
+      "Agents may declare these. They are never requested when a tenant is connected, only when an agent that declares them runs. Writes always pause for diff confirmation.",
+      "",
+      "| Scope | Reason |",
+      "| --- | --- |",
+    );
+    for (const scope of service.agentOnlyScopes) lines.push(`| ${scopeCode(scope.name)} | ${mdEscape(scope.reason)} |`);
+    lines.push("");
+  }
+  lines.push(
+    "## Roles",
+    "",
+    "Delegated permissions never add rights: OpenAdminOS can only read what the signed-in account can read. These roles let the account read this service without permission to change it, or with the narrowest permission that covers it. See [Roles](../../guides/roles.md) for who can grant admin consent.",
+    "",
+    "| Role | Why |",
+    "| --- | --- |",
+  );
+  for (const role of service.roles) lines.push(`| ${mdEscape(role.name)} | ${mdEscape(role.why)} |`);
+  lines.push("", "## Licences", "");
+  for (const licence of service.licences) lines.push(`- ${mdEscape(licence)}`);
+  lines.push("", "## Agents", "");
+  const serviceAgents = agentsForService(agents, service.id);
+  if (serviceAgents.length === 0) {
+    lines.push("No agent in the registry declares this service yet.");
+  } else {
+    lines.push("Agents in the registry that declare this service. An agent cannot run while a service it declares is not connected.", "");
+    lines.push("| Agent | Mode | Scopes |", "| --- | --- | --- |");
+    for (const agent of serviceAgents) {
+      lines.push(
+        `| ${agentLink(agent, "../agents/")} | \`${mdEscape(agent.mode)}\` | ${(agent.scopes ?? []).length > 0 ? agent.scopes.map(scopeCode).join("<br>") : "None"} |`,
+      );
+    }
+  }
+  lines.push("", "See also [Permissions by service](../reference/permissions-by-service.md).", "");
   return lines.join("\n");
 }
 
@@ -431,6 +640,17 @@ function summaryPage(agents) {
 - [Installation](getting-started/installation.md)
 - [First run](getting-started/first-run.md)
 - [Connect a tenant](getting-started/connect-tenant.md)
+- [Connect with the shared app](getting-started/connect-shared-app.md)
+- [Own app registration](getting-started/own-app-registration.md)
+
+## Services
+
+- [Intune](generated/services/intune.md)
+- [Entra](generated/services/entra.md)
+- [Defender](generated/services/defender.md)
+- [Planned services](services/planned.md)
+- [Permissions by service](generated/reference/permissions-by-service.md)
+- [Roles](guides/roles.md)
 
 ## Features
 
@@ -450,6 +670,10 @@ function summaryPage(agents) {
 - [Registry trust](trust/registry-trust.md)
 - [Sandboxed code](trust/sandboxed-code.md)
 - [EU AI Act](trust/eu-ai-act.md)
+
+## Troubleshooting
+
+- [Consent and sign-in errors](troubleshooting/consent-errors.md)
 
 ## Connectors
 
@@ -509,6 +733,7 @@ function writeWebDocsMirror() {
 function main() {
   ensureDir(generatedAgentsRoot);
   ensureDir(generatedReferenceRoot);
+  ensureDir(generatedServicesRoot);
 
   const registry = readJson(registryPath);
   const registryAgents = Array.isArray(registry.agents) ? registry.agents : [];
@@ -526,6 +751,10 @@ function main() {
   writeGeneratedFile("SUMMARY.md", summaryPage(agents));
   writeGeneratedFile("generated/agent-catalog.md", agentCatalogPage(agents));
   writeGeneratedFile("generated/reference/graph-scope-matrix.md", scopeMatrixPage(agents));
+  writeGeneratedFile("generated/reference/permissions-by-service.md", permissionsByServicePage());
+  for (const service of AVAILABLE_SERVICES) {
+    writeGeneratedFile(`generated/services/${service.id}.md`, servicePage(service, agents));
+  }
   writeGeneratedFile("generated/reference/write-safety-matrix.md", writeSafetyMatrixPage(agents));
   writeGeneratedFile("generated/reference/llm-provider-matrix.md", providerMatrixPage());
 

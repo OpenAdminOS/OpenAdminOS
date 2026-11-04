@@ -18,7 +18,7 @@ it("scheduled Graph access fails with recovery instructions without opening Micr
   });
   // Force a missing cached account without contacting Microsoft.
   Object.defineProperty(store, "msalClientForTenant", { value: () => ({
-    getTokenCache: () => ({ getAccountByHomeId: async () => null }),
+    getTokenCache: () => ({ getAllAccounts: async () => [] }),
   }) });
   try {
     const internal = store as unknown as { buildGraph(tenant: string, scopes: string[], execution: {
@@ -46,7 +46,7 @@ it("scheduled Teams and Outlook deliveries never open an unattended sign-in", as
     connectors: { teams: { config: { defaultTeamId: "team", defaultChannelId: "channel" } },
       outlook: { config: { defaultRecipients: "test@example.com" } } }, runs: [],
     }),
-    getMsalClient: () => ({ getTokenCache: () => ({ getAccountByHomeId: async () => null }) }),
+    msalClientForTenant: () => ({ getTokenCache: () => ({ getAllAccounts: async () => [] }) }),
     openBrowser: async () => { browserCalls += 1; },
     connectorSecretsFor: () => ({ get: async () => undefined }),
     appendRunStep: async () => "step", finishRunStep: async () => undefined, appendRunLog: async () => undefined,
@@ -61,6 +61,121 @@ it("scheduled Teams and Outlook deliveries never open an unattended sign-in", as
   assert.equal(browserCalls, 0);
 });
 
+it("Teams and Outlook deliveries sign in with the tenant's own app registration", async () => {
+  const { RunDeliveryService } = await import("./run-delivery.js");
+  const run = { id: "scheduled", agentSlug: "test", status: "completed", trigger: "schedule",
+    queuedAt: new Date().toISOString(), summary: "Test completed", logs: [], steps: [], tenantId: "tenant-byo" } as const;
+  const settings = { enabled: true, includeScheduledRuns: true, notifyOnSuccess: true };
+  const byoRegistration = { kind: "custom", clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    authority: "https://login.microsoftonline.com/contoso.onmicrosoft.com" } as const;
+  const resolvedFor: Array<{ tenantId: string; clientId?: string }> = [];
+  const accountLookups: string[] = [];
+  const authorities: Array<string | undefined> = [];
+  const host = {
+    read: async () => ({ installedAgents: [{ id: "test", slug: "test", name: "Test", delivery: {
+      teams: { ...settings, useDefaultTarget: true }, outlook: { ...settings, useDefaultRecipients: true },
+    } }], tenants: [
+      { id: "tenant-default", displayName: "Default", homeAccountId: "default-home", username: "admin@default.example" },
+      { id: "tenant-byo", displayName: "Contoso", homeAccountId: "byo-home", username: "admin@contoso.example",
+        appRegistration: byoRegistration },
+    ],
+    activeTenantId: "tenant-default",
+    connectors: { teams: { config: { defaultTeamId: "team", defaultChannelId: "channel" } },
+      outlook: { config: { defaultRecipients: "test@example.com" } } }, runs: [],
+    }),
+    msalClientForTenant: (tenant: { id: string; homeAccountId: string; appRegistration?: { clientId: string } }) => {
+      resolvedFor.push({ tenantId: tenant.id, ...(tenant.appRegistration ? { clientId: tenant.appRegistration.clientId } : {}) });
+      const clientId = tenant.appRegistration?.clientId ?? "default";
+      return {
+        getTokenCache: () => ({ getAllAccounts: async () => {
+          accountLookups.push(`${clientId}:${tenant.homeAccountId}`);
+          return [{ homeAccountId: tenant.homeAccountId, tenantId: tenant.id, username: "admin@contoso.example" }];
+        } }),
+        acquireTokenSilent: async (request: { scopes: string[]; authority?: string }) => {
+          authorities.push(request.authority);
+          return {
+            accessToken: `token-${clientId}`,
+            scopes: request.scopes,
+            expiresOn: new Date(Date.now() + 3_600_000),
+            account: { homeAccountId: "byo-home", tenantId: "tenant-byo", username: "admin@contoso.example" },
+            tenantId: "tenant-byo",
+          };
+        },
+      };
+    },
+    openBrowser: async () => undefined,
+    connectorSecretsFor: () => ({ get: async () => undefined }),
+    appendRunStep: async () => "step", finishRunStep: async () => undefined, appendRunLog: async () => undefined,
+  };
+  const service = new RunDeliveryService(host as unknown as import("./run-delivery.js").RunDeliveryHost);
+  const internal = service as unknown as {
+    deliverRunToTeams(run: unknown): Promise<{ error?: string }>;
+    deliverRunToOutlook(run: unknown): Promise<{ error?: string }>;
+  };
+  const graphCalls: Array<{ url: string; authorization: string | null }> = [];
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const url = String(input);
+    graphCalls.push({ url, authorization: new Headers(init?.headers).get("authorization") });
+    if (url.endsWith("/sendMail")) return new Response(null, { status: 202 });
+    return new Response(JSON.stringify({ id: "message-1", webUrl: "https://teams.example/message-1" }), {
+      status: 201,
+      headers: { "content-type": "application/json" },
+    });
+  }) as typeof fetch;
+  let teamsResult: { error?: string };
+  let outlookResult: { error?: string };
+  try {
+    teamsResult = await internal.deliverRunToTeams(run);
+    outlookResult = await internal.deliverRunToOutlook(run);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(teamsResult.error, undefined);
+  assert.equal(outlookResult.error, undefined);
+  assert.ok(graphCalls.some((call) => call.url.endsWith("/teams/team/channels/channel/messages")));
+  assert.ok(graphCalls.some((call) => call.url.endsWith("/me/sendMail")));
+  assert.ok(graphCalls.every((call) => call.authorization === `Bearer token-${byoRegistration.clientId}`));
+  assert.deepEqual(resolvedFor, [
+    { tenantId: "tenant-byo", clientId: byoRegistration.clientId },
+    { tenantId: "tenant-byo", clientId: byoRegistration.clientId },
+  ]);
+  assert.ok(accountLookups.length > 0);
+  assert.ok(accountLookups.every((entry) => entry === `${byoRegistration.clientId}:byo-home`));
+  // The registration's host, with the stored directory.
+  assert.ok(authorities.length > 0);
+  assert.ok(authorities.every((authority) => authority === "https://login.microsoftonline.com/tenant-byo"));
+});
+
+it("the delivery host resolves the MSAL client that connected the tenant", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-client-"));
+  const filePath = join(dir, "state.json");
+  const byoRegistration = { kind: "custom", clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    authority: "https://login.microsoftonline.com/contoso.onmicrosoft.com" } as const;
+  await writeFile(filePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [],
+    activeTenantId: "tenant-byo", tenants: [{ id: "tenant-byo", displayName: "Contoso", username: "admin@contoso.example",
+      homeAccountId: "byo-home", addedAt: new Date().toISOString(), appRegistration: byoRegistration }] }));
+  const storesFor: string[] = [];
+  const store = new AppStateStore({ filePath, userDataPath: dir, statsApiUrl: "",
+    tokenStore: { read: async () => "", write: async () => undefined },
+    tokenStoreFor: (clientId) => {
+      storesFor.push(clientId);
+      return { read: async () => "", write: async () => undefined };
+    },
+  });
+  try {
+    const internal = store as unknown as {
+      runDeliveryService: { host: { msalClientForTenant(tenant: unknown): unknown } };
+      msalClientFor(registration: unknown): unknown;
+    };
+    const tenant = (await store.getAppState()).tenants[0]!;
+    const deliveryClient = internal.runDeliveryService.host.msalClientForTenant(tenant);
+    assert.equal(deliveryClient, internal.msalClientFor(byoRegistration));
+    assert.notEqual(deliveryClient, internal.msalClientFor(undefined));
+    assert.deepEqual(storesFor, [byoRegistration.clientId]);
+  } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
 it("Chat and cache Graph access never widens consent beyond the tenant's granted scopes", async () => {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-granted-auth-"));
   const filePath = join(dir, "state.json");
@@ -73,15 +188,83 @@ it("Chat and cache Graph access never widens consent beyond the tenant's granted
     openBrowser: async () => { browserCalls += 1; },
   });
   Object.defineProperty(store, "msalClientForTenant", { value: () => ({
-    getTokenCache: () => ({ getAccountByHomeId: async () => null }),
+    getTokenCache: () => ({ getAllAccounts: async () => [] }),
   }) });
   try {
     const internal = store as unknown as { buildGraph(tenant: string, scopes: string[]): Promise<{ createGraph(log: () => void): RunGraphApi }> };
     const selection = await internal.buildGraph("tenant-1", ["Policy.Read.All"]);
     await assert.rejects(
       selection.createGraph(() => undefined).request({ method: "GET", path: "/identity/conditionalAccess/policies" }),
-      /Policy\.Read\.All, which was not granted for Test\. Add the access in Settings, Tenants\./,
+      /This needs Entra Conditional Access and policies, which is not granted for Test\. Add it in Settings, Tenants\./,
     );
     assert.equal(browserCalls, 0);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+for (const [label, account] of [
+  ["a different account", { homeAccountId: "other.fabrikam-tenant-id", tenantId: "fabrikam-tenant-id", username: "it@fabrikam.example" }],
+  ["the same account in another directory", { homeAccountId: "home.contoso-tenant-id", tenantId: "fabrikam-tenant-id", username: "admin@contoso.example" }],
+] as const) {
+  it(`Teams and Outlook deliveries reject ${label} before any Graph request`, async () => {
+    const { RunDeliveryService } = await import("./run-delivery.js");
+    const run = { id: "manual", agentSlug: "test", status: "completed", trigger: "manual",
+      queuedAt: new Date().toISOString(), summary: "Test completed", logs: [], steps: [], tenantId: "contoso-tenant-id" } as const;
+    const settings = { enabled: true, notifyOnSuccess: true };
+    const tenant = { id: "contoso-tenant-id", displayName: "Contoso", homeAccountId: "home.contoso-tenant-id",
+      username: "admin@contoso.example", grantedScopes: ["graph:User.Read"] };
+    const writes: unknown[] = [];
+    const signIns: Array<{ loginHint?: string; authority?: string }> = [];
+    const host = {
+      read: async () => ({ installedAgents: [{ id: "test", slug: "test", name: "Test", delivery: {
+        teams: { ...settings, useDefaultTarget: true }, outlook: { ...settings, useDefaultRecipients: true },
+      } }], tenants: [tenant], activeTenantId: tenant.id,
+      connectors: { teams: { config: { defaultTeamId: "team", defaultChannelId: "channel" } },
+        outlook: { config: { defaultRecipients: "test@example.com" } } }, runs: [],
+      }),
+      write: async (state: unknown) => { writes.push(state); },
+      // No cached profile for this directory, so every token comes from
+      // the interactive fallback, which returns the wrong account.
+      msalClientForTenant: () => ({
+        getTokenCache: () => ({ getAllAccounts: async () => [] }),
+        acquireTokenInteractive: async (request: { loginHint?: string; authority?: string }) => {
+          signIns.push({ ...(request.loginHint ? { loginHint: request.loginHint } : {}),
+            ...(request.authority ? { authority: request.authority } : {}) });
+          return { accessToken: "wrong-token", scopes: ["ChannelMessage.Send", "Mail.Send"], account, tenantId: account.tenantId };
+        },
+      }),
+      openBrowser: async () => undefined,
+      connectorSecretsFor: () => ({ get: async () => undefined }),
+      appendRunStep: async () => "step", finishRunStep: async () => undefined, appendRunLog: async () => undefined,
+    };
+    const service = new RunDeliveryService(host as unknown as import("./run-delivery.js").RunDeliveryHost);
+    const internal = service as unknown as {
+      deliverRunToTeams(run: unknown): Promise<{ error?: string; retryable?: boolean }>;
+      deliverRunToOutlook(run: unknown): Promise<{ error?: string; retryable?: boolean }>;
+    };
+    const graphCalls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      graphCalls.push(String(input));
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    let teams: { error?: string; retryable?: boolean };
+    let outlook: { error?: string; retryable?: boolean };
+    try {
+      teams = await internal.deliverRunToTeams(run);
+      outlook = await internal.deliverRunToOutlook(run);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    // The connector's generic token error must not hide the account copy,
+    // and an automatic retry would only open the same sign-in again.
+    assert.match(teams.error ?? "", /^Signed in as .+ Sign in as admin@contoso\.example( to that directory)? and try again\.$/);
+    assert.match(outlook.error ?? "", /^Signed in as .+ Sign in as admin@contoso\.example( to that directory)? and try again\.$/);
+    assert.equal(teams.retryable, false);
+    assert.equal(outlook.retryable, false);
+    assert.ok(signIns.length >= 2);
+    assert.ok(signIns.every((entry) => entry.loginHint === "admin@contoso.example"
+      && entry.authority === "https://login.microsoftonline.com/contoso-tenant-id"));
+    assert.deepEqual(graphCalls, []);
+    assert.deepEqual(writes, []);
+  });
+}

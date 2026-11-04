@@ -9,6 +9,10 @@ import {
   type ReactNode,
 } from "react";
 import { registerOverlay } from "../../shared/overlay-stack";
+import { IconCheck } from "../icons";
+
+/** Plain, radio and checkbox items. */
+const ITEM_SELECTOR = '[role^="menuitem"]:not(:disabled)';
 
 export type MenuEntry =
   | {
@@ -18,6 +22,9 @@ export type MenuEntry =
       icon?: ReactNode;
       danger?: boolean;
       disabled?: boolean;
+      /** Makes the item a selectable one: a radio in a group, or a checkbox. */
+      checked?: boolean;
+      radio?: boolean;
       onSelect: () => void;
     }
   | { type: "separator"; id: string };
@@ -54,7 +61,7 @@ export function Menu({
 
   const focusItem = (index: number, preventScroll = false) => {
     const entries = Array.from(
-      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
+      menuRef.current?.querySelectorAll<HTMLButtonElement>(ITEM_SELECTOR) ?? [],
     );
     const entry = entries[index];
     if (!entry) return;
@@ -128,7 +135,7 @@ export function Menu({
 
   const onMenuKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     const entries = Array.from(
-      menuRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not(:disabled)') ?? [],
+      menuRef.current?.querySelectorAll<HTMLButtonElement>(ITEM_SELECTOR) ?? [],
     );
     const current = entries.indexOf(document.activeElement as HTMLButtonElement);
     if (event.key === "ArrowDown") {
@@ -175,7 +182,14 @@ export function Menu({
               <button
                 key={item.id}
                 type="button"
-                role="menuitem"
+                role={
+                  item.checked === undefined
+                    ? "menuitem"
+                    : item.radio
+                      ? "menuitemradio"
+                      : "menuitemcheckbox"
+                }
+                aria-checked={item.checked}
                 disabled={item.disabled}
                 onClick={() => {
                   item.onSelect();
@@ -184,7 +198,9 @@ export function Menu({
                 className={`flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base transition-colors disabled:opacity-40 ${
                   item.danger
                     ? "text-[var(--color-danger)] hover:bg-[var(--color-danger-soft)]"
-                    : "text-[var(--color-text)] hover:bg-[var(--color-hover)]"
+                    : item.checked
+                      ? "bg-[var(--color-active)] text-[var(--color-text)]"
+                      : "text-[var(--color-text)] hover:bg-[var(--color-hover)]"
                 }`}
               >
                 {item.icon ? (
@@ -192,7 +208,10 @@ export function Menu({
                     {item.icon}
                   </span>
                 ) : null}
-                <span>{item.label}</span>
+                <span className={item.checked === undefined ? undefined : "flex-1"}>{item.label}</span>
+                {item.checked ? (
+                  <IconCheck size={12} className="shrink-0 text-[var(--color-accent)]" />
+                ) : null}
               </button>
             ),
           )}

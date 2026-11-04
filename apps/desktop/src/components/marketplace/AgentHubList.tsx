@@ -1,11 +1,20 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router";
 
+import { AGENT_COPY } from "../../copy";
 import { formatAgentDisplayName, type AgentDisplay } from "../../shared/agent-display";
-import type { AgentSummary, RegistryAgentSummary } from "../../shared/openAdminOS";
+import {
+  agentServiceIds,
+  type AgentSummary,
+  type InvalidAgentManifest,
+  type RegistryAgentSummary,
+} from "../../shared/openAdminOS";
 import { PILOT_COPY } from "../../shared/pilot-mode";
 import { useAppState } from "../../state";
-import { Button } from "../ui";
+import { IconShield } from "../icons";
+import { NewAgentModal } from "../NewAgentModal";
+import { ServiceChips } from "../ServiceAccess";
+import { Badge, Button } from "../ui";
 import { CoverArt } from "./CoverArt";
 
 export function hasLicenseShortfall(
@@ -54,6 +63,8 @@ export function AgentHubList({ query, pilot }: { query: string; pilot: boolean }
     [state.installedAgents],
   );
   const rows = registryAgents.filter((agent) => matchesAgentQuery(agent, query));
+  const invalidAgents = state.invalidAgents ?? [];
+  const [editingInvalid, setEditingInvalid] = useState<InvalidAgentManifest | null>(null);
 
   const openAgent = (slug: string, action?: "install") => {
     const search = new URLSearchParams({ from: "marketplace" });
@@ -82,6 +93,7 @@ export function AgentHubList({ query, pilot }: { query: string; pilot: boolean }
                   {formatAgentDisplayName(display)}
                 </span>
                 <span className="block truncate text-sm text-[var(--color-text-muted)]">{agent.description}</span>
+                <span className="mt-1 block"><ServiceChips services={agentServiceIds(display)} /></span>
                 <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
                   Agent · <span className={agent.mode === "write" ? "text-[var(--color-warning)]" : ""}>{agent.mode === "write" ? "Makes changes after your approval" : "Read only"}</span>
                   {installed ? " · Installed" : ""}
@@ -104,7 +116,18 @@ export function AgentHubList({ query, pilot }: { query: string; pilot: boolean }
           );
         })}
       </div>
-      {rows.length === 0 ? (
+      {invalidAgents.length > 0 ? (
+        <div aria-label="Invalid agent manifests" className="mt-3">
+          {invalidAgents.map((entry) => (
+            <InvalidAgentRow
+              key={`invalid-${entry.registryPath}`}
+              entry={entry}
+              onEdit={entry.source === "user" && entry.sourceText !== undefined ? () => setEditingInvalid(entry) : undefined}
+            />
+          ))}
+        </div>
+      ) : null}
+      {rows.length === 0 && invalidAgents.length === 0 ? (
         <div role="status" className="px-6 py-10 text-center">
           <div className="font-medium text-[var(--color-text)]">No agents match</div>
           <p className="mt-1 text-sm text-[var(--color-text-muted)]">
@@ -112,6 +135,48 @@ export function AgentHubList({ query, pilot }: { query: string; pilot: boolean }
               ? state.registryRefreshError ?? "The agent catalog has not loaded yet. Refresh the catalog to load it."
               : "Clear the search or try a Graph scope such as User.Read.All."}
           </p>
+        </div>
+      ) : null}
+      {editingInvalid ? (
+        <NewAgentModal
+          open
+          onClose={() => setEditingInvalid(null)}
+          initialYamlSource={editingInvalid.sourceText}
+          editingSlug={editingInvalid.folder}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+/** A local manifest that failed validation, listed as unavailable. */
+function InvalidAgentRow({
+  entry,
+  onEdit,
+}: {
+  entry: InvalidAgentManifest;
+  onEdit?: () => void;
+}) {
+  return (
+    <div className="calm-list-row group" aria-label={`${entry.id} ${AGENT_COPY.invalidBadge.toLowerCase()}`}>
+      <span className="calm-row-icon text-[var(--color-danger)]">
+        <IconShield size={16} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+          <span className="truncate font-medium text-[var(--color-text)]">{entry.id}</span>
+          <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge>
+        </span>
+        <span className="mt-0.5 block text-sm text-[var(--color-danger)]">
+          {AGENT_COPY.invalidTitle}. {entry.reason}
+        </span>
+        <span className="mt-0.5 block truncate font-mono text-xs text-[var(--color-text-muted)]" title={entry.manifestPath}>
+          {entry.manifestPath}
+        </span>
+      </div>
+      {onEdit ? (
+        <div className="calm-row-actions flex shrink-0 items-center gap-1">
+          <Button size="sm" variant="secondary" onClick={onEdit}>{AGENT_COPY.invalidEditAction}</Button>
         </div>
       ) : null}
     </div>

@@ -12,6 +12,8 @@ descriptor:
   category: apps
   tier: dashboard
   requiresEntraTier: free
+  services:
+    - entra
   mode: read
   preferredModel: llama3.1:8b
 skills:

@@ -32,9 +32,9 @@ const SOFT_TIMEOUT_MS = 180_000;
 interface SetupFlowValue {
   requireTenant(intent?: PendingIntent): boolean;
   requireTenantAndProvider(intent?: PendingIntent): boolean;
-  /** Opens tenant setup on the permissions stage. */
+  /** Opens tenant setup on the sign-in choice with neither app chosen. */
   openSetup(): void;
-  /** Opens tenant setup on the own app registration form. */
+  /** Opens tenant setup with "Your own app registration" chosen. */
   openOwnRegistration(): void;
   /** Adds or reopens the pilot tenant and makes it active. */
   startPilot(): Promise<void>;
@@ -68,6 +68,10 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const [connectedTenant, setConnectedTenant] = useState<TenantRecord | undefined>();
   const [pilotRemoved, setPilotRemoved] = useState(false);
   const [welcomeOpen, setWelcomeOpen] = useState(false);
+  // Options of the last sign-in attempt, so "Try again" and "Change
+  // sign-in options" never switch the admin to a different app.
+  const lastOptionsRef = useRef<ConnectTenantOptions | undefined>(undefined);
+  const [editOptions, setEditOptions] = useState<ConnectTenantOptions | undefined>();
   const attemptIdRef = useRef(0);
   const restoredRef = useRef(false);
 
@@ -132,6 +136,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       setIntent(nextIntent);
       setError(null);
       setPilotRemoved(false);
+      setEditOptions(undefined);
+      lastOptionsRef.current = undefined;
       setConnectedTenant(activeTenant);
       if (nextIntent) writePendingIntent(nextIntent);
       else clearPendingIntent();
@@ -235,6 +241,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const startConnect = useCallback(async (options?: ConnectTenantOptions) => {
     const attemptId = attemptIdRef.current + 1;
     attemptIdRef.current = attemptId;
+    lastOptionsRef.current = options;
     setError(null);
     setPilotRemoved(false);
     setStage("waiting");
@@ -278,8 +285,14 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const tryAgain = useCallback(async () => {
     attemptIdRef.current += 1;
     await cancelConnectTenant().catch(() => undefined);
-    void startConnect();
+    void startConnect(lastOptionsRef.current);
   }, [cancelConnectTenant, startConnect]);
+
+  const editSignIn = useCallback(() => {
+    setEditOptions(lastOptionsRef.current);
+    setError(null);
+    setStage("permissions");
+  }, []);
 
   const selectProvider = useCallback(
     async (id: ProviderId) => {
@@ -360,11 +373,14 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         agentName={pendingAgentName}
         providers={state.providers}
         activeProviderId={state.activeProviderId}
+        savedRegistrations={state.savedAppRegistrations ?? []}
+        {...(editOptions ? { editOptions } : {})}
         onClose={closeFlow}
         onConnect={(options) => void startConnect(options)}
         pilotRemoved={pilotRemoved}
         onKeepWaiting={() => setStage("waiting")}
         onTryAgain={() => void tryAgain()}
+        onEditSignIn={editSignIn}
         onSelectProvider={(id) => void selectProvider(id)}
         onRecheckProviders={refresh}
         onResume={resume}

@@ -3,6 +3,7 @@ import { DEFAULT_WRITE_MAX_ACTIONS } from "@openadminos/agent-sdk";
 import { Card } from "./Card";
 import { Pill } from "./Pill";
 import { Badge, Section } from "./ui";
+import { SERVICE_COPY } from "../copy";
 import {
   IconBolt,
   IconChevronDown,
@@ -94,10 +95,13 @@ export function ManifestSections({
   preview,
   settingsOverrides,
   sections = ["permissions", "settings", "result", "pipeline"],
+  consentNote = SERVICE_COPY.consentNoteGeneric,
 }: {
   preview: AgentManifestPreview;
   settingsOverrides?: Record<string, unknown>;
   sections?: ManifestSectionId[];
+  /** What happens to missing consent for the active tenant. */
+  consentNote?: string;
 }) {
   const { manifest } = preview;
   const scopes = collectScopesFromManifest(manifest);
@@ -121,9 +125,7 @@ export function ManifestSections({
               ) : (
                 <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>
               )}
-              <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-                Missing consent is requested before the first run.
-              </p>
+              <p className="mt-2 text-sm text-[var(--color-text-muted)]">{consentNote}</p>
               <DeclaredGraphOperations manifest={manifest} />
               <WriteLimitsSummary manifest={manifest} />
             </Section>

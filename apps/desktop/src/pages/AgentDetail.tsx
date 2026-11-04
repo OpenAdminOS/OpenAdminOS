@@ -4,6 +4,8 @@ import { Link, useLocation, useNavigate, useParams, useSearchParams } from "reac
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
+import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
+import { AGENT_COPY } from "../copy";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -14,6 +16,11 @@ import { Modal, ModalHeader } from "../components/Modal";
 import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
 import { RunWithMenu } from "../components/RunWithMenu";
 import { useToast } from "../components/Toast";
+import {
+  ServiceChips,
+  ServiceNotConnectedNotice,
+  agentConsentNote,
+} from "../components/ServiceAccess";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { CommunityShareModal } from "../components/CommunityShareModal";
 import {
@@ -39,8 +46,14 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
-  grantedScopeSet,
-  missingPermissionAreasForScopes,
+  agentServiceIds,
+  availableScopeSet,
+  missingPartsForScopes,
+  missingServicesForAgent,
+  partLabel,
+  uncoveredScopesCopy,
+  unmappedScopesCopy,
+  type ServiceId,
   resolveRunModel,
   type AgentManifestPreview,
   type AgentDiscordDelivery,
@@ -62,6 +75,12 @@ import {
   type WhatsAppWebGroupRef,
   type WhatsAppWebRecipientType,
 } from "../shared/openAdminOS";
+
+function manifestLoadErrorCopy(error: string, recovery: string): string {
+  const reason = error.trim();
+  const sentence = /[.?]$/.test(reason) ? reason : `${reason}.`;
+  return `The manifest could not be loaded: ${sentence} ${recovery}`;
+}
 
 function scrollAgentSection(targetId: string) {
   const target = document.getElementById(targetId);
@@ -92,6 +111,7 @@ export default function AgentDetail({
   const { requireTenantAndProvider, openSetup } = useSetupFlow();
   const {
     state,
+    loading: appStateLoading,
     registryAgents,
     installAgent,
     startRun,
@@ -120,6 +140,12 @@ export default function AgentDetail({
   const [previewLoading, setPreviewLoading] = useState(true);
   const [configureOpen, setConfigureOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [editInvalidOpen, setEditInvalidOpen] = useState(false);
+  const invalidEntry = agent?.manifestError
+    ? state.invalidAgents?.find((entry) => entry.registryPath === agent.registryPath)
+    : undefined;
+  const editableInvalid =
+    invalidEntry?.source === "user" && invalidEntry.sourceText !== undefined ? invalidEntry : undefined;
   const [communityShareOpen, setCommunityShareOpen] = useState(false);
   const [manifestOpen, setManifestOpen] = useState(false);
   const [hubInstallConfirm, setHubInstallConfirm] = useState(false);
@@ -145,6 +171,8 @@ export default function AgentDetail({
     : false;
   // In pilot mode only the three pilot agents run, with prepared text.
   const pilot = activeTenant?.kind === "sample";
+  const missingAgentServices =
+    agent && activeTenant ? missingServicesForAgent(activeTenant, agentServiceIds(agent)) : [];
   const pilotRunnable = pilot && Boolean(agent && isPilotAgentSlug(agent.slug));
   const pendingTenant = pendingRunChoice?.tenantId
     ? state.tenants.find((tenant) => tenant.id === pendingRunChoice.tenantId)
@@ -336,13 +364,17 @@ export default function AgentDetail({
     }
   };
 
+  const manifestError = agent?.manifestError;
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
     setPreviewLoading(true);
     setPreviewError(null);
     const api = window.openAdminOS;
-    if (!api) {
+    // Wait for the installed agents, because an invalid manifest has its
+    // own notice and loading it again would only repeat the same error.
+    if (appStateLoading) return;
+    if (!api || manifestError) {
       setPreview(null);
       setPreviewLoading(false);
       return;
@@ -363,7 +395,7 @@ export default function AgentDetail({
     return () => {
       cancelled = true;
     };
-  }, [slug, agent?.version, registryAgent?.version]);
+  }, [slug, agent?.version, registryAgent?.version, manifestError, appStateLoading]);
 
   useEffect(() => {
     window.openAdminOS
@@ -460,6 +492,7 @@ export default function AgentDetail({
         manifestOpen={manifestOpen}
         onCloseManifest={() => setManifestOpen(false)}
         tenantTier={activeTenant?.entraTier}
+        activeTenant={activeTenant}
         pilot={pilot}
         onConnectTenant={openSetup}
       />
@@ -484,7 +517,7 @@ export default function AgentDetail({
               <Button
                 variant="secondary"
                 size="sm"
-                disabled={agent.compatibility?.supported === false}
+                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
                 onClick={() => queueRunPreflight({ dryRun: true })}
               >
                 Dry run
@@ -498,7 +531,7 @@ export default function AgentDetail({
               <Button
                 variant="primary"
                 size="sm"
-                disabled={agent.compatibility?.supported === false}
+                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
                 onClick={() => queueRunPreflight()}
               >
                 Run
@@ -508,7 +541,7 @@ export default function AgentDetail({
                 providers={state.providers}
                 activeProviderId={state.activeProviderId}
                 activeModelByProviderId={state.activeModelByProviderId}
-                disabled={agent.compatibility?.supported === false}
+                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
                 onRun={(choice) => {
                   queueRunPreflight(choice);
                 }}
@@ -596,8 +629,26 @@ export default function AgentDetail({
           {agent.compatibility?.supported === false ? (
             <Badge tone="warning">Incompatible</Badge>
           ) : null}
+          {agent.manifestError ? <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge> : null}
           {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
+          <ServiceChips services={agentServiceIds(agent)} />
         </div>
+        {activeTenant && !pilot && missingAgentServices.length > 0 ? (
+          <ServiceNotConnectedNotice
+            tenant={activeTenant}
+            serviceIds={missingAgentServices.map((service) => service.id)}
+          />
+        ) : null}
+        {agent.manifestError ? (
+          <InvalidAgentNotice
+            name={agent.name}
+            reason={agent.manifestError}
+            manifestPath={invalidEntry?.manifestPath}
+            source={invalidEntry?.source}
+            onEdit={editableInvalid ? () => setEditInvalidOpen(true) : undefined}
+            onUninstall={() => setUninstallOpen(true)}
+          />
+        ) : null}
         {agent.compatibility?.supported === false && (
           <div className="mb-4 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/30">
             <div className="text-sm font-medium text-[var(--color-text)]">
@@ -670,15 +721,24 @@ export default function AgentDetail({
 
           {previewError ? (
             <p role="alert" className="text-sm text-[var(--color-danger)]">
-              The manifest could not be loaded: {previewError} Refresh the agent and try again.
+              {manifestLoadErrorCopy(previewError, "Refresh the agent and try again.")}
             </p>
           ) : null}
 
           {!previewLoading && !previewError && preview ? (
-            <ManifestSections preview={preview} sections={["permissions"]} />
+            <ManifestSections
+              preview={preview}
+              sections={["permissions"]}
+              consentNote={agentConsentNote(activeTenant, agent)}
+            />
           ) : null}
 
-          {!previewLoading && !preview ? <FallbackScopesCard scopes={agent.scopes} /> : null}
+          {!previewLoading && !preview ? (
+            <FallbackScopesCard
+              scopes={agent.scopes}
+              consentNote={agentConsentNote(activeTenant, agent)}
+            />
+          ) : null}
 
           <Section id="agent-schedule" title="Schedule" className="scroll-mt-4">
             <AgentScheduleCard
@@ -855,7 +915,7 @@ export default function AgentDetail({
             </div>
           ) : previewError ? (
             <p role="alert" className="text-sm text-[var(--color-danger)]">
-              The manifest could not be loaded: {previewError} Refresh the agent and try again.
+              {manifestLoadErrorCopy(previewError, "Refresh the agent and try again.")}
             </p>
           ) : preview ? (
             <ManifestPreview preview={preview} settingsOverrides={agent.settings} />
@@ -873,6 +933,14 @@ export default function AgentDetail({
           onSave={(values) => updateAgentSettings(agent.slug, values)}
         />
       )}
+      {editableInvalid ? (
+        <NewAgentModal
+          open={editInvalidOpen}
+          onClose={() => setEditInvalidOpen(false)}
+          initialYamlSource={editableInvalid.sourceText}
+          editingSlug={editableInvalid.folder}
+        />
+      ) : null}
       {preview?.isUserAuthored && (
         <NewAgentModal
           open={editOpen}
@@ -1018,6 +1086,7 @@ function HubAgentDrawer({
   installing,
   manifestOpen,
   tenantTier,
+  activeTenant,
   onClose,
   onRequestInstall,
   onCancelInstall,
@@ -1035,6 +1104,7 @@ function HubAgentDrawer({
   installing: boolean;
   manifestOpen: boolean;
   tenantTier?: "free" | "p1" | "p2" | "unknown";
+  activeTenant: TenantRecord | undefined;
   onClose: () => void;
   onRequestInstall: () => void;
   onCancelInstall: () => void;
@@ -1097,6 +1167,7 @@ function HubAgentDrawer({
               <Badge tone="warning">Incompatible</Badge>
             ) : null}
             {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
+            <ServiceChips services={agentServiceIds(agent)} />
           </div>
 
           {installConfirm ? (
@@ -1148,7 +1219,7 @@ function HubAgentDrawer({
               )) : <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>}
             </div>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Missing consent is requested before the first run.
+              {agentConsentNote(activeTenant, agent)}
             </p>
             {!installConfirm && preview ? (
               <DeclaredGraphOperations manifest={preview.manifest} />
@@ -1162,7 +1233,7 @@ function HubAgentDrawer({
             </div>
           ) : previewError ? (
             <p role="alert" className="text-sm text-[var(--color-danger)]">
-              The manifest could not be loaded: {previewError} Refresh the hub and try again.
+              {manifestLoadErrorCopy(previewError, "Refresh the hub and try again.")}
             </p>
           ) : preview ? (
             <ManifestSections preview={preview} sections={["settings", "result", "pipeline"]} />
@@ -2576,7 +2647,7 @@ function RunPreflightModal({
   pilot?: boolean;
   dryRun: boolean;
   open: boolean;
-  agent: { name: string; mode: "read" | "write"; scopes: string[]; schedule?: unknown };
+  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown };
   activeTenant: TenantRecord | undefined;
   providerName: string;
   providerIsLocal: boolean;
@@ -2586,11 +2657,21 @@ function RunPreflightModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  // The pilot tenant has every area and never asks Microsoft for consent.
-  const missingAreas = activeTenant && !pilot
-    ? missingPermissionAreasForScopes(agent.scopes, grantedScopeSet(activeTenant))
+  // The pilot tenant has every service and never asks Microsoft for consent.
+  // A service with nothing granted blocks the run; a missing part of a
+  // connected service is consented when the run starts.
+  const missingServices = activeTenant && !pilot
+    ? missingServicesForAgent(activeTenant, agentServiceIds(agent))
     : [];
-  const canStart = Boolean(activeTenant) && !deliverySaving;
+  const missingParts = activeTenant && !pilot
+    ? missingPartsForScopes(agent.scopes, availableScopeSet(activeTenant)).filter(
+        (part) => !missingServices.some((service) => service.id === part.service),
+      )
+    : [];
+  // Scopes the services cannot account for block the run, as in preflight.
+  const scopeBlockCopy = unmappedScopesCopy(agent.scopes) ?? uncoveredScopesCopy(agent);
+  const canStart =
+    Boolean(activeTenant) && !deliverySaving && missingServices.length === 0 && !scopeBlockCopy;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -2611,9 +2692,20 @@ function RunPreflightModal({
             through {providerName}'s local CLI and leave this device.
           </div>
         )}
-        {missingAreas.length > 0 && activeTenant && (
+        {scopeBlockCopy && (
+          <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            {scopeBlockCopy}
+          </div>
+        )}
+        {activeTenant && missingServices.length > 0 ? (
+          <ServiceNotConnectedNotice
+            tenant={activeTenant}
+            serviceIds={missingServices.map((service) => service.id)}
+          />
+        ) : null}
+        {missingParts.length > 0 && activeTenant && (
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            This agent needs {missingAreas.map((area) => area.title).join(", ")} access,
+            This agent needs {missingParts.map(partLabel).join(", ")} access,
             which was not granted for {activeTenant.displayName}. Starting it asks
             Microsoft for consent before the run continues.
           </div>
@@ -2783,7 +2875,7 @@ function modelSourceLabel(
   return "No model installed for the active provider";
 }
 
-function FallbackScopesCard({ scopes }: { scopes: string[] }) {
+function FallbackScopesCard({ scopes, consentNote }: { scopes: string[]; consentNote: string }) {
   return (
     <Section title="Permissions">
       {scopes.length > 0 ? (
@@ -2797,9 +2889,7 @@ function FallbackScopesCard({ scopes }: { scopes: string[] }) {
       ) : (
         <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>
       )}
-      <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-        Missing consent is requested before the first run.
-      </p>
+      <p className="mt-2 text-sm text-[var(--color-text-muted)]">{consentNote}</p>
     </Section>
   );
 }

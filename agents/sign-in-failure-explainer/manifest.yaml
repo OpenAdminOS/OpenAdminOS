@@ -18,6 +18,8 @@ descriptor:
   category: policies
   tier: agent
   requiresEntraTier: p1
+  services:
+    - entra
   mode: read
   preferredModel: llama3.1:8b
 

@@ -1,5 +1,6 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
+import { load as parseYaml } from "js-yaml";
 import { fileURLToPath } from "node:url";
 
 import type {
@@ -9,6 +10,7 @@ import type {
   AgentRunResult,
   AgentSummary,
   ConnectorAuditEntry,
+  InvalidAgentManifest,
   ConnectorAccessor,
   LlmStreamChunk,
   LlmTokenUsage,
@@ -121,21 +123,26 @@ export {
   type ScriptAgentModuleOptions,
 } from "./script-agent.js";
 export { renderTemplate, renderDeep } from "./template-engine.js";
+export { scopesFromAccessToken, scopesFromAuthenticationResult } from "./token-scopes.js";
 export {
   acquireTokenSilent,
+  assertSignedInAccount,
   createMsalClient,
   DEFAULT_AUTHORITY,
   DEFAULT_SCOPES,
-  DEFAULT_SCOPE_METADATA,
   GRAPH_CLI_CLIENT_ID,
+  GRAPH_DEFAULT_SCOPE,
   OPENADMINOS_CLIENT_ID,
   defaultClientId,
   authorityForDirectory,
+  findTenantAccount,
+  tenantAuthority,
   TenantConnectCancelledError,
   TenantConnectTimeoutError,
+  TenantAccountMismatchError,
   removeAccount,
   runInteractiveFlow,
-  type RequestedScopeMetadata,
+  type ExpectedTenantAccount,
   type TokenCacheStorage,
 } from "./msal.js";
 export {
@@ -146,6 +153,10 @@ export {
 export {
   detectEntraTier,
   probeSubscribedSkus,
+  SubscribedSkusProbeError,
+  SUBSCRIBED_SKUS_TIMEOUT_MS,
+  type SubscribedSkusFailureReason,
+  type SubscribedSkusProbe,
   classifySkus,
   extractRelevantLicenses,
   tenantSatisfiesRequirement,
@@ -167,6 +178,7 @@ export {
   type SandboxBrokerInput,
 } from "./sandbox-broker.js";
 export { createTenantSession } from "./msal.js";
+export { awaitWithSignal } from "./cancellation.js";
 export {
   disposeBuiltConnectors,
   findConnectorFactory,
@@ -182,16 +194,32 @@ export {
 const builtInRegistryRoot = "agents";
 
 export function listBuiltInRegistryAgents(): RegistryAgentSummary[] {
+  return listBuiltInRegistry().agents;
+}
+
+/**
+ * Agents found on disk, with every manifest that failed validation listed
+ * separately. One invalid manifest never hides the others.
+ */
+export interface RegistryListing {
+  agents: RegistryAgentSummary[];
+  invalid: InvalidAgentManifest[];
+}
+
+function listBuiltInRegistry(): RegistryListing {
   const agentsRoot = findAgentsRoot();
-  const agents = listAgentsInRoot(agentsRoot, { absolutePaths: false });
+  const listing = listAgentsInRoot(agentsRoot, { absolutePaths: false });
   const stats = loadAgentStats(dirname(agentsRoot));
-  if (!stats) return agents;
-  return agents.map((agent) => {
-    const entry = stats[agent.slug];
-    return entry && typeof entry.installs === "number"
-      ? { ...agent, installs: entry.installs }
-      : agent;
-  });
+  if (!stats) return listing;
+  return {
+    ...listing,
+    agents: listing.agents.map((agent) => {
+      const entry = stats[agent.slug];
+      return entry && typeof entry.installs === "number"
+        ? { ...agent, installs: entry.installs }
+        : agent;
+    }),
+  };
 }
 
 interface AgentStatsEntry {
@@ -235,26 +263,42 @@ function loadAgentStats(root: string): Record<string, AgentStatsEntry> | null {
 export function listAllRegistryAgents(
   userAgentsRoot?: string,
 ): RegistryAgentSummary[] {
-  const builtin = listBuiltInRegistryAgents();
+  return listAllRegistryAgentsWithIssues(userAgentsRoot).agents;
+}
+
+/**
+ * Same merge as `listAllRegistryAgents`, plus every manifest that failed
+ * validation. Callers that show agents use this so an invalid manifest is
+ * shown as unavailable instead of failing the whole listing.
+ */
+export function listAllRegistryAgentsWithIssues(
+  userAgentsRoot?: string,
+): RegistryListing {
+  const builtin = listBuiltInRegistry();
   if (!userAgentsRoot || !existsSync(userAgentsRoot)) {
     return builtin;
   }
 
   const user = listAgentsInRoot(userAgentsRoot, { absolutePaths: true });
   const bySlug = new Map<string, RegistryAgentSummary>();
-  for (const agent of builtin) bySlug.set(agent.slug, agent);
-  for (const agent of user) bySlug.set(agent.slug, agent); // user shadows builtin
-  return [...bySlug.values()].sort((left, right) =>
-    left.name.localeCompare(right.name),
-  );
+  for (const agent of builtin.agents) bySlug.set(agent.slug, agent);
+  for (const agent of user.agents) bySlug.set(agent.slug, agent); // user shadows builtin
+  return {
+    agents: [...bySlug.values()].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    ),
+    invalid: [...builtin.invalid, ...user.invalid],
+  };
 }
 
 function listAgentsInRoot(
   agentsRoot: string,
   options: { absolutePaths: boolean },
-): RegistryAgentSummary[] {
-  if (!existsSync(agentsRoot)) return [];
-  return readdirSync(agentsRoot)
+): RegistryListing {
+  if (!existsSync(agentsRoot)) return { agents: [], invalid: [] };
+  const agents: RegistryAgentSummary[] = [];
+  const invalid: InvalidAgentManifest[] = [];
+  const agentPaths = readdirSync(agentsRoot)
     .map((entryName) => join(agentsRoot, entryName))
     .filter((entryPath) => {
       try {
@@ -263,13 +307,125 @@ function listAgentsInRoot(
         return false;
       }
     })
-    .filter((agentPath) => existsSync(join(agentPath, "manifest.yaml")))
-    .map((agentPath) =>
-      loadRegistrySummaryFromYaml(agentPath, {
-        absoluteRegistryPath: options.absolutePaths,
-      }),
-    )
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .filter((agentPath) => existsSync(join(agentPath, "manifest.yaml")));
+  for (const agentPath of agentPaths) {
+    try {
+      agents.push(
+        loadRegistrySummaryFromYaml(agentPath, {
+          absoluteRegistryPath: options.absolutePaths,
+        }),
+      );
+    } catch (error) {
+      invalid.push(
+        invalidManifestEntry(agentPath, error, options.absolutePaths ? "user" : "bundled"),
+      );
+    }
+  }
+  return {
+    agents: agents.sort((left, right) => left.name.localeCompare(right.name)),
+    invalid: invalid.sort((left, right) => left.id.localeCompare(right.id)),
+  };
+}
+
+function invalidManifestEntry(
+  agentPath: string,
+  error: unknown,
+  source: InvalidAgentManifest["source"],
+): InvalidAgentManifest {
+  const manifestPath = join(agentPath, "manifest.yaml");
+  const folder = basename(agentPath);
+  let sourceText: string | undefined;
+  try {
+    sourceText = readFileSync(manifestPath, "utf8");
+  } catch {
+    sourceText = undefined;
+  }
+  return {
+    id: declaredAgentId(sourceText) ?? folder,
+    folder,
+    registryPath: source === "user" ? agentPath : relativeRegistryPath(agentPath),
+    manifestPath,
+    reason: error instanceof Error ? error.message : String(error),
+    source,
+    ...(source === "user" && sourceText !== undefined ? { sourceText } : {}),
+  };
+}
+
+/**
+ * Validate the manifest the runtime would load for an installed agent:
+ * an agent update override, a user-authored folder or the bundled copy,
+ * chosen by the same resolver as `loadAgentModule`. Returns undefined
+ * when it passes validation or when no manifest can be found, which
+ * `loadAgentModule` reports on its own.
+ */
+export function effectiveAgentManifestIssue(
+  agent: AgentSummary | RegistryAgentSummary,
+): InvalidAgentManifest | undefined {
+  let agentDir: string;
+  try {
+    agentDir = resolveAgentDirectory(agent);
+  } catch {
+    return undefined;
+  }
+  const manifestPath = join(agentDir, "manifest.yaml");
+  if (!existsSync(manifestPath)) return undefined;
+  const source: InvalidAgentManifest["source"] =
+    agentUpdatesDir && isInsideDirectory(agentDir, agentUpdatesDir)
+      ? "update"
+      : agent.registryPath && isAbsolutePath(agent.registryPath)
+        ? "user"
+        : "bundled";
+  let sourceText: string;
+  try {
+    sourceText = readFileSync(manifestPath, "utf8");
+  } catch (error) {
+    return effectiveIssueEntry(agent, agentDir, error, source, undefined);
+  }
+  try {
+    parseAgentTemplate(sourceText);
+    return undefined;
+  } catch (error) {
+    return effectiveIssueEntry(agent, agentDir, error, source, sourceText);
+  }
+}
+
+function effectiveIssueEntry(
+  agent: AgentSummary | RegistryAgentSummary,
+  agentDir: string,
+  error: unknown,
+  source: InvalidAgentManifest["source"],
+  sourceText: string | undefined,
+): InvalidAgentManifest {
+  return {
+    id: agent.id,
+    folder: basename(agentDir),
+    // The installed agent's own path, so the host matches it exactly.
+    registryPath:
+      agent.registryPath ??
+      (source === "user" ? agentDir : relativeRegistryPath(agentDir)),
+    manifestPath: join(agentDir, "manifest.yaml"),
+    reason: error instanceof Error ? error.message : String(error),
+    source,
+    ...(source === "user" && sourceText !== undefined ? { sourceText } : {}),
+  };
+}
+
+function isInsideDirectory(path: string, directory: string): boolean {
+  const normalizedPath = resolve(path).replace(/\\/g, "/");
+  const normalizedDir = resolve(directory).replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalizedPath === normalizedDir || normalizedPath.startsWith(`${normalizedDir}/`);
+}
+
+/** `descriptor.id` from manifest text that may not pass validation. */
+function declaredAgentId(sourceText: string | undefined): string | undefined {
+  if (sourceText === undefined) return undefined;
+  try {
+    const parsed = parseYaml(sourceText) as { descriptor?: { id?: unknown } } | null;
+    const id = parsed?.descriptor?.id;
+    return typeof id === "string" && id.trim().length > 0 ? id.trim() : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function findRegistryAgentById(
@@ -1177,14 +1333,8 @@ function loadRegistrySummaryFromYaml(
   agentPath: string,
   options: { absoluteRegistryPath?: boolean } = {},
 ): RegistryAgentSummary {
-  const yamlPath = join(agentPath, "manifest.yaml");
-  let manifest;
-  try {
-    manifest = parseAgentTemplate(readFileSync(yamlPath, "utf8"));
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Agent manifest at ${yamlPath} is invalid: ${message}`);
-  }
+  // Throws on an invalid manifest; listAgentsInRoot records it per agent.
+  const manifest = parseAgentTemplate(readFileSync(join(agentPath, "manifest.yaml"), "utf8"));
 
   // User-authored agents (NL2Agent) sit outside the bundled `agents/`
   // tree, so a "agents/<slug>" relative path would be ambiguous or

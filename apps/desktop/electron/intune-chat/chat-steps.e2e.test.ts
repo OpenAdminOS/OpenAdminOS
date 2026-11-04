@@ -10,7 +10,7 @@ import { after, before, describe, it } from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import type { IntuneChatStep, IntuneChatStreamEvent } from "@openadminos/agent-sdk";
+import { partIdsFor, qualifyScope, requestedScopes, type IntuneChatStep, type IntuneChatStreamEvent } from "@openadminos/agent-sdk";
 
 import { AppStateStore } from "../state.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
@@ -93,12 +93,14 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   writer?: (prompt: string) => string | undefined;
   /** Graph responses by path, in place of an empty collection. */
   graphResponses?: Record<string, unknown>;
+  /** Granted scopes for the tenant, in place of the fixture's. */
+  grantedScopes?: string[];
 } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
     activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
-    installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
+    installedAgents: [], runs: [], tenants: [options.grantedScopes ? { ...tenant, grantedScopes: options.grantedScopes } : tenant], activeTenantId: tenant.id,
   }));
   const graphPaths: string[] = [];
   const prompts: Array<{ system: string; prompt: string }> = [];
@@ -683,6 +685,46 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.deepEqual(message.followUps, ["Show compliance and last sync for our 5 macOS devices"]);
     });
   });
+
+  it("keeps the partial-answer note with the lazy refresh, the step timeline and streaming when a service is not connected", async () => {
+    const intuneOnly = requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name));
+    const note = "Not included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Settings, Tenants.";
+    for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+      await withHarness(async ({ store, graphPaths, script }) => {
+        script([
+          { kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices", limit: 25 } },
+          { final: true, answer: "9 devices are cached." },
+        ]);
+        const deltas: string[] = [];
+        const input = { content: "Show devices with security alerts" };
+        const result = send === "sendIntuneChatMessage"
+          ? await store.sendIntuneChatMessage(input)
+          : await store.streamIntuneChatMessage(input, (event: IntuneChatStreamEvent) => { if (event.type === "delta") deltas.push(event.content); });
+        const message = result.assistantMessage;
+        assert.equal(message.status, "completed", send);
+        assert.equal(message.content, `9 devices are cached.\n\n${note}`, send);
+        if (send === "streamIntuneChatMessage") assert.equal(deltas.at(-1), message.content, "the streamed text ends with the note");
+        assert.equal(graphPaths.some((path) => path.includes("/security/")), false, send);
+        assert.deepEqual(kinds(message.steps), ["plan", "answer", "graph-refresh", "tool", "answer"], send);
+        assert.notEqual(message.steps!.find((step) => step.kind === "graph-refresh")!.status, "failed", send);
+      }, { grantedScopes: intuneOnly });
+    }
+  });
+
+  it("adds no partial-answer note to a docs answer, which reads no tenant data", async () => {
+    const intuneOnly = requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name));
+    await withHarness(async ({ store, graphPaths, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender alerts on devices" } },
+        { final: true, answer: "Microsoft Learn describes Defender alerts [1]." },
+      ]);
+      const message = (await store.sendIntuneChatMessage({ content: "What does Microsoft Learn say about devices with security alerts?" })).assistantMessage;
+      assert.equal(message.questionKind, "docs");
+      assert.doesNotMatch(message.content, /Not included in this answer/);
+      assert.deepEqual(graphPaths, []);
+    }, { grantedScopes: intuneOnly });
+  });
+
   it("names a new chat with the answer's title, keeps it on later answers, and falls back to the question", async () => {
     await withHarness(async ({ store, script, prompts }) => {
       script([

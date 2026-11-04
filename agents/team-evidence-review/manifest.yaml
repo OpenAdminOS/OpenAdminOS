@@ -11,6 +11,8 @@ descriptor:
   category: compliance
   tier: agent
   requiresEntraTier: free
+  # Reads no Graph data, so it needs no service.
+  services: []
   mode: read
 skills:
   - id: review

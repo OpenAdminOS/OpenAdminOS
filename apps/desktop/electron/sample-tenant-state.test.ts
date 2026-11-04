@@ -58,7 +58,7 @@ describe("sample tenant state", () => {
         /Pilot mode has no Microsoft sign-in\. Connect your tenant to use this\./,
       );
 
-      await fixture.store.probeEntraTier(second.tenants[0]!, { force: true });
+      await fixture.store.retryTenantLicenseCheck(second.tenants[0]!.id);
       assert.equal(fixture.tokenReads, 0);
       assert.equal(fixture.customTokenStores, 0);
     } finally {

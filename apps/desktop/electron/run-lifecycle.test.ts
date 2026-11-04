@@ -368,3 +368,68 @@ definition:
     assert.equal(writes[0]?.path, "/users/second");
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+it("blocks an installed agent whose declared services do not cover its scopes", async () => {
+  const h = harness();
+  const mismatched = { id: "mismatched", slug: "mismatched", name: "Device and group report", description: "Reads devices and groups",
+    mode: "read", version: "1.0.0", installedAt: new Date().toISOString(), category: "compliance", tier: "agent",
+    requiresEntraTier: "free", services: ["entra"],
+    scopes: ["Group.Read.All", "DeviceManagementManagedDevices.Read.All", "User.Read"], author: { name: "Test" } } as AgentSummary;
+  Object.assign(h.host, { appVersion: "0.7.2", listProviders: async () => [{ id: "ollama", status: "connected", models: ["test"], isLocal: true }],
+    providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  // Entra is connected and Intune is not, so the declared services alone
+  // would pass the service preflight.
+  await h.host.write({ ...h.state(), installedAgents: [mismatched], activeTenantId: "tenant-a",
+    tenants: [{ id: "tenant-a", displayName: "Contoso", grantedScopes: ["graph:User.Read", "graph:GroupMember.Read.All", "graph:Group.Read.All"] }] as any });
+  await assert.rejects(
+    h.service.startRun("mismatched", {}),
+    /^Error: This agent uses DeviceManagementManagedDevices\.Read\.All, which its declared service Entra does not cover\. It cannot run until the agent also declares Intune\. Report it to the agent author\.$/,
+  );
+  assert.deepEqual(h.state().runs, []);
+});
+
+it("blocks a legacy agent that uses a scope no service lists", async () => {
+  const h = harness();
+  const legacy = { id: "legacy", slug: "legacy", name: "Legacy sites report", description: "Reads sites and groups",
+    mode: "read", version: "1.0.0", installedAt: new Date().toISOString(), category: "compliance", tier: "agent",
+    requiresEntraTier: "free", scopes: ["Group.Read.All", "Sites.Read.All"], author: { name: "Test" } } as AgentSummary;
+  Object.assign(h.host, { appVersion: "0.7.2", listProviders: async () => [{ id: "ollama", status: "connected", models: ["test"], isLocal: true }],
+    providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  await h.host.write({ ...h.state(), installedAgents: [legacy], activeTenantId: "tenant-a", tenants: [{ id: "tenant-a", displayName: "Contoso" }] as any });
+  await assert.rejects(
+    h.service.startRun("legacy", {}),
+    /^Error: This agent uses Sites\.Read\.All, which OpenAdminOS does not map to a service yet\. It cannot run until that scope is added to the service registry\. Report it to the agent author or to OpenAdminOS\.$/,
+  );
+  assert.deepEqual(h.state().runs, []);
+
+  // Group.Read.All alone maps to Entra, so a legacy manifest with it still
+  // gets a service preflight instead of passing with no dependency.
+  const groupsOnly = { ...legacy, scopes: ["Group.Read.All"] };
+  await h.host.write({ ...h.state(), installedAgents: [groupsOnly], tenants: [{ id: "tenant-a", displayName: "Contoso", grantedScopes: ["graph:DeviceManagementApps.Read.All"] }] as any });
+  await assert.rejects(
+    h.service.startRun("legacy", {}),
+    /^Error: Legacy sites report needs Entra, which is not connected for Contoso\./,
+  );
+});
+
+it("refuses to start an agent whose service is not connected for the tenant", async () => {
+  const h = harness();
+  const agent = { id: "score", slug: "score", name: "Secure score prioritizer", description: "Ranks Secure Score actions",
+    mode: "read", version: "1.0.0", installedAt: new Date().toISOString(), category: "compliance", tier: "agent",
+    requiresEntraTier: "free", scopes: ["SecurityEvents.Read.All"], services: ["defender"], author: { name: "Test" } } as AgentSummary;
+  Object.assign(h.host, { appVersion: "0.7.2", listProviders: async () => [{ id: "ollama", status: "connected", models: ["test"], isLocal: true }],
+    providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  const intuneOnly = { id: "tenant-a", displayName: "Contoso", grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"] };
+  await h.host.write({ ...h.state(), installedAgents: [agent], activeTenantId: "tenant-a", tenants: [intuneOnly] as any });
+  await assert.rejects(
+    h.service.startRun("score", {}),
+    /^Error: Secure score prioritizer needs Defender, which is not connected for Contoso\. Add it in Settings, Tenants, then run the agent again\.$/,
+  );
+  assert.deepEqual(h.state().runs, []);
+
+  // Once any Defender part is granted the run is queued; a missing part is
+  // consented at run time.
+  await h.host.write({ ...h.state(), tenants: [{ ...intuneOnly, grantedScopes: [...intuneOnly.grantedScopes, "graph:SecurityAlert.Read.All", "graph:SecurityIncident.Read.All"] }] as any });
+  const queued = await h.service.startRun("score", {});
+  assert.equal(queued.status, "queued");
+});

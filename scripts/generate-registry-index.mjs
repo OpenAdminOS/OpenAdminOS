@@ -75,6 +75,7 @@ function parseManifest(manifestPath) {
       verified: descriptor.author?.verified ?? false,
     },
     scopes: [...scopes],
+    services: Array.isArray(descriptor.services) ? descriptor.services : [],
     minAppVersion: descriptor.minAppVersion ?? "",
     ...(Array.isArray(descriptor.connectors)
       ? { connectors: descriptor.connectors }

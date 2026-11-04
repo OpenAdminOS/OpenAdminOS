@@ -5,6 +5,7 @@ import { Button } from "./components/Button";
 import { IconChat, IconWarning } from "./components/icons";
 import { EmptyState } from "./components/ui";
 import { PilotProductionOnly } from "./components/PilotMode";
+import { ServiceGate } from "./components/ServiceAccess";
 import { FirstLaunchWelcome } from "./setup/WelcomeView";
 
 const Office = lazy(() => import("./pages/Office"));
@@ -83,7 +84,10 @@ export default function App() {
               path="/changes"
               element={
                 <PilotProductionOnly feature="Changes" plural>
-                  <Changes />
+                  {/* Drift tracks Intune and Entra configuration. */}
+                  <ServiceGate anyOf={["intune", "entra"]} feature="Changes">
+                    <Changes />
+                  </ServiceGate>
                 </PilotProductionOnly>
               }
             />

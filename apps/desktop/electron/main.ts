@@ -1,4 +1,4 @@
-import { runNotificationTitle } from "./state-helpers.js";
+import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
@@ -42,6 +42,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, win32 } from "node:path";
 import { AppStateStore } from "./state.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
+import {
+  DEFAULT_TOKEN_CACHE_FILE,
+  adoptLegacyTokenCacheFiles,
+  tokenCacheFileName,
+} from "./token-cache-files.js";
 import {
   applyUpdateNow,
   checkForUpdatesNow,
@@ -89,7 +94,6 @@ import type {
   DriftTimelineInput,
   ExportAuditLogInput,
   GraphCacheResourceKind,
-  PermissionAreaId,
   ImportMultiTenantResultToWorkspacesInput,
   MultiTenantChatStreamEvent,
   PendingConnectorDecision,
@@ -124,7 +128,7 @@ import type {
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
-import { PERMISSION_AREAS, providerCatalog } from "@openadminos/agent-sdk";
+import { providerCatalog, servicePartById } from "@openadminos/agent-sdk";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -4511,7 +4515,7 @@ function validateDriftBundle(value: unknown): DriftBaselineExportBundle {
 }
 
 function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
-  if (value === undefined || value === null) return {};
+  if (value === undefined || value === null) throw new Error("Select at least one service.");
   if (!isPlainRecord(value)) {
     throw new Error("Connect tenant options must be an object.");
   }
@@ -4534,21 +4538,36 @@ function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
         128,
       );
     }
-  }
-  if (value.permissionAreaIds !== undefined) {
-    if (!Array.isArray(value.permissionAreaIds)) {
-      throw new Error("permissionAreaIds must be an array.");
+    if (registration.label !== undefined && registration.label !== "") {
+      options.appRegistration.label = requireBoundedString(
+        registration.label,
+        "label",
+        80,
+      );
     }
-    const validIds = new Set(PERMISSION_AREAS.map((area) => area.id));
-    options.permissionAreaIds = value.permissionAreaIds.map((areaId, index) => {
-      const id = requireBoundedString(areaId, `permissionAreaIds[${index}]`, 32);
-      if (!validIds.has(id as PermissionAreaId)) {
-        throw new Error(`permissionAreaIds[${index}] is invalid.`);
-      }
-      return id as PermissionAreaId;
-    });
+  }
+  if (value.partIds !== undefined) {
+    options.partIds = validatePartIds(value.partIds, "partIds");
+  }
+  if (!options.appRegistration && (options.partIds?.length ?? 0) === 0) {
+    // An own registration signs in with what the app was granted. The
+    // OpenAdminOS app requests only the services the admin chose.
+    throw new Error("Select at least one service.");
   }
   return options;
+}
+
+function validatePartIds(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array.`);
+  if (value.length > 64) throw new Error(`${label} has too many entries.`);
+  const ids = value.map((entry, index) => {
+    const id = requireBoundedString(entry, `${label}[${index}]`, 64);
+    const part = servicePartById(id);
+    if (!part) throw new Error(`${label}[${index}] is not a known service part.`);
+    if (part.planned) throw new Error(`${label}[${index}] is planned and cannot be requested yet.`);
+    return id;
+  });
+  return [...new Set(ids)];
 }
 
 function validateStartBaselineRollbackInput(
@@ -6459,17 +6478,33 @@ function registerIpcHandlers() {
   }));
   ipcMain.handle(
     "openadminos:add-tenant-access",
-    handleTrusted((_event, tenantId: unknown, areaId: unknown) => {
-      const validIds = new Set(PERMISSION_AREAS.map((area) => area.id));
-      const checkedAreaId = requireBoundedString(areaId, "areaId", 32);
-      if (!validIds.has(checkedAreaId as PermissionAreaId)) {
-        throw new Error("Permission area is invalid.");
-      }
+    handleTrusted((_event, tenantId: unknown, partIds: unknown) => {
+      const checked = validatePartIds(partIds, "partIds");
+      if (checked.length === 0) throw new Error("Select at least one service part.");
       return store.addTenantAccess(
         requireBoundedString(tenantId, "tenantId", 256),
-        checkedAreaId as PermissionAreaId,
+        checked,
       );
     }),
+  );
+  ipcMain.handle(
+    "openadminos:refresh-tenant-grants",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.refreshTenantGrants(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:retry-tenant-license-check",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.retryTenantLicenseCheck(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
+  // Aborts the host operation: its signal reaches MSAL and the Graph fetch.
+  ipcMain.handle(
+    "openadminos:cancel-tenant-check",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.cancelTenantCheck(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
   );
   ipcMain.handle("openadminos:add-sample-tenant", handleTrusted(() =>
     store.addSampleTenant(),
@@ -6485,6 +6520,17 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:disconnect-tenant", handleTrusted((_event, id: unknown) =>
     store.disconnectTenant(requireBoundedString(id, "tenantId", 256)),
   ),
+  );
+  ipcMain.handle(
+    "openadminos:remove-saved-app-registration",
+    handleTrusted((_event, clientId: unknown, directoryTenantId?: unknown) =>
+      store.removeSavedAppRegistration(
+        requireBoundedString(clientId, "clientId", 64),
+        directoryTenantId === undefined || directoryTenantId === ""
+          ? undefined
+          : requireBoundedString(directoryTenantId, "directoryTenantId", 128),
+      ),
+    ),
   );
   ipcMain.handle("openadminos:get-agent-manifest", handleTrusted((_event, slug: unknown) =>
     store.getAgentManifest(requireAgentSlug(slug, "slug")),
@@ -6777,13 +6823,28 @@ if (!gotLock) {
     }
 
     const userDataDir = app.getPath("userData");
-    const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
-    // Bring-your-own registrations get an isolated token cache: MSAL
-    // binds tokens to a client id, so mixing caches would surface
-    // accounts that the active client can never refresh.
-    const tokenStoreFor = (clientId: string) =>
+    const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, DEFAULT_TOKEN_CACHE_FILE));
+    // Token cache files are named by canonical (lower case) client ID; see
+    // token-cache-files.ts. Files named with another letter case before
+    // that are moved onto the canonical name, or kept as legacy caches
+    // when the canonical file already exists.
+    const defaultPartition = tokenCachePartition(undefined);
+    const tokenStoreFor = (partition: string) =>
       new SafeStorageTokenCacheStore(
-        join(userDataDir, `tokens-${clientId.replace(/[^0-9a-zA-Z-]/g, "")}.bin`),
+        join(userDataDir, tokenCacheFileName(partition, defaultPartition)),
+      );
+    const legacyTokenCacheFiles = await adoptLegacyTokenCacheFiles(
+      userDataDir,
+      defaultPartition,
+    ).catch((error: unknown) => {
+      console.warn(
+        `[tokens] token cache files named with another client ID letter case could not be checked: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return new Map<string, string[]>();
+    });
+    const legacyTokenStoresFor = (partition: string) =>
+      (legacyTokenCacheFiles.get(partition) ?? []).map(
+        (path) => new SafeStorageTokenCacheStore(path),
       );
     seedIntuneChatSmokeState(userDataDir);
     seedReportIssueSmokeState(userDataDir);
@@ -6808,6 +6869,7 @@ if (!gotLock) {
       filePath: join(userDataDir, "state.json"),
       tokenStore,
       tokenStoreFor,
+      legacyTokenStoresFor,
       userDataPath: userDataDir,
       userAgentsDir: join(userDataDir, "agents"),
       // Only packaged production builds report installs to the public
