@@ -1011,3 +1011,13 @@ A live run ("how does defender onboarding for macos work?", OpenAI Codex, gpt-6-
 - Blank answer area: a faithful replay of the host's event sequence renders the scope line and steps throughout in the page that sent the question, so the page logic was not at fault. The only way the code produced the screenshot is a Chat page instance that did not start the stream: after Chat is mounted again mid-run, the new page had no live state (not sending, no progress, only the saved question) and the events still went to the old page's handlers, so the answer appeared only once the saved message loaded. The live run is now kept outside the page. Which remount happened in the user's session could not be confirmed without the renderer console.
 - Providers that stream text as the model writes it: Ollama, LM Studio, Azure OpenAI, Claude Code, Copilot, Gemini, Apple Foundation. Codex CLI 0.166.0 `exec --json` was checked live and sends one `item.completed` event, so it does not.
 - The live Learn search for the question returned 27,458 characters, over the host's 12,000-character cap, so the JSON was cut and titles fell back to Markdown links inside the content. The host now returns the structured result too.
+
+# Append-only chat timeline (2026-11-04)
+
+Same branch. A run showed "Read the question" (9.3 s) and "Working on the answer", then "Asked Microsoft Learn" appeared between them. The scope line showed tool result text, and the sent text wrapped mid-word.
+
+- [x] Steps append-only and chronological; one model step per loop call with its decision; classification on the model step; plan step is local planning time only
+- [x] Renderer keeps visible step order
+- [x] Scope line shows the current step's title only
+- [x] Sent text wraps at word boundaries
+- [ ] Live check in the running app (needs a restart)
