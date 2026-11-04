@@ -32,7 +32,7 @@ describe("chat steps", () => {
     expect(rows[0]).toHaveTextContent("On device");
     expect(rows[1]).toHaveTextContent("Sent");
     expect(rows[1]).toHaveTextContent("Defender for Endpoint on macOS");
-    expect(rows[1]).toHaveTextContent("Nothing else left this device.");
+    expect(rows[1]).toHaveTextContent("Nothing else was sent to learn.microsoft.com.");
     expect(rows[1]).toHaveTextContent("learn.microsoft.com");
     expect(rows[1]).toHaveTextContent("1.2 s");
     expect(rows[2]).toHaveTextContent("Blocked a KQL Search query, blocked");
