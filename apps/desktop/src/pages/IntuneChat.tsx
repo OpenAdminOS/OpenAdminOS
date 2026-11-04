@@ -84,7 +84,7 @@ import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
-import { MarkdownPreview } from "../components/MarkdownPreview";
+import { AnswerBody, FollowUpChips, SourceCards, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
@@ -918,6 +918,23 @@ function IntuneChatContent() {
               );
               return [...withoutDraft, event.userMessage, event.assistantMessage];
             });
+          }
+          if (event.type === "steps") {
+            setMessages((current) =>
+              upsertMessage(
+                current,
+                {
+                  id: event.assistantMessageId,
+                  conversationId: event.conversationId,
+                  role: "assistant",
+                  content: "",
+                  status: "streaming",
+                  createdAt: new Date().toISOString(),
+                  steps: event.steps,
+                },
+                (existing) => ({ ...existing, steps: event.steps }),
+              ),
+            );
           }
           if (event.type === "status") {
             setChatProgress(progressFromStatusEvent(event));
@@ -4120,25 +4137,25 @@ function ChatMessageBubble({
   return (
     <article className="group mb-[34px] w-full" title={`Answered ${timestamp}`}>
       {progress ? (
-        <AssistantPendingScopeLine tenant={tenant} label={progress.message} />
+        <>
+          <AssistantPendingScopeLine tenant={tenant} label={progress.message} />
+          {message.steps?.length ? <StepTimeline steps={message.steps} /> : null}
+        </>
       ) : (
-        <AnswerScopeDisclosure
-          tenant={tenant}
-          multiTenant={multiTenant}
-          notice={message.engineNotice}
-          sources={message.sources ?? []}
-          trace={message.toolTrace ?? []}
-        />
+        <>
+          <AnswerScopeDisclosure
+            tenant={tenant}
+            multiTenant={multiTenant}
+            notice={message.engineNotice}
+            sources={message.sources ?? []}
+            trace={message.toolTrace ?? []}
+          />
+          <StepSummary message={message} />
+        </>
       )}
-      {displayContent ? (
-        <MarkdownPreview
-          source={displayContent}
-          numberedSections={false}
-          tableTools
-          className="chat-answer text-[var(--color-text)]"
-        />
-      ) : null}
+      {displayContent ? <AnswerBody message={message} content={displayContent} /> : null}
       <AnswerSources trace={message.toolTrace ?? []} />
+      {!progress && displayContent ? <SourceCards message={message} content={displayContent} /> : null}
       {!progress ? (
         <div className={`-ml-1.5 mt-1 flex gap-0.5 transition-opacity ${latestAssistant ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
           <IconButton

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { IconCopy } from "./icons";
 
@@ -27,9 +27,21 @@ import { IconCopy } from "./icons";
  *   - `*italic*` / `_italic_`
  *   - `` `inline code` ``
  *   - `[label](https://…)` links
+ *   - `[1]` citations, rendered through CitationContext when one is provided
  *
  * Anything outside this surface is rendered as plain text.
  */
+
+/**
+ * Renders a numbered citation. Returning undefined leaves the plain "[n]"
+ * text, so a number that matches no source is never shown as one.
+ */
+export const CitationContext = createContext<((citation: number) => ReactNode | undefined) | undefined>(undefined);
+
+function Citation({ citation }: { citation: number }) {
+  const render = useContext(CitationContext);
+  return <>{render?.(citation) ?? `[${citation}]`}</>;
+}
 export function MarkdownPreview({
   source,
   className,
@@ -325,7 +337,7 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
 }
 
 interface InlineToken {
-  kind: "text" | "bold" | "italic" | "strike" | "code" | "link";
+  kind: "text" | "bold" | "italic" | "strike" | "code" | "link" | "cite";
   text: string;
   href?: string;
   index: number;
@@ -363,6 +375,8 @@ function renderInline(input: string): ReactNode[] {
             {token.text}
           </a>
         );
+      case "cite":
+        return <Citation key={index} citation={Number(token.text)} />;
       case "text":
       default:
         return <span key={index}>{token.text}</span>;
@@ -401,6 +415,8 @@ function tokenizeInline(input: string): InlineToken[] {
       pattern: /(?<![_\w])_([^_\s][^_]*?)_(?!\w)/g,
       build: (c) => ({ kind: "italic", text: c[0] ?? "" }),
     },
+    // Last, so a link whose label is a number stays a link.
+    { pattern: /\[(\d{1,2})\](?!\()/g, build: (c) => ({ kind: "cite", text: c[0] ?? "" }) },
   ];
 
   for (const { pattern, build } of patterns) {
