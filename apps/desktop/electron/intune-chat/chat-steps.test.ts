@@ -162,6 +162,11 @@ describe("source labels and steps", () => {
     const done = toolStepFinish({ id: "t", tool: learnTool.name, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "",
       mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", results: [{ title: "a", url: "https://a" }, { title: "b", url: "https://b" }] } });
     assert.deepEqual([done.status, done.title, done.detail], ["completed", "Asked Microsoft Learn", "microsoft_docs_search · 2 results"]);
+    const failure = { id: "t", tool: learnTool.name, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "", error: "params must be an object." };
+    const notSent = toolStepFinish({ ...failure, mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", sentToHost: false } });
+    assert.ok("sent" in notSent && notSent.sent === undefined, "a call that failed before sending clears its sent text");
+    const reached = toolStepFinish({ ...failure, mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", sentToHost: true } });
+    assert.equal("sent" in reached, false, "a call that reached the host keeps its sent text");
   });
 });
 

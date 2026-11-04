@@ -53,7 +53,7 @@ export function summarizeSteps(message: Pick<IntuneChatMessage, "steps" | "docum
   const sent = new Map<string, Set<string>>();
   const add = (where: string, what: string) => sent.set(where, (sent.get(where) ?? new Set()).add(what));
   for (const step of steps) {
-    // A blocked call sent nothing; a failed one may have reached the host.
+    // The host clears sent text when a call was blocked or failed before it reached the host.
     if (step.kind === "mcp" && step.status !== "blocked" && step.sent) add(step.originLabel, "search text");
     if (step.origin === "model" && step.kind === "answer") add(step.originLabel, "answer context");
     if (step.origin === "model" && step.kind === "tool") add(step.originLabel, "search text");

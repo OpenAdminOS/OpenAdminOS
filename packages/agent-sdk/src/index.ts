@@ -1139,6 +1139,8 @@ export interface IntuneChatToolTraceEntry {
     blocked?: boolean;
     /** Articles or items found in the result, with their links. */
     results?: Array<{ title: string; url?: string }>;
+    /** The query reached the host. False when it was refused or failed before sending. */
+    sentToHost?: boolean;
   };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources

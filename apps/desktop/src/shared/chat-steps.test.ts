@@ -23,13 +23,15 @@ describe("step summary", () => {
         step({ kind: "plan", durationMs: 2 }),
         step({ kind: "mcp", origin: "third-party", originLabel: "learn.microsoft.com", sent: "Defender on macOS", durationMs: 1200 }),
         step({ kind: "mcp", origin: "third-party", originLabel: "www.kqlsearch.com", sent: "tenant name", status: "blocked" }),
+        // Failed before sending: the host cleared its sent text.
+        step({ kind: "mcp", origin: "third-party", originLabel: "www.intuneautomation.com", status: "failed" }),
         step({ kind: "answer", origin: "model", originLabel: "OpenAI", durationMs: 3400 }),
       ],
       documentationSources: [learn, index],
       toolTrace: [mcpTrace("Microsoft Learn")],
     });
-    expect(summary.count).toBe(4);
-    expect(summary.totalMs).toBe(4702);
+    expect(summary.count).toBe(5);
+    expect(summary.totalMs).toBe(4802);
     expect(summary.sources).toBe("Microsoft Learn and docs index");
     expect(summary.egress).toBe("Left this device: search text to learn.microsoft.com and answer context to OpenAI");
   });

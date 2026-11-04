@@ -176,7 +176,7 @@ describe("MCP tools in the Chat loop", () => {
       assert.deepEqual(calls, [{ tool: "microsoft_docs_search", args: { query: "Intune compliance policy grace period" } }]);
       const trace = result.toolTrace[0]!;
       assert.equal(trace.tool, docsTool.name);
-      assert.deepEqual(trace.mcpSource, { serverId: "microsoft-learn", serverName: "Microsoft Learn", host: "learn.microsoft.com", tool: "microsoft_docs_search", results: [] });
+      assert.deepEqual(trace.mcpSource, { serverId: "microsoft-learn", serverName: "Microsoft Learn", host: "learn.microsoft.com", tool: "microsoft_docs_search", results: [], sentToHost: true });
       assert.match(trace.resultSummary, /Microsoft Learn answered from learn\.microsoft\.com/);
       const observation = prompts[1]!.prompt;
       assert.match(observation, /<tenant_data source="third-party:learn\.microsoft\.com" nonce="[a-f0-9]+">/);
@@ -217,6 +217,7 @@ describe("MCP tools in the Chat loop", () => {
       if (result.ok) return;
       assert.equal(result.reason, "no-evidence");
       assert.equal(result.toolTrace[0]!.mcpSource?.host, "learn.microsoft.com");
+      assert.equal(result.toolTrace[0]!.mcpSource?.sentToHost, true, "the query reached the host before it failed");
       assert.match(result.toolTrace[0]!.error!, /could not be reached/);
     });
   });
@@ -357,6 +358,7 @@ describe("MCP tools in the Chat loop", () => {
         const result = await runAgenticChat(input(store, scriptedLlm([JSON.stringify({ tool: docsTool.name, params }), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), mcpContext(calls)));
         assert.match(result.toolTrace[0]!.error!, reason);
         assert.match(result.toolTrace[0]!.error!, /Nothing was sent to learn\.microsoft\.com/);
+        assert.equal(result.toolTrace[0]!.mcpSource?.sentToHost, false);
       }
       const open: McpChatContext = { ...mcpContext(calls), tools: [{ ...docsTool, inputSchema: { type: "object", additionalProperties: true } }] };
       const total = await runAgenticChat(input(store, scriptedLlm([JSON.stringify({ tool: docsTool.name, params: { a: "y".repeat(450), b: "y".repeat(450), c: "y".repeat(450), d: "y".repeat(450), e: "y".repeat(450) } }), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), open));

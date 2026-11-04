@@ -118,6 +118,9 @@ export interface McpPrivateTerms {
 /** The host refused an MCP call before anything was sent. */
 export class McpQueryBlockedError extends Error {}
 
+/** An MCP call failed after its query was sent to the host. */
+class McpCallFailedError extends Error {}
+
 export const MCP_ARG_STRING_LIMIT = 500;
 export const MCP_ARGS_LIMIT = 2_000;
 
@@ -527,6 +530,7 @@ export async function executeIntuneChatTool(
         ...mcpSource,
         ...((result as { truncated?: boolean }).truncated ? { truncated: true } : {}),
         results: (result as { results?: Array<{ title: string; url?: string }> }).results ?? [],
+        sentToHost: true,
       } } : {}),
       ...(cacheSource ? { cacheSource } : {}),
       ...(graphRecord
@@ -568,7 +572,7 @@ export async function executeIntuneChatTool(
       tool,
       params: params ?? {},
       resultSummary: caught instanceof McpQueryBlockedError ? `Blocked: ${message}` : `Failed: ${message}`,
-      ...(mcpSource ? { mcpSource: { ...mcpSource, ...(caught instanceof McpQueryBlockedError ? { blocked: true } : {}) } } : {}),
+      ...(mcpSource ? { mcpSource: { ...mcpSource, ...(caught instanceof McpQueryBlockedError ? { blocked: true } : {}), sentToHost: caught instanceof McpCallFailedError } } : {}),
       durationMs: Math.max(0, completedAtMs - startedAtMs),
       createdAt,
       completedAt: new Date(completedAtMs).toISOString(),
@@ -684,7 +688,12 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   if (indexes.some((index) => index.matches(joined))) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained tenant data from this conversation, such as a user, device or group name or an ID. Nothing was sent to ${entry.host}. Rephrase it as a public question without tenant values.`);
   }
-  const result = await ctx.mcp.call(entry, args, ctx.signal);
+  let result: { text: string; truncated: boolean };
+  try {
+    result = await ctx.mcp.call(entry, args, ctx.signal);
+  } catch (caught) {
+    throw new McpCallFailedError(caught instanceof Error ? caught.message : String(caught));
+  }
   return {
     server: entry.serverName,
     host: entry.host,
