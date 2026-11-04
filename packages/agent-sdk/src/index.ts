@@ -1,6 +1,7 @@
 import type { PermissionAreaId } from "./permission-areas.js";
 
 export * from "./permission-areas.js";
+export * from "./services.js";
 
 export type ProviderId =
   | "ollama"
