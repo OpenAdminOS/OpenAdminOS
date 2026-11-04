@@ -95,6 +95,11 @@ export interface RunAgenticChatInput {
   promptByteLimit?: number;
   question: string;
   /**
+   * The admin's question asks about product behaviour, not tenant state.
+   * Only then can a successful MCP answer stand without tenant evidence.
+   */
+  generalQuestion?: boolean;
+  /**
    * Documentation passages retrieved for this question. Empty when no
    * index is installed. Included so investigative answers are grounded
    * in product behaviour the same way deterministic answers are.
@@ -172,8 +177,8 @@ export async function runAgenticChat(
   let noEvidenceCount = 0;
   let evidenceToolCalls = 0;
   let webSearchAttempts = 0;
-  // A successful MCP answer is public reference evidence, so a docs-only
-  // question answered from it is not sent back for tenant evidence.
+  // A successful MCP answer is public reference evidence. It answers a
+  // general question on its own, never a question about tenant state.
   let mcpAnswers = 0;
   let responseModel = input.model;
   const invalidQueries = new Map<string, string>();
@@ -257,7 +262,7 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: "That was a progress message, not a finished answer. Perform the required read-only tool call now, then answer the current question using its result. If blocked, explain the concrete blocker. No work continues after a final response; do not promise a future lookup." });
       continue;
     }
-    if (action.kind === "final" && input.plannedResources.length > 0 && evidenceToolCalls === 0 && webSearchAttempts === 0 && mcpAnswers === 0 && invalidQueries.size === 0) {
+    if (action.kind === "final" && input.plannedResources.length > 0 && evidenceToolCalls === 0 && webSearchAttempts === 0 && !(input.generalQuestion && mcpAnswers > 0) && invalidQueries.size === 0) {
       noEvidenceCount += 1;
       if (noEvidenceCount > MAX_NO_EVIDENCE_RETRIES) {
         return {

@@ -434,6 +434,21 @@ const CATEGORY_RESOURCE_HINTS: Record<AgentSummary["category"], GraphCacheResour
   ],
 };
 
+const GENERAL_QUESTION_START =
+  /^(?:how (?:do|does|can|should|would|to|long|often)|what (?:is|are|does|do|happens)|what's|why (?:does|do|would)|explain|describe|when (?:does|do|should)|is (?:it|there)|can i|where (?:do|can))\b/;
+const TENANT_REFERENCE =
+  /\b(?:how many|which|our|my|mine|we|us|tenant|list|show|count|currently|right now|are there|do we|do i have)\b/;
+
+/**
+ * A how-to or product-behaviour question that does not ask about this
+ * tenant's state. Only such questions may be answered from public MCP
+ * evidence alone; tenant questions still need tenant evidence.
+ */
+export function isGeneralKnowledgeQuestion(question: string): boolean {
+  const lower = question.trim().toLowerCase();
+  return GENERAL_QUESTION_START.test(lower) && !TENANT_REFERENCE.test(lower);
+}
+
 export function planChatContext(question: string): PlannedChatContext {
   const lower = question.toLowerCase();
   const resources = new Set<GraphCacheResourceKind>();

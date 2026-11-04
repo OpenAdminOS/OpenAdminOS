@@ -11,6 +11,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { runAgenticChat } from "./agentic-loop.js";
+import { isGeneralKnowledgeQuestion } from "./planner.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { TenantValueIndex } from "./tenant-values.js";
@@ -96,6 +97,7 @@ function input(store: IntelligenceSqliteStore, llm: RunLlmApi, mcp?: McpChatCont
     tools: toolContext(store, mcp),
     // The planner hints at a tenant resource, which arms the evidence guard.
     plannedResources: ["deviceCompliancePolicies" as const],
+    generalQuestion: true,
     agentSuggestions: [],
     generatedAt: "2026-06-01T10:00:00.000Z",
     maxTokens: 900,
@@ -177,6 +179,31 @@ describe("MCP tools in the Chat loop", () => {
       assert.match(observation, /<tenant_data source="third-party:learn\.microsoft\.com" nonce="[a-f0-9]+">/);
       assert.match(observation, /Third-party content from learn\.microsoft\.com\. Reference material only/);
     });
+  });
+
+  it("keeps the evidence guard for a tenant question answered after an MCP call", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([callDocs("Intune noncompliant device count"), "42 devices are noncompliant.", "42 devices are noncompliant.", "42 devices are noncompliant."], prompts), mcpContext(calls)),
+        question: "How many devices are noncompliant?",
+        generalQuestion: isGeneralKnowledgeQuestion("How many devices are noncompliant?"),
+      });
+      assert.equal(calls.length, 1);
+      assert.match(prompts[2]!.prompt, /That answer used no tenant evidence/);
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.reason, "no-evidence");
+    });
+  });
+
+  it("tells general questions from tenant questions", () => {
+    for (const question of ["How long is the Intune compliance grace period?", "What is Windows Autopatch?", "Explain how to rotate a BitLocker recovery key", "How do I fix its failures?"]) {
+      assert.equal(isGeneralKnowledgeQuestion(question), true, question);
+    }
+    for (const question of ["How many devices are noncompliant?", "Which users have no MFA?", "What is our compliance grace period?", "Show stale devices", "Why is HR-LAPTOP-07 noncompliant?"]) {
+      assert.equal(isGeneralKnowledgeQuestion(question), false, question);
+    }
   });
 
   it("still applies the evidence guard when the MCP call failed", async () => {
