@@ -135,7 +135,13 @@ describe("follow-ups", () => {
 
 describe("source labels and steps", () => {
   it("calls text Microsoft Learn only when a Learn call ran", () => {
-    assert.equal(relabelUnverifiedLearn("Microsoft Learn says X [1]. Per the Microsoft Learn docs, Y.", false), "The Microsoft documentation says X [1]. Per the Microsoft documentation docs, Y.");
+    assert.equal(relabelUnverifiedLearn("Microsoft Learn says X [1]. Also, the Microsoft Learn article recommends Y.", false), "The Microsoft documentation says X [1]. Also, the Microsoft Learn article recommends Y.");
+    assert.equal(relabelUnverifiedLearn("According to Microsoft Learn, X. It is X, according to the Microsoft Learn.", false), "According to the Microsoft documentation, X. It is X, according to the Microsoft documentation.");
+    assert.equal(relabelUnverifiedLearn("X, as Microsoft Learn recommends.", false), "X, as the Microsoft documentation recommends.");
+    // Statements about Learn itself and code are left alone.
+    for (const text of ["Microsoft Learn is not installed, so this comes from the local docs index.", "Run `echo Microsoft Learn says hi`.", "```\n# Microsoft Learn says\n```"]) {
+      assert.equal(relabelUnverifiedLearn(text, false), text);
+    }
     assert.equal(relabelUnverifiedLearn("Microsoft Learn says X.", true), "Microsoft Learn says X.");
   });
 

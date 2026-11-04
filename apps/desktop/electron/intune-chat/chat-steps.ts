@@ -380,12 +380,24 @@ export function learnAnswered(trace: readonly IntuneChatToolTraceEntry[]): boole
 }
 
 /**
- * The answer may only call text Microsoft Learn when a Learn call ran in
- * it. Otherwise the passages came from the local index or the model, so
- * the name is replaced with a neutral one.
+ * The answer may only attribute text to Microsoft Learn when a Learn call
+ * answered. Otherwise the passages came from the local index or the
+ * model, so attribution phrases ("Microsoft Learn says", "according to
+ * Microsoft Learn") name the Microsoft documentation instead. Other
+ * mentions, such as "Microsoft Learn is not installed", and code are left
+ * as they are.
  */
+const LEARN_ATTRIBUTION =
+  /\b(according to\s+)(?:the\s+)?Microsoft Learn\b|\b(?:the\s+)?Microsoft Learn(?=\s+(?:says|said|states|documents|recommends|notes|explains|describes|lists|shows|confirms)\b)/gi;
+
 export function relabelUnverifiedLearn(answer: string, learnCalled: boolean): string {
   if (learnCalled) return answer;
-  return answer.replace(/\b(?:the\s+)?Microsoft Learn\b/gi, (_match, offset: number, whole: string) =>
-    /(?:^|[.!?]\s+|\n\s*)$/.test(whole.slice(0, offset)) ? "The Microsoft documentation" : "the Microsoft documentation");
+  // Odd parts are fenced or inline code.
+  return answer.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, index) => index % 2 === 1 ? part : part.replace(
+    LEARN_ATTRIBUTION,
+    (_match, according: string | undefined, offset: number, whole: string) => {
+      if (according) return `${according}the Microsoft documentation`;
+      return /(?:^|[.!?]\s+|\n\s*)$/.test(whole.slice(0, offset)) ? "The Microsoft documentation" : "the Microsoft documentation";
+    },
+  )).join("");
 }
