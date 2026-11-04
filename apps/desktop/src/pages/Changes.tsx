@@ -1519,7 +1519,9 @@ function TimelineView({
       <EmptyState
         icon={<IconClock size={18} />}
         title="No change history yet"
-        description="Refresh the tenant cache to capture a baseline, then refresh again to detect changes."
+        description={`Refresh the tenant cache to capture a baseline, then refresh again to detect changes.${
+          omittedNotice ? ` ${omittedNotice} Add it in Settings, Tenants to track its changes again.` : ""
+        }`}
         action={
           <Button variant="primary" onClick={onRefresh}>
             Refresh data

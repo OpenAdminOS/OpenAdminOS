@@ -956,6 +956,56 @@ describe("Changes page", () => {
     ).toHaveAttribute("type", "button");
   });
 
+  it("explains omitted history when no connected resource has a baseline yet", async () => {
+    const intuneNotConnected = {
+      serviceId: "intune" as const,
+      service: "Intune",
+      partId: "intune.devices",
+      part: "Intune devices and configuration",
+      serviceMissing: true,
+    };
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes",
+      bridge: makeTimelineBridge([], {
+        getDriftStatus: vi.fn(async (): Promise<DriftStatus> => ({
+          tenantId: "tenant-1",
+          resources: [
+            { ...driftStatus.resources[0]!, notGrantedService: intuneNotConnected },
+            {
+              ...driftStatus.resources[1]!,
+              baselineCaptured: false,
+              baselineCapturedAt: undefined,
+              snapshotCount: 0,
+            },
+          ],
+        })),
+        getDriftTimeline: vi.fn(
+          async (input: DriftTimelineInput): Promise<DriftTimelineResult> => ({
+            tenantId: "tenant-1",
+            entries: [],
+            hasMore: false,
+            limit: input.limit ?? 100,
+            omittedResources: [
+              {
+                resource: "deviceConfigurations",
+                resourceLabel: "Device configurations",
+                notGrantedService: intuneNotConnected,
+              },
+            ],
+          }),
+        ),
+      }),
+    });
+
+    expect(await screen.findByText("No change history yet")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Intune is not connected\. Its earlier snapshots are not shown\. Add it in Settings, Tenants to track its changes again\./,
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("leaves a resource of a service that is not connected out of the timeline", async () => {
     const user = userEvent.setup();
     const intuneNotConnected = {
