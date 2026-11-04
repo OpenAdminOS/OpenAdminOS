@@ -291,7 +291,6 @@ function clip(text: string, limit: number): string {
   return text.length <= limit ? text : `${text.slice(0, limit)}...`;
 }
 
-/** Stops reading any single response after `maxBytes`. */
 /**
  * Follows a redirect only within the server's own origin. A redirect to
  * another host would resend the tool params there, so it is refused and
@@ -315,6 +314,7 @@ function sameOriginFetch(base: FetchLike): FetchLike {
   };
 }
 
+/** Stops reading any single response after `maxBytes`. */
 function cappedFetch(base: FetchLike, maxBytes: number): FetchLike {
   return async (url, init) => {
     const response = await base(url, init);
