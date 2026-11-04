@@ -122,4 +122,25 @@ describe("an agent with an invalid manifest", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("names an agent update as the source of an invalid manifest", async () => {
+    const updateEntry: InvalidAgentManifest = {
+      ...invalidEntry,
+      source: "update",
+      manifestPath: "/Users/admin/Library/OpenAdminOS/agent-updates/wrong-services/manifest.yaml",
+      sourceText: undefined,
+    };
+    renderRoute(<Agents />, {
+      path: "/agents/:slug",
+      route: "/agents/wrong-services",
+      bridge: makeMockBridge({}, createMockAppState({ installedAgents: [broken, healthy], invalidAgents: [updateEntry] })),
+    });
+
+    const notice = await screen.findByRole("alert", { name: "Wrong services manifest is invalid" });
+    expect(notice).toHaveTextContent(
+      "This manifest came from an agent update. Uninstall the agent, then install it again from Agent Hub.",
+    );
+    expect(within(notice).getByText(updateEntry.manifestPath)).toBeInTheDocument();
+    expect(within(notice).queryByRole("button", { name: "Edit manifest" })).not.toBeInTheDocument();
+  });
 });

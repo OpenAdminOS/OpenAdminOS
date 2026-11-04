@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import type { AgentSummary, RunRecord } from "@openadminos/agent-sdk";
-import type { TokenCacheStorage } from "@openadminos/runtime";
+import { listBuiltInRegistryAgents, type TokenCacheStorage } from "@openadminos/runtime";
 
 import { AppStateStore } from "./state.js";
 
@@ -192,6 +192,122 @@ describe("an invalid local agent manifest", () => {
       assert.equal(state.runs.filter((run) => run.agentSlug === "wrong-services").length, 0);
     } finally {
       await fixture.close();
+    }
+  });
+});
+
+/** A store whose only installed agent is the bundled `find-inactive-devices`. */
+async function bundledFixture(dir: string, options: { schedule?: boolean } = {}) {
+  const agent = {
+    ...installed("find-inactive-devices", "agents/find-inactive-devices"),
+    ...(options.schedule === false ? { schedule: undefined } : {}),
+  };
+  const filePath = join(dir, "state.json");
+  await writeFile(
+    filePath,
+    JSON.stringify({
+      activeProviderId: "ollama",
+      tenants: [TENANT],
+      activeTenantId: TENANT.id,
+      runs: [],
+      installedAgents: [agent],
+    }),
+    "utf8",
+  );
+  return new AppStateStore({ filePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+}
+
+describe("the manifest an installed agent would run", () => {
+  it("shows an invalid agent update as unavailable, refuses runs and is skipped by the scheduler", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-invalid-update-"));
+    const overrideDir = join(dir, "agent-updates", "find-inactive-devices");
+    await mkdir(overrideDir, { recursive: true });
+    await writeFile(
+      join(overrideDir, "manifest.yaml"),
+      manifest("find-inactive-devices", "  services:\n    - entra"),
+      "utf8",
+    );
+    const store = await bundledFixture(dir);
+    try {
+      const state = await store.getAppState();
+      const agent = state.installedAgents.find((entry) => entry.slug === "find-inactive-devices");
+      assert.equal(agent?.manifestError, REASON);
+      assert.deepEqual(
+        state.invalidAgents?.map(({ id, manifestPath, reason, source, registryPath }) => ({ id, manifestPath, reason, source, registryPath })),
+        [{
+          id: "find-inactive-devices",
+          manifestPath: join(overrideDir, "manifest.yaml"),
+          reason: REASON,
+          source: "update",
+          registryPath: "agents/find-inactive-devices",
+        }],
+      );
+      await assert.rejects(store.startRun("find-inactive-devices"), /cannot run or be scheduled because its manifest is invalid/);
+
+      const started: string[] = [];
+      Object.defineProperty(store, "startRun", {
+        value: async (slug: string) => {
+          started.push(slug);
+          throw new Error("stop after start");
+        },
+      });
+      await store.fireDueSchedules();
+      assert.deepEqual(started, []);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("keeps a valid agent update runnable", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-valid-update-"));
+    const overrideDir = join(dir, "agent-updates", "find-inactive-devices");
+    await mkdir(overrideDir, { recursive: true });
+    await writeFile(
+      join(overrideDir, "manifest.yaml"),
+      manifest("find-inactive-devices", "  services:\n    - intune"),
+      "utf8",
+    );
+    const store = await bundledFixture(dir);
+    try {
+      const state = await store.getAppState();
+      assert.equal(state.installedAgents[0]?.manifestError, undefined);
+      assert.deepEqual(state.invalidAgents, []);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("still reports an invalid bundled manifest after the registry index has loaded", async () => {
+    const indexEntries = listBuiltInRegistryAgents();
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-invalid-bundled-"));
+    // The bundled tree is found from the working directory, so this
+    // folder stands in for the agents that ship with the app.
+    const bundledDir = join(dir, "app", "agents", "find-inactive-devices");
+    await mkdir(bundledDir, { recursive: true });
+    await writeFile(
+      join(bundledDir, "manifest.yaml"),
+      manifest("find-inactive-devices", "  services:\n    - entra"),
+      "utf8",
+    );
+    const store = await bundledFixture(dir);
+    const previousCwd = process.cwd();
+    process.chdir(join(dir, "app"));
+    try {
+      // What initRegistry stores once the HTTP index is fetched.
+      Object.defineProperty(store, "registryCacheEntries", { value: indexEntries, writable: true });
+      const state = await store.getAppState();
+      assert.equal(state.installedAgents[0]?.manifestError, REASON);
+      assert.deepEqual(
+        state.invalidAgents?.map(({ id, reason, source }) => ({ id, reason, source })),
+        [{ id: "find-inactive-devices", reason: REASON, source: "bundled" }],
+      );
+      await assert.rejects(store.startRun("find-inactive-devices"), /cannot run or be scheduled because its manifest is invalid/);
+    } finally {
+      process.chdir(previousCwd);
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 });

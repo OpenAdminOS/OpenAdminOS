@@ -32,6 +32,7 @@ import {
   withTenantDataOutputFilter,
   wrapConnector,
   findRegistryAgentById,
+  effectiveAgentManifestIssue,
   listAllRegistryAgentsWithIssues,
   listBuiltInRegistryAgents,
   listRegisteredConnectors,
@@ -523,14 +524,30 @@ function sanitizeNonNegativeInteger(value: unknown): number | undefined {
   return Math.round(value);
 }
 
-/** Matches an installed agent to an invalid manifest by its folder on disk. */
-function manifestErrorFor(
-  agent: AgentSummary,
-  invalid: readonly InvalidAgentManifest[],
-): string | undefined {
-  if (!agent.registryPath) return undefined;
-  const path = agent.registryPath.replace(/\\/g, "/");
-  return invalid.find((entry) => entry.registryPath.replace(/\\/g, "/") === path)?.reason;
+function normalizedRegistryPath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+/**
+ * The invalid manifests to list. Installed agents are checked against the
+ * manifest the runtime would load, so a listing entry for the same folder
+ * is replaced by that result: an invalid agent update shows, and a valid
+ * update over an invalid bundled copy does not.
+ */
+function mergeInvalidManifests(
+  installedAgents: readonly AgentSummary[],
+  installedIssues: readonly InvalidAgentManifest[],
+  listed: readonly InvalidAgentManifest[],
+): InvalidAgentManifest[] {
+  const installedPaths = new Set(
+    installedAgents.flatMap((agent) =>
+      agent.registryPath ? [normalizedRegistryPath(agent.registryPath)] : [],
+    ),
+  );
+  return [
+    ...installedIssues,
+    ...listed.filter((entry) => !installedPaths.has(normalizedRegistryPath(entry.registryPath))),
+  ];
 }
 
 function scheduleDueAtMs(agent: AgentSummary, nowMs: number): number {
@@ -2461,14 +2478,24 @@ export class AppStateStore {
       persisted.activeModelByProviderId,
     ).model;
 
-    const { agents: registryAgents, invalid: invalidAgents } = this.listRegistryWithIssues();
+    const { agents: registryAgents, invalid: listedInvalid } = this.listRegistryWithIssues();
+    const installedIssues: InvalidAgentManifest[] = [];
     const installedAgents = this.decorateInstalledWithUpdateInfo(
       persisted.installedAgents,
       registryAgents,
     ).map((agent) => {
-      const manifestError = manifestErrorFor(agent, invalidAgents);
-      return manifestError ? { ...agent, manifestError } : agent;
+      // Checked whatever the registry index holds, because this is the
+      // manifest a run or schedule would load.
+      const issue = effectiveAgentManifestIssue(agent);
+      if (!issue) return agent;
+      installedIssues.push(issue);
+      return { ...agent, manifestError: issue.reason };
     });
+    const invalidAgents = mergeInvalidManifests(
+      persisted.installedAgents,
+      installedIssues,
+      listedInvalid,
+    );
 
     const state: AppState = {
       activeProviderId: activeProvider?.id ?? "ollama",
@@ -2553,9 +2580,12 @@ export class AppStateStore {
     };
   }
 
-  /** The validation error of an installed agent's manifest on disk. */
+  /**
+   * The validation error of the manifest the runtime would load for an
+   * installed agent: an agent update, a local folder or the bundled copy.
+   */
   private agentManifestError(agent: AgentSummary): string | undefined {
-    return manifestErrorFor(agent, this.listRegistryWithIssues().invalid);
+    return effectiveAgentManifestIssue(agent)?.reason;
   }
 
   async getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined> {
@@ -4269,14 +4299,13 @@ export class AppStateStore {
       return;
     }
 
-    const invalid = this.listRegistryWithIssues().invalid;
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
       // The Agents page shows an invalid manifest as unavailable; its
       // schedule waits until the manifest is fixed.
-      if (manifestErrorFor(agent, invalid)) {
+      if (this.agentManifestError(agent)) {
         console.info(`[scheduler] skipped "${agent.slug}" because its manifest is invalid`);
         continue;
       }

@@ -346,6 +346,71 @@ function invalidManifestEntry(
   };
 }
 
+/**
+ * Validate the manifest the runtime would load for an installed agent:
+ * an agent update override, a user-authored folder or the bundled copy,
+ * chosen by the same resolver as `loadAgentModule`. Returns undefined
+ * when it passes validation or when no manifest can be found, which
+ * `loadAgentModule` reports on its own.
+ */
+export function effectiveAgentManifestIssue(
+  agent: AgentSummary | RegistryAgentSummary,
+): InvalidAgentManifest | undefined {
+  let agentDir: string;
+  try {
+    agentDir = resolveAgentDirectory(agent);
+  } catch {
+    return undefined;
+  }
+  const manifestPath = join(agentDir, "manifest.yaml");
+  if (!existsSync(manifestPath)) return undefined;
+  const source: InvalidAgentManifest["source"] =
+    agentUpdatesDir && isInsideDirectory(agentDir, agentUpdatesDir)
+      ? "update"
+      : agent.registryPath && isAbsolutePath(agent.registryPath)
+        ? "user"
+        : "bundled";
+  let sourceText: string;
+  try {
+    sourceText = readFileSync(manifestPath, "utf8");
+  } catch (error) {
+    return effectiveIssueEntry(agent, agentDir, error, source, undefined);
+  }
+  try {
+    parseAgentTemplate(sourceText);
+    return undefined;
+  } catch (error) {
+    return effectiveIssueEntry(agent, agentDir, error, source, sourceText);
+  }
+}
+
+function effectiveIssueEntry(
+  agent: AgentSummary | RegistryAgentSummary,
+  agentDir: string,
+  error: unknown,
+  source: InvalidAgentManifest["source"],
+  sourceText: string | undefined,
+): InvalidAgentManifest {
+  return {
+    id: agent.id,
+    folder: basename(agentDir),
+    // The installed agent's own path, so the host matches it exactly.
+    registryPath:
+      agent.registryPath ??
+      (source === "user" ? agentDir : relativeRegistryPath(agentDir)),
+    manifestPath: join(agentDir, "manifest.yaml"),
+    reason: error instanceof Error ? error.message : String(error),
+    source,
+    ...(source === "user" && sourceText !== undefined ? { sourceText } : {}),
+  };
+}
+
+function isInsideDirectory(path: string, directory: string): boolean {
+  const normalizedPath = resolve(path).replace(/\\/g, "/");
+  const normalizedDir = resolve(directory).replace(/\\/g, "/").replace(/\/+$/, "");
+  return normalizedPath === normalizedDir || normalizedPath.startsWith(`${normalizedDir}/`);
+}
+
 /** `descriptor.id` from manifest text that may not pass validation. */
 function declaredAgentId(sourceText: string | undefined): string | undefined {
   if (sourceText === undefined) return undefined;

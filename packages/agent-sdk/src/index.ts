@@ -227,7 +227,8 @@ export interface InvalidAgentManifest {
   manifestPath: string;
   /** The validation error. */
   reason: string;
-  source: "bundled" | "user";
+  /** Where the manifest came from: the app, the user, or an agent update. */
+  source: "bundled" | "user" | "update";
   /** Manifest text of a user-authored agent, so it can be edited in place. */
   sourceText?: string;
 }

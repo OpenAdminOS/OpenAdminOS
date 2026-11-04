@@ -636,7 +636,7 @@ export default function AgentDetail({
             name={agent.name}
             reason={agent.manifestError}
             manifestPath={invalidEntry?.manifestPath}
-            bundled={invalidEntry?.source === "bundled"}
+            source={invalidEntry?.source}
             onEdit={editableInvalid ? () => setEditInvalidOpen(true) : undefined}
             onUninstall={() => setUninstallOpen(true)}
           />

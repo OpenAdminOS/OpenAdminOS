@@ -1,4 +1,5 @@
 import { AGENT_COPY } from "../copy";
+import type { InvalidAgentManifest } from "../shared/openAdminOS";
 import { Button } from "./ui";
 
 /**
@@ -10,14 +11,14 @@ export function InvalidAgentNotice({
   name,
   reason,
   manifestPath,
-  bundled = false,
+  source,
   onEdit,
   onUninstall,
 }: {
   name: string;
   reason: string;
   manifestPath?: string;
-  bundled?: boolean;
+  source?: InvalidAgentManifest["source"];
   onEdit?: () => void;
   onUninstall?: () => void;
 }) {
@@ -30,7 +31,8 @@ export function InvalidAgentNotice({
       <div className="text-sm font-medium text-[var(--color-danger)]">{AGENT_COPY.invalidTitle}</div>
       <p className="mt-1 text-sm leading-relaxed text-[var(--color-text)]">
         {AGENT_COPY.invalidBody(name)}
-        {bundled ? ` ${AGENT_COPY.invalidBundledHint}` : null}
+        {source === "bundled" ? ` ${AGENT_COPY.invalidBundledHint}` : null}
+        {source === "update" ? ` ${AGENT_COPY.invalidUpdateHint}` : null}
       </p>
       <pre className="mt-2 whitespace-pre-wrap break-words rounded-md bg-[var(--color-bg-raised)] px-2.5 py-1.5 font-mono text-xs text-[var(--color-text)] ring-1 ring-[var(--color-border)]">
         {reason}
