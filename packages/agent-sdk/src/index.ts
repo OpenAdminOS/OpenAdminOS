@@ -194,6 +194,38 @@ export interface AgentSummary extends AgentContract {
    * registry version, or no registry entry was found.
    */
   updateAvailable?: AgentUpdateInfo;
+  /**
+   * Set by the host when this agent's manifest on disk fails validation.
+   * Derived on every `getAppState()` read, not persisted. The agent
+   * cannot run or be scheduled until the manifest is fixed.
+   */
+  manifestError?: string;
+}
+
+/**
+ * A bundled or local agent manifest that failed validation. Registry
+ * enumeration lists it here instead of throwing, so one bad manifest
+ * never blocks the other agents, tenants or history from loading.
+ */
+export interface InvalidAgentManifest {
+  /** `descriptor.id` when the manifest names one, otherwise the folder name. */
+  id: string;
+  /** Folder name under the agents root. */
+  folder: string;
+  /** Same form as `RegistryAgentSummary.registryPath`, to match installed agents. */
+  registryPath: string;
+  /** Absolute path of the manifest file. */
+  manifestPath: string;
+  /** The validation error. */
+  reason: string;
+  source: "bundled" | "user";
+  /** Manifest text of a user-authored agent, so it can be edited in place. */
+  sourceText?: string;
+}
+
+/** Why an installed agent with an invalid manifest cannot start. */
+export function invalidAgentManifestCopy(agentName: string, reason: string): string {
+  return `${agentName} cannot run or be scheduled because its manifest is invalid. Fix the manifest or uninstall the agent. Reason: ${reason}`;
 }
 
 export interface AgentCommunitySubmissionState {
@@ -957,6 +989,8 @@ export interface AppState {
   activeModelByProviderId?: Partial<Record<ProviderId, string>>;
   providers: ProviderSummary[];
   registryAgents: RegistryAgentSummary[];
+  /** Local manifests that failed validation, shown as unavailable agents. */
+  invalidAgents?: InvalidAgentManifest[];
   installedAgents: AgentSummary[];
   runs: RunRecord[];
   trust: TrustState;
