@@ -882,3 +882,57 @@ describe("answer prompt", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });
+
+describe("withdrawing a streamed final", () => {
+  function incremental(replies: string[]): RunLlmApi {
+    let index = 0;
+    return {
+      available: true,
+      streamsIncrementally: true,
+      async complete() { throw new Error("streamed"); },
+      async *stream() {
+        const text = replies[Math.min(index++, replies.length - 1)]!;
+        for (let end = 8; end < text.length + 8; end += 8) {
+          yield { delta: "", accumulated: text.slice(0, Math.min(end, text.length)), done: false, model: "m" };
+        }
+        yield { delta: "", accumulated: text, done: true, model: "m" };
+      },
+    };
+  }
+
+  it("withdraws an evidence-free final before the tenant refresh runs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-withdraw-"));
+    const store = seededStore(dir);
+    try {
+      const log: string[] = [];
+      const result = await runAgenticChat({
+        ...baseInput(store, incremental([
+          '{"kind":"tenant","sources":[],"final":true,"answer":"All devices are fine."}',
+          '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+          '{"final":true,"answer":"WIN-01 is compliant."}',
+        ])),
+        classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) },
+        ensureTenantData: async () => { log.push("refresh"); },
+        onAnswerText: (text) => log.push(text === "" ? "withdrawn" : "shown"),
+      });
+      assert.equal(result.ok, true);
+      const firstRefresh = log.indexOf("refresh");
+      assert.ok(log.indexOf("shown") < log.indexOf("withdrawn") && log.indexOf("withdrawn") < firstRefresh, log.join(", "));
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("withdraws the last streamed final before giving up without tenant evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-withdraw-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const result = await runAgenticChat({
+        ...baseInput(store, incremental(['{"final":true,"answer":"All devices are fine."}'])),
+        onAnswerText: (text) => shown.push(text),
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.reason, "no-evidence");
+      assert.equal(shown.at(-1), "", "nothing streamed stays on screen when the loop falls back");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});

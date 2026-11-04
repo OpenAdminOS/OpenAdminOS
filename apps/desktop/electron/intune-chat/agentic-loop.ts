@@ -307,15 +307,18 @@ export async function runAgenticChat(
   let attempts = 0;
   // The source guard gets as many retries as the evidence guard.
   const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES * 2 + 2;
-  // A streamed final the loop did not accept is withdrawn before the next reply.
+  // Streamed final text the loop did not accept is withdrawn as soon as
+  // that is known, before any slow work (a refresh, a tool, a fallback).
   let answerShown = false;
+  const withdrawAnswer = () => {
+    if (!answerShown) return;
+    answerShown = false;
+    input.onAnswerText?.("", learnAnswered);
+  };
   while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
-    if (answerShown) {
-      answerShown = false;
-      input.onAnswerText?.("", learnAnswered);
-    }
+    withdrawAnswer();
     const system = buildAgenticSystemPrompt(input, questionKind, [...required].filter((id) => !attemptedServers.has(id)), documentation.length > 0 || fallbackPending);
     const loopInput = { ...input, documentation };
     const prompt = input.voice
@@ -362,7 +365,8 @@ export async function runAgenticChat(
     // runs, so every step appends below the one before it.
     let classification: string | undefined;
     let afterClassification: (() => Promise<void>) | undefined;
-    const settleModelStep = async (outcome: ModelStepOutcome) => {
+    const settleModelStep = async (outcome: ModelStepOutcome, accepted = false) => {
+      if (!accepted) withdrawAnswer();
       input.modelStep?.finish(outcome, classification);
       const work = afterClassification;
       afterClassification = undefined;
@@ -485,7 +489,7 @@ export async function runAgenticChat(
         turns.push({ role: 'repair', content: `A failed data lookup cannot support a final answer or a zero count. Correct the query for ${[...invalidQueries.keys()].join(', ')} using the available fields before answering.` });
         continue;
       }
-      await settleModelStep(finalOutcome());
+      await settleModelStep(finalOutcome(), true);
       return {
         ok: true,
         answer: stripTenantDataFences(action.answer).trim(),
