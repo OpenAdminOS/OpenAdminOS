@@ -11,6 +11,9 @@ import {
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
+  agentServiceIds,
+  formatServiceList,
+  missingServicesForAgent,
   resolveProviderDefaultModel,
   resolveRunModel,
   type AgentSummary,
@@ -424,6 +427,20 @@ export class RunService {
             `${agent.name} requires ${requiredLabel}. The active tenant (${tenantRecord?.displayName ?? pinnedTenantId}) is on ${detectedLabel}. Microsoft 365 Business Premium includes Entra ID P1. Check your tenant's subscription, or pick a free-tier agent.`,
           );
         }
+      }
+
+      // Service preflight: an agent whose service is not connected for
+      // this tenant cannot reach its data. Refuse with the service to add.
+      const runTenant = persisted.tenants.find((t) => t.id === pinnedTenantId);
+      const missingServices = runTenant
+        ? missingServicesForAgent(runTenant, agentServiceIds(agent))
+        : [];
+      if (runTenant && missingServices.length > 0) {
+        const titles = missingServices.map((service) => service.title);
+        const one = titles.length === 1;
+        throw new Error(
+          `${agent.name} needs ${formatServiceList(titles)}, which ${one ? "is" : "are"} not connected for ${runTenant.displayName}. Add ${one ? "it" : "them"} in Settings, Tenants, then run the agent again.`,
+        );
       }
 
       if ((options.office || options.officeContext) && persisted.runs.some(r=>(r.office || r.officeContext) && ["queued","running"].includes(r.status))) throw new Error("Team compute slot is occupied. This assignment remains queued.");

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
@@ -357,4 +357,85 @@ export function ServiceNotConnectedPanel({
       />
     </div>
   );
+}
+/** Small chips naming the services an agent needs. */
+export function ServiceChips({ services }: { services: readonly ServiceId[] }) {
+  if (services.length === 0) return null;
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1" aria-label={SERVICE_COPY.chipsLabel(services.map((id) => serviceById(id).title))}>
+      {services.map((id) => (
+        <Badge key={id} tone="neutral" aria-hidden="true">
+          {serviceById(id).title}
+        </Badge>
+      ))}
+    </span>
+  );
+}
+
+
+/**
+ * One line for a run or detail view: "Needs Defender, not connected", with
+ * an Add action that opens the same dialog as Settings.
+ */
+export function ServiceNotConnectedNotice({
+  tenant,
+  serviceIds,
+}: {
+  tenant: TenantRecord;
+  serviceIds: readonly ServiceId[];
+}) {
+  const [adding, setAdding] = useState<ServiceId | null>(null);
+  if (serviceIds.length === 0) return null;
+  const titles = serviceIds.map((id) => serviceById(id).title);
+  const ownRegistration = usesOwnRegistration(tenant);
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/25">
+      <div className="min-w-0 text-sm leading-relaxed text-[var(--color-text)]">
+        <span className="font-medium">{SERVICE_COPY.needsNotConnected(titles)}</span>{" "}
+        <span className="text-[var(--color-text-soft)]">{SERVICE_COPY.needsNotConnectedBody(tenant.displayName)}</span>
+      </div>
+      <div className="flex shrink-0 flex-wrap gap-2">
+        {serviceIds.map((id) => (
+          <Button key={id} size="sm" variant="secondary" onClick={() => setAdding(id)}>
+            {ownRegistration
+              ? SERVICE_COPY.addPermissionsAction(serviceById(id).title)
+              : SERVICE_COPY.addAction(serviceById(id).title)}
+          </Button>
+        ))}
+      </div>
+      <ServiceAccessDialog
+        tenant={tenant}
+        serviceId={adding}
+        open={adding !== null}
+        onClose={() => setAdding(null)}
+      />
+    </div>
+  );
+}
+
+/**
+ * Shows the designed not-connected panel instead of a page whose data
+ * comes from services the active tenant has not connected. With no tenant,
+ * the sample tenant, or any listed service connected, the page renders.
+ */
+export function ServiceGate({
+  anyOf,
+  feature,
+  children,
+}: {
+  /** The page works when at least one of these services is connected. */
+  anyOf: readonly ServiceId[];
+  feature: string;
+  children: ReactNode;
+}) {
+  const { state } = useAppState();
+  const tenant = state.tenants.find((entry) => entry.id === state.activeTenantId);
+  if (
+    !tenant ||
+    tenant.kind === "sample" ||
+    anyOf.some((serviceId) => serviceStatus(tenant, serviceId) !== "missing")
+  ) {
+    return <>{children}</>;
+  }
+  return <ServiceNotConnectedPanel tenant={tenant} serviceIds={anyOf} feature={feature} />;
 }

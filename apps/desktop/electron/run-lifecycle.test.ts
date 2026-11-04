@@ -368,3 +368,25 @@ definition:
     assert.equal(writes[0]?.path, "/users/second");
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
+
+it("refuses to start an agent whose service is not connected for the tenant", async () => {
+  const h = harness();
+  const agent = { id: "score", slug: "score", name: "Secure score prioritizer", description: "Ranks Secure Score actions",
+    mode: "read", version: "1.0.0", installedAt: new Date().toISOString(), category: "compliance", tier: "agent",
+    requiresEntraTier: "free", scopes: ["SecurityEvents.Read.All"], services: ["defender"], author: { name: "Test" } } as AgentSummary;
+  Object.assign(h.host, { appVersion: "0.7.2", listProviders: async () => [{ id: "ollama", status: "connected", models: ["test"], isLocal: true }],
+    providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  const intuneOnly = { id: "tenant-a", displayName: "Contoso", grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"] };
+  await h.host.write({ ...h.state(), installedAgents: [agent], activeTenantId: "tenant-a", tenants: [intuneOnly] as any });
+  await assert.rejects(
+    h.service.startRun("score", {}),
+    /^Error: Secure score prioritizer needs Defender, which is not connected for Contoso\. Add it in Settings, Tenants, then run the agent again\.$/,
+  );
+  assert.deepEqual(h.state().runs, []);
+
+  // Once any Defender part is granted the run is queued; a missing part is
+  // consented at run time.
+  await h.host.write({ ...h.state(), tenants: [{ ...intuneOnly, grantedScopes: [...intuneOnly.grantedScopes, "graph:SecurityAlert.Read.All", "graph:SecurityIncident.Read.All"] }] as any });
+  const queued = await h.service.startRun("score", {});
+  assert.equal(queued.status, "queued");
+});

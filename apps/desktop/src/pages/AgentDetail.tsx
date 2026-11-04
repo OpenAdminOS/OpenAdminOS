@@ -14,6 +14,7 @@ import { Modal, ModalHeader } from "../components/Modal";
 import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
 import { RunWithMenu } from "../components/RunWithMenu";
 import { useToast } from "../components/Toast";
+import { ServiceChips, ServiceNotConnectedNotice } from "../components/ServiceAccess";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { CommunityShareModal } from "../components/CommunityShareModal";
 import {
@@ -39,9 +40,12 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
+  agentServiceIds,
   grantedScopeSet,
   missingPartsForScopes,
+  missingServicesForAgent,
   partLabel,
+  type ServiceId,
   resolveRunModel,
   type AgentManifestPreview,
   type AgentDiscordDelivery,
@@ -146,6 +150,8 @@ export default function AgentDetail({
     : false;
   // In pilot mode only the three pilot agents run, with prepared text.
   const pilot = activeTenant?.kind === "sample";
+  const missingAgentServices =
+    agent && activeTenant ? missingServicesForAgent(activeTenant, agentServiceIds(agent)) : [];
   const pilotRunnable = pilot && Boolean(agent && isPilotAgentSlug(agent.slug));
   const pendingTenant = pendingRunChoice?.tenantId
     ? state.tenants.find((tenant) => tenant.id === pendingRunChoice.tenantId)
@@ -590,7 +596,14 @@ export default function AgentDetail({
             <Badge tone="warning">Incompatible</Badge>
           ) : null}
           {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
+          <ServiceChips services={agentServiceIds(agent)} />
         </div>
+        {activeTenant && !pilot && missingAgentServices.length > 0 ? (
+          <ServiceNotConnectedNotice
+            tenant={activeTenant}
+            serviceIds={missingAgentServices.map((service) => service.id)}
+          />
+        ) : null}
         {agent.compatibility?.supported === false && (
           <div className="mb-4 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/30">
             <div className="text-sm font-medium text-[var(--color-text)]">
@@ -1082,6 +1095,7 @@ function HubAgentDrawer({
               <Badge tone="warning">Incompatible</Badge>
             ) : null}
             {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
+            <ServiceChips services={agentServiceIds(agent)} />
           </div>
 
           {installConfirm ? (
@@ -2561,7 +2575,7 @@ function RunPreflightModal({
   pilot?: boolean;
   dryRun: boolean;
   open: boolean;
-  agent: { name: string; mode: "read" | "write"; scopes: string[]; schedule?: unknown };
+  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown };
   activeTenant: TenantRecord | undefined;
   providerName: string;
   providerIsLocal: boolean;
@@ -2572,12 +2586,17 @@ function RunPreflightModal({
   onConfirm: () => void;
 }) {
   // The pilot tenant has every service and never asks Microsoft for consent.
-  // TODO(services-ui): the agent gating step turns this into "Needs
-  // <service>, not connected" with an Add action.
-  const missingParts = activeTenant && !pilot
-    ? missingPartsForScopes(agent.scopes, grantedScopeSet(activeTenant))
+  // A service with nothing granted blocks the run; a missing part of a
+  // connected service is consented when the run starts.
+  const missingServices = activeTenant && !pilot
+    ? missingServicesForAgent(activeTenant, agentServiceIds(agent))
     : [];
-  const canStart = Boolean(activeTenant) && !deliverySaving;
+  const missingParts = activeTenant && !pilot
+    ? missingPartsForScopes(agent.scopes, grantedScopeSet(activeTenant)).filter(
+        (part) => !missingServices.some((service) => service.id === part.service),
+      )
+    : [];
+  const canStart = Boolean(activeTenant) && !deliverySaving && missingServices.length === 0;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -2598,6 +2617,12 @@ function RunPreflightModal({
             through {providerName}'s local CLI and leave this device.
           </div>
         )}
+        {activeTenant && missingServices.length > 0 ? (
+          <ServiceNotConnectedNotice
+            tenant={activeTenant}
+            serviceIds={missingServices.map((service) => service.id)}
+          />
+        ) : null}
         {missingParts.length > 0 && activeTenant && (
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             This agent needs {missingParts.map(partLabel).join(", ")} access,

@@ -10,6 +10,8 @@ import { NewAgentModal } from "../components/NewAgentModal";
 import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
+import { ServiceChips } from "../components/ServiceAccess";
+import { SERVICE_COPY } from "../copy";
 import {
   IconChevronDown,
   IconBolt,
@@ -32,10 +34,15 @@ import {
 } from "../components/ui";
 import type { AgentDisplay } from "../shared/agent-display";
 import { formatAgentDisplayName } from "../shared/agent-display";
-import type {
-  AgentSummary,
-  RegistryAgentSummary,
-  RunRecord,
+import {
+  AVAILABLE_SERVICES,
+  agentServiceIds,
+  isServiceId,
+  serviceById,
+  type AgentSummary,
+  type RegistryAgentSummary,
+  type RunRecord,
+  type ServiceId,
 } from "../shared/openAdminOS";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -78,6 +85,8 @@ export default function AgentsHome() {
   const modeParam = searchParams.get("mode");
   const modeFilter: ModeFilter = modeParam === "read" || modeParam === "write" ? modeParam : "all";
   const categoryFilter = searchParams.get("category") || "all";
+  const serviceParam = searchParams.get("service");
+  const serviceFilter: ServiceId | "all" = isServiceId(serviceParam) ? serviceParam : "all";
   const scheduledOnly = searchParams.get("filter") === "scheduled";
   const activeTab = source === "hub" ? "hub" : scheduledOnly ? "schedules" : "installed";
   const updatesOnly = searchParams.get("updates") === "available";
@@ -230,9 +239,11 @@ export default function AgentsHome() {
         .includes(normalizedQuery);
     const matchesMode = modeFilter === "all" || row.display.mode === modeFilter;
     const matchesCategory = categoryFilter === "all" || row.display.category === categoryFilter;
+    const matchesService =
+      serviceFilter === "all" || agentServiceIds(row.display).includes(serviceFilter);
     const matchesSchedule = !scheduledOnly || row.installed?.schedule?.enabled === true;
     const matchesUpdates = !updatesOnly || Boolean(row.installed?.updateAvailable);
-    return matchesQuery && matchesMode && matchesCategory && matchesSchedule && matchesUpdates;
+    return matchesQuery && matchesMode && matchesCategory && matchesService && matchesSchedule && matchesUpdates;
   });
 
   const setLibraryTab = (nextTab: string) => {
@@ -270,6 +281,15 @@ export default function AgentsHome() {
       const next = new URLSearchParams(current);
       if (category === "all") next.delete("category");
       else next.set("category", category);
+      return next;
+    });
+  };
+
+  const setServiceFilter = (service: ServiceId | "all") => {
+    setSearchParams((current) => {
+      const next = new URLSearchParams(current);
+      if (service === "all") next.delete("service");
+      else next.set("service", service);
       return next;
     });
   };
@@ -383,6 +403,17 @@ export default function AgentsHome() {
       label: `${categoryFilter === category ? "✓ " : ""}${titleCase(category)}`,
       onSelect: () => setCategoryFilter(category),
     })),
+    { id: "service-separator", type: "separator" as const },
+    {
+      id: "service-all",
+      label: `${serviceFilter === "all" ? "✓ " : ""}${SERVICE_COPY.filterAll}`,
+      onSelect: () => setServiceFilter("all"),
+    },
+    ...AVAILABLE_SERVICES.map((service) => ({
+      id: `service-${service.id}`,
+      label: `${serviceFilter === service.id ? "✓ " : ""}${SERVICE_COPY.filterLabel(service.title)}`,
+      onSelect: () => setServiceFilter(service.id),
+    })),
     { id: "filter-separator", type: "separator" as const },
     {
       id: "scheduled",
@@ -463,7 +494,12 @@ export default function AgentsHome() {
         </div>
         <div className="mb-2 flex items-center justify-between gap-3 text-xs text-[var(--color-text-muted)]">
           <span>{rows.length} of {sourceRows.length} {source === "hub" ? "hub" : "installed"} agents</span>
-          {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
+          <span className="flex items-center gap-2">
+            {serviceFilter !== "all" ? (
+              <Badge tone="info">{SERVICE_COPY.filterLabel(serviceById(serviceFilter).title)}</Badge>
+            ) : null}
+            {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
+          </span>
         </div>
         {scheduledOnly ? <SchedulesPausedNotice className="mb-3" /> : null}
         {scheduledOnly && scheduledAgents.length > 0 && schedulerRegistered === false ? (
@@ -507,6 +543,7 @@ export default function AgentsHome() {
                       </span>
                     </span>
                     <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
+                    <span className="mt-1 block"><ServiceChips services={agentServiceIds(row.display)} /></span>
                     {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
                   </button>
                   {scheduled && row.installed ? (

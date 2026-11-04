@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { ServiceNotConnectedPanel } from "./ServiceAccess";
+import { ServiceGate, ServiceNotConnectedPanel } from "./ServiceAccess";
 import { createMockAppState, makeMockBridge, renderWithAppState } from "../test/test-utils";
 
 function intuneOnlyTenant(custom = false) {
@@ -58,5 +58,35 @@ describe("service not connected panel", () => {
     expect(within(dialog).getByRole("button", { name: "Copy script" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Check again" })).toBeInTheDocument();
     expect(within(dialog).queryByRole("button", { name: "Continue to Microsoft" })).not.toBeInTheDocument();
+  });
+});
+
+describe("service gate", () => {
+  it("shows the not-connected panel instead of the page when no listed service is connected", async () => {
+    const tenant = { ...intuneOnlyTenant(), grantedScopes: ["graph:SecurityEvents.Read.All"] };
+    renderWithAppState(
+      <ServiceGate anyOf={["intune", "entra"]} feature="Changes">
+        <div>Changes page</div>
+      </ServiceGate>,
+      { route: "/changes", bridge: makeMockBridge({}, createMockAppState({ tenants: [tenant] })) },
+    );
+    expect(
+      await screen.findByRole("heading", { name: "Intune and Entra are not connected for Contoso IT" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Changes page")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Intune" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add Entra" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("renders the page when one listed service is connected", async () => {
+    const tenant = intuneOnlyTenant();
+    renderWithAppState(
+      <ServiceGate anyOf={["intune", "entra"]} feature="Changes">
+        <div>Changes page</div>
+      </ServiceGate>,
+      { route: "/changes", bridge: makeMockBridge({}, createMockAppState({ tenants: [tenant] })) },
+    );
+    expect(await screen.findByText("Changes page")).toBeInTheDocument();
   });
 });

@@ -14,6 +14,8 @@ import {
   mergeGrantedScopes,
   missingPartsForScopes,
   missingServiceCopy,
+  missingServicesForAgent,
+  agentServiceIds,
   notGrantedServiceForScopes,
   parseScope,
   partIdsFor,
@@ -285,5 +287,22 @@ describe("missing service copy", () => {
       serviceMissing: true,
     });
     assert.equal(notGrantedServiceForScopes(peopleOnly, ["User.Read.All"]), undefined);
+  });
+});
+
+describe("agent services", () => {
+  it("uses the declaration or derives services from scopes", () => {
+    assert.deepEqual(agentServiceIds({ services: ["defender"], scopes: [] }), ["defender"]);
+    assert.deepEqual(agentServiceIds({ scopes: ["AuditLog.Read.All"] }), ["entra"]);
+  });
+
+  it("lists only declared services with no part granted", () => {
+    const tenant = { grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"] };
+    assert.deepEqual(
+      missingServicesForAgent(tenant, ["intune", "entra", "defender"]).map((service) => service.id),
+      ["defender"],
+    );
+    assert.deepEqual(missingServicesForAgent({}, ["defender"]), []);
+    assert.deepEqual(missingServicesForAgent({ kind: "sample", grantedScopes: [] }, ["defender"]), []);
   });
 });

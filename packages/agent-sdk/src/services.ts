@@ -765,6 +765,31 @@ export function missingServiceCopy(
   return `This needs ${formatServiceList(labels)}, which ${labels.length === 1 ? "is" : "are"} not granted for ${tenant.displayName ?? "this tenant"}. Add ${labels.length === 1 ? "it" : "them"} in Settings, Tenants.`;
 }
 
+/** Services an agent needs: its declaration, or derived from its scopes. */
+export function agentServiceIds(agent: {
+  services?: readonly ServiceId[];
+  scopes: readonly string[];
+}): ServiceId[] {
+  return agent.services && agent.services.length > 0
+    ? [...agent.services]
+    : servicesForScopes(agent.scopes);
+}
+
+/**
+ * Declared services with no part granted for the tenant, in registry
+ * order. The sample tenant and tenants whose grants were never recorded
+ * have every service. A partly connected service is not missing: its
+ * missing part is consented at run time with the OpenAdminOS app.
+ */
+export function missingServicesForAgent(
+  tenant: GrantSource,
+  services: readonly ServiceId[],
+): ServiceDefinition[] {
+  return AVAILABLE_SERVICES.filter(
+    (service) => services.includes(service.id) && serviceStatus(tenant, service.id) === "missing",
+  );
+}
+
 /** Qualified grants after adding `additions` to the current grants. */
 export function mergeGrantedScopes(
   current: GrantSource,
