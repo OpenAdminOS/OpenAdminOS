@@ -1067,10 +1067,17 @@ export class TenantCheckTimeoutError extends Error {
   }
 }
 
+/** How a tenant's connection was replaced while a check ran. */
+type TenantSuperseded = "reconnected" | "disconnected";
+
 /** The tenant was reconnected or disconnected while a check ran. */
 export class TenantCheckSupersededError extends Error {
-  constructor() {
-    super("The tenant was reconnected or disconnected during the check, so its result was not saved.");
+  constructor(how: TenantSuperseded) {
+    super(
+      how === "reconnected"
+        ? "This tenant was reconnected while the check ran. Run the check again."
+        : "This tenant was disconnected while the check ran, so its result was not saved.",
+    );
     this.name = "TenantCheckSupersededError";
   }
 }
@@ -1541,6 +1548,10 @@ export class AppStateStore {
     {
       progress: TenantCheckProgress;
       controller: AbortController;
+      /** The connection the operation started on. */
+      connectionId: string | undefined;
+      /** Set when a reconnect or disconnect stopped the operation. */
+      superseded?: TenantSuperseded;
       /** Cancel or deadline: ignored once the license result is committed. */
       stop(reason: "cancelled" | "timeout"): void;
     }
@@ -5914,8 +5925,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
 
     // A check that started on the previous connection stops and saves nothing.
-    this.supersedeTenantCheck(tenant.id);
+    this.supersedeTenantCheck(tenant.id, "reconnected", tenant.connectionId);
     if (replaced) await this.forgetReplacedSignIn(replaced, tenant);
+    // One that registered for the previous connection in the meantime too,
+    // so it cannot block this connection's license check.
+    this.supersedeTenantCheck(tenant.id, "reconnected", tenant.connectionId);
 
     // Background probe: detect the tenant's Entra ID tier so Agent Hub
     // can badge incompatible agents. `unknown` is treated as informational
@@ -6094,12 +6108,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /**
    * Stops the operation of a tenant that was reconnected or disconnected.
-   * It is released at once, so a new operation can start.
+   * It is released at once, so a new operation can start. An operation
+   * already on `keepConnectionId` keeps running.
    */
-  private supersedeTenantCheck(tenantId: string): void {
+  private supersedeTenantCheck(
+    tenantId: string,
+    how: TenantSuperseded,
+    keepConnectionId?: string,
+  ): void {
     const entry = this.tenantChecks.get(tenantId);
     if (!entry) return;
+    if (keepConnectionId !== undefined && entry.connectionId === keepConnectionId) return;
     this.tenantChecks.delete(tenantId);
+    entry.superseded = how;
     entry.controller.abort("superseded" satisfies TenantCheckAbort);
   }
 
@@ -6122,6 +6143,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const entry = {
       progress: { tenantId: tenant.id, kind, phase: "checking" } as TenantCheckProgress,
       controller,
+      connectionId: tenant.connectionId,
+      superseded: undefined as TenantSuperseded | undefined,
       stop(reason: "cancelled" | "timeout") {
         if (!operation.committed) controller.abort(reason satisfies TenantCheckAbort);
       },
@@ -6151,7 +6174,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     } catch (error) {
       if (!controller.signal.aborted) throw error;
       const abort = controller.signal.reason as TenantCheckAbort;
-      if (abort === "superseded") throw new TenantCheckSupersededError();
+      if (abort === "superseded") throw new TenantCheckSupersededError(entry.superseded ?? "reconnected");
       const within = deadlineText(deadlineMs);
       if (operation.probing) {
         void this.saveTierProbeOutcome(operation, abortedTierProbe(abort, within), { afterAbort: true })
@@ -6207,7 +6230,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     let saved = false;
     await this.serialize(async () => {
       const persisted = await this.read();
-      if (!persisted.tenants.some((entry) => this.sameConnection(entry, operation))) return;
+      this.assertSameConnection(persisted, operation);
       await this.write({
         ...persisted,
         tenants: persisted.tenants.map((entry) =>
@@ -6221,6 +6244,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   private sameConnection(entry: TenantRecord, operation: TenantOperation): boolean {
     return entry.id === operation.tenantId && entry.connectionId === operation.connectionId;
+  }
+
+  /**
+   * Throws when the tenant was reconnected or disconnected since the
+   * operation started, including in the gap before it registered, which
+   * no supersede reaches. The caller then reports it instead of success.
+   */
+  private assertSameConnection(persisted: PersistedState, operation: TenantOperation): void {
+    const current = persisted.tenants.find((entry) => entry.id === operation.tenantId);
+    if (current && this.sameConnection(current, operation)) return;
+    throw new TenantCheckSupersededError(current ? "reconnected" : "disconnected");
   }
 
   async addSampleTenant(): Promise<AppState> {
@@ -6401,8 +6435,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // Commit point.
       if (operation.signal.aborted && !options.afterAbort) return;
       if ((this.savedTierProbeSeq.get(operation.tenantId) ?? 0) > operation.seq) return;
-      if (!persisted.tenants.some((entry) => this.sameConnection(entry, operation))) return;
-      if (!options.afterAbort) operation.committed = true;
+      if (options.afterAbort) {
+        if (!persisted.tenants.some((entry) => this.sameConnection(entry, operation))) return;
+      } else {
+        this.assertSameConnection(persisted, operation);
+        operation.committed = true;
+      }
       await this.write({
         ...persisted,
         tenants: persisted.tenants.map((entry) =>
@@ -6551,7 +6589,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await this.write(next);
       if (target?.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     });
-    this.supersedeTenantCheck(id);
+    this.supersedeTenantCheck(id, "disconnected");
     await this.officeService.purgeTenant(id);
 
     return this.getAppState();

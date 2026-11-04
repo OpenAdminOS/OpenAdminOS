@@ -130,7 +130,8 @@ async function makeFixture(options: {
     },
     /**
      * Wraps one of the store's private steps. `arm()` holds the next call
-     * until `release()`; `reached` resolves when that call starts.
+     * after it has done its work and until `release()`, so a held read
+     * returns what was stored before. `reached` resolves when it is held.
      */
     gate(name: "read" | "write" | "forgetReplacedSignIn") {
       const target = store as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
@@ -141,11 +142,12 @@ async function makeFixture(options: {
         value: async (...args: unknown[]) => {
           const hold = armed;
           armed = undefined;
+          const result = await original(...args);
           if (hold) {
             hold.reached();
             await hold.gate;
           }
-          return original(...args);
+          return result;
         },
       });
       return {
@@ -884,6 +886,81 @@ describe("a token that arrives after a cancel", () => {
       const tenant = await fixture.tenant();
       assert.deepEqual(tenant?.grantedScopes, OWN.grantedScopes);
       assertTierKept(tenant);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+const RECONNECTED = "This tenant was reconnected while the check ran. Run the check again.";
+
+describe("a reconnect before a check registers", () => {
+  it("Add access reports the reconnect instead of success", async () => {
+    const fixture = await makeFixture({ tenants: [{ ...SHARED, connectionId: "connection-1" }], signIns: [] });
+    const reads = fixture.gate("read");
+    try {
+      // The stored state Add access reads is held until the tenant is
+      // reconnected, so the check starts on the old connection.
+      const held = reads.arm();
+      const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
+      pending.catch(() => undefined);
+      await held.reached;
+      await fixture.store.connectTenant({});
+      await until(async () => (await fixture.store.getAppState()).tenantChecks === undefined);
+      held.release();
+      await assert.rejects(pending, { name: "TenantCheckSupersededError", message: RECONNECTED });
+      const tenant = await fixture.tenant();
+      assert.notEqual(tenant?.connectionId, "connection-1");
+      assert.equal(tenant?.grantedScopes?.includes("graph:SecurityAlert.Read.All"), false);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("a check started on the old connection does not block the new connection's license check", async () => {
+    let calls = 0;
+    const fixture = await makeFixture({
+      tenants: [{ ...SHARED, connectionId: "connection-1" }],
+      signIns: [],
+      // The reconnect signs in at once, Add access on the old connection
+      // waits for its cancel, and the license check signs in at once.
+      interactive: (input) => {
+        calls += 1;
+        if (calls === 2) return waitForAbort(input);
+        return Promise.resolve({
+          account: CONNECTED,
+          tenantId: CONNECTED.tenantId,
+          scopes: [...(input.scopes ?? []), "User.Read", "Organization.Read.All"],
+          accessToken: "token",
+        });
+      },
+      respond: skusResponse,
+      deadlineMs: 3000,
+    });
+    const reads = fixture.gate("read");
+    const forget = fixture.gate("forgetReplacedSignIn");
+    try {
+      const forgetting = forget.arm();
+      const held = reads.arm();
+      const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
+      pending.catch(() => undefined);
+      await held.reached;
+      // The reconnect saves the new connection and stops what was running,
+      // then the old check registers before the new license check starts.
+      const connecting = fixture.store.connectTenant({});
+      await forgetting.reached;
+      held.release();
+      await until(async () =>
+        (await fixture.store.getAppState()).tenantChecks?.[0]?.phase === "sign-in",
+      );
+      forgetting.release();
+      await connecting;
+      await assert.rejects(pending, { name: "TenantCheckSupersededError", message: RECONNECTED });
+      const tenant = await waitFor(async () => {
+        const stored = await fixture.tenant();
+        return stored?.entraTier === "p2" ? stored : undefined;
+      });
+      assert.equal(tenant.tierProbeWarning, undefined);
     } finally {
       await fixture.close();
     }
