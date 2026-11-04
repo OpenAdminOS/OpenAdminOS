@@ -95,6 +95,19 @@ describe("shell chrome", () => {
     expect(screen.queryByText(/www\.intuneautomation\.com/)).not.toBeInTheDocument();
   });
 
+  it("names no MCP hosts when the model is too small to be offered the tools", async () => {
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({
+        mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }),
+        chatToolUse: { available: false, notice: "llama3.2:3b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger." },
+      })),
+    });
+    const status = await screen.findByRole("status", { name: /Local · Ollama/ });
+    expect(status.getAttribute("aria-label")).not.toMatch(/tool queries/);
+  });
+
   it("keeps updater errors and recovery in the sidebar", async () => {
     const user = userEvent.setup();
     const checkForUpdatesNow = vi.fn(async () => ({ status: "checking" as const }));

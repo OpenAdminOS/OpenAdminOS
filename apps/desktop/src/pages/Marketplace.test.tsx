@@ -146,11 +146,14 @@ describe("Marketplace", () => {
     expect(await within(dialog).findByRole("status")).toHaveTextContent("Removed KQL Search. Chat no longer offers its tools.");
   });
 
-  it("says when the selected model is too small for tool use", async () => {
-    render("/marketplace", {
-      chatToolUse: { available: false, notice: "The selected model, llama3.2:3b, is too small for tool use. Installed MCP tools are not offered to it. Choose a larger model in Settings." },
-    });
-    expect(await screen.findByRole("note")).toHaveTextContent("llama3.2:3b, is too small for tool use");
+  it("says when the selected model is too small for tool use, on the page and on each server card", async () => {
+    const notice = "llama3.2:3b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger.";
+    render("/marketplace", { chatToolUse: { available: false, notice } });
+    expect(await screen.findByRole("note")).toHaveTextContent(notice);
+    const mcp = screen.getByRole("region", { name: "MCP tools" });
+    for (const name of ["Microsoft Learn", "KQL Search", "IntuneAutomation"]) {
+      expect(within(mcp).getByRole("button", { name: new RegExp(`^${name}, MCP tool`) })).toHaveTextContent(notice);
+    }
   });
 
   it("keeps the Marketplace browsable in pilot mode with MCP install but no agent install", async () => {
