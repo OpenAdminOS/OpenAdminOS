@@ -46,6 +46,8 @@ before(async () => {
   // Provider detection must not reach a real local Ollama.
   process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
   httpServer = createServer((request, response) => {
+    // The endpoint moved within the same origin.
+    if (request.url === "/old") { response.writeHead(308, { location: "/mcp" }).end(); return; }
     void (async () => {
       const server = buildServer();
       const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
@@ -145,6 +147,32 @@ describe("MCP host", () => {
       await assert.rejects(host.connect({ id: "gone", name: "Gone", url: `http://127.0.0.1:${port}/mcp` }), (error: unknown) =>
         error instanceof McpHostError && error.code === "unreachable" && /Gone could not be reached at 127\.0\.0\.1/.test(error.message));
     } finally { await host.closeAll(); }
+  });
+
+  it("follows a same-origin redirect and refuses one to another host", async () => {
+    let foreignRequests = 0;
+    const foreign = createServer((_request, response) => { foreignRequests += 1; response.writeHead(500).end(); });
+    await new Promise<void>((resolve) => foreign.listen(0, "127.0.0.1", resolve));
+    const foreignPort = (foreign.address() as AddressInfo).port;
+    const mcpPort = new URL(endpoint.url).port;
+    const redirector = createServer((_request, response) => {
+      response.writeHead(307, { location: `http://localhost:${foreignPort}/mcp` }).end();
+    });
+    await new Promise<void>((resolve) => redirector.listen(0, "127.0.0.1", resolve));
+    const redirectPort = (redirector.address() as AddressInfo).port;
+    const host = new McpHost({ clientVersion: "test" });
+    try {
+      const moved = await host.connect({ id: "moved", name: "Moved", url: `http://127.0.0.1:${mcpPort}/old` });
+      assert.ok(moved.tools.length > 0);
+
+      await assert.rejects(host.connect({ id: "away", name: "Away", url: `http://127.0.0.1:${redirectPort}/mcp` }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "redirect" && /redirected to localhost/.test(error.message));
+      assert.equal(foreignRequests, 0);
+    } finally {
+      await host.closeAll();
+      await new Promise<void>((resolve) => redirector.close(() => resolve()));
+      await new Promise<void>((resolve) => foreign.close(() => resolve()));
+    }
   });
 
   it("reports an HTTP error status", async () => {

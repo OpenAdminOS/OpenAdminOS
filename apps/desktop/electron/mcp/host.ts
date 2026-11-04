@@ -31,7 +31,7 @@ export interface McpCallResult {
   truncated: boolean;
 }
 
-export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool";
+export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "redirect";
 
 export class McpHostError extends Error {
   constructor(readonly code: McpHostErrorCode, message: string) {
@@ -88,7 +88,7 @@ export class McpHost {
     this.connectTimeoutMs = options.connectTimeoutMs ?? 15_000;
     this.callTimeoutMs = options.callTimeoutMs ?? 30_000;
     this.maxOutputChars = options.maxOutputChars ?? 12_000;
-    this.fetch = cappedFetch(options.fetch ?? fetch, options.maxResponseBytes ?? 2 * 1024 * 1024);
+    this.fetch = sameOriginFetch(cappedFetch(options.fetch ?? fetch, options.maxResponseBytes ?? 2 * 1024 * 1024));
   }
 
   /** Open a fresh session and list the server's tools. */
@@ -244,6 +244,29 @@ function clip(text: string, limit: number): string {
 }
 
 /** Stops reading any single response after `maxBytes`. */
+/**
+ * Follows a redirect only within the server's own origin. A redirect to
+ * another host would resend the tool params there, so it is refused and
+ * never requested.
+ */
+function sameOriginFetch(base: FetchLike): FetchLike {
+  return async (url, init) => {
+    let target = new URL(url);
+    for (let hop = 0; hop <= 3; hop += 1) {
+      const response = await base(target, { ...init, redirect: "manual" });
+      const location = response.headers.get("location");
+      if (![301, 302, 303, 307, 308].includes(response.status) || !location) return response;
+      await response.body?.cancel().catch(() => undefined);
+      const next = new URL(location, target);
+      if (next.origin !== target.origin) {
+        throw new McpHostError("redirect", `${target.hostname} redirected to ${next.hostname}. OpenAdminOS does not follow redirects to another host, so nothing was sent there.`);
+      }
+      target = next;
+    }
+    throw new McpHostError("redirect", `${target.hostname} redirected too many times. Nothing more was sent.`);
+  };
+}
+
 function cappedFetch(base: FetchLike, maxBytes: number): FetchLike {
   return async (url, init) => {
     const response = await base(url, init);
