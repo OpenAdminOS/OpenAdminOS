@@ -24,6 +24,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- The browser page shown after Microsoft sign-in now carries the OpenAdminOS mark, follows the system light or dark theme, shows the close-tab shortcut, and on failure shows the error code and message Microsoft returned instead of a generic note.
 - Runs open on a full, centered run page instead of a live run modal or a side drawer. A status card shows a live headline, step progress, tenant, provider, model, tokens, cost, and where data goes; running work shows a step timeline with the model's reasoning as it streams and the report as it is written; finished runs show the report in reading type, the result data, and collapsible run details.
 - The website, docs, README, installer artwork, and social images describe OpenAdminOS as local-first agents for IT admins instead of a Microsoft 365-only tool. The homepage hero leads with the admin backlog agents take on and the guarantees around them (local models by default, every change approved, every run logged). Microsoft 365, Intune, and Entra are listed as supported today, and the homepage shows which services are available, which only receive run reports, and which are planned.
 - Record the open-core model in the spec: the desktop app stays MIT and fully functional on its own, optional paid team features are built separately, and the trust rules they must follow. Also record the direction for iOS and Android companion apps. No application behavior changed.

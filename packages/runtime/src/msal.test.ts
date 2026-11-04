@@ -102,6 +102,46 @@ describe("interactive tenant sign-in listener", () => {
     });
     assert.equal(result.accessToken, "test-token");
   });
+
+  it("serves branded result pages and escapes the error Microsoft returns", async () => {
+    const client = {
+      acquireTokenInteractive: async (request: InteractiveRequest) => {
+        const authorization = request.loopbackClient!.listenForAuthCode(
+          request.successTemplate,
+          request.errorTemplate,
+        );
+        let redirectUri: string | undefined;
+        const readyDeadline = Date.now() + 2_000;
+        while (!redirectUri && Date.now() < readyDeadline) {
+          try {
+            redirectUri = request.loopbackClient!.getRedirectUri();
+          } catch {
+            await new Promise((resolve) => setTimeout(resolve, 5));
+          }
+        }
+        assert.ok(redirectUri);
+        const success = await (await fetch(`${redirectUri}/`)).text();
+        assert.match(success, /Sign-in complete/);
+
+        const description = encodeURIComponent("AADSTS65004: <script>x</script>\r\nTrace ID: abc");
+        const failure = await fetch(`${redirectUri}/?error=access_denied&error_description=${description}`);
+        assert.match(failure.headers.get("content-type") ?? "", /text\/html/);
+        const html = await failure.text();
+        assert.match(html, /Sign-in did not complete/);
+        assert.match(html, /<strong>access_denied<\/strong>AADSTS65004: &#60;script&#62;x&#60;\/script&#62;/);
+        assert.doesNotMatch(html, /<script>x/);
+        assert.doesNotMatch(html, /Trace ID/);
+        assert.doesNotMatch(html, /oa:error-detail/);
+
+        const response = await authorization;
+        request.loopbackClient!.closeServer();
+        assert.equal(response.error, "access_denied");
+        return { accessToken: "unused" } as AuthenticationResult;
+      },
+    } as unknown as PublicClientApplication;
+
+    await runInteractiveFlow({ client, openBrowser: async () => undefined });
+  });
 });
 
 describe("incremental sign-in lifecycle", () => {
