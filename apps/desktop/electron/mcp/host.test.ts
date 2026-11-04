@@ -202,6 +202,88 @@ describe("MCP host", () => {
   });
 });
 
+describe("MCP host connection paths", () => {
+  async function serve(handler: Parameters<typeof createServer>[1]): Promise<{ url: string; close: () => Promise<void> }> {
+    const server = createServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    return {
+      url: `http://127.0.0.1:${port}/mcp`,
+      close: () => new Promise<void>((resolve) => { server.closeAllConnections(); server.close(() => resolve()); }),
+    };
+  }
+  async function mcpRequest(build: () => McpServer, request: Parameters<NonNullable<Parameters<typeof createServer>[1]>>[0], response: Parameters<NonNullable<Parameters<typeof createServer>[1]>>[1]) {
+    const server = build();
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    response.on("close", () => { void transport.close(); void server.close(); });
+    await server.connect(transport);
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    const raw = Buffer.concat(chunks).toString("utf8");
+    await transport.handleRequest(request, response, raw ? JSON.parse(raw) : undefined);
+  }
+
+  it("cancels a call when the signal aborts", async () => {
+    const host = new McpHost({ clientVersion: "test" });
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 50);
+      const started = Date.now();
+      await assert.rejects(host.callTool(endpoint, "slow", {}, controller.signal), (error: unknown) =>
+        (error as { name?: string }).name === "AbortError" && !(error instanceof McpHostError));
+      assert.ok(Date.now() - started < 350, "the call stops before the tool finishes");
+    } finally { await host.closeAll(); }
+  });
+
+  it("opens a new session after a failed call", async () => {
+    let failNext = false;
+    let initializations = 0;
+    const flaky = await serve((request, response) => {
+      if (failNext && request.method === "POST") { failNext = false; response.writeHead(503).end(); return; }
+      void (async () => {
+        const chunks: Buffer[] = [];
+        for await (const chunk of request) chunks.push(chunk as Buffer);
+        const raw = Buffer.concat(chunks).toString("utf8");
+        if (raw.includes('"method":"initialize"')) initializations += 1;
+        const server = buildServer();
+        const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+        response.on("close", () => { void transport.close(); void server.close(); });
+        await server.connect(transport);
+        await transport.handleRequest(request, response, raw ? JSON.parse(raw) : undefined);
+      })();
+    });
+    const host = new McpHost({ clientVersion: "test" });
+    const flakyEndpoint = { id: "flaky", name: "Flaky", url: flaky.url };
+    try {
+      await host.connect(flakyEndpoint);
+      failNext = true;
+      await assert.rejects(host.callTool(flakyEndpoint, "search_docs", { query: "a" }), (error: unknown) =>
+        error instanceof McpHostError && /HTTP 503/.test(error.message));
+      const result = await host.callTool(flakyEndpoint, "search_docs", { query: "again" });
+      assert.equal(result.text, "Result for again");
+      assert.equal(initializations, 2);
+    } finally { await host.closeAll(); await flaky.close(); }
+  });
+
+  it("times out a connect that never answers", async () => {
+    const silent = await serve(() => { /* never answers */ });
+    const host = new McpHost({ clientVersion: "test", connectTimeoutMs: 200 });
+    try {
+      await assert.rejects(host.connect({ id: "silent", name: "Silent", url: silent.url }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "timeout" && /Silent did not answer within 1 second\./.test(error.message));
+    } finally { await host.closeAll(); await silent.close(); }
+  });
+
+  it("reports a server that offers no tools as a designed install error", async () => {
+    const empty = await serve((request, response) => { void mcpRequest(() => new McpServer({ name: "empty", version: "1.0.0" }), request, response); });
+    const host = new McpHost({ clientVersion: "test" });
+    try {
+      await assert.rejects(host.connect({ id: "empty", name: "Empty", url: empty.url }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "server-error" && /Empty connected but offers no tools\. Nothing was installed\./.test(error.message));
+    } finally { await host.closeAll(); await empty.close(); }
+  });
+});
+
 describe("MCP catalog", () => {
   it("lists three public read-only servers over HTTPS without sign-in", () => {
     assert.deepEqual(MCP_CATALOG.map((entry) => mcpHost(entry.url)), [

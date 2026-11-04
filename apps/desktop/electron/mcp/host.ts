@@ -200,6 +200,9 @@ export class McpHost {
     });
     try {
       await client.connect(transport, { timeout: this.connectTimeoutMs });
+      if (!client.getServerCapabilities()?.tools) {
+        throw new McpHostError("server-error", `${endpoint.name} connected but offers no tools. Nothing was installed.`);
+      }
       const tools: McpToolInfo[] = [];
       let cursor: string | undefined;
       for (let page = 0; page < 4 && tools.length < MCP_MAX_TOOLS_PER_SERVER; page += 1) {
@@ -254,7 +257,8 @@ function describeError(error: unknown, endpoint: McpEndpoint, timeoutMs: number)
   if (error instanceof McpHostError) return error;
   const host = new URL(endpoint.url).hostname;
   if (isTimeout(error)) {
-    return new McpHostError("timeout", `${endpoint.name} did not answer within ${Math.round(timeoutMs / 1000)} seconds. Retry, or ask a narrower question.`);
+    const seconds = Math.max(1, Math.round(timeoutMs / 1000));
+    return new McpHostError("timeout", `${endpoint.name} did not answer within ${seconds} second${seconds === 1 ? "" : "s"}. Retry, or ask a narrower question.`);
   }
   const status = (error as { code?: unknown })?.code;
   if (typeof status === "number" && status >= 400 && status < 600) {
