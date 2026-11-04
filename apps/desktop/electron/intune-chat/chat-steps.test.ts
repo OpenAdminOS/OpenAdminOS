@@ -42,7 +42,6 @@ describe("question classification", () => {
     for (const question of [
       "What does the microsoft learn say about defender for macos?",
       "What is Windows Autopatch?",
-      "How long is the Intune compliance grace period?",
       "Write a KQL query that lists failed sign-ins in the last 24 hours",
       "Microsoft Learn on FileVault escrow requirements",
     ]) assert.equal(kind(question), "docs", question);
@@ -59,6 +58,23 @@ describe("question classification", () => {
     for (const question of ["Which of our macOS devices are noncompliant, and what does Microsoft Learn recommend for them?", "How do I fix our noncompliant Windows devices?"]) {
       assert.equal(kind(question), "mixed", question);
     }
+    // The grace period is set per compliance policy, so the tenant's own value matters too.
+    assert.equal(kind("How long is the Intune compliance grace period?"), "mixed");
+    // Questions that only sound general never skip tenant evidence when they mention tenant resources.
+    for (const question of [
+      "Can I see the noncompliant devices?",
+      "Describe the stale devices",
+      "Explain why Bob's laptop is noncompliant",
+      "Why does Bob's device show noncompliant?",
+      "What is the oldest device?",
+      "What's the largest group?",
+      "What is the last sign-in for jdoe?",
+      "What's the default compliance policy?",
+      "What's the Autopilot profile for HR?",
+      "Do any devices fail the BitLocker requirements?",
+      "Are all devices meeting the minimum requirements?",
+      "Is there a policy that runs a PowerShell script on Macs?",
+    ]) assert.notEqual(kind(question), "docs", question);
   });
 });
 

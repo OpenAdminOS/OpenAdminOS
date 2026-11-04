@@ -455,7 +455,13 @@ const AUTHORING_REQUEST =
   /^(?:write|draft|give me|suggest|find|is there|create|build)\b[^?]*\b(?:kql|kusto|queries|query|scripts?|powershell|samples?|examples?)\b/;
 /** Asks what documentation or a named reference says. */
 const DOCS_REFERENCE =
-  /\b(?:documentation|docs|microsoft learn|learn\.microsoft\.com|best practices?|according to|recommended|recommendation|requirements?|prerequisites?)\b/;
+  /\b(?:documentation|docs|microsoft learn|learn\.microsoft\.com|according to)\b/;
+/** Product guidance words. They also appear in tenant questions ("Do any devices fail the BitLocker requirements?"). */
+const GUIDANCE_REFERENCE = /\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?)\b/;
+/** Authoring requests that start like a tenant lookup ("Is there a policy that runs a script on Macs?"). */
+const LOOKUP_START = /^(?:is there|find)\b/;
+/** A definition question about a product or feature: "What is Windows Autopatch?", "What is a compliance policy?". Not "What is the oldest device?". */
+const DEFINITION = /^(?:what is|what's|what are)\s+(?:an?\s+)?(?!(?:the|our|my|any|all|these|those|this|that|we|us)\b)\S/;
 /** A how-to or how-it-works request. */
 const HOW_TO =
   /^(?:how (?:do|does|can|should|would|to)|how (?:long|often) (?:is|does|do|will|should|can)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can))\b/;
@@ -470,10 +476,10 @@ const TENANT_STATE = /\b(?:state of|status of|assigned to|enrolled in)\b/;
 
 /**
  * Decides whether a question needs the tenant. Docs is a positive label
- * only: it needs a docs signal (a named source, a documentation
- * reference, an authoring or how-to request, or "what is" a product or
- * feature without a definite plural or tenant-state word) and no tenant
- * reference. Docs questions never touch the tenant. A docs signal with a
+ * only: it needs an explicit docs signal (a named source, a documentation
+ * reference, an authoring request or a definition question), or a weak one (how-to, guidance
+ * words, "what is" without a tenant-state word) with no tenant resources
+ * planned, and no tenant reference. Docs questions never touch the tenant. A docs signal with a
  * tenant reference is mixed. A general-sounding question without a docs
  * signal ("What are the stale devices?") is ambiguous: with planned
  * resources it is mixed, which still requires tenant evidence. When in
@@ -486,9 +492,19 @@ export function classifyChatQuestion(
   const trimmed = question.trim();
   const lower = trimmed.toLowerCase();
   const tenantReference = TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
-  const docsSignal = input.namesSource || DOCS_REFERENCE.test(lower) || AUTHORING_REQUEST.test(lower) || HOW_TO.test(lower) ||
+  // An explicit signal names documentation or asks for a query or script.
+  // A weak signal only sounds general: how-to, "what is" or guidance words
+  // also start many tenant questions ("What is the oldest device?", "Can I
+  // see the noncompliant devices?"). A weak signal is docs only when the
+  // planner found no tenant resources in the question; otherwise it is
+  // mixed, which still requires tenant evidence.
+  const explicitDocs = input.namesSource || DOCS_REFERENCE.test(lower) ||
+    (AUTHORING_REQUEST.test(lower) && !LOOKUP_START.test(lower)) ||
+    (DEFINITION.test(lower) && !STATE_WORDS.test(lower));
+  const weakDocs = AUTHORING_REQUEST.test(lower) || GUIDANCE_REFERENCE.test(lower) || HOW_TO.test(lower) ||
     (WHAT_IS.test(lower) && !STATE_WORDS.test(lower));
-  if (docsSignal) return tenantReference ? "mixed" : "docs";
+  if (explicitDocs) return tenantReference ? "mixed" : "docs";
+  if (weakDocs) return tenantReference || input.plannedResources.length > 0 ? "mixed" : "docs";
   if (!tenantReference && GENERAL_QUESTION_START.test(lower) && input.plannedResources.length > 0) return "mixed";
   return "tenant";
 }

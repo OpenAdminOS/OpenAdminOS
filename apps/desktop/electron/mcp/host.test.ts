@@ -357,8 +357,8 @@ describe("MCP installs in app state", () => {
     }));
     const prompts: string[] = [];
     const replies = [
-      JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "Intune compliance grace period" } }),
-      JSON.stringify({ final: true, answer: "The grace period is set per noncompliance action." }),
+      JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "Windows Autopatch" } }),
+      JSON.stringify({ final: true, answer: "Windows Autopatch is a cloud service that automates Windows updates." }),
     ];
     const store = new AppStateStore({
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
@@ -373,17 +373,17 @@ describe("MCP installs in app state", () => {
     });
     try {
       await store.installMcpServer("test-docs");
-      const result = await store.sendIntuneChatMessage({ content: "How long is the Intune compliance grace period?" });
-      assert.equal(result.assistantMessage.content, "The grace period is set per noncompliance action.");
+      const result = await store.sendIntuneChatMessage({ content: "What is Windows Autopatch?" });
+      assert.equal(result.assistantMessage.content, "Windows Autopatch is a cloud service that automates Windows updates.");
       const trace = result.assistantMessage.toolTrace?.find((entry) => entry.mcpSource);
       assert.equal(trace?.mcpSource?.host, "127.0.0.1");
       assert.match(trace!.resultSummary, /Test Docs answered from 127\.0\.0\.1/);
-      assert.ok(prompts.some((prompt) => /Result for Intune compliance grace period/.test(prompt)));
+      assert.ok(prompts.some((prompt) => /Result for Windows Autopatch/.test(prompt)));
 
       // A disabled server offers nothing to Chat.
       await store.setMcpServerEnabled("test-docs", false);
       prompts.length = 0;
-      const disabled = await store.sendIntuneChatMessage({ content: "How long is the Intune compliance grace period?" });
+      const disabled = await store.sendIntuneChatMessage({ content: "What is Windows Autopatch?" });
       assert.equal(disabled.assistantMessage.toolTrace?.some((entry) => entry.mcpSource) ?? false, false);
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
