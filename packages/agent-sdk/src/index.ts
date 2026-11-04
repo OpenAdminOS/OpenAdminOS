@@ -3630,6 +3630,12 @@ export interface RunLlmApi {
   readonly available: boolean;
   readonly defaultModel?: string;
   /**
+   * `stream()` yields text as the model writes it. Without it the adapter
+   * yields the reply once at the end (Codex CLI), so callers that stream
+   * only for live text use `complete()` instead.
+   */
+  readonly streamsIncrementally?: boolean;
+  /**
    * Caller MUST check `available` first. When `available` is `false` both
    * `complete()` and `stream()` will throw before any I/O is performed.
    */

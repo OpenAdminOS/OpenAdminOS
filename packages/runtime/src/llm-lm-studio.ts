@@ -73,6 +73,7 @@ export function createLmStudioLlm(
   return {
     available: true,
     defaultModel,
+    streamsIncrementally: true,
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       const model = opts.model ?? defaultModel;
       if (!model) {

@@ -126,6 +126,8 @@ process.stdout.write(JSON.stringify({type:"turn.completed",usage:{input_tokens:1
     } else { await writeFile(binaryPath, script); await chmod(binaryPath, 0o755); }
     await writeFile(join(root, "config.toml"), 'cli_auth_credentials_store = "keyring"\n[mcp_servers.private]\ncommand = "must-not-run"\n');
     const llm = createCodexLlm({ binaryPath, homePath: root });
+    // codex exec --json sends the reply as one item.completed event, so callers do not stream it live.
+    assert.equal(llm.streamsIncrementally, undefined);
     const response = await llm.complete({ prompt: 'Review supplied evidence only.' });
     assert.deepEqual(response.tokenUsage, { promptTokens: 100, completionTokens: 20, totalTokens: 120 });
     const chunks = [];

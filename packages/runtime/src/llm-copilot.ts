@@ -31,7 +31,7 @@ export async function probeCopilotLlm(options: CopilotProviderOptions = {}): Pro
 
 export function createCopilotLlm(options: CopilotProviderOptions = {}): RunLlmApi {
   return {
-    available: true, defaultModel: options.defaultModel,
+    available: true, defaultModel: options.defaultModel, streamsIncrementally: true,
     async complete(input) {
       let last: LlmStreamChunk | undefined;
       for await (const chunk of this.stream(input)) last = chunk;

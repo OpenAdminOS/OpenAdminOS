@@ -116,6 +116,7 @@ export function createClaudeCodeLlm(
   return {
     available: true,
     defaultModel,
+    streamsIncrementally: true,
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       const binaryPath = await binaryPathPromise;
       const tempDir = await mkdtemp(join(tmpdir(), "openadminos-claude-code-"));

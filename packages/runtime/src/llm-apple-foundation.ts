@@ -86,6 +86,7 @@ export function createAppleFoundationLlm(
   return {
     available: true,
     defaultModel,
+    streamsIncrementally: true,
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       let last: LlmStreamChunk | undefined;
       for await (const chunk of this.stream(opts)) {
