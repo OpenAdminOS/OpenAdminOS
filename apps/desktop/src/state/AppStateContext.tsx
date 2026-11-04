@@ -523,6 +523,8 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     await api.cancelConnectTenant();
   }, []);
 
+  // TODO(services-ui): expose refreshTenantGrants (Check again for an own
+  // registration) here when the per-service settings step adds its button.
   const addTenantAccess = useCallback(
     async (tenantId: string, partIds: string[]) => {
       const api = getOpenAdminOSApi();

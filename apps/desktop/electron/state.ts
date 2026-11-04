@@ -17,6 +17,8 @@ import {
   createLmStudioLlm,
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
+  GRAPH_DEFAULT_SCOPE,
+  scopesFromAuthenticationResult,
   authorityForDirectory,
   createMsalClient,
   defaultClientId,
@@ -178,7 +180,7 @@ import {
   type WhatsAppWebSendResult,
   type WhatsAppWebStatus,
 } from "@openadminos/agent-sdk";
-import type { PublicClientApplication } from "@azure/msal-node";
+import { InteractionRequiredAuthError, type PublicClientApplication } from "@azure/msal-node";
 import {
   WHATSAPP_WEB_CONNECTOR_ID,
   getWhatsAppWebClient,
@@ -983,6 +985,26 @@ function requireClientId(value: string): string {
     );
   }
   return trimmed;
+}
+
+/** Own registrations sign in with every permission the app was granted. */
+const CUSTOM_REGISTRATION_SCOPES = [GRAPH_DEFAULT_SCOPE, "offline_access"];
+
+/** Check again found the same permissions as before. */
+export class TenantGrantsUnchangedError extends Error {
+  constructor() {
+    super("Microsoft returned no new permissions. Admin consent can take a minute to appear.");
+    this.name = "TenantGrantsUnchangedError";
+  }
+}
+
+function isInteractionRequired(error: unknown): boolean {
+  if (error instanceof InteractionRequiredAuthError) return true;
+  // acquireTokenSilent rewrites these into plain errors with recovery text.
+  return (
+    error instanceof Error &&
+    (error.message.includes("is no longer valid") || error.message.includes("No cached account"))
+  );
 }
 
 function qualifyStoredGrants(entries: readonly unknown[]): string[] {
@@ -5478,8 +5500,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
       : { kind: "openadminos", clientId: defaultClientId() };
     const client = this.msalClientFor(registration);
-    // The baseline sign-in scopes plus the chosen parts, deduplicated.
-    const scopes = toResourceScopes(requestedScopes(options.partIds ?? []));
+    // An own registration signs in with everything the app was granted and
+    // its services follow from the token. The OpenAdminOS app asks for the
+    // baseline sign-in scopes plus the chosen parts, deduplicated.
+    const scopes =
+      registration.kind === "custom"
+        ? CUSTOM_REGISTRATION_SCOPES
+        : toResourceScopes(requestedScopes(options.partIds ?? []));
     let result;
     try {
       result = await this.interactiveSignIn({
@@ -5519,7 +5546,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       addedAt,
       lastUsedAt: addedAt,
       // Only what the token carries counts as granted.
-      grantedScopes: grantsFromTokenScopes(result.scopes),
+      grantedScopes: grantsFromTokenScopes(scopesFromAuthenticationResult(result)),
       appRegistration: registration,
     };
 
@@ -5641,6 +5668,71 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       );
       await this.write({ ...current, tenants });
     });
+    return this.getAppState();
+  }
+
+  /**
+   * Check again for an own registration: get a fresh `.default` token and
+   * replace the stored grants with what it carries. Falls back to an
+   * interactive sign-in when the refresh token cannot be used.
+   */
+  async refreshTenantGrants(tenantId: string): Promise<AppState> {
+    const persisted = await this.read();
+    const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
+    if (!tenant) {
+      throw new Error("Tenant not found. Refresh Settings and try again.");
+    }
+    if (tenant.kind === "sample") {
+      throw new Error("The sample tenant already includes every service.");
+    }
+    if (tenant.appRegistration?.kind !== "custom") {
+      throw new Error(
+        "Check again applies to your own app registration. Use Add access in Settings, Tenants for the OpenAdminOS app.",
+      );
+    }
+    const client = this.msalClientForTenant(tenant);
+    let result;
+    try {
+      result = await acquireTokenSilent({
+        client,
+        homeAccountId: tenant.homeAccountId,
+        scopes: CUSTOM_REGISTRATION_SCOPES,
+        forceRefresh: true,
+      });
+    } catch (silentError) {
+      if (!isInteractionRequired(silentError)) {
+        throw new Error(humanizeMsalError(silentError, tenant.appRegistration));
+      }
+      try {
+        result = await this.interactiveSignIn({
+          client,
+          scopes: CUSTOM_REGISTRATION_SCOPES,
+          openBrowser: this.openBrowser,
+          timeoutMs: 300_000,
+        });
+      } catch (error) {
+        throw new Error(humanizeMsalError(error, tenant.appRegistration));
+      }
+    }
+    const grants = grantsFromTokenScopes(scopesFromAuthenticationResult(result));
+    const previous = new Set((tenant.grantedScopes ?? []).map(qualifyScope));
+    if (
+      tenant.grantedScopes !== undefined &&
+      grants.length === previous.size &&
+      grants.every((grant) => previous.has(grant))
+    ) {
+      throw new TenantGrantsUnchangedError();
+    }
+    await this.serialize(async () => {
+      const current = await this.read();
+      const tenants = current.tenants.map((entry) =>
+        entry.id === tenantId ? { ...entry, grantedScopes: grants } : entry,
+      );
+      await this.write({ ...current, tenants });
+    });
+    void this.probeEntraTier({ ...tenant, grantedScopes: grants }, { force: true }).catch(
+      () => undefined,
+    );
     return this.getAppState();
   }
 

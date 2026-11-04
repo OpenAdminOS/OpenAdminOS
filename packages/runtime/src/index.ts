@@ -121,12 +121,14 @@ export {
   type ScriptAgentModuleOptions,
 } from "./script-agent.js";
 export { renderTemplate, renderDeep } from "./template-engine.js";
+export { scopesFromAccessToken, scopesFromAuthenticationResult } from "./token-scopes.js";
 export {
   acquireTokenSilent,
   createMsalClient,
   DEFAULT_AUTHORITY,
   DEFAULT_SCOPES,
   GRAPH_CLI_CLIENT_ID,
+  GRAPH_DEFAULT_SCOPE,
   OPENADMINOS_CLIENT_ID,
   defaultClientId,
   authorityForDirectory,

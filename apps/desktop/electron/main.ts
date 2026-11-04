@@ -6457,6 +6457,12 @@ function registerIpcHandlers() {
       );
     }),
   );
+  ipcMain.handle(
+    "openadminos:refresh-tenant-grants",
+    handleTrusted((_event, tenantId: unknown) =>
+      store.refreshTenantGrants(requireBoundedString(tenantId, "tenantId", 256)),
+    ),
+  );
   ipcMain.handle("openadminos:add-sample-tenant", handleTrusted(() =>
     store.addSampleTenant(),
   ));

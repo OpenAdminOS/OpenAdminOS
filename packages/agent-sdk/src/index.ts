@@ -2826,6 +2826,11 @@ export interface OpenAdminOSApi {
   connectTenant(options?: ConnectTenantOptions): Promise<AppState>;
   /** Consent to more service parts for a tenant and merge the new grants. */
   addTenantAccess(tenantId: string, partIds: string[]): Promise<AppState>;
+  /**
+   * Check again for an own app registration: read the permissions a fresh
+   * token carries and replace the tenant's grants with them.
+   */
+  refreshTenantGrants(tenantId: string): Promise<AppState>;
   /** Add or reactivate the built-in fictional tenant. This is idempotent. */
   addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;

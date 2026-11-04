@@ -271,13 +271,11 @@ describe("contextual tenant setup", () => {
       screen.getByLabelText(/Directory \(tenant\) ID/i),
       "contoso.onmicrosoft.com",
     );
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       screen.getByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
 
     expect(connectTenant).toHaveBeenCalledWith({
-      partIds: INTUNE_PARTS,
       appRegistration: {
         clientId: "d1de0a94-f67a-421d-8804-a235955ffd69",
         directoryTenantId: "contoso.onmicrosoft.com",
@@ -640,10 +638,8 @@ describe("contextual tenant setup", () => {
     await user.click(await screen.findByRole("radio", { name: "Your own app registration" }));
     expect(screen.getByRole("radio", { name: /Contoso admin app/ })).toBeChecked();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
     expect(connectTenant).toHaveBeenLastCalledWith({
-      partIds: INTUNE_PARTS,
       appRegistration: {
         clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
         directoryTenantId: "contoso.onmicrosoft.com",
@@ -674,10 +670,8 @@ describe("contextual tenant setup", () => {
       "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     );
     await user.type(screen.getByLabelText(/Label \(optional\)/), "Fabrikam app");
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
     expect(connectTenant).toHaveBeenLastCalledWith({
-      partIds: INTUNE_PARTS,
       appRegistration: { clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", label: "Fabrikam app" },
     });
   });
@@ -696,13 +690,11 @@ describe("contextual tenant setup", () => {
       screen.getByLabelText(/Application \(client\) ID/i),
       "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     );
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Microsoft could not find your app registration.",
     );
     const expected = {
-      partIds: INTUNE_PARTS,
       appRegistration: { clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
     };
 

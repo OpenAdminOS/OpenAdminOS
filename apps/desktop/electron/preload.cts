@@ -463,6 +463,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:connect-tenant", options),
   addTenantAccess: (tenantId, partIds) =>
     ipcRenderer.invoke("openadminos:add-tenant-access", tenantId, partIds),
+  refreshTenantGrants: (tenantId) =>
+    ipcRenderer.invoke("openadminos:refresh-tenant-grants", tenantId),
   addSampleTenant: () => ipcRenderer.invoke("openadminos:add-sample-tenant"),
   cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>

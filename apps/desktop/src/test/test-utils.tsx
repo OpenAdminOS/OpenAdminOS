@@ -662,6 +662,7 @@ export function makeMockBridge(
     ),
     connectTenant: vi.fn(async () => appState),
     addTenantAccess: vi.fn(async () => appState),
+    refreshTenantGrants: vi.fn(async () => appState),
     addSampleTenant: vi.fn(async () => appState),
     cancelConnectTenant: vi.fn(async () => undefined),
     setActiveTenant: vi.fn(async (id: string) =>

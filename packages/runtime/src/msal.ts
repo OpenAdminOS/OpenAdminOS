@@ -61,6 +61,13 @@ export function authorityForDirectory(directoryTenantId?: string): string {
 // names, reasons and permission IDs live in the agent-sdk service registry.
 export const DEFAULT_SCOPES = toResourceScopes(BASELINE_SCOPES);
 
+/**
+ * Own app registrations sign in with every permission the app was granted.
+ * The granted set is then read from the token, see
+ * `scopesFromAuthenticationResult`.
+ */
+export const GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default";
+
 const SUCCESS_TEMPLATE = `<!doctype html>
 <html lang="en">
   <head>
@@ -329,6 +336,8 @@ export async function acquireTokenSilent(input: {
   client: PublicClientApplication;
   homeAccountId: string;
   scopes?: string[];
+  /** Skip the cached access token, for example after admin consent changed. */
+  forceRefresh?: boolean;
 }): Promise<AuthenticationResult> {
   const account = await input.client
     .getTokenCache()
@@ -342,6 +351,7 @@ export async function acquireTokenSilent(input: {
   const request: SilentFlowRequest = {
     account,
     scopes: input.scopes ?? DEFAULT_SCOPES,
+    ...(input.forceRefresh ? { forceRefresh: true } : {}),
   };
   try {
     const result = await input.client.acquireTokenSilent(request);

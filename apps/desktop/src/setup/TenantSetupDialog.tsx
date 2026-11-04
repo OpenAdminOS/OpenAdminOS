@@ -291,7 +291,7 @@ function PermissionsStep({
   const blockedReason =
     choice === null
       ? SETUP_COPY.chooseSignInReason
-      : selectedPartIds.length === 0
+      : choice === "openadminos" && selectedPartIds.length === 0
         ? SETUP_COPY.selectServiceReason
       : ownRegistration && ownRegistration.clientId.length === 0
         ? SETUP_COPY.clientIdRequiredReason
@@ -669,10 +669,15 @@ function PermissionsStep({
             aria-describedby={blockedReason ? "setup-approve-blocked-reason" : undefined}
             disabled={scopes === null || scopesError !== null || blockedReason !== null}
             onClick={() =>
-              onConnect({
-                partIds: selectedPartIds,
-                ...(ownRegistration ? { appRegistration: ownRegistration } : {}),
-              })
+              onConnect(
+                // An own registration signs in with what the app was granted,
+                // so the services only shape the setup script for it.
+                // TODO(services-ui): hide the picker for own registration
+                // sign-in and show the granted services after connect.
+                ownRegistration
+                  ? { appRegistration: ownRegistration }
+                  : { partIds: selectedPartIds },
+              )
             }
           >
             Approve {selectedScopeCount} read scopes and continue to Microsoft
