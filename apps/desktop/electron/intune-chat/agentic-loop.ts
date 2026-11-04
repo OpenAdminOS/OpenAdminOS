@@ -28,6 +28,7 @@ import {
   toolDefinitionsForPrompt,
   type IntuneChatToolContext,
   type McpChatContext,
+  type McpResultItem,
 } from "./tools.js";
 
 /**
@@ -481,8 +482,11 @@ export async function runAgenticChat(
       if (!execution.trace.error && !learnEmpty) {
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
-        const { results: _results, ...rest } = execution.result as Record<string, unknown>;
-        observed = { ...rest, citations: citations.addMcpResults(mcpSource.results ?? [], mcpSource) };
+        const { results = [], content, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown } & Record<string, unknown>;
+        const cites = citations.addMcpResults(results, mcpSource);
+        observed = results.some((item) => item.excerpt)
+          ? { ...rest, content: numberedMcpResults(results, cites.map((entry) => entry.cite)) }
+          : { ...rest, content, citations: cites };
       } else if (mcpSource.serverId === LEARN_SERVER_ID && fallbackPending && !learnAnswered && input.documentationFallback) {
         // Learn is offline, the query was blocked or nothing matched: the local index takes over.
         fallbackPending = false;
@@ -596,6 +600,25 @@ export function partialFinalAnswer(text: string): string | undefined {
     index += 1;
   }
   return out;
+}
+
+const MCP_EXCERPT_CHARS = 12_000;
+
+/**
+ * MCP results as the model reads them: "[n] Title, URL" before each
+ * excerpt, with the numbers the source cards use. Excerpts of one page
+ * share its number. The excerpts share one budget.
+ */
+export function numberedMcpResults(results: readonly McpResultItem[], cites: readonly string[]): string {
+  const each = Math.max(400, Math.floor(MCP_EXCERPT_CHARS / Math.max(1, results.length)));
+  const groups = new Map<string, { head: string; excerpts: string[] }>();
+  results.forEach((item, index) => {
+    const cite = cites[index]!;
+    const group = groups.get(cite) ?? { head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
+    if (item.excerpt) group.excerpts.push(item.excerpt.length > each ? `${item.excerpt.slice(0, each).trimEnd()} [...]` : item.excerpt);
+    groups.set(cite, group);
+  });
+  return [...groups.values()].map((group) => [group.head, ...group.excerpts].join("\n")).join("\n\n");
 }
 
 /** A tool call that reads tenant evidence: the first planned resource, or the cache inventory to choose one from. */

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -20,11 +21,14 @@ import type { IntelligenceSqliteStore } from "./sqlite-store.js";
  * MCP client against an in-process server that stands in for Microsoft
  * Learn and KQL Search, the cache, the loop, persistence and reload.
  */
+/** microsoft_docs_search for Defender onboarding on macOS, recorded from https://learn.microsoft.com/api/mcp on 2026-11-04. */
+const RECORDED_LEARN_SEARCH = readFileSync(new URL("./fixtures/learn-docs-search.json", import.meta.url), "utf8");
+
 function buildServer(kind: "learn" | "kql"): McpServer {
   const server = new McpServer({ name: kind, version: "1.0.0" });
   if (kind === "learn") {
     server.registerTool("microsoft_docs_search", { description: "Search Microsoft documentation.", inputSchema: { query: z.string() } },
-      async ({ query }) => ({ content: [{ type: "text", text: JSON.stringify({ results: query.includes("nothing") ? [] : [
+      async ({ query }) => ({ content: [{ type: "text", text: query.includes("recorded") ? JSON.stringify(JSON.parse(RECORDED_LEARN_SEARCH)) : JSON.stringify({ results: query.includes("nothing") ? [] : [
         { title: "Microsoft Defender for Endpoint on Mac", content: `Results for ${query}: needs full disk access.`, contentUrl: "https://learn.microsoft.com/defender-endpoint/microsoft-defender-endpoint-mac" },
         { title: "Prerequisites and system requirements", content: "Three latest macOS releases.", contentUrl: "https://learn.microsoft.com/defender-endpoint/mac-requirements" },
       ] }) }] }));
@@ -295,6 +299,25 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.equal(message.steps!.find((step) => step.kind === "docs-index")!.title, "Searched the local docs index");
       assert.equal(docsSearches.length, 1);
     }, { docsIndex: true });
+  });
+
+  it("numbers a real Microsoft Learn search for the model and makes its results citable", async () => {
+    await withHarness(async ({ store, prompts, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "recorded Defender onboarding on macOS with Intune" } },
+        { final: true, answer: "Download the onboarding package [1], or follow Defender for Business [2]." },
+      ]);
+      const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
+      // The recorded payload is longer than the host's output cap; the results are read from the whole payload.
+      assert.deepEqual(message.documentationSources?.map((source) => [source.citation, source.title, source.url]), [
+        [1, "Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune", "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune#create-system-configuration-profiles"],
+        [2, "Onboard devices to Microsoft Defender for Business", "https://learn.microsoft.com/defender-business/mdb-onboard-devices#mac"],
+        [3, "Deploy Microsoft Defender for Endpoint on macOS with another MDM solution", "https://learn.microsoft.com/defender-endpoint/mac-install-with-other-mdm#deploy-defender-for-endpoint"],
+      ]);
+      assert.equal(message.steps?.find((step) => step.kind === "mcp")?.detail, "microsoft_docs_search · 10 results");
+      assert.match(prompts[1]!.prompt, /\[1\] Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune, https:\/\/learn\.microsoft\.com\/defender-endpoint\/mac-install-with-intune#create-system-configuration-profiles\\n# Deploy/);
+      assert.match(prompts[1]!.system, /Each MCP result is listed as \[n\] Title, URL before its excerpt\. Cite it with that \[n\]/);
+    });
   });
 
   it("does not label the answer Microsoft Learn when the Learn call was blocked", async () => {

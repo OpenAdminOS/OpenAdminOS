@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 
 import { DEFAULT_GRAPH_READ_SCOPE_NAMES, type IntuneChatStep, type RunLlmApi, type TenantRecord } from "@openadminos/agent-sdk";
 
-import { runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
+import { numberedMcpResults, runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   ChatStepRecorder,
   CitationRegistry,
@@ -195,9 +195,48 @@ describe("citations and MCP results", () => {
     assert.deepEqual(parseMcpResults(JSON.stringify({ results: [
       { title: "Defender for Endpoint on Mac", content: "...", contentUrl: "https://learn.microsoft.com/defender-endpoint/mac" },
       { title: "Bad", contentUrl: "javascript:alert(1)" },
-    ] })), [{ title: "Defender for Endpoint on Mac", url: "https://learn.microsoft.com/defender-endpoint/mac" }]);
+    ] })), [{ title: "Defender for Endpoint on Mac", url: "https://learn.microsoft.com/defender-endpoint/mac", excerpt: "..." }]);
     assert.deepEqual(parseMcpResults("See [Failed sign-ins](https://www.kqlsearch.com/query/1) and [x](ftp://a)."), [{ title: "Failed sign-ins", url: "https://www.kqlsearch.com/query/1" }]);
     assert.equal(parseMcpResults(JSON.stringify(Array.from({ length: 30 }, (_, i) => ({ name: `Q${i}`, url: `https://example.com/${i}` })))).length, 10);
+  });
+
+  it("reads a recorded Microsoft Learn search by its structure, even when the text the model sees is capped", async () => {
+    // microsoft_docs_search for Defender onboarding on macOS, recorded from https://learn.microsoft.com/api/mcp on 2026-11-04.
+    const recorded = JSON.parse(await readFile(new URL("./fixtures/learn-docs-search.json", import.meta.url), "utf8")) as { results: Array<{ title: string; content: string; contentUrl: string }> };
+    const capped = JSON.stringify(recorded).slice(0, 12_000);
+    const items = parseMcpResults(capped, { structured: recorded });
+    assert.deepEqual(items.map((item) => [item.title, item.url]), recorded.results.map((result) => [result.title, result.contentUrl]));
+    assert.ok(items.every((item) => item.excerpt && item.excerpt.length > 1000));
+    // Links inside the content are never results.
+    assert.ok(items.every((item) => !/Apple Configurator|iMazing|Network protection for macOS/.test(item.title)));
+
+    // The model sees each result numbered as its source card is, one number per page.
+    const registry = new CitationRegistry();
+    registry.addPassages([{ file: "a.md", text: "Local passage." }]);
+    const cites = registry.addMcpResults(items, { serverName: "Microsoft Learn", host: "learn.microsoft.com" }).map((entry) => entry.cite);
+    const observation = numberedMcpResults(items, cites);
+    assert.match(observation, /^\[2\] Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune, https:\/\/learn\.microsoft\.com\/defender-endpoint\/mac-install-with-intune#create-system-configuration-profiles\n# Deploy/);
+    assert.match(observation, /\n\n\[3\] Onboard devices to Microsoft Defender for Business, https:\/\/learn\.microsoft\.com\/defender-business\/mdb-onboard-devices#mac\n/);
+    assert.deepEqual(registry.sources.slice(1).map((source) => [source.citation, source.title]), [
+      [2, "Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune"],
+      [3, "Onboard devices to Microsoft Defender for Business"],
+      [4, "Deploy Microsoft Defender for Endpoint on macOS with another MDM solution"],
+    ]);
+    assert.ok(observation.length < 14_000);
+  });
+
+  it("reads a fetched Learn page as one result titled by its heading, and items of other servers by name and link", () => {
+    const page = "# Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune\n\nSee [Apple Configurator](https://support.apple.com/apple-configurator).";
+    assert.deepEqual(parseMcpResults(page, { args: { url: "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune" } }).map(({ title, url }) => [title, url]), [
+      ["Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune", "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune"],
+    ]);
+    // IntuneAutomation and KQL Search shapes.
+    assert.deepEqual(parseMcpResults(JSON.stringify({ scripts: [{ id: "get-stale-devices", title: "Get Stale Intune Devices", synopsis: "Reports devices that have not checked in.", githubUrl: "https://github.com/ugurkocde/intuneautomation/blob/main/scripts/devices/get-stale-devices.ps1" }] })), [
+      { title: "Get Stale Intune Devices", url: "https://github.com/ugurkocde/intuneautomation/blob/main/scripts/devices/get-stale-devices.ps1", excerpt: "Reports devices that have not checked in." },
+    ]);
+    assert.deepEqual(parseMcpResults(JSON.stringify({ items: [{ id: "q1", title: "Failed sign-ins", sourceUrl: "https://github.com/example/kql/blob/main/failed.md" }] })), [
+      { title: "Failed sign-ins", url: "https://github.com/example/kql/blob/main/failed.md" },
+    ]);
   });
 });
 

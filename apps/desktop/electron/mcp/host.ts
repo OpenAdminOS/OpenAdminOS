@@ -32,8 +32,15 @@ export interface McpConnectResult {
 }
 
 export interface McpCallResult {
+  /** The result text, capped at the output limit. */
   text: string;
   truncated: boolean;
+  /**
+   * The whole result as data: the server's structured content, or its
+   * text parsed as JSON. Capped text can cut a JSON result in half, so
+   * result items are read from here.
+   */
+  structured?: unknown;
 }
 
 export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "redirect";
@@ -161,8 +168,10 @@ export class McpHost {
     if (result.isError === true) {
       throw new McpHostError("tool-error", `${endpoint.name} returned an error: ${clip(text || "no detail", 300)}`);
     }
-    if (text.length <= this.maxOutputChars) return { text, truncated: false };
-    return { text: text.slice(0, this.maxOutputChars), truncated: true };
+    const structured = result.structuredContent ?? parseJson(text);
+    const data = structured !== null && typeof structured === "object" ? { structured } : {};
+    if (text.length <= this.maxOutputChars) return { text, truncated: false, ...data };
+    return { text: text.slice(0, this.maxOutputChars), truncated: true, ...data };
   }
 
   async disconnect(id: string): Promise<void> {
@@ -247,6 +256,14 @@ function resultText(result: Awaited<ReturnType<Client["callTool"]>>): string {
   }
   if (parts.length === 0 && result.structuredContent !== undefined) parts.push(JSON.stringify(result.structuredContent));
   return parts.join("\n\n").trim();
+}
+
+function parseJson(text: string): unknown {
+  try {
+    return JSON.parse(text) as unknown;
+  } catch {
+    return undefined;
+  }
 }
 
 function isTimeout(error: unknown): boolean {
