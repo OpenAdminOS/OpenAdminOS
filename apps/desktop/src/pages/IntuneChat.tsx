@@ -296,6 +296,7 @@ function IntuneChatContent() {
   const draftConversationRef = useRef<string | null | undefined>(undefined);
   const skipDraftWriteRef = useRef(false);
   const [dismissedSuggestionMessageIds, setDismissedSuggestionMessageIds] = useState<string[]>([]);
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
   const followLatestRef = useRef(true);
   const restoreConversationScrollRef = useRef<string | null>(null);
@@ -1506,6 +1507,12 @@ function IntuneChatContent() {
   const progressMessageVisible =
     progressAssistantMessageId !== null &&
     displayedMessages.some((message) => message.id === progressAssistantMessageId);
+  // The first follow-up of the latest answer, offered as ghost text until dismissed.
+  const latestAssistant = displayedMessages.find((message) => message.id === latestAssistantMessageId);
+  const latestFollowUp = latestAssistant?.status === "completed" && latestAssistant.id !== progressAssistantMessageId ? latestAssistant.followUps?.[0] : undefined;
+  const composerSuggestion = latestFollowUp && `${latestAssistant!.id}:${latestFollowUp}` !== dismissedSuggestion
+    ? { text: latestFollowUp, key: `${latestAssistant!.id}:${latestFollowUp}` }
+    : undefined;
   const fillComposer = (value: string) => {
     setInput(value);
     writeChatDraft(activeConversationId, value);
@@ -1609,6 +1616,8 @@ function IntuneChatContent() {
       onModelSelect={(providerId, model) => void handleModelSelect(providerId, model)}
       onOpenProviders={() => navigate("/settings/providers")}
       dataBoundary={dataBoundary}
+      suggestion={composerSuggestion?.text}
+      onDismissSuggestion={() => composerSuggestion && setDismissedSuggestion(composerSuggestion.key)}
     />
   );
 
@@ -1938,6 +1947,9 @@ function IntuneChatContent() {
                           onOpenAgent={(slug) => navigate(`/agents/${encodeURIComponent(slug)}`)}
                         />
                       ) : null}
+                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== progressAssistantMessageId && message.followUps?.length ? (
+                        <FollowUpChips followUps={message.followUps} disabled={sending} onPick={fillComposer} />
+                      ) : null}
                       {!pilot && message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
                         <SuggestedAgentsBlock
                           suggestions={suggestedAgents}
@@ -2120,6 +2132,8 @@ function ChatComposer({
   onModelSelect,
   onOpenProviders,
   dataBoundary,
+  suggestion,
+  onDismissSuggestion,
 }: {
   placement: "home" | "docked";
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -2141,8 +2155,13 @@ function ChatComposer({
   onModelSelect: (providerId: ProviderId, model: string) => void;
   onOpenProviders: () => void;
   dataBoundary: DataBoundary;
+  /** A follow-up shown as ghost text while the composer is empty. Tab fills it; nothing is sent. */
+  suggestion?: string;
+  onDismissSuggestion?: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const showSuggestion = Boolean(suggestion) && value === "" && !disabled && !sending;
+  const suggestionHintId = `chat-suggestion-${placement}`;
   const [activePickerIndex, setActivePickerIndex] = useState(0);
   const query = value.startsWith("/") ? value.slice(1).trim().toLocaleLowerCase() : "";
   const hasAgentToken = installedAgents.some((agent) =>
@@ -2282,7 +2301,7 @@ function ChatComposer({
         </div>
       ) : null}
 
-      <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
+      <div className="intune-chat-composer relative rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
         {!activeTenant ? (
           <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
             {SETUP_COPY.guestChatHint}
@@ -2309,8 +2328,13 @@ function ChatComposer({
               : undefined
           }
           aria-autocomplete="list"
+          aria-describedby={showSuggestion ? suggestionHintId : undefined}
           autoComplete="off"
-          onChange={(event) => onValueChange(event.target.value)}
+          onChange={(event) => {
+            // Typing hides the suggestion for good; Tab is the only way to use it.
+            if (showSuggestion && event.target.value !== "") onDismissSuggestion?.();
+            onValueChange(event.target.value);
+          }}
           onKeyDown={(event) => {
             if (event.defaultPrevented) return;
             if (pickerOpen && pickerEntries.length > 0) {
@@ -2332,14 +2356,34 @@ function ChatComposer({
               setPickerOpen(false);
               return;
             }
+            if (showSuggestion && suggestion && event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+              event.preventDefault();
+              onValueChange(suggestion);
+              return;
+            }
+            if (showSuggestion && event.key === "Escape") {
+              event.preventDefault();
+              onDismissSuggestion?.();
+              return;
+            }
             if (shouldSubmitComposerKey(event.nativeEvent)) {
               event.preventDefault();
               onSend();
             }
           }}
-          placeholder={placeholder}
-          className="block min-h-[38px] max-h-[220px] w-full resize-none overflow-y-auto bg-transparent pb-3 pr-2 pt-0.5 text-md leading-[1.55] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
+          placeholder={showSuggestion ? suggestion : placeholder}
+          className={`block min-h-[38px] max-h-[220px] w-full resize-none overflow-y-auto bg-transparent pb-3 pt-0.5 text-md leading-[1.55] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none ${showSuggestion ? "pr-14" : "pr-2"}`}
         />
+        {showSuggestion ? (
+          <>
+            <kbd aria-hidden="true" className="pointer-events-none absolute right-3 top-3.5 rounded-[5px] px-1.5 py-px font-sans text-xs text-[var(--color-text-muted)] ring-1 ring-inset ring-[var(--color-border)]">
+              Tab
+            </kbd>
+            <span id={suggestionHintId} role="status" className="sr-only">
+              Suggestion: {suggestion}, press Tab to use it
+            </span>
+          </>
+        ) : null}
         <div className="flex items-center gap-1">
           <ComposerScopePopover {...scopeProps} />
           <IconButton
