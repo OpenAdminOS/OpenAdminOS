@@ -373,7 +373,7 @@ describe("MCP tools in the Chat loop", () => {
   it("never blocks product names that match a tenant called after a product", () => {
     // Every word is generic, so the whole name is the term, matched as whole tokens only.
     assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Microsoft Intune Lab", username: "admin@lab.example" }), {
-      tokens: ["admin@lab.example", "lab.example", "microsoft intune lab"], compact: ["admin@lab.example", "lab.example"] });
+      tokens: ["admin@lab.example", "lab.example", "microsoft intune lab"], compact: ["admin@lab.example", "lab.example", "microsoftintunelab"] });
     assert.deepEqual(mcpPrivateTermsForTenant(tenant), {
       tokens: ["admin@contoso.example", "contoso.example", "contoso"], compact: ["admin@contoso.example", "contoso.example", "contoso"] });
     assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Contoso Microsoft Practice", username: "admin@fabrikam.example" }).tokens, ["admin@fabrikam.example", "fabrikam.example", "contoso"]);
@@ -433,9 +433,10 @@ describe("MCP tools in the Chat loop", () => {
     const index = new TenantValueIndex();
     collectTenantValues([
       { phoneNumber: "555-123-4567", serialNumber: "12345678", imei: "35 209900 176148 1", wiFiMacAddress: "00:1A:2B:3C:4D:5E", deviceId: "100200300" },
-      { displayName: "Windows 11", groupTag: "Pilot" },
+      { displayName: "Windows 11", groupTag: "Zx7", mailNickname: "avq", hostName: "kio" },
     ], index);
-    for (const blocked of ["call 5551234567", "phone 555 123 4567", "serial 12345678", "imei 352099001761481", "mac 00-1a-2b-3c-4d-5e", "device 100200300"]) {
+    // Identifier keys are indexed whatever their length or words.
+    for (const blocked of ["call 5551234567", "phone 555 123 4567", "serial 12345678", "imei 352099001761481", "mac 00-1a-2b-3c-4d-5e", "device 100200300", "tag zx7", "alias avq", "host kio"]) {
       assert.equal(index.matches(blocked), true, blocked);
     }
     for (const allowed of ["Windows 11 compliance", "pilot ring", "12 devices"]) {
@@ -486,11 +487,11 @@ describe("MCP tools in the Chat loop", () => {
       assert.equal(acmeRun.toolTrace[1]!.mcpSource?.blocked, true);
       assert.equal(acmeRun.toolTrace[2]!.mcpSource?.blocked, true);
       const northern: McpChatContext = { ...mcpContext(calls), privateTerms: mcpPrivateTermsForTenant({ displayName: "Northern Cloud", username: "admin@nc.example" }) };
-      assert.deepEqual(northern.privateTerms.compact, ["admin@nc.example", "nc.example"]);
-      const northernRun = await runAgenticChat(input(store, scriptedLlm([callDocs("Cloud PC provisioning"), callDocs("northern europe region"), callDocs("Northern Cloud licensing"), '{"final":true,"answer":"Done."}']), northern));
+      assert.deepEqual(northern.privateTerms.compact, ["admin@nc.example", "nc.example", "northerncloud"]);
+      const northernRun = await runAgenticChat(input(store, scriptedLlm([callDocs("Cloud PC provisioning"), callDocs("northern europe region"), callDocs("Northern Cloud licensing"), callDocs("northerncloud licensing"), callDocs("northern_cloud tenant"), '{"final":true,"answer":"Done."}']), northern));
       assert.equal(northernRun.toolTrace[0]!.error, undefined);
       assert.equal(northernRun.toolTrace[1]!.error, undefined);
-      assert.equal(northernRun.toolTrace[2]!.mcpSource?.blocked, true);
+      for (const blocked of northernRun.toolTrace.slice(2)) assert.equal(blocked.mcpSource?.blocked, true);
       assert.deepEqual(calls.map((call) => call.args.query), ["device health attestation on Windows", "Cloud PC provisioning", "northern europe region"]);
     });
   });
@@ -500,12 +501,12 @@ describe("MCP tools in the Chat loop", () => {
     collectTenantValues([
       { activityDisplayName: "Update policy", targetResources: [{ id: "pol-9f2c", displayName: "Kiosk Wave Policy", modifiedProperties: [{ displayName: "Description", oldValue: "a", newValue: "b" }, { displayName: "Assignments" }] }], additionalDetails: [{ key: "Platform", value: "Windows" }] },
       { resources: [{ resourceId: "res-4411", modifiedProperties: [{ displayName: "Platform" }] }] },
-      { displayName: "Platform" }, { displayName: "Anna" }, { name: "Quinlanova" }, { displayName: "Kiosk7" },
+      { displayName: "Platform" }, { displayName: "Anna" }, { displayName: "Ed" }, { name: "Quinlanova" }, { displayName: "Kiosk7" },
     ], index);
-    for (const allowed of ["description field for policies", "assignments for apps", "platform support", "anna"]) {
+    for (const allowed of ["description field for policies", "assignments for apps", "platform support", "ed"]) {
       assert.equal(index.matches(allowed), false, allowed);
     }
-    for (const blocked of ["kiosk wave policy", "quinlanova", "kiosk7", "pol-9f2c"]) {
+    for (const blocked of ["anna", "kiosk wave policy", "quinlanova", "kiosk7", "pol-9f2c"]) {
       assert.equal(index.matches(blocked), true, blocked);
     }
   });

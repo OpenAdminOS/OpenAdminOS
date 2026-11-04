@@ -6,13 +6,11 @@ import { isCommonWord, isGenericTokens, normalizeTokens } from "./mcp-stopwords.
  */
 
 /**
- * Free-text name keys. A value under one of these is skipped when it is only
- * numbers and stopwords, because names like "Windows 11" or "All Users"
- * identify nothing. givenName and surname count only as a full name.
+ * Free-text display name keys. A value under one of these is skipped when it
+ * is only numbers and stopwords, because names like "Windows 11" or "All
+ * Users" identify nothing. givenName and surname count only as a full name.
  */
-const TENANT_NAME_KEYS = new Set([
-  "displayName", "name", "groupTag", "userDisplayName", "deviceName", "managedDeviceName", "hostName", "mailNickname",
-]);
+const TENANT_NAME_KEYS = new Set(["displayName", "name", "userDisplayName"]);
 
 /**
  * Descriptive keys. Their values are often ordinary words ("Sales",
@@ -26,6 +24,7 @@ const TENANT_LABEL_KEYS = new Set(["companyName", "department", "officeLocation"
  */
 const TENANT_IDENTIFIER_KEYS = new Set([
   "id", "userPrincipalName", "mail", "email", "emailAddress", "userName", "onPremisesSamAccountName",
+  "mailNickname", "groupTag", "hostName", "deviceName", "managedDeviceName",
   "serialNumber", "imei", "meid", "wiFiMacAddress", "ethernetMacAddress", "phoneNumber", "mobilePhone",
   "businessPhones", "otherMails", "proxyAddresses", "onPremisesDomainName", "domainName", "iccid", "udid",
 ]);
@@ -41,16 +40,20 @@ const PROPERTY_NAME_SUBTREES = new Set(["modifiedProperties", "additionalDetails
 export type TenantValueKind = "identifier" | "name" | "label";
 
 /**
- * Whether a name or label value can identify something. One that is only
- * numbers and stopwords cannot; a label of only common words cannot. A
- * single word must contain a digit or hyphen, or have 6 or more characters
- * and not be a common word, so "Mark" or "Platform" is not indexed.
+ * Whether a display name or label value can identify something. One that
+ * is only numbers and stopwords cannot; a label of only common words
+ * cannot. A single-word display name is indexed when it has 3 or more
+ * characters and is not a common word, so "Anna" is and "Platform" is not.
+ * A single-word label must contain a digit or hyphen, or have 6 or more
+ * characters and not be a common word.
  */
 function isDistinctiveValue(value: string, tokens: readonly string[], kind: "name" | "label"): boolean {
   if (isGenericTokens(tokens)) return false;
   if (kind === "label" && tokens.every((token) => /^\p{N}+$/u.test(token) || isCommonWord(token))) return false;
   if (tokens.length > 1) return true;
-  return /[\p{N}-]/u.test(value) || (tokens[0]!.length >= 6 && !isCommonWord(tokens[0]!));
+  const token = tokens[0]!;
+  if (kind === "name") return token.length >= 3 && !isCommonWord(token);
+  return /[\p{N}-]/u.test(value) || (token.length >= 6 && !isCommonWord(token));
 }
 
 /** Identifier values this long are also matched with separators removed. */

@@ -622,8 +622,13 @@ export function mcpPrivateTermsForTenant(tenant: { displayName: string; username
   const nameTokens = normalizeTokens(tenant.displayName);
   const distinctive = nameTokens.filter((token) => token.length >= 3 && !/^\p{N}+$/u.test(token) && !isCommonWord(token));
   const clean = (terms: string[]) => [...new Set(terms.map((term) => term.trim()).filter((term) => term.length >= 3))];
-  const compact = clean([tenant.username, tenant.username.split("@")[1] ?? "", ...distinctive]);
-  return { tokens: clean([...compact, ...(distinctive.length > 0 ? [] : [nameTokens.join(" ")])]), compact };
+  const account = [tenant.username, tenant.username.split("@")[1] ?? ""];
+  return {
+    tokens: clean([...account, ...(distinctive.length > 0 ? distinctive : [nameTokens.join(" ")])]),
+    // A name of only common words is still matched without separators as a
+    // whole, so "northerncloud" and "northern_cloud" are blocked.
+    compact: clean([...account, ...(distinctive.length > 0 ? distinctive : [nameTokens.join("")])]),
+  };
 }
 
 /**
