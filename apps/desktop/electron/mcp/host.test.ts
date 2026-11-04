@@ -536,6 +536,26 @@ describe("MCP installs in app state", () => {
     });
   }
 
+  it("does not write back an install that an uninstall overtook while it connected", async () => {
+    await withStore(async (store, statePath) => {
+      const host = (store as unknown as { mcpHost: McpHost }).mcpHost;
+      const connect = host.connect.bind(host);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      host.connect = async (entry) => { const connected = await connect(entry); await gate; return connected; };
+      const installing = store.installMcpServer("test-docs");
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      await store.uninstallMcpServer("test-docs");
+      release();
+      await assert.rejects(installing, /^Error: Test Docs was uninstalled while it connected\. Nothing was installed\.$/);
+      assert.equal((await store.listMcpServers()).find((entry) => entry.id === "test-docs")!.installed, false);
+      await readFile(statePath, "utf8").then((raw) => assert.equal(JSON.parse(raw).mcpServers, undefined), () => undefined);
+      // A later install is not affected.
+      host.connect = connect;
+      assert.equal((await store.installMcpServer("test-docs")).find((entry) => entry.id === "test-docs")!.installed, true);
+    });
+  });
+
   it("rejects servers outside the catalog and toggles on servers that are not installed", async () => {
     await withStore(async (store) => {
       await assert.rejects(store.installMcpServer("evil"), /not in the Marketplace catalog/);

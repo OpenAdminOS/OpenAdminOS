@@ -1270,6 +1270,8 @@ export class AppStateStore {
   private readonly runService: RunService;
   private readonly gatewayService: GatewayService;
   private readonly mcpHost: McpHost;
+  /** Counts uninstalls per server, so an install that was connecting meanwhile is not written back. */
+  private readonly mcpUninstalls = new Map<string, number>();
   private readonly mcpCatalog: readonly McpCatalogEntry[];
   private retrievalIndexInstance: RetrievalIndex | undefined;
   private readonly runDeliveryService: RunDeliveryService;
@@ -1744,9 +1746,12 @@ export class AppStateStore {
     if (requireInstalled && !(await this.read()).mcpServers?.[serverId]) {
       throw new Error(`${entry.name} is not installed. Install it from the Marketplace first.`);
     }
+    const uninstalls = this.mcpUninstalls.get(serverId) ?? 0;
     const connected = await this.mcpHost.connect(entry);
     const now = this.clock().toISOString();
-    await this.serialize(async () => {
+    const written = await this.serialize(async () => {
+      // An uninstall while this connected wins: writing now would install the server again.
+      if ((this.mcpUninstalls.get(serverId) ?? 0) !== uninstalls) return false;
       const current = await this.read();
       const existing = current.mcpServers?.[serverId];
       await this.write({
@@ -1761,7 +1766,14 @@ export class AppStateStore {
           },
         },
       });
+      return true;
     });
+    if (!written) {
+      await this.mcpHost.disconnect(serverId);
+      throw new Error(requireInstalled
+        ? `${entry.name} was uninstalled while its connection was checked. Its tool list was not saved.`
+        : `${entry.name} was uninstalled while it connected. Nothing was installed.`);
+    }
     this.emitStateChanged("mcp-servers-changed");
     return this.listMcpServers();
   }
@@ -1769,6 +1781,7 @@ export class AppStateStore {
   async uninstallMcpServer(serverId: string): Promise<McpServerSummary[]> {
     this.requireMcpCatalogEntry(serverId);
     await this.serialize(async () => {
+      this.mcpUninstalls.set(serverId, (this.mcpUninstalls.get(serverId) ?? 0) + 1);
       const current = await this.read();
       if (current.mcpServers?.[serverId]) {
         const { [serverId]: _removed, ...rest } = current.mcpServers;
