@@ -145,7 +145,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
   it("answers the Defender for macOS docs question from Microsoft Learn without touching the tenant", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
       script([
-        { tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
         { final: true, answer: "Microsoft Learn says Defender for Endpoint on macOS needs full disk access [1] and one of the three latest macOS releases [2]. [9]", next: ["Which Macs miss the system extension profile?"] },
       ]);
       const events: IntuneChatStreamEvent[] = [];
@@ -154,10 +154,12 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
       // Live steps: the plan first, the MCP row shows what it sent while it runs, then the answer.
       const snapshots = events.flatMap((event) => (event.type === "steps" ? [event.steps] : []));
-      // The plan step shows before the MCP tools load, then gets its detail.
+      // The plan step shows before the MCP tools load, then gets the model's kind and sources from its first reply.
       assert.deepEqual([snapshots[0]![0]!.kind, snapshots[0]![0]!.status, snapshots[0]![0]!.title], ["plan", "active", "Reading the question"]);
-      assert.deepEqual([snapshots[1]![0]!.status, snapshots[1]![0]!.title], ["completed", "Read the question"]);
-      assert.match(snapshots[1]![0]!.detail!, /^Documentation question\. Sources: Microsoft Learn\. Your tenant is not checked\.$/);
+      const decided = snapshots.findIndex((list) => list[0]!.status === "completed");
+      assert.ok(decided > snapshots.findIndex((list) => list.some((step) => step.kind === "answer")), "the kind is decided once the model replies");
+      assert.equal(snapshots[decided]![0]!.title, "Read the question");
+      assert.match(snapshots[decided]![0]!.detail!, /^Documentation question\. Sources: Microsoft Learn\. Your tenant is not checked\.$/);
       const live = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active"));
       const liveMcp = live!.find((step) => step.kind === "mcp")!;
       assert.equal(liveMcp.sent, "Defender for Endpoint on macOS");
@@ -171,11 +173,12 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.deepEqual([answer!.title, answer!.origin, answer!.originLabel], ["Wrote the answer", "device", "On device"]);
       assert.ok(message.steps!.every((step) => typeof step.durationMs === "number"));
 
-      // No refresh, no tenant tools, and none offered to the model.
+      // No refresh, no tenant tools, and none offered once the model said docs.
       assert.deepEqual(graphPaths, []);
       assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), false);
       assert.deepEqual(message.toolTrace?.map((entry) => entry.tool), [learnTool]);
-      assert.doesNotMatch(prompts[0]!.system, /- query_cache:|- graph_get:|- refresh_resource:/);
+      assert.match(prompts[0]!.system, /Your first reply must also give the question kind/);
+      assert.doesNotMatch(prompts[1]!.system, /- query_cache:|- graph_get:|- refresh_resource:|question kind/);
 
       // Citations map to Learn articles; [9] has no source.
       assert.deepEqual(message.documentationSources?.map((source) => [source.citation, source.kind, source.serverName, source.url]), [
@@ -197,7 +200,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
   it("does not label the answer Microsoft Learn when the Learn call was blocked", async () => {
     await withHarness(async ({ store, script }) => {
       script([
-        { tool: learnTool, params: { query: "Contoso Defender for macOS setup" } },
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Contoso Defender for macOS setup" } },
         { final: true, answer: "Microsoft Learn says Defender for Endpoint on macOS needs full disk access." },
       ]);
       const message = (await store.sendIntuneChatMessage({ content: DOCS_QUESTION })).assistantMessage;
@@ -211,7 +214,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
   it("calls KQL Search for a KQL question, even when the model tries to answer first", async () => {
     await withHarness(async ({ store, graphPaths, prompts, script }) => {
       script([
-        { final: true, answer: "Use SigninLogs." },
+        { kind: "docs", sources: [], final: true, answer: "Use SigninLogs." },
         { tool: kqlTool, params: { query: "failed sign-ins last 24 hours" } },
         { final: true, answer: "Start from this community query [1]:\n\n```kql\nSigninLogs | where TimeGenerated > ago(24h) | where ResultType != 0\n```" },
       ]);
@@ -265,22 +268,115 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     });
   });
 
-  it("never treats an ambiguous tenant question as docs-only", async () => {
+  it("falls back to the keyword kind when the model gives none, and never treats an ambiguous tenant question as docs-only", async () => {
     await withHarness(async ({ store, prompts, script }) => {
-      script([{ final: true, answer: "There are none." }, { tool: "query_cache", params: { resource: "managedDevices", where: { complianceState: "noncompliant" } } }, { final: true, answer: "2 devices are noncompliant." }]);
+      // A missing kind gets one repair; an invalid one counts as missing, then the keyword kind decides.
+      script([{ final: true, answer: "There are none." }, { kind: "documentation", final: true, answer: "There are none." }, { tool: "query_cache", params: { resource: "managedDevices", where: { complianceState: "noncompliant" } } }, { final: true, answer: "2 devices are noncompliant." }]);
       const message = (await store.sendIntuneChatMessage({ content: "What are the noncompliant devices?" })).assistantMessage;
       assert.equal(message.questionKind, "mixed");
-      assert.match(prompts[1]!.prompt, /That answer used no tenant evidence/);
+      assert.match(prompts[1]!.prompt, /That reply did not give the question kind/);
+      assert.match(message.steps![0]!.detail!, /^Documentation and tenant question\. .* The model gave no question kind, so keyword rules decided\.$/);
+      assert.match(prompts[2]!.prompt, /That answer used no tenant evidence/);
       assert.ok(message.toolTrace?.some((entry) => entry.tool === "query_cache" && !entry.error));
       assert.equal(message.content, "2 devices are noncompliant.");
       assert.equal(message.tenantContext, true);
     });
   });
 
+  it("answers docs questions the model calls docs with no refresh and no Graph calls", async () => {
+    await withHarness(async ({ store, cache, graphPaths, script }) => {
+      for (const question of ["How do I enroll macOS devices?", "Is there a script to find stale devices?"]) {
+        script([
+          { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: question } },
+          { final: true, answer: "Microsoft Learn describes the steps [1]." },
+        ]);
+        const result = await store.sendIntuneChatMessage({ content: question });
+        const message = result.assistantMessage;
+        assert.equal(message.questionKind, "docs", question);
+        assert.match(message.steps![0]!.detail!, /^Documentation question\. Sources: Microsoft Learn\. Your tenant is not checked\.$/, question);
+        assert.deepEqual(kinds(message.steps), ["plan", "mcp", "answer"], question);
+        assert.deepEqual(graphPaths, [], question);
+        assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), false, question);
+        assert.equal(message.tenantContext, undefined, question);
+      }
+    });
+  });
+
+  it("treats a model docs label as mixed when the question mentions the tenant", async () => {
+    await withHarness(async ({ store, graphPaths, prompts, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Intune device enrollment" } },
+        { final: true, answer: "Microsoft Learn describes enrollment [1]." },
+        { tool: "query_cache", params: { resource: "managedDevices", limit: 25 } },
+        { final: true, answer: "Microsoft Learn describes enrollment [1]. 9 of your devices are enrolled." },
+      ]);
+      const message = (await store.sendIntuneChatMessage({ content: "What do the docs say about our devices?" })).assistantMessage;
+      assert.equal(message.questionKind, "mixed");
+      assert.match(message.steps![0]!.detail!, /^Treated as docs and tenant: the question mentions your tenant\. Sources: /);
+      assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "mcp", "tool", "answer"]);
+      assert.ok(graphPaths.length > 0, "the mixed question refreshed the stale planned resources");
+      assert.ok(prompts.some((entry) => /That answer used no tenant evidence/.test(entry.prompt)));
+    });
+  });
+
+  it("takes the model's tenant kind for a question keyword rules call mixed, and refreshes before the tool", async () => {
+    await withHarness(async ({ store, cache, graphPaths, script }) => {
+      script([
+        { kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices", limit: 25 } },
+        { final: true, answer: "None of the 9 cached devices is unmanaged." },
+      ]);
+      const result = await store.sendIntuneChatMessage({ content: "What are unmanaged devices?" });
+      const message = result.assistantMessage;
+      assert.equal(message.questionKind, "tenant");
+      assert.match(message.steps![0]!.detail!, /^Tenant question\. Sources: cached tenant data and Microsoft Graph\.$/);
+      assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "tool", "answer"]);
+      assert.ok(graphPaths.length > 0);
+      assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), true);
+    });
+  });
+
+  it("upgrades a docs run that calls a tenant tool to mixed, refreshes, then runs the tool", async () => {
+    await withHarness(async ({ store, graphPaths, script }) => {
+      const events: IntuneChatStreamEvent[] = [];
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "enroll macOS devices in Intune" } },
+        { tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "macOS" }, limit: 25 } },
+        { final: true, answer: "Microsoft Learn describes enrollment [1]. 5 Macs are already enrolled." },
+      ]);
+      const message = (await store.streamIntuneChatMessage({ content: "How do I enroll macOS devices?" }, (event) => events.push(event))).assistantMessage;
+      assert.equal(message.questionKind, "mixed");
+      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "plan", "graph-refresh", "tool", "answer"]);
+      const upgrade = message.steps![2]!;
+      assert.deepEqual([upgrade.title, upgrade.detail], ["Treated as docs and tenant", "The model asked for tenant data, so the answer now needs tenant evidence."]);
+      assert.equal(message.steps![4]!.status, "completed");
+      assert.ok(graphPaths.length > 0, "the refresh ran before the tool");
+      // The refresh step showed live before the tool step started.
+      const live = events.flatMap((event) => (event.type === "steps" ? [event.steps] : []));
+      const refreshAt = live.findIndex((list) => list.some((step) => step.kind === "graph-refresh"));
+      const toolAt = live.findIndex((list) => list.some((step) => step.kind === "tool"));
+      assert.ok(refreshAt >= 0 && refreshAt < toolAt);
+      assert.equal(message.tenantContext, true);
+    });
+  });
+
+  it("keeps the keyword kind and the refresh before the answer on the deterministic path", async () => {
+    await withHarness(async ({ store, graphPaths, prompts, script }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      script(["Enroll Macs with Apple Business Manager."]);
+      const message = (await store.sendIntuneChatMessage({ content: "How do I enroll macOS devices?" })).assistantMessage;
+      assert.equal(message.questionKind, "mixed");
+      assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "answer"]);
+      assert.doesNotMatch(message.steps![0]!.detail!, /keyword rules/);
+      assert.ok(graphPaths.length > 0);
+      assert.equal(prompts.length, 1, "one model call, with no kind protocol");
+      assert.doesNotMatch(prompts[0]!.system, /question kind/);
+    });
+  });
+
   it("refreshes, asks Learn and still requires tenant evidence for a mixed tenant question", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
       script([
-        { tool: learnTool, params: { query: "Intune noncompliant macOS device remediation" } },
+        { kind: "mixed", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Intune noncompliant macOS device remediation" } },
         { final: true, answer: "Microsoft Learn recommends checking the compliance policy [1]." },
         { tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "macOS", complianceState: "noncompliant" } } },
         { final: true, answer: "Microsoft Learn recommends reviewing the failed setting first [1].\n\n2 of your macOS devices are noncompliant.", next: ["Show the compliance policies assigned to these Macs"] },

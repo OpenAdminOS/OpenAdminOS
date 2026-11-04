@@ -110,13 +110,14 @@ import {
   updateJobTenantProgress,
 } from "../state-helpers.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
-import { runAgenticChat } from "./agentic-loop.js";
+import { runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   GRAPH_CACHE_RESOURCES,
   buildAnswerPack,
   chatTitleForPrompt,
   classifyChatQuestion,
   definitionForResource,
+  hasTenantReference,
   matchAgentsToQuestion,
   pathForResource,
   planChatContext,
@@ -134,6 +135,7 @@ import {
   mergeFollowUps,
   namedServers,
   planChatSources,
+  QuestionKindTracker,
   relabelUnverifiedLearn,
   startAnswerStep,
   tenantTieInFollowUp,
@@ -1708,74 +1710,90 @@ export class IntuneChatService {
       providerId,
       ...(selectedModel ? { model: selectedModel } : {}),
     }).enabled;
-    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, steps });
+    // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
+    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, steps });
 
     let refreshResult: GraphCacheRefreshResult | undefined;
     // A write prompt is answered by the deterministic block below.
     // Refreshing Graph data first only delays that answer (measured at
     // tens of seconds live) and spends tenant reads on a reply that
     // cannot use them.
-    if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
-      const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
-      const staleResources = planned.resources.filter((resource) => {
-        const status = before.find((entry) => entry.resource === resource);
-        if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
-        return (
-          Date.now() - new Date(status.refreshedAt).getTime() >
-          resourceStalenessMs(resource)
-        );
-      });
-      if (staleResources.length > 0) {
-        const refreshStep = this.refreshStep(steps, staleResources);
-        refreshResult = await this.refreshGraphCache({
-          tenantId: tenant.id,
-          resources: staleResources,
+    const refreshPlanned = once(async () => {
+      if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
+        const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+        const staleResources = planned.resources.filter((resource) => {
+          const status = before.find((entry) => entry.resource === resource);
+          if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
+          return (
+            Date.now() - new Date(status.refreshedAt).getTime() >
+            resourceStalenessMs(resource)
+          );
         });
-        refreshStep.finish(refreshResult);
-        store.insertToolCall({
-          id: `tool_${randomUUID()}`,
-          conversationId: conversation.id,
-          messageId: userMessage.id,
-          type: "graph-cache-refresh",
-          status: refreshResult.resources.some((resource) => resource.ok)
-            ? "completed"
-            : "failed",
-          createdAt: now,
-          completedAt: refreshResult.finishedAt,
-          input: { resources: staleResources },
-          output: refreshResult,
-        });
+        if (staleResources.length > 0) {
+          const refreshStep = this.refreshStep(steps, staleResources);
+          refreshResult = await this.refreshGraphCache({
+            tenantId: tenant.id,
+            resources: staleResources,
+          });
+          refreshStep.finish(refreshResult);
+          store.insertToolCall({
+            id: `tool_${randomUUID()}`,
+            conversationId: conversation.id,
+            messageId: userMessage.id,
+            type: "graph-cache-refresh",
+            status: refreshResult.resources.some((resource) => resource.ok)
+              ? "completed"
+              : "failed",
+            createdAt: now,
+            completedAt: refreshResult.finishedAt,
+            input: { resources: staleResources },
+            output: refreshResult,
+          });
+        }
       }
-    }
-
-    const cacheStatus = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
-    const answerGeneratedAt = new Date().toISOString();
-    const rows = readPlannedChatRows(store, {
-      tenantId: tenant.id,
-      question: content,
-      generatedAt: answerGeneratedAt,
-      resources: planned.resources,
-      searchTerms: planned.searchTerms,
-      limitPerResource: chatBudget.limitPerResource,
     });
+    if (!lazyRefresh) await refreshPlanned();
+
+    const answerGeneratedAt = new Date().toISOString();
+    const readPack = () => ({
+      cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+      rows: readPlannedChatRows(store, {
+        tenantId: tenant.id,
+        question: content,
+        generatedAt: answerGeneratedAt,
+        resources: planned.resources,
+        searchTerms: planned.searchTerms,
+        limitPerResource: chatBudget.limitPerResource,
+      }),
+      // Snapshot matching the rows just read for the deterministic
+      // pack. If an investigation later refreshes resources and then
+      // falls back, its sources and aggregates must describe this pack,
+      // not the refreshed cache the fallback never used.
+      packCacheStatus: store.getGraphCacheStatus(tenant.id, [
+        ...GRAPH_CACHE_RESOURCES,
+      ]),
+      packAggregates: this.graphAggregatesFor(
+        store,
+        tenant.id,
+        planned.resources,
+      ),
+    });
+    let { cacheStatus, rows, packCacheStatus, packAggregates } = readPack();
+    // As in the streaming path: a tool-loop run refreshes once the kind
+    // needs it, and a fallback answers from the pack read right after.
+    let lazyPack: ReturnType<typeof readPack> | undefined;
+    const loadTenantData = once(async () => {
+      await refreshPlanned();
+      lazyPack = readPack();
+    });
+    const prepareDeterministic = async () => {
+      if (!lazyRefresh) return;
+      answerPlan.settleKind();
+      if (answerPlan.sources.kind !== "docs") await loadTenantData();
+      ({ cacheStatus, rows, packCacheStatus, packAggregates } = lazyPack ?? readPack());
+    };
     const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
-    const refreshedResources = new Set(
-      refreshResult?.resources
-        .filter((resource) => resource.ok)
-        .map((resource) => resource.resource) ?? [],
-    );
-    // Snapshot matching the rows just read for the deterministic
-    // pack. If an investigation later refreshes resources and then
-    // falls back, its sources and aggregates must describe this pack,
-    // not the refreshed cache the fallback never used.
-    const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
-      ...GRAPH_CACHE_RESOURCES,
-    ]);
-    const packAggregates = this.graphAggregatesFor(
-      store,
-      tenant.id,
-      planned.resources,
-    );
 
     let assistantContent: string;
     let usedDeterministic = false;
@@ -1816,6 +1834,7 @@ export class IntuneChatService {
       const buildDeterministicAnswer = async (
         notice?: string,
       ): Promise<{ content: string; model?: string }> => {
+        await prepareDeterministic();
         usedDeterministic = true;
         engineNotice = notice;
         const answerPack = buildAnswerPack({
@@ -1876,6 +1895,7 @@ export class IntuneChatService {
               ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
               questionKind: answerPlan.sources.kind,
               requiredServerIds: answerPlan.sources.requiredServerIds,
+              ...(lazyRefresh ? modelClassification(content, answerPlan.kind, loadTenantData) : {}),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -1917,7 +1937,9 @@ export class IntuneChatService {
     }
 
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
+    answerPlan.settleKind();
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
+    const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
     const followUps = answered
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
@@ -2116,10 +2138,12 @@ export class IntuneChatService {
       providerId,
       ...(selectedModel ? { model: selectedModel } : {}),
     }).enabled;
+    // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
       ? undefined
-      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, steps });
+      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, steps });
     const isCancelled = () => options.signal?.aborted === true;
     const finishCancelled = (): SendIntuneChatMessageResult => {
       const cancelledAt = new Date().toISOString();
@@ -2213,85 +2237,88 @@ export class IntuneChatService {
 
     // Same short-circuit as the non-streaming path: the write block
     // answers without tenant data, so no refresh runs first.
-    if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
-      const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
-      const staleResources = planned.resources.filter((resource) => {
-        const status = before.find((entry) => entry.resource === resource);
-        if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
-        return (
-          Date.now() - new Date(status.refreshedAt).getTime() >
-          resourceStalenessMs(resource)
-        );
-      });
-      progressRefreshResources = staleResources;
-      if (staleResources.length > 0) {
-        sendProgress({
-          message: `Refreshing ${staleResources.length} tenant data source${staleResources.length === 1 ? "" : "s"} before answering.`,
-          stage: "refreshing-cache",
+    const refreshPlanned = once(async () => {
+      if (input.refreshIfStale !== false && !planned.hasWriteIntent) {
+        const before = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
+        const staleResources = planned.resources.filter((resource) => {
+          const status = before.find((entry) => entry.resource === resource);
+          if (!status?.refreshedAt || status.lastError || status.pageLimitReached || (status.tenantTotal !== undefined && status.rows < status.tenantTotal)) return true;
+          return (
+            Date.now() - new Date(status.refreshedAt).getTime() >
+            resourceStalenessMs(resource)
+          );
         });
-        const refreshStep = this.refreshStep(steps, staleResources);
-        refreshResult = await this.refreshGraphCacheInternal(
-          {
-            tenantId: tenant.id,
-            resources: staleResources,
-          },
-          (event) => {
-            if (event.type === "resource-start") {
-              progressActiveResource = event.resource;
-              refreshStep.progress(event.label);
+        progressRefreshResources = staleResources;
+        if (staleResources.length > 0) {
+          sendProgress({
+            message: `Refreshing ${staleResources.length} tenant data source${staleResources.length === 1 ? "" : "s"} before answering.`,
+            stage: "refreshing-cache",
+          });
+          const refreshStep = this.refreshStep(steps, staleResources);
+          refreshResult = await this.refreshGraphCacheInternal(
+            {
+              tenantId: tenant.id,
+              resources: staleResources,
+            },
+            (event) => {
+              if (event.type === "resource-start") {
+                progressActiveResource = event.resource;
+                refreshStep.progress(event.label);
+                sendProgress({
+                  message: `Refreshing ${event.label}.`,
+                  stage: "refreshing-cache",
+                });
+                return;
+              }
+              progressActiveResource = undefined;
+              progressRefreshResults = [...progressRefreshResults, event.result];
               sendProgress({
-                message: `Refreshing ${event.label}.`,
+                message: event.result.ok
+                  ? `Cached ${event.result.label}.`
+                  : `Could not refresh ${event.result.label}.`,
                 stage: "refreshing-cache",
               });
-              return;
-            }
-            progressActiveResource = undefined;
-            progressRefreshResults = [...progressRefreshResults, event.result];
-            sendProgress({
-              message: event.result.ok
-                ? `Cached ${event.result.label}.`
-                : `Could not refresh ${event.result.label}.`,
-              stage: "refreshing-cache",
-            });
-          },
-          // Stop used to be checked only before and after the whole
-          // refresh, so pressing it mid-refresh let every remaining
-          // Graph call run to completion before the result was thrown
-          // away. The signal now reaches the requests themselves.
-          options.signal,
-        );
-        refreshStep.finish(refreshResult);
-        store.insertToolCall({
-          id: `tool_${randomUUID()}`,
-          conversationId: conversation.id,
-          messageId: userMessage.id,
-          type: "graph-cache-refresh",
-          status: refreshResult.resources.some((resource) => resource.ok)
-            ? "completed"
-            : "failed",
-          createdAt: now,
-          completedAt: refreshResult.finishedAt,
-          input: { resources: staleResources },
-          output: refreshResult,
-        });
-        sendProgress({
-          message: "Building answer context from local cache.",
-          stage: "building-context",
-          contextStatus: "active",
-          cacheStatus: {
-            tenantId: tenant.id,
-            resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
-            schedule: store.getGraphCacheRefreshSchedule(tenant.id),
-          },
-        });
-      } else {
-        sendProgress({
-          message: "Using cached tenant context.",
-          stage: "building-context",
-          contextStatus: "active",
-        });
+            },
+            // Stop used to be checked only before and after the whole
+            // refresh, so pressing it mid-refresh let every remaining
+            // Graph call run to completion before the result was thrown
+            // away. The signal now reaches the requests themselves.
+            options.signal,
+          );
+          refreshStep.finish(refreshResult);
+          store.insertToolCall({
+            id: `tool_${randomUUID()}`,
+            conversationId: conversation.id,
+            messageId: userMessage.id,
+            type: "graph-cache-refresh",
+            status: refreshResult.resources.some((resource) => resource.ok)
+              ? "completed"
+              : "failed",
+            createdAt: now,
+            completedAt: refreshResult.finishedAt,
+            input: { resources: staleResources },
+            output: refreshResult,
+          });
+          sendProgress({
+            message: "Building answer context from local cache.",
+            stage: "building-context",
+            contextStatus: "active",
+            cacheStatus: {
+              tenantId: tenant.id,
+              resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+              schedule: store.getGraphCacheRefreshSchedule(tenant.id),
+            },
+          });
+        } else {
+          sendProgress({
+            message: "Using cached tenant context.",
+            stage: "building-context",
+            contextStatus: "active",
+          });
+        }
       }
-    }
+    });
+    if (!lazyRefresh) await refreshPlanned();
     if (isCancelled()) {
       const result = finishCancelled();
       sendProgress({
@@ -2305,34 +2332,47 @@ export class IntuneChatService {
       return result;
     }
 
-    const cacheStatus = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
     const answerGeneratedAt = new Date().toISOString();
-    const rows = readPlannedChatRows(store, {
-      tenantId: tenant.id,
-      question: voiceContext?.planningQuestion ?? content,
-      generatedAt: answerGeneratedAt,
-      resources: planned.resources,
-      searchTerms: planned.searchTerms,
-      limitPerResource: chatBudget.limitPerResource,
+    const readPack = () => ({
+      cacheStatus: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
+      rows: readPlannedChatRows(store, {
+        tenantId: tenant.id,
+        question: voiceContext?.planningQuestion ?? content,
+        generatedAt: answerGeneratedAt,
+        resources: planned.resources,
+        searchTerms: planned.searchTerms,
+        limitPerResource: chatBudget.limitPerResource,
+      }),
+      // Snapshot matching the rows just read for the deterministic
+      // pack. If an investigation later refreshes resources and then
+      // falls back, its sources and aggregates must describe this pack,
+      // not the refreshed cache the fallback never used.
+      packCacheStatus: store.getGraphCacheStatus(tenant.id, [
+        ...GRAPH_CACHE_RESOURCES,
+      ]),
+      packAggregates: this.graphAggregatesFor(
+        store,
+        tenant.id,
+        planned.resources,
+      ),
     });
+    let { cacheStatus, rows, packCacheStatus, packAggregates } = readPack();
+    // A tool-loop run refreshes once the kind needs it. As on the
+    // deterministic path, a fallback answers from the pack read right
+    // after that refresh, not from data a tool refreshed later.
+    let lazyPack: ReturnType<typeof readPack> | undefined;
+    const loadTenantData = once(async () => {
+      await refreshPlanned();
+      lazyPack = readPack();
+    });
+    /** Before a deterministic answer in a tool-loop run, the kind is settled and a tenant or mixed question reads the tenant. */
+    const prepareDeterministic = async () => {
+      if (!lazyRefresh) return;
+      answerPlan?.settleKind();
+      if (answerPlan?.sources.kind !== "docs") await loadTenantData();
+      ({ cacheStatus, rows, packCacheStatus, packAggregates } = lazyPack ?? readPack());
+    };
     const agentSuggestions = matchAgentsToQuestion(content, persisted.installedAgents);
-    const refreshedResources = new Set(
-      refreshResult?.resources
-        .filter((resource) => resource.ok)
-        .map((resource) => resource.resource) ?? [],
-    );
-    // Snapshot matching the rows just read for the deterministic
-    // pack. If an investigation later refreshes resources and then
-    // falls back, its sources and aggregates must describe this pack,
-    // not the refreshed cache the fallback never used.
-    const packCacheStatus = store.getGraphCacheStatus(tenant.id, [
-      ...GRAPH_CACHE_RESOURCES,
-    ]);
-    const packAggregates = this.graphAggregatesFor(
-      store,
-      tenant.id,
-      planned.resources,
-    );
     let assistantContent = "";
     let usedDeterministic = false;
     let assistantStatus: IntuneChatMessage["status"] = "completed";
@@ -2385,6 +2425,7 @@ export class IntuneChatService {
         ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
         : contextualQuestion;
       const streamDeterministicAnswer = async (notice?: string) => {
+        await prepareDeterministic();
         usedDeterministic = true;
         engineNotice = notice;
         let answerPack = buildAnswerPack({
@@ -2471,6 +2512,7 @@ export class IntuneChatService {
               documentation,
               ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
               ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
+              ...(answerPlan && lazyRefresh ? modelClassification(content, answerPlan.kind, loadTenantData) : {}),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -2646,7 +2688,9 @@ export class IntuneChatService {
       emitDelta(assistantContent, "");
     }
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
+    answerPlan?.settleKind();
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
+    const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
     const followUps = answerPlan && answered
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
@@ -2789,9 +2833,12 @@ export class IntuneChatService {
   }
 
   /**
-   * Classifies the question, chooses its sources and records the first
-   * step. A docs question keeps the planner's resources only as the tenant
-   * tie-in for follow-ups: its plan is emptied, so nothing reads the tenant.
+   * Classifies the question by keyword rules, chooses its sources and
+   * starts the first step. When the model classifies, the step stays open
+   * and the keyword kind is only its fallback; otherwise the keyword kind
+   * is decided here. A docs question keeps the planner's resources only as
+   * the tenant tie-in for follow-ups: `settleKind` empties its plan, so
+   * nothing reads the tenant.
    */
   private async planAnswer(input: {
     content: string;
@@ -2799,22 +2846,27 @@ export class IntuneChatService {
     tenant: TenantRecord;
     conversationId: string;
     toolsOffered: boolean;
+    modelClassifies: boolean;
     steps: ChatStepRecorder;
-  }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; sources: ChatSourcePlan; tieInResources: GraphCacheResourceKind[] }> {
-    // The first step shows at once; its detail follows when the sources are known.
+  }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
+    // The first step shows at once; its detail follows when the kind and sources are known.
     const planStep = input.steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: ON_DEVICE });
     const installed = await this.mcpToolsFor(input.tenant, input.conversationId);
     // A model that skips the tool loop is offered no MCP tools, so none is planned as a source.
     const mcp = input.toolsOffered ? installed : {};
     const servers = mcp.mcp?.servers ?? [];
-    const kind = input.planned.hasWriteIntent
+    const keywordKind = input.planned.hasWriteIntent
       ? "tenant"
       : classifyChatQuestion(input.content, { plannedResources: input.planned.resources, namesSource: namedServers(input.content, servers).length > 0 });
-    const sources = planChatSources({ question: input.content, kind, servers, docsIndexAvailable: Boolean(this.host.documentationIndexVersion?.()) });
+    const context = { question: input.content, servers, docsIndexAvailable: Boolean(this.host.documentationIndexVersion?.()) };
+    const kind = new QuestionKindTracker(input.steps, planStep, context, planChatSources({ ...context, kind: keywordKind }));
     const tieInResources = [...input.planned.resources];
-    if (kind === "docs") input.planned.resources = [];
-    input.steps.finish(planStep, { title: "Read the question", detail: sources.detail });
-    return { mcp, mcpInstalled: Boolean(installed.mcp), sources, tieInResources };
+    const settleKind = () => {
+      kind.settle();
+      if (kind.sources.kind === "docs") input.planned.resources = [];
+    };
+    if (!input.modelClassifies) settleKind();
+    return { mcp, mcpInstalled: Boolean(installed.mcp), get sources() { return kind.sources; }, kind, settleKind, tieInResources };
   }
 
   /** Searches the local docs index and records the step. Passages carry the index version. */
@@ -3175,6 +3227,33 @@ type AgenticCapabilityDecision = {
 /** The plain line Chat and the Marketplace show when the model is too small for tool use. */
 export function smallModelNotice(model: string): string {
   return `${model} is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger.`;
+}
+
+/** Runs a refresh at most once; later calls wait for the same run. */
+function once(run: () => Promise<void>): () => Promise<void> {
+  let pending: Promise<void> | undefined;
+  return () => (pending ??= run());
+}
+
+function refreshedResourceSet(result: GraphCacheRefreshResult | undefined): Set<GraphCacheResourceKind> {
+  return new Set(result?.resources.filter((resource) => resource.ok).map((resource) => resource.resource) ?? []);
+}
+
+/**
+ * The model classifies the question in its first reply, the keyword
+ * check vetoes a docs label that refers to the tenant, and the tenant is
+ * refreshed only once the kind needs it.
+ */
+function modelClassification(
+  content: string,
+  kind: QuestionKindTracker,
+  loadTenantData: () => Promise<void>,
+): Pick<RunAgenticChatInput, "classify" | "onUpgrade" | "ensureTenantData"> {
+  return {
+    classify: { tenantReference: hasTenantReference(content), onKind: (decided, reason, declared) => kind.resolve(decided, reason, declared) },
+    onUpgrade: () => { kind.upgrade(); },
+    ensureTenantData: loadTenantData,
+  };
 }
 
 /** Says so when installed MCP tools were held back from a model that skips the tool loop. */

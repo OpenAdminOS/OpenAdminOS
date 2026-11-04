@@ -357,7 +357,7 @@ describe("MCP installs in app state", () => {
     }));
     const prompts: string[] = [];
     const replies = [
-      JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "Windows Autopatch" } }),
+      JSON.stringify({ kind: "docs", sources: ["test-docs"], tool: "mcp__test-docs__search_docs", params: { query: "Windows Autopatch" } }),
       JSON.stringify({ final: true, answer: "Windows Autopatch is a cloud service that automates Windows updates." }),
     ];
     const store = new AppStateStore({
@@ -397,9 +397,9 @@ describe("MCP installs in app state", () => {
       installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
     }));
     const replies = [
-      JSON.stringify({ tool: "graph_get", params: { path: "/deviceManagement/deviceHealthScripts" } }),
+      JSON.stringify({ kind: "tenant", sources: [], tool: "graph_get", params: { path: "/deviceManagement/deviceHealthScripts" } }),
       JSON.stringify({ final: true, answer: "One remediation script exists." }),
-      JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "how to fix Nightly Purge Zeta failures" } }),
+      JSON.stringify({ kind: "docs", sources: ["test-docs"], tool: "mcp__test-docs__search_docs", params: { query: "how to fix Nightly Purge Zeta failures" } }),
       JSON.stringify({ tool: "mcp__test-docs__search_docs", params: { query: "Intune remediation script failures" } }),
       JSON.stringify({ final: true, answer: "Check the script output in the remediation report." }),
     ];
