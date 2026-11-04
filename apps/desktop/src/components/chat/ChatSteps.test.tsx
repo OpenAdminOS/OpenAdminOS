@@ -78,6 +78,21 @@ describe("chat steps", () => {
     expect(document.getElementById("source-answer-1-1")).toHaveFocus();
   });
 
+  it("shows adjacent citation chips in ascending order, once per card", () => {
+    const article = "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune";
+    const message: IntuneChatMessage = {
+      id: "m-order", conversationId: "c", role: "assistant", status: "completed", createdAt: "", content: "",
+      documentationSources: [
+        { citation: 2, kind: "mcp", title: "Deploy Defender on macOS with Intune", url: `${article}#profiles`, serverName: "Microsoft Learn", host: "learn.microsoft.com" },
+        { citation: 4, kind: "mcp", title: "Deploy Defender on macOS with Intune", url: `${article}#deploy`, serverName: "Microsoft Learn", host: "learn.microsoft.com" },
+        { citation: 6, kind: "mcp", title: "Onboard devices to Defender for Business", url: "https://learn.microsoft.com/defender-business/mdb-onboard-devices", serverName: "Microsoft Learn", host: "learn.microsoft.com" },
+      ],
+    };
+    render(<AnswerBody message={message} content="Deploy the profiles [6][4] [2]. Keep `[9][1]` as code." />);
+    expect(screen.getAllByRole("button", { name: /^Source \d/ }).map((chip) => chip.textContent)).toEqual(["2", "6"]);
+    expect(screen.getByText("[9][1]")).toBeInTheDocument();
+  });
+
   it("shows uncited MCP results as consulted, without citation numbers", () => {
     const content = "Defender for Endpoint needs full disk access.";
     render(<SourceCards message={{ ...message, content }} content={content} />);

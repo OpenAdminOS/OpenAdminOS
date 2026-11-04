@@ -159,6 +159,22 @@ export function mergeSources(sources: readonly IntuneChatDocumentationSource[]):
   return { cards: [...byKey.values()], cardFor: (citation) => byCitation.get(citation) };
 }
 
+/**
+ * Adjacent citations ("[4][2] [6]") as one ascending run without repeats,
+ * each number replaced by its card's number, so merged chunks show once.
+ * Code is left alone.
+ */
+export function orderCitationRuns(content: string, sources: readonly IntuneChatDocumentationSource[]): string {
+  const { cardFor } = mergeSources(sources);
+  return content.split(/(```[\s\S]*?```|`[^`\n]*`)/).map((part, index) => index % 2 === 1 ? part : part.replace(
+    /\[\d{1,2}\](?!\()(?:[ ,]*\[\d{1,2}\](?!\())+/g,
+    (run) => {
+      const numbers = [...run.matchAll(/\[(\d{1,2})\]/g)].map((match) => cardFor(Number(match[1]))?.citation ?? Number(match[1]));
+      return [...new Set(numbers)].sort((a, b) => a - b).map((n) => `[${n}]`).join("");
+    },
+  )).join("");
+}
+
 /** Paragraphs split at blank lines, keeping fenced code blocks whole. */
 function chunks(content: string): string[] {
   const out: string[] = [];

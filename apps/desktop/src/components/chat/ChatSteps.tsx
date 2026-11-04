@@ -6,6 +6,7 @@ import {
   formatIndexVersion,
   formatStepDuration,
   mergeSources,
+  orderCitationRuns,
   sourcesForCards,
   splitAnswerBlocks,
   summarizeSteps,
@@ -182,7 +183,7 @@ function CitationChip({ messageId, source }: { messageId: string; source: Intune
  */
 export function AnswerBody({ message, content }: { message: IntuneChatMessage; content: string }) {
   const sources = message.documentationSources ?? [];
-  const blocks = splitAnswerBlocks(content, { documentationSources: sources, tenantEvidence: usedTenantEvidence(message) });
+  const blocks = splitAnswerBlocks(orderCitationRuns(content, sources), { documentationSources: sources, tenantEvidence: usedTenantEvidence(message) });
   // Chunks of one article share a card, so every number of the article shows the card's number.
   const { cardFor } = mergeSources(sources);
   const renderCitation = (citation: number) => {
