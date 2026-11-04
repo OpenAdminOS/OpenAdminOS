@@ -1,4 +1,4 @@
-import { isGenericTokens, normalizeTokens } from "./mcp-stopwords.js";
+import { isCommonWord, isGenericTokens, normalizeTokens } from "./mcp-stopwords.js";
 
 /**
  * Tenant values for the MCP egress check: identity strings that must never
@@ -15,17 +15,46 @@ const TENANT_NAME_KEYS = new Set([
 ]);
 
 /**
+ * Descriptive keys. Their values are often ordinary words ("Sales",
+ * "Building 2"), so a value made only of common words is skipped.
+ */
+const TENANT_LABEL_KEYS = new Set(["companyName", "department", "officeLocation"]);
+
+/**
  * Identifier keys. Their values are always indexed, whatever their words,
  * as is every key ending in Id, ID, Ids or IDs.
  */
 const TENANT_IDENTIFIER_KEYS = new Set([
   "id", "userPrincipalName", "mail", "email", "emailAddress", "userName", "onPremisesSamAccountName",
   "serialNumber", "imei", "meid", "wiFiMacAddress", "ethernetMacAddress", "phoneNumber", "mobilePhone",
-  "businessPhones", "otherMails", "proxyAddresses",
+  "businessPhones", "otherMails", "proxyAddresses", "onPremisesDomainName", "domainName", "iccid", "udid",
 ]);
 const ID_KEY = /I[dD]s?$/;
 
-export type TenantValueKind = "identifier" | "name";
+/**
+ * Subtrees that hold property names and change details, not identities:
+ * audit events list "Description", "Platform" or "Assignments" under
+ * displayName there. They are skipped.
+ */
+const PROPERTY_NAME_SUBTREES = new Set(["modifiedProperties", "additionalDetails"]);
+
+export type TenantValueKind = "identifier" | "name" | "label";
+
+/**
+ * Whether a name or label value can identify something. One that is only
+ * numbers and stopwords cannot; a label of only common words cannot. A
+ * single word must contain a digit or hyphen, or have 6 or more characters
+ * and not be a common word, so "Mark" or "Platform" is not indexed.
+ */
+function isDistinctiveValue(value: string, tokens: readonly string[], kind: "name" | "label"): boolean {
+  if (isGenericTokens(tokens)) return false;
+  if (kind === "label" && tokens.every((token) => /^\p{N}+$/u.test(token) || isCommonWord(token))) return false;
+  if (tokens.length > 1) return true;
+  return /[\p{N}-]/u.test(value) || (tokens[0]!.length >= 6 && !isCommonWord(tokens[0]!));
+}
+
+/** Identifier values this long are also matched with separators removed. */
+const COMPACT_IDENTIFIER_MIN = 8;
 
 /**
  * Token sequence matcher. Values and queries are normalized the same way
@@ -38,9 +67,15 @@ export type TenantValueKind = "identifier" | "name";
  * their first token: a query is scanned once and, at each token, compared
  * only with the values starting with that token. Cost depends on the query
  * length and bucket size, not on how many values exist, so there is no cap.
+ * Identifiers of 8 or more characters (MAC addresses, serials) are also
+ * kept with separators removed and matched against every run of
+ * consecutive query tokens joined, so "A1B2C3 D4E5F6" matches
+ * "A1:B2:C3:D4:E5:F6".
  */
 export class TenantValueIndex {
   private readonly buckets = new Map<string, Map<string, string[]>>();
+  private readonly compact = new Set<string>();
+  private compactMaxLength = 0;
   private count = 0;
 
   get size(): number {
@@ -51,17 +86,22 @@ export class TenantValueIndex {
     if (typeof value !== "string") return;
     const tokens = normalizeTokens(value);
     if (tokens.length === 0 || tokens.join(" ").length < 3) return;
-    if (kind === "name" && isGenericTokens(tokens)) return;
+    if (kind !== "identifier" && !isDistinctiveValue(value, tokens, kind)) return;
     this.insert(tokens);
     const digits = value.replace(/\D/g, "");
     if (digits.length >= 6 && digits.length * 2 > value.replace(/\s/g, "").length) this.insert([digits]);
+    const compact = tokens.join("");
+    if (kind === "identifier" && compact.length >= COMPACT_IDENTIFIER_MIN) {
+      this.compact.add(compact);
+      this.compactMaxLength = Math.max(this.compactMaxLength, compact.length);
+    }
   }
 
   addAll(values: Iterable<unknown>, kind: TenantValueKind = "identifier"): void {
     for (const value of values) this.add(value, kind);
   }
 
-  /** Normalized values, for storage; adding them again yields the same index. */
+  /** Normalized values, for storage; adding them again yields the same index or a stricter one. */
   values(): string[] {
     return [...this.buckets.values()].flatMap((bucket) => [...bucket.keys()]);
   }
@@ -69,7 +109,20 @@ export class TenantValueIndex {
   /** Whether any indexed value appears as a token sequence in the text. */
   matches(text: string): boolean {
     const tokens = normalizeTokens(text);
-    return this.matchesTokens(tokens) || this.matchesTokens(joinNumericRuns(tokens));
+    return this.matchesTokens(tokens) || this.matchesTokens(joinNumericRuns(tokens)) || this.matchesCompact(tokens);
+  }
+
+  private matchesCompact(tokens: readonly string[]): boolean {
+    if (this.compact.size === 0) return false;
+    for (let start = 0; start < tokens.length; start += 1) {
+      let joined = "";
+      for (let end = start; end < tokens.length; end += 1) {
+        joined += tokens[end]!;
+        if (joined.length > this.compactMaxLength) break;
+        if (this.compact.has(joined)) return true;
+      }
+    }
+    return false;
   }
 
   private insert(tokens: string[]): void {
@@ -117,9 +170,12 @@ export function collectTenantValues(value: unknown, into: TenantValueIndex, dept
     into.add(`${record.givenName} ${record.surname}`, "name");
   }
   for (const [key, child] of Object.entries(record)) {
+    if (PROPERTY_NAME_SUBTREES.has(key)) continue;
     const kind: TenantValueKind | undefined = TENANT_NAME_KEYS.has(key)
       ? "name"
-      : TENANT_IDENTIFIER_KEYS.has(key) || ID_KEY.test(key) ? "identifier" : undefined;
+      : TENANT_LABEL_KEYS.has(key)
+        ? "label"
+        : TENANT_IDENTIFIER_KEYS.has(key) || ID_KEY.test(key) ? "identifier" : undefined;
     if (typeof child === "string") {
       if (kind) into.add(child, kind);
     } else if (kind && Array.isArray(child) && child.every((item) => typeof item === "string")) {

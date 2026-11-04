@@ -19,7 +19,7 @@ import { fenceTenantData } from "@openadminos/runtime";
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { cleanMcpDescription, cleanMcpSchema } from "../mcp/host.js";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
-import { isGenericTokens, normalizeTokens } from "./mcp-stopwords.js";
+import { hasMixedScriptToken, isCommonWord, normalizeTokens } from "./mcp-stopwords.js";
 import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
   GRAPH_CACHE_RESOURCES,
@@ -77,7 +77,7 @@ export interface McpChatContext {
   tools: readonly McpChatTool[];
   call(tool: McpChatTool, args: Record<string, unknown>, signal?: AbortSignal): Promise<{ text: string; truncated: boolean }>;
   /** Tenant names and domains that must never appear in a tool query. */
-  privateTerms: readonly string[];
+  privateTerms: McpPrivateTerms;
   /**
    * Tenant values from earlier turns of this conversation. Together with
    * the cache seed and this turn's observations, a query containing one
@@ -85,10 +85,19 @@ export interface McpChatContext {
    */
   tenantValues: TenantValueIndex;
   /**
-   * Adds the identity values of the local cache. Runs once, on the first
-   * MCP call of an answer; if it fails, the call fails and nothing is sent.
+   * The identity values of the local cache, built once per tenant and
+   * reused until the cache changes. Read on each MCP call; if it fails, the
+   * call fails and nothing is sent.
    */
-  seedTenantValues?: (into: TenantValueIndex) => void;
+  cachedTenantValues?: () => TenantValueIndex;
+}
+
+/** The sign-in name, domain and tenant name words a tool query must not contain. */
+export interface McpPrivateTerms {
+  /** Matched as whole token sequences. */
+  tokens: readonly string[];
+  /** Also matched with separators removed, inside longer words. */
+  compact: readonly string[];
 }
 
 /** The host refused an MCP call before anything was sent. */
@@ -535,23 +544,25 @@ function executeToolUnchecked(
 /**
  * Tenant words a public tool query must not contain: the sign-in name, its
  * domain, and each distinctive word of the tenant name. Product and common
- * words in the name ("Contoso Microsoft Practice") are dropped, the rest
- * ("contoso") is blocked.
+ * English words in the name ("Contoso Microsoft Practice", "Acme Health")
+ * are dropped, the rest ("contoso", "acme") is blocked. A name made only of
+ * such words ("Northern Cloud") is blocked as the whole name, never word by
+ * word, so "Cloud PC" stays usable.
  */
-export function mcpPrivateTermsForTenant(tenant: { displayName: string; username: string }): string[] {
+export function mcpPrivateTermsForTenant(tenant: { displayName: string; username: string }): McpPrivateTerms {
   const nameTokens = normalizeTokens(tenant.displayName);
-  const distinctive = nameTokens.filter((token) => !isGenericTokens([token]) && token.length >= 3);
-  // A name made only of generic words is still the tenant's name as a whole.
-  const name = distinctive.length > 0 ? distinctive : [nameTokens.join(" ")];
-  const terms = [tenant.username, tenant.username.split("@")[1] ?? "", ...name];
-  return [...new Set(terms.map((term) => term.trim()).filter((term) => term.length >= 3))];
+  const distinctive = nameTokens.filter((token) => token.length >= 3 && !/^\p{N}+$/u.test(token) && !isCommonWord(token));
+  const clean = (terms: string[]) => [...new Set(terms.map((term) => term.trim()).filter((term) => term.length >= 3))];
+  const compact = clean([tenant.username, tenant.username.split("@")[1] ?? "", ...distinctive]);
+  return { tokens: clean([...compact, ...(distinctive.length > 0 ? [] : [nameTokens.join(" ")])]), compact };
 }
 
 /**
- * Tenant names, domains and sign-in names are high confidence, so they are
- * also matched with separators removed: "contoso" matches "contoso_ltd" and
- * "contosocorp". Terms shorter than five characters keep token matching
- * only, because as substrings they would match ordinary words.
+ * The sign-in name, domain and distinctive tenant name words are high
+ * confidence, so they are also matched with separators removed: "contoso"
+ * matches "contoso_ltd" and "contosocorp". Terms shorter than five
+ * characters keep token matching only, because as substrings they would
+ * match ordinary words.
  */
 function containsPrivateTerm(text: string, terms: readonly string[]): boolean {
   const compactText = normalizeTokens(text).join("");
@@ -581,16 +592,21 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   // in third-party results can steer the model, so identifiers that are
   // certainly private never leave the device, whatever the model wrote.
   const privateTerms = new TenantValueIndex();
-  privateTerms.addAll(ctx.mcp.privateTerms);
+  privateTerms.addAll(ctx.mcp.privateTerms.tokens);
   if (leaves.some((leaf) => /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i.test(leaf)) ||
-    privateTerms.matches(joined) || containsPrivateTerm(joined, ctx.mcp.privateTerms)) {
+    privateTerms.matches(joined) || containsPrivateTerm(joined, ctx.mcp.privateTerms.compact)) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained a tenant name, domain, email address, ID, IP address or credential. Nothing was sent to ${entry.host}. Rephrase it as a public question.`);
   }
-  if (ctx.mcp.seedTenantValues) {
-    ctx.mcp.seedTenantValues(ctx.mcp.tenantValues);
-    ctx.mcp.seedTenantValues = undefined;
+  // Look-alike letters from another script defeat value matching, so a
+  // word that mixes them is never sent.
+  if (hasMixedScriptToken(joined)) {
+    throw new McpQueryBlockedError(`the ${entry.serverName} query mixed Latin letters with Cyrillic or Greek ones in one word. Nothing was sent to ${entry.host}. Rephrase it in one script.`);
   }
-  const indexes = [ctx.mcp.tenantValues, ...(ctx.tenantObservations ? [ctx.tenantObservations] : [])];
+  const indexes = [
+    ctx.mcp.tenantValues,
+    ...(ctx.mcp.cachedTenantValues ? [ctx.mcp.cachedTenantValues()] : []),
+    ...(ctx.tenantObservations ? [ctx.tenantObservations] : []),
+  ];
   if (indexes.some((index) => index.matches(joined))) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained tenant data from this conversation, such as a user, device or group name or an ID. Nothing was sent to ${entry.host}. Rephrase it as a public question without tenant values.`);
   }

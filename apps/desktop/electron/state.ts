@@ -1810,7 +1810,7 @@ export class AppStateStore {
       tools,
       privateTerms: mcpPrivateTermsForTenant(tenant),
       tenantValues: new TenantValueIndex(),
-      seedTenantValues: (into) => this.requireIntelligenceStore().collectTenantIdentityValues(tenant.id, into),
+      cachedTenantValues: () => this.requireIntelligenceStore().tenantIdentityValues(tenant.id),
       call: (tool, args, signal) => {
         const entry = this.requireMcpCatalogEntry(tool.serverId);
         return this.mcpHost.callTool(entry, tool.tool, args, signal);

@@ -286,7 +286,7 @@ describe("MCP tools in the Chat loop", () => {
       assert.ok(!seeded.matches("member"));
       assert.ok(!seeded.matches("windows"));
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
-      const context = { ...mcpContext(calls), seedTenantValues: (into: TenantValueIndex) => store.collectTenantIdentityValues(tenant.id, into) };
+      const context = { ...mcpContext(calls), cachedTenantValues: () => store.tenantIdentityValues(tenant.id) };
       const result = await runAgenticChat(input(store, scriptedLlm([callDocs("reset MFA for Avery Quinlan"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), context));
       assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
       assert.equal(calls.length, 0);
@@ -314,7 +314,7 @@ describe("MCP tools in the Chat loop", () => {
   it("fails closed when the cache seed cannot be read", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
-      const context = { ...mcpContext(calls), seedTenantValues: () => { throw new Error("database is locked"); } };
+      const context = { ...mcpContext(calls), cachedTenantValues: (): TenantValueIndex => { throw new Error("database is locked"); } };
       const result = await runAgenticChat(input(store, scriptedLlm([callDocs("Intune compliance grace period"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), context));
       assert.match(result.toolTrace[0]!.error!, /database is locked/);
       assert.equal(calls.length, 0);
@@ -369,10 +369,12 @@ describe("MCP tools in the Chat loop", () => {
   });
 
   it("never blocks product names that match a tenant called after a product", () => {
-    // Every word is generic, so the whole name is the term.
-    assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Microsoft Intune Lab", username: "admin@lab.example" }), ["admin@lab.example", "lab.example", "microsoft intune lab"]);
-    assert.deepEqual(mcpPrivateTermsForTenant(tenant), ["admin@contoso.example", "contoso.example", "contoso"]);
-    assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Contoso Microsoft Practice", username: "admin@fabrikam.example" }), ["admin@fabrikam.example", "fabrikam.example", "contoso"]);
+    // Every word is generic, so the whole name is the term, matched as whole tokens only.
+    assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Microsoft Intune Lab", username: "admin@lab.example" }), {
+      tokens: ["admin@lab.example", "lab.example", "microsoft intune lab"], compact: ["admin@lab.example", "lab.example"] });
+    assert.deepEqual(mcpPrivateTermsForTenant(tenant), {
+      tokens: ["admin@contoso.example", "contoso.example", "contoso"], compact: ["admin@contoso.example", "contoso.example", "contoso"] });
+    assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Contoso Microsoft Practice", username: "admin@fabrikam.example" }).tokens, ["admin@fabrikam.example", "fabrikam.example", "contoso"]);
   });
 
   it("blocks the distinctive word of a tenant name that contains product words", async () => {
@@ -415,7 +417,7 @@ describe("MCP tools in the Chat loop", () => {
         rows: [{ id: "dev-d4", deviceName: "HR-LAPTOP-07" }] });
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
       const twoParams: McpChatTool = { ...docsTool, inputSchema: { type: "object", properties: { query: { type: "string" }, scope: { type: "string" } } } };
-      const context: McpChatContext = { ...mcpContext(calls), tools: [twoParams], seedTenantValues: (into) => store.collectTenantIdentityValues(tenant.id, into) };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [twoParams], cachedTenantValues: () => store.tenantIdentityValues(tenant.id) };
       const result = await runAgenticChat(input(store, scriptedLlm([
         JSON.stringify({ tool: docsTool.name, params: { query: "why is HR LAPTOP", scope: "07 offline" } }),
         '{"final":true,"answer":"Done."}',
@@ -471,6 +473,107 @@ describe("MCP tools in the Chat loop", () => {
     }
     assert.equal(index.matches("grant"), false);
     assert.equal(index.matches("hollis"), false);
+  });
+
+  it("blocks common English words of a tenant name only as the whole name", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const acme: McpChatContext = { ...mcpContext(calls), privateTerms: mcpPrivateTermsForTenant({ displayName: "Zenvora Health", username: "admin@zenvora.example" }) };
+      const acmeRun = await runAgenticChat(input(store, scriptedLlm([callDocs("device health attestation on Windows"), callDocs("Zenvora licensing"), callDocs("zenvoracorp licensing"), '{"final":true,"answer":"Done."}']), acme));
+      assert.equal(acmeRun.toolTrace[0]!.error, undefined);
+      assert.equal(acmeRun.toolTrace[1]!.mcpSource?.blocked, true);
+      assert.equal(acmeRun.toolTrace[2]!.mcpSource?.blocked, true);
+      const northern: McpChatContext = { ...mcpContext(calls), privateTerms: mcpPrivateTermsForTenant({ displayName: "Northern Cloud", username: "admin@nc.example" }) };
+      assert.deepEqual(northern.privateTerms.compact, ["admin@nc.example", "nc.example"]);
+      const northernRun = await runAgenticChat(input(store, scriptedLlm([callDocs("Cloud PC provisioning"), callDocs("northern europe region"), callDocs("Northern Cloud licensing"), '{"final":true,"answer":"Done."}']), northern));
+      assert.equal(northernRun.toolTrace[0]!.error, undefined);
+      assert.equal(northernRun.toolTrace[1]!.error, undefined);
+      assert.equal(northernRun.toolTrace[2]!.mcpSource?.blocked, true);
+      assert.deepEqual(calls.map((call) => call.args.query), ["device health attestation on Windows", "Cloud PC provisioning", "northern europe region"]);
+    });
+  });
+
+  it("skips audit property names and indexes single-word names only when distinctive", () => {
+    const index = new TenantValueIndex();
+    collectTenantValues([
+      { activityDisplayName: "Update policy", targetResources: [{ id: "pol-9f2c", displayName: "Kiosk Wave Policy", modifiedProperties: [{ displayName: "Description", oldValue: "a", newValue: "b" }, { displayName: "Assignments" }] }], additionalDetails: [{ key: "Platform", value: "Windows" }] },
+      { resources: [{ resourceId: "res-4411", modifiedProperties: [{ displayName: "Platform" }] }] },
+      { displayName: "Platform" }, { displayName: "Anna" }, { name: "Quinlanova" }, { displayName: "Kiosk7" },
+    ], index);
+    for (const allowed of ["description field for policies", "assignments for apps", "platform support", "anna"]) {
+      assert.equal(index.matches(allowed), false, allowed);
+    }
+    for (const blocked of ["kiosk wave policy", "quinlanova", "kiosk7", "pol-9f2c"]) {
+      assert.equal(index.matches(blocked), true, blocked);
+    }
+  });
+
+  it("strips default-ignorable fillers and blocks words that mix Latin with Cyrillic or Greek", async () => {
+    const index = new TenantValueIndex();
+    index.add("HR-LAPTOP-07");
+    for (const filler of ["\u115f", "\u1160", "\u3164", "\uffa0"]) {
+      assert.equal(index.matches(`HR${filler}-LAPTOP-0${filler}7`), true, `U+${filler.codePointAt(0)!.toString(16)}`);
+    }
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const result = await runAgenticChat(input(store, scriptedLlm([
+        callDocs("C\u043entoso licensing"),
+        callDocs("\u03b1lpha ring for updates"),
+        callDocs("\u041c\u0430\u0439\u043a\u0440\u043e\u0441\u043e\u0444\u0442 Intune"),
+        '{"final":true,"answer":"Done."}',
+      ]), mcpContext(calls)));
+      assert.match(result.toolTrace[0]!.error!, /mixed Latin letters with Cyrillic or Greek ones.*Nothing was sent/);
+      assert.equal(result.toolTrace[1]!.mcpSource?.blocked, true);
+      // Words in one script each are fine.
+      assert.equal(result.toolTrace[2]!.error, undefined);
+      assert.equal(calls.length, 1);
+    });
+  });
+
+  it("matches long identifiers against consecutive query tokens joined", () => {
+    const index = new TenantValueIndex();
+    collectTenantValues([{ wiFiMacAddress: "A1:B2:C3:D4:E5:F6", serialNumber: "5CG1234ABC", udid: "00008030-001A2B3C" }], index);
+    for (const blocked of ["mac a1b2c3d4e5f6", "A1B2C3 D4E5F6 offline", "A1:B2:C3:D4:E5:F6", "serial 5CG 1234 ABC", "5cg1234abc", "udid 00008030001a2b3c"]) {
+      assert.equal(index.matches(blocked), true, blocked);
+    }
+    for (const allowed of ["a1 b2 c3 mapping", "serial 5CG", "1234 ABC"]) {
+      assert.equal(index.matches(allowed), false, allowed);
+    }
+  });
+
+  it("seeds domains, administrative units and named locations, and labels only when distinctive", async () => {
+    await withStore(async (store) => {
+      const at = "2026-06-01T10:00:00.000Z";
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "domains", label: "Domains", scopeSet: [], refreshedAt: at, rows: [{ id: "zephyrmail.example", isVerified: true }] });
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "administrativeUnits", label: "AUs", scopeSet: [], refreshedAt: at, rows: [{ id: "au-1", displayName: "Region Bavaria Schools" }] });
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "namedLocations", label: "Named locations", scopeSet: [], refreshedAt: at, rows: [{ id: "loc-1", displayName: "Plant Ingolstadt" }] });
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "users", label: "Users", scopeSet: [], refreshedAt: at, rows: [
+        { id: "usr-1", displayName: "Avery Quinlan", department: "Sales", officeLocation: "Building 2", companyName: "Zephyr Freight", onPremisesDomainName: "corp.zephyr.local" },
+      ] });
+      const index = store.tenantIdentityValues(tenant.id);
+      for (const blocked of ["zephyrmail example", "region bavaria schools", "plant ingolstadt", "zephyr freight", "corp zephyr local"]) {
+        assert.equal(index.matches(blocked), true, blocked);
+      }
+      for (const allowed of ["sales team licensing", "building 2 printers"]) {
+        assert.equal(index.matches(allowed), false, allowed);
+      }
+    });
+  });
+
+  it("builds the cache index once per tenant and rebuilds it after the cache changes", async () => {
+    await withStore(async (store) => {
+      const at = "2026-06-01T10:00:00.000Z";
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: at, rows: [{ id: "dev-1", deviceName: "KIOSK-0042" }] });
+      const first = store.tenantIdentityValues(tenant.id);
+      assert.equal(store.tenantIdentityValues(tenant.id), first);
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: at, rows: [{ id: "dev-2", deviceName: "KIOSK-0099" }] });
+      const second = store.tenantIdentityValues(tenant.id);
+      assert.notEqual(second, first);
+      assert.equal(second.matches("kiosk-0099"), true);
+      assert.equal(second.matches("kiosk-0042"), false);
+      store.clearGraphCache(tenant.id);
+      assert.equal(store.tenantIdentityValues(tenant.id).matches("kiosk-0099"), false);
+    });
   });
 
   it("is not reachable through the external gateway's read tools", async () => {

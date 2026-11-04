@@ -2,12 +2,13 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
-import { collectTenantValues, type TenantValueIndex } from "./tenant-values.js";
+import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 
 /** Cached resources whose rows describe people, groups, devices or their activity. */
 const TENANT_IDENTITY_RESOURCES = [
   "users", "groups", "managedDevices", "entraDevices", "windowsAutopilotDevices", "autopilotEvents",
   "signIns", "directoryAudits", "intuneAuditEvents", "managedDeviceEncryptionStates", "troubleshootingEvents",
+  "domains", "administrativeUnits", "namedLocations",
 ] as const;
 import type {
   ChatInvestigationMode,
@@ -401,6 +402,9 @@ export class IntelligenceSqliteStore {
   // resource. A refresh whose fetch started before that moment holds
   // pre-write rows, so its completion must not clear the stale marker.
   private readonly graphInvalidatedAt = new Map<string, string>();
+  // Identity values of the cached rows per tenant, built on the first MCP
+  // call and dropped whenever that tenant's cache changes.
+  private readonly tenantIdentityIndexes = new Map<string, TenantValueIndex>();
 
   constructor(dbPath: string) {
     const root = dirname(dbPath);
@@ -674,6 +678,7 @@ export class IntelligenceSqliteStore {
     refreshedAt: string;
   }): void {
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
+    this.tenantIdentityIndexes.delete(input.tenantId);
     this.db.exec("BEGIN");
     try {
       const normalizedRows = input.rows.map((row) => ({
@@ -2065,6 +2070,7 @@ export class IntelligenceSqliteStore {
   }
 
   clearGraphCache(tenantId: string): void {
+    this.tenantIdentityIndexes.delete(tenantId);
     this.db.exec("BEGIN");
     try {
       this.db
@@ -2105,6 +2111,7 @@ export class IntelligenceSqliteStore {
       .filter((row) => readJson<string[]>(row.resolved_tenant_ids_json, []).includes(tenantId))
       .map((row) => row.id);
 
+    this.tenantIdentityIndexes.delete(tenantId);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
@@ -2296,6 +2303,19 @@ export class IntelligenceSqliteStore {
       into.add(row.display_name, "name");
       collectTenantValues(readJson<unknown>(row.raw_json, {}), into);
     }
+  }
+
+  /**
+   * The identity values of the cache as one index, built once per tenant
+   * and rebuilt after the tenant's cache changes. Callers must not add to it.
+   */
+  tenantIdentityValues(tenantId: string): TenantValueIndex {
+    const cached = this.tenantIdentityIndexes.get(tenantId);
+    if (cached) return cached;
+    const index = new TenantValueIndex();
+    this.collectTenantIdentityValues(tenantId, index);
+    this.tenantIdentityIndexes.set(tenantId, index);
+    return index;
   }
 
   /** Tenant values that earlier turns of a conversation observed. */
