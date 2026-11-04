@@ -21,7 +21,7 @@ Reviews recent directory audit entries by activity, category, result, actor, and
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.6.3` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-11-04 · `6b31f81` |
+| Last changed | 2026-11-04 · `46d7170` |
 
 ## Execution
 
