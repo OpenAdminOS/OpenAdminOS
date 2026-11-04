@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Marketplace replaces the Agent Hub: browse registry agents and install the Microsoft Learn, KQL Search and IntuneAutomation MCP servers, whose read-only tools Chat can then call with any provider. The status strip names the hosts that receive tool queries.
 - Public roadmap at roadmap.openadminos.com: four stages from the desktop available today to team features and a vendor ecosystem, each item tracked as a public issue.
 - Add a code of conduct (Contributor Covenant 2.1) and a security policy with private vulnerability reporting and the scope of what to report.
 - Document how to connect with your own Entra app registration: redirect URI, public client flows, and the delegated Graph permissions to add. A test keeps the documented permission list in sync with the app.

@@ -873,10 +873,10 @@ Vendor sign-in (designed separately as Vendor MCP authentication), local or sand
 
 ## Steps
 
-- [ ] MCP host in the main process: catalog of the three servers, connect, list tools, call with timeout and output cap
-- [ ] Persist installs, IPC and preload API
-- [ ] Chat loop: MCP tools in the prompt, executor, trace, evidence guard, prompt rules
-- [ ] Trust copy for external tool hosts
-- [ ] Marketplace page and sidebar; move the hub out of Agents
+- [x] MCP host in the main process: catalog of the three servers, connect, list tools, call with timeout and output cap
+- [x] Persist installs, IPC and preload API
+- [x] Chat loop: MCP tools in the prompt, executor, trace, evidence guard, prompt rules
+- [x] Trust copy for external tool hosts
+- [x] Marketplace page and sidebar; move the hub out of Agents
 - [ ] Tests, screenshots, live check in the app
 - [ ] SPEC, CHANGELOG, reviews

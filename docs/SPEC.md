@@ -2140,7 +2140,8 @@ The shell sidebar presents these primary actions and destinations in this order:
 | New chat | `/chat` | Starts a new tenant Q&A conversation |
 | Search | Command palette | Commands, conversations, agents, and Settings targets |
 | Agent Team | `/office` | Persistent teammates, assignments, evidence review, conversations, and the Office and List views |
-| Agents | `/agents` | Installed and Hub libraries, schedules, and agent details |
+| Agents | `/agents` | Installed agents, schedules, and agent details |
+| Marketplace | `/marketplace` | Registry agents and MCP servers to install (added 2026-11-03, replaces the Hub tab) |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
 
@@ -2966,3 +2967,13 @@ The maintainer approved a Nightly channel next to Stable, modelled on TenuVault:
 - **Agent compatibility:** a nightly satisfies `minAppVersion` values up to its base version, so `0.7.1-nightly.*` runs agents that require 0.7.1.
 
 Runbook: `docs/RELEASING.md`, "Nightly builds".
+
+### Marketplace and MCP client, first wave (2026-11-03)
+
+- **Marketplace replaces the Agent Hub.** A Marketplace sidebar item (`/marketplace`) lists the registry agents and remote MCP servers, styled after `docs/mockups/25-marketplace.html` without prices, trials or vendor commerce. Agents shows installed agents only. `/hub`, `/agents/hub` and `/agents?source=hub` redirect to `/marketplace?kind=agents`; agent details and install stay on `/agents/:slug`. In pilot mode the Marketplace is browsable and MCP servers can be installed; agent install stays production-only.
+- **Catalog in code.** The first wave is Microsoft Learn (`learn.microsoft.com/api/mcp`), KQL Search (`www.kqlsearch.com/mcp`) and IntuneAutomation (`www.intuneautomation.com/mcp/`): streamable HTTP, no sign-in, read-only, never touching the tenant. The catalog is a typed module (`apps/desktop/electron/mcp/catalog.ts`) until a public catalog file exists. Tool schemas are never hard-coded: the host lists them live at install and on each check.
+- **MCP client in the main process.** `McpHost` (`@modelcontextprotocol/sdk` Client with the streamable HTTP transport) connects, lists tools, calls them with a 30 second timeout, caps each response at 2 MB and each tool output at 12,000 characters, and reports designed errors (unreachable, timeout, HTTP status, tool error, unknown tool). Installs persist under `mcpServers` in `state.json`; a failed connect records nothing.
+- **Every install shows an authentication step**, including "No sign-in needed", plus the host that receives tool queries, and requires an acknowledgement.
+- **Chat.** Installed, enabled MCP tools are offered to the investigation loop as `mcp__<serverId>__<tool>` with any provider. Results are fenced as third-party content from the named host, not instructions and not tenant evidence; a successful MCP answer satisfies the evidence guard for a documentation question. The model is told to send only standalone public questions, and the host blocks a query containing email addresses, GUIDs, IP addresses, credentials, the tenant sign-in name or domain, or the tenant display name (unless it contains a product word). MCP tools never reach the external MCP gateway and are not offered to Nova voice. Small local models that skip the tool loop get no MCP tools, and Marketplace and Chat say so.
+- **Trust copy rule.** Whenever an MCP server is enabled, the status strip names the hosts that receive tool queries ("tool queries to learn.microsoft.com +2", every host in the tooltip), also with a local model; the local strip no longer says no data leaves the device. Pilot mode keeps its label because pilot Chat never calls a model or a tool.
+
