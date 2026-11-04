@@ -229,9 +229,11 @@ describe("citations and MCP results", () => {
 
   it("reads a fetched Learn page as one result titled by its heading, and items of other servers by name and link", () => {
     const page = "# Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune\n\nSee [Apple Configurator](https://support.apple.com/apple-configurator).";
-    assert.deepEqual(parseMcpResults(page, { args: { url: "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune" } }).map(({ title, url }) => [title, url]), [
+    assert.deepEqual(parseMcpResults(page, { host: "learn.microsoft.com", args: { url: "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune" } }).map(({ title, url }) => [title, url]), [
       ["Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune", "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune"],
     ]);
+    // A fetched URL the model chose on another host never becomes a card link.
+    assert.deepEqual(parseMcpResults(page, { host: "learn.microsoft.com", args: { url: "https://evil.example/learn.microsoft.com" } }).map(({ url }) => url), ["https://support.apple.com/apple-configurator"]);
     // IntuneAutomation and KQL Search shapes.
     assert.deepEqual(parseMcpResults(JSON.stringify({ scripts: [{ id: "get-stale-devices", title: "Get Stale Intune Devices", synopsis: "Reports devices that have not checked in.", githubUrl: "https://github.com/ugurkocde/intuneautomation/blob/main/scripts/devices/get-stale-devices.ps1" }] })), [
       { title: "Get Stale Intune Devices", url: "https://github.com/ugurkocde/intuneautomation/blob/main/scripts/devices/get-stale-devices.ps1", excerpt: "Reports devices that have not checked in." },
