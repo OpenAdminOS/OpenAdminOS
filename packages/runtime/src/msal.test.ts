@@ -133,6 +133,16 @@ describe("interactive tenant sign-in listener", () => {
         assert.doesNotMatch(html, /Trace ID/);
         assert.doesNotMatch(html, /oa:error-detail/);
 
+        // String.replace expands $` $& $' $$ in a string replacement; the
+        // untrusted text must be inserted literally.
+        const patterns = encodeURIComponent("a$`b$&c$$d");
+        const literal = await (
+          await fetch(`${redirectUri}/?error=x&error_description=${patterns}`)
+        ).text();
+        assert.match(literal, /<strong>x<\/strong>a\$`b\$&#38;c\$\$d<\/div>/);
+        assert.equal(literal.match(/<!doctype/g)?.length, 1);
+        assert.doesNotMatch(literal, /oa:error-detail/);
+
         const response = await authorization;
         request.loopbackClient!.closeServer();
         assert.equal(response.error, "access_denied");

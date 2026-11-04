@@ -302,7 +302,7 @@ function authResultPage(input: {
 
 const SUCCESS_TEMPLATE = authResultPage({
   tone: "success",
-  title: "OpenAdminOS - sign-in complete",
+  title: "OpenAdminOS: sign-in complete",
   status: "Signed in",
   heading: "Sign-in complete",
   body: "Microsoft returned an authorization code to OpenAdminOS. The desktop app finishes connecting the tenant from here.",
@@ -310,7 +310,7 @@ const SUCCESS_TEMPLATE = authResultPage({
 
 const ERROR_TEMPLATE = authResultPage({
   tone: "danger",
-  title: "OpenAdminOS - sign-in did not complete",
+  title: "OpenAdminOS: sign-in did not complete",
   status: "Not connected",
   heading: "Sign-in did not complete",
   body: "Microsoft returned an error instead of an authorization code. Return to OpenAdminOS and connect the tenant again.",
@@ -325,14 +325,14 @@ function renderSignInErrorPage(
   template: string,
   error?: { error?: string; error_description?: string },
 ): string {
-  if (!error?.error) return template.replace(ERROR_DETAIL_MARKER, "");
+  if (!error?.error) return template.replace(ERROR_DETAIL_MARKER, () => "");
   // Entra descriptions carry trace and correlation IDs on later lines; the
   // first line is the part an admin acts on.
   const description = (error.error_description ?? "").split(/\r?\n/)[0]!.trim().slice(0, 280);
   const detail = `<div class="detail mono"><strong>${escapeHtml(error.error)}</strong>${
     description ? escapeHtml(description) : ""
   }</div>`;
-  return template.replace(ERROR_DETAIL_MARKER, detail);
+  return template.replace(ERROR_DETAIL_MARKER, () => detail);
 }
 
 export interface TokenCacheStorage {
