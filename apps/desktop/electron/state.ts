@@ -23,7 +23,6 @@ import {
   createOllamaLlm,
   createRegistryInstallCountPayload,
   createTenantSession,
-  DEFAULT_SCOPE_METADATA,
   probeSubscribedSkus,
   findConnectorFactory,
   fenceTenantData,
@@ -160,6 +159,9 @@ import {
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
   scopesForPermissionAreas,
+  BASELINE_SCOPES,
+  SERVICE_PARTS,
+  toResourceScopes,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSchedule,
@@ -5436,15 +5438,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async listRequestedScopes(): Promise<RequestedScope[]> {
-    // Strips the Graph resource prefix so the renderer can display the
-    // bare scope name (e.g. "DeviceManagementManagedDevices.Read.All")
-    // while the constant in msal.ts keeps the fully-qualified URI MSAL
-    // requires.
-    return DEFAULT_SCOPE_METADATA.map((scope) => ({
-      name: scope.name,
-      mode: scope.mode,
-      rationale: scope.rationale,
-    }));
+    // One row per scope a part can request, with the reason from the
+    // service registry. Bare names: MSAL gets the resource form.
+    const seen = new Set<string>();
+    return SERVICE_PARTS.flatMap((part) =>
+      part.scopes.flatMap((scope) => {
+        if (seen.has(scope.name)) return [];
+        seen.add(scope.name);
+        return [{ name: scope.name, mode: "read" as const, rationale: scope.reason }];
+      }),
+    );
   }
 
   async connectTenant(options: ConnectTenantOptions = {}): Promise<AppState> {
@@ -5469,9 +5472,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const client = this.msalClientFor(registration);
     const permissionAreaIds = normalizePermissionAreaIds(options.permissionAreaIds);
     const requestedScopeNames = scopesForPermissionAreas(permissionAreaIds);
-    const scopes = requestedScopeNames.map(
-      (scope) => `https://graph.microsoft.com/${scope}`,
-    );
+    const scopes = toResourceScopes([...BASELINE_SCOPES, ...requestedScopeNames]);
     let result;
     try {
       result = await this.interactiveSignIn({

@@ -6,7 +6,6 @@ import type {
   PublicClientApplication,
 } from "@azure/msal-node";
 import {
-  DEFAULT_SCOPE_METADATA,
   DEFAULT_SCOPES,
   createTenantSession,
   runInteractiveFlow,
@@ -15,13 +14,13 @@ import {
 } from "./msal.js";
 
 describe("default tenant consent scopes", () => {
-  it("keeps the MSAL request and consent-preview metadata in exact sync", () => {
-    const requested = DEFAULT_SCOPES.map((scope) =>
-      scope.replace("https://graph.microsoft.com/", ""),
-    ).sort();
-    const described = DEFAULT_SCOPE_METADATA.map((scope) => scope.name).sort();
-    assert.deepEqual(requested, described);
-    assert.equal(new Set(requested).size, requested.length);
+  it("asks for the four sign-in scopes only when no scopes are given", () => {
+    assert.deepEqual(DEFAULT_SCOPES, [
+      "openid",
+      "profile",
+      "offline_access",
+      "https://graph.microsoft.com/User.Read",
+    ]);
   });
   it("retains the scopes actually returned by MSAL without changing token requests", async () => {
     const requests: string[][] = [];

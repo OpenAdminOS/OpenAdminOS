@@ -549,9 +549,9 @@ export interface StartRunOptions {
  * to the renderer so the pre-consent scope preview can list exactly
  * what MSAL is about to ask for, with a plain-English rationale.
  *
- * The default read set is requested together so Chat and bundled read
- * agents do not discover missing consent mid-answer. Write scopes are
- * never requested by default.
+ * Rows come from the service registry: the scopes of the parts an admin
+ * can choose. Sign-in itself requests only the baseline scopes. Write
+ * scopes are never requested at connect.
  */
 export interface RequestedScope {
   name: string;

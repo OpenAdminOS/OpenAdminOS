@@ -126,7 +126,6 @@ export {
   createMsalClient,
   DEFAULT_AUTHORITY,
   DEFAULT_SCOPES,
-  DEFAULT_SCOPE_METADATA,
   GRAPH_CLI_CLIENT_ID,
   OPENADMINOS_CLIENT_ID,
   defaultClientId,
@@ -135,7 +134,6 @@ export {
   TenantConnectTimeoutError,
   removeAccount,
   runInteractiveFlow,
-  type RequestedScopeMetadata,
   type TokenCacheStorage,
 } from "./msal.js";
 export {

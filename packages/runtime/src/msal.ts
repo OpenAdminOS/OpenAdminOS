@@ -14,8 +14,9 @@ import {
 } from "@azure/msal-node";
 import { createServer, type Server } from "node:http";
 import {
-  DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  BASELINE_SCOPES,
   OPENADMINOS_APP_CLIENT_ID,
+  toResourceScopes,
   type TenantSession,
 } from "@openadminos/agent-sdk";
 
@@ -54,157 +55,11 @@ export function authorityForDirectory(directoryTenantId?: string): string {
   }
   return `https://login.microsoftonline.com/${trimmed}`;
 }
-// Bundled at initial sign-in so the admin sees ONE Microsoft consent
-// screen, every bundled read-only agent can run without a second
-// consent prompt, and Intune Chat can refresh its core read-only cache
-// without discovering missing scopes during an answer. Audited against
-// every agent manifest under /agents plus the Intune Chat Graph cache
-// planner (see `DEFAULT_SCOPE_METADATA` for which feature uses which scope).
-// Write scopes are deliberately excluded. Each write-mode agent
-// requests its specific scope at install/run time, with a separate
-// consent screen, per the project's trust policy.
-export const DEFAULT_SCOPES = DEFAULT_GRAPH_READ_SCOPE_NAMES.map(
-  (name) => `https://graph.microsoft.com/${name}`,
-);
-
-export interface RequestedScopeMetadata {
-  name: string;
-  mode: "read" | "write";
-  rationale: string;
-}
-
-// User-facing rationale for the scope set requested at initial sign-in.
-// Ordered to mirror what a manager scanning the consent screen would
-// want to grok first (operational → identity/users → security).
-//
-// Agents the admin installs later from the registry that declare a
-// scope NOT in this set will trigger an incremental MSAL consent
-// prompt at install time. MSAL also adds the reserved scopes
-// `openid`, `profile`, and `offline_access` on every interactive
-// request. Those are not admin-consent permissions and are surfaced
-// in the UI as a small footnote, not as separate rows.
-export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
-  {
-    name: "DeviceManagementManagedDevices.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Intune-enrolled devices, detected apps, troubleshooting events, and fleet status. Used by Compliance overview, Find inactive devices, OS update posture, Tenant health report, and Intune Chat device investigations.",
-  },
-  {
-    name: "DeviceManagementConfiguration.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Intune compliance policies, configuration profiles, settings catalog policies, update policies, endpoint security intents, assignment filters, administrative templates, and encryption-state resources for Intune Chat.",
-  },
-  {
-    name: "DeviceManagementApps.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Intune apps, managed app policies, app protection policies, and app configuration policies so Intune Chat can answer deployment, Company Portal, and mobile app protection questions.",
-  },
-  {
-    name: "DeviceManagementServiceConfig.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Intune service configuration resources including Windows Autopilot devices, Autopilot deployment profiles, and enrollment configurations.",
-  },
-  {
-    name: "DeviceManagementScripts.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Intune remediation scripts and platform scripts so Intune Chat can explain assignment, execution, and reporting gaps without requesting write permissions.",
-  },
-  {
-    name: "DeviceManagementRBAC.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Intune role scope tags so Intune Chat can explain policy visibility and scope-tag targeting.",
-  },
-  {
-    name: "Device.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Entra device objects for stale-device correlation, Autopilot matching, and Intune-vs-Entra inventory comparisons.",
-  },
-  {
-    name: "GroupMember.Read.All",
-    mode: "read",
-    rationale:
-      "Reads group objects and membership signals used by Intune assignments, app targeting, filters, and policy coverage questions.",
-  },
-  {
-    name: "Organization.Read.All",
-    mode: "read",
-    rationale:
-      "Reads /subscribedSkus so the status strip can show which Entra ID tier (Free / P1 / P2) the tenant is on and badge agents that need P1 or P2 features.",
-  },
-  {
-    name: "User.Read.All",
-    mode: "read",
-    rationale:
-      "Reads user profile data: license assignment, location, and last sign-in. Used by User license overview and as a prerequisite read for Stale guest cleanup.",
-  },
-  {
-    name: "Policy.Read.All",
-    mode: "read",
-    rationale:
-      "Reads conditional access and related tenant policies so the Conditional access explainer can describe what's enforced and why.",
-  },
-  {
-    name: "Application.Read.All",
-    mode: "read",
-    rationale:
-      "Reads registered apps in Entra so the Dormant app registrations agent can flag apps that haven't been used.",
-  },
-  {
-    name: "AuditLog.Read.All",
-    mode: "read",
-    rationale:
-      "Reads sign-in logs and directory audit events. Used by Sign-in failure explainer, Tenant change audit, and as a prerequisite read for Stale guest cleanup.",
-  },
-  {
-    name: "IdentityRiskyUser.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Entra ID Protection's risky-user signals so the Risky sign-in triage agent can group and explain risk events. Requires Entra ID P2 to return data; the scope can still be consented on Free/P1 tenants but the agent will surface no results.",
-  },
-  {
-    name: "SecurityEvents.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Microsoft Secure Score controls so the Secure score prioritizer can rank improvement actions by impact.",
-  },
-  {
-    name: "RoleManagement.Read.Directory",
-    mode: "read",
-    rationale:
-      "Reads Entra directory roles so Chat can answer which admin roles exist and how policies target privileged users. Never modifies role assignments.",
-  },
-  {
-    name: "AdministrativeUnit.Read.All",
-    mode: "read",
-    rationale:
-      "Reads administrative units so scoped-administration questions can be answered with the tenant's actual delegation structure.",
-  },
-  {
-    name: "Domain.Read.All",
-    mode: "read",
-    rationale:
-      "Reads verified domains and their authentication type so Chat can explain federation and domain configuration questions.",
-  },
-  {
-    name: "SecurityAlert.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Microsoft Defender alerts so Chat can summarize open alerts by severity and service. Alert data is read-only; triage actions are never taken.",
-  },
-  {
-    name: "SecurityIncident.Read.All",
-    mode: "read",
-    rationale:
-      "Reads Microsoft Defender incidents so Chat can report incident status, classification, and assignment. Incidents are never modified.",
-  },
-];
+// Sign-in only: openid, profile, offline_access and User.Read. Callers
+// add the scopes of the service parts the admin chose, and agents add
+// their declared scopes when they run, each behind its own consent. Scope
+// names, reasons and permission IDs live in the agent-sdk service registry.
+export const DEFAULT_SCOPES = toResourceScopes(BASELINE_SCOPES);
 
 const SUCCESS_TEMPLATE = `<!doctype html>
 <html lang="en">
