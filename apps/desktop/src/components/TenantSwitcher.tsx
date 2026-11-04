@@ -14,7 +14,7 @@ import {
   IconRefresh,
   IconSettings,
 } from "./icons";
-import { licensesNotChecked, useTenantCheck } from "./ServiceAccess";
+import { TenantCheckStatus, licensesNotChecked, useTenantCheck } from "./ServiceAccess";
 import { Modal, ModalHeader } from "./Modal";
 import { Pill } from "./Pill";
 import { TenantTile } from "./TenantTile";
@@ -179,7 +179,7 @@ export function TenantSwitcher() {
                 return (
                   <div
                     key={tenant.id}
-                    className={`group flex items-center rounded-[9px] ${active ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}
+                    className={`group flex flex-wrap items-center rounded-[9px] ${active ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}
                   >
                     <button
                       type="button"
@@ -224,6 +224,7 @@ export function TenantSwitcher() {
                     >
                       <IconClose size={11} />
                     </button>
+                    <TenantCheckStatus tenant={tenant} className="basis-full px-2.5 pb-1.5" />
                   </div>
                 );
               })
@@ -324,38 +325,34 @@ export function TenantSwitcher() {
 }
 
 /**
- * Retry license check from the tenant menu. While it runs the same button
- * cancels it, and the result is reported in a toast.
+ * Retry license check from the tenant menu. Its progress and Cancel show
+ * under the tenant, and the result is reported in a toast, so it stays
+ * visible after the menu closes.
  */
 function SwitcherLicenseRetry({ tenant }: { tenant: TenantRecord }) {
   const { retryTenantLicenseCheck } = useAppState();
   const toast = useToast();
   const check = useTenantCheck(tenant.id);
-  const label = check.running
-    ? SERVICE_COPY.cancelLicenseCheckFor(tenant.displayName)
-    : SERVICE_COPY.retryLicenseCheckFor(tenant.displayName);
+  if (check.busy) return null;
+  const label = SERVICE_COPY.retryLicenseCheckFor(tenant.displayName);
   return (
     <button
       type="button"
       aria-label={label}
-      title={check.running && check.signingIn ? SERVICE_COPY.waitingForSignIn : label}
-      disabled={check.cancelling || (!check.running && check.progress !== undefined)}
+      title={label}
       onClick={() => {
-        if (check.running) {
-          check.cancel();
-          return;
-        }
         void check.run(() => retryTenantLicenseCheck(tenant.id)).then((result) => {
-          if (result.status === "cancelled") toast.info(SERVICE_COPY.checkCancelled.license);
-          else if (result.status === "failed") toast.error(result.message);
-          else if (result.value.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning) {
+          if (result.status === "ended") {
+            if (result.tone === "danger") toast.error(result.message);
+            else toast.info(result.message);
+          } else if (result.value.tenants.find((entry) => entry.id === tenant.id)?.tierProbeWarning) {
             toast.info(SERVICE_COPY.licenseCheckStillFailing);
           } else toast.success(SERVICE_COPY.licenseCheckFinished);
         });
       }}
       className="rounded-[7px] p-1.5 text-[var(--color-warning)] hover:bg-[var(--color-warning-soft)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-warning)]"
     >
-      {check.running ? <IconClose size={11} /> : <IconRefresh size={11} />}
+      <IconRefresh size={11} />
     </button>
   );
 }
