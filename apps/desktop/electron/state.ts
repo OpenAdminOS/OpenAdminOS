@@ -1698,6 +1698,7 @@ export class AppStateStore {
         host: mcpHost(entry.url),
         description: entry.description,
         pitch: entry.pitch,
+        useFor: entry.useFor,
         auth: entry.auth,
         readOnly: entry.readOnly,
         installed: Boolean(installed),

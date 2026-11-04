@@ -1049,6 +1049,8 @@ export interface McpServerSummary {
   host: string;
   description: string;
   pitch: string;
+  /** Our own line on what Chat uses this server for, also given to the model. */
+  useFor: string;
   auth: McpServerAuth;
   readOnly: true;
   installed: boolean;

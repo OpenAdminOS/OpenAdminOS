@@ -146,6 +146,9 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
   return (
     <div className="grid gap-7 px-6 py-6">
       <p className="max-w-[62ch] text-base leading-relaxed text-[var(--color-text-soft)]">{server.description}</p>
+      <p className="max-w-[62ch] text-sm text-[var(--color-text-muted)]">
+        <span className="font-medium text-[var(--color-text-soft)]">Chat uses it for</span> {server.useFor.charAt(0).toLowerCase() + server.useFor.slice(1)}
+      </p>
       {toolUse?.available === false && toolUse.notice ? <ToolUseNotice notice={toolUse.notice} /> : null}
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Where queries go</h3>
