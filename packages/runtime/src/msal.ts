@@ -436,7 +436,10 @@ export async function acquireTokenSilent(input: {
   scopes?: string[];
   /** Skip the cached access token, for example after admin consent changed. */
   forceRefresh?: boolean;
+  /** Stops waiting for MSAL; the call rejects with the signal's reason. */
+  signal?: AbortSignal;
 }): Promise<AuthenticationResult> {
+  input.signal?.throwIfAborted();
   const { homeAccountId, tenantId } = input.account;
   const account = await findTenantAccount({ client: input.client, homeAccountId, tenantId });
   if (!account) {
@@ -453,8 +456,9 @@ export async function acquireTokenSilent(input: {
   };
   let result: AuthenticationResult | null;
   try {
-    result = await input.client.acquireTokenSilent(request);
+    result = await awaitWithSignal(input.client.acquireTokenSilent(request), input.signal);
   } catch (error) {
+    if (input.signal?.aborted) throw input.signal.reason;
     if (error instanceof InteractionRequiredAuthError) {
       throw new Error(
         `Cached refresh token is no longer valid for ${homeAccountId}. Reconnect the tenant.`,
@@ -489,6 +493,8 @@ export interface CreateTenantSessionInput {
   acquireInteractive?: (
     scopes: string[],
   ) => Promise<AuthenticationResult>;
+  /** Stops silent acquisition; pass the same signal to `acquireInteractive`. */
+  signal?: AbortSignal;
 }
 
 /**
@@ -515,9 +521,11 @@ export function createTenantSession(
         client: input.client,
         account: expected,
         ...(input.authority ? { authority: input.authority } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
         scopes,
       });
     } catch (silentError) {
+      if (input.signal?.aborted) throw silentError;
       const needsInteractive =
         silentError instanceof InteractionRequiredAuthError ||
         (silentError instanceof Error &&
