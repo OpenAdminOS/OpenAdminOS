@@ -80,13 +80,14 @@ import {
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
 import { appendOnlySteps, currentStepTitle, renumberCitations, tenantNotUsed, usedTenantEvidence } from "../shared/chat-steps";
+import { hostedDisclosureKey, readHostedDisclosures, recordHostedDisclosure, showFullHostedDisclosure } from "../shared/hosted-disclosure";
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
-import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
+import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
 import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
@@ -312,6 +313,7 @@ function IntuneChatContent() {
   const [dismissedSuggestionMessageIds, setDismissedSuggestionMessageIds] = useState<string[]>([]);
   const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+  const [hostedDisclosures, setHostedDisclosures] = useState(readHostedDisclosures);
   const followLatestRef = useRef(true);
   const restoreConversationScrollRef = useRef<string | null>(null);
 
@@ -1559,6 +1561,28 @@ function IntuneChatContent() {
   const composerSuggestion = latestFollowUp && `${latestAssistant!.id}:${latestFollowUp}` !== dismissedSuggestion
     ? { text: latestFollowUp, key: `${latestAssistant!.id}:${latestFollowUp}` }
     : undefined;
+  // The full hosted sentence shows on a conversation's first message and
+  // after the provider, model or MCP hosts change; otherwise an icon.
+  const disclosureKey = hostedDisclosureKey({
+    providerId: state.activeProviderId,
+    ...(activeModel ? { model: activeModel } : {}),
+    ...(dataBoundary.kind === "hosted" && dataBoundary.toolHostsNote ? { toolHosts: dataBoundary.toolHostsNote } : {}),
+  });
+  const hostedDisclosureFull = showFullHostedDisclosure({
+    hosted: dataBoundary.kind === "hosted",
+    currentKey: disclosureKey,
+    conversationId: activeConversationId,
+    messages: displayedMessages,
+    acknowledged: hostedDisclosures,
+    providerId: state.activeProviderId,
+    ...(activeModel ? { model: activeModel } : {}),
+  });
+  useEffect(() => {
+    // A message sent with this provider, model and hosts: later messages show the icon only.
+    if (!runInProgress || !activeConversationId || dataBoundary.kind !== "hosted") return;
+    if (hostedDisclosures[activeConversationId] === disclosureKey) return;
+    setHostedDisclosures((current) => recordHostedDisclosure(current, activeConversationId, disclosureKey));
+  }, [runInProgress, activeConversationId, dataBoundary.kind, disclosureKey, hostedDisclosures]);
   const fillComposer = (value: string) => {
     setInput(value);
     writeChatDraft(activeConversationId, value);
@@ -1662,6 +1686,7 @@ function IntuneChatContent() {
       onModelSelect={(providerId, model) => void handleModelSelect(providerId, model)}
       onOpenProviders={() => navigate("/settings/providers")}
       dataBoundary={dataBoundary}
+      hostedDisclosureFull={hostedDisclosureFull}
       suggestion={composerSuggestion?.text}
       onDismissSuggestion={() => composerSuggestion && setDismissedSuggestion(composerSuggestion.key)}
     />
@@ -2184,6 +2209,7 @@ function ChatComposer({
   onModelSelect,
   onOpenProviders,
   dataBoundary,
+  hostedDisclosureFull,
   suggestion,
   onDismissSuggestion,
 }: {
@@ -2207,11 +2233,15 @@ function ChatComposer({
   onModelSelect: (providerId: ProviderId, model: string) => void;
   onOpenProviders: () => void;
   dataBoundary: DataBoundary;
+  /** Show the hosted sentence in full under the composer; otherwise its icon carries it. */
+  hostedDisclosureFull: boolean;
   /** A follow-up shown as ghost text while the composer is empty. Tab fills it; nothing is sent. */
   suggestion?: string;
   onDismissSuggestion?: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const disclosureId = `hosted-disclosure-${placement}`;
   const showSuggestion = Boolean(suggestion) && value === "" && !disabled && !sending;
   const suggestionHintId = `chat-suggestion-${placement}`;
   const [activePickerIndex, setActivePickerIndex] = useState(0);
@@ -2270,6 +2300,7 @@ function ChatComposer({
       : "Ask a follow-up, or type / to run an agent"
     : SETUP_COPY.guestComposerPlaceholder;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  const hostedSentence = `Prompts and tenant data go to ${activeProvider?.name ?? "the selected provider"} while this model is selected.${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
 
   return (
     <div className="relative">
@@ -2452,6 +2483,20 @@ function ChatComposer({
             }}
           />
           <span className="min-w-2 flex-1" />
+          {dataBoundary.kind === "hosted" ? (
+            <Tooltip content={hostedSentence} panelClassName="max-w-72">
+              <button
+                type="button"
+                aria-label="Where data goes"
+                aria-expanded={hostedDisclosureFull || disclosureOpen}
+                aria-controls={disclosureId}
+                onClick={() => setDisclosureOpen((open) => !open)}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] text-[var(--color-warning)] transition-colors hover:bg-[var(--color-warning-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+              >
+                <IconCloud size={13} />
+              </button>
+            </Tooltip>
+          ) : null}
           <ComposerModelPopover
             providers={providers}
             activeProviderId={activeProviderId}
@@ -2499,12 +2544,9 @@ function ChatComposer({
           </span>
         </div>
       ) : (
-        <div role="note" className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-warning)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
+        <div id={disclosureId} role="note" hidden={!(hostedDisclosureFull || disclosureOpen)} className={`mt-2.5 items-center gap-1.5 text-sm text-[var(--color-warning)] ${hostedDisclosureFull || disclosureOpen ? "flex" : ""} ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
           <IconCloud size={13} />
-          <span>
-            Prompts and tenant data go to {activeProvider?.name ?? "the selected provider"} while this model is selected.
-            {dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : null}
-          </span>
+          <span>{hostedSentence}</span>
         </div>
       )}
     </div>

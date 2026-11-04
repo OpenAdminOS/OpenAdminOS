@@ -671,6 +671,48 @@ describe("IntuneChat agent picker", () => {
   });
 });
 
+describe("IntuneChat hosted-provider disclosure", () => {
+  const sentence = "Prompts and tenant data go to OpenAI while this model is selected.";
+  const conversation: IntuneChatConversation = {
+    id: "conversation-hosted", title: "Stale devices", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+  };
+  const answered = (model: string) => vi.fn(async () => [
+    { id: "q-h", conversationId: conversation.id, role: "user" as const, content: "Which devices are stale?", status: "completed" as const, createdAt: conversation.createdAt },
+    { id: "a-h", conversationId: conversation.id, role: "assistant" as const, content: "Two devices are stale.", status: "completed" as const, createdAt: conversation.updatedAt, providerId: "openai" as const, model },
+  ]);
+
+  it("folds the sentence into an icon once the conversation sent with this model, keeping it reachable by keyboard and screen reader", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },
+      createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
+    expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
+    const icon = screen.getByRole("button", { name: "Where data goes" });
+    expect(icon).toHaveAccessibleDescription(sentence);
+    expect(icon).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("note")).toBeNull();
+    // The status strip pill is unchanged; the composer icon opens the full sentence on demand.
+    await user.click(icon);
+    expect(icon).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("note")).toHaveTextContent(sentence);
+    await user.click(icon);
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("shows the sentence in full again after switching the model", async () => {
+    const bridge = makeMockBridge(
+      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-4.1") },
+      createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
+    expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent(sentence);
+    expect(screen.getByRole("button", { name: "Where data goes" })).toHaveAttribute("aria-expanded", "true");
+  });
+});
+
 describe("IntuneChat hosted-provider consent", () => {
   it("shows consent copy and waits for explicit confirmation before sending tenant context", async () => {
     const user = userEvent.setup();
@@ -692,7 +734,8 @@ describe("IntuneChat hosted-provider consent", () => {
       name: "Ask about your Microsoft 365 tenant",
     });
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("OpenAI");
-    await screen.findByText(
+    // A new conversation shows the hosted sentence in full under the composer.
+    expect(await screen.findByRole("note")).toHaveTextContent(
       "Prompts and tenant data go to OpenAI while this model is selected.",
     );
 
