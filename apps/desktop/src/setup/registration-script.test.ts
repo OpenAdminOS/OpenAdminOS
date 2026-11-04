@@ -246,6 +246,32 @@ describe("existing app registration script", () => {
     expect(output.script).not.toMatch(/addPassword|PasswordCredentials|KeyCredentials/i);
   });
 
+  it("retries a new grant while a new enterprise application replicates, and only a new grant", () => {
+    // The retry loop from `$grantAttempts` through its closing brace.
+    const grantLoop = (script: string, from: number): string => {
+      const start = script.indexOf("    $grantAttempts = ", from);
+      const end = script.indexOf("\n    }\n", script.indexOf("Start-Sleep -Seconds", start)) + "\n    }".length;
+      return script.slice(start, end);
+    };
+    const script = output.script;
+    const newGrant = script.indexOf("$addedConsent = @($requestedScopeValues)");
+    expect(newGrant).toBeGreaterThan(script.indexOf("} else {", script.indexOf("if ($existingGrant)")));
+    expect(script.indexOf("$grantAttempts")).toBeGreaterThan(newGrant);
+    expect(script.match(/New-MgOauth2PermissionGrant/g)).toHaveLength(1);
+    // The same bounded loop the create script runs, so its tests cover this one.
+    const createScript = generateRegistrationSetup({
+      mode: "create",
+      displayName: "OpenAdminOS",
+      partIds: ["defender.incidents"],
+    }).script;
+    const loop = grantLoop(script, newGrant);
+    expect(loop).toContain("if (-not $notReplicatedYet -or $attempt -eq $grantAttempts) { throw }");
+    expect(loop).toBe(grantLoop(createScript, 0));
+    expect(script).toContain(
+      `A new grant is retried up to ${CONSENT_GRANT_ATTEMPTS} times, ${CONSENT_GRANT_RETRY_SECONDS} seconds apart`,
+    );
+  });
+
   it("names the services and the client ID in the admin message", () => {
     expect(output.message).toContain(`existing app registration with client ID ${clientId}: Defender.`);
     expect(output.message).toContain("keeps every permission the app already has");

@@ -159,6 +159,39 @@ export function generateRegistrationSetup(
     : { ...base, ...extendScript(input.clientId, scopeLines, serviceList) };
 }
 
+/**
+ * PowerShell that creates the tenant-wide consent grant for
+ * `$requestedScopeValues`, retrying only while a new service principal has
+ * not replicated yet. Any other error, or the last failed attempt, is
+ * thrown to the caller: the create script rolls back, the extend script
+ * stops.
+ */
+function newConsentGrantWithRetry(indent: string): string {
+  const lines = [
+    "$scopeString = $requestedScopeValues -join ' '",
+    `$grantAttempts = ${CONSENT_GRANT_ATTEMPTS}`,
+    "for ($attempt = 1; $attempt -le $grantAttempts; $attempt++) {",
+    "    try {",
+    "        New-MgOauth2PermissionGrant -BodyParameter @{",
+    "            ClientId = $servicePrincipal.Id",
+    "            ConsentType = 'AllPrincipals'",
+    "            ResourceId = $graphServicePrincipal.Id",
+    "            Scope = $scopeString",
+    "        } | Out-Null",
+    "        break",
+    "    } catch {",
+    "        # Only a service principal that has not replicated yet is worth",
+    "        # waiting for. Any other error is thrown at once.",
+    "        $notReplicatedYet = $_.Exception.Message -match 'Request_ResourceNotFound|does not exist or one of its queried reference-property objects are not present'",
+    "        if (-not $notReplicatedYet -or $attempt -eq $grantAttempts) { throw }",
+    `        Write-Host "The new enterprise application is not available yet. Retrying admin consent in ${CONSENT_GRANT_RETRY_SECONDS} seconds (attempt $attempt of $grantAttempts)."`,
+    `        Start-Sleep -Seconds ${CONSENT_GRANT_RETRY_SECONDS}`,
+    "    }",
+    "}",
+  ];
+  return lines.map((line) => `${indent}${line}`).join("\n");
+}
+
 function createScript(
   displayNameInput: string,
   scopeLines: string,
@@ -220,26 +253,7 @@ try {
         AppId = $application.AppId
     }
 
-    $scopeString = $requestedScopeValues -join ' '
-    $grantAttempts = ${CONSENT_GRANT_ATTEMPTS}
-    for ($attempt = 1; $attempt -le $grantAttempts; $attempt++) {
-        try {
-            New-MgOauth2PermissionGrant -BodyParameter @{
-                ClientId = $servicePrincipal.Id
-                ConsentType = 'AllPrincipals'
-                ResourceId = $graphServicePrincipal.Id
-                Scope = $scopeString
-            } | Out-Null
-            break
-        } catch {
-            # Only a service principal that has not replicated yet is worth
-            # waiting for. Any other error goes straight to the rollback.
-            $notReplicatedYet = $_.Exception.Message -match 'Request_ResourceNotFound|does not exist or one of its queried reference-property objects are not present'
-            if (-not $notReplicatedYet -or $attempt -eq $grantAttempts) { throw }
-            Write-Host "The new enterprise application is not available yet. Retrying admin consent in ${CONSENT_GRANT_RETRY_SECONDS} seconds (attempt $attempt of $grantAttempts)."
-            Start-Sleep -Seconds ${CONSENT_GRANT_RETRY_SECONDS}
-        }
-    }
+${newConsentGrantWithRetry("    ")}
 } catch {
     $setupError = $_.Exception.Message
     try {
@@ -282,7 +296,7 @@ It makes these changes:
 2. Stops before changing anything if a required Microsoft Graph PowerShell module is missing, or if no application with this client ID exists in the tenant.
 3. Adds delegated Microsoft Graph permissions for these OpenAdminOS services: ${serviceList}, plus openid, profile, offline_access and User.Read. Every permission the app already has is kept. Nothing is removed.
 4. Creates the enterprise application if it does not exist yet.
-5. Grants tenant-wide admin consent for the added scopes. An existing tenant-wide grant is extended, never reduced.
+5. Grants tenant-wide admin consent for the added scopes. An existing tenant-wide grant is extended, never reduced. A new grant is retried up to ${CONSENT_GRANT_ATTEMPTS} times, ${CONSENT_GRANT_RETRY_SECONDS} seconds apart, while a new enterprise application replicates in Microsoft Entra ID.
 6. Prints what changed.
 
 The script does not create a client secret or certificate, and it does not change the app's redirect URIs or other settings.
@@ -359,12 +373,7 @@ if ($existingGrant) {
     }
 } else {
     $addedConsent = @($requestedScopeValues)
-    New-MgOauth2PermissionGrant -BodyParameter @{
-        ClientId = $servicePrincipal.Id
-        ConsentType = 'AllPrincipals'
-        ResourceId = $graphServicePrincipal.Id
-        Scope = ($requestedScopeValues -join ' ')
-    } | Out-Null
+${newConsentGrantWithRetry("    ")}
 }
 
 $addedNames = @($addedPermissions | ForEach-Object {

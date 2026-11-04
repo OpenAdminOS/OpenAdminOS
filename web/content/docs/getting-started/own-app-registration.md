@@ -106,7 +106,7 @@ OpenAdminOS cannot change your registration itself. Use one of these:
 1. Stops without changes if a required module is missing, or if no application with this client ID exists in the tenant.
 2. Adds the delegated permissions for the selected parts, plus the four sign-in permissions, to the app's existing Microsoft Graph entry. Every permission the app already has, for every resource, is kept. Nothing is removed.
 3. Creates the enterprise application if it does not exist yet.
-4. Grants tenant-wide admin consent for the added permissions. An existing tenant-wide grant is extended with the new permissions, never reduced.
+4. Grants tenant-wide admin consent for the added permissions. An existing tenant-wide grant is extended with the new permissions, never reduced. A new grant is retried up to 6 times, 5 seconds apart, while a new enterprise application replicates.
 5. Prints what changed, then tells you to return to OpenAdminOS and choose **Check again**.
 
 It does not create a client secret or certificate, and it does not change redirect URIs or other settings.
