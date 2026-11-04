@@ -27,25 +27,32 @@ export interface LiveChatRun {
   progress: ChatProgressState | null;
 }
 
-let current: LiveChatRun | null = null;
+/** Live runs by stream id. More than one can run when Chat sends again from another conversation. */
+let runs: readonly LiveChatRun[] = [];
 const listeners = new Set<() => void>();
 
-function publish(next: LiveChatRun | null): void {
-  current = next;
+function publish(next: readonly LiveChatRun[]): void {
+  runs = next;
   for (const listener of listeners) listener();
 }
 
 export function startLiveChatRun(run: LiveChatRun): void {
-  publish(run);
+  publish([...runs.filter((entry) => entry.streamId !== run.streamId), run]);
 }
 
-/** Updates the run only while `streamId` is still the live one. */
+/** Updates the run while it is live; an ended run is left alone. */
 export function updateLiveChatRun(streamId: string, update: (run: LiveChatRun) => LiveChatRun): void {
-  if (current?.streamId === streamId) publish(update(current));
+  if (runs.some((run) => run.streamId === streamId)) publish(runs.map((run) => (run.streamId === streamId ? update(run) : run)));
 }
 
+/** Removes the run once it completed, failed or was cancelled. */
 export function endLiveChatRun(streamId: string): void {
-  if (current?.streamId === streamId) publish(null);
+  if (runs.some((run) => run.streamId === streamId)) publish(runs.filter((run) => run.streamId !== streamId));
+}
+
+/** The live runs, oldest first. */
+export function liveChatRuns(): readonly LiveChatRun[] {
+  return runs;
 }
 
 function subscribe(listener: () => void): () => void {
@@ -53,6 +60,6 @@ function subscribe(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function useLiveChatRun(): LiveChatRun | null {
-  return useSyncExternalStore(subscribe, () => current, () => current);
+export function useLiveChatRuns(): readonly LiveChatRun[] {
+  return useSyncExternalStore(subscribe, liveChatRuns, liveChatRuns);
 }

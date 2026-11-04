@@ -80,7 +80,7 @@ import {
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
 import { answerSources, appendOnlySteps, currentStepTitle } from "../shared/chat-steps";
-import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRun, type ChatProgressState } from "../state/live-chat-run";
+import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { SETUP_COPY } from "../copy";
@@ -244,11 +244,10 @@ function IntuneChatContent() {
   const [progressAssistantMessageId, setProgressAssistantMessageId] = useState<string | null>(null);
   // A run this page did not start, for the conversation it shows: Chat was
   // opened again while the answer streams. Its live steps show here too.
-  const liveRun = useLiveChatRun();
-  const adoptedRun =
-    !sending && liveRun?.conversationId != null && liveRun.conversationId === activeConversationId && liveRun.tenantId === state.activeTenantId
-      ? liveRun
-      : null;
+  const liveRuns = useLiveChatRuns();
+  const adoptedRun = sending
+    ? null
+    : liveRuns.find((run) => run.conversationId != null && run.conversationId === activeConversationId && run.tenantId === state.activeTenantId) ?? null;
   const runInProgress = sending || adoptedRun !== null;
   const shownProgress = adoptedRun ? adoptedRun.progress : chatProgress;
   const shownProgressMessageId = adoptedRun ? adoptedRun.assistantMessageId : progressAssistantMessageId;
