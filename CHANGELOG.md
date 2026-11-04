@@ -43,6 +43,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- An invalid local agent manifest no longer stops tenants, agents and history from loading. The agent shows as unavailable with the validation reason and Edit manifest or Uninstall, and cannot run or be scheduled. A license check that signs in as another account keeps the stored tier and licenses and shows a tenant warning in Settings, Tenants and the tenant switcher.
 - The app registration setup script checks for every Microsoft Graph PowerShell module it uses before changing anything, and removes the application it created if admin consent cannot be granted. Before, a machine without `Microsoft.Graph.Identity.SignIns` was left with a registration that had no consent.
 - The Agent Team sidebar row now highlights across the full width on hover like the other rows, and its findings tooltip (and other sidebar tooltips) is no longer cut off at the sidebar edge.
 - Run history no longer keeps failed scheduled runs that were saved without a tenant. Schedules now wait while no tenant is active and say so, and a scheduled run that fails to start is removed with its tenant.
