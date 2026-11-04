@@ -137,7 +137,7 @@ describe("tenant checks with cancel", () => {
     const before = createMockAppState({ tenants: [ownRegistrationTenant(false)] });
     const pending = deferred<AppState>();
     const cancelTenantCheck = vi.fn(async () => {
-      pending.reject(remoteError("openadminos:refresh-tenant-grants", "TenantCheckCancelledError", "Check again was cancelled. Nothing changed."));
+      pending.reject(remoteError("openadminos:refresh-tenant-grants", "TenantCheckCancelledError", "Check again was cancelled. OpenAdminOS saved nothing."));
     });
     const live = liveBridge(before, { refreshTenantGrants: vi.fn(() => pending.promise), cancelTenantCheck });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/tenants", bridge: live.bridge });
@@ -156,7 +156,7 @@ describe("tenant checks with cancel", () => {
     await user.click(within(progress).getByRole("button", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") }));
     expect(cancelTenantCheck).toHaveBeenCalledWith("tenant-1");
     live.publish(before);
-    expect(await within(services).findByText("Check again was cancelled. Nothing changed.")).toBeInTheDocument();
+    expect(await within(services).findByText("Check again was cancelled. OpenAdminOS saved nothing.")).toBeInTheDocument();
     expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
     expect(within(services).queryByRole("alert")).not.toBeInTheDocument();
     expect(within(services).getByRole("button", { name: SERVICE_COPY.checkAgain })).toBeEnabled();

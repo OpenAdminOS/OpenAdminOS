@@ -1192,12 +1192,12 @@ function abortedCheckMessage(
   if (grants) return operation.probing ? `${grants} ${license}` : grants;
   if (abort === "cancelled") {
     return kind === "access"
-      ? "Sign-in was cancelled. Nothing changed."
-      : "Check again was cancelled. Nothing changed.";
+      ? "Sign-in was cancelled. OpenAdminOS saved nothing."
+      : "Check again was cancelled. OpenAdminOS saved nothing.";
   }
   return kind === "access"
-    ? `Add access did not finish within ${within}. Nothing changed. Try again when Microsoft sign-in is ready.`
-    : `Check again did not finish within ${within}. Nothing changed. Choose Check again to try again.`;
+    ? `Add access did not finish within ${within}. OpenAdminOS saved nothing. Try again when Microsoft sign-in is ready.`
+    : `Check again did not finish within ${within}. OpenAdminOS saved nothing. Choose Check again to try again.`;
 }
 
 /** A specific reason for a license check that did not finish. */

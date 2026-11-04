@@ -450,7 +450,7 @@ const CANCELLED_AFTER_ACCESS =
   "Access was added. The license check was cancelled; the Entra tier and licenses are as they were. Retry license check to update them.";
 
 describe("cancelling and timing out a tenant check", () => {
-  it("shows the open Microsoft sign-in, and a cancel before a token changes nothing", async () => {
+  it("shows the open Microsoft sign-in, and a cancel before a token saves nothing", async () => {
     const fixture = await makeFixture({
       tenants: [OWN],
       signIns: [],
@@ -471,7 +471,7 @@ describe("cancelling and timing out a tenant check", () => {
       fixture.store.cancelTenantCheck(OWN.id);
       await assert.rejects(pending, {
         name: "TenantCheckCancelledError",
-        message: "Check again was cancelled. Nothing changed.",
+        message: "Check again was cancelled. OpenAdminOS saved nothing.",
       });
       const state = await fixture.store.getAppState();
       assert.equal(state.tenantChecks, undefined);
@@ -484,7 +484,7 @@ describe("cancelling and timing out a tenant check", () => {
     }
   });
 
-  it("Add access cancelled during sign-in says nothing changed", async () => {
+  it("Add access cancelled during sign-in says OpenAdminOS saved nothing", async () => {
     const fixture = await makeFixture({ tenants: [SHARED], signIns: [], interactive: waitForAbort });
     try {
       const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
@@ -493,7 +493,7 @@ describe("cancelling and timing out a tenant check", () => {
         (await fixture.store.getAppState()).tenantChecks?.[0]?.phase === "sign-in",
       );
       fixture.store.cancelTenantCheck(SHARED.id);
-      await assert.rejects(pending, { message: "Sign-in was cancelled. Nothing changed." });
+      await assert.rejects(pending, { message: "Sign-in was cancelled. OpenAdminOS saved nothing." });
       assert.deepEqual((await fixture.tenant())?.grantedScopes, SHARED.grantedScopes);
     } finally {
       await fixture.close();
@@ -611,7 +611,7 @@ describe("cancelling and timing out a tenant check", () => {
     try {
       await assert.rejects(fixture.store.refreshTenantGrants(OWN.id), {
         name: "TenantCheckTimeoutError",
-        message: "Check again did not finish within 1 second. Nothing changed. Choose Check again to try again.",
+        message: "Check again did not finish within 1 second. OpenAdminOS saved nothing. Choose Check again to try again.",
       });
       const tenant = await fixture.tenant();
       assert.deepEqual(tenant?.grantedScopes, OWN.grantedScopes);
