@@ -9,6 +9,8 @@ import { join } from "node:path";
 import {
   availableScopeSet,
   formatServiceList,
+  grantedScopeSet,
+  missingPartsForScopes,
   missingServiceCopy,
   notGrantedServiceForScopes,
   resolveProviderDefaultModel,
@@ -155,6 +157,52 @@ function restrictPlannedResourcesForTenant(
   if (planned.resources.length === 0) return { blocked: reason };
   const labels = dropped.map((resource) => definitionForResource(resource).label);
   return { omitted: `Not included in this answer: ${formatServiceList(labels)}. ${reason}` };
+}
+
+interface UnavailableTenantResources {
+  resources: GraphCacheResourceKind[];
+  /** Scopes the tenant still has to grant, for the readiness row. */
+  missingScopes: string[];
+  /** The service or part to add, for the recovery line. */
+  reason: string;
+  /** Names the left-out resources and the service or part to add. */
+  message: string;
+}
+
+/**
+ * Resources a tenant cannot read with its current grants, by the same
+ * part-level rule as single-tenant Chat. Multi-tenant Chat treats them
+ * as missing access, so old cache rows of a service that is not
+ * connected never count as a current result.
+ */
+function unavailableResourcesForTenant(
+  resources: readonly GraphCacheResourceKind[],
+  tenant: TenantRecord,
+): UnavailableTenantResources | undefined {
+  const available = availableScopeSet(tenant);
+  const unavailable = resources.filter(
+    (resource) => !definitionForResource(resource).scopes.every((scope) => available.has(scope)),
+  );
+  if (unavailable.length === 0) return undefined;
+  const needed = requiredScopesForResources(unavailable);
+  const granted = grantedScopeSet(tenant);
+  const partScopes = missingPartsForScopes(needed, available).flatMap((part) =>
+    part.scopes.filter((scope) => scope.audience === "graph").map((scope) => scope.name),
+  );
+  const notGranted = (partScopes.length > 0 ? partScopes : needed).filter((scope) => !granted.has(scope));
+  const missingScopes = [
+    ...new Set(notGranted.length > 0 ? notGranted : needed.filter((scope) => !available.has(scope))),
+  ];
+  const labels = unavailable.map((resource) => definitionForResource(resource).label);
+  const reason =
+    missingServiceCopy(tenant, needed) ??
+    `This needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+  return {
+    resources: unavailable,
+    missingScopes,
+    reason,
+    message: `Not included: ${formatServiceList(labels)}. ${reason}`,
+  };
 }
 
 /** Appends the left-out line to a completed answer so it is never silent. */
@@ -688,6 +736,9 @@ export class IntuneChatService {
         tenant.status !== "failed" &&
         tenant.status !== "skipped",
     );
+    // Resources the refresh skipped because their service is not connected
+    // for the tenant. A skipped device read leaves nothing current to show.
+    const skippedNotes = new Map<string, { devicesSkipped: boolean; message: string }>();
     const refreshTenant = async (tenant: (typeof runnable)[number]) => {
       const startedAt = new Date().toISOString();
       job = updateJobTenantProgress(job, tenant.tenantId, {
@@ -706,6 +757,27 @@ export class IntuneChatService {
             tenantId: tenant.tenantId,
             resources: tenant.staleResources,
           });
+          const skippedResources = refreshResult.resources.filter((resource) => resource.skipped);
+          if (skippedResources.length > 0) {
+            // The refresh judged current grants, so the copy reads them too.
+            const record = (await this.host.read()).tenants.find((entry) => entry.id === tenant.tenantId);
+            const kinds = skippedResources.map((resource) => resource.resource);
+            const reason =
+              (record ? missingServiceCopy(record, requiredScopesForResources(kinds)) : undefined) ??
+              "Its service is not connected for this tenant. Add it in Settings, Tenants.";
+            const devicesSkipped = kinds.includes("managedDevices");
+            const message = `Not included: ${formatServiceList(skippedResources.map((resource) => resource.label))}. ${reason}`;
+            skippedNotes.set(tenant.tenantId, { devicesSkipped, message });
+            if (devicesSkipped) {
+              job = updateJobTenantProgress(job, tenant.tenantId, {
+                status: "skipped",
+                detail: message,
+                updatedAt: new Date().toISOString(),
+              });
+              persistJob();
+              return;
+            }
+          }
           const failedResources = refreshResult.resources.filter(
             (resource) => !resource.ok && !resource.skipped,
           );
@@ -767,6 +839,21 @@ export class IntuneChatService {
         });
         continue;
       }
+      const skippedNote = skippedNotes.get(tenant.tenantId);
+      if (skippedNote?.devicesSkipped) {
+        comparisons.push({
+          tenantId: tenant.tenantId,
+          tenantName: tenant.tenantName,
+          status: "skipped",
+          windowsDevices: 0,
+          compliant: 0,
+          nonCompliant: 0,
+          unknown: 0,
+          lastRefresh: tenant.cacheFreshness,
+          warnings: [skippedNote.message, ...tenant.warnings],
+        });
+        continue;
+      }
       if (!runnable.some((entry) => entry.tenantId === tenant.tenantId)) {
         comparisons.push({
           tenantId: tenant.tenantId,
@@ -799,10 +886,15 @@ export class IntuneChatService {
         row.operatingSystem.toLowerCase().includes("windows"),
       );
       deviceRows.push(...windowsRows);
-      comparisons.push(buildTenantComparison({
+      const comparison = buildTenantComparison({
         tenant,
         rows: windowsRows,
-      }));
+      });
+      comparisons.push(
+        skippedNote
+          ? { ...comparison, warnings: [skippedNote.message, ...comparison.warnings] }
+          : comparison,
+      );
       job = updateJobTenantProgress(job, tenant.tenantId, {
         status: "ready",
         detail: `${windowsRows.length.toLocaleString()} Windows device rows prepared.`,
@@ -830,6 +922,7 @@ export class IntuneChatService {
       rows: deviceRows,
     });
     const finalStatus =
+      skippedNotes.size > 0 ||
       comparisons.some((comparison) =>
         ["failed", "expired", "missing-scopes", "throttled", "skipped"].includes(
           comparison.status,
@@ -1167,8 +1260,13 @@ export class IntuneChatService {
       .filter((tenant) => selectedTenantSet.has(tenant.id))
       .map((tenant) => {
         const statusRows = store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]);
-        const relevantStatus = statusRows.filter((status) =>
-          resources.includes(status.resource),
+        // Current grants decide first. Cache rows and earlier errors of a
+        // resource the tenant cannot read now say nothing about this run.
+        const unavailable = unavailableResourcesForTenant(resources, tenant);
+        const relevantStatus = statusRows.filter(
+          (status) =>
+            resources.includes(status.resource) &&
+            !unavailable?.resources.includes(status.resource),
         );
         const staleResources = relevantStatus
           .filter((status) => isGraphCacheStatusStale(status))
@@ -1185,7 +1283,10 @@ export class IntuneChatService {
         });
         const errors = issues.map(issue => issue.message);
         const accessDenials = issues.flatMap(issue => issue.denial ? [issue.denial] : []);
-        const missingScopes = [...new Set(accessDenials.flatMap(denial => denial.missingScopes))];
+        const missingScopes = [...new Set([
+          ...(unavailable?.missingScopes ?? []),
+          ...accessDenials.flatMap(denial => denial.missingScopes),
+        ])];
         const status = tenantReadinessStatus({
           missingScopes,
           staleResources,
@@ -1201,8 +1302,13 @@ export class IntuneChatService {
           cacheFreshness,
           staleResources,
           missingScopes,
-          warnings: readinessWarnings({ status, staleResources, errors }),
-          recovery: readinessRecovery(status, accessDenials),
+          warnings: [
+            ...(unavailable ? [unavailable.message] : []),
+            ...readinessWarnings({ status, staleResources, errors }),
+          ],
+          recovery: unavailable
+            ? [unavailable.reason, ...(accessDenials.length > 0 ? [readinessRecovery(status, accessDenials)] : [])].join(" ")
+            : readinessRecovery(status, accessDenials),
           ...(accessDenials.length > 0 ? { accessDenials } : {}),
         };
       });
