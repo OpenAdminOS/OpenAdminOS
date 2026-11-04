@@ -63,7 +63,7 @@ If you cannot create app registrations yourself, choose **Your own app registrat
 4. Stops without changes if an application with the same display name already exists.
 5. Creates a single-tenant public client registration with the `http://localhost` redirect URI.
 6. Adds the delegated Microsoft Graph scopes for the selected areas, looking up their permission IDs in the tenant at run time.
-7. Creates the enterprise application and grants tenant-wide admin consent for the same scopes. If either step fails, it deletes the registration it created, so nothing is left half set up.
+7. Creates the enterprise application and grants tenant-wide admin consent for the same scopes. A new enterprise application can take a few seconds to replicate, so the consent grant is retried up to 6 times, 5 seconds apart, when Entra reports it as not found yet. If either step still fails, it deletes the registration it created, so nothing is left half set up.
 8. Prints the application (client) ID and directory (tenant) ID to enter in OpenAdminOS.
 
 The script never creates a client secret or certificate. Generation happens on your device and does not use an LLM.

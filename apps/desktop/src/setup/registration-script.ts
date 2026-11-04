@@ -9,6 +9,14 @@ export const DEFAULT_REGISTRATION_DISPLAY_NAME = "OpenAdminOS";
 export const REGISTRATION_DISPLAY_NAME_MAX_LENGTH = 120;
 export const AUTHENTICATION_TRUST_MODEL_URL =
   "https://docs.openadminos.com/trust-model/authentication";
+/**
+ * A new service principal can take several seconds to replicate in
+ * Microsoft Entra ID, and until it has, the consent grant fails with a not
+ * found error. The script retries only that error, this many times, this
+ * many seconds apart, before it rolls back.
+ */
+export const CONSENT_GRANT_ATTEMPTS = 6;
+export const CONSENT_GRANT_RETRY_SECONDS = 5;
 
 export interface RegistrationSetupOutput {
   script: string;
@@ -103,7 +111,7 @@ It makes these changes:
 2. Stops before changing anything if a required Microsoft Graph PowerShell module is missing, or if an application with the same display name already exists. This avoids updating or duplicating an existing registration.
 3. Creates a single-tenant public client application with the localhost redirect URI required by the OpenAdminOS desktop sign-in flow.
 4. Adds delegated Microsoft Graph permissions for these OpenAdminOS areas: ${areaList}. It also adds openid, profile, and offline_access for sign-in and refresh tokens.
-5. Creates the corresponding enterprise application and grants tenant-wide admin consent for the same delegated scope set. If either step fails, it deletes the application it created in step 3.
+5. Creates the corresponding enterprise application and grants tenant-wide admin consent for the same delegated scope set. While the new enterprise application replicates in Microsoft Entra ID, the consent grant is retried up to ${CONSENT_GRANT_ATTEMPTS} times, ${CONSENT_GRANT_RETRY_SECONDS} seconds apart. If either step fails, it deletes the application it created in step 3.
 
 The script does not create a client secret or certificate. OpenAdminOS signs users in through the system browser and acts with the signed-in administrator's delegated access.
 #>
@@ -173,12 +181,25 @@ try {
     }
 
     $scopeString = $requestedScopeValues -join ' '
-    New-MgOauth2PermissionGrant -BodyParameter @{
-        ClientId = $servicePrincipal.Id
-        ConsentType = 'AllPrincipals'
-        ResourceId = $graphServicePrincipal.Id
-        Scope = $scopeString
-    } | Out-Null
+    $grantAttempts = ${CONSENT_GRANT_ATTEMPTS}
+    for ($attempt = 1; $attempt -le $grantAttempts; $attempt++) {
+        try {
+            New-MgOauth2PermissionGrant -BodyParameter @{
+                ClientId = $servicePrincipal.Id
+                ConsentType = 'AllPrincipals'
+                ResourceId = $graphServicePrincipal.Id
+                Scope = $scopeString
+            } | Out-Null
+            break
+        } catch {
+            # Only a service principal that has not replicated yet is worth
+            # waiting for. Any other error goes straight to the rollback.
+            $notReplicatedYet = $_.Exception.Message -match 'Request_ResourceNotFound|does not exist or one of its queried reference-property objects are not present'
+            if (-not $notReplicatedYet -or $attempt -eq $grantAttempts) { throw }
+            Write-Host "The new enterprise application is not available yet. Retrying admin consent in ${CONSENT_GRANT_RETRY_SECONDS} seconds (attempt $attempt of $grantAttempts)."
+            Start-Sleep -Seconds ${CONSENT_GRANT_RETRY_SECONDS}
+        }
+    }
 } catch {
     $setupError = $_.Exception.Message
     try {
