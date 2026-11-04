@@ -1765,6 +1765,50 @@ describe("IntuneChat live run", () => {
     expect(await screen.findByRole("button", { name: /4 steps/ }, { timeout: 4000 })).toBeInTheDocument();
   });
 
+  it("stays on the page the admin opened when a run finishes after they left Chat", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let saved: IntuneChatMessage[] = [];
+    let listed: IntuneChatConversation[] = [];
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => listed),
+      getIntuneChatMessages: vi.fn(async () => saved),
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        saved = [userMessage];
+        listed = [conversation];
+        await new Promise<void>((resolve) => { finish = resolve; });
+        saved = [userMessage, result.assistantMessage];
+        return result;
+      }),
+    });
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<AppShell><IntuneChat /><LocationProbe /></AppShell>} />
+        <Route path="/marketplace" element={<AppShell><LocationProbe /></AppShell>} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+    await user.type(await screen.findByLabelText(CHAT_COPY.composerLabel), conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    act(() => events.slice(0, 5).forEach((event) => emit(event)));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(`/chat/${conversation.id}`));
+
+    await user.click(screen.getByRole("link", { name: "Marketplace" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/marketplace"));
+    act(() => events.slice(5).forEach((event) => emit(event)));
+    await act(async () => {
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByTestId("location")).toHaveTextContent("/marketplace");
+    // The sidebar still lists the conversation.
+    expect(await screen.findByTitle(conversation.title)).toBeInTheDocument();
+  });
+
   it("keeps the scope line and the live steps after Chat is opened again during the run", async () => {
     const user = userEvent.setup();
     const { conversation, userMessage, result, events } = liveRunFixture();

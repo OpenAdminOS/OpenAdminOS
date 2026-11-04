@@ -294,6 +294,14 @@ function IntuneChatContent() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
   const activeStreamIdRef = useRef<string | null>(null);
+  // A run keeps going after the admin leaves Chat. Its end must not bring them back.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const activeTenantIdRef = useRef(state.activeTenantId);
   activeTenantIdRef.current = state.activeTenantId;
   const initialQuestionConsumedRef = useRef(false);
@@ -931,7 +939,7 @@ function IntuneChatContent() {
             setOptimisticDraft(null);
             setPendingConversation(event.conversation);
             upsertConversation(event.conversation);
-            if (activeTenantIdRef.current === state.activeTenantId) openConversation(event.conversation.id, { replace: true });
+            if (activeTenantIdRef.current === state.activeTenantId && mountedRef.current) openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
             updateLiveChatRun(streamId, (run) => ({ ...run, conversationId: event.conversation.id, assistantMessageId: event.assistantMessage.id }));
@@ -1035,9 +1043,14 @@ function IntuneChatContent() {
       if (tenantStillActive()) {
         setPendingConversation(result.conversation);
         upsertConversation(result.conversation);
-        openConversation(result.conversation.id, { replace: true });
         setCacheStatus(result.cacheStatus);
-        await loadShell(result.conversation.id);
+        if (mountedRef.current) {
+          openConversation(result.conversation.id, { replace: true });
+          await loadShell(result.conversation.id);
+        } else {
+          // Refresh the sidebar without opening the conversation.
+          await loadShell();
+        }
       }
     } catch (caught) {
       failed = true;
