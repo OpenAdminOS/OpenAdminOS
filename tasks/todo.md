@@ -918,12 +918,22 @@ The `@` picker, parallel tool calls, and changing the local index content.
 
 ## Steps
 
-- [ ] MCP egress filter review fixes S1 to S5 and N1
-- [ ] Source classification as the first step; docs-only questions skip the tenant refresh and tenant tools
-- [ ] Source routing: "use for" lines, named sources forced, Learn before the local index
-- [ ] Live step events with origin tags, persisted with the message
-- [ ] Follow-ups from the final JSON and the deterministic rule
-- [ ] Small-model notice wording and status strip hosts only when tools are offered
-- [ ] Renderer: timeline, folded summary, documentation and tenant blocks, source cards, composer ghost text
-- [ ] Integration test for the docs, KQL and mixed tenant questions
-- [ ] SPEC, CHANGELOG
+- [x] MCP egress filter review fixes S1 to S5 and N1
+- [x] Source classification as the first step; docs-only questions skip the tenant refresh and tenant tools
+- [x] Source routing: "use for" lines, named sources forced, Learn before the local index
+- [x] Live step events with origin tags, persisted with the message
+- [x] Follow-ups from the final JSON and the deterministic rule
+- [x] Small-model notice wording and status strip hosts only when tools are offered
+- [x] Renderer: timeline, folded summary, documentation and tenant blocks, source cards, composer ghost text
+- [x] Integration test for the docs, KQL and mixed tenant questions
+- [x] SPEC, CHANGELOG
+- [ ] Live check in the running app with the three questions (needs an app restart; not done in this session)
+- [ ] Screenshots in light and dark
+- [ ] Separate evaluator and GPT-6.1-Sol reviews
+
+## Review (2026-11-04)
+
+- Criteria 1 to 9 are covered by tests: `chat-steps.test.ts` (classification, source plan, citations, follow-ups, relabelling, step recorder, loop routing and fallback), `chat-steps.e2e.test.ts` (the Defender for macOS docs question streamed live, a KQL question, a mixed tenant question and the deterministic path, through the app store with an in-process MCP server), renderer tests for the timeline, summary, blocks, source cards, chips and composer ghost text, and the Marketplace and status strip small-model cases.
+- Criterion 10: the live check in the running app is still open, because the main-process changes need a restart of the running dev instance. The end-to-end test stands in for it until then.
+- Found while testing: a final answer containing a fenced KQL block was read as malformed tool JSON and fell back to deterministic retrieval. Fixed in its own commit.
+
