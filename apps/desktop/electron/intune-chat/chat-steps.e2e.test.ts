@@ -78,7 +78,7 @@ interface Harness {
   script(replies: unknown[]): void;
 }
 
-async function withHarness(run: (harness: Harness) => Promise<void>): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
@@ -123,7 +123,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>): Promise<vo
     await store.installMcpServer("kql-search");
     const cache = (store as unknown as { requireIntelligenceStore(): IntelligenceSqliteStore }).requireIntelligenceStore();
     // A fresh device cache: 5 Macs, 2 of them noncompliant, and 4 Windows PCs.
-    cache.replaceGraphResources({
+    if (!options.emptyCache) cache.replaceGraphResources({
       tenantId: tenant.id, resource: "managedDevices", label: "Managed devices", scopeSet: [], refreshedAt: new Date().toISOString(),
       rows: [
         ...Array.from({ length: 5 }, (_, i) => ({ id: `mac-${i}`, deviceName: `MAC-0${i}`, operatingSystem: "macOS", complianceState: i < 2 ? "noncompliant" : "compliant" })),
@@ -371,6 +371,22 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.equal(prompts.length, 1, "one model call, with no kind protocol");
       assert.doesNotMatch(prompts[0]!.system, /question kind/);
     });
+  });
+
+  it("refreshes an empty cache before a direct device answer", async () => {
+    for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+      await withHarness(async ({ store, graphPaths, script }) => {
+        script([{ kind: "tenant", sources: [], final: true, answer: "unused" }]);
+        const result = send === "sendIntuneChatMessage"
+          ? await store.sendIntuneChatMessage({ content: "How many non-compliant devices are there?" })
+          : await store.streamIntuneChatMessage({ content: "How many non-compliant devices are there?" }, () => undefined);
+        const message = result.assistantMessage;
+        assert.doesNotMatch(message.content, /inventory is unavailable/, send);
+        assert.match(message.content, /0 devices are marked non-compliant/, send);
+        assert.ok(graphPaths.length > 0, send);
+        assert.ok(kinds(message.steps).includes("graph-refresh"), send);
+      }, { emptyCache: true });
+    }
   });
 
   it("refreshes, asks Learn and still requires tenant evidence for a mixed tenant question", async () => {

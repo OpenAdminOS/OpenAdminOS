@@ -1711,6 +1711,8 @@ export class IntuneChatService {
       ...(selectedModel ? { model: selectedModel } : {}),
     }).enabled;
     // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
+    // directResources is set exactly when a direct answer can apply; direct answers read the cache
+    // before any model call, so those questions keep the refresh before the answer.
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, steps });
 
@@ -2139,6 +2141,8 @@ export class IntuneChatService {
       ...(selectedModel ? { model: selectedModel } : {}),
     }).enabled;
     // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
+    // directResources is set exactly when a direct answer can apply; direct answers read the cache
+    // before any model call, so those questions keep the refresh before the answer.
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
