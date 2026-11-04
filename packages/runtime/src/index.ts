@@ -133,6 +133,8 @@ export {
   OPENADMINOS_CLIENT_ID,
   defaultClientId,
   authorityForDirectory,
+  findTenantAccount,
+  tenantAuthority,
   TenantConnectCancelledError,
   TenantConnectTimeoutError,
   TenantAccountMismatchError,

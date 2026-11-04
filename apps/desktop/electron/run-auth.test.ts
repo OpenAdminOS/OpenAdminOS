@@ -18,7 +18,7 @@ it("scheduled Graph access fails with recovery instructions without opening Micr
   });
   // Force a missing cached account without contacting Microsoft.
   Object.defineProperty(store, "msalClientForTenant", { value: () => ({
-    getTokenCache: () => ({ getAccountByHomeId: async () => null }),
+    getTokenCache: () => ({ getAllAccounts: async () => [] }),
   }) });
   try {
     const internal = store as unknown as { buildGraph(tenant: string, scopes: string[], execution: {
@@ -46,7 +46,7 @@ it("scheduled Teams and Outlook deliveries never open an unattended sign-in", as
     connectors: { teams: { config: { defaultTeamId: "team", defaultChannelId: "channel" } },
       outlook: { config: { defaultRecipients: "test@example.com" } } }, runs: [],
     }),
-    msalClientForTenant: () => ({ getTokenCache: () => ({ getAccountByHomeId: async () => null }) }),
+    msalClientForTenant: () => ({ getTokenCache: () => ({ getAllAccounts: async () => [] }) }),
     openBrowser: async () => { browserCalls += 1; },
     connectorSecretsFor: () => ({ get: async () => undefined }),
     appendRunStep: async () => "step", finishRunStep: async () => undefined, appendRunLog: async () => undefined,
@@ -70,6 +70,7 @@ it("Teams and Outlook deliveries sign in with the tenant's own app registration"
     authority: "https://login.microsoftonline.com/contoso.onmicrosoft.com" } as const;
   const resolvedFor: Array<{ tenantId: string; clientId?: string }> = [];
   const accountLookups: string[] = [];
+  const authorities: Array<string | undefined> = [];
   const host = {
     read: async () => ({ installedAgents: [{ id: "test", slug: "test", name: "Test", delivery: {
       teams: { ...settings, useDefaultTarget: true }, outlook: { ...settings, useDefaultRecipients: true },
@@ -82,20 +83,24 @@ it("Teams and Outlook deliveries sign in with the tenant's own app registration"
     connectors: { teams: { config: { defaultTeamId: "team", defaultChannelId: "channel" } },
       outlook: { config: { defaultRecipients: "test@example.com" } } }, runs: [],
     }),
-    msalClientForTenant: (tenant: { id: string; appRegistration?: { clientId: string } }) => {
+    msalClientForTenant: (tenant: { id: string; homeAccountId: string; appRegistration?: { clientId: string } }) => {
       resolvedFor.push({ tenantId: tenant.id, ...(tenant.appRegistration ? { clientId: tenant.appRegistration.clientId } : {}) });
       const clientId = tenant.appRegistration?.clientId ?? "default";
       return {
-        getTokenCache: () => ({ getAccountByHomeId: async (homeAccountId: string) => {
-          accountLookups.push(`${clientId}:${homeAccountId}`);
-          return { homeAccountId, tenantId: tenant.id, username: "admin@contoso.example" };
+        getTokenCache: () => ({ getAllAccounts: async () => {
+          accountLookups.push(`${clientId}:${tenant.homeAccountId}`);
+          return [{ homeAccountId: tenant.homeAccountId, tenantId: tenant.id, username: "admin@contoso.example" }];
         } }),
-        acquireTokenSilent: async (request: { scopes: string[] }) => ({
-          accessToken: `token-${clientId}`,
-          scopes: request.scopes,
-          expiresOn: new Date(Date.now() + 3_600_000),
-          account: { homeAccountId: "byo-home" },
-        }),
+        acquireTokenSilent: async (request: { scopes: string[]; authority?: string }) => {
+          authorities.push(request.authority);
+          return {
+            accessToken: `token-${clientId}`,
+            scopes: request.scopes,
+            expiresOn: new Date(Date.now() + 3_600_000),
+            account: { homeAccountId: "byo-home", tenantId: "tenant-byo", username: "admin@contoso.example" },
+            tenantId: "tenant-byo",
+          };
+        },
       };
     },
     openBrowser: async () => undefined,
@@ -137,6 +142,9 @@ it("Teams and Outlook deliveries sign in with the tenant's own app registration"
   ]);
   assert.ok(accountLookups.length > 0);
   assert.ok(accountLookups.every((entry) => entry === `${byoRegistration.clientId}:byo-home`));
+  // The registration's host, with the stored directory.
+  assert.ok(authorities.length > 0);
+  assert.ok(authorities.every((authority) => authority === "https://login.microsoftonline.com/tenant-byo"));
 });
 
 it("the delivery host resolves the MSAL client that connected the tenant", async () => {
@@ -180,7 +188,7 @@ it("Chat and cache Graph access never widens consent beyond the tenant's granted
     openBrowser: async () => { browserCalls += 1; },
   });
   Object.defineProperty(store, "msalClientForTenant", { value: () => ({
-    getTokenCache: () => ({ getAccountByHomeId: async () => null }),
+    getTokenCache: () => ({ getAllAccounts: async () => [] }),
   }) });
   try {
     const internal = store as unknown as { buildGraph(tenant: string, scopes: string[]): Promise<{ createGraph(log: () => void): RunGraphApi }> };

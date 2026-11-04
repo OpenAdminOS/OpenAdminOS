@@ -29,6 +29,10 @@ function customTenant(grantedScopes?: string[]): TenantRecord {
   };
 }
 
+type Account = { homeAccountId: string; tenantId: string; username: string };
+type SilentRequest = { scopes: string[]; forceRefresh?: boolean; account: Account; authority?: string };
+const CONNECTED: Account = { homeAccountId: "home.contoso-tenant-id", tenantId: "contoso-tenant-id", username: "admin@contoso.example" };
+
 async function makeFixture(options: {
   tenants?: TenantRecord[];
   interactive?: {
@@ -36,7 +40,9 @@ async function makeFixture(options: {
     accessToken?: string;
     account?: { homeAccountId: string; tenantId: string; username: string };
   };
-  silent?: () => Promise<{ scopes: string[]; accessToken: string }>;
+  silent?: (request: SilentRequest) => Promise<{ scopes: string[]; accessToken: string; account?: Account }>;
+  /** Cached profiles. Defaults to the connected account in its own directory. */
+  accounts?: Account[];
 }) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-own-grants-"));
   const filePath = join(dir, "state.json");
@@ -45,14 +51,17 @@ async function makeFixture(options: {
   }));
   const interactiveRequests: string[][] = [];
   const loginHints: Array<string | undefined> = [];
+  const interactiveAuthorities: Array<string | undefined> = [];
   const silentRequests: Array<{ scopes: string[]; forceRefresh?: boolean }> = [];
+  const silentTargets: Array<{ tenantId: string; authority?: string }> = [];
   const store = new AppStateStore({
     filePath, userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined },
     tokenStoreFor: () => ({ read: async () => "", write: async () => undefined }),
-    interactiveSignIn: async ({ scopes, loginHint }) => {
+    interactiveSignIn: async ({ scopes, loginHint, authority }) => {
       interactiveRequests.push([...(scopes ?? [])]);
       loginHints.push(loginHint);
+      interactiveAuthorities.push(authority);
       return {
         account: options.interactive?.account ?? { homeAccountId: "home.contoso-tenant-id", tenantId: "contoso-tenant-id", username: "admin@contoso.example" },
         scopes: options.interactive?.scopes ?? [],
@@ -62,11 +71,19 @@ async function makeFixture(options: {
   });
   if (options.silent) {
     const silent = options.silent;
+    const accounts = options.accounts ?? [CONNECTED];
     Object.defineProperty(store, "msalClientForTenant", { value: () => ({
-      getTokenCache: () => ({ getAccountByHomeId: async () => ({ homeAccountId: "home.contoso-tenant-id" }) }),
-      acquireTokenSilent: async (request: { scopes: string[]; forceRefresh?: boolean }) => {
+      getTokenCache: () => ({
+        getAllAccounts: async () => accounts,
+        // MSAL returns the first profile with this homeAccountId.
+        getAccountByHomeId: async (id: string) => accounts.find((entry) => entry.homeAccountId === id) ?? null,
+      }),
+      acquireTokenSilent: async (request: SilentRequest) => {
         silentRequests.push({ scopes: request.scopes, ...(request.forceRefresh ? { forceRefresh: true } : {}) });
-        return silent();
+        silentTargets.push({ tenantId: request.account.tenantId, ...(request.authority ? { authority: request.authority } : {}) });
+        const result = await silent(request);
+        const account = result.account ?? request.account;
+        return { ...result, account, tenantId: account.tenantId };
       },
     }) });
   }
@@ -74,7 +91,9 @@ async function makeFixture(options: {
     store,
     interactiveRequests,
     loginHints,
+    interactiveAuthorities,
     silentRequests,
+    silentTargets,
     async close() {
       for (const tenant of (await store.getAppState().catch(() => undefined))?.tenants ?? []) {
         await store.cancelGraphCachePreload(tenant.id).catch(() => undefined);
@@ -199,6 +218,71 @@ describe("own app registration grants", () => {
       }
     });
   }
+
+  describe("Check again for a guest with profiles in two directories", () => {
+    // One homeAccountId, a profile in the guest's home directory listed
+    // first, and a profile in the connected directory.
+    const homeProfile: Account = { homeAccountId: "home.contoso-tenant-id", tenantId: "home-tenant-id", username: "admin@contoso.example" };
+    const accounts = [homeProfile, CONNECTED];
+
+    it("refreshes the stored directory's profile through its own authority", async () => {
+      const fixture = await makeFixture({
+        tenants: [customTenant(["graph:User.Read"])],
+        accounts,
+        silent: async () => ({ scopes: [DEFAULT_SCOPE], accessToken: token("User.Read SecurityEvents.Read.All") }),
+      });
+      try {
+        const state = await fixture.store.refreshTenantGrants("contoso-tenant-id");
+        assert.deepEqual(fixture.silentTargets, [
+          { tenantId: "contoso-tenant-id", authority: "https://login.microsoftonline.com/contoso-tenant-id" },
+        ]);
+        assert.deepEqual(state.tenants[0]?.grantedScopes, ["graph:User.Read", "graph:SecurityEvents.Read.All"]);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it("saves nothing when the silent token is for another directory", async () => {
+      const fixture = await makeFixture({
+        tenants: [customTenant(["graph:User.Read"])],
+        accounts,
+        silent: async () => ({
+          scopes: [DEFAULT_SCOPE],
+          accessToken: token("User.Read Application.Read.All"),
+          account: homeProfile,
+        }),
+      });
+      try {
+        await assert.rejects(fixture.store.refreshTenantGrants("contoso-tenant-id"), {
+          name: "TenantAccountMismatchError",
+          message:
+            "Signed in as admin@contoso.example to directory home-tenant-id, but this tenant is directory contoso-tenant-id, connected as admin@contoso.example. Sign in as admin@contoso.example to that directory and try again.",
+        });
+        assert.equal(fixture.interactiveRequests.length, 0);
+        const state = await fixture.store.getAppState();
+        assert.deepEqual(state.tenants[0]?.grantedScopes, ["graph:User.Read"]);
+      } finally {
+        await fixture.close();
+      }
+    });
+
+    it("signs in to the stored directory when only another directory's profile is cached", async () => {
+      const fixture = await makeFixture({
+        tenants: [customTenant(["graph:User.Read"])],
+        accounts: [homeProfile],
+        silent: async () => ({ scopes: [DEFAULT_SCOPE], accessToken: token("User.Read Application.Read.All") }),
+        interactive: { scopes: [DEFAULT_SCOPE], accessToken: token("User.Read AuditLog.Read.All") },
+      });
+      try {
+        const state = await fixture.store.refreshTenantGrants("contoso-tenant-id");
+        assert.equal(fixture.silentRequests.length, 0);
+        assert.deepEqual(fixture.interactiveAuthorities, ["https://login.microsoftonline.com/contoso-tenant-id"]);
+        assert.deepEqual(state.tenants[0]?.grantedScopes, ["graph:User.Read", "graph:AuditLog.Read.All"]);
+      } finally {
+        await fixture.close();
+      }
+    });
+  });
 
   it("Check again points the OpenAdminOS app to Add access", async () => {
     const fixture = await makeFixture({

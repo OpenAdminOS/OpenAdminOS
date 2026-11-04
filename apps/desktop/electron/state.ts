@@ -44,6 +44,7 @@ import {
   removeAccount,
   runInteractiveFlow,
   assertSignedInAccount,
+  TenantAccountMismatchError,
   setAgentUpdatesDir,
   toInstalledAgent,
   type TokenCacheStorage,
@@ -284,7 +285,7 @@ import {
   humanizeMsalError,
   humanizeScheduledRunError,
   isNodeError,
-  loginHintFor,
+  signInTargetFor,
   normalizeWorkspaceInstructions,
   normalizeWorkspaceTitle,
   rememberAppRegistration,
@@ -1989,12 +1990,13 @@ export class AppStateStore {
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (scopes) => {
         const result = await this.interactiveSignIn({
           client,
           scopes,
           openBrowser,
-          ...loginHintFor(tenant),
+          ...signInTargetFor(tenant),
         });
         assertSignedInAccount(result, connectedAccountOf(tenant));
         return result;
@@ -5663,7 +5665,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         scopes: toResourceScopes(scopeNames),
         openBrowser: this.openBrowser,
         timeoutMs: 300_000,
-        ...loginHintFor(tenant),
+        ...signInTargetFor(tenant),
       });
     } catch (error) {
       throw new Error(humanizeMsalError(error, tenant.appRegistration));
@@ -5708,13 +5710,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const client = this.msalClientForTenant(tenant);
     let result;
     try {
+      // Bound to the stored account in the stored directory, and checked
+      // against both before the grants are replaced.
       result = await acquireTokenSilent({
         client,
-        homeAccountId: tenant.homeAccountId,
+        account: connectedAccountOf(tenant),
+        authority: tenant.appRegistration?.authority,
         scopes: CUSTOM_REGISTRATION_SCOPES,
         forceRefresh: true,
       });
     } catch (silentError) {
+      if (silentError instanceof TenantAccountMismatchError) throw silentError;
       if (!isInteractionRequired(silentError)) {
         throw new Error(humanizeMsalError(silentError, tenant.appRegistration));
       }
@@ -5724,13 +5730,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           scopes: CUSTOM_REGISTRATION_SCOPES,
           openBrowser: this.openBrowser,
           timeoutMs: 300_000,
-          ...loginHintFor(tenant),
+          ...signInTargetFor(tenant),
         });
       } catch (error) {
         throw new Error(humanizeMsalError(error, tenant.appRegistration));
       }
-      // The silent path is bound to the stored account. A fresh sign-in
-      // could be anyone, so it must match before grants are replaced.
+      // A fresh sign-in could be anyone, so it must match before grants
+      // are replaced.
       assertSignedInAccount(result, connectedAccountOf(tenant));
     }
     const grants = grantsFromTokenScopes(scopesFromAuthenticationResult(result));
@@ -5922,12 +5928,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (scopes) => {
         const signIn = await this.interactiveSignIn({
           client,
           scopes,
           openBrowser,
-          ...loginHintFor(tenant),
+          ...signInTargetFor(tenant),
         });
         assertSignedInAccount(signIn, connectedAccountOf(tenant));
         return signIn;
@@ -6179,6 +6186,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (requestedScopes: string[]) => {
         if (execution) {
           execution.signal.throwIfAborted();
@@ -6211,7 +6219,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           scopes: requestedScopes,
           openBrowser,
           signal: execution?.signal,
-          ...loginHintFor(tenant),
+          ...signInTargetFor(tenant),
         });
         assertSignedInAccount(result, connectedAccountOf(tenant));
         return result;
@@ -6250,7 +6258,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         : async () => {
             const result = await acquireTokenSilent({
               client,
-              homeAccountId: tenant.homeAccountId,
+              account: connectedAccountOf(tenant),
+              authority: tenant.appRegistration?.authority,
               scopes: [...grantedScopeSet(tenant)],
             });
             return recordTokenScopes({ accessToken: result.accessToken, scopes: result.scopes });

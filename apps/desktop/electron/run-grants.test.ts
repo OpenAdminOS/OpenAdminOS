@@ -44,9 +44,10 @@ async function storeWithToken(tenant: TenantRecord, tokenScopes: string[]) {
     filePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
   });
+  const account = { homeAccountId: tenant.homeAccountId, tenantId: tenant.id, username: tenant.username };
   Object.defineProperty(store, "msalClientForTenant", { value: () => ({
-    getTokenCache: () => ({ getAccountByHomeId: async () => ({ homeAccountId: tenant.homeAccountId }) }),
-    acquireTokenSilent: async () => ({ accessToken: "opaque-token", scopes: tokenScopes }),
+    getTokenCache: () => ({ getAllAccounts: async () => [account] }),
+    acquireTokenSilent: async () => ({ accessToken: "opaque-token", scopes: tokenScopes, account, tenantId: tenant.id }),
   }) });
   const internal = store as unknown as {
     buildGraph(tenantId: string, scopes: string[]): Promise<{ createGraph(log: () => void): RunGraphApi }>;

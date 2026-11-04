@@ -48,7 +48,9 @@ async function makeFixture(account: Account) {
   // Silent acquisition always needs interaction, so every token comes
   // from the interactive fallback inside buildGraph.
   Object.defineProperty(store, "msalClientForTenant", { value: () => ({
-    getTokenCache: () => ({ getAccountByHomeId: async () => ({ homeAccountId: TENANT.homeAccountId }) }),
+    getTokenCache: () => ({
+      getAllAccounts: async () => [{ homeAccountId: TENANT.homeAccountId, tenantId: TENANT.id, username: TENANT.username }],
+    }),
     acquireTokenSilent: async () => {
       throw new InteractionRequiredAuthError("interaction_required", "Interaction required.");
     },

@@ -9,8 +9,10 @@ import {
   DEFAULT_SCOPES,
   TenantAccountMismatchError,
   assertSignedInAccount,
+  acquireTokenSilent,
   createTenantSession,
   runInteractiveFlow,
+  tenantAuthority,
   TenantConnectCancelledError,
   TenantConnectTimeoutError,
 } from "./msal.js";
@@ -26,11 +28,12 @@ describe("default tenant consent scopes", () => {
   });
   it("retains the scopes actually returned by MSAL without changing token requests", async () => {
     const requests: string[][] = [];
+    const account = { homeAccountId: "account", tenantId: "tenant", username: "reader" };
     const client = {
-      getTokenCache: () => ({ getAccountByHomeId: async () => ({ homeAccountId: "account" }) }),
+      getTokenCache: () => ({ getAllAccounts: async () => [account] }),
       acquireTokenSilent: async (request: { scopes: string[] }) => {
         requests.push(request.scopes);
-        return { accessToken: "opaque-token", scopes: ["User.Read.All"] };
+        return { accessToken: "opaque-token", scopes: ["User.Read.All"], account, tenantId: "tenant" };
       },
     } as unknown as PublicClientApplication;
     const session = createTenantSession({ client, tenantId: "tenant", username: "reader", homeAccountId: "account" });
@@ -188,5 +191,112 @@ describe("connected account check", () => {
     } as unknown as PublicClientApplication;
     await runInteractiveFlow({ client, openBrowser: async () => undefined, loginHint: "admin@contoso.example" });
     assert.equal(loginHint, "admin@contoso.example");
+  });
+});
+
+describe("silent sign-in bound to the stored directory", () => {
+  // A B2B guest: one homeAccountId, one cached profile per directory. MSAL
+  // lists the home profile first, which is what getAccountByHomeId returns.
+  const homeAccountId = "oid.home-tid";
+  const homeProfile = { homeAccountId, tenantId: "home-tid", username: "admin@home.example" };
+  const guestProfile = { homeAccountId, tenantId: "guest-tid", username: "admin@home.example" };
+  const guestTenant = { tenantId: "guest-tid", homeAccountId, username: "admin@home.example" };
+
+  function guestClient(
+    respond: (request: { account: typeof homeProfile; authority?: string }) => typeof homeProfile,
+  ) {
+    const requests: Array<{ account: typeof homeProfile; authority?: string; scopes: string[] }> = [];
+    const client = {
+      getTokenCache: () => ({
+        getAllAccounts: async () => [homeProfile, guestProfile],
+        getAccountByHomeId: async (id: string) =>
+          [homeProfile, guestProfile].find((profile) => profile.homeAccountId === id) ?? null,
+      }),
+      acquireTokenSilent: async (request: { account: typeof homeProfile; authority?: string; scopes: string[] }) => {
+        requests.push(request);
+        const account = respond(request);
+        return { accessToken: `token-for-${account.tenantId}`, scopes: request.scopes, account, tenantId: account.tenantId };
+      },
+    } as unknown as PublicClientApplication;
+    return { client, requests };
+  }
+
+  it("selects the profile of the stored directory and asks its authority", async () => {
+    const { client, requests } = guestClient((request) => request.account);
+    const session = createTenantSession({ client, ...guestTenant });
+    assert.equal(await session.acquireTokenForScopes(["User.Read"]), "token-for-guest-tid");
+    assert.equal(requests[0]!.account.tenantId, "guest-tid");
+    assert.equal(requests[0]!.authority, "https://login.microsoftonline.com/guest-tid");
+  });
+
+  it("rejects a silent token for another directory and never falls back to sign-in", async () => {
+    const { client } = guestClient(() => homeProfile);
+    let interactive = 0;
+    const session = createTenantSession({
+      client,
+      ...guestTenant,
+      acquireInteractive: async () => {
+        interactive += 1;
+        throw new Error("not expected");
+      },
+    });
+    await assert.rejects(
+      session.acquireTokenWithScopes!(["User.Read"]),
+      (error: unknown) =>
+        error instanceof TenantAccountMismatchError &&
+        error.message.includes("to directory home-tid, but this tenant is directory guest-tid"),
+    );
+    assert.equal(interactive, 0);
+  });
+
+  it("rejects an interactive fallback result for another directory", async () => {
+    const client = {
+      getTokenCache: () => ({ getAllAccounts: async () => [homeProfile] }),
+    } as unknown as PublicClientApplication;
+    const session = createTenantSession({
+      client,
+      ...guestTenant,
+      acquireInteractive: async () =>
+        ({ accessToken: "home-token", account: homeProfile, tenantId: "home-tid" }) as unknown as AuthenticationResult,
+    });
+    await assert.rejects(session.acquireTokenForScopes(["User.Read"]), TenantAccountMismatchError);
+  });
+
+  it("reports a missing profile for the stored directory as no cached account", async () => {
+    const client = {
+      getTokenCache: () => ({ getAllAccounts: async () => [homeProfile] }),
+      acquireTokenSilent: async () => {
+        throw new Error("not expected");
+      },
+    } as unknown as PublicClientApplication;
+    await assert.rejects(
+      acquireTokenSilent({ client, account: guestTenant }),
+      /No cached account for homeAccountId oid.home-tid in directory guest-tid/,
+    );
+  });
+
+  it("keeps the host of the configured authority", () => {
+    assert.equal(
+      tenantAuthority("guest-tid", "https://login.microsoftonline.us/organizations"),
+      "https://login.microsoftonline.us/guest-tid",
+    );
+    assert.equal(tenantAuthority("guest-tid"), "https://login.microsoftonline.com/guest-tid");
+    assert.throws(() => tenantAuthority("guest/../tid"), /Tenant ID must be a GUID/);
+  });
+
+  it("passes a tenant authority to interactive sign-in", async () => {
+    let authority: string | undefined;
+    const client = {
+      acquireTokenInteractive: async (request: InteractiveRequest) => {
+        authority = request.authority;
+        return { accessToken: "token" } as AuthenticationResult;
+      },
+    } as unknown as PublicClientApplication;
+    await runInteractiveFlow({
+      client,
+      openBrowser: async () => undefined,
+      authority: "https://login.microsoftonline.com/guest-tid",
+    });
+    assert.equal(authority, "https://login.microsoftonline.com/guest-tid");
   });
 });

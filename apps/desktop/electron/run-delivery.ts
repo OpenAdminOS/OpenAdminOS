@@ -29,7 +29,7 @@ import {
   connectedAccountOf,
   createLocalOnlyTenantSession,
   isTerminalRunStatus,
-  loginHintFor,
+  signInTargetFor,
 } from "./state-helpers.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -573,6 +573,7 @@ export class RunDeliveryService {
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (scopes) => {
         if (run.trigger === "schedule") {
           scheduledAuthRequired = true;
@@ -582,7 +583,7 @@ export class RunDeliveryService {
           client,
           scopes,
           openBrowser,
-          ...loginHintFor(tenant),
+          ...signInTargetFor(tenant),
         });
         assertSignedInAccount(result, connectedAccountOf(tenant));
         return result;
@@ -901,6 +902,7 @@ export class RunDeliveryService {
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (scopes) => {
         if (run.trigger === "schedule") {
           scheduledAuthRequired = true;
@@ -910,7 +912,7 @@ export class RunDeliveryService {
           client,
           scopes,
           openBrowser,
-          ...loginHintFor(tenant),
+          ...signInTargetFor(tenant),
         });
         assertSignedInAccount(result, connectedAccountOf(tenant));
         return result;

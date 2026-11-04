@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import {
   OPENADMINOS_CLIENT_ID,
   TENANT_DATA_INSTRUCTIONS,
+  tenantAuthority,
   type ExpectedTenantAccount,
 } from "@openadminos/runtime";
 import {
@@ -402,9 +403,17 @@ export function connectedAccountOf(tenant: TenantRecord): ExpectedTenantAccount 
   return { tenantId: tenant.id, homeAccountId: tenant.homeAccountId, username: tenant.username };
 }
 
-/** Prefills Microsoft sign-in with the connected account, when it is known. */
-export function loginHintFor(tenant: TenantRecord): { loginHint?: string } {
-  return tenant.username ? { loginHint: tenant.username } : {};
+/**
+ * Sends a sign-in for a stored tenant to its own directory, on the host of
+ * the registration's authority, and prefills the connected account when it
+ * is known. A guest signing in through `/common` would land in its home
+ * directory instead.
+ */
+export function signInTargetFor(tenant: TenantRecord): { loginHint?: string; authority: string } {
+  return {
+    ...(tenant.username ? { loginHint: tenant.username } : {}),
+    authority: tenantAuthority(tenant.id, tenant.appRegistration?.authority),
+  };
 }
 
 export function tenantNamesById(tenants: TenantRecord[]): Map<string, string> {

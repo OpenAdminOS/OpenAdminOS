@@ -1,6 +1,7 @@
 import { awaitWithSignal } from "./cancellation.js";
 import {
   AuthError,
+  type AccountInfo,
   type AuthorizeResponse,
   InteractionRequiredAuthError,
   LogLevel,
@@ -54,6 +55,24 @@ export function authorityForDirectory(directoryTenantId?: string): string {
     );
   }
   return `https://login.microsoftonline.com/${trimmed}`;
+}
+
+/**
+ * The authority for one connected directory, on the host of the client's
+ * configured authority. A guest account has one profile per directory under
+ * the same homeAccountId. Requests for a stored tenant use this authority so
+ * MSAL refreshes or signs in to that directory, never the home directory
+ * that `/common` would pick.
+ */
+export function tenantAuthority(
+  tenantId: string,
+  configuredAuthority: string = DEFAULT_AUTHORITY,
+): string {
+  const trimmed = tenantId.trim();
+  if (!/^[0-9a-zA-Z.-]{1,100}$/.test(trimmed)) {
+    throw new Error("Tenant ID must be a GUID or a verified domain name.");
+  }
+  return `${new URL(configuredAuthority).origin}/${trimmed}`;
 }
 // Sign-in only: openid, profile, offline_access and User.Read. Callers
 // add the scopes of the service parts the admin chose, and agents add
@@ -156,6 +175,8 @@ export interface InteractiveFlowInput {
   timeoutMs?: number;
   /** Prefills the Microsoft sign-in page with the connected account. */
   loginHint?: string;
+  /** Signs in to this authority instead of the client's configured one. */
+  authority?: string;
 }
 
 /** The account a stored tenant was connected with. */
@@ -193,8 +214,12 @@ export function assertSignedInAccount(
       `Signed in as ${signedInAs}, but this tenant is connected as ${connectedAs}. Sign in as ${connectedAs} and try again.`,
     );
   }
-  const signedInTenant = account.tenantId || account.homeAccountId;
-  if (signedInTenant.toLowerCase() !== expected.tenantId.toLowerCase()) {
+  // The account profile and the token can each name a directory; both must
+  // be the stored one.
+  const signedInTenant = [account.tenantId || account.homeAccountId, result.tenantId]
+    .filter((id): id is string => !!id)
+    .find((id) => id.toLowerCase() !== expected.tenantId.toLowerCase());
+  if (signedInTenant) {
     throw new TenantAccountMismatchError(
       `Signed in as ${signedInAs} to directory ${signedInTenant}, but this tenant is directory ${expected.tenantId}, connected as ${connectedAs}. Sign in as ${connectedAs} to that directory and try again.`,
     );
@@ -363,6 +388,7 @@ export async function runInteractiveFlow(
   };
   if (input.redirectUri) request.redirectUri = input.redirectUri;
   if (input.loginHint) request.loginHint = input.loginHint;
+  if (input.authority) request.authority = input.authority;
   try {
     const result = await awaitWithSignal(input.client.acquireTokenInteractive(request), signal);
     signal.throwIfAborted();
@@ -378,41 +404,70 @@ export async function runInteractiveFlow(
   }
 }
 
-export async function acquireTokenSilent(input: {
+/**
+ * The cached profile of this account in this directory. `getAllAccounts`
+ * returns one entry per tenant profile, and a guest shares one
+ * homeAccountId across directories, so matching on homeAccountId alone can
+ * pick another directory's profile.
+ */
+export async function findTenantAccount(input: {
   client: PublicClientApplication;
   homeAccountId: string;
+  tenantId: string;
+}): Promise<AccountInfo | null> {
+  const homeAccountId = input.homeAccountId.toLowerCase();
+  const tenantId = input.tenantId.toLowerCase();
+  const accounts = await input.client.getTokenCache().getAllAccounts();
+  return (
+    accounts.find(
+      (account) =>
+        account.homeAccountId.toLowerCase() === homeAccountId &&
+        account.tenantId?.toLowerCase() === tenantId,
+    ) ?? null
+  );
+}
+
+export async function acquireTokenSilent(input: {
+  client: PublicClientApplication;
+  /** The stored tenant: its directory, account and username. */
+  account: ExpectedTenantAccount;
+  /** The client's configured authority. Only its host is used. */
+  authority?: string;
   scopes?: string[];
   /** Skip the cached access token, for example after admin consent changed. */
   forceRefresh?: boolean;
 }): Promise<AuthenticationResult> {
-  const account = await input.client
-    .getTokenCache()
-    .getAccountByHomeId(input.homeAccountId);
+  const { homeAccountId, tenantId } = input.account;
+  const account = await findTenantAccount({ client: input.client, homeAccountId, tenantId });
   if (!account) {
     throw new Error(
-      `No cached account for homeAccountId ${input.homeAccountId}. Reconnect the tenant.`,
+      `No cached account for homeAccountId ${homeAccountId} in directory ${tenantId}. Reconnect the tenant.`,
     );
   }
 
   const request: SilentFlowRequest = {
     account,
+    authority: tenantAuthority(tenantId, input.authority),
     scopes: input.scopes ?? DEFAULT_SCOPES,
     ...(input.forceRefresh ? { forceRefresh: true } : {}),
   };
+  let result: AuthenticationResult | null;
   try {
-    const result = await input.client.acquireTokenSilent(request);
-    if (!result) {
-      throw new Error("MSAL silent acquisition returned no result.");
-    }
-    return result;
+    result = await input.client.acquireTokenSilent(request);
   } catch (error) {
     if (error instanceof InteractionRequiredAuthError) {
       throw new Error(
-        `Cached refresh token is no longer valid for ${input.homeAccountId}. Reconnect the tenant.`,
+        `Cached refresh token is no longer valid for ${homeAccountId}. Reconnect the tenant.`,
       );
     }
     throw error;
   }
+  if (!result) {
+    throw new Error("MSAL silent acquisition returned no result.");
+  }
+  // A token for another directory must never be used or recorded.
+  assertSignedInAccount(result, input.account);
+  return result;
 }
 
 export interface CreateTenantSessionInput {
@@ -420,6 +475,8 @@ export interface CreateTenantSessionInput {
   tenantId: string;
   username: string;
   homeAccountId: string;
+  /** The client's configured authority. Only its host is used. */
+  authority?: string;
   /**
    * Optional fallback invoked when silent token acquisition fails for a
    * scope set the cache cannot satisfy (typically because the user has
@@ -447,14 +504,19 @@ export interface CreateTenantSessionInput {
 export function createTenantSession(
   input: CreateTenantSessionInput,
 ): TenantSession {
+  const expected: ExpectedTenantAccount = {
+    tenantId: input.tenantId,
+    homeAccountId: input.homeAccountId,
+    username: input.username,
+  };
   const acquire = async (scopes: string[]): Promise<AuthenticationResult> => {
     try {
-      const result = await acquireTokenSilent({
+      return await acquireTokenSilent({
         client: input.client,
-        homeAccountId: input.homeAccountId,
+        account: expected,
+        ...(input.authority ? { authority: input.authority } : {}),
         scopes,
       });
-      return result;
     } catch (silentError) {
       const needsInteractive =
         silentError instanceof InteractionRequiredAuthError ||
@@ -466,6 +528,7 @@ export function createTenantSession(
         throw silentError;
       }
       const result = await input.acquireInteractive(scopes);
+      assertSignedInAccount(result, expected);
       return result;
     }
   };
