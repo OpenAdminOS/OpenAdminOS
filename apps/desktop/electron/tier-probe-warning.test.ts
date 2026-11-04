@@ -822,3 +822,70 @@ describe("the license result has one commit point", () => {
     }
   });
 });
+
+describe("a token that arrives after a cancel", () => {
+  it("Add access does not save grants from a sign-in that ignored the cancel", async () => {
+    const late = { resolve: (_value: unknown) => undefined as void };
+    const fixture = await makeFixture({
+      tenants: [SHARED],
+      signIns: [],
+      interactive: () => new Promise((resolve) => { late.resolve = resolve; }),
+      respond: skusResponse,
+    });
+    try {
+      const pending = fixture.store.addTenantAccess(SHARED.id, ["defender.incidents"]);
+      pending.catch(() => undefined);
+      await until(async () =>
+        (await fixture.store.getAppState()).tenantChecks?.[0]?.phase === "sign-in",
+      );
+      fixture.store.cancelTenantCheck(SHARED.id);
+      await assert.rejects(pending, { message: "Sign-in was cancelled. OpenAdminOS saved nothing." });
+      late.resolve({
+        account: CONNECTED,
+        tenantId: CONNECTED.tenantId,
+        scopes: ["SecurityAlert.Read.All", "SecurityIncident.Read.All", "Organization.Read.All"],
+        accessToken: "late-token",
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const tenant = await fixture.tenant();
+      assert.deepEqual(tenant?.grantedScopes, SHARED.grantedScopes);
+      assertTierKept(tenant);
+      assert.equal(tenant?.tierProbeWarning, undefined);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("Check again does not save grants from a silent token that ignored the cancel", async () => {
+    const late = { resolve: (_value: unknown) => undefined as void };
+    let asked = false;
+    const fixture = await makeFixture({
+      tenants: [OWN],
+      signIns: [],
+      silentDefault: () => {
+        asked = true;
+        return new Promise((resolve) => { late.resolve = resolve; });
+      },
+      respond: skusResponse,
+    });
+    try {
+      const pending = fixture.store.refreshTenantGrants(OWN.id);
+      pending.catch(() => undefined);
+      await until(async () => asked);
+      fixture.store.cancelTenantCheck(OWN.id);
+      await assert.rejects(pending, { message: "Check again was cancelled. OpenAdminOS saved nothing." });
+      late.resolve({
+        account: CONNECTED,
+        tenantId: CONNECTED.tenantId,
+        scopes: [DEFAULT_SCOPE],
+        accessToken: token("User.Read Organization.Read.All SecurityEvents.Read.All"),
+      });
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const tenant = await fixture.tenant();
+      assert.deepEqual(tenant?.grantedScopes, OWN.grantedScopes);
+      assertTierKept(tenant);
+    } finally {
+      await fixture.close();
+    }
+  });
+});

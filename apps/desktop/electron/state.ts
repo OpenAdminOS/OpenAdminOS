@@ -6048,6 +6048,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         // are replaced.
         assertSignedInAccount(result, connectedAccountOf(tenant));
       }
+      // A token that answers after a cancel or the deadline is not used.
+      operation.signal.throwIfAborted();
       const grants = grantsFromTokenScopes(scopesFromAuthenticationResult(result));
       const previous = new Set((tenant.grantedScopes ?? []).map(qualifyScope));
       const unchanged =
@@ -6175,7 +6177,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const previous = operation.phase;
     operation.setPhase("sign-in");
     try {
-      return await this.interactiveSignIn({
+      const result = await this.interactiveSignIn({
         client: this.msalClientForTenant(tenant),
         scopes,
         openBrowser: this.openBrowser,
@@ -6183,6 +6185,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         timeoutMs: 300_000,
         ...signInTargetFor(tenant),
       });
+      // A sign-in that answers after a cancel or the deadline is not used.
+      operation.signal.throwIfAborted();
+      return result;
     } finally {
       operation.setPhase(previous);
     }
