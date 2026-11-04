@@ -277,6 +277,16 @@ describe("existing app registration script", () => {
     expect(output.message).toContain("keeps every permission the app already has");
   });
 
+  it("uses the client ID in lower case, as OpenAdminOS stores it", () => {
+    const script = generateRegistrationSetup({
+      mode: "extend",
+      clientId: clientId.toUpperCase(),
+      partIds: ["defender.score"],
+    }).script;
+    expect(script).toContain(`$clientId = '${clientId}'`);
+    expect(script).not.toContain(clientId.toUpperCase());
+  });
+
   it("rejects a client ID that is not a GUID", () => {
     expect(() =>
       generateRegistrationSetup({ mode: "extend", clientId: "contoso'; Remove-MgApplication", partIds: ["defender.score"] }),

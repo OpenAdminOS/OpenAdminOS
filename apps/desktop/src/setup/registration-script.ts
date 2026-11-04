@@ -283,7 +283,7 @@ function extendScript(
   scopeLines: string,
   serviceList: string,
 ): { script: string; message: string } {
-  const clientId = clientIdInput.trim();
+  const clientId = clientIdInput.trim().toLowerCase();
   if (!CLIENT_ID_PATTERN.test(clientId)) {
     throw new Error("The Application (client) ID must be a GUID from your app registration overview.");
   }
