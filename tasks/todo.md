@@ -1083,3 +1083,17 @@ Verification: typecheck, electron 774 pass, renderer (Node 22) 398 pass in 53 fi
 ## Criterion 10 evidence
 
 - Light and dark screenshots of the service picker, the own-registration view, the Settings per-service rows and dialogs, the not-connected panel, the Changes gate, the Marketplace chips and filter, the agent detail notice and the run review were captured on 2026-11-04 in `/private/tmp/claude-501/-Users-ugurkoc-Desktop-GitHub-OpenAdminOS/330f8253-e29b-4f12-aead-2997aec35ed3/scratchpad/services-shots/`. They are local only and not committed.
+
+## Review round 8
+
+- **GPT-6.1-Sol:** no blocking issue. The round 7 fixes were checked: licence commit point, late tokens rejected, the superseded error, cancel copy against what is saved, Menu roles, and SPEC. 177 focused tests pass. One nit: CONTRIBUTING.md said `services: []` was allowed only with no Graph scopes. Fixed in 7d75e1b to say "beyond the sign-in baseline".
+- **Claude evaluator:** no blocking issue. All suites are green: electron 774, renderer 398, runtime 254 with 2 skipped, qa-graph 71, qa 0 fail, scripts 18, docs:check clean. Criteria 1 to 9 pass. Criterion 10 was pending only on this GPT round. The menus were checked live for keyboard and screen reader behaviour. Screenshots are r8-*.png.
+- **Known edge, not fixed:** a cancel after "Access was added" followed by a complete interactive reconnect while the grants save is still queued. The save then throws superseded, but the cancel message already said access was added. This needs a full reconnect inside a write-queue wait, so it is left as is.
+
+## Status before PR
+
+- Both reviewers are clean at 7d75e1b.
+- Still open, needs the owner:
+  - The lab checks: `.default` delegated sign-in with an own registration, the Defender alerts, incidents and Secure Score endpoints with a permissioned connection, and the extend script's PATCH writes.
+  - The `TODO(ugur)` decisions in code.
+  - Approval to push the two PR #162 fixes (b8f79f4, af761fd) and to open the stacked PR.
