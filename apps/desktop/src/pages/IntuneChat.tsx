@@ -78,6 +78,7 @@ import {
   shouldSubmitComposerKey,
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
+import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRun, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { SETUP_COPY } from "../copy";
@@ -98,12 +99,6 @@ import { PilotProductionPage } from "../components/PilotMode";
 import Workspaces from "./Workspaces";
 
 const promptGroups = CHAT_PROMPT_GROUPS;
-
-type ChatProgressState = {
-  message: string;
-  progressPercent: number;
-  steps: IntuneChatProgressStep[];
-};
 
 type OptimisticChatDraft = {
   userMessage: IntuneChatMessage;
@@ -245,6 +240,16 @@ function IntuneChatContent() {
   const [error, setError] = useState<string | null>(null);
   const [chatProgress, setChatProgress] = useState<ChatProgressState | null>(null);
   const [progressAssistantMessageId, setProgressAssistantMessageId] = useState<string | null>(null);
+  // A run this page did not start, for the conversation it shows: Chat was
+  // opened again while the answer streams. Its live steps show here too.
+  const liveRun = useLiveChatRun();
+  const adoptedRun =
+    !sending && liveRun?.conversationId != null && liveRun.conversationId === activeConversationId && liveRun.tenantId === state.activeTenantId
+      ? liveRun
+      : null;
+  const runInProgress = sending || adoptedRun !== null;
+  const shownProgress = adoptedRun ? adoptedRun.progress : chatProgress;
+  const shownProgressMessageId = adoptedRun ? adoptedRun.assistantMessageId : progressAssistantMessageId;
   const [optimisticDraft, setOptimisticDraft] = useState<OptimisticChatDraft | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [hostedConsentPrompt, setHostedConsentPrompt] =
@@ -504,7 +509,8 @@ function IntuneChatContent() {
     return () => {
       stale = true;
     };
-  }, [activeConversationId, conversations, sending, errorReloadToken, state.activeTenantId]);
+    // An adopted run ending reloads the saved answer.
+  }, [activeConversationId, conversations, sending, errorReloadToken, state.activeTenantId, adoptedRun?.streamId]);
 
   useEffect(() => {
     if (draftConversationRef.current === activeConversationId) return;
@@ -541,7 +547,7 @@ function IntuneChatContent() {
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
     }
     setShowScrollToLatest(false);
-  }, [messages, sending, chatProgress?.message, pilot]);
+  }, [messages, sending, shownProgress?.message, pilot]);
 
   useEffect(
     () => () => {
@@ -612,13 +618,13 @@ function IntuneChatContent() {
 
   const handleStopGeneration = async () => {
     const api = window.openAdminOS;
-    if (!api || !sending || stopping) return;
+    if (!api || !runInProgress || stopping) return;
     setStopping(true);
     dispatchSend({ type: "request-stop" });
     setError(null);
     setChatProgress(createStoppedChatProgress("Stopping response."));
     try {
-      await api.cancelIntuneChatStream(activeStreamIdRef.current ?? undefined);
+      await api.cancelIntuneChatStream(activeStreamIdRef.current ?? adoptedRun?.streamId ?? undefined);
     } catch (caught) {
       setStopping(false);
       dispatchSend({ type: "stop-failed" });
@@ -632,7 +638,7 @@ function IntuneChatContent() {
   ) => {
     const content = (contentOverride ?? input).trim();
     const api = window.openAdminOS;
-    if (!api || !content || sending) return;
+    if (!api || !content || runInProgress) return;
     const targetConversationId =
       conversationIdOverride !== undefined
         ? conversationIdOverride
@@ -887,6 +893,20 @@ function IntuneChatContent() {
     activeStreamIdRef.current = streamId;
     const sendTenantId = state.activeTenantId;
     const tenantStillActive = () => activeTenantIdRef.current === sendTenantId;
+    startLiveChatRun({
+      streamId,
+      ...(sendTenantId ? { tenantId: sendTenantId } : {}),
+      conversationId: targetConversationId,
+      assistantMessageId: pendingAssistantId,
+      messages: [pendingUserMessage, pendingAssistantMessage],
+      progress: initialProgress,
+    });
+    // Each change goes to this page and to the live run, which a Chat page
+    // mounted later in the run reads.
+    const applyMessages = (update: (current: IntuneChatMessage[]) => IntuneChatMessage[]) => {
+      setMessages(update);
+      updateLiveChatRun(streamId, (run) => ({ ...run, messages: update(run.messages) }));
+    };
     try {
       const result = await api.streamIntuneChatMessage(
         {
@@ -900,7 +920,10 @@ function IntuneChatContent() {
           // After a tenant switch this stream belongs to the previous
           // tenant's scope: let it finish host-side, but stop painting
           // its tenant's data into the new tenant's shell.
-          if (!tenantStillActive()) return;
+          if (!tenantStillActive()) {
+            endLiveChatRun(streamId);
+            return;
+          }
           if (event.type === "started") {
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
@@ -909,7 +932,8 @@ function IntuneChatContent() {
             if (activeTenantIdRef.current === state.activeTenantId) openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
-            setMessages((current) => {
+            updateLiveChatRun(streamId, (run) => ({ ...run, conversationId: event.conversation.id, assistantMessageId: event.assistantMessage.id }));
+            applyMessages((current) => {
               const withoutDraft = current.filter(
                 (message) =>
                   message.id !== pendingUserId &&
@@ -921,7 +945,7 @@ function IntuneChatContent() {
             });
           }
           if (event.type === "steps") {
-            setMessages((current) =>
+            applyMessages((current) =>
               upsertMessage(
                 current,
                 {
@@ -938,13 +962,15 @@ function IntuneChatContent() {
             );
           }
           if (event.type === "status") {
-            setChatProgress(progressFromStatusEvent(event));
+            const progress = progressFromStatusEvent(event);
+            setChatProgress(progress);
+            updateLiveChatRun(streamId, (run) => ({ ...run, progress }));
             if (event.cacheStatus) {
               setCacheStatus(event.cacheStatus);
             }
           }
           if (event.type === "delta") {
-            setMessages((current) =>
+            applyMessages((current) =>
               upsertMessage(
                 current,
                 {
@@ -971,6 +997,7 @@ function IntuneChatContent() {
             event.type === "failed" ||
             event.type === "cancelled"
           ) {
+            endLiveChatRun(streamId);
             setOptimisticDraft(null);
             setCacheStatus(event.result.cacheStatus);
             setMessages((current) => {
@@ -1054,6 +1081,7 @@ function IntuneChatContent() {
         ),
       );
     } finally {
+      endLiveChatRun(streamId);
       if (activeStreamIdRef.current === streamId) activeStreamIdRef.current = null;
       sendInFlightRef.current = false;
       setSending(false);
@@ -1500,16 +1528,19 @@ function IntuneChatContent() {
     window.addEventListener("keydown", onRenameShortcut);
     return () => window.removeEventListener("keydown", onRenameShortcut);
   }, [activeConversation, requestRename, sending, workspaceView]);
-  const displayedMessages = mergeOptimisticMessages(messages, optimisticDraft);
+  const displayedMessages = mergeOptimisticMessages(
+    adoptedRun ? adoptedRun.messages.reduce((list, message) => upsertMessage(list, message), messages) : messages,
+    optimisticDraft,
+  );
   const latestAssistantMessageId = [...displayedMessages]
     .reverse()
     .find((message) => message.role === "assistant")?.id;
   const progressMessageVisible =
-    progressAssistantMessageId !== null &&
-    displayedMessages.some((message) => message.id === progressAssistantMessageId);
+    shownProgressMessageId !== null &&
+    displayedMessages.some((message) => message.id === shownProgressMessageId);
   // The first follow-up of the latest answer, offered as ghost text until dismissed.
   const latestAssistant = displayedMessages.find((message) => message.id === latestAssistantMessageId);
-  const latestFollowUp = latestAssistant?.status === "completed" && latestAssistant.id !== progressAssistantMessageId ? latestAssistant.followUps?.[0] : undefined;
+  const latestFollowUp = latestAssistant?.status === "completed" && latestAssistant.id !== shownProgressMessageId ? latestAssistant.followUps?.[0] : undefined;
   const composerSuggestion = latestFollowUp && `${latestAssistant!.id}:${latestFollowUp}` !== dismissedSuggestion
     ? { text: latestFollowUp, key: `${latestAssistant!.id}:${latestFollowUp}` }
     : undefined;
@@ -1602,7 +1633,7 @@ function IntuneChatContent() {
       onValueChange={setInput}
       onSend={() => void handleSend()}
       onStop={() => void handleStopGeneration()}
-      sending={sending}
+      sending={runInProgress}
       stopping={stopping}
       disabled={unknownConversation}
       activeTenant={activeTenant}
@@ -1627,7 +1658,7 @@ function IntuneChatContent() {
     !unknownConversation &&
     !multiTenantPreflight &&
     displayedMessages.length === 0 &&
-    !chatProgress;
+    !shownProgress;
 
   const calmTopBar = shellChrome ? (
     <>
@@ -1902,9 +1933,9 @@ function IntuneChatContent() {
                   batchNotice={batchNotice}
                 />
               </div>
-            ) : displayedMessages.length === 0 && chatProgress ? (
+            ) : displayedMessages.length === 0 && shownProgress ? (
               <div className="flex flex-1 flex-col justify-center py-16">
-                <AssistantPendingScopeLine tenant={activeTenant} label={chatProgress.message} />
+                <AssistantPendingScopeLine tenant={activeTenant} label={shownProgress.message} />
               </div>
             ) : (
               <div className="flex flex-1 flex-col">
@@ -1923,7 +1954,7 @@ function IntuneChatContent() {
                     <div key={message.id} data-message-id={message.id} className="scroll-mt-[18px]">
                       <ChatMessageBubble
                         message={message}
-                        progress={message.id === progressAssistantMessageId ? chatProgress : null}
+                        progress={message.id === shownProgressMessageId ? shownProgress : null}
                         copied={message.id === copiedMessageId}
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
@@ -1938,7 +1969,7 @@ function IntuneChatContent() {
                           setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
                         }}
                       />
-                      {pilot && message.role === "assistant" && message.status === "completed" && message.id !== progressAssistantMessageId ? (
+                      {pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId ? (
                         <PilotFollowUps
                           prompt={previousUserPromptForMessage(displayedMessages, message)}
                           disabled={sending}
@@ -1947,7 +1978,7 @@ function IntuneChatContent() {
                           onOpenAgent={(slug) => navigate(`/agents/${encodeURIComponent(slug)}`)}
                         />
                       ) : null}
-                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== progressAssistantMessageId && message.followUps?.length ? (
+                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.length ? (
                         <FollowUpChips followUps={message.followUps} disabled={sending} onPick={fillComposer} />
                       ) : null}
                       {!pilot && message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
@@ -1983,8 +2014,8 @@ function IntuneChatContent() {
                     </div>
                   );
                 })}
-                {sending && chatProgress && !progressMessageVisible ? (
-                  <AssistantPendingScopeLine tenant={activeTenant} label={chatProgress.message} />
+                {runInProgress && shownProgress && !progressMessageVisible ? (
+                  <AssistantPendingScopeLine tenant={activeTenant} label={shownProgress.message} />
                 ) : null}
               </div>
             )}

@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
@@ -19,6 +19,7 @@ import {
 } from "../test/test-utils";
 import type {
   IntuneChatStep,
+  IntuneChatStreamEvent,
   GraphCacheStatus,
   IntuneChatConversation,
   IntuneChatMessage,
@@ -1584,4 +1585,110 @@ it("routes a suggested write-agent dry run through the dry-run preflight", async
   expect(await screen.findByRole("heading", { name: "Review dry run" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Start dry run" }));
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
+});
+
+/**
+ * The event sequence of a streamed docs answer, as the host sends it
+ * (recorded from the app store): the first step at once, status lines,
+ * the step list several times, one MCP call, then the answer.
+ */
+function liveRunFixture() {
+  const conversation: IntuneChatConversation = {
+    id: "chat-live-run", title: "how does defender onboarding for macos work?", createdAt: "2026-11-04T10:49:54.264Z",
+    updatedAt: "2026-11-04T10:49:54.264Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+  };
+  const userMessage: IntuneChatMessage = { id: "u-live-run", conversationId: conversation.id, role: "user", content: conversation.title, status: "completed", createdAt: conversation.createdAt };
+  const pending: IntuneChatMessage = { id: "a-live-run", conversationId: conversation.id, role: "assistant", content: "", status: "streaming", createdAt: conversation.createdAt, providerId: "openai" };
+  const step = (overrides: Partial<IntuneChatStep>): IntuneChatStep => ({ id: "step-1", kind: "plan", title: "Reading the question", status: "active", origin: "device", originLabel: "On device", startedAt: "2026-11-04T10:49:54.275Z", ...overrides });
+  const plan = step({});
+  const planDone = step({ title: "Read the question", status: "completed", durationMs: 11261, detail: "Documentation question. Sources: Microsoft Learn. Your tenant is not checked." });
+  const answer = step({ id: "step-2", kind: "answer", title: "Working on the answer", origin: "model", originLabel: "OpenAI Codex", detail: "gpt-6-sol" });
+  const asking = step({ id: "step-3", kind: "mcp", title: "Asking Microsoft Learn", origin: "third-party", originLabel: "learn.microsoft.com", detail: "microsoft_docs_search", sent: "Defender for Endpoint onboarding on macOS" });
+  const asked = { ...asking, title: "Asked Microsoft Learn", status: "completed" as const, durationMs: 1200, detail: "microsoft_docs_search · 10 results" };
+  const answered = { ...answer, title: "Wrote the answer", status: "completed" as const, durationMs: 26439 };
+  const base = { conversationId: conversation.id, assistantMessageId: pending.id };
+  const status = (message: string): IntuneChatStreamEvent => ({ type: "status", conversationId: conversation.id, message, stage: "running-tools" });
+  const finalText = "Onboarding has three parts [1].";
+  const result: SendIntuneChatMessageResult = {
+    conversation, userMessage,
+    assistantMessage: { ...pending, status: "completed", content: finalText, steps: [planDone, asked, answered] },
+    cacheStatus: { tenantId: "tenant-1", resources: [] },
+  };
+  const events: IntuneChatStreamEvent[] = [
+    { type: "started", conversation, userMessage, assistantMessage: pending, cacheStatus: result.cacheStatus },
+    { type: "steps", ...base, steps: [plan] },
+    status("Checking cached tenant data."),
+    status("Investigative mode started."),
+    { type: "steps", ...base, steps: [plan, answer] },
+    { type: "steps", ...base, steps: [planDone, answer] },
+    { type: "steps", ...base, steps: [planDone, asking, answer] },
+    status("Asking Microsoft Learn at learn.microsoft.com: microsoft_docs_search."),
+    { type: "steps", ...base, steps: [planDone, asked, answer] },
+    status("Microsoft Learn answered from learn.microsoft.com."),
+    { type: "steps", ...base, steps: [planDone, asked, answered] },
+    status("Model response started."),
+    { type: "delta", ...base, delta: finalText, content: finalText, providerId: "openai" },
+    { type: "completed", result },
+  ];
+  return { conversation, userMessage, result, events, finalText };
+}
+
+describe("IntuneChat live run", () => {
+  it("keeps the scope line and the live steps after Chat is opened again during the run", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let saved: IntuneChatMessage[] = [];
+    let listed: IntuneChatConversation[] = [];
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => listed),
+      getIntuneChatMessages: vi.fn(async () => saved),
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        // The host saves the question first; the answer is saved when it is done.
+        saved = [userMessage];
+        listed = [conversation];
+        await new Promise<void>((resolve) => { finish = resolve; });
+        saved = [userMessage, result.assistantMessage];
+        return result;
+      }),
+    });
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<AppShell><IntuneChat /></AppShell>} />
+        <Route path="/marketplace" element={<AppShell><LocationProbe /></AppShell>} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+    const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+    await user.type(composer, conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    act(() => events.slice(0, 5).forEach((event) => emit(event)));
+    expect(await screen.findByText("Investigative mode started.")).toBeInTheDocument();
+
+    // The admin opens another page and comes back while the answer runs.
+    await user.click(screen.getByRole("link", { name: "Marketplace" }));
+    expect(await screen.findByTestId("location")).toHaveTextContent("/marketplace");
+    await user.click(await screen.findByTitle(conversation.title));
+
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    expect(await within(log).findByText("Investigative mode started.")).toBeInTheDocument();
+    expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
+    const timeline = within(log).getByRole("list", { name: "Steps" });
+    expect(within(timeline).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Reading the question"),
+      expect.stringContaining("Working on the answer"),
+    ]);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+    // Later events reach the page that is showing the conversation now.
+    act(() => events.slice(5, 9).forEach((event) => emit(event)));
+    expect(await within(log).findByText("Asked Microsoft Learn")).toBeInTheDocument();
+    act(() => events.slice(9).forEach((event) => emit(event)));
+    finish();
+    expect(await within(log).findByText(/Onboarding has three parts/, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /3 steps/ }, { timeout: 4000 })).toBeInTheDocument();
+  });
 });
