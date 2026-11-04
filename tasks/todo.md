@@ -949,4 +949,40 @@ An admin who only works in Intune still consents to Entra and Defender reads. Ev
 
 ## Lokka verification
 
-(filled during the build)
+Checked with Lokka on 2026-11-04 (lab tenant, app-only connection): `GET /v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')?$select=oauth2PermissionScopes` returns 867 delegated scopes. Every scope below is present and enabled. The ID is the delegated permission ID, and the last column shows who can consent.
+
+| Scope | Delegated permission ID | Consent |
+| --- | --- | --- |
+| openid | 37f7f235-527c-4136-accd-4a02d197296e | User |
+| profile | 14dad69e-099b-42c9-810b-d002981feec1 | User |
+| offline_access | 7427e0e9-2fba-42fe-b0c0-848c9e6a8182 | User |
+| User.Read | e1fe6dd8-ba31-4d61-89e7-88639da4683d | User |
+| DeviceManagementManagedDevices.Read.All | 314874da-47d6-4978-88dc-cf0d37f0bb82 | Admin |
+| DeviceManagementConfiguration.Read.All | f1493658-876a-4c87-8fa7-edb559b3476a | Admin |
+| DeviceManagementApps.Read.All | 4edf5f54-4666-44af-9de9-0144fb4b6e8c | Admin |
+| DeviceManagementServiceConfig.Read.All | 8696daa5-bce5-4b2e-83f9-51b6defc4e1e | Admin |
+| DeviceManagementScripts.Read.All | d32381d8-ee89-4220-9c83-b672aa68d404 | Admin |
+| DeviceManagementRBAC.Read.All | 49f0cc30-024c-4dfd-ab3e-82e137ee5431 | Admin |
+| Device.Read.All | 951183d1-1a61-466f-a6d1-1fde911bfd95 | Admin |
+| GroupMember.Read.All | bc024368-1153-4739-b217-4326f2e966d0 | Admin |
+| Organization.Read.All | 4908d5b9-3fb2-4b1e-9336-1888b7937185 | Admin |
+| Directory.Read.All | 06da0dbc-49e2-44d2-8312-53f166ab848a | Admin |
+| User.Read.All | a154be20-db9c-4678-8ab7-66f6cc099a59 | Admin |
+| User.ReadBasic.All | b340eb25-3456-403f-be2f-af7a0d370277 | User |
+| Policy.Read.All | 572fea84-0151-49b2-9301-11cb16974376 | Admin |
+| Application.Read.All | c79f8feb-a9db-4090-85f9-90d820caa0eb | Admin |
+| AuditLog.Read.All | e4c9e354-4dc5-45b8-9e7c-e1393b0b1a20 | Admin |
+| IdentityRiskyUser.Read.All | d04bb851-cb7c-4146-97c7-ca3e71baf56c | Admin |
+| SecurityEvents.Read.All | 64733abd-851e-478a-bffb-e47a14b18235 | Admin |
+| RoleManagement.Read.Directory | 741c54c3-0c1e-44a1-818b-3f97ab4e8c83 | Admin |
+| AdministrativeUnit.Read.All | 3361d15d-be43-4de6-b441-3c746d05163d | Admin |
+| Domain.Read.All | 2f9ee017-59c1-4f1d-9472-bd5529a7b311 | Admin |
+| SecurityAlert.Read.All | bc257fb8-46b4-4b15-8713-01e91bfbe4ea | Admin |
+| SecurityIncident.Read.All | b9abcc4f-94fc-4457-9141-d20ce80ec952 | Admin |
+| ThreatHunting.Read.All | b152eca8-ea73-4a48-8c98-1a6742673d99 | Admin (planned part only) |
+
+Microsoft Graph app ID: 00000003-0000-0000-c000-000000000000.
+
+Not covered by this check:
+- The `.default` delegated sign-in. Lokka runs app-only, so it cannot exercise this. It needs a live sign-in with an own registration in the lab tenant.
+- The Defender endpoints. The Lokka app lacks SecurityAlert, SecurityIncident and ThreatHunting permissions. Before the Defender service ships, verify the alerts, incidents and Secure Score endpoints with a delegated or permissioned connection.
