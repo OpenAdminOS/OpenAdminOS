@@ -44,11 +44,17 @@ describe("agents by service", () => {
     expect(within(hub).getByText("Inactive devices")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
-    await user.click(screen.getByRole("menuitem", { name: "Needs Defender" }));
+    expect(screen.getByRole("menuitemradio", { name: "All services" })).toHaveAttribute("aria-checked", "true");
+    await user.click(screen.getByRole("menuitemradio", { name: "Needs Defender" }));
     expect(within(hub).getByText("Secure score prioritizer")).toBeInTheDocument();
     expect(within(hub).queryByText("Inactive devices")).not.toBeInTheDocument();
     expect(within(hub).queryByText("Stale guests")).not.toBeInTheDocument();
     expect(screen.getByText("1 of 3 hub agents")).toBeInTheDocument();
+    // The selected filter is shown by its checked state, not a mark in the label.
+    await user.click(screen.getByRole("button", { name: "Filter" }));
+    expect(screen.getByRole("menuitemradio", { name: "Needs Defender" })).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByRole("menuitemradio", { name: "All services" })).toHaveAttribute("aria-checked", "false");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Scheduled only" })).toHaveAttribute("aria-checked", "false");
   });
 
   it("names a service that is not connected on the agent detail", async () => {
