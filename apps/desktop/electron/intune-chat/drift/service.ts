@@ -33,8 +33,10 @@ import type {
   RenameDriftBaselineInput,
   RetireDriftBaselineInput,
   TenantGroup,
+  NotGrantedService,
   TenantRecord,
 } from "@openadminos/agent-sdk";
+import { notGrantedServiceForScopes } from "@openadminos/agent-sdk";
 import { definitionForResource } from "../planner.js";
 import type {
   CachedGraphResourceRecord,
@@ -352,6 +354,7 @@ export class DriftService {
         ...(cacheStatus.get(stat.resource)?.pageLimitReached
           ? { pageLimitReached: true }
           : {}),
+        ...notGrantedServiceFor(tenant, stat.resource),
       })),
     };
   }
@@ -1149,6 +1152,16 @@ function displayNameFromRaw(rawJson: string | undefined): string | undefined {
     stringValue(row.name) ??
     stringValue(row.deviceName)
   );
+}
+
+// Drift snapshots come from the cache, so a resource of a service that is
+// not connected never gets one. The status says so instead of looking empty.
+function notGrantedServiceFor(
+  tenant: TenantRecord,
+  resource: GraphCacheResourceKind,
+): { notGrantedService?: NotGrantedService } {
+  const notGrantedService = notGrantedServiceForScopes(tenant, definitionForResource(resource).scopes);
+  return notGrantedService ? { notGrantedService } : {};
 }
 
 function labelForResource(resource: GraphCacheResourceKind): string {

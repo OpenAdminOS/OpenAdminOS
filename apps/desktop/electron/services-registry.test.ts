@@ -13,6 +13,8 @@ import {
   grantsFromTokenScopes,
   mergeGrantedScopes,
   missingPartsForScopes,
+  missingServiceCopy,
+  notGrantedServiceForScopes,
   parseScope,
   partIdsFor,
   partLabel,
@@ -241,5 +243,47 @@ describe("grant status", () => {
     assert.equal(partLabel(SERVICE_PARTS.find((part) => part.id === "defender.score")!), "Defender Secure Score");
     assert.equal(serviceForScope("User.ReadWrite.All")?.id, "entra");
     assert.equal(serviceForScope("Directory.Read.All")?.id, "entra");
+  });
+});
+
+describe("missing service copy", () => {
+  const peopleOnly = {
+    displayName: "Contoso",
+    grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"],
+  };
+
+  it("names a service that has no part granted as not connected", () => {
+    assert.equal(
+      missingServiceCopy(peopleOnly, ["SecurityIncident.Read.All"]),
+      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+    );
+    assert.equal(
+      missingServiceCopy({ grantedScopes: [] }, ["SecurityIncident.Read.All", "DeviceManagementApps.Read.All"]),
+      "Intune and Defender are not connected for this tenant. Add them in Settings, Tenants.",
+    );
+  });
+
+  it("names the missing part of a partly connected service with the tenant", () => {
+    assert.equal(
+      missingServiceCopy(peopleOnly, ["AuditLog.Read.All"]),
+      "This needs Entra sign-in logs, which is not granted for Contoso. Add it in Settings, Tenants.",
+    );
+  });
+
+  it("is silent when everything is granted, for the sample tenant and for agent-only scopes", () => {
+    assert.equal(missingServiceCopy(peopleOnly, ["User.Read.All"]), undefined);
+    assert.equal(missingServiceCopy({ kind: "sample", grantedScopes: [] }, ["SecurityIncident.Read.All"]), undefined);
+    assert.equal(missingServiceCopy(peopleOnly, ["Directory.Read.All"]), undefined);
+  });
+
+  it("describes the part a cache resource needs", () => {
+    assert.deepEqual(notGrantedServiceForScopes(peopleOnly, ["SecurityAlert.Read.All"]), {
+      serviceId: "defender",
+      service: "Defender",
+      partId: "defender.incidents",
+      part: "Defender alerts and incidents",
+      serviceMissing: true,
+    });
+    assert.equal(notGrantedServiceForScopes(peopleOnly, ["User.Read.All"]), undefined);
   });
 });

@@ -12,7 +12,7 @@ import type {
   RunGraphApi,
 } from "@openadminos/agent-sdk";
 
-import { graphAccessDenialFromError, graphAccessDenialText } from "@openadminos/agent-sdk";
+import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy } from "@openadminos/agent-sdk";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
@@ -845,8 +845,11 @@ function assertResourceGranted(
     (scope) => !ctx.grantedScopes.has(scope),
   );
   if (missing.length > 0) {
+    const copy = missingServiceCopy({ grantedScopes: [...ctx.grantedScopes] }, definition.scopes);
     throw new Error(
-      `${definition.label} needs ${missing.join(", ")}, which was not granted for this tenant.`,
+      copy
+        ? `${definition.label}: ${copy}`
+        : `${definition.label} needs ${missing.join(", ")}, which was not granted for this tenant.`,
     );
   }
 }

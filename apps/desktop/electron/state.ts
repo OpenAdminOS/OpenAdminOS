@@ -153,6 +153,7 @@ import {
   grantedScopeSet,
   grantsFromTokenScopes,
   mergeGrantedScopes,
+  missingServiceCopy,
   qualifyScope,
   normalizeGraphScopeName,
   providerCatalog,
@@ -6169,7 +6170,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             .filter((scope) => !OIDC_SCOPES.has(scope) && !granted.has(scope));
           if (ungranted.length > 0) {
             throw new Error(
-              `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Settings, Tenants.`,
+              missingServiceCopy(tenant, ungranted) ??
+                `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Settings, Tenants.`,
             );
           }
         }

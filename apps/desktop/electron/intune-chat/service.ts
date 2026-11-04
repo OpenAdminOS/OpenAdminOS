@@ -8,9 +8,8 @@ import { join } from "node:path";
 
 import {
   grantedScopeSet,
-  missingPartsForScopes,
-  partForScope,
-  partLabel,
+  missingServiceCopy,
+  notGrantedServiceForScopes,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
   graphAccessDenialText,
@@ -143,14 +142,10 @@ function restrictPlannedResourcesForTenant(
   if (originalResources.length === 0 || planned.resources.length > 0) {
     return undefined;
   }
-  // TODO(services-ui): the chat step replaces this with the shared
-  // missing-service copy from the SDK.
-  const [missingPart] = missingPartsForScopes(
-    requiredScopesForResources(originalResources),
-    granted,
+  return (
+    missingServiceCopy(tenant, requiredScopesForResources(originalResources)) ??
+    `This question needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`
   );
-  const partTitle = missingPart ? partLabel(missingPart) : "additional Microsoft Graph";
-  return `This question needs ${partTitle} access, which was not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
 }
 
 type GraphCacheRefreshProgressEvent =
@@ -253,10 +248,8 @@ export class IntuneChatService {
       throw new Error("A cache preload is already running for this tenant.");
     if (options.resources?.length === 0)
       throw new Error("Select at least one resource to preload.");
-    const granted = grantedScopeSet(tenant);
-    const resources = sanitizeGraphResources(options.resources).filter((resource) =>
-      definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
-    );
+    // Resources of services that are not connected come back skipped.
+    const resources = sanitizeGraphResources(options.resources);
     const controller = new AbortController();
     const job: import("@openadminos/agent-sdk").GraphCachePreloadJob = {
       tenantId: tenant.id,
@@ -287,7 +280,7 @@ export class IntuneChatService {
         job.status = controller.signal.aborted
           ? "cancelled"
           : result.resources.length === resources.length &&
-              result.resources.every((r) => r.ok && !r.pageLimitReached)
+              result.resources.every((r) => r.skipped || (r.ok && !r.pageLimitReached))
             ? "complete"
             : "incomplete";
       })
@@ -698,7 +691,9 @@ export class IntuneChatService {
             tenantId: tenant.tenantId,
             resources: tenant.staleResources,
           });
-          const failedResources = refreshResult.resources.filter((resource) => !resource.ok);
+          const failedResources = refreshResult.resources.filter(
+            (resource) => !resource.ok && !resource.skipped,
+          );
           if (
             failedResources.some((resource) => resource.resource === "managedDevices") ||
             failedResources.length === refreshResult.resources.length
@@ -1297,12 +1292,8 @@ export class IntuneChatService {
       resources: store
         .getGraphCacheStatus(resolvedTenant.id, [...GRAPH_CACHE_RESOURCES])
         .map((status) => {
-          const missingScope = status.scopeSet.find(
-            (scope) => !grantedScopeSet(resolvedTenant).has(scope),
-          );
-          // TODO(services-ui): the chat step renames this to notGrantedService.
-          const part = missingScope ? partForScope(missingScope) : undefined;
-          return part ? { ...status, notGrantedArea: partLabel(part) } : status;
+          const notGrantedService = notGrantedServiceForScopes(resolvedTenant, status.scopeSet);
+          return notGrantedService ? { ...status, notGrantedService } : status;
         }),
       schedule: store.getGraphCacheRefreshSchedule(resolvedTenant.id),
       preload: this.preloadJobs.get(resolvedTenant.id)?.job,
@@ -1389,18 +1380,37 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted, options.tenantId);
-    const granted = grantedScopeSet(tenant);
-    const resources = sanitizeGraphResources(options.resources).filter((resource) =>
-      definitionForResource(resource).scopes.every((scope) => granted.has(scope)),
-    );
+    // Resources whose service part is not granted are reported as skipped
+    // with the service to add, never refreshed and never counted as errors.
+    const requested = sanitizeGraphResources(options.resources);
+    const skipped: GraphCacheRefreshResult["resources"] = [];
+    const resources = requested.filter((resource) => {
+      const definition = definitionForResource(resource);
+      const notGrantedService = notGrantedServiceForScopes(tenant, definition.scopes);
+      if (!notGrantedService) return true;
+      skipped.push({
+        resource,
+        label: definition.label,
+        rows: 0,
+        ok: false,
+        skipped: "not-connected",
+        notGrantedService,
+      });
+      return false;
+    });
     const scopes = requiredScopesForResources(resources);
     const startedAt = new Date().toISOString();
+    let completed = 0;
+    for (const result of skipped) {
+      completed += 1;
+      onProgress?.({ type: "resource-complete", result, completed, total: requested.length });
+    }
     if (resources.length === 0) {
       return {
         tenantId: tenant.id,
         startedAt,
         finishedAt: new Date().toISOString(),
-        resources: [],
+        resources: skipped,
       };
     }
     const log = (level: RunLogLevel, message: string, metadata?: Record<string, unknown>) => {
@@ -1414,7 +1424,6 @@ export class IntuneChatService {
     const slots = new Array<GraphCacheRefreshResult["resources"][number] | undefined>(
       resources.length,
     );
-    let completed = 0;
 
     const refreshOne = async (resource: GraphCacheResourceKind, slot: number) => {
       const definition = definitionForResource(resource);
@@ -1425,7 +1434,7 @@ export class IntuneChatService {
         resource,
         label: definition.label,
         completed,
-        total: resources.length,
+        total: requested.length,
       });
       try {
         const query: Record<string, string> = { ...(request.query ?? {}) };
@@ -1484,7 +1493,7 @@ export class IntuneChatService {
           type: "resource-complete",
           result: slots[slot]!,
           completed,
-          total: resources.length,
+          total: requested.length,
         });
       } catch (error) {
         const raw = error instanceof Error ? error.message : String(error);
@@ -1520,7 +1529,7 @@ export class IntuneChatService {
           type: "resource-complete",
           result: slots[slot]!,
           completed,
-          total: resources.length,
+          total: requested.length,
         });
       }
     };
@@ -1546,14 +1555,17 @@ export class IntuneChatService {
     );
     await Promise.all(workers);
 
+    const results = new Map(
+      [...skipped, ...slots].flatMap((entry) => (entry ? [[entry.resource, entry] as const] : [])),
+    );
     return {
       tenantId: tenant.id,
       startedAt,
       finishedAt: new Date().toISOString(),
-      resources: slots.filter(
-        (entry): entry is GraphCacheRefreshResult["resources"][number] =>
-          entry !== undefined,
-      ),
+      resources: requested.flatMap((resource) => {
+        const entry = results.get(resource);
+        return entry ? [entry] : [];
+      }),
     };
   }
 
@@ -2850,7 +2862,7 @@ export class IntuneChatService {
       const startedAt = new Date(nowMs).toISOString();
       try {
         const result = await this.refreshGraphCache({ tenantId: tenant.id });
-        const failures = result.resources.filter((resource) => !resource.ok);
+        const failures = result.resources.filter((resource) => !resource.ok && !resource.skipped);
         this.host.intelligenceStore.markGraphCacheRefreshScheduleRun({
           tenantId: tenant.id,
           startedAt,

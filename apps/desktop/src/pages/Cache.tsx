@@ -10,13 +10,16 @@ import {
   Toolbar,
   type DataTableColumn,
 } from "../components/ui";
-import { userFacingErrorReason } from "../copy";
+import { SERVICE_COPY, userFacingErrorReason } from "../copy";
+import { ServiceAccessDialog } from "../components/ServiceAccess";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
-import type {
-  GraphCacheResourceKind,
-  GraphCacheStatus,
-  LocalDataSummary,
+import {
+  serviceById,
+  type GraphCacheResourceKind,
+  type GraphCacheStatus,
+  type LocalDataSummary,
+  type ServiceId,
 } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 
@@ -53,6 +56,7 @@ export function DataSettingsSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [clearTarget, setClearTarget] = useState<ClearTarget>(null);
   const [clearing, setClearing] = useState(false);
+  const [addingService, setAddingService] = useState<ServiceId | null>(null);
   const epoch = useRef(0);
   const resumedIntentRef = useRef<string | null>(null);
 
@@ -75,7 +79,7 @@ export function DataSettingsSection() {
         ? current
         : new Set(
             nextStatus.resources
-              .filter((resource) => !resource.notGrantedArea)
+              .filter((resource) => !resource.notGrantedService)
               .map((resource) => resource.resource),
           ),
     );
@@ -106,7 +110,7 @@ export function DataSettingsSection() {
     () =>
       status?.resources.filter(
         (resource) =>
-          !resource.notGrantedArea &&
+          !resource.notGrantedService &&
           (!resource.refreshedAt || Boolean(resource.lastError) || resource.pageLimitReached),
       ) ?? [],
     [status],
@@ -232,7 +236,7 @@ export function DataSettingsSection() {
             <input
               type="checkbox"
               checked={selected.has(resource.resource)}
-              disabled={running || Boolean(resource.notGrantedArea)}
+              disabled={running || Boolean(resource.notGrantedService)}
               onChange={(event) =>
                 setSelected((current) => {
                   const next = new Set(current);
@@ -268,8 +272,8 @@ export function DataSettingsSection() {
         sortable: true,
         sortValue: (resource) => resource.refreshedAt ?? "",
         render: (resource) =>
-          resource.notGrantedArea ? (
-            <span className="text-[var(--color-text-muted)]">Not granted</span>
+          resource.notGrantedService ? (
+            <span className="text-[var(--color-text-muted)]">Not connected</span>
           ) : resource.lastError ? (
             <span className="text-[var(--color-danger)]">Refresh failed</span>
           ) : resource.refreshedAt ? (
@@ -282,9 +286,11 @@ export function DataSettingsSection() {
         id: "permission",
         header: "Permission",
         render: (resource) => (
-          <span className={resource.notGrantedArea ? "text-xs text-[var(--color-text-muted)]" : "break-words font-mono text-xs"}>
-            {resource.notGrantedArea
-              ? `${resource.notGrantedArea} area`
+          <span className={resource.notGrantedService ? "text-xs text-[var(--color-text-muted)]" : "break-words font-mono text-xs"}>
+            {resource.notGrantedService
+              ? resource.notGrantedService.serviceMissing
+                ? `${resource.notGrantedService.service} is not connected`
+                : `Needs ${resource.notGrantedService.part}`
               : resource.scopeSet.join(", ") || "None"}
           </span>
         ),
@@ -301,8 +307,16 @@ export function DataSettingsSection() {
     status?.resources.reduce((total, resource) => total + resource.rows, 0) ??
     0;
   const grantableResources = status?.resources.filter(
-    (resource) => !resource.notGrantedArea,
+    (resource) => !resource.notGrantedService,
   ) ?? [];
+  // Services some resources need, each with an Add action.
+  const unconnectedServiceIds = [
+    ...new Set(
+      (status?.resources ?? []).flatMap((resource) =>
+        resource.notGrantedService ? [resource.notGrantedService.serviceId] : [],
+      ),
+    ),
+  ];
 
   return (
     <div className="max-w-[1040px] rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
@@ -470,6 +484,29 @@ export function DataSettingsSection() {
           </Button>
         </div>
       </div>
+
+      {activeTenant && activeTenant.kind !== "sample" && unconnectedServiceIds.length > 0 ? (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-4">
+          <p className="min-w-0 flex-1 text-sm text-[var(--color-text-muted)]">
+            {SERVICE_COPY.cacheSkipped(
+              (status?.resources ?? []).filter((resource) => resource.notGrantedService).length,
+            )}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {unconnectedServiceIds.map((serviceId) => (
+              <Button key={serviceId} size="sm" variant="secondary" onClick={() => setAddingService(serviceId)}>
+                {SERVICE_COPY.addAccessTitle(serviceById(serviceId).title)}
+              </Button>
+            ))}
+          </div>
+          <ServiceAccessDialog
+            tenant={activeTenant}
+            serviceId={addingService}
+            open={addingService !== null}
+            onClose={() => setAddingService(null)}
+          />
+        </div>
+      ) : null}
 
       <details className="group px-5 py-4">
         <summary className="cursor-pointer text-base font-medium text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent)]">

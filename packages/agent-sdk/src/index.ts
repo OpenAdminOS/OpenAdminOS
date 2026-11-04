@@ -1,4 +1,4 @@
-import type { ServiceId } from "./services.js";
+import type { NotGrantedService, ServiceId } from "./services.js";
 
 export * from "./services.js";
 
@@ -1173,8 +1173,8 @@ export interface GraphCacheResourceStatus {
   pageLimitReached?: boolean;
   refreshedAt?: string;
   scopeSet: string[];
-  /** Permission area required before this resource can be cached. */
-  notGrantedArea?: string;
+  /** The service part this resource needs that the tenant has not granted. */
+  notGrantedService?: NotGrantedService;
   lastError?: string;
   accessDenial?: GraphAccessDenial;
   /**
@@ -1297,6 +1297,8 @@ export interface DriftResourceStatus {
   totalTrackedVersions: number;
   currentObjectCount: number;
   pageLimitReached?: boolean;
+  /** Set when the service part this resource needs is not granted. */
+  notGrantedService?: NotGrantedService;
 }
 
 export interface DriftStatus {
@@ -1673,6 +1675,13 @@ export interface GraphCacheRefreshResourceResult {
   ok: boolean;
   error?: string;
   accessDenial?: GraphAccessDenial;
+  /**
+   * Set when the refresh did not call Graph because the service this
+   * resource belongs to is not connected. A skipped resource is not a
+   * failure; `notGrantedService` names what to add.
+   */
+  skipped?: "not-connected";
+  notGrantedService?: NotGrantedService;
 }
 
 export interface GraphCacheRefreshResult {

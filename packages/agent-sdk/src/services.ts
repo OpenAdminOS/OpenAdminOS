@@ -705,6 +705,66 @@ export function missingPartsForScopes(
   return SERVICE_PARTS.filter((part) => missing.has(part.id));
 }
 
+/** The service part a resource or request needs that the tenant has not granted. */
+export interface NotGrantedService {
+  serviceId: ServiceId;
+  /** Service title, for example "Defender". */
+  service: string;
+  partId: string;
+  /** The part named with its service, for example "Entra sign-in logs". */
+  part: string;
+  /** True when no part of the service is granted: the service is not connected. */
+  serviceMissing: boolean;
+}
+
+/** The first part `scopes` need that is not granted, or undefined when all are. */
+export function notGrantedServiceForScopes(
+  tenant: GrantSource,
+  scopes: readonly string[],
+): NotGrantedService | undefined {
+  const [part] = missingPartsForScopes(scopes, grantedScopeSet(tenant));
+  if (!part) return undefined;
+  const service = serviceById(part.service);
+  return {
+    serviceId: service.id,
+    service: service.title,
+    partId: part.id,
+    part: partLabel(part),
+    serviceMissing: serviceStatus(tenant, service.id) === "missing",
+  };
+}
+
+/** "Defender", "Intune and Entra", "Intune, Entra and Defender". */
+export function formatServiceList(titles: readonly string[], conjunction: "and" | "or" = "and"): string {
+  if (titles.length <= 1) return titles[0] ?? "";
+  return `${titles.slice(0, -1).join(", ")} ${conjunction} ${titles.at(-1)}`;
+}
+
+/**
+ * Names what is missing when `scopes` are not granted. A service with no
+ * part granted is "not connected"; otherwise the missing part is named.
+ * Undefined when every part scope is granted, or when the scopes belong
+ * to no part (agent-only scopes are consented at run time).
+ */
+export function missingServiceCopy(
+  tenant: GrantSource & { displayName?: string },
+  scopes: readonly string[],
+): string | undefined {
+  const parts = missingPartsForScopes(scopes, grantedScopeSet(tenant));
+  if (parts.length === 0) return undefined;
+  const missingServices = AVAILABLE_SERVICES.filter(
+    (service) =>
+      parts.some((part) => part.service === service.id) &&
+      serviceStatus(tenant, service.id) === "missing",
+  );
+  if (missingServices.length > 0) {
+    const titles = missingServices.map((service) => service.title);
+    return `${formatServiceList(titles)} ${titles.length === 1 ? "is" : "are"} not connected for this tenant. Add ${titles.length === 1 ? "it" : "them"} in Settings, Tenants.`;
+  }
+  const labels = parts.map(partLabel);
+  return `This needs ${formatServiceList(labels)}, which ${labels.length === 1 ? "is" : "are"} not granted for ${tenant.displayName ?? "this tenant"}. Add ${labels.length === 1 ? "it" : "them"} in Settings, Tenants.`;
+}
+
 /** Qualified grants after adding `additions` to the current grants. */
 export function mergeGrantedScopes(
   current: GrantSource,

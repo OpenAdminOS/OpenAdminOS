@@ -669,7 +669,11 @@ export default function Changes() {
 
   const selectedStatusResources = useMemo(() => {
     if (!status) return [];
-    if (selectedResource === "all") return status.resources;
+    // Resources of services that are not connected never get snapshots,
+    // so they do not decide whether a baseline exists.
+    if (selectedResource === "all") {
+      return status.resources.filter((resource) => !resource.notGrantedService);
+    }
     return status.resources.filter(
       (resource) => resource.resource === selectedResource,
     );
@@ -1397,7 +1401,9 @@ function TimelineFilters({
         <option value="all">All resources</option>
         {resources.map((resource) => (
           <option key={resource.resource} value={resource.resource}>
-            {resource.resourceLabel}
+            {resource.notGrantedService
+              ? `${resource.resourceLabel} (${resource.notGrantedService.serviceMissing ? `${resource.notGrantedService.service} not connected` : "not connected"})`
+              : resource.resourceLabel}
           </option>
         ))}
       </Select>

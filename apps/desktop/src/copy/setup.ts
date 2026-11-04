@@ -1,4 +1,5 @@
 import type { PendingIntent } from "../setup/pending-intent";
+import { formatServiceList } from "../shared/openAdminOS";
 
 export const WELCOME_COPY = {
   title: "Welcome to OpenAdminOS",
@@ -157,10 +158,7 @@ export function resumeIntentLabel(intent: PendingIntent | null, agentName?: stri
   }
 }
 
-function joinTitles(titles: readonly string[], conjunction: "and" | "or" = "and"): string {
-  if (titles.length <= 1) return titles[0] ?? "";
-  return `${titles.slice(0, -1).join(", ")} ${conjunction} ${titles.at(-1)}`;
-}
+const joinTitles = formatServiceList;
 
 export const SERVICE_COPY = {
   status: {
@@ -196,6 +194,8 @@ export const SERVICE_COPY = {
         ? "Add the permissions to your app registration, grant admin consent, then choose Check again."
         : "Add the service to ask Microsoft for consent to its read scopes only. Your other services stay as they are."
     }`,
+  cacheSkipped: (count: number) =>
+    `${count} ${count === 1 ? "resource belongs" : "resources belong"} to service parts that are not connected for this tenant. Refresh skips them until the access is added.`,
   needsNotConnected: (services: readonly string[]) => `Needs ${joinTitles(services)}, not connected.`,
   needsNotConnectedBody: (tenant: string) =>
     `Runs against ${tenant} are blocked until the service is added.`,
