@@ -11,6 +11,7 @@ import {
   escapePowerShellSingleQuoted,
   generateRegistrationSetup,
   powerShellStringLiteral,
+  generateRequiredResourceAccessSnippet,
   validateRegistrationDisplayName,
 } from "./registration-script";
 
@@ -25,10 +26,11 @@ describe("granted scope set", () => {
 
 describe("registration setup generator", () => {
   it("uses the chosen part scopes plus sign-in and resolves permission ids at run time", () => {
-    const output = generateRegistrationSetup("Admin's OpenAdminOS", [
-      "intune.apps",
-      "entra.apps",
-    ]);
+    const output = generateRegistrationSetup({
+      mode: "create",
+      displayName: "Admin's OpenAdminOS",
+      partIds: ["intune.apps", "entra.apps"],
+    });
     expect(output.scopeNames).toEqual([
       "openid",
       "profile",
@@ -71,11 +73,18 @@ describe("registration setup generator", () => {
   });
 
   it("contains no credential creation commands or properties", () => {
-    const script = generateRegistrationSetup(
-      "OpenAdminOS",
-      partIdsFor(["intune", "entra", "defender"]),
-    ).script;
+    const script = generateRegistrationSetup({
+      mode: "create",
+      displayName: "OpenAdminOS",
+      partIds: partIdsFor(["intune", "entra", "defender"]),
+    }).script;
     expect(script).not.toMatch(/addPassword|PasswordCredentials|KeyCredentials/i);
+  });
+
+  it("refuses an empty service selection", () => {
+    expect(() =>
+      generateRegistrationSetup({ mode: "create", displayName: "OpenAdminOS", partIds: [] }),
+    ).toThrow("Select at least one service.");
   });
 
   it("escapes PowerShell single-quoted strings", () => {
@@ -111,6 +120,10 @@ function parsedDisplayName(script: string): string {
   }
 }
 
+function createSetup(displayName: string) {
+  return generateRegistrationSetup({ mode: "create", displayName, partIds: ["entra.people"] });
+}
+
 describe("registration display name quoting", () => {
   const injection = "; Write-Output INJECTED; #";
 
@@ -120,7 +133,7 @@ describe("registration display name quoting", () => {
       expect(validateRegistrationDisplayName(name)).toBe(
         "Display name cannot contain typographic single quotes. Use a straight apostrophe (') instead.",
       );
-      expect(() => generateRegistrationSetup(name, ["entra.people"])).toThrow(
+      expect(() => createSetup(name)).toThrow(
         /typographic single quotes/,
       );
     }
@@ -128,14 +141,14 @@ describe("registration display name quoting", () => {
 
   it("still accepts and escapes the ASCII apostrophe", () => {
     expect(validateRegistrationDisplayName(`Ops'${injection}`)).toBeNull();
-    expect(generateRegistrationSetup(`Ops'${injection}`, ["entra.people"]).script).toContain(
+    expect(createSetup(`Ops'${injection}`).script).toContain(
       `$displayName = 'Ops''${injection}'`,
     );
   });
 
   it.skipIf(!HAS_PWSH)("parses the escaped name as one string in PowerShell", () => {
     const name = `Ops'${injection}`;
-    const output = parsedDisplayName(generateRegistrationSetup(name, ["entra.people"]).script);
+    const output = parsedDisplayName(createSetup(name).script);
     expect(output).toBe(`NAME=${name}`);
     expect(output.split("\n")).not.toContain("INJECTED");
   });
@@ -152,7 +165,7 @@ describe("registration script encoding", () => {
   it("writes non-ASCII display names as [char] codes", () => {
     expect(powerShellStringLiteral("Ugur's app")).toBe("'Ugur''s app'");
     expect(powerShellStringLiteral("\u00DCber Ops")).toBe("-join @([char]0x00DC, 'ber Ops')");
-    const script = generateRegistrationSetup("\u00DCber Ops", ["entra.people"]).script;
+    const script = createSetup("\u00DCber Ops").script;
     expect(script).toMatch(printableAscii);
     expect(script).toContain("$displayName = -join @([char]0x00DC, 'ber Ops')");
     expect(script).toContain("app registration with the display name set in $displayName below");
@@ -160,10 +173,7 @@ describe("registration script encoding", () => {
 
   // U+00C2 is C3 82 in UTF-8, and Windows-1252 reads 0x82 as U+201A.
   it("leaves no byte that Windows-1252 reads as a quote", () => {
-    const script = generateRegistrationSetup(
-      "\u00C2; Write-Output INJECTED; #",
-      ["entra.people"],
-    ).script;
+    const script = createSetup("\u00C2; Write-Output INJECTED; #").script;
     const bytes = new TextEncoder().encode(script);
     expect(new TextDecoder("windows-1252").decode(bytes)).toBe(script);
     expect(script).toMatch(printableAscii);
@@ -171,8 +181,101 @@ describe("registration script encoding", () => {
 
   it.skipIf(!HAS_PWSH)("round-trips non-ASCII names through PowerShell", () => {
     for (const name of ["\u00DCber Ops", "Ops \u{20BB7} team", "\u00C2'; Write-Output INJECTED; #"]) {
-      const output = parsedDisplayName(generateRegistrationSetup(name, ["entra.people"]).script);
+      const output = parsedDisplayName(createSetup(name).script);
       expect(output).toBe(`NAME=${name}`);
     }
+  });
+
+  it("keeps the existing-app script ASCII-only", () => {
+    const script = generateRegistrationSetup({
+      mode: "extend",
+      clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+      partIds: ["intune.devices", "entra.people", "defender.incidents"],
+    }).script;
+    expect(script).toMatch(printableAscii);
+  });
+});
+
+describe("existing app registration script", () => {
+  const clientId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const output = generateRegistrationSetup({
+    mode: "extend",
+    clientId: ` ${clientId} `,
+    partIds: ["defender.incidents", "defender.score"],
+  });
+
+  it("finds the app by client ID and stops when it does not exist", () => {
+    expect(output.mode).toBe("extend");
+    expect(output.script).toContain(`$clientId = '${clientId}'`);
+    expect(output.script).toContain(`Get-MgApplication -Filter "appId eq '$clientId'"`);
+    expect(output.script).toContain("No application with client ID $clientId was found in this tenant. No changes were made.");
+    expect(output.script.indexOf("$applications.Count -ne 1")).toBeLessThan(output.script.indexOf("Update-MgApplication"));
+    expect(output.scopeNames).toEqual([
+      "openid",
+      "profile",
+      "offline_access",
+      "User.Read",
+      "SecurityAlert.Read.All",
+      "SecurityIncident.Read.All",
+      "SecurityEvents.Read.All",
+    ]);
+  });
+
+  it("resolves permission IDs at run time and never removes an existing requiredResourceAccess entry", () => {
+    expect(output.script).toContain("Where-Object { $_.Value -eq $scopeValue }");
+    // Every existing resource entry and every existing permission is sent back.
+    expect(output.script).toContain("foreach ($resource in @($application.RequiredResourceAccess))");
+    expect(output.script).toContain("ResourceAppId = $resource.ResourceAppId");
+    expect(output.script).toContain("$existingAccess = @($existingAccess + $addedPermissions)");
+    expect(output.script).toContain("$existingScopeIds -notcontains $_.Id");
+    expect(output.script).toContain("RequiredResourceAccess = $requiredResourceAccess");
+    expect(output.script).not.toMatch(/Remove-Mg|\.Remove\(|-ne \$_\.Id/);
+    expect(output.script).not.toContain("New-MgApplication");
+  });
+
+  it("unions an existing AllPrincipals grant and creates one only when none exists", () => {
+    expect(output.script).toContain("$_.ConsentType -eq 'AllPrincipals' -and $_.ResourceId -eq $graphServicePrincipal.Id");
+    expect(output.script).toContain("Update-MgOauth2PermissionGrant -OAuth2PermissionGrantId $existingGrant.Id");
+    expect(output.script).toContain("Scope = (@($grantedScopes + $addedConsent) -join ' ')");
+    expect(output.script).toContain("New-MgOauth2PermissionGrant");
+    expect(output.script.indexOf("if ($existingGrant)")).toBeLessThan(output.script.indexOf("New-MgOauth2PermissionGrant"));
+    expect(output.script).toContain("New-MgServicePrincipal");
+    expect(output.script).toContain("Return to OpenAdminOS and choose Check again.");
+    expect(output.script).not.toMatch(/addPassword|PasswordCredentials|KeyCredentials/i);
+  });
+
+  it("names the services and the client ID in the admin message", () => {
+    expect(output.message).toContain(`existing app registration with client ID ${clientId}: Defender.`);
+    expect(output.message).toContain("keeps every permission the app already has");
+  });
+
+  it("rejects a client ID that is not a GUID", () => {
+    expect(() =>
+      generateRegistrationSetup({ mode: "extend", clientId: "contoso'; Remove-MgApplication", partIds: ["defender.score"] }),
+    ).toThrow("The Application (client) ID must be a GUID");
+  });
+});
+
+describe("requiredResourceAccess snippet", () => {
+  it("lists the registry permission IDs for Graph only, with merge and consent notes", () => {
+    const snippet = generateRequiredResourceAccessSnippet(["entra.signins", "entra.people"]);
+    const parsed = JSON.parse(snippet.json) as Array<{ resourceAppId: string; resourceAccess: Array<{ id: string; type: string }> }>;
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.resourceAppId).toBe("00000003-0000-0000-c000-000000000000");
+    expect(parsed[0]?.resourceAccess).toEqual(
+      [
+        "37f7f235-527c-4136-accd-4a02d197296e",
+        "14dad69e-099b-42c9-810b-d002981feec1",
+        "7427e0e9-2fba-42fe-b0c0-848c9e6a8182",
+        "e1fe6dd8-ba31-4d61-89e7-88639da4683d",
+        "a154be20-db9c-4678-8ab7-66f6cc099a59",
+        "bc024368-1153-4739-b217-4326f2e966d0",
+        "4908d5b9-3fb2-4b1e-9336-1888b7937185",
+        "e4c9e354-4dc5-45b8-9e7c-e1393b0b1a20",
+        "d04bb851-cb7c-4146-97c7-ca3e71baf56c",
+      ].map((id) => ({ id, type: "Scope" })),
+    );
+    expect(snippet.notes.join(" ")).toMatch(/Do not replace the array/);
+    expect(snippet.notes.join(" ")).toMatch(/Admin consent is still required/);
   });
 });

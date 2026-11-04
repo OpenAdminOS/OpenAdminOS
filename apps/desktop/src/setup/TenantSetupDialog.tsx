@@ -326,7 +326,11 @@ function PermissionsStep({
     setRegistrationSetupStatus(null);
     setRegistrationActionError(null);
     setRegistrationSetup(
-      generateRegistrationSetup(registrationDisplayName, selectedPartIds),
+      generateRegistrationSetup({
+        mode: "create",
+        displayName: registrationDisplayName,
+        partIds: selectedPartIds,
+      }),
     );
   };
   const copyRegistrationText = async (text: string, label: string) => {
