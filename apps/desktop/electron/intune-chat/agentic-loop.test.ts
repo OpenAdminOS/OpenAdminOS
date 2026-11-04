@@ -107,6 +107,28 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
+  it("reads a final answer whose text contains a fenced code block", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const answer = "Start from this query:\n\n```kql\nSigninLogs | where ResultType != 0\n```";
+      for (const reply of [JSON.stringify({ final: true, answer }), `\`\`\`json\n${JSON.stringify({ final: true, answer })}\n\`\`\``]) {
+        const result = await runAgenticChat({
+          question: "Write a KQL query for failed sign-ins",
+          questionKind: "docs",
+          tenant, providerId: "ollama", providerIsLocal: true, model: "llama3.1:8b",
+          llm: scriptedLlm([reply]), tools: toolContext(store), plannedResources: [], agentSuggestions: [],
+          generatedAt: "2026-06-01T10:00:00.000Z", maxTokens: 900,
+        });
+        assert.equal(result.ok, true, reply);
+        if (result.ok) assert.equal(result.answer, answer);
+      }
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("requires a voice lookup to finish instead of accepting a progress promise", async () => {
     const dir = await mkdtemp(join(tmpdir(), "nova-unfinished-"));
     const store = seededStore(dir);

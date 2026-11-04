@@ -541,6 +541,17 @@ function extractLastJsonObject(text: string):
   | { found: false }
   | { found: true; valid: true; value: unknown }
   | { found: true; valid: false; reason: string } {
+  // A whole reply that is one JSON object, bare or in one outer fence, is
+  // read first: an answer string may itself contain a fenced KQL or
+  // PowerShell block, which the fence scan below would cut apart.
+  const whole = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1");
+  if (whole.startsWith("{")) {
+    try {
+      return { found: true, valid: true, value: JSON.parse(whole) as unknown };
+    } catch {
+      // Not one object: scan for fenced or balanced candidates.
+    }
+  }
   const fenced = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/gi)].map(
     (match) => match[1]?.trim() ?? "",
   );
