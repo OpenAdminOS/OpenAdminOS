@@ -53,8 +53,24 @@ export interface McpHostOptions {
 
 export const MCP_MAX_TOOLS_PER_SERVER = 32;
 const TOOL_NAME = /^[A-Za-z0-9_.-]{1,64}$/;
-const MAX_DESCRIPTION_CHARS = 1_000;
-const MAX_SCHEMA_CHARS = 4_000;
+export const MCP_DESCRIPTION_LIMIT = 600;
+export const MCP_SCHEMA_LIMIT = 1_500;
+
+/**
+ * Tool descriptions come from the server and are untrusted: control
+ * characters are removed, whitespace collapsed and the text capped.
+ */
+export function cleanMcpDescription(text: unknown): string {
+  const flat = String(text ?? "").replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, " ").replace(/\s+/g, " ").trim();
+  return flat.length <= MCP_DESCRIPTION_LIMIT ? flat : `${flat.slice(0, MCP_DESCRIPTION_LIMIT - 3)}...`;
+}
+
+/** An oversized or malformed schema is replaced by a plain object schema. */
+export function cleanMcpSchema(schema: unknown): Record<string, unknown> {
+  if (!schema || typeof schema !== "object" || Array.isArray(schema)) return { type: "object" };
+  const serialized = JSON.stringify(schema);
+  return serialized.length <= MCP_SCHEMA_LIMIT ? schema as Record<string, unknown> : { type: "object" };
+}
 
 interface Session {
   client: Client;
@@ -183,12 +199,10 @@ export class McpHost {
 
 function sanitizeTool(tool: { name: string; description?: string; inputSchema: unknown }): McpToolInfo | undefined {
   if (!TOOL_NAME.test(tool.name)) return undefined;
-  const schema = tool.inputSchema && typeof tool.inputSchema === "object" ? tool.inputSchema as Record<string, unknown> : {};
-  const serialized = JSON.stringify(schema);
   return {
     name: tool.name,
-    description: clip((tool.description ?? "").replace(/\s+/g, " ").trim(), MAX_DESCRIPTION_CHARS),
-    inputSchema: serialized.length <= MAX_SCHEMA_CHARS ? schema : { type: "object" },
+    description: cleanMcpDescription(tool.description),
+    inputSchema: cleanMcpSchema(tool.inputSchema),
   };
 }
 
