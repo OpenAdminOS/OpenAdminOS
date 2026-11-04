@@ -21,7 +21,7 @@ Prioritizes Microsoft Secure Score control profiles by category, action type, ef
 | Preferred model | `llama3.1:8b` |
 | Minimum app version | `0.1.0` |
 | Author | OpenAdminOS · verified |
-| Last changed | 2026-05-29 · `3a69fc6` |
+| Last changed | 2026-11-04 · `7d14aac` |
 
 ## Execution
 
