@@ -499,10 +499,11 @@ export async function runAgenticChat(
       continue;
     }
     const missingSources = [...required].filter((id) => !attemptedServers.has(id));
+    const missingNames = missingSources.map((id) => input.tools.mcp?.servers?.find((server) => server.id === id)?.name ?? id);
     if (action.kind === "final" && missingSources.length > 0 && missingSourceCount < MAX_NO_EVIDENCE_RETRIES) {
       missingSourceCount += 1;
       await settleModelStep({ kind: "repair", reason: "sources" });
-      const names = missingSources.map((id) => input.tools.mcp?.servers?.find((server) => server.id === id)?.name ?? id);
+      const names = missingNames;
       const tools = (input.tools.mcp?.tools ?? []).filter((tool) => missingSources.includes(tool.serverId)).map((tool) => tool.name);
       turns.push({ role: "repair", content: `Call ${names.join(" and ")} before answering: it is the source chosen for this question. Its tools are ${tools.join(", ")}. Request one with empty params; the host writes the query.` });
       continue;
@@ -550,9 +551,13 @@ export async function runAgenticChat(
         continue;
       }
       await settleModelStep(finalOutcome(), true);
+      // The repair budget for required sources is spent: the answer is kept, never silently.
+      const notConsulted = missingNames.length > 0
+        ? `\n\n${missingNames.join(" and ")} ${missingNames.length === 1 ? "was" : "were"} not consulted for this answer. The model answered without calling ${missingNames.length === 1 ? "it" : "them"}.`
+        : "";
       return {
         ok: true,
-        answer: finalAnswer,
+        answer: finalAnswer + notConsulted,
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),

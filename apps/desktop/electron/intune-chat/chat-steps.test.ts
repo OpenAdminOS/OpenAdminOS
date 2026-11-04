@@ -529,6 +529,25 @@ describe("agentic loop sources", () => {
     });
   });
 
+  it("says a required source was not consulted once its repair budget is spent", async () => {
+    await withStore(async (store) => {
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const calls: string[] = [];
+      const result = await runAgenticChat(loopInput(store, scripted([
+        '{"final":true,"answer":"From memory."}',
+        '{"final":true,"answer":"Still from memory."}',
+        '{"final":true,"answer":"Defender needs full disk access."}',
+      ], prompts), learnContext(async (_tool, args) => { calls.push(String(args.query)); return { text: "", truncated: false }; }),
+      { questionKind: "docs", requiredServerIds: ["microsoft-learn"] }));
+      assert.equal(prompts.length, 3, "two repairs, then the third final is kept");
+      assert.equal(calls.length, 0, "no tool was called");
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      assert.equal(result.answer, "Defender needs full disk access.\n\nMicrosoft Learn was not consulted for this answer. The model answered without calling it.");
+      assert.deepEqual(result.toolTrace, []);
+    });
+  });
+
   it("falls back to the local index when Learn does not answer", async () => {
     await withStore(async (store) => {
       const prompts: Array<{ system?: string; prompt: string }> = [];
