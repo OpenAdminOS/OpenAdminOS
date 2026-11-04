@@ -768,6 +768,29 @@ export function formatServiceList(titles: readonly string[], conjunction: "and" 
 }
 
 /**
+ * Names the services whose earlier drift snapshots a view left out, for
+ * example "Intune is not connected. Its earlier snapshots are not
+ * compared." A service with some parts granted is named by its missing
+ * parts. Undefined when nothing was left out.
+ */
+export function omittedSnapshotsCopy(
+  omitted: readonly { notGrantedService: NotGrantedService }[],
+  outcome: "compared" | "shown",
+  tenantName?: string,
+): string | undefined {
+  const services = [...new Set(omitted.filter((entry) => entry.notGrantedService.serviceMissing).map((entry) => entry.notGrantedService.service))];
+  const parts = [...new Set(omitted.filter((entry) => !entry.notGrantedService.serviceMissing).map((entry) => entry.notGrantedService.part))];
+  const forTenant = tenantName ? ` for ${tenantName}` : "";
+  const sentence = (names: string[], state: string) =>
+    `${formatServiceList(names)} ${names.length === 1 ? "is" : "are"} ${state}${forTenant}. ${names.length === 1 ? "Its" : "Their"} earlier snapshots are not ${outcome}.`;
+  const copy = [
+    ...(services.length > 0 ? [sentence(services, "not connected")] : []),
+    ...(parts.length > 0 ? [sentence(parts, "not granted")] : []),
+  ];
+  return copy.length > 0 ? copy.join(" ") : undefined;
+}
+
+/**
  * Names what is missing when `scopes` are not granted. A service with no
  * part granted is "not connected"; otherwise the missing part is named.
  * Undefined when every part scope is granted, or when the scopes belong

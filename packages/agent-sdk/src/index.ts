@@ -1344,6 +1344,22 @@ export interface DriftTimelineResult {
   hasMore: boolean;
   limit: number;
   historyTruncated?: boolean;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
+}
+
+/**
+ * A tracked resource that a drift view left out because the service part
+ * it needs is not granted now. Its earlier snapshots stay on the device
+ * but are historical: they are no longer refreshed, so they are never
+ * shown or compared as current configuration.
+ */
+export interface DriftOmittedResource {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  notGrantedService: NotGrantedService;
+  /** Cross-tenant compare only: the tenant that lacks the grant. */
+  tenantId?: string;
 }
 
 export interface DriftEntryDetailInput {
@@ -1354,6 +1370,11 @@ export interface DriftEntryDetailInput {
 }
 
 export interface DriftEntryDetail {
+  /**
+   * Set when the resource's service part is not granted now: the detail
+   * comes from historical snapshots that are no longer refreshed.
+   */
+  notGrantedService?: NotGrantedService;
   changes: DriftFieldChange[];
   summary: string;
   before?: unknown;
@@ -1480,6 +1501,8 @@ export interface DriftBaselineDriftResult {
   entries: DriftBaselineDriftEntry[];
   hasMore: boolean;
   limit: number;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 // ─── Point-in-time compare (v0.5) ────────────────────────────────────────
@@ -1513,6 +1536,8 @@ export interface DriftTimeCompareResult {
    * least one compared resource, so the "before" side may be partial.
    */
   retentionLimited?: boolean;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 // ─── Baseline export bundles (v0.5) ──────────────────────────────────────
@@ -1569,6 +1594,8 @@ export interface DriftBundleCompareResult {
   entries: DriftTenantCompareEntry[];
   hasMore: boolean;
   limit: number;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 // ─── Opt-in usage telemetry (v0.5) ───────────────────────────────────────
@@ -1631,6 +1658,8 @@ export interface FleetTenantDriftStatus {
   drift?: { added: number; removed: number; modified: number; evaluatedAt: string };
   lastCaptureAt?: string;
   trackedObjectCount: number;
+  /** Resources left out of the counts because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 export interface FleetDriftStatusInput {
@@ -1698,6 +1727,8 @@ export interface DriftTenantCompareResult {
   entries: DriftTenantCompareEntry[];
   hasMore: boolean;
   limit: number;
+  /** Resources left out because either tenant lacks their service part now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 export interface RefreshGraphCacheOptions {
