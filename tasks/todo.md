@@ -1036,3 +1036,10 @@ Same branch. From two runs in the app built at 52ca085: a docs answer and the te
 - [x] H. Agent suggestion needs the agent's own topic term; at most one
 - [x] I. Investigated: the 4-hour-old device cache was within the 6-hour managedDevices threshold; the lazy refresh refreshed the stale security alerts and incidents only, as configured
 - [ ] Live check in the running app (needs a restart)
+
+# Review fixes for the timeline and answer rounds (2026-11-04)
+
+- [x] Withdraw a rejected streamed final before slow work and before falling back
+- [x] No navigation back to Chat when a run finishes after the admin left
+- [x] Live runs kept by stream id, with a store unit test
+- [x] Stop checked after a streamed reply; Nova keeps a hosted disclosure; Graph requests in the egress line; live text throttled
