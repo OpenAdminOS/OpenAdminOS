@@ -79,7 +79,7 @@ describe("source plan", () => {
     assert.equal(plan.detail, "Tenant question. Sources: cached tenant data and Microsoft Graph.");
     const mixed = planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [learn], docsIndexAvailable: false });
     assert.equal(mixed.detail, "Documentation and tenant question. Sources: Microsoft Learn, and cached tenant data and Microsoft Graph.");
-    assert.match(planChatSources({ question: "What is Autopatch?", kind: "docs", servers: [], docsIndexAvailable: false }).detail, /No documentation source is installed/);
+    assert.match(planChatSources({ question: "What is Autopatch?", kind: "docs", servers: [], docsIndexAvailable: false }).detail, /No documentation source is available/);
   });
 });
 

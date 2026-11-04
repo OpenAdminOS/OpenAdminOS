@@ -117,7 +117,7 @@ export function planChatSources(input: {
   const docsList = joinList(documentation) + (docs && learnFirst ? `, then ${docs}` : "");
   const tenant = "cached tenant data and Microsoft Graph";
   const detail = input.kind === "docs"
-    ? `Documentation question. ${documentation.length > 0 ? `Sources: ${docsList}.` : "No documentation source is installed, so the model answers from what it knows."} Your tenant is not checked.`
+    ? `Documentation question. ${documentation.length > 0 ? `Sources: ${docsList}.` : "No documentation source is available, so the model answers from what it knows."} Your tenant is not checked.`
     : input.kind === "mixed"
       ? `Documentation and tenant question. Sources: ${documentation.length > 0 ? `${docsList}, and ` : ""}${tenant}.`
       : `Tenant question. Sources: ${tenant}${names.length > 0 ? `, and ${joinList(names)}` : ""}.`;

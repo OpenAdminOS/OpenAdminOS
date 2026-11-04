@@ -1904,7 +1904,7 @@ export class IntuneChatService {
               responseModel = deterministic.model ?? responseModel;
             }
           } else {
-            const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, Boolean(mcp.mcp)));
+            const deterministic = await buildDeterministicAnswer(withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false));
             assistantContent = deterministic.content;
             responseModel = deterministic.model ?? responseModel;
           }
@@ -2578,7 +2578,7 @@ export class IntuneChatService {
               } else await streamDeterministicAnswer(agentic.fallbackNotice);
             }
           } else {
-            const notice = withMcpSkippedNotice(capability, Boolean(mcp.mcp));
+            const notice = withMcpSkippedNotice(capability, answerPlan?.mcpInstalled ?? false);
             if (capability.reason === "capability-fallback" && notice) {
               sendProgress({
                 message: notice,
@@ -2791,8 +2791,10 @@ export class IntuneChatService {
     conversationId: string;
     toolsOffered: boolean;
     steps: ChatStepRecorder;
-  }): Promise<{ mcp: { mcp?: McpChatContext }; sources: ChatSourcePlan; tieInResources: GraphCacheResourceKind[] }> {
-    const mcp = input.toolsOffered ? await this.mcpToolsFor(input.tenant, input.conversationId) : {};
+  }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; sources: ChatSourcePlan; tieInResources: GraphCacheResourceKind[] }> {
+    const installed = await this.mcpToolsFor(input.tenant, input.conversationId);
+    // A model that skips the tool loop is offered no MCP tools, so none is planned as a source.
+    const mcp = input.toolsOffered ? installed : {};
     const servers = mcp.mcp?.servers ?? [];
     const kind = input.planned.hasWriteIntent
       ? "tenant"
@@ -2801,7 +2803,7 @@ export class IntuneChatService {
     const tieInResources = [...input.planned.resources];
     if (kind === "docs") input.planned.resources = [];
     input.steps.finish(input.steps.start({ kind: "plan", title: "Read the question", detail: sources.detail, origin: "device", originLabel: ON_DEVICE }));
-    return { mcp, sources, tieInResources };
+    return { mcp, mcpInstalled: Boolean(installed.mcp), sources, tieInResources };
   }
 
   /** Searches the local docs index and records the step. Passages carry the index version. */

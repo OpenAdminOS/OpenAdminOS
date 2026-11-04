@@ -204,6 +204,20 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     });
   });
 
+  it("gives the deterministic path the same plan step and tenant follow-up, and says MCP tools were not used", async () => {
+    await withHarness(async ({ store, graphPaths, script }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      script(["Defender for Endpoint on macOS needs full disk access."]);
+      const message = (await store.sendIntuneChatMessage({ content: DOCS_QUESTION })).assistantMessage;
+      assert.equal(message.questionKind, "docs");
+      assert.deepEqual(kinds(message.steps), ["plan", "answer"]);
+      assert.match(message.steps![0]!.detail!, /Documentation question\. No documentation source is available/);
+      assert.match(message.engineNotice ?? "", /Installed MCP tools were not used because Chat is set to deterministic retrieval/);
+      assert.deepEqual(message.followUps, ["Check our 5 macOS devices for Defender in Intune"]);
+      assert.deepEqual(graphPaths, []);
+    });
+  });
+
   it("refreshes, asks Learn and still requires tenant evidence for a mixed tenant question", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
       script([
