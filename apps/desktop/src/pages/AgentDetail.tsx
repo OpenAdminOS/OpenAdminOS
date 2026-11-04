@@ -49,6 +49,7 @@ import {
   missingPartsForScopes,
   missingServicesForAgent,
   partLabel,
+  uncoveredScopesCopy,
   unmappedScopesCopy,
   type ServiceId,
   resolveRunModel,
@@ -2613,9 +2614,10 @@ function RunPreflightModal({
         (part) => !missingServices.some((service) => service.id === part.service),
       )
     : [];
-  const unmappedCopy = unmappedScopesCopy(agent.scopes);
+  // Scopes the services cannot account for block the run, as in preflight.
+  const scopeBlockCopy = unmappedScopesCopy(agent.scopes) ?? uncoveredScopesCopy(agent);
   const canStart =
-    Boolean(activeTenant) && !deliverySaving && missingServices.length === 0 && !unmappedCopy;
+    Boolean(activeTenant) && !deliverySaving && missingServices.length === 0 && !scopeBlockCopy;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -2636,9 +2638,9 @@ function RunPreflightModal({
             through {providerName}'s local CLI and leave this device.
           </div>
         )}
-        {unmappedCopy && (
+        {scopeBlockCopy && (
           <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-            {unmappedCopy}
+            {scopeBlockCopy}
           </div>
         )}
         {activeTenant && missingServices.length > 0 ? (

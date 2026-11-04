@@ -31,7 +31,7 @@ import type {
 import {
   AVAILABLE_SERVICES,
   assertWritePlanLimits,
-  scopesRequiringService,
+  scopesNotCoveredByServices,
   servicesForScopes,
   writeLimitsValidationIssue,
   type ServiceId,
@@ -178,13 +178,21 @@ export function parseAgentTemplate(source: string): AgentTemplate {
     skills: validated,
     definition: definition as AgentTemplate["definition"],
   };
-  if (Array.isArray(descriptor.services) && descriptor.services.length === 0) {
-    // Baseline sign-in scopes, such as User.Read, need no service.
-    const scopes = scopesRequiringService(collectScopes(template));
-    if (scopes.length > 0) {
+  if (Array.isArray(descriptor.services)) {
+    // Every declared scope must belong to a declared service, so run
+    // preflight checks the services the agent really needs. Baseline
+    // sign-in scopes, such as User.Read, need no service; a scope the
+    // registry does not map is never covered.
+    const services = descriptor.services as ServiceId[];
+    const uncovered = scopesNotCoveredByServices(collectScopes(template), services);
+    if (uncovered.length > 0) {
+      const suggested = servicesForScopes(uncovered);
+      const suggest = suggested.length > 0 ? `; these scopes belong to ${suggested.join(", ")}` : "";
       throw new ManifestValidationError(
         "descriptor.services",
-        `must list at least one service when the agent declares Graph scopes (${scopes.join(", ")})`,
+        services.length === 0
+          ? `must list at least one service when the agent declares Graph scopes (${uncovered.join(", ")})`
+          : `[${services.join(", ")}] does not cover ${uncovered.join(", ")}${suggest}`,
       );
     }
   }

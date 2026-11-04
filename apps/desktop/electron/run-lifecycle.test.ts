@@ -369,6 +369,25 @@ definition:
   } finally { await rm(dir, { recursive: true, force: true }); }
 });
 
+it("blocks an installed agent whose declared services do not cover its scopes", async () => {
+  const h = harness();
+  const mismatched = { id: "mismatched", slug: "mismatched", name: "Device and group report", description: "Reads devices and groups",
+    mode: "read", version: "1.0.0", installedAt: new Date().toISOString(), category: "compliance", tier: "agent",
+    requiresEntraTier: "free", services: ["entra"],
+    scopes: ["Group.Read.All", "DeviceManagementManagedDevices.Read.All", "User.Read"], author: { name: "Test" } } as AgentSummary;
+  Object.assign(h.host, { appVersion: "0.7.2", listProviders: async () => [{ id: "ollama", status: "connected", models: ["test"], isLocal: true }],
+    providerCanRun: () => true, buildLlm: async () => new Promise(() => {}) });
+  // Entra is connected and Intune is not, so the declared services alone
+  // would pass the service preflight.
+  await h.host.write({ ...h.state(), installedAgents: [mismatched], activeTenantId: "tenant-a",
+    tenants: [{ id: "tenant-a", displayName: "Contoso", grantedScopes: ["graph:User.Read", "graph:GroupMember.Read.All", "graph:Group.Read.All"] }] as any });
+  await assert.rejects(
+    h.service.startRun("mismatched", {}),
+    /^Error: This agent uses DeviceManagementManagedDevices\.Read\.All, which its declared service Entra does not cover\. It cannot run until the agent also declares Intune\. Report it to the agent author\.$/,
+  );
+  assert.deepEqual(h.state().runs, []);
+});
+
 it("blocks a legacy agent that uses a scope no service lists", async () => {
   const h = harness();
   const legacy = { id: "legacy", slug: "legacy", name: "Legacy sites report", description: "Reads sites and groups",

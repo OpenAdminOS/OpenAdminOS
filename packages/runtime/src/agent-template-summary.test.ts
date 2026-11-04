@@ -228,6 +228,23 @@ definition:
     }
   });
 
+  it("rejects a declaration that does not cover every scope", () => {
+    const intune = manifest("  services:\n    - entra")
+      .replace("Policy.Read.All", "DeviceManagementManagedDevices.Read.All")
+      .replace("/identity/conditionalAccess/policies", "/deviceManagement/managedDevices");
+    assert.throws(
+      () => parseAgentTemplate(intune),
+      /descriptor\.services: \[entra\] does not cover DeviceManagementManagedDevices\.Read\.All; these scopes belong to intune/,
+    );
+    const both = intune.replace("    - entra", "    - entra\n    - intune");
+    assert.deepEqual(agentTemplateToRegistrySummary(parseAgentTemplate(both)).services, ["entra", "intune"]);
+  });
+
+  it("never treats a scope the registry does not map as covered", () => {
+    const unmapped = manifest("  services:\n    - entra").replace("Policy.Read.All", "Example.Read.All");
+    assert.throws(() => parseAgentTemplate(unmapped), /\[entra\] does not cover Example\.Read\.All/);
+  });
+
   it("accepts an empty list for an agent that declares no Graph scopes", () => {
     const noGraph = `descriptor:
   id: evidence-only

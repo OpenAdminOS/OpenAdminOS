@@ -908,6 +908,36 @@ export function unmappedScopesCopy(scopes: readonly string[]): string | undefine
 }
 
 /**
+ * The blocked-state copy for an agent whose declared services do not cover
+ * its scopes, or undefined. The parser rejects such a manifest, but an agent
+ * installed before that check keeps its stored metadata. Unmapped scopes
+ * are left to `unmappedScopesCopy`, and agents without a declaration have
+ * their services derived from the scopes, so they are always covered.
+ */
+export function uncoveredScopesCopy(agent: {
+  services?: readonly ServiceId[];
+  scopes: readonly string[];
+}): string | undefined {
+  if (agent.services === undefined) return undefined;
+  const unmapped = new Set(unmappedScopes(agent.scopes));
+  const uncovered = [
+    ...new Set(
+      scopesNotCoveredByServices(agent.scopes, agent.services)
+        .map(normalizeGraphScopeName)
+        .filter((name) => !unmapped.has(name)),
+    ),
+  ];
+  if (uncovered.length === 0) return undefined;
+  const declared = agent.services.map((id) => serviceById(id).title);
+  const needed = servicesForScopes(uncovered).map((id) => serviceById(id).title);
+  const declaredCopy =
+    declared.length > 0
+      ? `which ${declared.length === 1 ? "its declared service" : "its declared services"} ${formatServiceList(declared)} ${declared.length === 1 ? "does" : "do"} not cover`
+      : "but declares no services";
+  return `This agent uses ${formatServiceList(uncovered)}, ${declaredCopy}. It cannot run until the agent also declares ${formatServiceList(needed)}. Report it to the agent author.`;
+}
+
+/**
  * Declared scopes that need a service: every scope except the baseline
  * sign-in scopes, which each tenant grants at sign-in. An agent whose
  * scopes are all baseline may declare `services: []`.

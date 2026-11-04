@@ -91,6 +91,9 @@ descriptor:
 The registry QA check `services-cover-scopes` fails when `services` is
 missing, names a planned or unknown service, or leaves a declared scope
 uncovered. Its message suggests the services that would cover the scopes.
+The app applies the same rule: the manifest parser rejects a declaration
+that leaves a scope uncovered, and run preflight blocks an installed agent
+whose stored services do not cover its scopes, naming those scopes.
 
 ## Execution Kinds
 

@@ -95,6 +95,33 @@ describe("agents by service", () => {
     expect(screen.getByRole("dialog", { name: "Add Defender access" })).toBeInTheDocument();
   });
 
+  it("blocks the run review when the declared services do not cover the scopes", async () => {
+    const agent = createMockAgent({
+      id: "devices",
+      slug: "devices",
+      name: "Device and group report",
+      mode: "read",
+      scopes: ["Group.Read.All", "DeviceManagementManagedDevices.Read.All"],
+      services: ["entra"],
+    });
+    const entraTenant = {
+      ...createMockAppState().tenants[0]!,
+      grantedScopes: ["graph:User.Read", "graph:Group.Read.All", "graph:GroupMember.Read.All"],
+    };
+    const state = createMockAppState({ tenants: [entraTenant], installedAgents: [agent] });
+    renderRoute(<Agents startRunOnOpen />, {
+      path: "/agents/:slug/confirm",
+      route: "/agents/devices/confirm",
+      bridge: makeMockBridge({}, state),
+    });
+
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+      "This agent uses DeviceManagementManagedDevices.Read.All, which its declared service Entra does not cover. It cannot run until the agent also declares Intune. Report it to the agent author.",
+    );
+    expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+  });
+
   it("says runs are blocked in Permissions when the service is not connected", async () => {
     const agent = createMockAgent({
       id: "score",

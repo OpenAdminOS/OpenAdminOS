@@ -14,6 +14,7 @@ import {
   agentServiceIds,
   formatServiceList,
   missingServicesForAgent,
+  uncoveredScopesCopy,
   unmappedScopesCopy,
   resolveProviderDefaultModel,
   resolveRunModel,
@@ -434,6 +435,11 @@ export class RunService {
       // Block the run rather than treat it as needing no service.
       const unmapped = unmappedScopesCopy(agent.scopes);
       if (unmapped) throw new Error(unmapped);
+      // Declared services must cover every scope, or the service preflight
+      // below checks the wrong services. Agents installed before the parser
+      // enforced this still carry such a declaration.
+      const uncovered = uncoveredScopesCopy(agent);
+      if (uncovered) throw new Error(uncovered);
 
       // Service preflight: an agent whose service is not connected for
       // this tenant cannot reach its data. Refuse with the service to add.

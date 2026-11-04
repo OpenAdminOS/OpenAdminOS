@@ -41,7 +41,7 @@ Use the least-privileged scopes that cover the agent's Graph operations:
 - Do not declare `Directory.Read.All` when a narrower read scope works. It is not part of any service and is requested only when the agent runs.
 - Declare write scopes only on `write` steps. They are requested when the agent runs, and every write still pauses for diff confirmation.
 
-Registry agents must declare `services`; the registry QA check `services-cover-scopes` fails without it, or when a scope is not covered. An agent that declares no Graph scopes beyond the sign-in baseline (`openid`, `profile`, `offline_access`, `User.Read`), for example one that only reviews evidence the host supplies, declares `services: []`. A local agent without `services` gets them derived from its scopes, but declaring them keeps the agent ready for a community submission.
+Registry agents must declare `services`; the registry QA check `services-cover-scopes` fails without it, or when a scope is not covered. When a manifest declares `services`, the app refuses to load it if a scope is not covered, and refuses to run an installed agent whose services leave a scope out. An agent that declares no Graph scopes beyond the sign-in baseline (`openid`, `profile`, `offline_access`, `User.Read`), for example one that only reviews evidence the host supplies, declares `services: []`. A local agent without `services` gets them derived from its scopes, but declaring them keeps the agent ready for a community submission.
 
 For write agents, preflight verifies the confirmation gate but does not apply Graph changes. A write agent still pauses for confirmation every time it produces a non-empty write plan.
 
