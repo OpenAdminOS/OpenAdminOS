@@ -128,6 +128,36 @@ async function makeFixture(options: {
       void (store as unknown as { serialize(work: () => Promise<void>): Promise<void> }).serialize(() => gate);
       return release;
     },
+    /**
+     * Wraps one of the store's private steps. `arm()` holds the next call
+     * until `release()`; `reached` resolves when that call starts.
+     */
+    gate(name: "read" | "write" | "forgetReplacedSignIn") {
+      const target = store as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+      const original = target[name]!.bind(store);
+      let armed: { reached: () => void; gate: Promise<void> } | undefined;
+      Object.defineProperty(store, name, {
+        configurable: true,
+        value: async (...args: unknown[]) => {
+          const hold = armed;
+          armed = undefined;
+          if (hold) {
+            hold.reached();
+            await hold.gate;
+          }
+          return original(...args);
+        },
+      });
+      return {
+        arm() {
+          let reached!: () => void;
+          let release!: () => void;
+          const reachedPromise = new Promise<void>((resolve) => { reached = resolve; });
+          armed = { reached, gate: new Promise<void>((resolve) => { release = resolve; }) };
+          return { reached: reachedPromise, release };
+        },
+      };
+    },
     async tenant(): Promise<TenantRecord | undefined> {
       return (await store.getAppState()).tenants.find((entry) => entry.id === CONNECTED.tenantId);
     },
@@ -728,6 +758,65 @@ describe("one operation per tenant connection", () => {
       const tenant = await fixture.tenant();
       assert.equal(tenant?.entraTier, "p2");
       assert.equal(tenant?.tierProbeWarning, undefined);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+const LICENSE_CANCELLED =
+  "The license check was cancelled; the Entra tier and licenses are as they were. Retry license check to update them.";
+
+describe("the license result has one commit point", () => {
+  it("a cancel while the save reads the stored state writes nothing and keeps the old tier", async () => {
+    const fixture = await makeFixture({ tenants: [SHARED], signIns: [CONNECTED], respond: async () => {
+      held = reads.arm();
+      return skusResponse();
+    } });
+    const reads = fixture.gate("read");
+    let held: ReturnType<typeof reads.arm> | undefined;
+    try {
+      const pending = fixture.store.retryTenantLicenseCheck(SHARED.id);
+      pending.catch(() => undefined);
+      await until(async () => held !== undefined);
+      await held!.reached;
+      fixture.store.cancelTenantCheck(SHARED.id);
+      await assert.rejects(pending, { name: "TenantCheckCancelledError", message: LICENSE_CANCELLED });
+      held!.release();
+      const tenant = await waitFor(async () => {
+        const stored = await fixture.tenant();
+        return stored?.tierProbeWarning ? stored : undefined;
+      });
+      assert.equal(tenant.tierProbeWarning?.reason, "cancelled");
+      assertTierKept(tenant);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("a cancel while the result is being written reports the saved result", async () => {
+    const fixture = await makeFixture({ tenants: [SHARED], signIns: [CONNECTED], respond: async () => {
+      held = writes.arm();
+      return skusResponse();
+    } });
+    const writes = fixture.gate("write");
+    let held: ReturnType<typeof writes.arm> | undefined;
+    try {
+      const pending = fixture.store.retryTenantLicenseCheck(SHARED.id);
+      pending.catch(() => undefined);
+      await until(async () => held !== undefined);
+      await held!.reached;
+      fixture.store.cancelTenantCheck(SHARED.id);
+      held!.release();
+      const state = await pending;
+      const tenant = state.tenants.find((entry) => entry.id === SHARED.id);
+      assert.equal(tenant?.entraTier, "p2");
+      assert.equal(tenant?.tierProbeWarning, undefined);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal((await fixture.store.getAppState()).tenantChecks, undefined);
+      const stored = await fixture.tenant();
+      assert.equal(stored?.entraTier, "p2");
+      assert.equal(stored?.tierProbeWarning, undefined);
     } finally {
       await fixture.close();
     }

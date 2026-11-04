@@ -1111,6 +1111,12 @@ interface TenantOperation {
   grants?: "added" | "updated" | "unchanged";
   /** The license check is part of this operation. */
   probing: boolean;
+  /**
+   * The license result passed its commit point and is being written. From
+   * here a cancel or the deadline no longer stops the operation, so it
+   * reports what it saved.
+   */
+  committed: boolean;
 }
 
 /** What a license check found, or why it did not read anything. */
@@ -1532,7 +1538,12 @@ export class AppStateStore {
   /** Tenant checks and license probes in progress, by tenant ID. */
   private readonly tenantChecks = new Map<
     string,
-    { progress: TenantCheckProgress; controller: AbortController }
+    {
+      progress: TenantCheckProgress;
+      controller: AbortController;
+      /** Cancel or deadline: ignored once the license result is committed. */
+      stop(reason: "cancelled" | "timeout"): void;
+    }
   >();
   private readonly tenantCheckDeadlineMs: number;
   private tenantCheckSeq = 0;
@@ -6076,7 +6087,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * kept.
    */
   cancelTenantCheck(tenantId: string): void {
-    this.tenantChecks.get(tenantId)?.controller.abort("cancelled" satisfies TenantCheckAbort);
+    this.tenantChecks.get(tenantId)?.stop("cancelled");
   }
 
   /**
@@ -6104,14 +6115,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (this.tenantChecks.has(tenant.id)) throw new TenantCheckBusyError();
     const controller = new AbortController();
     const deadlineMs = this.tenantCheckDeadlineMs;
-    const timer = setTimeout(
-      () => controller.abort("timeout" satisfies TenantCheckAbort),
-      deadlineMs,
-    );
+    const timer = setTimeout(() => entry.stop("timeout"), deadlineMs);
     timer.unref?.();
     const entry = {
       progress: { tenantId: tenant.id, kind, phase: "checking" } as TenantCheckProgress,
       controller,
+      stop(reason: "cancelled" | "timeout") {
+        if (!operation.committed) controller.abort(reason satisfies TenantCheckAbort);
+      },
     };
     this.tenantChecks.set(tenant.id, entry);
     this.emitStateChanged("tenant-check");
@@ -6131,6 +6142,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         host.emitStateChanged("tenant-check");
       },
       probing: kind === "license" && needsTierProbe(tenant),
+      committed: false,
     };
     try {
       return await awaitWithSignal(work(operation), controller.signal);
@@ -6177,8 +6189,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /**
-   * Saves grants from a verified token. A cancel does not stop it; a
-   * reconnect or disconnect since the operation started does.
+   * Saves grants from a verified token. Their commit point is the token:
+   * the caller records `operation.grants` before queuing the save, so a
+   * later cancel keeps them and the message says so. Inside the write
+   * queue, after the read and right before the write, only the connection
+   * is checked again: a reconnect or disconnect drops the save.
    */
   private async saveCheckGrants(
     operation: TenantOperation,
@@ -6362,9 +6377,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /**
-   * Saves a license check result. It is dropped when the tenant was
-   * reconnected or disconnected, when its operation was stopped (unless
-   * this is the stop being recorded), or when a newer result is saved.
+   * Saves a license check result. The commit point is inside the write
+   * queue, after the read and right before the write: the result is
+   * dropped when its operation was stopped (unless this is the stop being
+   * recorded), when a newer result is saved, or when the tenant was
+   * reconnected or disconnected. Past that point the operation is
+   * committed and a cancel no longer stops it.
    */
   private async saveTierProbeOutcome(
     operation: TenantOperation,
@@ -6374,10 +6392,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (outcome.kind === "recent") return;
     let saved = false;
     await this.serialize(async () => {
+      const persisted = await this.read();
+      // Commit point.
       if (operation.signal.aborted && !options.afterAbort) return;
       if ((this.savedTierProbeSeq.get(operation.tenantId) ?? 0) > operation.seq) return;
-      const persisted = await this.read();
       if (!persisted.tenants.some((entry) => this.sameConnection(entry, operation))) return;
+      if (!options.afterAbort) operation.committed = true;
       await this.write({
         ...persisted,
         tenants: persisted.tenants.map((entry) =>
