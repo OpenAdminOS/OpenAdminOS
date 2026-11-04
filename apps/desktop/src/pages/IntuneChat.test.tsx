@@ -1,4 +1,4 @@
-import { act, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
@@ -1477,6 +1477,35 @@ describe("IntuneChat conversation routes", () => {
       await user.clear(composer);
       expect(composer).not.toHaveAttribute("placeholder", followUp);
     });
+  });
+
+  it("shows Scroll to latest in its own row above the composer, outside the conversation, only away from the bottom", async () => {
+    const user = userEvent.setup();
+    const conversation: IntuneChatConversation = {
+      id: "conversation-scroll", title: "Long answer", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async () => [{ id: "a-long", conversationId: conversation.id, role: "assistant" as const, status: "completed" as const, createdAt: conversation.updatedAt, content: "A long answer." }]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-scroll", bridge });
+    expect(await screen.findByText("A long answer.")).toBeInTheDocument();
+    const log = screen.getByRole("log", { name: "Conversation" });
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 600 });
+    log.scrollTop = 1380;
+    fireEvent.scroll(log);
+    expect(screen.queryByRole("button", { name: "Scroll to latest" })).toBeNull();
+    log.scrollTop = 400;
+    fireEvent.scroll(log);
+    const button = screen.getByRole("button", { name: "Scroll to latest" });
+    expect(log).not.toContainElement(button);
+    const row = screen.getByTestId("scroll-to-latest-row");
+    expect(row.className).not.toMatch(/\babsolute\b/);
+    // Above the composer in the same column.
+    expect(row.compareDocumentPosition(screen.getByLabelText(CHAT_COPY.composerLabel)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(button);
+    expect(screen.queryByRole("button", { name: "Scroll to latest" })).toBeNull();
   });
 
   it("exposes the transcript as a log and focuses the composer on open", async () => {

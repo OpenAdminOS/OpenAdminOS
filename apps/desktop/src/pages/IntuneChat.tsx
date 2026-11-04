@@ -2045,21 +2045,21 @@ function IntuneChatContent() {
         </div>
 
         <div className="relative shrink-0 px-6 pb-3.5">
-          {showScrollToLatest ? (
-            // Positioned wrapper: IconButton places its own classes on the
-            // inner button, which sits inside the tooltip's relative wrapper.
-            <div className="absolute bottom-[calc(100%+10px)] left-1/2 z-20 -translate-x-1/2">
-              <IconButton
-                label="Scroll to latest"
-                tooltip="Scroll to latest"
-                icon={<IconArrowDown size={13} />}
-                onClick={scrollToLatest}
-                className="bg-[var(--color-surface)] shadow-[var(--shadow-pop)]"
-              />
-            </div>
-          ) : null}
           <div className="pointer-events-none absolute inset-x-0 -top-7 h-7 bg-gradient-to-b from-transparent to-[var(--color-bg)]" />
           <div className="relative mx-auto w-full max-w-[740px]">
+            {showScrollToLatest ? (
+              // Its own row above the composer, outside the scrolling
+              // conversation, so it never covers an answer or a source.
+              <div data-testid="scroll-to-latest-row" className="flex justify-center pb-2">
+                <IconButton
+                  label="Scroll to latest"
+                  tooltip="Scroll to latest"
+                  icon={<IconArrowDown size={13} />}
+                  onClick={scrollToLatest}
+                  className="bg-[var(--color-surface)] shadow-[var(--shadow-pop)]"
+                />
+              </div>
+            ) : null}
             {state.providerAutoSelectNotice && !pilot ? (
               <ProviderAutoSelectNotice
                 providerName={state.providerAutoSelectNotice.providerName}
