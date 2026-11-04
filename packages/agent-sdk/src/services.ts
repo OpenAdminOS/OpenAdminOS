@@ -247,8 +247,8 @@ export const SERVICES: readonly ServiceDefinition[] = [
       },
     ],
     roles: [
-      { name: "Intune Administrator", why: "Reads every Intune object, including devices, policies, apps and scripts." },
-      { name: "Global Reader", why: "Reads Intune and Entra configuration without permission to change it." },
+      { name: "Read Only Operator (Intune role)", why: "Views users, devices, enrollment, configuration and apps in Intune without permission to change them. Assigned in Intune, and scope tags still apply." },
+      { name: "Global Reader", why: "Reads all Intune data and the Entra directory without permission to change them." },
     ],
     licences: [
       "Microsoft Intune Plan 1, included in Microsoft 365 E3, E5, F3, Business Premium and EMS E3 or E5.",
@@ -450,8 +450,8 @@ export const SERVICES: readonly ServiceDefinition[] = [
       },
     ],
     roles: [
-      { name: "Security Reader", why: "Reads Defender alerts, incidents and Secure Score." },
-      { name: "Global Reader", why: "Reads security data without permission to change it." },
+      { name: "Security Reader", why: "Reads Defender alerts, incidents and Secure Score without permission to change them." },
+      { name: "Global Reader", why: "Reads Defender alerts and incidents without permission to change them. Use Security Reader for Secure Score." },
     ],
     licences: [
       "Alerts and incidents need a Microsoft Defender product, for example Defender for Endpoint, Defender for Office 365 or Microsoft 365 E5.",

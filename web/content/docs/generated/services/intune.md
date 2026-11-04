@@ -79,8 +79,8 @@ Delegated permissions never add rights: OpenAdminOS can only read what the signe
 
 | Role | Why |
 | --- | --- |
-| Intune Administrator | Reads every Intune object, including devices, policies, apps and scripts. |
-| Global Reader | Reads Intune and Entra configuration without permission to change it. |
+| Read Only Operator (Intune role) | Views users, devices, enrollment, configuration and apps in Intune without permission to change them. Assigned in Intune, and scope tags still apply. |
+| Global Reader | Reads all Intune data and the Entra directory without permission to change them. |
 
 ## Licences
 

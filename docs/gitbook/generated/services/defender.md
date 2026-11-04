@@ -57,8 +57,8 @@ Delegated permissions never add rights: OpenAdminOS can only read what the signe
 
 | Role | Why |
 | --- | --- |
-| Security Reader | Reads Defender alerts, incidents and Secure Score. |
-| Global Reader | Reads security data without permission to change it. |
+| Security Reader | Reads Defender alerts, incidents and Secure Score without permission to change them. |
+| Global Reader | Reads Defender alerts and incidents without permission to change them. Use Security Reader for Secure Score. |
 
 ## Licences
 
