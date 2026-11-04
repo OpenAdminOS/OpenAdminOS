@@ -15,6 +15,8 @@ import { GRAPH_CACHE_RESOURCES, pathForResource, resolveQuestionKind } from "./p
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
+import { writeMcpQuery } from "./mcp-query-writer.js";
+import { mcpSentText } from "./chat-steps.js";
 import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, validTitle, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
 import {
   MCP_TOOL_RULES,
@@ -27,6 +29,7 @@ import {
   summarizeToolCallForProgress,
   toolDefinitionsForPrompt,
   type IntuneChatToolContext,
+  type McpCallHooks,
   type McpChatContext,
   type McpResultItem,
 } from "./tools.js";
@@ -140,6 +143,13 @@ export interface RunAgenticChatInput {
   promptByteLimit?: number;
   question: string;
   /**
+   * The admin's own messages in this conversation, oldest first, ending
+   * with the current one. The only text the MCP query writer gets from the
+   * conversation: `question` can carry history with answers built on
+   * tenant data. Without it, no MCP query is written and nothing is sent.
+   */
+  adminMessages?: readonly string[];
+  /**
    * How the question was classified. A docs question gets no tenant tools
    * and the evidence guard never asks for them. Tenant and mixed
    * questions still need tenant evidence. Defaults to "tenant". With
@@ -205,6 +215,8 @@ export interface RunAgenticChatInput {
     traceEntry: IntuneChatToolTraceEntry;
     message: string;
   }) => void;
+  /** An MCP call's written params passed every check and are about to be sent. */
+  onToolSending?: (event: { tool: IntuneChatInvestigationToolName; params: Record<string, unknown> }) => void;
   /**
    * Streams each reply when the adapter streams incrementally. While a
    * reply is recognizably a final answer: the text of its answer so far,
@@ -293,6 +305,9 @@ export async function runAgenticChat(
   let learnAnswered = false;
   let fallbackPending = Boolean(input.documentationFallback);
   const citations = new CitationRegistry();
+  // Titles and links of MCP results in this answer, and the queries sent: the query writer's only context besides the admin's messages.
+  const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string }> = [];
+  const sentQueries: string[] = [];
   const documentation: LoopPassage[] = [];
   const addDocumentation = (passages: readonly DocsIndexPassage[]) => {
     const numbers = citations.addPassages(passages);
@@ -467,7 +482,7 @@ export async function runAgenticChat(
       await settleModelStep({ kind: "repair", reason: "sources" });
       const names = missingSources.map((id) => input.tools.mcp?.servers?.find((server) => server.id === id)?.name ?? id);
       const tools = (input.tools.mcp?.tools ?? []).filter((tool) => missingSources.includes(tool.serverId)).map((tool) => tool.name);
-      turns.push({ role: "repair", content: `Call ${names.join(" and ")} before answering: it is the source chosen for this question. Its tools are ${tools.join(", ")}. Send only a standalone public question.` });
+      turns.push({ role: "repair", content: `Call ${names.join(" and ")} before answering: it is the source chosen for this question. Its tools are ${tools.join(", ")}. Request one with empty params; the host writes the query.` });
       continue;
     }
     if (action.kind === "final" && !docsOnly && !input.smallTalk && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
@@ -526,13 +541,32 @@ export async function runAgenticChat(
       assertNotCancelled(input.signal);
     }
     const startedAt = new Date().toISOString();
+    const mcpTool = isMcpChatToolName(action.tool) ? input.tools.mcp?.tools.find((tool) => tool.name === action.tool) : undefined;
     input.onToolStart?.({
       tool: action.tool,
-      params: action.params,
-      message: summarizeToolCallForProgress(action.tool, action.params, input.tools.mcp?.tools.find(tool => tool.name === action.tool)),
+      // The model's params for an MCP tool are never sent, so they are not shown either.
+      params: mcpTool ? {} : action.params,
+      message: summarizeToolCallForProgress(action.tool, action.params, mcpTool),
       startedAt,
     });
-    const execution = await executeIntuneChatTool(input.tools, action.tool, action.params);
+    const tool = action.tool;
+    const mcpHooks: McpCallHooks | undefined = mcpTool ? {
+      writeQuery: (entry) => writeMcpQuery({
+        llm: input.llm,
+        ...(input.model ? { model: input.model } : {}),
+        ...(input.signal ? { signal: input.signal } : {}),
+        adminMessages: input.adminMessages ?? [],
+        tool: entry,
+        earlierResults: mcpResults,
+        sentQueries,
+      }),
+      resultUrls: (serverId) => mcpResults.filter((item) => item.serverId === serverId && item.url).map((item) => item.url!),
+      onSend: (params) => {
+        sentQueries.push(mcpSentText(params));
+        input.onToolSending?.({ tool, params });
+      },
+    } : undefined;
+    const execution = await executeIntuneChatTool(input.tools, action.tool, action.params, mcpHooks);
     toolTrace.push(execution.trace);
     if (!execution.trace.error && isEvidenceResult(action.tool, execution.result)) evidenceToolCalls += 1;
     const mcpSource = execution.trace.mcpSource;
@@ -544,6 +578,7 @@ export async function runAgenticChat(
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
         const { results = [], content, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown } & Record<string, unknown>;
+        mcpResults.push(...results.map((item) => ({ serverId: mcpSource.serverId, serverName: mcpSource.serverName, title: item.title, ...(item.url ? { url: item.url } : {}) })));
         const cites = citations.addMcpResults(results, mcpSource);
         observed = results.some((item) => item.excerpt)
           ? { ...rest, content: numberedMcpResults(results, cites.map((entry) => entry.cite)) }
@@ -551,7 +586,9 @@ export async function runAgenticChat(
       } else if (mcpSource.serverId === LEARN_SERVER_ID && fallbackPending && !learnAnswered && input.documentationFallback) {
         // Learn is offline, the query was blocked or nothing matched: the local index takes over.
         fallbackPending = false;
-        const reason = mcpSource.blocked ? "the Microsoft Learn query was blocked" : learnEmpty ? "Microsoft Learn returned nothing" : "Microsoft Learn did not answer";
+        const reason = mcpSource.blocked ? "the Microsoft Learn query was blocked"
+          : learnEmpty ? "Microsoft Learn returned nothing"
+            : "Microsoft Learn did not answer";
         const fallback = await input.documentationFallback(reason);
         addDocumentation(fallback);
         const lead = `${reason[0]!.toUpperCase()}${reason.slice(1)}.`;
@@ -602,7 +639,8 @@ export async function runAgenticChat(
         JSON.stringify(
           {
             tool: action.tool,
-            params: action.params,
+            // For an MCP tool, the params that were written and checked, not the model's.
+            params: execution.trace.params,
             result: observed,
             trace: execution.trace,
           },

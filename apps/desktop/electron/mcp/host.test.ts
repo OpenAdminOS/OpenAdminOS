@@ -13,6 +13,28 @@ import { z } from "zod";
 import { AppStateStore } from "../state.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./catalog.js";
 import { MCP_SCHEMA_UNAVAILABLE, McpHost, McpHostError, type McpEndpoint } from "./host.js";
+import { isMcpQueryWriterRequest } from "../intune-chat/mcp-query-writer.js";
+
+/**
+ * Stands in for the MCP query writer in a scripted model: it answers with
+ * the params the script gave the last MCP tool call.
+ */
+function writerDouble() {
+  let lastParams = "{}";
+  return {
+    answers: (system: string | undefined) => isMcpQueryWriterRequest(system),
+    reply: () => lastParams,
+    saw(text: string) {
+      try {
+        const value = JSON.parse(text) as { tool?: string; params?: unknown };
+        if (value.tool?.startsWith("mcp__")) lastParams = JSON.stringify(value.params ?? {});
+      } catch {
+        // A prose reply.
+      }
+      return text;
+    },
+  };
+}
 
 /** A stateless in-process MCP server with tools that exercise each host path. */
 function buildServer(): McpServer {
@@ -360,6 +382,7 @@ describe("MCP installs in app state", () => {
       JSON.stringify({ kind: "docs", sources: ["test-docs"], tool: "mcp__test-docs__search_docs", params: { query: "Windows Autopatch" } }),
       JSON.stringify({ final: true, answer: "Windows Autopatch is a cloud service that automates Windows updates." }),
     ];
+    const writer = writerDouble();
     const store = new AppStateStore({
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
@@ -367,7 +390,11 @@ describe("MCP installs in app state", () => {
       graphFactory: () => ({ listManagedDevices: async () => [], retireManagedDevice: async () => { throw new Error("no writes"); }, request: async () => ({ value: [] }) }),
       llmFactory: () => ({
         available: true, defaultModel: "llama3.1:8b",
-        async complete(options) { prompts.push(options.prompt); return { text: replies[Math.min(prompts.length - 1, replies.length - 1)]!, model: "llama3.1:8b" }; },
+        async complete(options) {
+          if (writer.answers(options.system)) return { text: writer.reply(), model: "llama3.1:8b" };
+          prompts.push(options.prompt);
+          return { text: writer.saw(replies[Math.min(prompts.length - 1, replies.length - 1)]!), model: "llama3.1:8b" };
+        },
         async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
       }),
     });
@@ -404,6 +431,7 @@ describe("MCP installs in app state", () => {
       JSON.stringify({ final: true, answer: "Check the script output in the remediation report." }),
     ];
     let reply = 0;
+    const writer = writerDouble();
     const store = new AppStateStore({
       filePath: statePath, userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
@@ -417,7 +445,10 @@ describe("MCP installs in app state", () => {
       }),
       llmFactory: () => ({
         available: true, defaultModel: "llama3.1:8b",
-        async complete() { return { text: replies[Math.min(reply++, replies.length - 1)]!, model: "llama3.1:8b" }; },
+        async complete(options) {
+          if (writer.answers(options.system)) return { text: writer.reply(), model: "llama3.1:8b" };
+          return { text: writer.saw(replies[Math.min(reply++, replies.length - 1)]!), model: "llama3.1:8b" };
+        },
         async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
       }),
     });

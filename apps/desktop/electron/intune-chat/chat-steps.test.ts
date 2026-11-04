@@ -17,6 +17,7 @@ import {
   relabelUnverifiedLearn,
   tenantTieInFollowUp,
   toolStepFinish,
+  toolStepSending,
   toolStepStart,
   validFollowUps,
   mergeFollowUps,
@@ -25,6 +26,7 @@ import {
   validTitle,
 } from "./chat-steps.js";
 import { classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
+import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { TenantValueIndex } from "./tenant-values.js";
 import { mcpChatToolName, mcpPrivateTermsForTenant, parseMcpResults, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
@@ -356,8 +358,10 @@ describe("source labels and steps", () => {
   });
 
   it("shows the exact text an MCP call sent, and no sent text when it was blocked", () => {
-    const start = toolStepStart(learnTool.name, { query: "Defender for Endpoint on macOS requirements" }, learnTool, "OpenAI");
-    assert.deepEqual([start.kind, start.origin, start.originLabel, start.sent], ["mcp", "third-party", "learn.microsoft.com", "Defender for Endpoint on macOS requirements"]);
+    // The model's own params are never sent, so the step shows sent text only once the written query passed the checks.
+    const start = toolStepStart(learnTool.name, { query: "Contoso Macs" }, learnTool, "OpenAI");
+    assert.deepEqual([start.kind, start.origin, start.originLabel, start.sent, start.detail], ["mcp", "third-party", "learn.microsoft.com", undefined, "microsoft_docs_search · writing the query from your messages"]);
+    assert.deepEqual(toolStepSending(learnTool.name, { query: "Defender for Endpoint on macOS requirements" }, learnTool), { detail: "microsoft_docs_search", sent: "Defender for Endpoint on macOS requirements" });
     const blocked = toolStepFinish({ id: "t", tool: learnTool.name, params: {}, resultSummary: "Blocked", durationMs: 1, createdAt: "", completedAt: "", error: "the Microsoft Learn query contained a tenant name. Nothing was sent to learn.microsoft.com.",
       mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", blocked: true } });
     assert.equal(blocked.status, "blocked");
@@ -374,14 +378,28 @@ describe("source labels and steps", () => {
   });
 });
 
+/**
+ * A model that replies from a script. It stands in for the MCP query
+ * writer too: that request gets the params the script gave the last MCP
+ * tool call, so scripts read as before.
+ */
 function scripted(responses: string[], prompts: Array<{ system?: string; prompt: string }>): RunLlmApi {
   let index = 0;
+  let lastParams = "{}";
   return {
     available: true,
     defaultModel: "llama3.1:8b",
     async complete(options) {
+      if (isMcpQueryWriterRequest(options.system)) return { text: lastParams, model: "llama3.1:8b" };
       prompts.push({ ...(options.system ? { system: options.system } : {}), prompt: options.prompt });
-      return { text: responses[Math.min(index++, responses.length - 1)]!, model: "llama3.1:8b" };
+      const text = responses[Math.min(index++, responses.length - 1)]!;
+      try {
+        const value = JSON.parse(text) as { tool?: string; params?: unknown };
+        if (value.tool?.startsWith("mcp__")) lastParams = JSON.stringify(value.params ?? {});
+      } catch {
+        // A prose reply.
+      }
+      return { text, model: "llama3.1:8b" };
     },
     async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
   };
@@ -396,6 +414,7 @@ async function withStore(run: (store: IntelligenceSqliteStore) => Promise<void>)
 function loopInput(store: IntelligenceSqliteStore, llm: RunLlmApi, mcp: McpChatContext, overrides: Partial<RunAgenticChatInput>): RunAgenticChatInput {
   return {
     question: "What does Microsoft Learn say about Defender for macOS?",
+    adminMessages: ["What does Microsoft Learn say about Defender for macOS?"],
     tenant, providerId: "ollama", providerIsLocal: true, model: "llama3.1:8b", llm,
     tools: {
       tenantId: tenant.id, store, grantedScopes: new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES),

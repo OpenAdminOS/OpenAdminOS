@@ -327,7 +327,11 @@ function resourceLabel(params: unknown): string | undefined {
   }
 }
 
-/** The step for a tool call that just started. */
+/**
+ * The step for a tool call that just started. An MCP step shows no sent
+ * text until the query writer's params passed every check (see
+ * toolStepSending), because nothing has been sent before that.
+ */
 export function toolStepStart(
   tool: IntuneChatInvestigationToolName,
   params: unknown,
@@ -338,10 +342,9 @@ export function toolStepStart(
     return {
       kind: "mcp",
       title: `Asking ${mcp?.serverName ?? "an MCP server"}`,
-      detail: mcp?.tool ?? tool,
+      detail: `${mcp?.tool ?? tool} · writing the query from your messages`,
       origin: "third-party",
       originLabel: mcp?.host ?? "third-party host",
-      sent: mcpSentText(params),
     };
   }
   if (tool === "web_search") return { kind: "tool", title: "Searching the web", origin: "model", originLabel: modelLabel };
@@ -357,7 +360,12 @@ export function toolStepStart(
   };
 }
 
-/** How a finished tool call changes its step. Blocked MCP calls sent nothing, so they show no sent text. */
+/** The query writer's params passed every check and are being sent: the MCP step shows them exactly. */
+export function toolStepSending(tool: IntuneChatInvestigationToolName, params: Record<string, unknown>, mcp: McpChatTool | undefined): Partial<IntuneChatStep> {
+  return { detail: mcp?.tool ?? tool, sent: mcpSentText(params) };
+}
+
+/** How a finished tool call changes its step. MCP calls that sent nothing show no sent text. */
 export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneChatStep> {
   const durationMs = entry.durationMs;
   if (entry.mcpSource) {
@@ -365,7 +373,7 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneC
     if (blocked) {
       return { status: "blocked", title: `Blocked a ${serverName} query`, detail: `${entry.error ?? "The query held tenant data."}`, sent: undefined, durationMs };
     }
-    // A call that failed before sending (bad params, seed failure) sent nothing.
+    // A call that failed before sending (bad params, the query writer, the cache index) sent nothing.
     if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs, ...(entry.mcpSource.sentToHost ? {} : { sent: undefined }) };
     const count = results?.length ?? 0;
     return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? `${count} ${count === 1 ? "result" : "results"}` : `answer from ${host}`}`, durationMs };
@@ -383,6 +391,9 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
   return {
     start(tool: IntuneChatInvestigationToolName, params: unknown): void {
       current = steps.start(toolStepStart(tool, params, mcp?.tools.find((entry) => entry.name === tool), modelLabel));
+    },
+    sending(tool: IntuneChatInvestigationToolName, params: Record<string, unknown>): void {
+      if (current) steps.update(current, toolStepSending(tool, params, mcp?.tools.find((entry) => entry.name === tool)));
     },
     finish(entry: IntuneChatToolTraceEntry): void {
       if (current) steps.finish(current, toolStepFinish(entry));

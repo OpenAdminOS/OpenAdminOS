@@ -15,6 +15,7 @@ import type { IntuneChatStep, IntuneChatStreamEvent } from "@openadminos/agent-s
 import { AppStateStore } from "../state.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
+import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
 
 /**
  * Drives Chat end to end through the app store: question planning, the
@@ -81,6 +82,8 @@ interface Harness {
   cache: IntelligenceSqliteStore;
   graphPaths: string[];
   prompts: Array<{ system: string; prompt: string }>;
+  /** Prompts of the MCP query writer, which the model double answers apart from the script. */
+  writerPrompts: string[];
   script(replies: unknown[]): void;
 }
 
@@ -96,6 +99,20 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
   let replies: string[] = [];
   const chunkDelayMs = options.chunkDelayMs;
   let reply = 0;
+  // Stands in for the MCP query writer: it answers with the params the
+  // script gave the last MCP tool call, so scripts read as before.
+  const writerPrompts: string[] = [];
+  let lastParams = "{}";
+  const nextReply = () => {
+    const text = replies[Math.min(reply++, replies.length - 1)]!;
+    try {
+      const value = JSON.parse(text) as { tool?: string; params?: unknown };
+      if (value.tool?.startsWith("mcp__")) lastParams = JSON.stringify(value.params ?? {});
+    } catch {
+      // A prose reply.
+    }
+    return text;
+  };
   const learn = MCP_CATALOG.find((entry) => entry.id === "microsoft-learn")!;
   const kql = MCP_CATALOG.find((entry) => entry.id === "kql-search")!;
   const store = new AppStateStore({
@@ -114,12 +131,16 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
       available: true, defaultModel: "llama3.1:8b",
       ...(options.incremental ? { streamsIncrementally: true } : {}),
       async complete(options) {
+        if (isMcpQueryWriterRequest(options.system)) {
+          writerPrompts.push(options.prompt);
+          return { text: lastParams, model: "llama3.1:8b" };
+        }
         prompts.push({ system: options.system ?? "", prompt: options.prompt });
-        return { text: replies[Math.min(reply++, replies.length - 1)]!, model: "llama3.1:8b" };
+        return { text: nextReply(), model: "llama3.1:8b" };
       },
       async *stream(options) {
         prompts.push({ system: options.system ?? "", prompt: options.prompt });
-        const text = replies[Math.min(reply++, replies.length - 1)]!;
+        const text = nextReply();
         let accumulated = "";
         for (const delta of text.split(/(?<= )/)) {
           if (chunkDelayMs) await new Promise((resolve) => setTimeout(resolve, chunkDelayMs));
@@ -157,8 +178,8 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
       ],
     });
     await run({
-      docsSearches, store, cache, graphPaths, prompts,
-      script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; graphPaths.length = 0; },
+      docsSearches, store, cache, graphPaths, prompts, writerPrompts,
+      script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; writerPrompts.length = 0; graphPaths.length = 0; },
     });
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 }
@@ -172,7 +193,7 @@ const classifiedAs = (steps: readonly IntuneChatStep[] | undefined) =>
 
 describe("Chat steps, sources and follow-ups end to end", () => {
   it("answers the Defender for macOS docs question from Microsoft Learn without touching the tenant", async () => {
-    await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
+    await withHarness(async ({ store, cache, graphPaths, prompts, writerPrompts, script }) => {
       script([
         { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
         { final: true, answer: "Microsoft Learn says Defender for Endpoint on macOS needs full disk access [1] and one of the three latest macOS releases [2]. [9]", next: ["Which Macs miss the system extension profile?"] },
@@ -188,9 +209,17 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       const working = snapshots.find((list) => list.some((step) => step.kind === "answer"))!;
       assert.deepEqual([working[0]!.status, working[0]!.title], ["completed", "Read the question"]);
       assert.deepEqual([working[1]!.title, working[1]!.status], ["Working", "active"]);
-      const live = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active"));
+      // While the query is written nothing has been sent, so no sent text shows; then the exact checked text does.
+      const writing = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active"))!.find((step) => step.kind === "mcp")!;
+      assert.deepEqual([writing.sent, writing.detail], [undefined, "microsoft_docs_search · writing the query from your messages"]);
+      const live = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active" && step.sent));
       const liveMcp = live!.find((step) => step.kind === "mcp")!;
       assert.equal(liveMcp.sent, "Defender for Endpoint on macOS");
+      // The query writer saw the admin's question and the tool, never the tenant name or the answering model's prompt.
+      assert.equal(writerPrompts.length, 1);
+      assert.ok(writerPrompts[0]!.includes(JSON.stringify([DOCS_QUESTION])), "the admin's message, fenced");
+      assert.match(writerPrompts[0]!, /Tool: microsoft_docs_search on 127\.0\.0\.1/);
+      assert.doesNotMatch(writerPrompts[0]!, /Contoso|contoso\.example|Tenant:|MAC-0/);
       assert.deepEqual([liveMcp.origin, liveMcp.originLabel], ["third-party", "127.0.0.1"]);
       assert.equal(live!.at(-1)!.kind, "mcp", "a new step appends below the model step that chose it");
       // Append-only: every snapshot starts with the previous one's step ids.
