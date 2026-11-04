@@ -531,9 +531,26 @@ function executeToolUnchecked(
  * ("contoso") is blocked.
  */
 export function mcpPrivateTermsForTenant(tenant: { displayName: string; username: string }): string[] {
-  const distinctive = normalizeTokens(tenant.displayName).filter((token) => !isGenericTokens([token]) && token.length >= 3);
-  const terms = [tenant.username, tenant.username.split("@")[1] ?? "", ...distinctive];
+  const nameTokens = normalizeTokens(tenant.displayName);
+  const distinctive = nameTokens.filter((token) => !isGenericTokens([token]) && token.length >= 3);
+  // A name made only of generic words is still the tenant's name as a whole.
+  const name = distinctive.length > 0 ? distinctive : [nameTokens.join(" ")];
+  const terms = [tenant.username, tenant.username.split("@")[1] ?? "", ...name];
   return [...new Set(terms.map((term) => term.trim()).filter((term) => term.length >= 3))];
+}
+
+/**
+ * Tenant names, domains and sign-in names are high confidence, so they are
+ * also matched with separators removed: "contoso" matches "contoso_ltd" and
+ * "contosocorp". Terms shorter than five characters keep token matching
+ * only, because as substrings they would match ordinary words.
+ */
+function containsPrivateTerm(text: string, terms: readonly string[]): boolean {
+  const compactText = normalizeTokens(text).join("");
+  return terms.some((term) => {
+    const compactTerm = normalizeTokens(term).join("");
+    return compactTerm.length >= 5 && compactText.includes(compactTerm);
+  });
 }
 
 async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName, params: unknown): Promise<unknown> {
@@ -558,7 +575,7 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   const privateTerms = new TenantValueIndex();
   privateTerms.addAll(ctx.mcp.privateTerms);
   if (leaves.some((leaf) => /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i.test(leaf)) ||
-    privateTerms.matches(joined)) {
+    privateTerms.matches(joined) || containsPrivateTerm(joined, ctx.mcp.privateTerms)) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained a tenant name, domain, email address, ID, IP address or credential. Nothing was sent to ${entry.host}. Rephrase it as a public question.`);
   }
   if (ctx.mcp.seedTenantValues) {

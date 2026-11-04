@@ -367,7 +367,8 @@ describe("MCP tools in the Chat loop", () => {
   });
 
   it("never blocks product names that match a tenant called after a product", () => {
-    assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Microsoft Intune Lab", username: "admin@lab.example" }), ["admin@lab.example", "lab.example"]);
+    // Every word is generic, so the whole name is the term.
+    assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Microsoft Intune Lab", username: "admin@lab.example" }), ["admin@lab.example", "lab.example", "microsoft intune lab"]);
     assert.deepEqual(mcpPrivateTermsForTenant(tenant), ["admin@contoso.example", "contoso.example", "contoso"]);
     assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Contoso Microsoft Practice", username: "admin@fabrikam.example" }), ["admin@fabrikam.example", "fabrikam.example", "contoso"]);
   });
@@ -419,6 +420,44 @@ describe("MCP tools in the Chat loop", () => {
       ]), context));
       assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
       assert.equal(calls.length, 0);
+    });
+  });
+
+  it("always indexes identifier keys, and matches mostly numeric values without separators", () => {
+    const index = new TenantValueIndex();
+    collectTenantValues([
+      { phoneNumber: "555-123-4567", serialNumber: "12345678", imei: "35 209900 176148 1", wiFiMacAddress: "00:1A:2B:3C:4D:5E", deviceId: "100200300" },
+      { displayName: "Windows 11", groupTag: "Pilot" },
+    ], index);
+    for (const blocked of ["call 5551234567", "phone 555 123 4567", "serial 12345678", "imei 352099001761481", "mac 00-1a-2b-3c-4d-5e", "device 100200300"]) {
+      assert.equal(index.matches(blocked), true, blocked);
+    }
+    for (const allowed of ["Windows 11 compliance", "pilot ring", "12 devices"]) {
+      assert.equal(index.matches(allowed), false, allowed);
+    }
+  });
+
+  it("matches values in scripts without word spaces inside a longer run", () => {
+    const index = new TenantValueIndex();
+    collectTenantValues([{ displayName: "営業部" }, { displayName: "ฝ่ายขาย" }, { displayName: "영업팀" }], index);
+    assert.equal(index.matches("東京営業部の端末が同期しません"), true);
+    assert.equal(index.matches("เครื่องของฝ่ายขายเสีย"), true);
+    assert.equal(index.matches("서울영업팀노트북"), true);
+    assert.equal(index.matches("東京の端末が同期しません"), false);
+  });
+
+  it("matches tenant names, domains and sign-in names with separators removed", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      for (const query of ["contoso_ltd licensing", "contosocorp licensing", "contoso-example docs"]) {
+        const result = await runAgenticChat(input(store, scriptedLlm([callDocs(query), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), mcpContext(calls)));
+        assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true, query);
+      }
+      const generic: McpChatContext = { ...mcpContext(calls), privateTerms: mcpPrivateTermsForTenant({ displayName: "All Users Group", username: "admin@fabrikam.example" }) };
+      const blocked = await runAgenticChat(input(store, scriptedLlm([callDocs("all users group naming"), callDocs("all users dynamic membership rule"), '{"final":true,"answer":"Done."}']), generic));
+      assert.equal(blocked.toolTrace[0]!.mcpSource?.blocked, true);
+      assert.equal(blocked.toolTrace[1]!.error, undefined);
+      assert.deepEqual(calls.map((call) => call.args.query), ["all users dynamic membership rule"]);
     });
   });
 

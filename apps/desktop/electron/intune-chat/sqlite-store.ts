@@ -2292,8 +2292,8 @@ export class IntelligenceSqliteStore {
       .prepare(`SELECT graph_id, display_name, raw_json FROM graph_resources WHERE tenant_id = ? AND resource IN (${placeholders})`)
       .iterate(tenantId, ...TENANT_IDENTITY_RESOURCES) as Iterable<{ graph_id: string; display_name: string | null; raw_json: string }>;
     for (const row of rows) {
-      into.add(row.graph_id);
-      into.add(row.display_name);
+      into.add(row.graph_id, "identifier");
+      into.add(row.display_name, "name");
       collectTenantValues(readJson<unknown>(row.raw_json, {}), into);
     }
   }

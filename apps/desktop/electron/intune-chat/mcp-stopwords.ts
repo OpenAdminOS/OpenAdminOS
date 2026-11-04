@@ -21,10 +21,15 @@ export const MCP_STOPWORDS: ReadonlySet<string> = new Set([
   "gmbh", "llc", "ag", "plc", "international", "global", "systems", "technologies", "partners",
 ]);
 
+/** Scripts written without spaces between words. Each character is its own token. */
+const UNSPACED_SCRIPT = /([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}\p{Script=Thai}])/gu;
+
 /**
  * Normalizes text for token matching: compatibility forms folded (NFKC),
  * format characters such as zero-width spaces and combining marks removed,
  * lowercased, and every run of other characters turned into one space.
+ * Characters of scripts without word spaces become one token each, so a
+ * value inside a longer run of such text still matches contiguously.
  */
 export function normalizeTokens(text: string): string[] {
   const folded = text
@@ -32,7 +37,9 @@ export function normalizeTokens(text: string): string[] {
     .replace(/\p{Cf}/gu, "")
     .normalize("NFD")
     .replace(/\p{M}/gu, "")
+    .normalize("NFC")
     .toLowerCase()
+    .replace(UNSPACED_SCRIPT, " $1 ")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .trim();
   return folded ? folded.split(" ") : [];
