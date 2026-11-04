@@ -208,7 +208,7 @@ import {
 } from "./registry-client.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } from "./intune-chat/service.js";
-import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatTool } from "./intune-chat/tools.js";
+import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
 import { McpHost, type McpToolInfo } from "./mcp/host.js";
@@ -1391,6 +1391,7 @@ export class AppStateStore {
       startRun: (agentSlug, options) => host.startRun(agentSlug, options),
       getDriftTimeline: (input) => host.getDriftTimeline(input),
       retrieveDocumentation: (query) => host.retrieveDocumentation(query),
+      documentationIndexVersion: () => host.documentationIndexVersion(),
       mcpChatContext: (tenant) => host.mcpChatContext(tenant),
       appVersion: this.appVersion,
       get userDataPath() {
@@ -1790,9 +1791,11 @@ export class AppStateStore {
   private async mcpChatContext(tenant: TenantRecord): Promise<McpChatContext | undefined> {
     const persisted = await this.read();
     const tools: McpChatTool[] = [];
+    const servers: McpChatServer[] = [];
     for (const entry of this.mcpCatalog) {
       const installed = persisted.mcpServers?.[entry.id];
       if (!installed?.enabled) continue;
+      servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics });
       for (const tool of installed.tools) {
         if (tool.unavailable) continue;
         tools.push({
@@ -1809,6 +1812,7 @@ export class AppStateStore {
     if (tools.length === 0) return undefined;
     return {
       tools,
+      servers: servers.filter((server) => tools.some((tool) => tool.serverId === server.id)),
       privateTerms: mcpPrivateTermsForTenant(tenant),
       tenantValues: new TenantValueIndex(),
       cachedTenantValues: () => this.requireIntelligenceStore().tenantIdentityValues(tenant.id),
@@ -1927,6 +1931,12 @@ export class AppStateStore {
       };
     }
     return index.status();
+  }
+
+  /** The installed docs index version, such as "2026-08-26", when one is usable. */
+  documentationIndexVersion(): string | undefined {
+    const status = this.retrievalIndex()?.status();
+    return status?.available ? status.version : undefined;
   }
 
   /**

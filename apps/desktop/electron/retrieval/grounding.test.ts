@@ -37,11 +37,16 @@ describe("Chat documentation grounding", () => {
       2,
       "both deterministic paths should build a grounded prompt",
     );
+    // When Microsoft Learn is the chosen source, the index is its fallback.
     assert.equal(
-      (service.match(/documentation:(?: options\.voice && options\.webSearch\s*\? \[\]\s*:)?\s*await this\.retrieveDocumentationSafely/g) ?? [])
-        .length,
+      (service.match(/learnFirst \? \[\] : await this\.searchDocsIndex\(modelQuestion, steps\)/g) ?? []).length,
       2,
       "both agentic call sites should pass retrieved documentation",
+    );
+    assert.equal(
+      (service.match(/documentationFallback: \(\) => this\.searchDocsIndex\(modelQuestion, steps, true\)/g) ?? []).length,
+      2,
+      "both agentic call sites should fall back to the index when Learn does not answer",
     );
   });
 });

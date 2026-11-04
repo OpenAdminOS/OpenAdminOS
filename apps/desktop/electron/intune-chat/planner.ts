@@ -3,6 +3,7 @@ import type {
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
   IntuneChatAgentSuggestion,
+  IntuneChatQuestionKind,
   TenantRecord,
 } from "@openadminos/agent-sdk";
 import type { GraphCacheResourceDefinition } from "./sqlite-store.js";
@@ -447,6 +448,38 @@ const TENANT_REFERENCE =
 export function isGeneralKnowledgeQuestion(question: string): boolean {
   const lower = question.trim().toLowerCase();
   return GENERAL_QUESTION_START.test(lower) && !TENANT_REFERENCE.test(lower);
+}
+
+/** Asks for an example query or script, not for tenant state. */
+const AUTHORING_REQUEST =
+  /^(?:write|draft|give me|suggest|find|is there|create|build)\b[^?]*\b(?:kql|kusto|queries|query|scripts?|powershell|samples?|examples?)\b/;
+/** Asks what documentation or a named reference says. */
+const DOCS_REFERENCE =
+  /\b(?:documentation|docs|microsoft learn|learn\.microsoft\.com|best practices?|according to|recommended|recommendation|requirements?|prerequisites?)\b/;
+const HOW_TO = /^(?:how (?:do|does|can|should|would|to)|why (?:does|do|would)|explain)\b/;
+/** Values that only make sense in one tenant: an email address, a GUID, or a name like HR-LAPTOP-07. */
+const TENANT_VALUE = /[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]*-[A-Z0-9-]*\d/;
+const TENANT_STATE = /\b(?:state of|status of|assigned to|enrolled in)\b/;
+
+/**
+ * Decides whether a question needs the tenant. A docs question asks how
+ * a product behaves or what a reference says, and never touches the
+ * tenant, even when it names a platform the planner maps to resources. A
+ * tenant question asks about this tenant's state. A mixed question asks
+ * both, for example how documentation applies to "our" devices. Built on
+ * the same wording rules as isGeneralKnowledgeQuestion.
+ */
+export function classifyChatQuestion(
+  question: string,
+  input: { plannedResources: readonly GraphCacheResourceKind[]; namesSource: boolean },
+): IntuneChatQuestionKind {
+  const trimmed = question.trim();
+  const lower = trimmed.toLowerCase();
+  const tenantReference = TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
+  const docsSignal = input.namesSource || DOCS_REFERENCE.test(lower);
+  if (!tenantReference && (GENERAL_QUESTION_START.test(lower) || AUTHORING_REQUEST.test(lower) || docsSignal)) return "docs";
+  if (tenantReference && (docsSignal || HOW_TO.test(lower))) return "mixed";
+  return tenantReference || input.plannedResources.length > 0 ? "tenant" : "docs";
 }
 
 export function planChatContext(question: string): PlannedChatContext {

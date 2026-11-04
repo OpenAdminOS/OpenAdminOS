@@ -6,12 +6,13 @@ import { describe, it } from "node:test";
 
 import {
   DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  type IntuneChatQuestionKind,
   type RunLlmApi,
   type TenantRecord,
 } from "@openadminos/agent-sdk";
 
 import { runAgenticChat } from "./agentic-loop.js";
-import { isGeneralKnowledgeQuestion } from "./planner.js";
+import { classifyChatQuestion, isGeneralKnowledgeQuestion } from "./planner.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
@@ -95,9 +96,10 @@ function input(store: IntelligenceSqliteStore, llm: RunLlmApi, mcp?: McpChatCont
     model: "llama3.1:8b",
     llm,
     tools: toolContext(store, mcp),
-    // The planner hints at a tenant resource, which arms the evidence guard.
+    // The planner hints at a tenant resource, which arms the evidence guard
+    // unless the question is a docs question.
     plannedResources: ["deviceCompliancePolicies" as const],
-    generalQuestion: true,
+    questionKind: "mixed" as IntuneChatQuestionKind,
     agentSuggestions: [],
     generatedAt: "2026-06-01T10:00:00.000Z",
     maxTokens: 900,
@@ -163,10 +165,10 @@ describe("MCP tools in the Chat loop", () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
       const prompts: Array<{ system?: string; prompt: string }> = [];
-      const result = await runAgenticChat(input(store, scriptedLlm([
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([
         callDocs("Intune compliance policy grace period"),
         '```json\n{"final":true,"answer":"The grace period is set per compliance policy action. Source: learn.microsoft.com."}\n```',
-      ], prompts), mcpContext(calls)));
+      ], prompts), mcpContext(calls)), questionKind: "docs" });
       // Answered from documentation only: the tenant-evidence guard does not reject it.
       assert.equal(result.ok, true);
       if (!result.ok) return;
@@ -174,7 +176,7 @@ describe("MCP tools in the Chat loop", () => {
       assert.deepEqual(calls, [{ tool: "microsoft_docs_search", args: { query: "Intune compliance policy grace period" } }]);
       const trace = result.toolTrace[0]!;
       assert.equal(trace.tool, docsTool.name);
-      assert.deepEqual(trace.mcpSource, { serverId: "microsoft-learn", serverName: "Microsoft Learn", host: "learn.microsoft.com", tool: "microsoft_docs_search" });
+      assert.deepEqual(trace.mcpSource, { serverId: "microsoft-learn", serverName: "Microsoft Learn", host: "learn.microsoft.com", tool: "microsoft_docs_search", results: [] });
       assert.match(trace.resultSummary, /Microsoft Learn answered from learn\.microsoft\.com/);
       const observation = prompts[1]!.prompt;
       assert.match(observation, /<tenant_data source="third-party:learn\.microsoft\.com" nonce="[a-f0-9]+">/);
@@ -189,7 +191,7 @@ describe("MCP tools in the Chat loop", () => {
       const result = await runAgenticChat({
         ...input(store, scriptedLlm([callDocs("Intune noncompliant device count"), "42 devices are noncompliant.", "42 devices are noncompliant.", "42 devices are noncompliant."], prompts), mcpContext(calls)),
         question: "How many devices are noncompliant?",
-        generalQuestion: isGeneralKnowledgeQuestion("How many devices are noncompliant?"),
+        questionKind: classifyChatQuestion("How many devices are noncompliant?", { plannedResources: ["managedDevices"], namesSource: false }),
       });
       assert.equal(calls.length, 1);
       assert.match(prompts[2]!.prompt, /That answer used no tenant evidence/);
@@ -207,10 +209,10 @@ describe("MCP tools in the Chat loop", () => {
     }
   });
 
-  it("still applies the evidence guard when the MCP call failed", async () => {
+  it("still applies the evidence guard to a tenant question when the MCP call failed", async () => {
     await withStore(async (store) => {
       const failing: McpChatContext = { ...mcpContext([]), async call() { throw new Error("Microsoft Learn could not be reached at learn.microsoft.com."); } };
-      const result = await runAgenticChat(input(store, scriptedLlm([callDocs("grace period"), "It is seven days.", "It is seven days.", "It is seven days."]), failing));
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([callDocs("grace period"), "It is seven days.", "It is seven days.", "It is seven days."]), failing), questionKind: "tenant" });
       assert.equal(result.ok, false);
       if (result.ok) return;
       assert.equal(result.reason, "no-evidence");

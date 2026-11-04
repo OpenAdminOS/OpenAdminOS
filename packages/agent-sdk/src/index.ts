@@ -1008,6 +1008,53 @@ export interface IntuneChatMessage {
   toolTrace?: IntuneChatToolTraceEntry[];
   agentSuggestions?: IntuneChatAgentSuggestion[];
   error?: string;
+  /** How the question was classified, which decides whether the tenant is checked. */
+  questionKind?: IntuneChatQuestionKind;
+  /** What ran for this answer, in order, as the timeline shows it. */
+  steps?: IntuneChatStep[];
+  /** Targets of the [n] citations in the answer. */
+  documentationSources?: IntuneChatDocumentationSource[];
+  /** Read-only follow-up questions, at most two. Never sent automatically. */
+  followUps?: string[];
+}
+
+/**
+ * Docs questions are answered from documentation sources only and never
+ * touch the tenant. Tenant and mixed questions need tenant evidence.
+ */
+export type IntuneChatQuestionKind = "docs" | "tenant" | "mixed";
+
+/** Where a Chat step ran or where its data went. */
+export type IntuneChatStepOrigin = "device" | "graph" | "third-party" | "model";
+
+/** One row of the Chat step timeline, streamed live and stored with the answer. */
+export interface IntuneChatStep {
+  id: string;
+  kind: "plan" | "docs-index" | "mcp" | "graph-refresh" | "tool" | "answer";
+  title: string;
+  detail?: string;
+  status: "active" | "completed" | "failed" | "blocked";
+  origin: IntuneChatStepOrigin;
+  /** Tag text: "On device", "Microsoft Graph", the third-party host or the model provider. */
+  originLabel: string;
+  /** The exact text an MCP call sent to its host. Absent when nothing was sent. */
+  sent?: string;
+  startedAt: string;
+  durationMs?: number;
+}
+
+/** What an [n] citation in an answer points to. */
+export interface IntuneChatDocumentationSource {
+  citation: number;
+  kind: "mcp" | "docs-index";
+  title: string;
+  /** MCP results: the article URL, the server and its host. */
+  url?: string;
+  serverName?: string;
+  host?: string;
+  /** Local index passages: the source file and the index version date. */
+  file?: string;
+  indexVersion?: string;
 }
 
 export type IntuneChatInvestigationToolName =
@@ -1085,6 +1132,8 @@ export interface IntuneChatToolTraceEntry {
     truncated?: boolean;
     /** The host refused the call before sending it because it held tenant data. */
     blocked?: boolean;
+    /** Articles or items found in the result, with their links. */
+    results?: Array<{ title: string; url?: string }>;
   };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources
@@ -2177,6 +2226,13 @@ export type IntuneChatStreamEvent =
       assistantMessageId: string;
       traceEntry: IntuneChatToolTraceEntry;
       message: string;
+    }
+  | {
+      /** The step timeline after a step started or changed, in display order. */
+      type: "steps";
+      conversationId: string;
+      assistantMessageId: string;
+      steps: IntuneChatStep[];
     }
   | {
       type: "delta";

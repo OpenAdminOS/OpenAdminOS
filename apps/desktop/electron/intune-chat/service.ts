@@ -22,9 +22,11 @@ import {
   type GraphCacheRefreshResourceResult,
   type GraphCacheRefreshScheduleSettings,
   type GraphCacheResourceKind,
+  type GraphCacheResourceStatus,
   type GraphCacheStatus,
   type HostedProviderBatchConsent,
   type IntuneChatConversation,
+  type IntuneChatDocumentationSource,
   type IntuneChatInvestigationToolName,
   type IntuneChatMessage,
   type IntuneChatProgressStep,
@@ -113,8 +115,8 @@ import {
   GRAPH_CACHE_RESOURCES,
   buildAnswerPack,
   chatTitleForPrompt,
+  classifyChatQuestion,
   definitionForResource,
-  isGeneralKnowledgeQuestion,
   matchAgentsToQuestion,
   pathForResource,
   planChatContext,
@@ -123,6 +125,24 @@ import {
   type PlannedChatContext,
 } from "./planner.js";
 import { executeIntuneChatTool, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
+import {
+  CitationRegistry,
+  LEARN_SERVER_ID,
+  MICROSOFT_GRAPH,
+  ON_DEVICE,
+  formatIndexVersion,
+  mergeFollowUps,
+  namedServers,
+  planChatSources,
+  relabelUnverifiedLearn,
+  startAnswerStep,
+  tenantTieInFollowUp,
+  toolStepHooks,
+  type AnswerModel,
+  type ChatSourcePlan,
+  ChatStepRecorder,
+  type DocsIndexPassage,
+} from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
 import { answerPilotChatMessage } from "./pilot-chat.js";
 import { PILOT_COPY } from "../../src/shared/pilot-mode.js";
@@ -207,6 +227,8 @@ export interface ChatServiceHost {
   retrieveDocumentation?(query: string): Promise<
     Array<{ file: string; title?: string; text: string; score: number }>
   >;
+  /** The installed docs index version, such as "2026-08-26". Undefined when none is usable. */
+  documentationIndexVersion?(): string | undefined;
   /**
    * Tools of the installed, enabled MCP servers for a Chat answer. Never
    * used by the external gateway's read tools.
@@ -1678,6 +1700,15 @@ export class IntuneChatService {
       createdAt: now,
     };
     store.insertMessage(userMessage);
+    const steps = new ChatStepRecorder();
+    const answerModel: AnswerModel = { ...(selectedModel ? { name: selectedModel } : {}), hosted: provider?.isLocal === false, providerName: provider.name };
+    const toolsOffered = resolveAgenticCapability({
+      mode: store.getChatInvestigationSettings().mode,
+      provider,
+      providerId,
+      ...(selectedModel ? { model: selectedModel } : {}),
+    }).enabled;
+    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, steps });
 
     let refreshResult: GraphCacheRefreshResult | undefined;
     // A write prompt is answered by the deterministic block below.
@@ -1695,10 +1726,12 @@ export class IntuneChatService {
         );
       });
       if (staleResources.length > 0) {
+        const refreshStep = this.refreshStep(steps, staleResources);
         refreshResult = await this.refreshGraphCache({
           tenantId: tenant.id,
           resources: staleResources,
         });
+        refreshStep.finish(refreshResult);
         store.insertToolCall({
           id: `tool_${randomUUID()}`,
           conversationId: conversation.id,
@@ -1751,8 +1784,10 @@ export class IntuneChatService {
     let engineNotice: string | undefined;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
+    let documentationSources: IntuneChatDocumentationSource[] = [];
+    let modelFollowUps: string[] = [];
 
-    const directDeviceAnswer = !planned.hasWriteIntent && !accessBlockedMessage
+    const directDeviceAnswer = !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs"
       ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
@@ -1794,7 +1829,11 @@ export class IntuneChatService {
           generatedAt: answerGeneratedAt,
           limits: chatBudget.answerPackLimits,
         });
-        const documentation = await this.retrieveDocumentationSafely(modelQuestion);
+        const documentation = await this.searchDocsIndex(modelQuestion, steps);
+        const citations = new CitationRegistry();
+        citations.addPassages(documentation);
+        documentationSources = citations.sources;
+        const finishAnswerStep = startAnswerStep(steps, answerModel);
         const completion = await llm.complete({
           system: buildIntuneChatSystemPrompt(provider?.isLocal === true),
           prompt: buildAnswerPrompt(answerPack, documentation),
@@ -1802,6 +1841,7 @@ export class IntuneChatService {
           temperature: 0.2,
           maxTokens: chatBudget.maxTokens,
         });
+        finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0 });
         const content = completion.text.trim();
         return {
           content,
@@ -1823,12 +1863,19 @@ export class IntuneChatService {
             providerId,
             model: selectedModel ?? llm.defaultModel,
           });
-          const mcp = await this.mcpToolsFor(tenant, conversation.id);
+          const mcp = answerPlan.mcp;
           if (capability.enabled) {
             const tenantObservations = new TenantValueIndex();
+            const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
+            const learnFirst = answerPlan.sources.learnFirst;
+            const documentation = learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
+            const finishAnswerStep = startAnswerStep(steps, answerModel);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
-              documentation: await this.retrieveDocumentationSafely(modelQuestion),
+              documentation,
+              ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
+              questionKind: answerPlan.sources.kind,
+              requiredServerIds: answerPlan.sources.requiredServerIds,
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -1836,17 +1883,22 @@ export class IntuneChatService {
               llm,
               tools: { ...this.buildChatToolContext(tenant), ...mcp, tenantObservations },
               plannedResources: planned.resources,
-              generalQuestion: isGeneralKnowledgeQuestion(content),
               agentSuggestions,
               generatedAt: answerGeneratedAt,
               maxTokens: chatBudget.maxTokens,
+              onToolStart: (event) => toolSteps.start(event.tool, event.params),
+              onToolFinish: (event) => toolSteps.finish(event.traceEntry),
             }));
             responseModel = agentic.model ?? responseModel;
             toolTrace = agentic.toolTrace;
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
+              finishAnswerStep({ passages: (agentic.documentationSources ?? []).filter((source) => source.kind === "docs-index").length, trace: agentic.toolTrace });
               assistantContent = agentic.answer;
+              modelFollowUps = agentic.followUps ?? [];
+              documentationSources = agentic.documentationSources ?? [];
             } else {
+              finishAnswerStep({ passages: 0, trace: agentic.toolTrace, failed: true });
               const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
               assistantContent = deterministic.content;
               responseModel = deterministic.model ?? responseModel;
@@ -1864,6 +1916,11 @@ export class IntuneChatService {
       }
     }
 
+    assistantContent = relabelUnverifiedLearn(assistantContent, (toolTrace ?? []).some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID));
+    steps.settle(assistantStatus === "failed" ? "failed" : "completed");
+    const followUps = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage
+      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
+      : [];
     const assistantMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -1874,6 +1931,10 @@ export class IntuneChatService {
       providerId,
       model: responseModel,
       ...(engineNotice ? { engineNotice } : {}),
+      questionKind: answerPlan.sources.kind,
+      steps: steps.steps,
+      ...(documentationSources.length > 0 ? { documentationSources } : {}),
+      ...(followUps.length > 0 ? { followUps } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
           ? packCacheStatus
@@ -2043,12 +2104,25 @@ export class IntuneChatService {
       assistantMessage: pendingAssistant,
       cacheStatus: initialCacheStatus,
     });
+    const steps = new ChatStepRecorder((list) => onEvent({ type: "steps", conversationId: conversation.id, assistantMessageId: assistantId, steps: list }));
+    const answerModel: AnswerModel = { ...(selectedModel ? { name: selectedModel } : {}), hosted: provider?.isLocal === false, providerName: provider.name };
+    const toolsOffered = !options.voice && resolveAgenticCapability({
+      mode: store.getChatInvestigationSettings().mode,
+      provider,
+      providerId,
+      ...(selectedModel ? { model: selectedModel } : {}),
+    }).enabled;
+    // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
+    const answerPlan = options.voice
+      ? undefined
+      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, steps });
     const isCancelled = () => options.signal?.aborted === true;
     const finishCancelled = (): SendIntuneChatMessageResult => {
       const cancelledAt = new Date().toISOString();
       const currentCacheStatus = store.getGraphCacheStatus(tenant.id, [
         ...GRAPH_CACHE_RESOURCES,
       ]);
+      steps.settle("failed");
       const assistantMessage: IntuneChatMessage = {
         id: assistantId,
         conversationId: conversation.id,
@@ -2058,6 +2132,8 @@ export class IntuneChatService {
         createdAt: cancelledAt,
         providerId,
         ...(selectedModel ? { model: selectedModel } : {}),
+        ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
+        steps: steps.steps,
         sources: buildIntuneChatSources({
           cacheStatus: currentCacheStatus,
           plannedResources: planned.resources,
@@ -2149,6 +2225,7 @@ export class IntuneChatService {
           message: `Refreshing ${staleResources.length} tenant data source${staleResources.length === 1 ? "" : "s"} before answering.`,
           stage: "refreshing-cache",
         });
+        const refreshStep = this.refreshStep(steps, staleResources);
         refreshResult = await this.refreshGraphCacheInternal(
           {
             tenantId: tenant.id,
@@ -2157,6 +2234,7 @@ export class IntuneChatService {
           (event) => {
             if (event.type === "resource-start") {
               progressActiveResource = event.resource;
+              refreshStep.progress(event.label);
               sendProgress({
                 message: `Refreshing ${event.label}.`,
                 stage: "refreshing-cache",
@@ -2178,6 +2256,7 @@ export class IntuneChatService {
           // away. The signal now reaches the requests themselves.
           options.signal,
         );
+        refreshStep.finish(refreshResult);
         store.insertToolCall({
           id: `tool_${randomUUID()}`,
           conversationId: conversation.id,
@@ -2257,6 +2336,8 @@ export class IntuneChatService {
     let engineNotice: string | undefined;
     let responseModel = selectedModel;
     let toolTrace: IntuneChatMessage["toolTrace"];
+    let documentationSources: IntuneChatDocumentationSource[] = [];
+    let modelFollowUps: string[] = [];
 
     const emitDelta = (content: string, delta: string = content) => {
       onEvent({
@@ -2270,7 +2351,7 @@ export class IntuneChatService {
       });
     };
 
-    const directVoiceAnswer = accessBlockedMessage
+    const directVoiceAnswer = accessBlockedMessage || answerPlan?.sources.kind === "docs"
       ? undefined
       : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
@@ -2314,8 +2395,14 @@ export class IntuneChatService {
           limits: chatBudget.answerPackLimits,
         });
         const system = [buildIntuneChatSystemPrompt(provider?.isLocal === true), options.voice ? VOICE_ANSWER_INSTRUCTIONS : ""].filter(Boolean).join("\n");
-        const streamDocumentation = await this.retrieveDocumentationSafely(options.voice ? content : modelQuestion);
+        const streamDocumentation = options.voice
+          ? await this.retrieveDocumentationSafely(content)
+          : await this.searchDocsIndex(modelQuestion, steps);
         const documentation = options.voice ? streamDocumentation.slice(0, 2).map(d => ({ ...d, text: d.text.slice(0, 600) })) : streamDocumentation;
+        const citations = new CitationRegistry();
+        citations.addPassages(documentation);
+        documentationSources = citations.sources;
+        const finishAnswerStep = startAnswerStep(steps, answerModel);
         const overhead = Buffer.byteLength(buildAnswerPrompt("", documentation)) + Buffer.byteLength(system);
         if (options.voice) answerPack = compactVoiceAnswerPack(answerPack, voiceByteLimit - overhead);
         const prompt = buildAnswerPrompt(answerPack, documentation);
@@ -2337,6 +2424,7 @@ export class IntuneChatService {
         }
         assistantContent = assistantContent.trim();
         emitDelta(assistantContent, "");
+        finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
 
       if (!llm.available) {
@@ -2353,8 +2441,7 @@ export class IntuneChatService {
             providerId,
             model: selectedModel ?? llm.defaultModel,
           });
-          // Voice keeps its own bounded tool set; MCP tools are Chat only.
-          const mcp = options.voice ? {} : await this.mcpToolsFor(tenant, conversation.id);
+          const mcp = answerPlan?.mcp ?? {};
           const tenantObservations = new TenantValueIndex();
           if (capability.enabled || options.webSearch) {
             sendProgress({
@@ -2368,11 +2455,17 @@ export class IntuneChatService {
                 schedule: store.getGraphCacheRefreshSchedule(tenant.id),
               },
             });
+            const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
+            const learnFirst = answerPlan?.sources.learnFirst === true;
+            const documentation = options.voice
+              ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
+              : learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
+            const finishAnswerStep = startAnswerStep(steps, answerModel);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
-              documentation: options.voice && options.webSearch
-                ? []
-                : await this.retrieveDocumentationSafely(modelQuestion),
+              documentation,
+              ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
+              ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -2381,12 +2474,12 @@ export class IntuneChatService {
               tools: { ...this.buildChatToolContext(tenant, options.signal), webSearch: options.webSearch, ...mcp, tenantObservations },
               ...(options.voice ? { voice: true, promptByteLimit: voiceByteLimit, observationCharBudget: 6000 } : {}),
               plannedResources: planned.resources,
-              generalQuestion: isGeneralKnowledgeQuestion(content),
               agentSuggestions: options.voice ? [] : agentSuggestions,
               generatedAt: answerGeneratedAt,
               maxTokens: chatBudget.maxTokens,
               signal: options.signal,
               onToolStart: (event) => {
+                toolSteps.start(event.tool, event.params);
                 const stepId = `tool-${progressToolSteps.length + 1}-${event.tool}`;
                 progressToolSteps = [
                   ...progressToolSteps,
@@ -2413,6 +2506,7 @@ export class IntuneChatService {
                 });
               },
               onToolFinish: (event) => {
+                toolSteps.finish(event.traceEntry);
                 progressToolSteps = progressToolSteps.map((step, index) =>
                   index === progressToolSteps.length - 1
                     ? {
@@ -2441,6 +2535,9 @@ export class IntuneChatService {
             toolTrace = agentic.toolTrace;
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
+              finishAnswerStep({ passages: (agentic.documentationSources ?? []).filter((source) => source.kind === "docs-index").length, trace: agentic.toolTrace });
+              modelFollowUps = agentic.followUps ?? [];
+              documentationSources = agentic.documentationSources ?? [];
               sendProgress({
                 message: "Model response started.",
                 stage: "generating-answer",
@@ -2452,9 +2549,10 @@ export class IntuneChatService {
                   schedule: store.getGraphCacheRefreshSchedule(tenant.id),
                 },
               });
-              assistantContent = agentic.answer.trim();
+              assistantContent = relabelUnverifiedLearn(agentic.answer.trim(), agentic.toolTrace.some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID));
               emitDelta(assistantContent);
             } else {
+              finishAnswerStep({ passages: 0, trace: agentic.toolTrace, failed: true });
               sendProgress({
                 message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice,
                 stage: "building-context",
@@ -2542,6 +2640,11 @@ export class IntuneChatService {
       ).join("\n");
       emitDelta(assistantContent, "");
     }
+    assistantContent = relabelUnverifiedLearn(assistantContent, (toolTrace ?? []).some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID));
+    steps.settle(assistantStatus === "failed" ? "failed" : "completed");
+    const followUps = answerPlan && assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage
+      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
+      : [];
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,
       conversationId: conversation.id,
@@ -2552,6 +2655,10 @@ export class IntuneChatService {
       providerId,
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
+      ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
+      steps: steps.steps,
+      ...(documentationSources.length > 0 ? { documentationSources } : {}),
+      ...(followUps.length > 0 ? { followUps } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
           ? packCacheStatus
@@ -2670,6 +2777,95 @@ export class IntuneChatService {
       );
       return [];
     }
+  }
+
+  /**
+   * Classifies the question, chooses its sources and records the first
+   * step. A docs question keeps the planner's resources only as the tenant
+   * tie-in for follow-ups: its plan is emptied, so nothing reads the tenant.
+   */
+  private async planAnswer(input: {
+    content: string;
+    planned: PlannedChatContext;
+    tenant: TenantRecord;
+    conversationId: string;
+    toolsOffered: boolean;
+    steps: ChatStepRecorder;
+  }): Promise<{ mcp: { mcp?: McpChatContext }; sources: ChatSourcePlan; tieInResources: GraphCacheResourceKind[] }> {
+    const mcp = input.toolsOffered ? await this.mcpToolsFor(input.tenant, input.conversationId) : {};
+    const servers = mcp.mcp?.servers ?? [];
+    const kind = input.planned.hasWriteIntent
+      ? "tenant"
+      : classifyChatQuestion(input.content, { plannedResources: input.planned.resources, namesSource: namedServers(input.content, servers).length > 0 });
+    const sources = planChatSources({ question: input.content, kind, servers, docsIndexAvailable: Boolean(this.host.documentationIndexVersion?.()) });
+    const tieInResources = [...input.planned.resources];
+    if (kind === "docs") input.planned.resources = [];
+    input.steps.finish(input.steps.start({ kind: "plan", title: "Read the question", detail: sources.detail, origin: "device", originLabel: ON_DEVICE }));
+    return { mcp, sources, tieInResources };
+  }
+
+  /** Searches the local docs index and records the step. Passages carry the index version. */
+  private async searchDocsIndex(query: string, steps: ChatStepRecorder, fallback = false): Promise<DocsIndexPassage[]> {
+    const version = this.host.documentationIndexVersion?.();
+    const title = fallback ? "Searched the local docs index instead" : "Searched the local docs index";
+    const step = () => ({ kind: "docs-index" as const, title, origin: "device" as const, originLabel: ON_DEVICE });
+    const id = version ? steps.start({ ...step(), title: fallback ? "Searching the local docs index instead" : "Searching the local docs index" }) : undefined;
+    const passages: DocsIndexPassage[] = (await this.retrieveDocumentationSafely(query)).map((passage) => ({
+      file: passage.file,
+      ...(passage.title ? { title: passage.title } : {}),
+      text: passage.text,
+      ...(version ? { indexVersion: version } : {}),
+    }));
+    const detail = `${passages.length > 0 ? `${passages.length} ${passages.length === 1 ? "passage" : "passages"}` : "No passages matched"}${version ? ` · index from ${formatIndexVersion(version)}` : ""}`;
+    if (id) steps.finish(id, { title, detail });
+    else if (passages.length > 0) steps.finish(steps.start(step()), { detail });
+    return passages;
+  }
+
+  /** Records the pre-answer Graph refresh as one step, with its live progress. */
+  private refreshStep(steps: ChatStepRecorder, resources: readonly GraphCacheResourceKind[]) {
+    const id = steps.start({
+      kind: "graph-refresh",
+      title: "Refreshing tenant data",
+      detail: `${resources.length} ${resources.length === 1 ? "source" : "sources"}`,
+      origin: "graph",
+      originLabel: MICROSOFT_GRAPH,
+    });
+    return {
+      progress: (label: string) => steps.update(id, { detail: label }),
+      finish: (result: GraphCacheRefreshResult) => {
+        const ok = result.resources.filter((resource) => resource.ok);
+        const first = ok[0];
+        steps.finish(id, ok.length === 0
+          ? { status: "failed", title: "Could not refresh tenant data", detail: result.resources[0]?.error ?? "Every refresh failed." }
+          : {
+              title: "Refreshed tenant data",
+              detail: `${first!.label} · ${first!.rows.toLocaleString()} rows${ok.length > 1 ? ` and ${ok.length - 1} more` : ""}${ok.length < result.resources.length ? ` · ${result.resources.length - ok.length} failed` : ""}`,
+            });
+      },
+    };
+  }
+
+  /** Follow-ups for an answer: the tenant tie-in of a docs question first, then the model's. */
+  private answerFollowUps(input: {
+    content: string;
+    sources: ChatSourcePlan;
+    tieInResources: readonly GraphCacheResourceKind[];
+    tenantId: string;
+    cacheStatus: readonly GraphCacheResourceStatus[];
+    modelFollowUps?: readonly string[];
+  }): string[] {
+    const store = this.host.requireIntelligenceStore();
+    const devices = input.cacheStatus.find((status) => status.resource === "managedDevices");
+    const tieIn = tenantTieInFollowUp({
+      question: input.content,
+      kind: input.sources.kind,
+      tieInResources: input.tieInResources,
+      ...(devices?.refreshedAt && input.tieInResources.includes("managedDevices")
+        ? { deviceCountsByOs: this.graphAggregatesFor(store, input.tenantId, ["managedDevices"]).managedDevices?.breakdowns.operatingSystem ?? {} }
+        : {}),
+    });
+    return mergeFollowUps([tieIn], input.modelFollowUps ?? []);
   }
 
   /** MCP tools for one answer, with the tenant values earlier turns observed. */
@@ -3089,7 +3285,7 @@ function buildAnswerPrompt(
     )
     .join("\n\n");
   return [
-    "Microsoft documentation passages retrieved locally for this question:",
+    "Microsoft documentation passages from the local docs index on this device. Call them the local docs index, never Microsoft Learn:",
     passages,
     "",
     "The documentation above describes how Microsoft 365 behaves in general. It is not this tenant's state. When you rely on it, cite the source in square brackets, for example [1]. If it does not cover the question, say so rather than guessing.",

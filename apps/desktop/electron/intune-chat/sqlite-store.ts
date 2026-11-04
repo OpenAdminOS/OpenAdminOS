@@ -65,9 +65,13 @@ interface MessageRow {
   engine_notice: string | null;
   sources_json: string | null;
   agent_suggestions_json: string | null;
+  answer_meta_json: string | null;
   error: string | null;
   created_at: string;
 }
+
+/** Answer fields stored together: the question kind, steps, citation targets and follow-ups. */
+type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps">;
 
 interface ResourceStatusRow {
   resource: GraphCacheResourceKind;
@@ -592,9 +596,9 @@ export class IntelligenceSqliteStore {
       .prepare(
         `INSERT INTO chat_messages (
           id, conversation_id, role, content, status, provider_id, model,
-          engine_notice, sources_json, agent_suggestions_json, error, created_at
+          engine_notice, sources_json, agent_suggestions_json, answer_meta_json, error, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -607,6 +611,7 @@ export class IntelligenceSqliteStore {
         message.engineNotice ?? null,
         message.sources ? JSON.stringify(message.sources) : null,
         message.agentSuggestions ? JSON.stringify(message.agentSuggestions) : null,
+        answerMetaJson(message),
         message.error ?? null,
         message.createdAt,
       );
@@ -616,7 +621,7 @@ export class IntelligenceSqliteStore {
     const rows = this.db
       .prepare(
         `SELECT id, conversation_id, role, content, status, provider_id, model,
-                engine_notice, sources_json, agent_suggestions_json, error, created_at
+                engine_notice, sources_json, agent_suggestions_json, answer_meta_json, error, created_at
          FROM chat_messages
          WHERE conversation_id = ?
          ORDER BY created_at ASC`,
@@ -3748,6 +3753,7 @@ export class IntelligenceSqliteStore {
     ensureColumn(this.db, "chat_conversations", "scope_json", "TEXT");
     ensureColumn(this.db, "chat_conversations", "multi_tenant_job_id", "TEXT");
     ensureColumn(this.db, "chat_messages", "engine_notice", "TEXT");
+    ensureColumn(this.db, "chat_messages", "answer_meta_json", "TEXT");
     this.ensureDefaultSavedQueries(new Date().toISOString());
   }
 
@@ -4021,9 +4027,20 @@ function readMessage(row: MessageRow): IntuneChatMessage {
     agentSuggestions: row.agent_suggestions_json
       ? readJson(row.agent_suggestions_json, [])
       : undefined,
+    ...(row.answer_meta_json ? readJson<AnswerMeta>(row.answer_meta_json, {}) : {}),
     error: row.error ?? undefined,
     createdAt: row.created_at,
   };
+}
+
+function answerMetaJson(message: IntuneChatMessage): string | null {
+  const meta: AnswerMeta = {
+    ...(message.questionKind ? { questionKind: message.questionKind } : {}),
+    ...(message.steps?.length ? { steps: message.steps } : {}),
+    ...(message.documentationSources?.length ? { documentationSources: message.documentationSources } : {}),
+    ...(message.followUps?.length ? { followUps: message.followUps } : {}),
+  };
+  return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
 }
 
 function readSuggestion(row: SuggestionRow): SelfTrainingSuggestion {
