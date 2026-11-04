@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { IntuneChatDocumentationSource, IntuneChatStep, IntuneChatToolTraceEntry } from "./openAdminOS";
-import { sourcesForCards, splitAnswerBlocks, summarizeSteps, usedTenantEvidence } from "./chat-steps";
+import { normalizeSourceUrl, sourcesForCards, splitAnswerBlocks, summarizeSteps, usedTenantEvidence } from "./chat-steps";
 
 const step = (overrides: Partial<IntuneChatStep>): IntuneChatStep => ({
   id: overrides.id ?? Math.random().toString(36), kind: "tool", title: "Step", status: "completed", origin: "device",
@@ -87,8 +87,20 @@ describe("answer blocks", () => {
     expect(splitAnswerBlocks("Two devices need review.", { documentationSources: [learn], tenantEvidence: true })).toEqual([{ kind: "plain", text: "Two devices need review." }]);
   });
 
+  it("merges chunks of one article into one card that every one of their numbers points at", () => {
+    const article = (citation: number, url: string): IntuneChatDocumentationSource => ({ ...learn, citation, title: "Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune", url });
+    const sources = [
+      article(2, "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune#create-system-configuration-profiles"),
+      article(4, "https://learn.microsoft.com/en-us/defender-endpoint/mac-install-with-intune/#deploy"),
+      { ...learn, citation: 6, title: "Onboard devices to Microsoft Defender for Business", url: "https://learn.microsoft.com/defender-business/mdb-onboard-devices#mac" },
+    ];
+    const cards = sourcesForCards("Deploy the profiles [4] and onboard [6], see also [2].", sources);
+    expect(cards.sources.map((card) => [card.citation, card.citations])).toEqual([[2, [2, 4]], [6, [6]]]);
+    expect(normalizeSourceUrl("https://Learn.Microsoft.com/en-us/Intune/x/#y")).toBe("https://learn.microsoft.com/intune/x");
+  });
+
   it("shows cards for cited sources only, and MCP results when nothing is cited", () => {
-    expect(sourcesForCards("X [2] and [9].", [learn, index])).toEqual({ cited: true, sources: [index] });
-    expect(sourcesForCards("No citations.", [learn, index])).toEqual({ cited: false, sources: [learn] });
+    expect(sourcesForCards("X [2] and [9].", [learn, index])).toEqual({ cited: true, sources: [{ ...index, citations: [2] }] });
+    expect(sourcesForCards("No citations.", [learn, index])).toEqual({ cited: false, sources: [{ ...learn, citations: [1] }] });
   });
 });

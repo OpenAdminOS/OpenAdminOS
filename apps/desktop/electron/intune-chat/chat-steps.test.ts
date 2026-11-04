@@ -195,6 +195,17 @@ describe("citations and MCP results", () => {
     assert.equal(registry.sources[0]!.indexVersion, "2026-08-26");
   });
 
+  it("gives chunks of one article one number, across fragments, locale segments and trailing slashes", () => {
+    const registry = new CitationRegistry();
+    const cites = registry.addMcpResults([
+      { title: "Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune", url: "https://learn.microsoft.com/defender-endpoint/mac-install-with-intune#create-system-configuration-profiles" },
+      { title: "Onboard devices to Microsoft Defender for Business", url: "https://learn.microsoft.com/defender-business/mdb-onboard-devices#mac" },
+      { title: "Deploy Microsoft Defender for Endpoint on macOS with Microsoft Intune", url: "https://learn.microsoft.com/en-us/defender-endpoint/mac-install-with-intune/#deploy" },
+    ], { serverName: "Microsoft Learn", host: "learn.microsoft.com" });
+    assert.deepEqual(cites.map((entry) => entry.cite), ["[1]", "[2]", "[1]"]);
+    assert.equal(registry.sources.length, 2);
+  });
+
   it("reads titles and links from JSON and Markdown results, and drops unsafe links", () => {
     assert.deepEqual(parseMcpResults(JSON.stringify({ results: [
       { title: "Defender for Endpoint on Mac", content: "...", contentUrl: "https://learn.microsoft.com/defender-endpoint/mac" },

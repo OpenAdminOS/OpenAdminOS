@@ -128,6 +128,37 @@ export function citedNumbers(text: string, sources: readonly IntuneChatDocumenta
   return [...new Set([...text.matchAll(/\[(\d{1,2})\](?!\()/g)].map((match) => Number(match[1])).filter((n) => known.has(n)))];
 }
 
+/**
+ * One key per article: lowercase host, no fragment, no locale segment such
+ * as /en-us/, no trailing slash. Chunks of one Learn page share it.
+ */
+export function normalizeSourceUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    const path = parsed.pathname.replace(/^\/[a-z]{2}-[a-z]{2}(?=\/)/i, "").replace(/\/+$/, "");
+    return `${parsed.protocol}//${parsed.host.toLowerCase()}${path.toLowerCase()}${parsed.search}`;
+  } catch {
+    return url;
+  }
+}
+
+/** A source card: the first source of one article or file, with every citation number that points at it. */
+export type SourceCard = IntuneChatDocumentationSource & { citations: number[] };
+
+/** Sources merged into one card per article or file; `cardFor` maps any citation number to its card. */
+export function mergeSources(sources: readonly IntuneChatDocumentationSource[]): { cards: SourceCard[]; cardFor: (citation: number) => SourceCard | undefined } {
+  const byKey = new Map<string, SourceCard>();
+  const byCitation = new Map<number, SourceCard>();
+  for (const source of [...sources].sort((a, b) => a.citation - b.citation)) {
+    const key = source.url ? `url:${normalizeSourceUrl(source.url)}` : source.file ? `file:${source.file}` : `citation:${source.citation}`;
+    const card = byKey.get(key) ?? { ...source, citations: [] };
+    card.citations.push(source.citation);
+    byKey.set(key, card);
+    byCitation.set(source.citation, card);
+  }
+  return { cards: [...byKey.values()], cardFor: (citation) => byCitation.get(citation) };
+}
+
 /** Paragraphs split at blank lines, keeping fenced code blocks whole. */
 function chunks(content: string): string[] {
   const out: string[] = [];
@@ -193,10 +224,11 @@ export function splitAnswerBlocks(content: string, input: {
  * The host registers MCP results only for calls that answered, so a failed
  * or blocked call never appears.
  */
-export function sourcesForCards(content: string, sources: readonly IntuneChatDocumentationSource[]): { cited: boolean; sources: IntuneChatDocumentationSource[] } {
-  const cited = citedNumbers(content, sources);
-  if (cited.length > 0) return { cited: true, sources: sources.filter((source) => cited.includes(source.citation)) };
-  return { cited: false, sources: sources.filter((source) => source.kind === "mcp").slice(0, 4) };
+export function sourcesForCards(content: string, sources: readonly IntuneChatDocumentationSource[]): { cited: boolean; sources: SourceCard[] } {
+  const { cards, cardFor } = mergeSources(sources);
+  const cited = new Set(citedNumbers(content, sources).map((citation) => cardFor(citation)?.citation));
+  if (cited.size > 0) return { cited: true, sources: cards.filter((card) => cited.has(card.citation)) };
+  return { cited: false, sources: cards.filter((source) => source.kind === "mcp").slice(0, 4) };
 }
 
 /** "2026-08-26" as "Aug 26, 2026". */

@@ -8,6 +8,7 @@ import type {
 } from "@openadminos/agent-sdk";
 
 import { definitionForResource, planChatContext } from "./planner.js";
+import { normalizeSourceUrl } from "../../src/shared/chat-steps.js";
 import { isMcpChatToolName, isTenantTool, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
 
 export const LEARN_SERVER_ID = "microsoft-learn";
@@ -247,7 +248,8 @@ export class CitationRegistry {
   addMcpResults(results: ReadonlyArray<{ title: string; url?: string }>, tool: Pick<McpChatTool, "serverName" | "host">): Array<{ cite: string; title: string; url?: string }> {
     const items = results.length > 0 ? results : [{ title: `${tool.serverName} result` }];
     return items.map((item) => {
-      const existing = item.url ? this.list.find((source) => source.url === item.url) : undefined;
+      // Chunks of one article (other fragment, locale segment or trailing slash) share its number.
+      const existing = item.url ? this.list.find((source) => source.url && normalizeSourceUrl(source.url) === normalizeSourceUrl(item.url!)) : undefined;
       const citation = existing?.citation ?? this.push({
         kind: "mcp",
         title: item.title,
