@@ -1634,6 +1634,51 @@ function liveRunFixture() {
 }
 
 describe("IntuneChat live run", () => {
+  it("shows the scope line and the steps from the moment of sending until the answer, never an empty answer area", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return result;
+      }),
+      getIntuneChatMessages: vi.fn(async () => [userMessage, result.assistantMessage]),
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+    await user.type(composer, conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    const answerArea = () => {
+      const steps = within(log).getByRole("list", { name: "Steps" });
+      expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
+      return within(steps).getAllByRole("listitem").map((row) => row.textContent ?? "");
+    };
+    // Before the host has started the run, and after it started but sent no step yet.
+    expect(answerArea()).toEqual([expect.stringContaining("Reading the question")]);
+    expect(within(log).getByText("Checking cached tenant data.")).toBeInTheDocument();
+    act(() => emit(events[0]!));
+    expect(answerArea()).toEqual([expect.stringContaining("Reading the question")]);
+    for (const event of events.slice(1, -2)) {
+      act(() => emit(event));
+      expect(answerArea().length).toBeGreaterThan(0);
+    }
+    expect(answerArea()).toEqual([
+      expect.stringContaining("Read the question"),
+      expect.stringContaining("Asked Microsoft Learn"),
+      expect.stringContaining("Wrote the answer"),
+    ]);
+    act(() => emit(events.at(-2)!));
+    expect(answerArea()).toHaveLength(3);
+    act(() => emit(events.at(-1)!));
+    finish();
+    expect(await screen.findByRole("button", { name: /3 steps/ }, { timeout: 4000 })).toBeInTheDocument();
+  });
+
   it("keeps the scope line and the live steps after Chat is opened again during the run", async () => {
     const user = userEvent.setup();
     const { conversation, userMessage, result, events } = liveRunFixture();

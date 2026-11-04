@@ -68,6 +68,31 @@ export function StepTimeline({ steps, id }: { steps: readonly IntuneChatStep[]; 
   );
 }
 
+/**
+ * The first row before the host sends a step, so the answer area of a run
+ * is never empty. It reads the same as the host's first step.
+ */
+export function StepSkeleton() {
+  const tone = STEP_ORIGIN_TONE.device;
+  return (
+    <ol aria-label="Steps" className="relative mb-4 list-none p-0">
+      <li aria-current="step" className="relative grid grid-cols-[22px_minmax(0,1fr)_auto] gap-x-3 py-[7px]">
+        <span aria-hidden="true" className={`relative z-[1] mt-px grid h-[21px] w-[21px] place-items-center rounded-full ring-1 ring-inset ring-current/40 motion-safe:animate-pulse ${tone.text} ${tone.soft}`}>
+          <span className="h-[5px] w-[5px] rounded-full bg-current" />
+        </span>
+        <div className="min-w-0">
+          <div className="text-base font-medium text-[var(--color-text)]">
+            Reading the question
+            <span className="sr-only">, running</span>
+          </div>
+          <div aria-hidden="true" className="run-skeleton mt-1.5 h-2.5 w-44 max-w-full" />
+        </div>
+        <span className={`mt-px self-start whitespace-nowrap rounded-full px-2 py-0.5 text-xs ${tone.text} ${tone.soft}`}>On device</span>
+      </li>
+    </ol>
+  );
+}
+
 /** The folded line after an answer. It expands to the full timeline. */
 export function StepSummary({ message }: { message: IntuneChatMessage }) {
   const [open, setOpen] = useState(false);

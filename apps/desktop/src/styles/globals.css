@@ -691,6 +691,12 @@ button:disabled {
     transition-duration: 0.01ms !important;
   }
 
+  .chat-scope-shimmer {
+    animation: none !important;
+    background: none;
+    color: var(--color-text-muted);
+  }
+
   .animate-fade-in,
   .animate-fade-in-scale,
   .animate-pulse-soft,

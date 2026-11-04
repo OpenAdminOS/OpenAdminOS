@@ -51,6 +51,7 @@ import {
   type IntuneChatConversation,
   type IntuneChatMessage,
   type IntuneChatProgressStep,
+  type IntuneChatStep,
   type IntuneChatSource,
   type IntuneChatStreamEvent,
   type IntuneChatToolTraceEntry,
@@ -85,7 +86,7 @@ import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
-import { AnswerBody, FollowUpChips, SourceCards, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
+import { AnswerBody, FollowUpChips, SourceCards, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
@@ -1935,7 +1936,7 @@ function IntuneChatContent() {
               </div>
             ) : displayedMessages.length === 0 && shownProgress ? (
               <div className="flex flex-1 flex-col justify-center py-16">
-                <AssistantPendingScopeLine tenant={activeTenant} label={shownProgress.message} />
+                <PendingAnswer tenant={activeTenant} label={shownProgress.message} />
               </div>
             ) : (
               <div className="flex flex-1 flex-col">
@@ -2015,7 +2016,7 @@ function IntuneChatContent() {
                   );
                 })}
                 {runInProgress && shownProgress && !progressMessageVisible ? (
-                  <AssistantPendingScopeLine tenant={activeTenant} label={shownProgress.message} />
+                  <PendingAnswer tenant={activeTenant} label={shownProgress.message} />
                 ) : null}
               </div>
             )}
@@ -2835,6 +2836,16 @@ function AssistantPendingScopeLine({ tenant, label }: { tenant?: TenantRecord; l
       <span aria-hidden="true">·</span>
       <span className="chat-scope-shimmer">{label}</span>
     </div>
+  );
+}
+
+/** The scope line and the live steps, with a first skeleton row until the host sends a step. */
+function PendingAnswer({ tenant, label, steps }: { tenant?: TenantRecord; label: string; steps?: readonly IntuneChatStep[] }) {
+  return (
+    <>
+      <AssistantPendingScopeLine tenant={tenant} label={label} />
+      {steps?.length ? <StepTimeline steps={steps} /> : <StepSkeleton />}
+    </>
   );
 }
 
@@ -4212,10 +4223,7 @@ function ChatMessageBubble({
   return (
     <article className="group mb-[34px] w-full" title={`Answered ${timestamp}`}>
       {progress ? (
-        <>
-          <AssistantPendingScopeLine tenant={tenant} label={progress.message} />
-          {message.steps?.length ? <StepTimeline steps={message.steps} /> : null}
-        </>
+        <PendingAnswer tenant={tenant} label={progress.message} steps={message.steps} />
       ) : (
         <>
           <AnswerScopeDisclosure
