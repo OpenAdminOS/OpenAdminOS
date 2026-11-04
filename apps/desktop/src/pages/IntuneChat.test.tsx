@@ -1345,8 +1345,8 @@ describe("IntuneChat conversation routes", () => {
       const bridge = setup();
       const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
       await waitFor(() => expect(composer).toHaveAttribute("placeholder", followUp));
-      expect(screen.getByText(`Suggestion: ${followUp}, press Tab to use it`)).toBeInTheDocument();
-      expect(composer).toHaveAccessibleDescription(`Suggestion: ${followUp}, press Tab to use it`);
+      expect(screen.getByText(`Suggestion: ${followUp}, press Tab to use it, Escape to dismiss`)).toBeInTheDocument();
+      expect(composer).toHaveAccessibleDescription(`Suggestion: ${followUp}, press Tab to use it, Escape to dismiss`);
       composer.focus();
       await user.keyboard("{Tab}");
       expect(composer).toHaveValue(followUp);

@@ -2380,7 +2380,7 @@ function ChatComposer({
               Tab
             </kbd>
             <span id={suggestionHintId} role="status" className="sr-only">
-              Suggestion: {suggestion}, press Tab to use it
+              Suggestion: {suggestion}, press Tab to use it, Escape to dismiss
             </span>
           </>
         ) : null}
