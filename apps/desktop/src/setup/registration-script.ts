@@ -44,6 +44,35 @@ export function escapePowerShellSingleQuoted(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+function isPrintableAscii(value: string): boolean {
+  return /^[\x20-\x7E]*$/.test(value);
+}
+
+/**
+ * A PowerShell expression for `value` written in printable ASCII only.
+ * Windows PowerShell 5.1 reads a .ps1 without a byte order mark in the
+ * system code page. Under Windows-1252 some UTF-8 bytes of ordinary
+ * letters decode as single-quote delimiters, so every other character is
+ * written as a [char] code.
+ */
+export function powerShellStringLiteral(value: string): string {
+  if (isPrintableAscii(value)) return `'${escapePowerShellSingleQuoted(value)}'`;
+  const parts: string[] = [];
+  let run = "";
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code >= 0x20 && code <= 0x7e) {
+      run += value[index];
+      continue;
+    }
+    if (run) parts.push(`'${escapePowerShellSingleQuoted(run)}'`);
+    run = "";
+    parts.push(`[char]0x${code.toString(16).toUpperCase().padStart(4, "0")}`);
+  }
+  if (run) parts.push(`'${escapePowerShellSingleQuoted(run)}'`);
+  return `-join @(${parts.join(", ")})`;
+}
+
 export function generateRegistrationSetup(
   displayNameInput: string,
   areaIds: readonly PermissionAreaId[],
@@ -59,12 +88,15 @@ export function generateRegistrationSetup(
   );
   const scopeNames = scopesForPermissionAreas(selectedIds);
   const allScopes = [...scopeNames, "openid", "profile", "offline_access"];
-  const escapedDisplayName = escapePowerShellSingleQuoted(displayName);
+  const displayNameLiteral = powerShellStringLiteral(displayName);
+  const headerName = isPrintableAscii(displayName)
+    ? `named ${displayName}`
+    : "with the display name set in $displayName below";
   const scopeLines = allScopes.map((scope) => `    '${scope}'`).join(",\n");
   const areaList = areaTitles.join(", ");
 
   const script = `<#
-This script creates a tenant-owned Microsoft Entra app registration named ${displayName} for OpenAdminOS.
+This script creates a tenant-owned Microsoft Entra app registration ${headerName} for OpenAdminOS.
 
 It makes these changes:
 1. Connects to Microsoft Graph with permission to create an application and grant delegated tenant-wide consent. An administrator must approve these setup permissions.
@@ -77,7 +109,7 @@ The script does not create a client secret or certificate. OpenAdminOS signs use
 #>
 
 $ErrorActionPreference = 'Stop'
-$displayName = '${escapedDisplayName}'
+$displayName = ${displayNameLiteral}
 $microsoftGraphAppId = '00000003-0000-0000-c000-000000000000'
 $requestedScopeValues = @(
 ${scopeLines}

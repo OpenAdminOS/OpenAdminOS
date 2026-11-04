@@ -15,6 +15,7 @@ import {
 import {
   escapePowerShellSingleQuoted,
   generateRegistrationSetup,
+  powerShellStringLiteral,
   validateRegistrationDisplayName,
 } from "./registration-script";
 
@@ -155,5 +156,36 @@ describe("registration display name quoting", () => {
   it.skipIf(!HAS_PWSH)("confirms PowerShell ends a single-quoted string at U+2019", () => {
     const script = "$displayName = 'Ops\u2019; Write-Output INJECTED; #'\n$microsoftGraphAppId = ''";
     expect(parsedDisplayName(script).split("\n")).toContain("INJECTED");
+  });
+});
+
+describe("registration script encoding", () => {
+  const printableAscii = /^[\t\n\r\x20-\x7E]*$/;
+
+  it("writes non-ASCII display names as [char] codes", () => {
+    expect(powerShellStringLiteral("Ugur's app")).toBe("'Ugur''s app'");
+    expect(powerShellStringLiteral("\u00DCber Ops")).toBe("-join @([char]0x00DC, 'ber Ops')");
+    const script = generateRegistrationSetup("\u00DCber Ops", ["directory"]).script;
+    expect(script).toMatch(printableAscii);
+    expect(script).toContain("$displayName = -join @([char]0x00DC, 'ber Ops')");
+    expect(script).toContain("app registration with the display name set in $displayName below");
+  });
+
+  // U+00C2 is C3 82 in UTF-8, and Windows-1252 reads 0x82 as U+201A.
+  it("leaves no byte that Windows-1252 reads as a quote", () => {
+    const script = generateRegistrationSetup(
+      "\u00C2; Write-Output INJECTED; #",
+      ["directory"],
+    ).script;
+    const bytes = new TextEncoder().encode(script);
+    expect(new TextDecoder("windows-1252").decode(bytes)).toBe(script);
+    expect(script).toMatch(printableAscii);
+  });
+
+  it.skipIf(!HAS_PWSH)("round-trips non-ASCII names through PowerShell", () => {
+    for (const name of ["\u00DCber Ops", "Ops \u{20BB7} team", "\u00C2'; Write-Output INJECTED; #"]) {
+      const output = parsedDisplayName(generateRegistrationSetup(name, ["directory"]).script);
+      expect(output).toBe(`NAME=${name}`);
+    }
   });
 });
