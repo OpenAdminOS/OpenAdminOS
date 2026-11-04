@@ -190,7 +190,7 @@ describe("citation numbering", () => {
 
   it("names the third-party hosts once as not verified, and the local index", () => {
     expect(sourcesHeadingDetail([learn, { ...learn, citation: 3 }])).toBe("learn.microsoft.com, not verified by OpenAdminOS");
-    expect(sourcesHeadingDetail([learn, { ...learn, citation: 3, host: "www.kqlsearch.com" }, index])).toBe("learn.microsoft.com and www.kqlsearch.com, not verified by OpenAdminOS · local docs index on this device");
+    expect(sourcesHeadingDetail([learn, { ...learn, citation: 3, host: "www.kqlsearch.com" }, index])).toBe("learn.microsoft.com and www.kqlsearch.com, not verified by OpenAdminOS · Local docs index on this device");
   });
 
   it("offers Open in Learn when one Learn page supplies more than half of the citations", () => {

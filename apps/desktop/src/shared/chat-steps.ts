@@ -298,18 +298,19 @@ export function renumberCitations(content: string, sources: readonly IntuneChatD
 
 /** The host a reader sees for a source: the MCP host, or the local docs index. */
 export function sourceHost(source: IntuneChatDocumentationSource): string {
-  return source.kind === "mcp" ? source.host ?? "third-party host" : "local docs index";
+  return source.kind === "mcp" ? source.host ?? "third-party host" : "Local docs index";
 }
 
 /**
  * The line after "Sources": the distinct third-party hosts, said once to
- * be unverified, and the local docs index when it was used.
+ * be unverified, and the local docs index when it was used. The index is
+ * bundled with the app, so it is never named as third-party.
  */
 export function sourcesHeadingDetail(sources: readonly IntuneChatDocumentationSource[]): string {
   const hosts = [...new Set(sources.filter((source) => source.kind === "mcp").map(sourceHost))];
   const parts = [
     ...(hosts.length > 0 ? [`${joinList(hosts)}, not verified by OpenAdminOS`] : []),
-    ...(sources.some((source) => source.kind === "docs-index") ? ["local docs index on this device"] : []),
+    ...(sources.some((source) => source.kind === "docs-index") ? ["Local docs index on this device"] : []),
   ];
   return parts.join(" · ");
 }

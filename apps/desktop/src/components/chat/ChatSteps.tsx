@@ -315,9 +315,13 @@ function formatTime(value: string | undefined): string | undefined {
 }
 
 function SourceRow({ messageId, card, display, highlighted }: { messageId: string; card: SourceCard; display?: number; highlighted: boolean }) {
+  const indexDate = card.indexVersion ? formatIndexVersion(card.indexVersion) : undefined;
+  // A consulted index passage is labelled with its title (the file when it has none) and the index, in place of a host.
   const where = card.kind === "mcp"
     ? sourceHost(card)
-    : `${card.file ?? "local docs index"}${card.indexVersion ? ` · index from ${formatIndexVersion(card.indexVersion)}` : ""}`;
+    : display === undefined
+      ? `Local docs index${indexDate ? `, ${indexDate}` : ""}`
+      : `${card.file ?? "Local docs index"}${indexDate ? ` · index from ${indexDate}` : ""}`;
   return (
     <li
       id={display === undefined ? undefined : rowId(messageId, display)}
@@ -335,7 +339,7 @@ function SourceRow({ messageId, card, display, highlighted }: { messageId: strin
           {card.title}
         </a>
       ) : (
-        <span title={card.title} className="min-w-0 truncate text-sm font-medium text-[var(--color-text)]">{card.title}</span>
+        <span title={card.file && card.file !== card.title ? `${card.title} (${card.file})` : card.title} className="min-w-0 truncate text-sm font-medium text-[var(--color-text)]">{card.title || card.file}</span>
       )}
       <span className="ml-auto shrink-0 truncate pl-2 text-xs text-[var(--color-text-muted)] max-w-[45%]">{where}</span>
     </li>
@@ -345,9 +349,10 @@ function SourceRow({ messageId, card, display, highlighted }: { messageId: strin
 /**
  * The sources of an answer as a compact list: one line each with its
  * number, title and host, the first three shown and the rest under "Show
- * N more". The heading names the third-party hosts once, as not verified.
- * Sources the answer was given but does not cite sit under a collapsed
- * "Also consulted". A citation chip reveals, scrolls to and briefly
+ * N more". The heading names the third-party hosts once, as not verified,
+ * and the local docs index, which ships with the app, by name. Sources the
+ * answer was given but does not cite sit under a collapsed "Also
+ * consulted", or under "Consulted" when nothing is cited. A citation chip reveals, scrolls to and briefly
  * highlights its row. When tenant tools ran, the tenant resources follow.
  */
 export function SourceList({ message, content }: { message: IntuneChatMessage; content: string }) {
@@ -355,8 +360,8 @@ export function SourceList({ message, content }: { message: IntuneChatMessage; c
   const ordered = orderCitationRuns(content, sources);
   const numbering = numberCitations(ordered, sources);
   const cited = numbering.cited;
-  // When nothing is cited, the MCP results the answer was given are shown as consulted.
-  const consulted = cited.length > 0 ? numbering.consulted : numbering.consulted.filter((card) => card.kind === "mcp");
+  // Sources the answer was given but does not cite, MCP results and local index passages alike, never numbered.
+  const consulted = numbering.consulted;
   const [showAll, setShowAll] = useState(false);
   const [consultedOpen, setConsultedOpen] = useState(false);
   const [highlighted, setHighlighted] = useState<number | null>(null);

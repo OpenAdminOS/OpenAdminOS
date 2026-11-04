@@ -1462,6 +1462,45 @@ describe("IntuneChat conversation routes", () => {
       expect(within(log).getByRole("button", { name: /1 step/ })).not.toHaveTextContent("Tenant not used");
     });
 
+    it("lists consulted local index passages of an uncited answer the same way after a reload", async () => {
+      const conversation: IntuneChatConversation = {
+        id: "conversation-uncited", title: "Compliance grace period", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+      };
+      const stored: IntuneChatMessage[] = [{
+        id: "a-uncited", conversationId: conversation.id, role: "assistant", status: "completed", createdAt: conversation.updatedAt,
+        content: "A device is marked noncompliant once the grace period ends.",
+        questionKind: "docs",
+        documentationSources: [
+          { citation: 1, kind: "docs-index", title: "Compliance policies", file: "intune/compliance.md", indexVersion: "2026-08-26" },
+          { citation: 2, kind: "mcp", title: "Compliance grace period", url: "https://learn.microsoft.com/intune/grace", serverName: "Microsoft Learn", host: "learn.microsoft.com" },
+        ],
+        steps: [{ id: "s1", kind: "plan", title: "Read the question", status: "completed", origin: "device", originLabel: "On device", startedAt: "", durationMs: 1 }],
+      }];
+      const bridge = makeMockBridge({
+        listIntuneChatConversations: vi.fn(async () => [conversation]),
+        getIntuneChatMessages: vi.fn(async () => structuredClone(stored)),
+      });
+      const consultedRows = async () => {
+        await screen.findByText(/grace period ends/);
+        const consulted = within(screen.getByRole("log", { name: "Conversation" })).getByRole("region", { name: "Consulted" });
+        return {
+          heading: within(consulted).getByRole("heading").textContent,
+          rows: within(consulted).getAllByRole("listitem").map((row) => row.textContent),
+          links: within(consulted).queryAllByRole("link").map((link) => link.getAttribute("href")),
+        };
+      };
+      const first = renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-uncited", bridge });
+      const before = await consultedRows();
+      expect(before).toEqual({
+        heading: "Consulted · learn.microsoft.com, not verified by OpenAdminOS · Local docs index on this device",
+        rows: ["Compliance policiesLocal docs index, Aug 26, 2026", "Compliance grace periodlearn.microsoft.com"],
+        links: ["https://learn.microsoft.com/intune/grace"],
+      });
+      first.unmount();
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-uncited", bridge });
+      expect(await consultedRows()).toEqual(before);
+    });
+
     it("streams each step live, then folds them into the summary line", async () => {
       const user = userEvent.setup();
       const conversation: IntuneChatConversation = {

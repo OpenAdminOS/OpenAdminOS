@@ -185,14 +185,54 @@ describe("chat steps", () => {
     expect(screen.queryByRole("link", { name: /Open in Learn/ })).toBeNull();
   });
 
-  it("shows uncited MCP results as consulted, without citation numbers", () => {
+  it("lists uncited MCP results and local index passages as consulted, without citation numbers", () => {
     const content = "Defender for Endpoint needs full disk access.";
     render(<SourceList message={{ ...message, content }} content={content} />);
     expect(screen.queryByRole("region", { name: "Sources" })).toBeNull();
     const consulted = screen.getByRole("region", { name: "Consulted" });
-    expect(within(consulted).getByText("Microsoft Defender for Endpoint on Mac")).toBeInTheDocument();
-    expect(within(consulted).queryByText(/Source 1/)).toBeNull();
-    expect(within(consulted).queryByText(/defender\/mac-intune\.md/)).toBeNull();
+    expect(within(consulted).getByRole("heading")).toHaveTextContent("Consulted · learn.microsoft.com, not verified by OpenAdminOS · Local docs index on this device");
+    const rows = within(consulted).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      "Microsoft Defender for Endpoint on Maclearn.microsoft.com",
+      "Deploy Defender on macOS with IntuneLocal docs index, Aug 26, 2026",
+    ]);
+    expect(within(rows[0]!).getByRole("link", { name: "Microsoft Defender for Endpoint on Mac" })).toHaveAttribute("href", "https://learn.microsoft.com/defender-endpoint/mac");
+    // The local passage has no URL, so no link; its file shows on hover.
+    expect(within(rows[1]!).queryByRole("link")).toBeNull();
+    expect(within(rows[1]!).getByText("Deploy Defender on macOS with Intune")).toHaveAttribute("title", "Deploy Defender on macOS with Intune (defender/mac-intune.md)");
+    expect(within(consulted).queryByText(/Source \d/)).toBeNull();
+    expect(within(consulted).queryByRole("button", { name: /Also consulted/ })).toBeNull();
+  });
+
+  it("names only the local docs index, not a third-party host, when an uncited answer consulted local passages only", () => {
+    const local: IntuneChatDocumentationSource[] = [
+      { citation: 1, kind: "docs-index", title: "Compliance policies", file: "intune/compliance.md", indexVersion: "2026-08-26", excerpt: "Compliance policies mark a device." },
+      { citation: 2, kind: "docs-index", title: "", file: "intune/grace-period.md" },
+    ];
+    const answer: IntuneChatMessage = { ...message, content: "A device is marked noncompliant after the grace period.", documentationSources: local, steps: [] };
+    render(<SourceList message={answer} content={answer.content} />);
+    const consulted = screen.getByRole("region", { name: "Consulted" });
+    expect(within(consulted).getByRole("heading")).toHaveTextContent(/^Consulted · Local docs index on this device$/);
+    expect(consulted).not.toHaveTextContent(/not verified|third-party/);
+    expect(within(consulted).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      "Compliance policiesLocal docs index, Aug 26, 2026",
+      "intune/grace-period.mdLocal docs index",
+    ]);
+    expect(within(consulted).queryAllByRole("link")).toHaveLength(0);
+  });
+
+  it("lists uncited local passages under Also consulted next to uncited MCP results when something is cited", async () => {
+    const user = userEvent.setup();
+    const kql: IntuneChatDocumentationSource = { citation: 3, kind: "mcp", title: "Failed sign-ins", url: "https://www.kqlsearch.com/query/1", serverName: "KQL Search", host: "www.kqlsearch.com" };
+    const answer: IntuneChatMessage = { ...message, content: "Grant full disk access [1].", documentationSources: [...message.documentationSources!, kql], steps: [] };
+    render(<SourceList message={answer} content={answer.content} />);
+    const list = screen.getByRole("region", { name: "Sources" });
+    expect(within(list).getByRole("heading")).toHaveTextContent("Sources · learn.microsoft.com and www.kqlsearch.com, not verified by OpenAdminOS · Local docs index on this device");
+    await user.click(within(list).getByRole("button", { name: "Also consulted (2)" }));
+    expect(within(screen.getByRole("list", { name: "Also consulted" })).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      "Deploy Defender on macOS with IntuneLocal docs index, Aug 26, 2026",
+      "Failed sign-inswww.kqlsearch.com",
+    ]);
   });
 
   it("names the host of an uncited third-party source in the heading too", () => {
@@ -204,7 +244,7 @@ describe("chat steps", () => {
 
   it("names the local index file and date on its row", () => {
     render(<SourceList message={message} content={message.content} />);
-    expect(screen.getByRole("heading")).toHaveTextContent("Sources · learn.microsoft.com, not verified by OpenAdminOS · local docs index on this device");
+    expect(screen.getByRole("heading")).toHaveTextContent("Sources · learn.microsoft.com, not verified by OpenAdminOS · Local docs index on this device");
     expect(screen.getByText("defender/mac-intune.md · index from Aug 26, 2026")).toBeInTheDocument();
   });
 
