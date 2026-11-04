@@ -11,7 +11,7 @@ import {
   type TenantRecord,
 } from "@openadminos/agent-sdk";
 
-import { MAX_AGENTIC_ITERATIONS, runAgenticChat } from "./agentic-loop.js";
+import { MAX_AGENTIC_ITERATIONS, partialFinalAnswer, runAgenticChat } from "./agentic-loop.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
 import { executeIntuneChatTool } from "./tools.js";
@@ -716,4 +716,97 @@ it('does not turn failed license reads into an empty-tenant answer from unrelate
     assert.match(result.answer, /No verified count is available/);
     assert.doesNotMatch(result.answer, /no unused seats/);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+describe("streamed final answers", () => {
+  it("decodes the answer of a final reply while it streams, in any key order", () => {
+    assert.equal(partialFinalAnswer('```json\n{"tool":"query_cache","params":{"answer":"x"}}'), undefined);
+    assert.equal(partialFinalAnswer('{"final":true,"ans'), undefined);
+    assert.equal(partialFinalAnswer('{"final":true,"answer":"Onboard'), "Onboard");
+    assert.equal(partialFinalAnswer('{"kind":"docs","answer":"Line one\\nLine \\"two\\"","sources":[],"final":true'), 'Line one\nLine "two"');
+    // An escape cut off at the end waits for the next chunk.
+    assert.equal(partialFinalAnswer('{"final": true, "answer": "Tab\\'), "Tab");
+    assert.equal(partialFinalAnswer('{"final": true, "answer": "caf\\u00e'), "caf");
+    assert.equal(partialFinalAnswer('{"final": true, "answer": "caf\\u00e9 [1]", "next": ["Check our Macs"]}'), "café [1]");
+  });
+
+  /** Streams each scripted reply in small pieces, as an incremental adapter does. */
+  function streamingLlm(replies: string[], pieces = 7): RunLlmApi & { completeCalls: number } {
+    let index = 0;
+    const llm = {
+      available: true,
+      streamsIncrementally: true,
+      completeCalls: 0,
+      async complete() {
+        llm.completeCalls += 1;
+        throw new Error("an incremental adapter is streamed");
+      },
+      async *stream() {
+        const text = replies[Math.min(index++, replies.length - 1)]!;
+        for (let end = pieces; end < text.length + pieces; end += pieces) {
+          const accumulated = text.slice(0, Math.min(end, text.length));
+          yield { delta: accumulated.slice(-pieces), accumulated, done: false, model: "stream-model" };
+        }
+        yield { delta: "", accumulated: text, done: true, model: "stream-model" };
+      },
+    };
+    return llm;
+  }
+
+  it("shows a final answer as it streams, never a tool call, and returns the parsed answer", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-stream-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const llm = streamingLlm([
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
+        '```json\n{"answer":"WIN-01 is \\"compliant\\".\\nNo other devices.","final":true}\n```',
+      ]);
+      const result = await runAgenticChat({ ...baseInput(store, llm), onAnswerText: (text) => shown.push(text) });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.answer, 'WIN-01 is "compliant".\nNo other devices.');
+      assert.equal(llm.completeCalls, 0);
+      assert.ok(shown.length > 1, "the answer arrives in pieces");
+      assert.equal(shown.at(-1), 'WIN-01 is "compliant".\nNo other devices.');
+      assert.ok(shown.every((text, index) => index === 0 || text.startsWith(shown[index - 1]!)), "each piece extends the last");
+      assert.ok(shown.every((text) => !text.includes("query_cache")));
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("withdraws a streamed final the loop did not accept", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-stream-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const llm = streamingLlm([
+        '{"final":true,"answer":"All devices are fine."}',
+        '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+        '{"final":true,"answer":"WIN-01 is compliant."}',
+      ]);
+      const result = await runAgenticChat({ ...baseInput(store, llm), onAnswerText: (text) => shown.push(text) });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.answer, "WIN-01 is compliant.");
+      // The answer without tenant evidence showed, was withdrawn, then the real one streamed.
+      const withdrawn = shown.indexOf("");
+      assert.ok(withdrawn > 0);
+      assert.equal(shown[withdrawn - 1], "All devices are fine.");
+      assert.equal(shown.at(-1), "WIN-01 is compliant.");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("asks an adapter that yields once at the end for the complete reply", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-stream-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const llm = scriptedLlm([
+        '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+        '{"final":true,"answer":"WIN-01 is compliant."}',
+      ]);
+      const result = await runAgenticChat({ ...baseInput(store, llm), onAnswerText: (text) => shown.push(text) });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.answer, "WIN-01 is compliant.");
+      assert.deepEqual(shown, []);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
 });

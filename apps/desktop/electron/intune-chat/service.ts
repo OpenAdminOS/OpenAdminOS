@@ -2543,6 +2543,8 @@ export class IntuneChatService {
               generatedAt: answerGeneratedAt,
               maxTokens: chatBudget.maxTokens,
               signal: options.signal,
+              // The final answer streams as it arrives; the stored answer below replaces it.
+              ...(options.voice ? {} : { onAnswerText: (text: string, learn: boolean) => emitDelta(relabelUnverifiedLearn(text, learn)) }),
               onToolStart: (event) => {
                 toolSteps.start(event.tool, event.params);
                 const stepId = `tool-${progressToolSteps.length + 1}-${event.tool}`;

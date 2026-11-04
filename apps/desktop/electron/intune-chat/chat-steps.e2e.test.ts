@@ -78,7 +78,7 @@ interface Harness {
   script(replies: unknown[]): void;
 }
 
-async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string } = {}): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string; incremental?: boolean } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
@@ -105,6 +105,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
     },
     llmFactory: () => ({
       available: true, defaultModel: "llama3.1:8b",
+      ...(options.incremental ? { streamsIncrementally: true } : {}),
       async complete(options) {
         prompts.push({ system: options.system ?? "", prompt: options.prompt });
         return { text: replies[Math.min(reply++, replies.length - 1)]!, model: "llama3.1:8b" };
@@ -198,6 +199,24 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.deepEqual(reloaded.followUps, message.followUps);
       assert.equal(reloaded.questionKind, "docs");
     });
+  });
+
+  it("streams the final answer and relabels unverified Microsoft Learn attribution while it streams", async () => {
+    await withHarness(async ({ store, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Contoso Defender for macOS setup" } },
+        { final: true, answer: "Microsoft Learn says Defender for Endpoint on macOS needs full disk access and a system extension." },
+      ]);
+      const deltas: string[] = [];
+      const result = await store.streamIntuneChatMessage({ content: DOCS_QUESTION }, (event) => {
+        if (event.type === "delta") deltas.push(event.content);
+      });
+      assert.ok(deltas.length > 2, "the answer arrives in pieces before the stored answer");
+      assert.ok(deltas.every((content) => !/Microsoft Learn says/.test(content)), "live text is relabelled too");
+      assert.ok(deltas.slice(0, -1).some((content) => content.startsWith("The Microsoft documentation says Defender") && !content.endsWith("extension.")));
+      assert.equal(deltas.at(-1), "The Microsoft documentation says Defender for Endpoint on macOS needs full disk access and a system extension.");
+      assert.equal(result.assistantMessage.content, deltas.at(-1));
+    }, { incremental: true });
   });
 
   it("does not label the answer Microsoft Learn when the Learn call was blocked", async () => {

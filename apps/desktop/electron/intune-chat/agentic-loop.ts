@@ -189,6 +189,15 @@ export interface RunAgenticChatInput {
     traceEntry: IntuneChatToolTraceEntry;
     message: string;
   }) => void;
+  /**
+   * Streams each reply when the adapter streams incrementally. While a
+   * reply is recognizably a final answer: the text of its answer so far,
+   * and whether a Microsoft Learn call answered. An empty text withdraws a
+   * final answer the loop did not accept. The parsed reply stays the
+   * source of truth: the returned answer replaces whatever was shown.
+   * Tool calls are never shown.
+   */
+  onAnswerText?: (text: string, learnAnswered: boolean) => void;
 }
 
 export type RunAgenticChatResult =
@@ -283,9 +292,15 @@ export async function runAgenticChat(
   let attempts = 0;
   // The source guard gets as many retries as the evidence guard.
   const maxAttempts = MAX_AGENTIC_ITERATIONS + MAX_MALFORMED_RETRIES + MAX_UNFINISHED_RETRIES + MAX_NO_EVIDENCE_RETRIES * 2 + 2;
+  // A streamed final the loop did not accept is withdrawn before the next reply.
+  let answerShown = false;
   while (iteration < MAX_AGENTIC_ITERATIONS && attempts < maxAttempts) {
     attempts += 1;
     assertNotCancelled(input.signal);
+    if (answerShown) {
+      answerShown = false;
+      input.onAnswerText?.("", learnAnswered);
+    }
     const system = buildAgenticSystemPrompt(input, questionKind, [...required].filter((id) => !attemptedServers.has(id)), documentation.length > 0 || fallbackPending);
     const loopInput = { ...input, documentation };
     const prompt = input.voice
@@ -298,14 +313,28 @@ export async function runAgenticChat(
         return { ok: false, reason: "context-limit", fallbackNotice: "Nova used bounded retrieved evidence because this investigation exceeded its voice context budget.", toolTrace, iterations: iteration, model: responseModel };
       }
     }
-    const completion = await input.llm.complete({
+    const options = {
       system,
       prompt,
       ...(input.model ? { model: input.model } : {}),
       temperature: 0.1,
       maxTokens: Math.max(500, input.maxTokens),
       signal: input.signal,
-    });
+    };
+    let completion: { text: string; model: string };
+    if (input.onAnswerText && input.llm.streamsIncrementally) {
+      completion = { text: "", model: responseModel ?? "" };
+      for await (const chunk of input.llm.stream(options)) {
+        completion = { text: chunk.accumulated, model: chunk.model };
+        const partial = partialFinalAnswer(chunk.accumulated);
+        if (partial !== undefined && partial.trim()) {
+          answerShown = true;
+          input.onAnswerText(partial, learnAnswered);
+        }
+      }
+    } else {
+      completion = await input.llm.complete(options);
+    }
     responseModel = completion.model;
     const assistantText = completion.text.trim();
     turns.push({ role: "assistant", content: assistantText });
@@ -526,6 +555,42 @@ export async function runAgenticChat(
     iterations: MAX_AGENTIC_ITERATIONS,
     ...(responseModel ? { model: responseModel } : {}),
   };
+}
+
+const JSON_ESCAPES: Record<string, string> = { '"': '"', "\\": "\\", "/": "/", b: "\b", f: "\f", n: "\n", r: "\r", t: "\t" };
+
+/**
+ * The answer of a reply that is still streaming, once the reply is
+ * recognizably a final action: `"final":true` and the start of the
+ * `"answer"` string, in any key order. The JSON string is decoded up to
+ * where it has arrived; an escape cut off at the end waits for the next
+ * chunk. Anything else, such as a tool call, gives undefined.
+ */
+export function partialFinalAnswer(text: string): string | undefined {
+  if (!/"final"\s*:\s*true\b/.test(text)) return undefined;
+  const start = /"answer"\s*:\s*"/.exec(text);
+  if (!start) return undefined;
+  let out = "";
+  for (let index = start.index + start[0].length; index < text.length; index += 1) {
+    const char = text[index]!;
+    if (char === '"') break;
+    if (char !== "\\") {
+      out += char;
+      continue;
+    }
+    const next = text[index + 1];
+    if (next === undefined) break;
+    if (next === "u") {
+      const hex = text.slice(index + 2, index + 6);
+      if (!/^[0-9a-f]{4}$/i.test(hex)) break;
+      out += String.fromCharCode(Number.parseInt(hex, 16));
+      index += 5;
+      continue;
+    }
+    out += JSON_ESCAPES[next] ?? next;
+    index += 1;
+  }
+  return out;
 }
 
 /** A tool call that reads tenant evidence: the first planned resource, or the cache inventory to choose one from. */
