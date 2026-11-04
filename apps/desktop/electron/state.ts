@@ -6098,18 +6098,37 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // interactive consent on the first run that requires a new one.
     // Connectors already do this for their declared scopes; agents now
     // get the same treatment.
+    // Grants follow what tokens carry, never what an agent declares. Each
+    // new set of returned scopes is recorded once per selection.
+    const recorded = new Set<string>();
+    const recordTokenScopes = <T extends string | { accessToken: string; scopes?: readonly string[] }>(
+      acquired: T,
+    ): T => {
+      if (typeof acquired !== "string") {
+        const grants = grantsFromTokenScopes(acquired.scopes).filter((grant) => !recorded.has(grant));
+        if (grants.length > 0) {
+          for (const grant of grants) recorded.add(grant);
+          void this.recordTokenGrants(tenant.id, grants).catch((error) =>
+            console.warn(
+              `[tenants] granted scopes for ${tenant.id} could not be recorded: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+        }
+      }
+      return acquired;
+    };
     const tokenProvider =
       scopes.length > 0
-        ? async () => tenantSession.acquireTokenWithScopes
+        ? async () => recordTokenScopes(tenantSession.acquireTokenWithScopes
           ? await tenantSession.acquireTokenWithScopes(scopes)
-          : await tenantSession.acquireTokenForScopes(scopes)
+          : await tenantSession.acquireTokenForScopes(scopes))
         : async () => {
             const result = await acquireTokenSilent({
               client,
               homeAccountId: tenant.homeAccountId,
               scopes: [...grantedScopeSet(tenant)],
             });
-            return { accessToken: result.accessToken, scopes: result.scopes };
+            return recordTokenScopes({ accessToken: result.accessToken, scopes: result.scopes });
           };
     return {
       createGraph: (log) => this.graphFactory
@@ -6124,6 +6143,29 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       tenantId: tenant.id,
       tenantSession,
     };
+  }
+
+  /**
+   * Merge scopes a token returned into the tenant's grants. Tenants whose
+   * grants were never recorded keep the all-defaults assumption until
+   * their next sign-in replaces it with what Microsoft returned.
+   */
+  private async recordTokenGrants(tenantId: string, grants: readonly string[]): Promise<void> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
+      if (!tenant || tenant.kind === "sample" || tenant.grantedScopes === undefined) return;
+      const known = new Set(tenant.grantedScopes.map(qualifyScope));
+      if (grants.every((grant) => known.has(qualifyScope(grant)))) return;
+      await this.write({
+        ...persisted,
+        tenants: persisted.tenants.map((entry) =>
+          entry.id === tenantId
+            ? { ...entry, grantedScopes: mergeGrantedScopes(entry, grants) }
+            : entry,
+        ),
+      });
+    });
   }
 
   private async persistRunSnapshot(run: RunRecord): Promise<void> {

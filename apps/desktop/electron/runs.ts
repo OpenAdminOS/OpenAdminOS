@@ -11,7 +11,6 @@ import {
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
-  mergeGrantedScopes,
   resolveProviderDefaultModel,
   resolveRunModel,
   type AgentSummary,
@@ -1218,26 +1217,9 @@ export class RunService {
       const nextRuns = exists
         ? persisted.runs.map((existing) => (existing.id === nextRun.id ? nextRun : existing))
         : [nextRun, ...persisted.runs];
-      const completedAgent =
-        !wasTerminal && nextRun.status === "completed"
-          ? persisted.installedAgents.find(
-              (agent) => agent.slug === nextRun.agentSlug,
-            )
-          : undefined;
-      const nextTenants = completedAgent
-        ? persisted.tenants.map((tenant) =>
-            tenant.id === nextRun.tenantId && tenant.kind !== "sample"
-              ? {
-                  ...tenant,
-                  grantedScopes: mergeGrantedScopes(
-                    tenant,
-                    completedAgent.scopes,
-                  ),
-                }
-              : tenant,
-          )
-        : persisted.tenants;
-      await this.host.write({ ...persisted, runs: nextRuns, tenants: nextTenants });
+      // Grants are recorded from the scopes tokens return during the run
+      // (see the host's buildGraph), never from the agent's declaration.
+      await this.host.write({ ...persisted, runs: nextRuns });
       if (!wasTerminal && isNowTerminal) {
         this.host.notifyRunFinished(nextRun);
       }
