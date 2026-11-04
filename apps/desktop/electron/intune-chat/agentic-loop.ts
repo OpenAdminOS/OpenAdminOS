@@ -305,6 +305,8 @@ export async function runAgenticChat(
   let learnAnswered = false;
   let fallbackPending = Boolean(input.documentationFallback);
   const citations = new CitationRegistry();
+  // Sources numbered up to here reached a model request; only they are returned as consulted and citable.
+  let consultedSources = 0;
   // Titles and links of MCP results in this answer, and the queries sent: the query writer's only context besides the admin's messages.
   const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string }> = [];
   const sentQueries: string[] = [];
@@ -365,6 +367,7 @@ export async function runAgenticChat(
       signal: input.signal,
     };
     let completion: { text: string; model: string };
+    consultedSources = citations.sources.length;
     input.modelStep?.start();
     if (input.onAnswerText && input.llm.streamsIncrementally) {
       completion = { text: "", model: responseModel ?? "" };
@@ -392,6 +395,8 @@ export async function runAgenticChat(
     // runs, so every step appends below the one before it.
     let classification: string | undefined;
     let afterClassification: (() => Promise<void>) | undefined;
+    // The local docs index the classification of this reply loads; returns how many passages it added.
+    let indexLoad: (() => Promise<number>) | undefined;
     const settleModelStep = async (outcome: ModelStepOutcome, accepted = false) => {
       if (!accepted) withdrawAnswer();
       input.modelStep?.finish(outcome, classification);
@@ -448,12 +453,18 @@ export async function runAgenticChat(
       if (questionKind === "tenant") fallbackPending = false;
       const loadIndex = !plan.learnFirst && fallbackPending && input.documentationFallback;
       const tenantData = questionKind !== "docs";
+      // Microsoft Learn is no longer the chosen source, so the withheld local index is loaded now.
+      indexLoad = loadIndex
+        ? async () => {
+            indexLoad = undefined;
+            fallbackPending = false;
+            const passages = await input.documentationFallback!();
+            addDocumentation(passages);
+            return passages.length;
+          }
+        : undefined;
       afterClassification = async () => {
-        if (loadIndex) {
-          // Microsoft Learn is no longer the chosen source, so the withheld local index is loaded now.
-          fallbackPending = false;
-          addDocumentation(await input.documentationFallback!());
-        }
+        await indexLoad?.();
         if (tenantData) {
           await input.ensureTenantData?.();
           assertNotCancelled(input.signal);
@@ -508,6 +519,17 @@ export async function runAgenticChat(
       });
       continue;
     }
+    if (action.kind === "final" && indexLoad) {
+      // The classification of this reply loads the local docs index, so the
+      // answer was written without those passages. It is accepted only when
+      // none matched; otherwise the model answers again with them.
+      withdrawAnswer();
+      if (await indexLoad() > 0) {
+        await settleModelStep({ kind: "repair", reason: "documentation" });
+        turns.push({ role: "repair", content: "Passages from the local docs index are now in the prompt. Answer again using them, and cite them with their numbers where you rely on them." });
+        continue;
+      }
+    }
     malformedCount = 0;
     iteration += 1;
     if (action.kind === "final") {
@@ -523,7 +545,8 @@ export async function runAgenticChat(
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),
-        documentationSources: citations.sources,
+        // Only sources whose content reached the model that wrote this answer.
+        documentationSources: citations.sources.slice(0, consultedSources),
         // Injected text can steer next, so links and tenant values never become a suggestion.
         followUps: validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)),
         ...(input.askTitle ? titleField(validTitle(action.title, (text) => holdsTenantData(input.tools, text))) : {}),

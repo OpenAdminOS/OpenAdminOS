@@ -558,6 +558,40 @@ describe("agentic loop sources", () => {
     });
   });
 
+  it("answers again when the classification loads local docs passages after a final answer, and cites only passages the model saw", async () => {
+    await withStore(async (store) => {
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const outcomes: string[] = [];
+      const classify = { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) };
+      const modelStep = { start() {}, writing() {}, finish(outcome: { kind: string; reason?: string }) { outcomes.push(outcome.kind === "repair" ? `repair:${outcome.reason}` : outcome.kind); } };
+      const result = await runAgenticChat(loopInput(store, scripted([
+        '{"kind":"docs","sources":["docs-index"],"final":true,"answer":"From memory [1] [2]."}',
+        '{"final":true,"answer":"It needs full disk access [1]."}',
+      ], prompts), learnContext(async () => ({ text: "", truncated: false })), {
+        questionKind: "docs",
+        classify,
+        modelStep,
+        documentationFallback: async () => [{ file: "defender/mac-install.md", title: "Deploy on macOS", text: "Grant full disk access." }],
+      }));
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      assert.equal(result.answer, "It needs full disk access [1].");
+      assert.deepEqual(outcomes, ["repair:documentation", "final"]);
+      assert.doesNotMatch(prompts[0]!.prompt, /Deploy on macOS/);
+      assert.match(prompts[1]!.prompt, /\[1\] Deploy on macOS - defender\/mac-install\.md/);
+      assert.match(prompts[1]!.prompt, /Passages from the local docs index are now in the prompt\. Answer again using them/);
+      assert.deepEqual(result.documentationSources?.map((source) => [source.citation, source.file]), [[1, "defender/mac-install.md"]]);
+
+      // With no passages for the question, the first answer stands and cites nothing.
+      prompts.length = 0;
+      const none = await runAgenticChat(loopInput(store, scripted(['{"kind":"docs","sources":[],"final":true,"answer":"From memory."}'], prompts),
+        learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs", classify, documentationFallback: async () => [] }));
+      assert.equal(none.ok && none.answer, "From memory.");
+      assert.equal(prompts.length, 1);
+      assert.deepEqual(none.ok && none.documentationSources, []);
+    });
+  });
+
   it("still requires tenant evidence for a mixed question after a docs call", async () => {
     await withStore(async (store) => {
       store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: new Date().toISOString(),

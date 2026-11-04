@@ -407,7 +407,7 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
 export type ModelStepOutcome =
   | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
   | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
-  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" };
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" | "documentation" };
 
 export interface ModelStepHooks {
   start(): void;
@@ -432,6 +432,7 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
   evidence: "Answered without checking tenant data",
   unfinished: "Reply was progress, not an answer",
   lookup: "Answered on a failed lookup",
+  documentation: "Answered before the local docs passages arrived",
 };
 
 /** The plain decision of a tool call, such as "Chose to ask Microsoft Learn" or "Chose to query cached managed devices". */
