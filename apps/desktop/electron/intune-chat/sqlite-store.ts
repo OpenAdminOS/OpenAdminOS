@@ -2272,6 +2272,28 @@ export class IntelligenceSqliteStore {
       .all(path, tenantId, resource) as unknown as Array<{ type: string | null }>).flatMap(row => row.type && row.type !== 'null' ? [row.type] : []);
   }
 
+  /**
+   * Identity values of cached users, groups and devices: ids, names, UPNs,
+   * mail and serial numbers. The MCP egress check refuses queries that
+   * contain one, which also covers values an earlier answer surfaced.
+   */
+  tenantIdentityValues(tenantId: string, limit = 20_000): string[] {
+    const resources = ["users", "groups", "managedDevices", "entraDevices", "windowsAutopilotDevices"];
+    const placeholders = resources.map(() => "?").join(", ");
+    const fields = ["displayName", "userPrincipalName", "mail", "deviceName", "managedDeviceName", "serialNumber", "userDisplayName", "emailAddress"];
+    const source = `FROM graph_resources WHERE tenant_id = ? AND resource IN (${placeholders})`;
+    const selects = [
+      `SELECT graph_id AS value ${source}`,
+      `SELECT display_name AS value ${source}`,
+      ...fields.map((field) => `SELECT json_extract(raw_json, '$.${field}') AS value ${source}`),
+    ];
+    const args = selects.flatMap(() => [tenantId, ...resources]);
+    const rows = this.db
+      .prepare(`SELECT DISTINCT value FROM (${selects.join(" UNION ALL ")}) WHERE typeof(value) = 'text' LIMIT ?`)
+      .all(...args, Math.max(1, Math.floor(limit))) as Array<{ value: string }>;
+    return rows.map((row) => row.value);
+  }
+
   queryGraphCache(input: {
     tenantId: string;
     resource: GraphCacheResourceKind;

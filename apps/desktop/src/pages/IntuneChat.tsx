@@ -4367,7 +4367,9 @@ function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
               </div>
               {entry.mcpSource ? (
                 <div className="mt-1 text-xs leading-5 text-[var(--color-warning)]">
-                  MCP tool · {entry.mcpSource.serverName} at {entry.mcpSource.host} · third-party content, not tenant evidence
+                  {entry.mcpSource.blocked
+                    ? `MCP tool · ${entry.mcpSource.serverName} at ${entry.mcpSource.host} · blocked because the query held tenant data, nothing was sent`
+                    : `MCP tool · ${entry.mcpSource.serverName} at ${entry.mcpSource.host} · third-party content, not tenant evidence`}
                 </div>
               ) : null}
               {entry.error && (

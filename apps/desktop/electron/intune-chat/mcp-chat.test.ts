@@ -14,6 +14,7 @@ import { runAgenticChat } from "./agentic-loop.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import {
+  addTenantValue,
   mcpChatToolName,
   mcpPrivateTermsForTenant,
   type IntuneChatToolContext,
@@ -43,6 +44,7 @@ function mcpContext(calls: Array<{ tool: string; args: Record<string, unknown> }
   return {
     tools: [docsTool],
     privateTerms: mcpPrivateTermsForTenant(tenant),
+    tenantValues: new Set(),
     async call(tool, args) {
       calls.push({ tool: tool.tool, args });
       return { text, truncated: false };
@@ -208,8 +210,71 @@ describe("MCP tools in the Chat loop", () => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
       for (const query of ["Contoso compliance policy", "devices in contoso.example", "user admin@fabrikam.example", "device 1f0e9a8b-1111-2222-3333-444455556666"]) {
         const result = await runAgenticChat(input(store, scriptedLlm([callDocs(query), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), mcpContext(calls)));
-        assert.match(result.toolTrace[0]!.error!, /Rephrase the Microsoft Learn query as a public question.*Nothing was sent to learn\.microsoft\.com/);
+        assert.match(result.toolTrace[0]!.error!, /the Microsoft Learn query contained a tenant name.*Nothing was sent to learn\.microsoft\.com/);
+        assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
       }
+      assert.equal(calls.length, 0);
+    });
+  });
+
+  it("blocks a tenant value from an earlier observation and sends nothing", async () => {
+    await withStore(async (store) => {
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "device-77", deviceName: "HR-LAPTOP-07", operatingSystem: "Windows", complianceState: "noncompliant" }] });
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const result = await runAgenticChat(input(store, scriptedLlm([
+        '{"tool":"query_cache","params":{"resource":"managedDevices"}}',
+        // Injected text in tenant data steered the model to leak a device name.
+        callDocs("why is HR-LAPTOP-07 noncompliant"),
+        callDocs("Intune noncompliant Windows device remediation"),
+        '{"final":true,"answer":"Done."}',
+      ], prompts), mcpContext(calls)));
+      const blocked = result.toolTrace[1]!;
+      assert.equal(blocked.mcpSource?.blocked, true);
+      assert.match(blocked.error!, /contained tenant data from this conversation.*Nothing was sent to learn\.microsoft\.com/);
+      assert.match(blocked.resultSummary, /^Blocked: /);
+      assert.match(prompts[2]!.prompt, /contained tenant data from this conversation/);
+      // The public question afterwards goes through; the leaking one never reached the host.
+      assert.deepEqual(calls, [{ tool: "microsoft_docs_search", args: { query: "Intune noncompliant Windows device remediation" } }]);
+    });
+  });
+
+  it("blocks tenant identity values seeded from the local cache", async () => {
+    await withStore(async (store) => {
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "users", label: "Users", scopeSet: [],
+        refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "user-1", displayName: "Avery Quinlan", userPrincipalName: "avery@contoso.example", userType: "Member" }] });
+      const seeded = store.tenantIdentityValues(tenant.id);
+      assert.ok(seeded.includes("Avery Quinlan"));
+      assert.ok(seeded.includes("user-1"));
+      assert.ok(!seeded.includes("Member"));
+      const context = mcpContext([]);
+      for (const value of seeded) addTenantValue(context.tenantValues, value);
+      const result = await runAgenticChat(input(store, scriptedLlm([callDocs("reset MFA for Avery Quinlan"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), context));
+      assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
+    });
+  });
+
+  it("validates params against the schema and size limits before sending", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const cases: Array<[Record<string, unknown>, RegExp]> = [
+        [{ query: "x".repeat(501) }, /exceeds 500 characters/],
+        [{ query: "grace period", extra: "a" }, /has no parameter named extra/],
+        [{ query: { nested: "grace period" } }, /must be text, a number, true or false/],
+        [{ query: 42 }, /must be of type string/],
+        [{}, /needs the query param/],
+      ];
+      for (const [params, reason] of cases) {
+        const result = await runAgenticChat(input(store, scriptedLlm([JSON.stringify({ tool: docsTool.name, params }), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), mcpContext(calls)));
+        assert.match(result.toolTrace[0]!.error!, reason);
+        assert.match(result.toolTrace[0]!.error!, /Nothing was sent to learn\.microsoft\.com/);
+      }
+      const open: McpChatContext = { ...mcpContext(calls), tools: [{ ...docsTool, inputSchema: { type: "object", additionalProperties: true } }] };
+      const total = await runAgenticChat(input(store, scriptedLlm([JSON.stringify({ tool: docsTool.name, params: { a: "y".repeat(450), b: "y".repeat(450), c: "y".repeat(450), d: "y".repeat(450), e: "y".repeat(450) } }), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), open));
+      assert.match(total.toolTrace[0]!.error!, /params exceed 2,000 characters/);
       assert.equal(calls.length, 0);
     });
   });

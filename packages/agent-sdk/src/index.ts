@@ -1079,6 +1079,8 @@ export interface IntuneChatToolTraceEntry {
     host: string;
     tool: string;
     truncated?: boolean;
+    /** The host refused the call before sending it because it held tenant data. */
+    blocked?: boolean;
   };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources
