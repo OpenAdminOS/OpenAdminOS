@@ -52,6 +52,10 @@ describe("question classification", () => {
     for (const question of ["How many devices are noncompliant?", "Show stale devices", "Why is HR-LAPTOP-07 noncompliant?", "What is the status of device KIOSK-0042?", "Which users have no MFA?"]) {
       assert.equal(kind(question), "tenant", question);
     }
+    // General wording without a docs signal is ambiguous: mixed still needs tenant evidence.
+    for (const question of ["What are the noncompliant devices?", "What are the stale devices?", "Is there a macOS device with FileVault off?", "What is the compliance rate?"]) {
+      assert.equal(kind(question), "mixed", question);
+    }
     for (const question of ["Which of our macOS devices are noncompliant, and what does Microsoft Learn recommend for them?", "How do I fix our noncompliant Windows devices?"]) {
       assert.equal(kind(question), "mixed", question);
     }
@@ -77,8 +81,11 @@ describe("source plan", () => {
     const plan = planChatSources({ question: "How many devices are noncompliant?", kind: "tenant", servers: [learn], docsIndexAvailable: true });
     assert.deepEqual(plan.requiredServerIds, []);
     assert.equal(plan.detail, "Tenant question. Sources: cached tenant data and Microsoft Graph.");
-    const mixed = planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [learn], docsIndexAvailable: false });
-    assert.equal(mixed.detail, "Documentation and tenant question. Sources: Microsoft Learn, and cached tenant data and Microsoft Graph.");
+    const mixed = planChatSources({ question: "How do I fix our noncompliant devices?", kind: "mixed", servers: [learn], docsIndexAvailable: true });
+    assert.deepEqual(mixed.requiredServerIds, [], "a mixed question gets no third-party call it did not ask for");
+    assert.equal(mixed.detail, "Documentation and tenant question. Sources: the local docs index, and cached tenant data and Microsoft Graph.");
+    const named = planChatSources({ question: "What does Microsoft Learn recommend for our noncompliant devices?", kind: "mixed", servers: [learn], docsIndexAvailable: false });
+    assert.equal(named.detail, "Documentation and tenant question. Sources: Microsoft Learn, and cached tenant data and Microsoft Graph.");
     assert.match(planChatSources({ question: "What is Autopatch?", kind: "docs", servers: [], docsIndexAvailable: false }).detail, /No documentation source is available/);
   });
 });

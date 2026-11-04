@@ -218,6 +218,17 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     });
   });
 
+  it("never treats an ambiguous tenant question as docs-only", async () => {
+    await withHarness(async ({ store, prompts, script }) => {
+      script([{ final: true, answer: "There are none." }, { tool: "query_cache", params: { resource: "managedDevices", where: { complianceState: "noncompliant" } } }, { final: true, answer: "2 devices are noncompliant." }]);
+      const message = (await store.sendIntuneChatMessage({ content: "What are the noncompliant devices?" })).assistantMessage;
+      assert.equal(message.questionKind, "mixed");
+      assert.match(prompts[1]!.prompt, /That answer used no tenant evidence/);
+      assert.ok(message.toolTrace?.some((entry) => entry.tool === "query_cache" && !entry.error));
+      assert.equal(message.content, "2 devices are noncompliant.");
+    });
+  });
+
   it("refreshes, asks Learn and still requires tenant evidence for a mixed tenant question", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
       script([

@@ -456,18 +456,28 @@ const AUTHORING_REQUEST =
 /** Asks what documentation or a named reference says. */
 const DOCS_REFERENCE =
   /\b(?:documentation|docs|microsoft learn|learn\.microsoft\.com|best practices?|according to|recommended|recommendation|requirements?|prerequisites?)\b/;
-const HOW_TO = /^(?:how (?:do|does|can|should|would|to)|why (?:does|do|would)|explain)\b/;
+/** A how-to or how-it-works request. */
+const HOW_TO =
+  /^(?:how (?:do|does|can|should|would|to)|how (?:long|often) (?:is|does|do|will|should|can)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can))\b/;
+/** "What is Autopatch?" or "What does Microsoft Learn say about X?". */
+const WHAT_IS = /^(?:what is|what's|what does|what do|what happens)\b/;
+/** Words that make a "what is" question ask for tenant state: a definite plural or a measure. */
+const STATE_WORDS =
+  /\b(?:the|these|those|any)\s+(?:[\w-]+\s+){0,2}(?:devices|users|groups|policies|apps|accounts|machines|computers|laptops|macs|pcs)\b|\b(?:noncompliant|non-compliant|stale|rate|count|number of|percentage|total|offline|inactive|failing|failed|status|state)\b/;
 /** Values that only make sense in one tenant: an email address, a GUID, or a name like HR-LAPTOP-07. */
 const TENANT_VALUE = /[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]*-[A-Z0-9-]*\d/;
 const TENANT_STATE = /\b(?:state of|status of|assigned to|enrolled in)\b/;
 
 /**
- * Decides whether a question needs the tenant. A docs question asks how
- * a product behaves or what a reference says, and never touches the
- * tenant, even when it names a platform the planner maps to resources. A
- * tenant question asks about this tenant's state. A mixed question asks
- * both, for example how documentation applies to "our" devices. Built on
- * the same wording rules as isGeneralKnowledgeQuestion.
+ * Decides whether a question needs the tenant. Docs is a positive label
+ * only: it needs a docs signal (a named source, a documentation
+ * reference, an authoring or how-to request, or "what is" a product or
+ * feature without a definite plural or tenant-state word) and no tenant
+ * reference. Docs questions never touch the tenant. A docs signal with a
+ * tenant reference is mixed. A general-sounding question without a docs
+ * signal ("What are the stale devices?") is ambiguous: with planned
+ * resources it is mixed, which still requires tenant evidence. When in
+ * doubt the answer is mixed or tenant, never docs.
  */
 export function classifyChatQuestion(
   question: string,
@@ -476,10 +486,11 @@ export function classifyChatQuestion(
   const trimmed = question.trim();
   const lower = trimmed.toLowerCase();
   const tenantReference = TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
-  const docsSignal = input.namesSource || DOCS_REFERENCE.test(lower);
-  if (!tenantReference && (GENERAL_QUESTION_START.test(lower) || AUTHORING_REQUEST.test(lower) || docsSignal)) return "docs";
-  if (tenantReference && (docsSignal || HOW_TO.test(lower))) return "mixed";
-  return tenantReference || input.plannedResources.length > 0 ? "tenant" : "docs";
+  const docsSignal = input.namesSource || DOCS_REFERENCE.test(lower) || AUTHORING_REQUEST.test(lower) || HOW_TO.test(lower) ||
+    (WHAT_IS.test(lower) && !STATE_WORDS.test(lower));
+  if (docsSignal) return tenantReference ? "mixed" : "docs";
+  if (!tenantReference && GENERAL_QUESTION_START.test(lower) && input.plannedResources.length > 0) return "mixed";
+  return "tenant";
 }
 
 export function planChatContext(question: string): PlannedChatContext {

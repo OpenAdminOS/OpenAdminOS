@@ -91,8 +91,10 @@ export function namedServers(question: string, servers: readonly McpChatServer[]
 
 /**
  * Chooses sources: a server the question names is always required. For a
- * docs or mixed question, servers whose topics match are chosen next; if
- * none is, Microsoft Learn is chosen when installed. The local docs index
+ * docs or mixed question, servers whose topics match are chosen next. For
+ * a docs question with none chosen, Microsoft Learn is chosen when
+ * installed; a mixed question may be an ambiguous tenant question, so it
+ * never gets a third-party call it did not ask for. The local docs index
  * is used directly unless Learn is chosen, and is Learn's fallback.
  */
 export function planChatSources(input: {
@@ -108,7 +110,7 @@ export function planChatSources(input: {
       if (server.topics.some((topic) => new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower))) chosen.set(server.id, server);
     }
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
-    if (chosen.size === 0 && learn) chosen.set(learn.id, learn);
+    if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);
   }
   const learnFirst = chosen.has(LEARN_SERVER_ID);
   const names = [...chosen.values()].map((server) => server.name);
