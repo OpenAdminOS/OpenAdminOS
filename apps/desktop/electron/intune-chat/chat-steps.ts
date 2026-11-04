@@ -90,8 +90,7 @@ export function namedServers(question: string, servers: readonly McpChatServer[]
 }
 
 /**
- * Chooses sources: a server the question names, or the model said it
- * would use, is always required. For a
+ * Chooses sources: a server the question names is always required. For a
  * docs or mixed question, servers whose topics match are chosen next. For
  * a docs question with none chosen, Microsoft Learn is chosen when
  * installed; a mixed question may be an ambiguous tenant question, so it
@@ -103,16 +102,13 @@ export function planChatSources(input: {
   kind: IntuneChatQuestionKind;
   servers: readonly McpChatServer[];
   docsIndexAvailable: boolean;
-  /** Server ids the model declared; unknown ids are ignored. */
+  /** Server ids the model declared. They are shown as its intent, never required; unknown ids are ignored. */
   declaredServerIds?: readonly string[];
   /** Replaces the detail's first sentence, which names the kind. */
   lead?: string;
 }): ChatSourcePlan {
   const lower = input.question.toLowerCase();
   const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
-  // TODO(ugur): a server the model declares becomes required, so the timeline's sources are the ones that
-  // run. Confirm, or show declared sources without enforcing them.
-  for (const server of input.servers) if (input.declaredServerIds?.includes(server.id)) chosen.set(server.id, server);
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
       if (server.topics.some((topic) => new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower))) chosen.set(server.id, server);
@@ -132,7 +128,9 @@ export function planChatSources(input: {
     : input.kind === "mixed"
       ? `Sources: ${documentation.length > 0 ? `${docsList}, and ` : ""}${tenant}.`
       : `Sources: ${tenant}${names.length > 0 ? `, and ${joinList(names)}` : ""}.`;
-  return { kind: input.kind, requiredServerIds: [...chosen.keys()], learnFirst, detail: `${lead} ${rest}` };
+  const intended = input.servers.filter((server) => input.declaredServerIds?.includes(server.id) && !chosen.has(server.id)).map((server) => server.name);
+  const intent = intended.length > 0 ? ` The model also plans to ask ${joinList(intended)}.` : "";
+  return { kind: input.kind, requiredServerIds: [...chosen.keys()], learnFirst, detail: `${lead} ${rest}${intent}` };
 }
 
 /**

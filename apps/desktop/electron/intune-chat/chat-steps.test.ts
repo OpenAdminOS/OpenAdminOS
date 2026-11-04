@@ -130,9 +130,15 @@ describe("model-declared question kinds", () => {
     const fallback = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), context, planChatSources({ ...context, kind: "mixed" }));
     fallback.resolve("mixed", "fallback");
     assert.match(steps.steps[1]!.detail!, /The model gave no question kind, so keyword rules decided\.$/);
-    // A declared server is chosen; an unknown id is ignored.
+    // A declared server is shown as the model's intent, never required; an unknown id is ignored.
     const declared = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), { ...context, servers: [learn, kql] }, planChatSources({ ...context, kind: "mixed" }));
-    assert.deepEqual(declared.resolve("tenant", "model", ["kql-search", "evil"]).requiredServerIds, ["kql-search"]);
+    const declaredPlan = declared.resolve("tenant", "model", ["kql-search", "evil"]);
+    assert.deepEqual(declaredPlan.requiredServerIds, []);
+    assert.equal(declaredPlan.detail, "Tenant question. Sources: cached tenant data and Microsoft Graph. The model also plans to ask KQL Search.");
+    // A declared server that is required anyway is named once, as a source.
+    const named = planChatSources({ question: "Ask Microsoft Learn about LAPS", kind: "docs", servers: [learn, kql], docsIndexAvailable: false, declaredServerIds: ["microsoft-learn"] });
+    assert.deepEqual(named.requiredServerIds, ["microsoft-learn"]);
+    assert.doesNotMatch(named.detail, /plans to ask/);
     // An upgrade turns docs into mixed and shows its own step; tenant and mixed never change.
     const docs = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), context, planChatSources({ ...context, kind: "docs" }));
     docs.resolve("docs", "model");
