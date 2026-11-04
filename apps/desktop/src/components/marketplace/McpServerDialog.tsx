@@ -214,7 +214,7 @@ function InstallReview({
           Tool queries the model writes go to <code className="font-mono text-xs">{server.host}</code>. The status strip names this host while the server is on.
         </Step>
         <Step icon={<IconShield size={16} />} title="What is sent">
-          The model is told to send only public questions. OpenAdminOS blocks a query that contains your tenant name, domain, email addresses or IDs before it is sent. Answers come back as reference material, never as instructions.
+          The model is told to send only public questions. Known tenant values, email addresses and IDs are blocked before sending. This filter is a safety net, not a guarantee. Answers are passed to the model as reference material, not instructions.
         </Step>
         <Step icon={<IconHardDrive size={16} />} title="Tenant access">
           None. The server cannot read or change your tenant.
@@ -245,12 +245,12 @@ function QueryFlow({ host }: { host: string }) {
       <div className={edge} aria-hidden="true">→</div>
       <div className={node}>
         <b className="text-sm font-medium text-[var(--color-text)]">OpenAdminOS on this device</b>
-        <span className="text-xs text-[var(--color-text-muted)]">Blocks tenant names, domains and IDs, then sends the query</span>
+        <span className="text-xs text-[var(--color-text-muted)]">Known tenant values, email addresses and IDs are blocked before sending</span>
       </div>
       <div className={`${edge} text-[var(--color-warning)]`} aria-hidden="true">→</div>
       <div className={`${node} bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/35`}>
         <b className="break-all text-sm font-medium text-[var(--color-text)]">{host}</b>
-        <span className="text-xs text-[var(--color-text-muted)]">Receives the question text, never tenant data</span>
+        <span className="text-xs text-[var(--color-text-muted)]">Receives the question text</span>
       </div>
     </div>
   );
