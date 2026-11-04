@@ -43,6 +43,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat shows the scope line and a first step from the moment of sending, also after Chat is opened again during a run, streams the final answer with providers that stream, asks Microsoft Learn before the local docs index, cites Learn results by their real titles and links, and words follow-ups as requests the admin would type.
 - The app registration setup script checks for every Microsoft Graph PowerShell module it uses before changing anything, and removes the application it created if admin consent cannot be granted. Before, a machine without `Microsoft.Graph.Identity.SignIns` was left with a registration that had no consent.
 - The Agent Team sidebar row now highlights across the full width on hover like the other rows, and its findings tooltip (and other sidebar tooltips) is no longer cut off at the sidebar edge.
 - Run history no longer keeps failed scheduled runs that were saved without a tenant. Schedules now wait while no tenant is active and say so, and a scheduled run that fails to start is removed with its tenant.

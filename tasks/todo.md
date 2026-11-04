@@ -976,3 +976,38 @@ The answering model classifies the question, and the keyword rule stays as a vet
 - Electron 721 of 721, renderer 359 of 359 under Node 22, runtime 224 pass and 0 fail, qa 181 pass, 4 warn, 0 fail, root typecheck clean.
 - Open: the live check in the running app needs a restart of the dev instance, and the separate evaluator and GPT-6.1-Sol reviews.
 - Review fixes (2026-11-04): direct answers keep the refresh first (empty-cache test), the evidence guard keys on the kind with only small talk exempt, a follow-up after a tenant answer cannot be docs only, declared sources are intent only (the TODO is resolved), a failed refresh shows on its step and the answer continues, and Stop is checked after the refresh.
+
+# Live answer, Learn first and citable Learn results (2026-11-04)
+
+Same branch, `marketplace/first-wave`. Runs locally only.
+
+## Why
+
+A live run ("how does defender onboarding for macos work?", OpenAI Codex, gpt-6-sol) showed the question and nothing under it for the whole run, then the full answer at once. The local docs index was put in the prompt before Microsoft Learn was asked, so the answer cited only local passages. The Learn source cards were titled from links inside the content ("Apple Configurator", "iMazing Profile Editor"). One follow-up spoke to the admin ("Would you like to check this tenant's macOS onboarding status?") and repeated the deterministic one.
+
+## Acceptance criteria
+
+1. From sending until the first answer text, the answer area always shows the scope line and the live step timeline, with a "Reading the question" skeleton row before the first step. Never blank, also when Chat is opened again during the run. Reduced motion respected.
+2. With an adapter that streams incrementally, the final answer of the tool loop streams as it arrives; tool calls are never shown; the parsed reply replaces the streamed text; Learn relabelling applies to streamed text. Report which providers stream.
+3. A docs question with Learn installed asks Learn first; the local index is searched only when Learn is left out, fails, is blocked or returns nothing, as its own step that names the reason, in the order it ran.
+4. Learn results are read by their structure, numbered "[n] Title, URL" for the model with the numbers the cards use, and card titles come from the result titles. Checked against the live Learn server and a recorded payload.
+5. Follow-ups are in the admin's voice; offers to the admin are rewritten or dropped; near-duplicates of the deterministic follow-up are dropped.
+6. Each fix has its own commit with a test that fails without it.
+
+## Steps
+
+- [x] Root cause of the blank answer area, renderer replay test, fix
+- [x] Skeleton step until the host sends one, reduced motion
+- [x] Streaming flag on LLM adapters; stream the loop's final answer
+- [x] Learn first, local index as a named fallback step
+- [x] MCP results by structure, numbered for the model, recorded Learn payload
+- [x] Follow-ups in the admin's voice, near-duplicates dropped
+- [x] SPEC, CHANGELOG
+- [ ] Live check in the running app (needs a restart of the dev instance; not done in this session)
+- [ ] Separate evaluator and GPT-6.1-Sol reviews
+
+## Review (2026-11-04)
+
+- Blank answer area: a faithful replay of the host's event sequence renders the scope line and steps throughout in the page that sent the question, so the page logic was not at fault. The only way the code produced the screenshot is a Chat page instance that did not start the stream: after Chat is mounted again mid-run, the new page had no live state (not sending, no progress, only the saved question) and the events still went to the old page's handlers, so the answer appeared only once the saved message loaded. The live run is now kept outside the page. Which remount happened in the user's session could not be confirmed without the renderer console.
+- Providers that stream text as the model writes it: Ollama, LM Studio, Azure OpenAI, Claude Code, Copilot, Gemini, Apple Foundation. Codex CLI 0.166.0 `exec --json` was checked live and sends one `item.completed` event, so it does not.
+- The live Learn search for the question returned 27,458 characters, over the host's 12,000-character cap, so the JSON was cut and titles fell back to Markdown links inside the content. The host now returns the structured result too.
