@@ -603,9 +603,12 @@ export interface TenantRecord {
    */
   appRegistration?: TenantAppRegistration;
   /**
-   * Microsoft Graph delegated scopes granted for this tenant. Absent means
-   * the full default read set for tenants connected before permission areas
-   * were introduced. The sample tenant always exposes every area.
+   * Delegated scopes the tenant's tokens carry, qualified with their
+   * audience, for example `graph:User.Read.All`. Only scopes a token
+   * returned are recorded, never `.default` or the OIDC scopes. Absent
+   * means every requestable part scope, for tenants connected before
+   * grants were recorded; the next sign-in replaces it. The sample tenant
+   * always exposes every service. Read it with `grantedScopeSet`.
    */
   grantedScopes?: string[];
 }

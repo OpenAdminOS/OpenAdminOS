@@ -151,6 +151,7 @@ import {
   grantedScopeSet,
   grantsFromTokenScopes,
   mergeGrantedScopes,
+  qualifyScope,
   normalizeGraphScopeName,
   providerCatalog,
   resolveProviderDefaultModel,
@@ -982,6 +983,14 @@ function requireClientId(value: string): string {
     );
   }
   return trimmed;
+}
+
+function qualifyStoredGrants(entries: readonly unknown[]): string[] {
+  return [
+    ...new Set(
+      entries.filter((entry): entry is string => typeof entry === "string").map(qualifyScope),
+    ),
+  ];
 }
 
 function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
@@ -6209,20 +6218,30 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // client to those records so they keep refreshing silently instead
       // of forcing every existing install to reconnect. New connections
       // use the OpenAdminOS registration.
-      const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : []).map(
-        (tenant) =>
-          isPlainRecordValue(tenant) &&
-          tenant.kind !== "sample" &&
-          tenant.appRegistration === undefined
-            ? {
-                ...tenant,
-                appRegistration: {
-                  kind: "openadminos" as const,
-                  clientId: GRAPH_CLI_CLIENT_ID,
-                },
-              }
+      const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : [])
+        .map(
+          (tenant) =>
+            isPlainRecordValue(tenant) &&
+            tenant.kind !== "sample" &&
+            tenant.appRegistration === undefined
+              ? {
+                  ...tenant,
+                  appRegistration: {
+                    kind: "openadminos" as const,
+                    clientId: GRAPH_CLI_CLIENT_ID,
+                  },
+                }
+              : tenant,
+        )
+        // Services migration: grants were stored as bare Graph scope
+        // names. They are now qualified with their audience, for example
+        // `graph:User.Read.All`. Qualifying is idempotent, and an absent
+        // list keeps meaning "every default" until the next sign-in.
+        .map((tenant) =>
+          isPlainRecordValue(tenant) && Array.isArray(tenant.grantedScopes)
+            ? { ...tenant, grantedScopes: qualifyStoredGrants(tenant.grantedScopes) }
             : tenant,
-      );
+        );
       const activeTenantId =
         typeof parsed.activeTenantId === "string" &&
         tenants.some((tenant) => tenant.id === parsed.activeTenantId)
