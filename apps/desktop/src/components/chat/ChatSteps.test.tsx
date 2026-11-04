@@ -195,6 +195,13 @@ describe("chat steps", () => {
     expect(within(consulted).queryByText(/defender\/mac-intune\.md/)).toBeNull();
   });
 
+  it("names the host of an uncited third-party source in the heading too", () => {
+    const kql: IntuneChatDocumentationSource = { citation: 2, kind: "mcp", title: "Failed sign-ins", url: "https://www.kqlsearch.com/query/1", serverName: "KQL Search", host: "www.kqlsearch.com" };
+    const answer: IntuneChatMessage = { ...message, content: "A [1].", documentationSources: [learnSource(1, "Article 1"), kql], steps: [] };
+    render(<SourceList message={answer} content={answer.content} />);
+    expect(screen.getByRole("heading")).toHaveTextContent("Sources · learn.microsoft.com and www.kqlsearch.com, not verified by OpenAdminOS");
+  });
+
   it("names the local index file and date on its row", () => {
     render(<SourceList message={message} content={message.content} />);
     expect(screen.getByRole("heading")).toHaveTextContent("Sources · learn.microsoft.com, not verified by OpenAdminOS · local docs index on this device");

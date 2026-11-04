@@ -397,7 +397,8 @@ export function SourceList({ message, content }: { message: IntuneChatMessage; c
   const shown = cited.length > 0 ? cited : consulted;
   if (shown.length === 0) return null;
   const heading = cited.length > 0 ? "Sources" : "Consulted";
-  const detail = sourcesHeadingDetail(shown);
+  // Uncited third-party rows sit under this heading too, so their hosts are named as well.
+  const detail = sourcesHeadingDetail(cited.length > 0 ? [...shown, ...consulted] : shown);
   const hidden = shown.length - VISIBLE_SOURCES;
   const learnPage = mainLearnPage(numbering);
   return (

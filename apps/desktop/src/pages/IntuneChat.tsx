@@ -1580,10 +1580,11 @@ function IntuneChatContent() {
   });
   useEffect(() => {
     // A message sent with this provider, model and hosts: later messages show the icon only.
-    if (!runInProgress || !activeConversationId || dataBoundary.kind !== "hosted") return;
+    // Only the conversation whose answer is running: switching chats mid-run records nothing.
+    if (!runInProgress || !progressMessageVisible || !activeConversationId || dataBoundary.kind !== "hosted") return;
     if (hostedDisclosures[activeConversationId] === disclosureKey) return;
     setHostedDisclosures((current) => recordHostedDisclosure(current, activeConversationId, disclosureKey));
-  }, [runInProgress, activeConversationId, dataBoundary.kind, disclosureKey, hostedDisclosures]);
+  }, [runInProgress, progressMessageVisible, activeConversationId, dataBoundary.kind, disclosureKey, hostedDisclosures]);
   const fillComposer = (value: string) => {
     setInput(value);
     writeChatDraft(activeConversationId, value);

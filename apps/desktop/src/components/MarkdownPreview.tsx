@@ -88,6 +88,7 @@ function CopyStepButton({ text, step }: { text: string; step: number }) {
       className="absolute right-0 top-[3px] inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] group-hover/step:opacity-100 group-focus-within/step:opacity-100"
     >
       {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+      <span role="status" className="sr-only">{copied ? `Copied step ${step}` : ""}</span>
     </button>
   );
 }
