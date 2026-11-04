@@ -1,43 +1,45 @@
 import {
-  PERMISSION_AREAS,
-  type PermissionAreaId,
+  AVAILABLE_SERVICES,
   type RequestedScope,
+  type ServiceId,
 } from "../shared/openAdminOS";
 
 export interface ScopeGroup {
-  id: PermissionAreaId | "other";
+  id: ServiceId | "other";
   title: string;
   summary: string;
-  required: boolean;
+  /** One row per scope name. A scope several parts share is listed once. */
   scopes: RequestedScope[];
 }
 
-export const SCOPE_GROUP_BY_NAME: Readonly<Record<string, PermissionAreaId>> =
-  Object.fromEntries(
-    PERMISSION_AREAS.flatMap((area) =>
-      area.scopes.map((scope) => [scope, area.id] as const),
-    ),
-  );
-
+/**
+ * Groups the requested scope rows by service, in registry order. Rows of
+ * a service this version does not know land in an Other group so nothing
+ * requested is hidden.
+ */
 export function groupRequestedScopes(scopes: RequestedScope[]): ScopeGroup[] {
-  const grouped = new Map<ScopeGroup["id"], RequestedScope[]>();
+  const known = new Set<string>(AVAILABLE_SERVICES.map((service) => service.id));
+  const grouped = new Map<ScopeGroup["id"], Map<string, RequestedScope>>();
   for (const scope of scopes) {
-    const id = SCOPE_GROUP_BY_NAME[scope.name] ?? "other";
-    grouped.set(id, [...(grouped.get(id) ?? []), scope]);
+    const id = known.has(scope.service) ? scope.service : "other";
+    const rows = grouped.get(id) ?? new Map<string, RequestedScope>();
+    if (!rows.has(scope.name)) rows.set(scope.name, scope);
+    grouped.set(id, rows);
   }
 
-  const result: ScopeGroup[] = PERMISSION_AREAS.map((group) => ({
-    ...group,
-    scopes: grouped.get(group.id) ?? [],
-  })).filter((group) => group.scopes.length > 0);
+  const result: ScopeGroup[] = AVAILABLE_SERVICES.flatMap((service) => {
+    const rows = grouped.get(service.id);
+    return rows
+      ? [{ id: service.id, title: service.title, summary: service.summary, scopes: [...rows.values()] }]
+      : [];
+  });
   const other = grouped.get("other");
-  if (other?.length) {
+  if (other?.size) {
     result.push({
       id: "other",
       title: "Other requested access",
       summary: "Additional read scopes declared by this OpenAdminOS version.",
-      required: false,
-      scopes: other,
+      scopes: [...other.values()],
     });
   }
   return result;

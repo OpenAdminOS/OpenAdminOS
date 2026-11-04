@@ -6,12 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import {
-  PERMISSION_AREAS,
-  REQUIRED_PERMISSION_AREA_MESSAGE,
-  grantedScopeSet,
-  scopesForPermissionAreas,
-} from "../shared/openAdminOS";
+import { grantedScopeSet, partIdsFor } from "../shared/openAdminOS";
 import {
   escapePowerShellSingleQuoted,
   generateRegistrationSetup,
@@ -19,19 +14,8 @@ import {
   validateRegistrationDisplayName,
 } from "./registration-script";
 
-describe("permission areas", () => {
-  it("keeps the required directory area and maps every default scope once", () => {
-    expect(PERMISSION_AREAS.find((area) => area.id === "directory")).toMatchObject({
-      required: true,
-      summary: REQUIRED_PERMISSION_AREA_MESSAGE,
-    });
-    expect(new Set(PERMISSION_AREAS.flatMap((area) => area.scopes)).size).toBe(
-      PERMISSION_AREAS.flatMap((area) => area.scopes).length,
-    );
-    expect(scopesForPermissionAreas(["devices", "identity"])).toHaveLength(12);
-  });
-
-  it("treats an absent granted set as the legacy full default", () => {
+describe("granted scope set", () => {
+  it("treats an absent granted set as every requestable part scope", () => {
     expect(grantedScopeSet({}).size).toBe(20);
     expect(grantedScopeSet({ grantedScopes: ["User.Read.All"] })).toEqual(
       new Set(["User.Read.All"]),
@@ -40,14 +24,19 @@ describe("permission areas", () => {
 });
 
 describe("registration setup generator", () => {
-  it("uses the chosen area scopes and resolves permission ids at run time", () => {
+  it("uses the chosen part scopes plus sign-in and resolves permission ids at run time", () => {
     const output = generateRegistrationSetup("Admin's OpenAdminOS", [
-      "apps",
-      "directory",
+      "intune.apps",
+      "entra.apps",
     ]);
-    expect(output.scopeNames).toEqual(
-      scopesForPermissionAreas(["apps", "directory"]),
-    );
+    expect(output.scopeNames).toEqual([
+      "openid",
+      "profile",
+      "offline_access",
+      "User.Read",
+      "DeviceManagementApps.Read.All",
+      "Application.Read.All",
+    ]);
     for (const scope of output.scopeNames) expect(output.script).toContain(`'${scope}'`);
     expect(output.script).not.toContain("'DeviceManagementManagedDevices.Read.All'");
     expect(output.script).not.toContain("'Policy.Read.All'");
@@ -74,20 +63,18 @@ describe("registration setup generator", () => {
     expect(output.script).toContain("'openid'");
     expect(output.script).toContain("'profile'");
     expect(output.script).toContain("'offline_access'");
-    expect(output.message).toContain("Apps, Users, groups, and directory");
+    expect(output.serviceTitles).toEqual(["Intune", "Entra"]);
+    expect(output.message).toContain("these services: Intune, Entra.");
     expect(output.message).toContain(
       "https://docs.openadminos.com/trust-model/authentication",
     );
   });
 
   it("contains no credential creation commands or properties", () => {
-    const script = generateRegistrationSetup("OpenAdminOS", [
-      "devices",
-      "apps",
-      "directory",
-      "identity",
-      "security",
-    ]).script;
+    const script = generateRegistrationSetup(
+      "OpenAdminOS",
+      partIdsFor(["intune", "entra", "defender"]),
+    ).script;
     expect(script).not.toMatch(/addPassword|PasswordCredentials|KeyCredentials/i);
   });
 
@@ -133,7 +120,7 @@ describe("registration display name quoting", () => {
       expect(validateRegistrationDisplayName(name)).toBe(
         "Display name cannot contain typographic single quotes. Use a straight apostrophe (') instead.",
       );
-      expect(() => generateRegistrationSetup(name, ["directory"])).toThrow(
+      expect(() => generateRegistrationSetup(name, ["entra.people"])).toThrow(
         /typographic single quotes/,
       );
     }
@@ -141,14 +128,14 @@ describe("registration display name quoting", () => {
 
   it("still accepts and escapes the ASCII apostrophe", () => {
     expect(validateRegistrationDisplayName(`Ops'${injection}`)).toBeNull();
-    expect(generateRegistrationSetup(`Ops'${injection}`, ["directory"]).script).toContain(
+    expect(generateRegistrationSetup(`Ops'${injection}`, ["entra.people"]).script).toContain(
       `$displayName = 'Ops''${injection}'`,
     );
   });
 
   it.skipIf(!HAS_PWSH)("parses the escaped name as one string in PowerShell", () => {
     const name = `Ops'${injection}`;
-    const output = parsedDisplayName(generateRegistrationSetup(name, ["directory"]).script);
+    const output = parsedDisplayName(generateRegistrationSetup(name, ["entra.people"]).script);
     expect(output).toBe(`NAME=${name}`);
     expect(output.split("\n")).not.toContain("INJECTED");
   });
@@ -165,7 +152,7 @@ describe("registration script encoding", () => {
   it("writes non-ASCII display names as [char] codes", () => {
     expect(powerShellStringLiteral("Ugur's app")).toBe("'Ugur''s app'");
     expect(powerShellStringLiteral("\u00DCber Ops")).toBe("-join @([char]0x00DC, 'ber Ops')");
-    const script = generateRegistrationSetup("\u00DCber Ops", ["directory"]).script;
+    const script = generateRegistrationSetup("\u00DCber Ops", ["entra.people"]).script;
     expect(script).toMatch(printableAscii);
     expect(script).toContain("$displayName = -join @([char]0x00DC, 'ber Ops')");
     expect(script).toContain("app registration with the display name set in $displayName below");
@@ -175,7 +162,7 @@ describe("registration script encoding", () => {
   it("leaves no byte that Windows-1252 reads as a quote", () => {
     const script = generateRegistrationSetup(
       "\u00C2; Write-Output INJECTED; #",
-      ["directory"],
+      ["entra.people"],
     ).script;
     const bytes = new TextEncoder().encode(script);
     expect(new TextDecoder("windows-1252").decode(bytes)).toBe(script);
@@ -184,7 +171,7 @@ describe("registration script encoding", () => {
 
   it.skipIf(!HAS_PWSH)("round-trips non-ASCII names through PowerShell", () => {
     for (const name of ["\u00DCber Ops", "Ops \u{20BB7} team", "\u00C2'; Write-Output INJECTED; #"]) {
-      const output = parsedDisplayName(generateRegistrationSetup(name, ["directory"]).script);
+      const output = parsedDisplayName(generateRegistrationSetup(name, ["entra.people"]).script);
       expect(output).toBe(`NAME=${name}`);
     }
   });

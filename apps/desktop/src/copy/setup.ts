@@ -79,6 +79,7 @@ export const SETUP_COPY = {
   savedRegistrationsHint: "Registrations you connected with before. Remove them in Settings, Tenants.",
   newRegistrationOption: "Enter a different registration",
   chooseSignInReason: "Choose OpenAdminOS app or your own app registration above to continue.",
+  selectServiceReason: "Select at least one service.",
   clientIdRequiredReason: "Enter the Application (client) ID of your app registration to continue.",
   clientIdInvalidReason:
     "The Application (client) ID must be a GUID from your app registration overview.",

@@ -1,6 +1,5 @@
-import type { PermissionAreaId } from "./permission-areas.js";
+import type { ServiceId } from "./services.js";
 
-export * from "./permission-areas.js";
 export * from "./services.js";
 
 export type ProviderId =
@@ -554,6 +553,9 @@ export interface StartRunOptions {
  * scopes are never requested at connect.
  */
 export interface RequestedScope {
+  service: ServiceId;
+  /** The service part that requests this scope, for example `intune.devices`. */
+  partId: string;
   name: string;
   mode: "read" | "write";
   rationale: string;
@@ -660,8 +662,11 @@ export interface ConnectTenantOptions {
    * app. `directoryTenantId` is required only for single-tenant apps.
    */
   appRegistration?: { clientId: string; directoryTenantId?: string; label?: string };
-  /** Permission areas selected in the pre-consent review. */
-  permissionAreaIds?: PermissionAreaId[];
+  /**
+   * Service parts selected in the pre-consent review. Required with the
+   * OpenAdminOS app; at least one part must be chosen.
+   */
+  partIds?: string[];
 }
 
 /** A subscribed SKU surfaced in the Settings → Tenants license panel. */
@@ -2816,7 +2821,8 @@ export interface OpenAdminOSApi {
    */
   getRequestedScopes(): Promise<RequestedScope[]>;
   connectTenant(options?: ConnectTenantOptions): Promise<AppState>;
-  addTenantAccess(tenantId: string, areaId: PermissionAreaId): Promise<AppState>;
+  /** Consent to more service parts for a tenant and merge the new grants. */
+  addTenantAccess(tenantId: string, partIds: string[]): Promise<AppState>;
   /** Add or reactivate the built-in fictional tenant. This is idempotent. */
   addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;

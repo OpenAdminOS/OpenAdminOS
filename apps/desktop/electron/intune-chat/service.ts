@@ -8,8 +8,9 @@ import { join } from "node:path";
 
 import {
   grantedScopeSet,
-  missingPermissionAreasForScopes,
-  permissionAreaForScope,
+  missingPartsForScopes,
+  partForScope,
+  partLabel,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
   graphAccessDenialText,
@@ -142,12 +143,14 @@ function restrictPlannedResourcesForTenant(
   if (originalResources.length === 0 || planned.resources.length > 0) {
     return undefined;
   }
-  const missingAreas = missingPermissionAreasForScopes(
+  // TODO(services-ui): the chat step replaces this with the shared
+  // missing-service copy from the SDK.
+  const [missingPart] = missingPartsForScopes(
     requiredScopesForResources(originalResources),
     granted,
   );
-  const areaTitle = missingAreas[0]?.title ?? "additional Microsoft Graph";
-  return `This question needs ${areaTitle} access, which was not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+  const partTitle = missingPart ? partLabel(missingPart) : "additional Microsoft Graph";
+  return `This question needs ${partTitle} access, which was not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
 }
 
 type GraphCacheRefreshProgressEvent =
@@ -1297,8 +1300,9 @@ export class IntuneChatService {
           const missingScope = status.scopeSet.find(
             (scope) => !grantedScopeSet(resolvedTenant).has(scope),
           );
-          const area = missingScope ? permissionAreaForScope(missingScope) : undefined;
-          return area ? { ...status, notGrantedArea: area.title } : status;
+          // TODO(services-ui): the chat step renames this to notGrantedService.
+          const part = missingScope ? partForScope(missingScope) : undefined;
+          return part ? { ...status, notGrantedArea: partLabel(part) } : status;
         }),
       schedule: store.getGraphCacheRefreshSchedule(resolvedTenant.id),
       preload: this.preloadJobs.get(resolvedTenant.id)?.job,

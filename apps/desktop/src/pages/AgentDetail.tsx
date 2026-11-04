@@ -40,7 +40,8 @@ import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   grantedScopeSet,
-  missingPermissionAreasForScopes,
+  missingPartsForScopes,
+  partLabel,
   resolveRunModel,
   type AgentManifestPreview,
   type AgentDiscordDelivery,
@@ -2570,9 +2571,11 @@ function RunPreflightModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  // The pilot tenant has every area and never asks Microsoft for consent.
-  const missingAreas = activeTenant && !pilot
-    ? missingPermissionAreasForScopes(agent.scopes, grantedScopeSet(activeTenant))
+  // The pilot tenant has every service and never asks Microsoft for consent.
+  // TODO(services-ui): the agent gating step turns this into "Needs
+  // <service>, not connected" with an Add action.
+  const missingParts = activeTenant && !pilot
+    ? missingPartsForScopes(agent.scopes, grantedScopeSet(activeTenant))
     : [];
   const canStart = Boolean(activeTenant) && !deliverySaving;
   return (
@@ -2595,9 +2598,9 @@ function RunPreflightModal({
             through {providerName}'s local CLI and leave this device.
           </div>
         )}
-        {missingAreas.length > 0 && activeTenant && (
+        {missingParts.length > 0 && activeTenant && (
           <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            This agent needs {missingAreas.map((area) => area.title).join(", ")} access,
+            This agent needs {missingParts.map(partLabel).join(", ")} access,
             which was not granted for {activeTenant.displayName}. Starting it asks
             Microsoft for consent before the run continues.
           </div>

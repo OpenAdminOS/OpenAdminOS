@@ -27,7 +27,6 @@ import {
   type AgentWhatsAppWebDelivery,
   type AppState,
   type OpenAdminOSApi,
-  type PermissionAreaId,
   type ProviderId,
   type RegistryAgentSummary,
   type RequestedScope,
@@ -64,7 +63,7 @@ interface AppStateContextValue {
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: (options?: ConnectTenantOptions) => Promise<TenantRecord | undefined>;
-  addTenantAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
+  addTenantAccess: (tenantId: string, partIds: string[]) => Promise<void>;
   addSampleTenant: () => Promise<TenantRecord>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
@@ -525,14 +524,14 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const addTenantAccess = useCallback(
-    async (tenantId: string, areaId: PermissionAreaId) => {
+    async (tenantId: string, partIds: string[]) => {
       const api = getOpenAdminOSApi();
       if (!api) {
         throw new Error("Adding tenant access is unavailable in browser development.");
       }
       setError(null);
       try {
-        const nextState = await api.addTenantAccess(tenantId, areaId);
+        const nextState = await api.addTenantAccess(tenantId, partIds);
         setState(nextState);
         setRegistryAgents(nextState.registryAgents);
       } catch (caughtError) {

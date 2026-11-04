@@ -1,8 +1,7 @@
 import {
-  PERMISSION_AREAS,
-  normalizePermissionAreaIds,
-  scopesForPermissionAreas,
-  type PermissionAreaId,
+  AVAILABLE_SERVICES,
+  requestedScopes,
+  servicePartById,
 } from "../shared/openAdminOS";
 
 export const DEFAULT_REGISTRATION_DISPLAY_NAME = "OpenAdminOS";
@@ -13,7 +12,8 @@ export const AUTHENTICATION_TRUST_MODEL_URL =
 export interface RegistrationSetupOutput {
   script: string;
   message: string;
-  areaTitles: string[];
+  serviceTitles: string[];
+  /** Every delegated scope the script adds, sign-in scopes included. */
   scopeNames: string[];
 }
 
@@ -75,25 +75,29 @@ export function powerShellStringLiteral(value: string): string {
 
 export function generateRegistrationSetup(
   displayNameInput: string,
-  areaIds: readonly PermissionAreaId[],
+  partIds: readonly string[],
 ): RegistrationSetupOutput {
   const validationError = validateRegistrationDisplayName(displayNameInput);
   if (validationError) throw new Error(validationError);
 
   const displayName = displayNameInput.trim();
-  const selectedIds = normalizePermissionAreaIds(areaIds);
-  const selected = new Set(selectedIds);
-  const areaTitles = PERMISSION_AREAS.filter((area) => selected.has(area.id)).map(
-    (area) => area.title,
+  const selectedServices = new Set(
+    partIds.flatMap((id) => {
+      const part = servicePartById(id);
+      return part && !part.planned ? [part.service] : [];
+    }),
   );
-  const scopeNames = scopesForPermissionAreas(selectedIds);
-  const allScopes = [...scopeNames, "openid", "profile", "offline_access"];
+  if (selectedServices.size === 0) throw new Error("Select at least one service.");
+  const serviceTitles = AVAILABLE_SERVICES.filter((service) =>
+    selectedServices.has(service.id),
+  ).map((service) => service.title);
+  const scopeNames = requestedScopes(partIds).map((scope) => scope.name);
   const displayNameLiteral = powerShellStringLiteral(displayName);
   const headerName = isPrintableAscii(displayName)
     ? `named ${displayName}`
     : "with the display name set in $displayName below";
-  const scopeLines = allScopes.map((scope) => `    '${scope}'`).join(",\n");
-  const areaList = areaTitles.join(", ");
+  const scopeLines = scopeNames.map((scope) => `    '${scope}'`).join(",\n");
+  const serviceList = serviceTitles.join(", ");
 
   const script = `<#
 This script creates a tenant-owned Microsoft Entra app registration ${headerName} for OpenAdminOS.
@@ -102,7 +106,7 @@ It makes these changes:
 1. Connects to Microsoft Graph with permission to create an application and grant delegated tenant-wide consent. An administrator must approve these setup permissions.
 2. Stops before changing anything if a required Microsoft Graph PowerShell module is missing, or if an application with the same display name already exists. This avoids updating or duplicating an existing registration.
 3. Creates a single-tenant public client application with the localhost redirect URI required by the OpenAdminOS desktop sign-in flow.
-4. Adds delegated Microsoft Graph permissions for these OpenAdminOS areas: ${areaList}. It also adds openid, profile, and offline_access for sign-in and refresh tokens.
+4. Adds delegated Microsoft Graph permissions for these OpenAdminOS services: ${serviceList}. It also adds openid, profile, offline_access and User.Read for sign-in and refresh tokens.
 5. Creates the corresponding enterprise application and grants tenant-wide admin consent for the same delegated scope set. If either step fails, it deletes the application it created in step 3.
 
 The script does not create a client secret or certificate. OpenAdminOS signs users in through the system browser and acts with the signed-in administrator's delegated access.
@@ -198,7 +202,7 @@ Write-Host "Enter both values in OpenAdminOS under Use your organization's app r
 Write-Host "Find the enterprise application in the Microsoft Entra admin center under Enterprise applications, named $displayName."
 `;
 
-  const message = `Please run the attached PowerShell script as an Entra administrator. It creates a tenant-owned OpenAdminOS public client registration, its enterprise application, and tenant-wide admin consent for these areas: ${areaList}. All requested Microsoft Graph permissions are delegated and read-only. The script creates no client secret or certificate. Authentication details: ${AUTHENTICATION_TRUST_MODEL_URL}`;
+  const message = `Please run the attached PowerShell script as an Entra administrator. It creates a tenant-owned OpenAdminOS public client registration, its enterprise application, and tenant-wide admin consent for these services: ${serviceList}. All requested Microsoft Graph permissions are delegated and read-only. The script creates no client secret or certificate. Authentication details: ${AUTHENTICATION_TRUST_MODEL_URL}`;
 
-  return { script, message, areaTitles, scopeNames };
+  return { script, message, serviceTitles, scopeNames };
 }

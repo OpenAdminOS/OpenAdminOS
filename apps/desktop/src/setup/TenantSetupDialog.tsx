@@ -19,14 +19,19 @@ import { SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   ConnectTenantOptions,
-  PermissionAreaId,
   ProviderId,
   ProviderSummary,
   RequestedScope,
   SavedAppRegistration,
+  ServiceId,
   TenantRecord,
 } from "../shared/openAdminOS";
-import { OPENADMINOS_APP_CLIENT_ID, PERMISSION_AREAS } from "../shared/openAdminOS";
+import {
+  AVAILABLE_SERVICES,
+  OPENADMINOS_APP_CLIENT_ID,
+  partIdsFor,
+  servicePartById,
+} from "../shared/openAdminOS";
 import { tenantRegistrationSummary } from "../shared/app-registration";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
@@ -229,14 +234,17 @@ function PermissionsStep({
     initialRegistration?.directoryTenantId ?? "",
   );
   const [registrationLabel, setRegistrationLabel] = useState(initialRegistration?.label ?? "");
-  const [selectedAreaIds, setSelectedAreaIds] = useState<Set<PermissionAreaId>>(
+  // TODO(ugur): no service is preselected and at least one is required.
+  // Confirm whether a first connect should preselect a service.
+  // TODO(services-ui): the service picker step replaces these grouped
+  // checkboxes with services that expand to their parts.
+  const [selectedServiceIds, setSelectedServiceIds] = useState<Set<ServiceId>>(
     () =>
       new Set(
-        initialOptions?.permissionAreaIds
-          ? PERMISSION_AREAS.filter(
-              (area) => area.required || initialOptions.permissionAreaIds!.includes(area.id),
-            ).map((area) => area.id)
-          : PERMISSION_AREAS.map((area) => area.id),
+        (initialOptions?.partIds ?? []).flatMap((partId) => {
+          const part = servicePartById(partId);
+          return part ? [part.service] : [];
+        }),
       ),
   );
   const [registrationDisplayName, setRegistrationDisplayName] = useState(
@@ -248,15 +256,17 @@ function PermissionsStep({
   const [registrationSetupStatus, setRegistrationSetupStatus] = useState<string | null>(null);
   const [registrationActionError, setRegistrationActionError] = useState<string | null>(null);
   const selectedGroups = groups.filter(
-    (group) => group.id === "other" || selectedAreaIds.has(group.id),
+    (group) => group.id === "other" || selectedServiceIds.has(group.id),
   );
-  const selectedScopeCount = selectedGroups.reduce(
-    (total, group) => total + group.scopes.length,
-    0,
+  // Services share scopes such as User.Read.All, so count unique names.
+  const selectedScopeCount = new Set(
+    selectedGroups.flatMap((group) => group.scopes.map((scope) => scope.name)),
+  ).size;
+  const selectedPartIds = partIdsFor(
+    AVAILABLE_SERVICES.filter((service) => selectedServiceIds.has(service.id)).map(
+      (service) => service.id,
+    ),
   );
-  const selectedAreaIdList = PERMISSION_AREAS.filter((area) =>
-    selectedAreaIds.has(area.id),
-  ).map((area) => area.id);
   const savedChoice =
     choice === "own" && savedSelection !== NEW_REGISTRATION
       ? savedRegistrations.find((entry) => savedRegistrationKey(entry) === savedSelection)
@@ -281,6 +291,8 @@ function PermissionsStep({
   const blockedReason =
     choice === null
       ? SETUP_COPY.chooseSignInReason
+      : selectedPartIds.length === 0
+        ? SETUP_COPY.selectServiceReason
       : ownRegistration && ownRegistration.clientId.length === 0
         ? SETUP_COPY.clientIdRequiredReason
         : ownRegistration && !CLIENT_ID_PATTERN.test(ownRegistration.clientId)
@@ -289,13 +301,11 @@ function PermissionsStep({
               !DIRECTORY_ID_PATTERN.test(ownRegistration.directoryTenantId)
             ? SETUP_COPY.directoryIdInvalidReason
             : null;
-  const toggleArea = (areaId: PermissionAreaId) => {
-    const area = PERMISSION_AREAS.find((candidate) => candidate.id === areaId);
-    if (area?.required) return;
-    setSelectedAreaIds((current) => {
+  const toggleService = (serviceId: ServiceId) => {
+    setSelectedServiceIds((current) => {
       const next = new Set(current);
-      if (next.has(areaId)) next.delete(areaId);
-      else next.add(areaId);
+      if (next.has(serviceId)) next.delete(serviceId);
+      else next.add(serviceId);
       return next;
     });
     setRegistrationSetup(null);
@@ -303,7 +313,10 @@ function PermissionsStep({
     setRegistrationActionError(null);
   };
   const generateSetup = () => {
-    const validationError = validateRegistrationDisplayName(registrationDisplayName);
+    const validationError =
+      selectedPartIds.length === 0
+        ? SETUP_COPY.selectServiceReason
+        : validateRegistrationDisplayName(registrationDisplayName);
     if (validationError) {
       setRegistrationSetupError(validationError);
       setRegistrationSetup(null);
@@ -313,7 +326,7 @@ function PermissionsStep({
     setRegistrationSetupStatus(null);
     setRegistrationActionError(null);
     setRegistrationSetup(
-      generateRegistrationSetup(registrationDisplayName, selectedAreaIdList),
+      generateRegistrationSetup(registrationDisplayName, selectedPartIds),
     );
   };
   const copyRegistrationText = async (text: string, label: string) => {
@@ -492,7 +505,7 @@ function PermissionsStep({
                     Generate a setup script for your admin
                   </h4>
                   <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
-                    The script creates a tenant-owned public client registration for the selected areas. Review it before sending it to your Entra administrator.
+                    The script creates a tenant-owned public client registration for the selected services. Review it before sending it to your Entra administrator.
                   </p>
                   <label className="mt-3 block text-sm text-[var(--color-text-soft)]">
                     Application display name
@@ -617,14 +630,14 @@ function PermissionsStep({
               </div>
             )}
             {groups.map((group) => {
-              const areaId = group.id === "other" ? undefined : group.id;
+              const serviceId = group.id === "other" ? undefined : group.id;
               return (
                 <ScopeDisclosure
                   key={group.id}
                   group={group}
                   defaultOpen={false}
-                  checked={!areaId || selectedAreaIds.has(areaId)}
-                  onCheckedChange={areaId ? () => toggleArea(areaId) : undefined}
+                  checked={!serviceId || selectedServiceIds.has(serviceId)}
+                  onCheckedChange={serviceId ? () => toggleService(serviceId) : undefined}
                 />
               );
             })}
@@ -657,7 +670,7 @@ function PermissionsStep({
             disabled={scopes === null || scopesError !== null || blockedReason !== null}
             onClick={() =>
               onConnect({
-                permissionAreaIds: selectedAreaIdList,
+                partIds: selectedPartIds,
                 ...(ownRegistration ? { appRegistration: ownRegistration } : {}),
               })
             }
@@ -739,13 +752,13 @@ function ScopeDisclosure({
           id={checkboxId}
           aria-label={group.title}
           checked={checked}
-          disabled={group.required || !onCheckedChange}
+          disabled={!onCheckedChange}
           onChange={onCheckedChange}
           className="h-4 w-4 shrink-0 accent-[var(--color-accent)] disabled:opacity-60"
         />
         <label
           htmlFor={checkboxId}
-          className={`min-w-0 flex-1 ${onCheckedChange && !group.required ? "cursor-pointer" : "cursor-not-allowed"}`}
+          className={`min-w-0 flex-1 ${onCheckedChange ? "cursor-pointer" : "cursor-not-allowed"}`}
         >
           <span className="block text-base font-medium text-[var(--color-text)]">
             {group.title} · {group.scopes.length} read scope{group.scopes.length === 1 ? "" : "s"}

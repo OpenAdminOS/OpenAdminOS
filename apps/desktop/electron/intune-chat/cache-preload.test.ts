@@ -215,7 +215,7 @@ it("skips cache resources outside the tenant granted set", async () => {
         const managedDevices = status.resources.find(
           (resource) => resource.resource === "managedDevices",
         );
-        assert.equal(managedDevices?.notGrantedArea, "Devices and configuration");
+        assert.equal(managedDevices?.notGrantedArea, "Intune devices and configuration");
         return;
       }
       await new Promise((resolve) => setTimeout(resolve, 5));

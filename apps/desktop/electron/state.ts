@@ -75,7 +75,6 @@ import type {
   SavedAppRegistration,
   TenantAppRegistration,
   ConnectTenantOptions,
-  PermissionAreaId,
   TenantRecord,
   TenantSession,
   AzureOpenAIProviderConfig,
@@ -150,17 +149,15 @@ import {
   DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   grantedScopeSet,
-  intersectGrantedScopes,
+  grantsFromTokenScopes,
   mergeGrantedScopes,
   normalizeGraphScopeName,
-  normalizePermissionAreaIds,
-  permissionAreaById,
   providerCatalog,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
-  scopesForPermissionAreas,
-  BASELINE_SCOPES,
+  requestedScopes,
   SERVICE_PARTS,
+  servicePartById,
   toResourceScopes,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
@@ -5438,15 +5435,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async listRequestedScopes(): Promise<RequestedScope[]> {
-    // One row per scope a part can request, with the reason from the
-    // service registry. Bare names: MSAL gets the resource form.
-    const seen = new Set<string>();
+    // One row per part scope, with the reason from the service registry.
+    // A scope shared by several parts appears once per part. Bare names:
+    // MSAL gets the resource form.
     return SERVICE_PARTS.flatMap((part) =>
-      part.scopes.flatMap((scope) => {
-        if (seen.has(scope.name)) return [];
-        seen.add(scope.name);
-        return [{ name: scope.name, mode: "read" as const, rationale: scope.reason }];
-      }),
+      part.scopes.map((scope) => ({
+        service: part.service,
+        partId: part.id,
+        name: scope.name,
+        mode: "read" as const,
+        rationale: scope.reason,
+      })),
     );
   }
 
@@ -5470,9 +5469,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
       : { kind: "openadminos", clientId: defaultClientId() };
     const client = this.msalClientFor(registration);
-    const permissionAreaIds = normalizePermissionAreaIds(options.permissionAreaIds);
-    const requestedScopeNames = scopesForPermissionAreas(permissionAreaIds);
-    const scopes = toResourceScopes([...BASELINE_SCOPES, ...requestedScopeNames]);
+    // The baseline sign-in scopes plus the chosen parts, deduplicated.
+    const scopes = toResourceScopes(requestedScopes(options.partIds ?? []));
     let result;
     try {
       result = await this.interactiveSignIn({
@@ -5511,7 +5509,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: account.username,
       addedAt,
       lastUsedAt: addedAt,
-      grantedScopes: intersectGrantedScopes(result.scopes, requestedScopeNames),
+      // Only what the token carries counts as granted.
+      grantedScopes: grantsFromTokenScopes(result.scopes),
       appRegistration: registration,
     };
 
@@ -5585,7 +5584,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   async addTenantAccess(
     tenantId: string,
-    areaId: PermissionAreaId,
+    partIds: readonly string[],
   ): Promise<AppState> {
     const persisted = await this.read();
     const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
@@ -5593,26 +5592,34 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       throw new Error("Tenant not found. Refresh Settings and try again.");
     }
     if (tenant.kind === "sample") {
-      throw new Error("The sample tenant already includes every permission area.");
+      throw new Error("The sample tenant already includes every service.");
     }
-    const area = permissionAreaById(areaId);
-    if (!area) throw new Error("Permission area is invalid.");
+    if (tenant.appRegistration?.kind === "custom") {
+      // Consent for an own registration is granted on the app itself.
+      throw new Error(
+        "Add these permissions to your app registration, then choose Check again.",
+      );
+    }
+    const parts = partIds.map((id) => servicePartById(id));
+    if (parts.length === 0 || parts.some((part) => !part || part.planned)) {
+      throw new Error("Choose a service part that can be added.");
+    }
     const client = this.msalClientForTenant(tenant);
-    const requestedScopes = [...area.scopes];
+    const scopeNames = [
+      ...new Set(parts.flatMap((part) => part!.scopes.map((scope) => scope.name))),
+    ];
     let result;
     try {
-      result = await runInteractiveFlow({
+      result = await this.interactiveSignIn({
         client,
-        scopes: requestedScopes.map(
-          (scope) => `https://graph.microsoft.com/${scope}`,
-        ),
+        scopes: toResourceScopes(scopeNames),
         openBrowser: this.openBrowser,
         timeoutMs: 300_000,
       });
     } catch (error) {
       throw new Error(humanizeMsalError(error, tenant.appRegistration));
     }
-    const newlyGranted = intersectGrantedScopes(result.scopes, requestedScopes);
+    const newlyGranted = grantsFromTokenScopes(result.scopes);
     await this.serialize(async () => {
       const current = await this.read();
       const tenants = current.tenants.map((entry) =>
@@ -5772,6 +5779,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       });
       return;
     }
+    // The probe reads /subscribedSkus. Without Organization.Read.All it
+    // would open a consent prompt the admin did not ask for, so the tier
+    // stays unknown until a service that includes it is connected.
+    if (!grantedScopeSet(tenant).has("Organization.Read.All")) return;
     const DAY_MS = 24 * 60 * 60 * 1000;
     const recent =
       tenant.entraTier &&

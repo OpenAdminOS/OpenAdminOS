@@ -36,10 +36,12 @@ import {
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
-  PERMISSION_AREAS,
-  grantedPermissionAreas,
-  type PermissionAreaDefinition,
-  type PermissionAreaId,
+  AVAILABLE_SERVICES,
+  SERVICE_PARTS,
+  grantedParts,
+  serviceStatus,
+  type ServiceDefinition,
+  type ServiceScope,
   type AuditLogExportFormat,
   type AzureOpenAIProviderConfig,
   type ChatInvestigationMode,
@@ -53,7 +55,6 @@ import {
   type ProviderId,
   type ProviderTestResult,
   type ProviderSummary,
-  type RequestedScope,
   type ReleaseDiagnostics,
   type RetrievalStatus,
   type RunHistoryPruneResult,
@@ -1210,7 +1211,7 @@ function TenantsSection({
   error: string | null;
   savedRegistrations: SavedAppRegistration[];
   onSetActive: (id: string) => Promise<void>;
-  onAddAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
+  onAddAccess: (tenantId: string, partIds: string[]) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
   onRemoveSavedRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
 }) {
@@ -1331,23 +1332,36 @@ function TenantRow({
   tenant: TenantRecord;
   isActive: boolean;
   onSetActive: (id: string) => Promise<void>;
-  onAddAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
+  onAddAccess: (tenantId: string, partIds: string[]) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
   const { openSetup } = useSetupFlow();
-  const { getRequestedScopes } = useAppState();
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
-  const [accessArea, setAccessArea] = useState<PermissionAreaDefinition | null>(null);
+  // TODO(services-ui): the per-service settings step replaces this with
+  // service and part rows, including the own registration script, the
+  // requiredResourceAccess snippet and Check again.
+  const [accessService, setAccessService] = useState<ServiceDefinition | null>(null);
   const [addingAccess, setAddingAccess] = useState(false);
   const [accessError, setAccessError] = useState<string | null>(null);
-  const [accessScopeDetails, setAccessScopeDetails] = useState<RequestedScope[]>([]);
-  const grantedAreas = grantedPermissionAreas(tenant);
-  const grantedAreaIds = new Set(grantedAreas.map((area) => area.id));
-  const missingAreas = PERMISSION_AREAS.filter(
-    (area) => !grantedAreaIds.has(area.id),
-  );
+  const grantedPartIds = new Set(grantedParts(tenant).map((part) => part.id));
+  const serviceRows = AVAILABLE_SERVICES.map((service) => ({
+    service,
+    status: serviceStatus(tenant, service.id),
+  }));
+  const connectedServices = serviceRows.filter((row) => row.status !== "missing");
+  const incompleteServices = serviceRows.filter((row) => row.status !== "connected");
+  const accessParts = accessService
+    ? SERVICE_PARTS.filter(
+        (part) => part.service === accessService.id && !grantedPartIds.has(part.id),
+      )
+    : [];
+  const accessScopes = [
+    ...new Map(
+      accessParts.flatMap((part) => part.scopes).map((scope) => [scope.name, scope] as const),
+    ).values(),
+  ] satisfies ServiceScope[];
   const entraLicenseName =
     tenant.entraTier && tenant.entraTier !== "unknown"
       ? tenant.entraTier === "free"
@@ -1433,32 +1447,34 @@ function TenantRow({
         <div className="border-b border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-4 py-3 last:border-b-0">
           <div className="flex flex-wrap items-center gap-2">
             <span className="mr-1 text-xs font-medium text-[var(--color-text-muted)]">
-              Granted areas
+              Connected services
             </span>
-            {grantedAreas.map((area) => (
-              <Badge key={area.id} tone="neutral">{area.title}</Badge>
+            {connectedServices.length === 0 ? (
+              <span className="text-xs text-[var(--color-text-muted)]">None</span>
+            ) : null}
+            {connectedServices.map(({ service, status }) => (
+              <Badge key={service.id} tone="neutral">
+                {status === "partial" ? `${service.title} (partial)` : service.title}
+              </Badge>
             ))}
           </div>
-          {missingAreas.length > 0 && (
+          {incompleteServices.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <span className="mr-1 text-xs text-[var(--color-text-muted)]">
                 Additional access
               </span>
-              {missingAreas.map((area) => (
+              {incompleteServices.map(({ service }) => (
                 <UiButton
-                  key={area.id}
+                  key={service.id}
                   size="sm"
                   variant="secondary"
-                  aria-label={`Add ${area.title} access`}
+                  aria-label={`Add ${service.title} access`}
                   onClick={() => {
                     setAccessError(null);
-                    setAccessArea(area);
-                    void getRequestedScopes()
-                      .then(setAccessScopeDetails)
-                      .catch(() => setAccessScopeDetails([]));
+                    setAccessService(service);
                   }}
                 >
-                  Add access: {area.title}
+                  Add access: {service.title}
                 </UiButton>
               ))}
             </div>
@@ -1466,39 +1482,37 @@ function TenantRow({
         </div>
       )}
       <Modal
-        open={accessArea !== null}
+        open={accessService !== null}
         onClose={() => {
-          if (!addingAccess) setAccessArea(null);
+          if (!addingAccess) setAccessService(null);
         }}
         size="md"
       >
         <ModalHeader
-          title={accessArea ? `Add ${accessArea.title} access` : "Add access"}
+          title={accessService ? `Add ${accessService.title} access` : "Add access"}
           subtitle={`Review delegated access for ${tenant.displayName}`}
           onClose={() => {
-            if (!addingAccess) setAccessArea(null);
+            if (!addingAccess) setAccessService(null);
           }}
         />
-        {accessArea && (
+        {accessService && (
           <div className="space-y-4 p-6">
             <p className="text-sm leading-6 text-[var(--color-text-soft)]">
-              {accessArea.summary}
+              {accessService.summary}
             </p>
             <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
               <div className="text-xs font-medium text-[var(--color-text-muted)]">
-                {accessArea.scopes.length} delegated read scopes
+                {accessScopes.length} delegated read scopes
               </div>
               <ul className="mt-2 space-y-2">
-                {accessArea.scopes.map((scope) => (
-                  <li key={scope}>
+                {accessScopes.map((scope) => (
+                  <li key={scope.name}>
                     <div className="break-all font-mono text-xs text-[var(--color-text-soft)]">
-                      {scope}
+                      {scope.name}
                     </div>
-                    {accessScopeDetails.find((entry) => entry.name === scope)?.rationale && (
-                      <p className="mt-0.5 text-xs leading-5 text-[var(--color-text-muted)]">
-                        {accessScopeDetails.find((entry) => entry.name === scope)?.rationale}
-                      </p>
-                    )}
+                    <p className="mt-0.5 text-xs leading-5 text-[var(--color-text-muted)]">
+                      {scope.reason}
+                    </p>
                   </li>
                 ))}
               </ul>
@@ -1515,7 +1529,7 @@ function TenantRow({
               </div>
             )}
             <div className="flex justify-end gap-2">
-              <Button variant="ghost" disabled={addingAccess} onClick={() => setAccessArea(null)}>
+              <Button variant="ghost" disabled={addingAccess} onClick={() => setAccessService(null)}>
                 Cancel
               </Button>
               <Button
@@ -1524,8 +1538,8 @@ function TenantRow({
                 onClick={() => {
                   setAddingAccess(true);
                   setAccessError(null);
-                  void onAddAccess(tenant.id, accessArea.id)
-                    .then(() => setAccessArea(null))
+                  void onAddAccess(tenant.id, accessParts.map((part) => part.id))
+                    .then(() => setAccessService(null))
                     .catch((caught) =>
                       setAccessError(caught instanceof Error ? caught.message : String(caught)),
                     )

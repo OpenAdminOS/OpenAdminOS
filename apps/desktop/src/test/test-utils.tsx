@@ -8,7 +8,7 @@ import { AppStateProvider } from "../state";
 import { SetupFlowProvider } from "../setup/SetupFlowContext";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
-  DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  SERVICE_PARTS,
   DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   deriveTrustState,
@@ -650,11 +650,15 @@ export function makeMockBridge(
     }),
     listTenants: vi.fn(async () => appState.tenants),
     getRequestedScopes: vi.fn(async () =>
-      DEFAULT_GRAPH_READ_SCOPE_NAMES.map((name) => ({
-        name,
-        mode: "read" as const,
-        rationale: `Read access for ${name}.`,
-      })),
+      SERVICE_PARTS.flatMap((part) =>
+        part.scopes.map((scope) => ({
+          service: part.service,
+          partId: part.id,
+          name: scope.name,
+          mode: "read" as const,
+          rationale: `Read access for ${scope.name}.`,
+        })),
+      ),
     ),
     connectTenant: vi.fn(async () => appState),
     addTenantAccess: vi.fn(async () => appState),

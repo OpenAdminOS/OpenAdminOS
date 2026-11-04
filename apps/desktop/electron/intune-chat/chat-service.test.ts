@@ -1933,7 +1933,7 @@ it("answers an ungranted area deterministically without calling Graph", async ()
     });
     assert.equal(
       result.assistantMessage.content,
-      "This question needs Devices and configuration access, which was not granted for Directory team. Add it in Settings, Tenants.",
+      "This question needs Intune devices and configuration access, which was not granted for Directory team. Add it in Settings, Tenants.",
     );
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);

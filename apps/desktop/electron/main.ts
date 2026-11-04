@@ -89,7 +89,6 @@ import type {
   DriftTimelineInput,
   ExportAuditLogInput,
   GraphCacheResourceKind,
-  PermissionAreaId,
   ImportMultiTenantResultToWorkspacesInput,
   MultiTenantChatStreamEvent,
   PendingConnectorDecision,
@@ -124,7 +123,7 @@ import type {
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
-import { PERMISSION_AREAS, providerCatalog } from "@openadminos/agent-sdk";
+import { providerCatalog, servicePartById } from "@openadminos/agent-sdk";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -4511,7 +4510,7 @@ function validateDriftBundle(value: unknown): DriftBaselineExportBundle {
 }
 
 function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
-  if (value === undefined || value === null) return {};
+  if (value === undefined || value === null) throw new Error("Select at least one service.");
   if (!isPlainRecord(value)) {
     throw new Error("Connect tenant options must be an object.");
   }
@@ -4542,20 +4541,28 @@ function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
       );
     }
   }
-  if (value.permissionAreaIds !== undefined) {
-    if (!Array.isArray(value.permissionAreaIds)) {
-      throw new Error("permissionAreaIds must be an array.");
-    }
-    const validIds = new Set(PERMISSION_AREAS.map((area) => area.id));
-    options.permissionAreaIds = value.permissionAreaIds.map((areaId, index) => {
-      const id = requireBoundedString(areaId, `permissionAreaIds[${index}]`, 32);
-      if (!validIds.has(id as PermissionAreaId)) {
-        throw new Error(`permissionAreaIds[${index}] is invalid.`);
-      }
-      return id as PermissionAreaId;
-    });
+  if (value.partIds !== undefined) {
+    options.partIds = validatePartIds(value.partIds, "partIds");
+  }
+  if (!options.appRegistration && (options.partIds?.length ?? 0) === 0) {
+    // An own registration signs in with what the app was granted. The
+    // OpenAdminOS app requests only the services the admin chose.
+    throw new Error("Select at least one service.");
   }
   return options;
+}
+
+function validatePartIds(value: unknown, label: string): string[] {
+  if (!Array.isArray(value)) throw new Error(`${label} must be an array.`);
+  if (value.length > 64) throw new Error(`${label} has too many entries.`);
+  const ids = value.map((entry, index) => {
+    const id = requireBoundedString(entry, `${label}[${index}]`, 64);
+    const part = servicePartById(id);
+    if (!part) throw new Error(`${label}[${index}] is not a known service part.`);
+    if (part.planned) throw new Error(`${label}[${index}] is planned and cannot be requested yet.`);
+    return id;
+  });
+  return [...new Set(ids)];
 }
 
 function validateStartBaselineRollbackInput(
@@ -6441,15 +6448,12 @@ function registerIpcHandlers() {
   }));
   ipcMain.handle(
     "openadminos:add-tenant-access",
-    handleTrusted((_event, tenantId: unknown, areaId: unknown) => {
-      const validIds = new Set(PERMISSION_AREAS.map((area) => area.id));
-      const checkedAreaId = requireBoundedString(areaId, "areaId", 32);
-      if (!validIds.has(checkedAreaId as PermissionAreaId)) {
-        throw new Error("Permission area is invalid.");
-      }
+    handleTrusted((_event, tenantId: unknown, partIds: unknown) => {
+      const checked = validatePartIds(partIds, "partIds");
+      if (checked.length === 0) throw new Error("Select at least one service part.");
       return store.addTenantAccess(
         requireBoundedString(tenantId, "tenantId", 256),
-        checkedAreaId as PermissionAreaId,
+        checked,
       );
     }),
   );

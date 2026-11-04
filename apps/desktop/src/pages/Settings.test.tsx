@@ -285,6 +285,7 @@ describe("Settings provider section", () => {
     expect(bridge.refreshGraphCache).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       screen.getByRole("button", {
         name: /Approve \d+ read scopes and continue to Microsoft/,
@@ -779,16 +780,15 @@ describe("Settings provider section", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows granted areas and adds a missing area through reviewed consent", async () => {
+  it("shows connected services and adds a missing service through reviewed consent", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();
     const tenant = {
       ...base.tenants[0]!,
       grantedScopes: [
-        "User.Read.All",
-        "GroupMember.Read.All",
-        "Directory.Read.All",
-        "Organization.Read.All",
+        "graph:User.Read.All",
+        "graph:GroupMember.Read.All",
+        "graph:Organization.Read.All",
       ],
     };
     const state = createMockAppState({ tenants: [tenant] });
@@ -801,17 +801,14 @@ describe("Settings provider section", () => {
       bridge,
     });
 
-    expect(await screen.findByText("Users, groups, and directory")).toBeInTheDocument();
-    await user.click(
-      screen.getByRole("button", { name: "Add Devices and configuration access" }),
-    );
-    expect(
-      screen.getByRole("dialog", { name: "Add Devices and configuration access" }),
-    ).toBeInTheDocument();
-    expect(screen.getByText("6 delegated read scopes")).toBeInTheDocument();
+    expect(await screen.findByText("Intune (partial)")).toBeInTheDocument();
+    expect(screen.getByText("Entra (partial)")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Add Intune access" }));
+    expect(screen.getByRole("dialog", { name: "Add Intune access" })).toBeInTheDocument();
+    expect(screen.getByText("7 delegated read scopes")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Continue to Microsoft" }));
     await waitFor(() =>
-      expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", "devices"),
+      expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", ["intune.devices", "intune.apps"]),
     );
   });
 
