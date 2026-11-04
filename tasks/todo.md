@@ -1043,3 +1043,31 @@ Same branch. From two runs in the app built at 52ca085: a docs answer and the te
 - [x] No navigation back to Chat when a run finishes after the admin left
 - [x] Live runs kept by stream id, with a store unit test
 - [x] Stop checked after a streamed reply; Nova keeps a hosted disclosure; Graph requests in the egress line; live text throttled
+
+## Chat UI pass (2026-11-04)
+
+Same branch. From a screenshot of a docs answer from Microsoft Learn on a hosted model: the tenant chip on a docs answer, "Microsoft Learn" three times, citations numbered with gaps, "third-party content" on every card, the Scroll to latest button over the sources and a long hosted line under the composer.
+
+### Acceptance criteria and status
+
+1. [x] A docs answer that never touched the tenant shows no tenant chip; the summary row says "Tenant not used". Mixed and tenant answers keep the chip.
+2. [x] Only cited sources are numbered, 1..N in order of first appearance, chips remapped; uncited sources sit under a collapsed "Also consulted"; numbering reads only the stored answer and sources, so a reload renders the same (done in the renderer, `numberCitations`).
+3. [x] Scroll to latest sits in its own row above the composer, outside the scrolling conversation, and shows only away from the bottom.
+4. [x] Optional `title` in the final JSON of a new chat's first answer: at most 60 characters, plain text, no links, no tenant values, no write intent; used for the sidebar and header unless renamed meanwhile; trimmed question otherwise. No extra model call.
+5. [x] The source name appears once, in the summary row; the header source label is gone; block labels only when an answer has both documentation and tenant blocks.
+6. [x] Hosted sentence under the composer: in full on a conversation's first message and after a provider, model or MCP host change; otherwise a shield icon with the same sentence as tooltip and accessible description, opening it in full on click. Status strip unchanged.
+7. [x] "Sources · learn.microsoft.com, not verified by OpenAdminOS" once in the heading, not on each row.
+8. [x] Origin icons with counts replace the coloured dots; the full timeline still expands.
+9. [x] Compact source list, three shown and "Show N more"; chip hover or focus shows the excerpt, title and host (excerpts stored host-side).
+10. [x] Chips 12 px with 5.7:1 (light) and 8.2:1 (dark) contrast; a click reveals, scrolls to, focuses and highlights the row; the row title links to the page.
+11. [x] One row: "6 steps · 25 s · Microsoft Learn · Tenant not used" and "Sent: answer context to OpenAI Codex, search text to learn.microsoft.com", with "Sent" expanding to exactly what left the device; local runs say "Nothing left this device".
+12. [x] One follow-up chip under the answer, with "Uses tenant data" when a docs answer's follow-up reads tenant data; clicking fills the composer only.
+13. [x] Copy button on each numbered step (plain text, no citations); "Open in Learn" when one Learn page supplies more than half of the citations.
+
+### Review
+
+- Tests: electron unit and end-to-end tests for `validTitle`, `sourceExcerpt`, the title protocol, title persistence and fallback, stored excerpts and `tenantFollowUps`; renderer tests for each item (`chat-steps.test.ts`, `hosted-disclosure.test.ts`, `ChatSteps.test.tsx`, `MarkdownPreview.test.tsx`, `IntuneChat.test.tsx`).
+- Screenshots in light and dark from a scratch Vite and Playwright harness with a mock bridge (not committed).
+- A separate review found no blocking issues; three of its lower-confidence notes were fixed (hosts of consulted rows in the heading, disclosure recorded for the running chat only, copied step announced). Not changed: uncited local index passages are not listed when nothing is cited (earlier decision), and copying a step copies its first line, not nested sub-items.
+- Checks: typecheck clean; electron 757 of 757; renderer 53 files, 395 tests under Node 22 before the review fixes (chat files 185 of 185 after); runtime 225 pass, 0 fail; qa-graph 65 of 65; qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
+- Open: the live check in the running app, and the separate evaluator and GPT-6.1-Sol reviews. Seen in the harness at 1280 px wide and not changed here: a long chat title in the top bar runs under the status strip pill.

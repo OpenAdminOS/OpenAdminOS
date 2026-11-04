@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Chat answers read cleaner: one summary row with origin icons, sources and what was sent (expandable to the exact text), sources numbered 1..N as cited with a compact list, passage popovers and "Also consulted", no tenant chip on docs answers, one follow-up chip that says when it uses tenant data, short chat titles from the first answer, copy buttons on numbered steps, and the hosted-provider sentence under the composer folded into an icon after the first message.
 - Chat shows every step live with where it ran and what left the device, folds it into one summary line after the answer, labels documentation and tenant blocks from the trace with source cards, keeps docs questions off the tenant (the answering model classifies each question, a keyword check turns a docs label that mentions the tenant into mixed, and the tenant is refreshed only once the answer needs it), calls the source a question names, prefers Microsoft Learn over the local index, and offers read-only follow-ups as chips and Tab-to-fill ghost text.
 - Marketplace replaces the Agent Hub: browse registry agents and install the Microsoft Learn, KQL Search and IntuneAutomation MCP servers, whose read-only tools Chat can then call with any provider. The status strip names the hosts that receive tool queries.
 - Public roadmap at roadmap.openadminos.com: four stages from the desktop available today to team features and a vendor ecosystem, each item tracked as a public issue.
