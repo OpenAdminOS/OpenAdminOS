@@ -1,5 +1,9 @@
 import { createHash } from "node:crypto";
-import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
+import {
+  OPENADMINOS_CLIENT_ID,
+  TENANT_DATA_INSTRUCTIONS,
+  type ExpectedTenantAccount,
+} from "@openadminos/runtime";
 import {
   AVAILABLE_SERVICES,
   graphAccessDenialFromError,
@@ -383,6 +387,16 @@ export function sanitizeGraphResources(
 }
 
 
+
+/** The account and directory a stored tenant was connected with. */
+export function connectedAccountOf(tenant: TenantRecord): ExpectedTenantAccount {
+  return { tenantId: tenant.id, homeAccountId: tenant.homeAccountId, username: tenant.username };
+}
+
+/** Prefills Microsoft sign-in with the connected account, when it is known. */
+export function loginHintFor(tenant: TenantRecord): { loginHint?: string } {
+  return tenant.username ? { loginHint: tenant.username } : {};
+}
 
 export function tenantNamesById(tenants: TenantRecord[]): Map<string, string> {
   return new Map(tenants.map((tenant) => [tenant.id, tenant.displayName]));

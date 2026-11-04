@@ -124,6 +124,7 @@ export { renderTemplate, renderDeep } from "./template-engine.js";
 export { scopesFromAccessToken, scopesFromAuthenticationResult } from "./token-scopes.js";
 export {
   acquireTokenSilent,
+  assertSignedInAccount,
   createMsalClient,
   DEFAULT_AUTHORITY,
   DEFAULT_SCOPES,
@@ -134,8 +135,10 @@ export {
   authorityForDirectory,
   TenantConnectCancelledError,
   TenantConnectTimeoutError,
+  TenantAccountMismatchError,
   removeAccount,
   runInteractiveFlow,
+  type ExpectedTenantAccount,
   type TokenCacheStorage,
 } from "./msal.js";
 export {

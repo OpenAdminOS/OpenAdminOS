@@ -14,6 +14,7 @@ const G = "https://graph.microsoft.com/";
 async function makeFixture(options: {
   initial?: Record<string, unknown>;
   returnedScopes: (requested: string[]) => string[];
+  account?: { homeAccountId: string; tenantId: string; username: string };
 }) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-service-connect-"));
   const statePath = join(dir, "state.json");
@@ -24,6 +25,7 @@ async function makeFixture(options: {
   );
   const storage: TokenCacheStorage = { read: async () => "", write: async () => undefined };
   const requests: string[][] = [];
+  const loginHints: Array<string | undefined> = [];
   const store = new AppStateStore({
     filePath: statePath,
     tokenStore: storage,
@@ -31,10 +33,11 @@ async function makeFixture(options: {
     userDataPath: dir,
     statsApiUrl: "",
     appVersion: "0.7.2",
-    interactiveSignIn: async ({ scopes }) => {
+    interactiveSignIn: async ({ scopes, loginHint }) => {
       requests.push([...(scopes ?? [])]);
+      loginHints.push(loginHint);
       return {
-        account: {
+        account: options.account ?? {
           homeAccountId: "home.contoso-tenant-id",
           tenantId: "contoso-tenant-id",
           username: "admin@contoso.example",
@@ -46,6 +49,7 @@ async function makeFixture(options: {
   return {
     store,
     requests,
+    loginHints,
     async persistedGrants(): Promise<unknown> {
       const persisted = JSON.parse(await readFile(statePath, "utf8")) as {
         tenants: Array<{ grantedScopes?: unknown }>;
@@ -124,6 +128,7 @@ describe("connecting by service part", () => {
     try {
       const state = await fixture.store.addTenantAccess("contoso-tenant-id", ["defender.incidents"]);
       assert.deepEqual(fixture.requests[0], [`${G}SecurityAlert.Read.All`, `${G}SecurityIncident.Read.All`]);
+      assert.deepEqual(fixture.loginHints, ["admin@contoso.example"]);
       assert.deepEqual(state.tenants[0]?.grantedScopes, [
         "graph:DeviceManagementApps.Read.All",
         "graph:SecurityAlert.Read.All",
@@ -134,6 +139,47 @@ describe("connecting by service part", () => {
       await fixture.close();
     }
   });
+
+  for (const [label, account, message] of [
+    [
+      "a different account",
+      { homeAccountId: "other.fabrikam-tenant-id", tenantId: "fabrikam-tenant-id", username: "it@fabrikam.example" },
+      "Signed in as it@fabrikam.example, but this tenant is connected as admin@contoso.example. Sign in as admin@contoso.example and try again.",
+    ],
+    [
+      "the same account in another directory",
+      { homeAccountId: "home.contoso-tenant-id", tenantId: "fabrikam-tenant-id", username: "admin@contoso.example" },
+      "Signed in as admin@contoso.example to directory fabrikam-tenant-id, but this tenant is directory contoso-tenant-id, connected as admin@contoso.example. Sign in as admin@contoso.example to that directory and try again.",
+    ],
+  ] as const) {
+    it(`Add access saves nothing when ${label} signs in`, async () => {
+      const fixture = await makeFixture({
+        initial: {
+          activeTenantId: "contoso-tenant-id",
+          tenants: [{
+            id: "contoso-tenant-id",
+            displayName: "Contoso",
+            username: "admin@contoso.example",
+            homeAccountId: "home.contoso-tenant-id",
+            addedAt: "2026-11-04T10:00:00.000Z",
+            appRegistration: { kind: "openadminos", clientId: "d1de0a94-f67a-421d-8804-a235955ffd69" },
+            grantedScopes: ["graph:User.Read"],
+          }],
+        },
+        returnedScopes: () => ["SecurityAlert.Read.All", "SecurityIncident.Read.All"],
+        account,
+      });
+      try {
+        await assert.rejects(fixture.store.addTenantAccess("contoso-tenant-id", ["defender.incidents"]), {
+          name: "TenantAccountMismatchError",
+          message,
+        });
+        assert.deepEqual(await fixture.persistedGrants(), ["graph:User.Read"]);
+      } finally {
+        await fixture.close();
+      }
+    });
+  }
 
   it("asks an own registration to add permissions on the app instead of consenting", async () => {
     const fixture = await makeFixture({

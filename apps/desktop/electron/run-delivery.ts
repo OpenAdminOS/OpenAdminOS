@@ -1,5 +1,6 @@
 import { PILOT_COPY } from "../src/shared/pilot-mode.js";
 import {
+  assertSignedInAccount,
   createTenantSession,
   findConnectorFactory,
   noSecrets,
@@ -25,8 +26,10 @@ import type { PublicClientApplication } from "@azure/msal-node";
 import { WHATSAPP_WEB_CONNECTOR_ID } from "@openadminos/connector-whatsapp-web";
 
 import {
+  connectedAccountOf,
   createLocalOnlyTenantSession,
   isTerminalRunStatus,
+  loginHintFor,
 } from "./state-helpers.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -575,7 +578,14 @@ export class RunDeliveryService {
           scheduledAuthRequired = true;
           throw new Error(authRecovery);
         }
-        return runInteractiveFlow({ client, scopes, openBrowser });
+        const result = await runInteractiveFlow({
+          client,
+          scopes,
+          openBrowser,
+          ...loginHintFor(tenant),
+        });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
       },
     });
 
@@ -896,7 +906,14 @@ export class RunDeliveryService {
           scheduledAuthRequired = true;
           throw new Error(authRecovery);
         }
-        return runInteractiveFlow({ client, scopes, openBrowser });
+        const result = await runInteractiveFlow({
+          client,
+          scopes,
+          openBrowser,
+          ...loginHintFor(tenant),
+        });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
       },
     });
 

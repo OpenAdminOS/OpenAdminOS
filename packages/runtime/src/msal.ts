@@ -154,6 +154,51 @@ export interface InteractiveFlowInput {
   redirectUri?: string;
   signal?: AbortSignal;
   timeoutMs?: number;
+  /** Prefills the Microsoft sign-in page with the connected account. */
+  loginHint?: string;
+}
+
+/** The account a stored tenant was connected with. */
+export interface ExpectedTenantAccount {
+  tenantId: string;
+  homeAccountId: string;
+  username: string;
+}
+
+/** An interactive sign-in returned an account other than the connected one. */
+export class TenantAccountMismatchError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TenantAccountMismatchError";
+  }
+}
+
+/**
+ * Throws unless the sign-in returned the account and directory the tenant
+ * was connected with. Callers check this before saving anything, so a
+ * different account can never change a tenant's grants or tokens in use.
+ */
+export function assertSignedInAccount(
+  result: AuthenticationResult,
+  expected: ExpectedTenantAccount,
+): void {
+  const account = result.account;
+  const signedInAs = account?.username || "an unknown account";
+  const connectedAs = expected.username || expected.homeAccountId;
+  const sameAccount =
+    !!account &&
+    account.homeAccountId.toLowerCase() === expected.homeAccountId.toLowerCase();
+  if (!sameAccount) {
+    throw new TenantAccountMismatchError(
+      `Signed in as ${signedInAs}, but this tenant is connected as ${connectedAs}. Sign in as ${connectedAs} and try again.`,
+    );
+  }
+  const signedInTenant = account.tenantId || account.homeAccountId;
+  if (signedInTenant.toLowerCase() !== expected.tenantId.toLowerCase()) {
+    throw new TenantAccountMismatchError(
+      `Signed in as ${signedInAs} to directory ${signedInTenant}, but this tenant is directory ${expected.tenantId}, connected as ${connectedAs}. Sign in as ${connectedAs} to that directory and try again.`,
+    );
+  }
 }
 
 export class TenantConnectCancelledError extends Error {
@@ -317,6 +362,7 @@ export async function runInteractiveFlow(
     loopbackClient,
   };
   if (input.redirectUri) request.redirectUri = input.redirectUri;
+  if (input.loginHint) request.loginHint = input.loginHint;
   try {
     const result = await awaitWithSignal(input.client.acquireTokenInteractive(request), signal);
     signal.throwIfAborted();

@@ -43,6 +43,7 @@ import {
   ollamaEndpointOverride,
   removeAccount,
   runInteractiveFlow,
+  assertSignedInAccount,
   setAgentUpdatesDir,
   toInstalledAgent,
   type TokenCacheStorage,
@@ -276,12 +277,14 @@ import {
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
+  connectedAccountOf,
   createLocalOnlyTenantSession,
   entryToRegistrySummary,
   forgetAppRegistration,
   humanizeMsalError,
   humanizeScheduledRunError,
   isNodeError,
+  loginHintFor,
   normalizeWorkspaceInstructions,
   normalizeWorkspaceTitle,
   rememberAppRegistration,
@@ -1986,8 +1989,16 @@ export class AppStateStore {
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        this.interactiveSignIn({ client, scopes, openBrowser }),
+      acquireInteractive: async (scopes) => {
+        const result = await this.interactiveSignIn({
+          client,
+          scopes,
+          openBrowser,
+          ...loginHintFor(tenant),
+        });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
+      },
     });
   }
 
@@ -5652,10 +5663,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         scopes: toResourceScopes(scopeNames),
         openBrowser: this.openBrowser,
         timeoutMs: 300_000,
+        ...loginHintFor(tenant),
       });
     } catch (error) {
       throw new Error(humanizeMsalError(error, tenant.appRegistration));
     }
+    // Consent from another account must not change this tenant's grants.
+    assertSignedInAccount(result, connectedAccountOf(tenant));
     const newlyGranted = grantsFromTokenScopes(result.scopes);
     await this.serialize(async () => {
       const current = await this.read();
@@ -5710,10 +5724,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           scopes: CUSTOM_REGISTRATION_SCOPES,
           openBrowser: this.openBrowser,
           timeoutMs: 300_000,
+          ...loginHintFor(tenant),
         });
       } catch (error) {
         throw new Error(humanizeMsalError(error, tenant.appRegistration));
       }
+      // The silent path is bound to the stored account. A fresh sign-in
+      // could be anyone, so it must match before grants are replaced.
+      assertSignedInAccount(result, connectedAccountOf(tenant));
     }
     const grants = grantsFromTokenScopes(scopesFromAuthenticationResult(result));
     const previous = new Set((tenant.grantedScopes ?? []).map(qualifyScope));
@@ -5904,8 +5922,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        await this.interactiveSignIn({ client, scopes, openBrowser }),
+      acquireInteractive: async (scopes) => {
+        const signIn = await this.interactiveSignIn({
+          client,
+          scopes,
+          openBrowser,
+          ...loginHintFor(tenant),
+        });
+        assertSignedInAccount(signIn, connectedAccountOf(tenant));
+        return signIn;
+      },
     });
     const result = await probeSubscribedSkus(
       (scopes) => session.acquireTokenForScopes(scopes),

@@ -7,6 +7,8 @@ import type {
 } from "@azure/msal-node";
 import {
   DEFAULT_SCOPES,
+  TenantAccountMismatchError,
+  assertSignedInAccount,
   createTenantSession,
   runInteractiveFlow,
   TenantConnectCancelledError,
@@ -121,5 +123,70 @@ describe("incremental sign-in lifecycle", () => {
     controller.abort();
     await assert.rejects(result, TenantConnectCancelledError);
     finish({ accessToken: "late-token" } as AuthenticationResult);
+  });
+});
+
+describe("connected account check", () => {
+  const expected = {
+    tenantId: "contoso-tid",
+    homeAccountId: "oid.contoso-tid",
+    username: "admin@contoso.example",
+  };
+  const signedIn = (account: { homeAccountId: string; tenantId: string; username: string }) =>
+    ({ account, tenantId: account.tenantId }) as unknown as AuthenticationResult;
+
+  it("accepts the connected account in its own directory", () => {
+    assert.doesNotThrow(() =>
+      assertSignedInAccount(
+        signedIn({ homeAccountId: "OID.CONTOSO-TID", tenantId: "contoso-tid", username: "Admin@contoso.example" }),
+        expected,
+      ),
+    );
+  });
+
+  it("names both accounts when a different account signs in", () => {
+    assert.throws(
+      () =>
+        assertSignedInAccount(
+          signedIn({ homeAccountId: "other.fabrikam-tid", tenantId: "fabrikam-tid", username: "it@fabrikam.example" }),
+          expected,
+        ),
+      (error: unknown) =>
+        error instanceof TenantAccountMismatchError &&
+        error.message ===
+          "Signed in as it@fabrikam.example, but this tenant is connected as admin@contoso.example. Sign in as admin@contoso.example and try again.",
+    );
+  });
+
+  it("rejects the same account signed in to another directory", () => {
+    assert.throws(
+      () =>
+        assertSignedInAccount(
+          signedIn({ homeAccountId: "oid.contoso-tid", tenantId: "fabrikam-tid", username: "admin@contoso.example" }),
+          expected,
+        ),
+      (error: unknown) =>
+        error instanceof TenantAccountMismatchError &&
+        error.message.startsWith("Signed in as admin@contoso.example to directory fabrikam-tid, but this tenant is directory contoso-tid"),
+    );
+  });
+
+  it("rejects a sign-in without an account", () => {
+    assert.throws(
+      () => assertSignedInAccount({ account: null } as unknown as AuthenticationResult, expected),
+      /Signed in as an unknown account, but this tenant is connected as admin@contoso.example/,
+    );
+  });
+
+  it("passes the login hint to MSAL", async () => {
+    let loginHint: string | undefined;
+    const client = {
+      acquireTokenInteractive: async (request: InteractiveRequest) => {
+        loginHint = request.loginHint;
+        return { accessToken: "token" } as AuthenticationResult;
+      },
+    } as unknown as PublicClientApplication;
+    await runInteractiveFlow({ client, openBrowser: async () => undefined, loginHint: "admin@contoso.example" });
+    assert.equal(loginHint, "admin@contoso.example");
   });
 });

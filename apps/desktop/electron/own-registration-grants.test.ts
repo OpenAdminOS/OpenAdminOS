@@ -31,7 +31,11 @@ function customTenant(grantedScopes?: string[]): TenantRecord {
 
 async function makeFixture(options: {
   tenants?: TenantRecord[];
-  interactive?: { scopes: string[]; accessToken?: string };
+  interactive?: {
+    scopes: string[];
+    accessToken?: string;
+    account?: { homeAccountId: string; tenantId: string; username: string };
+  };
   silent?: () => Promise<{ scopes: string[]; accessToken: string }>;
 }) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-own-grants-"));
@@ -40,15 +44,17 @@ async function makeFixture(options: {
     activeProviderId: "ollama", installedAgents: [], runs: [], tenants: options.tenants ?? [],
   }));
   const interactiveRequests: string[][] = [];
+  const loginHints: Array<string | undefined> = [];
   const silentRequests: Array<{ scopes: string[]; forceRefresh?: boolean }> = [];
   const store = new AppStateStore({
     filePath, userDataPath: dir, statsApiUrl: "", appVersion: "0.7.2",
     tokenStore: { read: async () => "", write: async () => undefined },
     tokenStoreFor: () => ({ read: async () => "", write: async () => undefined }),
-    interactiveSignIn: async ({ scopes }) => {
+    interactiveSignIn: async ({ scopes, loginHint }) => {
       interactiveRequests.push([...(scopes ?? [])]);
+      loginHints.push(loginHint);
       return {
-        account: { homeAccountId: "home.contoso-tenant-id", tenantId: "contoso-tenant-id", username: "admin@contoso.example" },
+        account: options.interactive?.account ?? { homeAccountId: "home.contoso-tenant-id", tenantId: "contoso-tenant-id", username: "admin@contoso.example" },
         scopes: options.interactive?.scopes ?? [],
         accessToken: options.interactive?.accessToken ?? "",
       } as never;
@@ -67,6 +73,7 @@ async function makeFixture(options: {
   return {
     store,
     interactiveRequests,
+    loginHints,
     silentRequests,
     async close() {
       for (const tenant of (await store.getAppState().catch(() => undefined))?.tenants ?? []) {
@@ -154,11 +161,44 @@ describe("own app registration grants", () => {
     try {
       const state = await fixture.store.refreshTenantGrants("contoso-tenant-id");
       assert.deepEqual(fixture.interactiveRequests[0], [DEFAULT_SCOPE, "offline_access"]);
+      assert.deepEqual(fixture.loginHints, ["admin@contoso.example"]);
       assert.deepEqual(state.tenants[0]?.grantedScopes, ["graph:User.Read", "graph:Application.Read.All"]);
     } finally {
       await fixture.close();
     }
   });
+
+  for (const [label, account, message] of [
+    [
+      "a different account",
+      { homeAccountId: "other.fabrikam-tenant-id", tenantId: "fabrikam-tenant-id", username: "it@fabrikam.example" },
+      "Signed in as it@fabrikam.example, but this tenant is connected as admin@contoso.example. Sign in as admin@contoso.example and try again.",
+    ],
+    [
+      "the same account in another directory",
+      { homeAccountId: "home.contoso-tenant-id", tenantId: "fabrikam-tenant-id", username: "admin@contoso.example" },
+      "Signed in as admin@contoso.example to directory fabrikam-tenant-id, but this tenant is directory contoso-tenant-id, connected as admin@contoso.example. Sign in as admin@contoso.example to that directory and try again.",
+    ],
+  ] as const) {
+    it(`Check again saves nothing when ${label} signs in`, async () => {
+      const fixture = await makeFixture({
+        tenants: [customTenant(["graph:User.Read"])],
+        silent: async () => { throw new InteractionRequiredAuthError("interaction_required", "Interaction required."); },
+        interactive: { scopes: [DEFAULT_SCOPE], accessToken: token("User.Read Application.Read.All"), account },
+      });
+      try {
+        await assert.rejects(fixture.store.refreshTenantGrants("contoso-tenant-id"), {
+          name: "TenantAccountMismatchError",
+          message,
+        });
+        const state = await fixture.store.getAppState();
+        assert.deepEqual(state.tenants[0]?.grantedScopes, ["graph:User.Read"]);
+        assert.equal(state.tenants[0]?.homeAccountId, "home.contoso-tenant-id");
+      } finally {
+        await fixture.close();
+      }
+    });
+  }
 
   it("Check again points the OpenAdminOS app to Add access", async () => {
     const fixture = await makeFixture({
