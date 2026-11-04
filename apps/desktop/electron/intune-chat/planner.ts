@@ -468,8 +468,33 @@ const TENANT_STATE =
   /\b(?:state of|status of|assigned to|enrolled in|your|their|his|her|any|all|who|run it|run this|execute|against)\b|\b(?!(?:what|it|that|there|here|let|who|where|how)'s\b)[a-z0-9]+'s\b/;
 
 /**
- * Decides whether a question needs the tenant. A docs label skips the
- * tenant refresh and tenant tools, so it is given only when it is safe:
+ * Whether the wording refers to this tenant: "our", "which", "your", a
+ * possessive such as "Bob's", or a value such as HR-LAPTOP-07.
+ */
+export function hasTenantReference(question: string): boolean {
+  const trimmed = question.trim();
+  const lower = trimmed.toLowerCase();
+  return TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
+}
+
+/**
+ * The kind the answering model declared, with the keyword check as a
+ * veto: docs stands only when the wording refers to nothing in the
+ * tenant, otherwise it becomes mixed. Tenant and mixed stand as given.
+ */
+export function resolveQuestionKind(
+  declared: IntuneChatQuestionKind,
+  tenantReference: boolean,
+): { kind: IntuneChatQuestionKind; vetoed: boolean } {
+  if (declared === "docs" && tenantReference) return { kind: "mixed", vetoed: true };
+  return { kind: declared, vetoed: false };
+}
+
+/**
+ * Decides by keyword rules whether a question needs the tenant. The tool
+ * loop asks the answering model instead and uses this only when the model
+ * gives no kind; the deterministic path uses it as it is. A docs label
+ * skips the tenant refresh and tenant tools, so it is given only when it is safe:
  * the question names documentation or a source, or asks to write a query
  * or script, and refers to nothing in the tenant. Wording that only sounds
  * general (how-to, "what is", guidance words) also starts many tenant
@@ -483,9 +508,8 @@ export function classifyChatQuestion(
   question: string,
   input: { plannedResources: readonly GraphCacheResourceKind[]; namesSource: boolean },
 ): IntuneChatQuestionKind {
-  const trimmed = question.trim();
-  const lower = trimmed.toLowerCase();
-  const tenantReference = TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
+  const lower = question.trim().toLowerCase();
+  const tenantReference = hasTenantReference(question);
   const planned = input.plannedResources.length > 0;
   const explicitDocs = input.namesSource || DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower);
   if (explicitDocs) return tenantReference ? "mixed" : "docs";

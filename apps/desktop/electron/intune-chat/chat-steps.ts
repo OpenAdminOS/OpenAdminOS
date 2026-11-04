@@ -90,7 +90,8 @@ export function namedServers(question: string, servers: readonly McpChatServer[]
 }
 
 /**
- * Chooses sources: a server the question names is always required. For a
+ * Chooses sources: a server the question names, or the model said it
+ * would use, is always required. For a
  * docs or mixed question, servers whose topics match are chosen next. For
  * a docs question with none chosen, Microsoft Learn is chosen when
  * installed; a mixed question may be an ambiguous tenant question, so it
@@ -102,9 +103,14 @@ export function planChatSources(input: {
   kind: IntuneChatQuestionKind;
   servers: readonly McpChatServer[];
   docsIndexAvailable: boolean;
+  /** Server ids the model declared; unknown ids are ignored. */
+  declaredServerIds?: readonly string[];
+  /** Replaces the detail's first sentence, which names the kind. */
+  lead?: string;
 }): ChatSourcePlan {
   const lower = input.question.toLowerCase();
   const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
+  for (const server of input.servers) if (input.declaredServerIds?.includes(server.id)) chosen.set(server.id, server);
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
       if (server.topics.some((topic) => new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower))) chosen.set(server.id, server);
@@ -118,12 +124,71 @@ export function planChatSources(input: {
   const documentation = [...names, ...(docs && !learnFirst ? [docs] : [])];
   const docsList = joinList(documentation) + (docs && learnFirst ? `, then ${docs}` : "");
   const tenant = "cached tenant data and Microsoft Graph";
-  const detail = input.kind === "docs"
-    ? `Documentation question. ${documentation.length > 0 ? `Sources: ${docsList}.` : "No documentation source is available, so the model answers from what it knows."} Your tenant is not checked.`
+  const lead = input.lead ?? (input.kind === "docs" ? "Documentation question." : input.kind === "mixed" ? "Documentation and tenant question." : "Tenant question.");
+  const rest = input.kind === "docs"
+    ? `${documentation.length > 0 ? `Sources: ${docsList}.` : "No documentation source is available, so the model answers from what it knows."} Your tenant is not checked.`
     : input.kind === "mixed"
-      ? `Documentation and tenant question. Sources: ${documentation.length > 0 ? `${docsList}, and ` : ""}${tenant}.`
-      : `Tenant question. Sources: ${tenant}${names.length > 0 ? `, and ${joinList(names)}` : ""}.`;
-  return { kind: input.kind, requiredServerIds: [...chosen.keys()], learnFirst, detail };
+      ? `Sources: ${documentation.length > 0 ? `${docsList}, and ` : ""}${tenant}.`
+      : `Sources: ${tenant}${names.length > 0 ? `, and ${joinList(names)}` : ""}.`;
+  return { kind: input.kind, requiredServerIds: [...chosen.keys()], learnFirst, detail: `${lead} ${rest}` };
+}
+
+/**
+ * How the kind was decided: by the model, by the model with the keyword
+ * veto, by keyword rules after the model gave no kind, or by keyword
+ * rules alone on a path where the model does not classify.
+ */
+export type QuestionKindReason = "model" | "veto" | "fallback" | "keywords";
+
+/**
+ * The kind of one answer and the first step that shows it. The kind is
+ * decided once, then can only be upgraded from docs to mixed, never
+ * downgraded. Until it is decided, `sources` is the keyword plan.
+ */
+export class QuestionKindTracker {
+  private decided = false;
+
+  constructor(
+    private readonly steps: ChatStepRecorder,
+    private readonly planStepId: string,
+    private readonly input: { question: string; servers: readonly McpChatServer[]; docsIndexAvailable: boolean },
+    private plan: ChatSourcePlan,
+  ) {}
+
+  get sources(): ChatSourcePlan {
+    return this.plan;
+  }
+
+  /** Decides the kind once and finishes the first step with it and its sources. */
+  resolve(kind: IntuneChatQuestionKind, reason: QuestionKindReason, declaredServerIds: readonly string[] = []): ChatSourcePlan {
+    if (this.decided) return this.plan;
+    this.decided = true;
+    this.plan = planChatSources({
+      ...this.input,
+      kind,
+      declaredServerIds,
+      ...(reason === "veto" ? { lead: "Treated as docs and tenant: the question mentions your tenant." } : {}),
+    });
+    const detail = reason === "fallback" ? `${this.plan.detail} The model gave no question kind, so keyword rules decided.` : this.plan.detail;
+    this.steps.finish(this.planStepId, { title: "Read the question", detail });
+    return this.plan;
+  }
+
+  /** Decides the keyword kind when nothing else did, for example after a fallback. */
+  settle(): void {
+    this.resolve(this.plan.kind, "keywords");
+  }
+
+  /** A docs answer asked for tenant data: it becomes mixed, shown as its own step. */
+  upgrade(): ChatSourcePlan {
+    if (this.plan.kind !== "docs") return this.plan;
+    this.plan = { ...this.plan, kind: "mixed" };
+    this.steps.finish(this.steps.start({ kind: "plan", title: "Treating it as docs and tenant", origin: "device", originLabel: ON_DEVICE }), {
+      title: "Treated as docs and tenant",
+      detail: "The model asked for tenant data, so the answer now needs tenant evidence.",
+    });
+    return this.plan;
+  }
 }
 
 function joinList(items: readonly string[]): string {

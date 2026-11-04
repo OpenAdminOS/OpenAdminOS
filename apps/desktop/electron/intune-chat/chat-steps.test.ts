@@ -11,13 +11,14 @@ import {
   ChatStepRecorder,
   CitationRegistry,
   planChatSources,
+  QuestionKindTracker,
   relabelUnverifiedLearn,
   tenantTieInFollowUp,
   toolStepFinish,
   toolStepStart,
   validFollowUps,
 } from "./chat-steps.js";
-import { classifyChatQuestion, planChatContext } from "./planner.js";
+import { classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { TenantValueIndex } from "./tenant-values.js";
 import { mcpChatToolName, mcpPrivateTermsForTenant, parseMcpResults, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
@@ -94,6 +95,52 @@ describe("question classification", () => {
       "Are all licenses assigned? Cite docs.",
       "Write a KQL query for failed sign-ins and run it for yesterday",
     ]) assert.notEqual(kind(question), "docs", question);
+  });
+});
+
+describe("model-declared question kinds", () => {
+  it("keeps a model docs label only when the wording refers to nothing in the tenant", () => {
+    for (const question of [
+      "What does the microsoft learn say about defender for macos?",
+      "How do I enroll macOS devices?",
+      "Is there a script to find stale devices?",
+      "What are unmanaged devices?",
+    ]) assert.deepEqual(resolveQuestionKind("docs", hasTenantReference(question)), { kind: "docs", vetoed: false }, question);
+    for (const question of [
+      "What do the docs say about our devices?",
+      "How do I fix Bob's laptop?",
+      "Why is HR-LAPTOP-07 noncompliant per the docs?",
+      "Explain the status of device KIOSK-0042",
+      "Which devices need Defender?",
+    ]) assert.deepEqual(resolveQuestionKind("docs", hasTenantReference(question)), { kind: "mixed", vetoed: true }, question);
+    // Tenant and mixed stand as given, with or without a tenant reference.
+    assert.deepEqual(resolveQuestionKind("tenant", false), { kind: "tenant", vetoed: false });
+    assert.deepEqual(resolveQuestionKind("mixed", true), { kind: "mixed", vetoed: false });
+  });
+
+  it("says when the veto fired and when keyword rules decided", () => {
+    const steps = new ChatStepRecorder();
+    const context = { question: "What do the docs say about our devices?", servers: [learn], docsIndexAvailable: false };
+    const vetoed = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), context, planChatSources({ ...context, kind: "mixed" }));
+    vetoed.resolve("mixed", "veto");
+    assert.equal(steps.steps[0]!.detail, "Treated as docs and tenant: the question mentions your tenant. Sources: cached tenant data and Microsoft Graph.");
+    // Decided once: later calls change nothing.
+    vetoed.resolve("docs", "model");
+    assert.equal(vetoed.sources.kind, "mixed");
+    const fallback = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), context, planChatSources({ ...context, kind: "mixed" }));
+    fallback.resolve("mixed", "fallback");
+    assert.match(steps.steps[1]!.detail!, /The model gave no question kind, so keyword rules decided\.$/);
+    // A declared server is chosen; an unknown id is ignored.
+    const declared = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), { ...context, servers: [learn, kql] }, planChatSources({ ...context, kind: "mixed" }));
+    assert.deepEqual(declared.resolve("tenant", "model", ["kql-search", "evil"]).requiredServerIds, ["kql-search"]);
+    // An upgrade turns docs into mixed and shows its own step; tenant and mixed never change.
+    const docs = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), context, planChatSources({ ...context, kind: "docs" }));
+    docs.resolve("docs", "model");
+    assert.equal(docs.upgrade().kind, "mixed");
+    assert.deepEqual([steps.steps.at(-1)!.kind, steps.steps.at(-1)!.title], ["plan", "Treated as docs and tenant"]);
+    const count = steps.steps.length;
+    assert.equal(declared.upgrade().kind, "tenant");
+    assert.equal(steps.steps.length, count);
   });
 });
 
