@@ -79,6 +79,7 @@ import {
   shouldSubmitComposerKey,
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
+import { appendOnlySteps } from "../shared/chat-steps";
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRun, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
@@ -958,7 +959,7 @@ function IntuneChatContent() {
                   createdAt: new Date().toISOString(),
                   steps: event.steps,
                 },
-                (existing) => ({ ...existing, steps: event.steps }),
+                (existing) => ({ ...existing, steps: appendOnlySteps(existing.steps, event.steps) }),
               ),
             );
           }

@@ -1601,17 +1601,19 @@ function liveRunFixture() {
   const pending: IntuneChatMessage = { id: "a-live-run", conversationId: conversation.id, role: "assistant", content: "", status: "streaming", createdAt: conversation.createdAt, providerId: "openai" };
   const step = (overrides: Partial<IntuneChatStep>): IntuneChatStep => ({ id: "step-1", kind: "plan", title: "Reading the question", status: "active", origin: "device", originLabel: "On device", startedAt: "2026-11-04T10:49:54.275Z", ...overrides });
   const plan = step({});
-  const planDone = step({ title: "Read the question", status: "completed", durationMs: 11261, detail: "Documentation question. Sources: Microsoft Learn. Your tenant is not checked." });
-  const answer = step({ id: "step-2", kind: "answer", title: "Working on the answer", origin: "model", originLabel: "OpenAI Codex", detail: "gpt-6-sol" });
+  const planDone = step({ title: "Read the question", status: "completed", durationMs: 40, detail: "Sources available: Microsoft Learn. The model classifies the question." });
+  const working = step({ id: "step-2", kind: "answer", title: "Working", origin: "model", originLabel: "OpenAI Codex", detail: "gpt-6-sol" });
+  const chose = { ...working, title: "Chose to ask Microsoft Learn", status: "completed" as const, durationMs: 9300, detail: "gpt-6-sol · Classified as a docs question. Sources: Microsoft Learn. Your tenant is not checked." };
   const asking = step({ id: "step-3", kind: "mcp", title: "Asking Microsoft Learn", origin: "third-party", originLabel: "learn.microsoft.com", detail: "microsoft_docs_search", sent: "Defender for Endpoint onboarding on macOS" });
   const asked = { ...asking, title: "Asked Microsoft Learn", status: "completed" as const, durationMs: 1200, detail: "microsoft_docs_search · 10 results" };
-  const answered = { ...answer, title: "Wrote the answer", status: "completed" as const, durationMs: 26439 };
+  const working2 = step({ id: "step-4", kind: "answer", title: "Working", origin: "model", originLabel: "OpenAI Codex", detail: "gpt-6-sol" });
+  const answered = { ...working2, title: "Wrote the answer", status: "completed" as const, durationMs: 15400 };
   const base = { conversationId: conversation.id, assistantMessageId: pending.id };
   const status = (message: string): IntuneChatStreamEvent => ({ type: "status", conversationId: conversation.id, message, stage: "running-tools" });
   const finalText = "Onboarding has three parts [1].";
   const result: SendIntuneChatMessageResult = {
     conversation, userMessage,
-    assistantMessage: { ...pending, status: "completed", content: finalText, steps: [planDone, asked, answered] },
+    assistantMessage: { ...pending, status: "completed", content: finalText, steps: [planDone, chose, asked, answered] },
     cacheStatus: { tenantId: "tenant-1", resources: [] },
   };
   const events: IntuneChatStreamEvent[] = [
@@ -1619,13 +1621,14 @@ function liveRunFixture() {
     { type: "steps", ...base, steps: [plan] },
     status("Checking cached tenant data."),
     status("Investigative mode started."),
-    { type: "steps", ...base, steps: [plan, answer] },
-    { type: "steps", ...base, steps: [planDone, answer] },
-    { type: "steps", ...base, steps: [planDone, asking, answer] },
+    { type: "steps", ...base, steps: [planDone, working] },
+    { type: "steps", ...base, steps: [planDone, chose] },
+    { type: "steps", ...base, steps: [planDone, chose, asking] },
     status("Asking Microsoft Learn at learn.microsoft.com: microsoft_docs_search."),
-    { type: "steps", ...base, steps: [planDone, asked, answer] },
-    status("Microsoft Learn answered from learn.microsoft.com."),
-    { type: "steps", ...base, steps: [planDone, asked, answered] },
+    { type: "steps", ...base, steps: [planDone, chose, asked] },
+    status("Microsoft Learn answered from learn.microsoft.com · 12,000 characters · shortened"),
+    { type: "steps", ...base, steps: [planDone, chose, asked, working2] },
+    { type: "steps", ...base, steps: [planDone, chose, asked, answered] },
     status("Model response started."),
     { type: "delta", ...base, delta: finalText, content: finalText, providerId: "openai" },
     { type: "completed", result },
@@ -1634,6 +1637,41 @@ function liveRunFixture() {
 }
 
 describe("IntuneChat live run", () => {
+  it("never rearranges visible steps when a tool step arrives while a model step runs", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return result;
+      }),
+      getIntuneChatMessages: vi.fn(async () => [userMessage, result.assistantMessage]),
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.type(await screen.findByLabelText(CHAT_COPY.composerLabel), conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    const rows = () => within(within(log).getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((row) => row.textContent ?? "");
+    const base = { conversationId: conversation.id, assistantMessageId: "a-live-run" };
+    const plan: IntuneChatStep = { id: "step-1", kind: "plan", title: "Read the question", status: "completed", origin: "device", originLabel: "On device", startedAt: "", durationMs: 40 };
+    const working: IntuneChatStep = { id: "step-2", kind: "answer", title: "Working", status: "active", origin: "model", originLabel: "OpenAI Codex", startedAt: "" };
+    const asking: IntuneChatStep = { id: "step-3", kind: "mcp", title: "Asking Microsoft Learn", status: "active", origin: "third-party", originLabel: "learn.microsoft.com", startedAt: "", sent: "Defender for macOS" };
+    act(() => emit(events[0]!));
+    act(() => emit({ type: "steps", ...base, steps: [plan, working] }));
+    expect(rows()).toEqual([expect.stringContaining("Read the question"), expect.stringContaining("Working")]);
+    // A list that puts the new step above the running one, as an older host did.
+    act(() => emit({ type: "steps", ...base, steps: [plan, asking, working] }));
+    expect(rows()).toEqual([expect.stringContaining("Read the question"), expect.stringContaining("Working"), expect.stringContaining("Asking Microsoft Learn")]);
+    act(() => emit({ type: "steps", ...base, steps: [plan, { ...asking, title: "Asked Microsoft Learn", status: "completed" }, { ...working, title: "Chose to ask Microsoft Learn", status: "completed" }] }));
+    expect(rows()).toEqual([expect.stringContaining("Read the question"), expect.stringContaining("Chose to ask Microsoft Learn"), expect.stringContaining("Asked Microsoft Learn")]);
+    act(() => emit(events.at(-1)!));
+    finish();
+  });
+
   it("shows the scope line and the steps from the moment of sending until the answer, never an empty answer area", async () => {
     const user = userEvent.setup();
     const { conversation, userMessage, result, events } = liveRunFixture();
@@ -1669,14 +1707,15 @@ describe("IntuneChat live run", () => {
     }
     expect(answerArea()).toEqual([
       expect.stringContaining("Read the question"),
+      expect.stringContaining("Chose to ask Microsoft Learn"),
       expect.stringContaining("Asked Microsoft Learn"),
       expect.stringContaining("Wrote the answer"),
     ]);
     act(() => emit(events.at(-2)!));
-    expect(answerArea()).toHaveLength(3);
+    expect(answerArea()).toHaveLength(4);
     act(() => emit(events.at(-1)!));
     finish();
-    expect(await screen.findByRole("button", { name: /3 steps/ }, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /4 steps/ }, { timeout: 4000 })).toBeInTheDocument();
   });
 
   it("keeps the scope line and the live steps after Chat is opened again during the run", async () => {
@@ -1723,8 +1762,8 @@ describe("IntuneChat live run", () => {
     expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
     const timeline = within(log).getByRole("list", { name: "Steps" });
     expect(within(timeline).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
-      expect.stringContaining("Reading the question"),
-      expect.stringContaining("Working on the answer"),
+      expect.stringContaining("Read the question"),
+      expect.stringContaining("Working"),
     ]);
     expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
 
@@ -1734,6 +1773,6 @@ describe("IntuneChat live run", () => {
     act(() => events.slice(9).forEach((event) => emit(event)));
     finish();
     expect(await within(log).findByText(/Onboarding has three parts/, {}, { timeout: 4000 })).toBeInTheDocument();
-    expect(await screen.findByRole("button", { name: /3 steps/ }, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /4 steps/ }, { timeout: 4000 })).toBeInTheDocument();
   });
 });

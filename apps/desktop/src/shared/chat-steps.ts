@@ -1,4 +1,4 @@
-import type { IntuneChatDocumentationSource, IntuneChatMessage, IntuneChatStepOrigin } from "./openAdminOS.js";
+import type { IntuneChatDocumentationSource, IntuneChatMessage, IntuneChatStep, IntuneChatStepOrigin } from "./openAdminOS.js";
 
 /** Theme tokens per origin: on device, Microsoft Graph, a third-party host, the model provider. */
 export const STEP_ORIGIN_TONE: Record<IntuneChatStepOrigin, { text: string; soft: string; dot: string }> = {
@@ -16,6 +16,22 @@ export function formatStepDuration(ms: number): string {
 function joinList(items: readonly string[]): string {
   if (items.length <= 2) return items.join(" and ");
   return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
+/**
+ * The live step list in the order it was first shown: a step already on
+ * screen keeps its place and new steps append below it, so a list the host
+ * ordered differently never rearranges visible rows.
+ */
+export function appendOnlySteps(shown: readonly IntuneChatStep[] | undefined, next: readonly IntuneChatStep[]): IntuneChatStep[] {
+  if (!shown?.length) return [...next];
+  const byId = new Map(next.map((step) => [step.id, step]));
+  const kept = shown.flatMap((step) => {
+    const updated = byId.get(step.id);
+    return updated ? [updated] : [];
+  });
+  const keptIds = new Set(kept.map((step) => step.id));
+  return [...kept, ...next.filter((step) => !keptIds.has(step.id))];
 }
 
 const TENANT_TOOLS = new Set(["list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift"]);
