@@ -17,6 +17,11 @@ export interface RegistrationSetupOutput {
   scopeNames: string[];
 }
 
+// PowerShell treats these as single-quote delimiters too, so they would
+// end the quoted display name in the script. Only the ASCII apostrophe is
+// allowed, and escapePowerShellSingleQuoted doubles it.
+const POWERSHELL_QUOTE_VARIANTS = /[\u2018\u2019\u201A\u201B]/u;
+
 export function validateRegistrationDisplayName(value: string): string | null {
   const displayName = value.trim();
   if (!displayName) return "Enter a display name.";
@@ -28,6 +33,9 @@ export function validateRegistrationDisplayName(value: string): string | null {
   }
   if (displayName.includes("<#") || displayName.includes("#>")) {
     return "Display name cannot contain PowerShell comment delimiters.";
+  }
+  if (POWERSHELL_QUOTE_VARIANTS.test(displayName)) {
+    return "Display name cannot contain typographic single quotes. Use a straight apostrophe (') instead.";
   }
   return null;
 }

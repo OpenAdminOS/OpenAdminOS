@@ -1,3 +1,9 @@
+/// <reference types="node" />
+
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -89,5 +95,65 @@ describe("registration setup generator", () => {
     expect(validateRegistrationDisplayName("Unsafe #> name")).toMatch(
       /comment delimiters/,
     );
+  });
+});
+
+const HAS_PWSH = spawnSync("pwsh", ["-NoProfile", "-Command", "exit 0"]).status === 0;
+
+// Runs the script header and the display name assignment, then prints the
+// value PowerShell parsed. Nothing after the assignment runs.
+function parsedDisplayName(script: string): string {
+  const cut = script.indexOf("\n$microsoftGraphAppId");
+  expect(cut).toBeGreaterThan(0);
+  const directory = mkdtempSync(join(tmpdir(), "openadminos-ps-"));
+  try {
+    const path = join(directory, "prefix.ps1");
+    writeFileSync(
+      path,
+      `${script.slice(0, cut)}\nWrite-Output "NAME=$displayName"\n`,
+      "utf8",
+    );
+    const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-File", path], {
+      encoding: "utf8",
+    });
+    expect(result.status, result.stderr).toBe(0);
+    return result.stdout.trim();
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+describe("registration display name quoting", () => {
+  const injection = "; Write-Output INJECTED; #";
+
+  it("rejects every PowerShell single-quote variant", () => {
+    for (const quote of ["\u2018", "\u2019", "\u201A", "\u201B"]) {
+      const name = `Ops${quote}${injection}`;
+      expect(validateRegistrationDisplayName(name)).toBe(
+        "Display name cannot contain typographic single quotes. Use a straight apostrophe (') instead.",
+      );
+      expect(() => generateRegistrationSetup(name, ["directory"])).toThrow(
+        /typographic single quotes/,
+      );
+    }
+  });
+
+  it("still accepts and escapes the ASCII apostrophe", () => {
+    expect(validateRegistrationDisplayName(`Ops'${injection}`)).toBeNull();
+    expect(generateRegistrationSetup(`Ops'${injection}`, ["directory"]).script).toContain(
+      `$displayName = 'Ops''${injection}'`,
+    );
+  });
+
+  it.skipIf(!HAS_PWSH)("parses the escaped name as one string in PowerShell", () => {
+    const name = `Ops'${injection}`;
+    const output = parsedDisplayName(generateRegistrationSetup(name, ["directory"]).script);
+    expect(output).toBe(`NAME=${name}`);
+    expect(output.split("\n")).not.toContain("INJECTED");
+  });
+
+  it.skipIf(!HAS_PWSH)("confirms PowerShell ends a single-quoted string at U+2019", () => {
+    const script = "$displayName = 'Ops\u2019; Write-Output INJECTED; #'\n$microsoftGraphAppId = ''";
+    expect(parsedDisplayName(script).split("\n")).toContain("INJECTED");
   });
 });
