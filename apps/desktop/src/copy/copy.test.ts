@@ -66,6 +66,7 @@ describe("v0.4 copy catalog", () => {
     expect(local.toolHosts?.detail).toBe(
       "MCP tool queries the model writes go to learn.microsoft.com, www.kqlsearch.com and www.intuneautomation.com. The model is told to send only public questions, never tenant names, IDs or tenant data.",
     );
+    expect(local.toolHosts?.composer).toBe("MCP tool queries go to learn.microsoft.com, www.kqlsearch.com and www.intuneautomation.com.");
     const hosted = deriveTrustCopy({ provider: { name: "Anthropic", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
     expect(hosted.strip).toBe("hosted · tenant context sent to Anthropic · tool queries to learn.microsoft.com");
     expect(deriveToolHostsCopy([])).toBeUndefined();

@@ -2380,12 +2380,18 @@ function ChatComposer({
       ) : dataBoundary.kind === "local" ? (
         <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
           <IconLock size={13} />
-          <span>Local model. Tenant data stays on this device.</span>
+          <span>
+            Local model. Tenant data stays on this device.
+            {dataBoundary.toolHostsNote ? <span className="text-[var(--color-warning)]"> {dataBoundary.toolHostsNote}</span> : null}
+          </span>
         </div>
       ) : (
         <div role="note" className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-warning)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
           <IconCloud size={13} />
-          <span>Prompts and tenant data go to {activeProvider?.name ?? "the selected provider"} while this model is selected.</span>
+          <span>
+            Prompts and tenant data go to {activeProvider?.name ?? "the selected provider"} while this model is selected.
+            {dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : null}
+          </span>
         </div>
       )}
     </div>

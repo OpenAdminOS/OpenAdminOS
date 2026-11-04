@@ -25,6 +25,8 @@ export interface ToolHostsCopy {
   strip: string;
   /** Tooltip sentence naming every host. */
   detail: string;
+  /** Composer line naming every host. */
+  composer: string;
 }
 
 export interface DerivedTrustCopy {
@@ -53,6 +55,7 @@ export function deriveToolHostsCopy(hosts: readonly string[] | undefined): ToolH
   return {
     strip: `tool queries to ${unique[0]}${unique.length > 1 ? ` +${unique.length - 1}` : ""}`,
     detail: `MCP tool queries the model writes go to ${listHosts(unique)}. The model is told to send only public questions, never tenant names, IDs or tenant data.`,
+    composer: `MCP tool queries go to ${listHosts(unique)}.`,
   };
 }
 

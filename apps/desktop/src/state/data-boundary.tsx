@@ -27,6 +27,8 @@ export type DataBoundary =
       model?: string;
       /** Status strip segment naming the MCP hosts that receive tool queries. */
       toolHosts?: string;
+      /** Composer sentence naming every MCP host. */
+      toolHostsNote?: string;
       tooltip: string;
       isVoiceHosted: false;
     }
@@ -35,6 +37,7 @@ export type DataBoundary =
       label: string;
       model?: string;
       toolHosts?: string;
+      toolHostsNote?: string;
       tooltip: string;
       isVoiceHosted: boolean;
     };
@@ -106,7 +109,7 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
         .filter((server) => server.installed && server.enabled)
         .map((server) => server.host),
     });
-    const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip } : {};
+    const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
     const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";
     if (provider.isLocal) {
       return {

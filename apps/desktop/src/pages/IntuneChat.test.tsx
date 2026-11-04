@@ -6,10 +6,12 @@ import { Route, Routes, useLocation } from "react-router";
 import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
 import Agents from "./Agents";
 import { AppShell } from "../components/AppShell";
+import { DataBoundaryProvider } from "../state";
 import {
   createAwaitingConfirmationRun,
   createMockAgent,
   createMockAppState,
+  createMockMcpServers,
   makeMockBridge,
   mockProviders,
   renderRoute,
@@ -782,6 +784,23 @@ describe("IntuneChat trust presentation", () => {
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("Ollama");
     expect(screen.queryByText("Local provider")).not.toBeInTheDocument();
     expect(screen.getByText("Local model. Tenant data stays on this device.")).toBeInTheDocument();
+  });
+
+  it("names the MCP hosts in the local boundary footnote when MCP servers are on", async () => {
+    renderRoute(
+      <DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>,
+      {
+        path: "/chat/:conversationId?",
+        route: "/chat",
+        bridge: makeMockBridge({}, createMockAppState({
+          mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: true } }),
+        })),
+      },
+    );
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    expect(screen.getByText(/^Local model\. Tenant data stays on this device\./)).toHaveTextContent(
+      "Local model. Tenant data stays on this device. MCP tool queries go to learn.microsoft.com and www.kqlsearch.com.",
+    );
   });
 
   it("activates the provider when picking another provider's model", async () => {
