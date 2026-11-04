@@ -883,3 +883,47 @@ Vendor sign-in (designed separately as Vendor MCP authentication), local or sand
 - [ ] Screenshots in light and dark, and a live check in the running app
 - [x] SPEC, CHANGELOG
 - [ ] Separate evaluator and GPT-6.1-Sol reviews
+
+# Chat steps, follow-ups and source routing (2026-11-04)
+
+Same branch, `marketplace/first-wave`. Runs locally only. The design reference is the "Chat steps proposal" mockup, shown in the thread on 2026-11-04 (scratchpad file chat-steps.html).
+
+## Why
+
+A docs question ("What does the Microsoft Learn say about Defender for macOS?") never called the Learn MCP server. The run log shows a graph-cache-refresh of 8 resources and 3 cache tools. The [1] [4] [5] citations came from the local docs index (55,193 passages, version 2026-08-26). That index is injected into the prompt and never shown. The model wrote "Microsoft Learn says". The planner refreshed tenant data because the question mentioned macOS, and the evidence guard then forced device queries. While the run was in progress, the UI only showed "Investigative mode started."
+
+## Decisions (user, 2026-11-04)
+
+- Docs-only questions do not touch the tenant. Tenant context is offered as a follow-up.
+- Follow-ups are prefilled as ghost text in the empty composer, and Tab accepts. No background model is used. The answering model returns them in its final JSON, and a deterministic rule covers docs questions that have a tenant tie-in.
+- Source routing is layered: a "use for" line we write per source, the first step names the chosen sources, naming a source in the question forces it, and labels come from the steps that ran. When the Learn server is installed, it is used before the local index. The `@` picker is left out of v1.
+- Small models: say plainly why tools are off and recommend 8B or larger. The status strip names MCP hosts only when the model can call them.
+
+## Acceptance criteria
+
+1. Chat streams every step live as a timeline row: plan, local docs index, each MCP call, Graph refresh, each cache or Graph tool, and writing the answer. Each row has a title, a detail line, a duration and an origin tag: On device, Microsoft Graph, the third-party host, or the model provider. An MCP row shows the exact text that was sent. Blocked and failed steps show as designed states.
+2. After the answer, the timeline folds into one summary line: step count, total time, sources, and what left the device and where it went. The line expands to show the full timeline. Persisted messages reload with the same steps.
+3. The answer separates documentation and tenant blocks. The labels come from the trace, not from model text. Every citation maps to a source card: Microsoft Learn or other MCP results with title and URL, local index passages with file and index date, and tenant resources. A citation that matches no source is not rendered as a source.
+4. A docs-only question runs no graph-cache-refresh and no tenant tools, and the evidence guard does not force them. A tenant or mixed question still requires tenant evidence.
+5. If the question names an installed source by name or host, that source is called. An answer only labels text as Microsoft Learn when a Learn call ran in that answer. When Learn is installed it is preferred over the local index, and the index is the fallback when Learn is offline or blocked.
+6. Each catalog entry carries our own "use for" line, and the prompt lists it. The first step names the sources chosen for the question.
+7. Follow-ups: the final protocol JSON accepts an optional `next` array of up to 2 strings. They are validated: read-only intent (existing write-intent check), at most 120 characters, trimmed. A deterministic follow-up is generated when a docs-only question matches tenant resources (for example "Check our 5 macOS devices for Defender in Intune", with the count from the local cache). The deterministic path also produces them.
+8. Composer: when it is empty and a follow-up exists, the follow-up shows as ghost text with a Tab hint. Tab fills it, Esc dismisses it, typing hides it, and nothing is sent automatically. Tab keeps its normal behaviour otherwise. Screen readers announce "Suggestion: ..., press Tab to use it". The chips under the answer remain.
+9. Small models: the notice reads, for example, "llama3.2:3b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger." The Marketplace server cards show the same line. The status strip lists MCP hosts only when tools are actually offered.
+10. Tests cover each criterion. Renderer tests run under Node 22. Live check in the running app with the Defender for macOS question, a KQL question and a mixed tenant question.
+
+## Out of scope
+
+The `@` picker, parallel tool calls, and changing the local index content.
+
+## Steps
+
+- [ ] MCP egress filter review fixes S1 to S5 and N1
+- [ ] Source classification as the first step; docs-only questions skip the tenant refresh and tenant tools
+- [ ] Source routing: "use for" lines, named sources forced, Learn before the local index
+- [ ] Live step events with origin tags, persisted with the message
+- [ ] Follow-ups from the final JSON and the deterministic rule
+- [ ] Small-model notice wording and status strip hosts only when tools are offered
+- [ ] Renderer: timeline, folded summary, documentation and tenant blocks, source cards, composer ghost text
+- [ ] Integration test for the docs, KQL and mixed tenant questions
+- [ ] SPEC, CHANGELOG
