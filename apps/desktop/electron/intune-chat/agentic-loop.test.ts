@@ -810,3 +810,29 @@ describe("streamed final answers", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });
+
+describe("model steps", () => {
+  it("gives each model call its own step, finished with its decision before the tool it chose runs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-steps-"));
+    const store = seededStore(dir);
+    try {
+      const log: string[] = [];
+      const llm = scriptedLlm([
+        '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+        '{"final":true,"answer":"All devices are fine."}',
+      ]);
+      const result = await runAgenticChat({
+        ...baseInput(store, llm),
+        modelStep: {
+          start: () => log.push("model: working"),
+          writing: () => log.push("model: writing"),
+          finish: (outcome) => log.push(`model: ${outcome.kind}${outcome.kind === "tool" ? ` ${outcome.tool}` : ""}`),
+        },
+        onToolStart: (event) => log.push(`tool: ${event.tool}`),
+        onToolFinish: () => log.push("tool: done"),
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(log, ["model: working", "model: tool query_cache", "tool: query_cache", "tool: done", "model: working", "model: final"]);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});

@@ -9,6 +9,8 @@ import { DEFAULT_GRAPH_READ_SCOPE_NAMES, type IntuneChatStep, type RunLlmApi, ty
 import { numberedMcpResults, runAgenticChat, type RunAgenticChatInput } from "./agentic-loop.js";
 import {
   ChatStepRecorder,
+  modelStepHooks,
+  toolDecision,
   CitationRegistry,
   planChatSources,
   QuestionKindTracker,
@@ -131,12 +133,12 @@ describe("model-declared question kinds", () => {
     assert.equal(vetoed.sources.kind, "mixed");
     const fallback = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), context, planChatSources({ ...context, kind: "mixed" }));
     fallback.resolve("mixed", "fallback");
-    assert.match(steps.steps[1]!.detail!, /The model gave no question kind, so keyword rules decided\.$/);
+    assert.match(steps.steps[1]!.detail!, /^The model gave no question kind, so keyword rules decided: a docs and tenant question\. Sources:/);
     // A declared server is shown as the model's intent, never required; an unknown id is ignored.
     const declared = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), { ...context, servers: [learn, kql] }, planChatSources({ ...context, kind: "mixed" }));
     const declaredPlan = declared.resolve("tenant", "model", ["kql-search", "evil"]);
     assert.deepEqual(declaredPlan.requiredServerIds, []);
-    assert.equal(declaredPlan.detail, "Tenant question. Sources: cached tenant data and Microsoft Graph. The model also plans to ask KQL Search.");
+    assert.equal(declaredPlan.detail, "Classified as a tenant question. Sources: cached tenant data and Microsoft Graph. The model also plans to ask KQL Search.");
     // A declared server that is required anyway is named once, as a source.
     const named = planChatSources({ question: "Ask Microsoft Learn about LAPS", kind: "docs", servers: [learn, kql], docsIndexAvailable: false, declaredServerIds: ["microsoft-learn"] });
     assert.deepEqual(named.requiredServerIds, ["microsoft-learn"]);
@@ -300,16 +302,41 @@ describe("source labels and steps", () => {
     assert.equal(relabelUnverifiedLearn("Microsoft Learn says X.", true), "Microsoft Learn says X.");
   });
 
-  it("keeps the model step last while it runs and settles open steps", () => {
+  it("appends steps in the order they start, never above a running step, and settles open steps", () => {
     const seen: IntuneChatStep[][] = [];
     const steps = new ChatStepRecorder((list) => seen.push(list));
-    steps.start({ kind: "answer", title: "Working on the answer", origin: "model", originLabel: "OpenAI" });
+    steps.start({ kind: "answer", title: "Working", origin: "model", originLabel: "OpenAI" });
     const tool = steps.start({ kind: "tool", title: "Querying cached data", origin: "device", originLabel: "On device" });
-    assert.deepEqual(steps.steps.map((step) => step.kind), ["tool", "answer"]);
+    assert.deepEqual(steps.steps.map((step) => step.kind), ["answer", "tool"]);
     steps.finish(tool);
     steps.settle("completed");
     assert.ok(steps.steps.every((step) => step.status === "completed" && typeof step.durationMs === "number"));
     assert.equal(seen.length, 4);
+  });
+
+  it("finishes the plan step when the local plan is ready and shows the model's classification on its model step", () => {
+    const steps = new ChatStepRecorder();
+    const context = { question: "how do I configure defender for macos?", servers: [learn], docsIndexAvailable: true };
+    const kind = new QuestionKindTracker(steps, steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: "On device" }), context, planChatSources({ ...context, kind: "mixed" }));
+    kind.awaitModel();
+    assert.deepEqual([steps.steps[0]!.status, steps.steps[0]!.title, steps.steps[0]!.detail], [
+      "completed", "Read the question", "Sources available: Microsoft Learn and the local docs index. The model classifies the question.",
+    ]);
+    const model = modelStepHooks(steps, { name: "gpt-6-sol", hosted: true, providerName: "OpenAI Codex" }, undefined);
+    model.start();
+    assert.deepEqual([steps.steps[1]!.title, steps.steps[1]!.detail, steps.steps[1]!.originLabel, steps.steps[1]!.status], ["Working", "gpt-6-sol", "OpenAI Codex", "active"]);
+    const plan = kind.resolve("docs", "model", ["microsoft-learn"]);
+    model.finish({ kind: "tool", tool: mcpChatToolName("microsoft-learn", "microsoft_docs_search"), params: { query: "x" } }, plan.detail);
+    assert.equal(steps.steps[0]!.detail, "Sources available: Microsoft Learn and the local docs index. The model classifies the question.");
+    assert.equal(steps.steps[1]!.title, "Chose to ask an MCP server");
+    assert.equal(steps.steps[1]!.detail, "gpt-6-sol · Classified as a docs question. Sources: Microsoft Learn, then the local docs index if Microsoft Learn is unavailable. Your tenant is not checked.");
+    model.start();
+    model.writing();
+    assert.equal(steps.steps[2]!.title, "Writing the answer");
+    model.finish({ kind: "final", passages: 0, trace: [] });
+    assert.deepEqual(steps.steps.map((step) => [step.kind, step.title]), [["plan", "Read the question"], ["answer", "Chose to ask an MCP server"], ["answer", "Wrote the answer"]]);
+    assert.equal(toolDecision("query_cache", { resource: "managedDevices" }, undefined), "Chose to query cached Intune managed devices");
+    assert.equal(toolDecision("list_cached_resources", {}, undefined), "Chose to check the cache inventory");
   });
 
   it("shows the exact text an MCP call sent, and no sent text when it was blocked", () => {

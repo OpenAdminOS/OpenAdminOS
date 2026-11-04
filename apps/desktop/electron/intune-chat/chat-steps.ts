@@ -23,9 +23,9 @@ export interface DocsIndexPassage {
 }
 
 /**
- * Records the timeline of one answer. Every change hands the full list to
- * the listener, so a live view never has to order steps itself. While the
- * model step is active it stays last and new steps go in before it.
+ * Records the timeline of one answer. Steps are appended in the order they
+ * start and never move, live or stored. Every change hands the full list
+ * to the listener.
  */
 export class ChatStepRecorder {
   private readonly list: IntuneChatStep[] = [];
@@ -39,9 +39,7 @@ export class ChatStepRecorder {
 
   start(step: Omit<IntuneChatStep, "id" | "status" | "startedAt">): string {
     const record: IntuneChatStep = { ...step, id: `step-${this.nextId++}`, status: "active", startedAt: new Date().toISOString() };
-    const answer = this.list.findIndex((entry) => entry.kind === "answer" && entry.status === "active");
-    if (answer >= 0 && step.kind !== "answer") this.list.splice(answer, 0, record);
-    else this.list.push(record);
+    this.list.push(record);
     this.emit();
     return record.id;
   }
@@ -147,6 +145,8 @@ export type QuestionKindReason = "model" | "veto" | "fallback" | "keywords";
  */
 export class QuestionKindTracker {
   private decided = false;
+  /** The first step finished before the model classifies; the classification then shows on the model step. */
+  private planShown = false;
   private readonly keywordVetoed: boolean;
 
   /**
@@ -167,19 +167,41 @@ export class QuestionKindTracker {
     return this.plan;
   }
 
-  /** Decides the kind once and finishes the first step with it and its sources. */
+  /**
+   * Finishes the first step once the local plan is ready, when the model
+   * classifies the question next. Its time is local planning only.
+   */
+  awaitModel(): void {
+    if (this.planShown || this.decided) return;
+    this.planShown = true;
+    const { servers, docsIndexAvailable } = this.input;
+    const sources = [...servers.map((server) => server.name), ...(docsIndexAvailable ? ["the local docs index"] : [])];
+    this.steps.finish(this.planStepId, {
+      title: "Read the question",
+      detail: `${sources.length > 0 ? `Sources available: ${joinList(sources)}.` : "No documentation source is installed."} The model classifies the question.`,
+    });
+  }
+
+  /**
+   * Decides the kind once. Before the model classifies, the first step
+   * shows it with its sources. A model classification is returned in the
+   * plan's detail for the model step that made it, for example
+   * "Classified as a docs question. Sources: Microsoft Learn. Your tenant
+   * is not checked."
+   */
   resolve(kind: IntuneChatQuestionKind, reason: QuestionKindReason, declaredServerIds: readonly string[] = []): ChatSourcePlan {
     if (this.decided) return this.plan;
     this.decided = true;
     const { veto, ...context } = this.input;
-    this.plan = planChatSources({
-      ...context,
-      kind,
-      declaredServerIds,
-      ...(reason === "veto" ? { lead: `Treated as docs and tenant: ${veto ?? "the question mentions your tenant"}.` } : {}),
-    });
-    const detail = reason === "fallback" ? `${this.plan.detail} The model gave no question kind, so keyword rules decided.` : this.plan.detail;
-    this.steps.finish(this.planStepId, { title: "Read the question", detail });
+    const phrase = kind === "docs" ? "a docs question" : kind === "tenant" ? "a tenant question" : "a docs and tenant question";
+    const lead = reason === "veto"
+      ? `Treated as docs and tenant: ${veto ?? "the question mentions your tenant"}.`
+      : reason === "model" ? `Classified as ${phrase}.`
+        : reason === "fallback" ? `The model gave no question kind, so keyword rules decided: ${phrase}.`
+          : this.planShown ? `Keyword rules decided: ${phrase}.` : undefined;
+    this.plan = planChatSources({ ...context, kind, declaredServerIds, ...(lead ? { lead } : {}) });
+    if (!this.planShown) this.steps.finish(this.planStepId, { title: "Read the question", detail: this.plan.detail });
+    else if (reason === "keywords") this.steps.update(this.planStepId, { detail: this.plan.detail });
     return this.plan;
   }
 
@@ -335,6 +357,89 @@ export function toolStepHooks(steps: ChatStepRecorder, mcp: McpChatContext | und
   };
 }
 
+/** What a model call in the tool loop decided. */
+export type ModelStepOutcome =
+  | { kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown }
+  | { kind: "final"; passages: number; trace: readonly IntuneChatToolTraceEntry[] }
+  | { kind: "repair"; reason: "malformed" | "kind" | "sources" | "evidence" | "unfinished" | "lookup" };
+
+export interface ModelStepHooks {
+  start(): void;
+  /** The streamed reply is recognizably a final answer. */
+  writing(): void;
+  finish(outcome: ModelStepOutcome, classification?: string): void;
+}
+
+const DECISION: Record<string, string> = {
+  list_cached_resources: "Chose to check the cache inventory",
+  find_graph_endpoint: "Chose to look up Graph endpoints",
+  graph_get: "Chose to read Microsoft Graph",
+  refresh_resource: "Chose to refresh tenant data",
+  query_drift: "Chose to read local change history",
+  web_search: "Chose to search the web",
+};
+
+const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], string> = {
+  malformed: "Reply was not valid tool JSON",
+  kind: "Reply gave no question kind",
+  sources: "Answered before asking the chosen source",
+  evidence: "Answered without checking tenant data",
+  unfinished: "Reply was progress, not an answer",
+  lookup: "Answered on a failed lookup",
+};
+
+/** The plain decision of a tool call, such as "Chose to ask Microsoft Learn" or "Chose to query cached managed devices". */
+export function toolDecision(tool: IntuneChatInvestigationToolName, params: unknown, mcp: McpChatTool | undefined): string {
+  if (isMcpChatToolName(tool)) return `Chose to ask ${mcp?.serverName ?? "an MCP server"}`;
+  if (tool === "query_cache") {
+    const label = resourceLabel(params);
+    if (!label) return "Chose to query cached data";
+    // Product names keep their capital; other labels read as plain words.
+    return `Chose to query cached ${/^(?:Intune|Entra|Microsoft|Windows|Defender|Autopilot|Apple|Conditional)\b/.test(label) ? label : `${label.charAt(0).toLowerCase()}${label.slice(1)}`}`;
+  }
+  return DECISION[tool] ?? "Chose a tool";
+}
+
+function answerInputs(passages: number, trace: readonly IntuneChatToolTraceEntry[], tenantContext?: boolean): string {
+  const parts = ["question"];
+  if (passages > 0) parts.push(`${passages} doc ${passages === 1 ? "passage" : "passages"}`);
+  const servers = [...new Set(trace.filter((entry) => entry.mcpSource && !entry.error).map((entry) => entry.mcpSource!.serverName))];
+  if (servers.length > 0) parts.push(`${joinList(servers)} results`);
+  const tenant = trace.filter((entry) => isTenantTool(entry.tool) && !entry.error).length;
+  if (tenant > 0) parts.push(`${tenant} tenant ${tenant === 1 ? "result" : "results"}`);
+  else if (tenantContext) parts.push("cached tenant data");
+  return joinList(parts);
+}
+
+/**
+ * One step per model call of the tool loop, appended when the call
+ * starts: "Working" with the provider and model, finished with what the
+ * reply decided ("Chose to ask Microsoft Learn", "Wrote the answer"). Its
+ * duration is the call alone.
+ */
+export function modelStepHooks(steps: ChatStepRecorder, model: AnswerModel, mcp: McpChatContext | undefined): ModelStepHooks {
+  const name = model.name ?? model.providerName;
+  let current: { id: string; startedAt: number } | undefined;
+  return {
+    start() {
+      current = { id: steps.start({ kind: "answer", title: "Working", detail: name, origin: model.hosted ? "model" : "device", originLabel: modelOriginLabel(model) }), startedAt: Date.now() };
+    },
+    writing() {
+      if (current) steps.update(current.id, { title: "Writing the answer" });
+    },
+    finish(outcome, classification) {
+      if (!current) return;
+      const title = outcome.kind === "final" ? "Wrote the answer"
+        : outcome.kind === "tool" ? toolDecision(outcome.tool, outcome.params, mcp?.tools.find((tool) => tool.name === outcome.tool))
+          : REPAIR[outcome.reason];
+      const detail = outcome.kind === "final" ? `${name} · ${answerInputs(outcome.passages, outcome.trace)}`
+        : outcome.kind === "repair" ? `${name} · asked the model to try again` : name;
+      steps.finish(current.id, { title, detail: classification ? `${detail} · ${classification}` : detail, durationMs: Math.max(0, Date.now() - current.startedAt) });
+      current = undefined;
+    },
+  };
+}
+
 /** Where the model runs: on this device, or at the hosted provider. */
 export interface AnswerModel {
   name?: string;
@@ -347,30 +452,30 @@ export function modelOriginLabel(model: AnswerModel): string {
 }
 
 /**
- * Starts the model step, which stays last while it runs. The returned
- * function finishes it; its duration leaves out the time tools took.
+ * Starts the model step of an answer written in one call, outside the tool
+ * loop. The returned function finishes it; `writing` retitles it once
+ * answer text arrives.
  */
 export function startAnswerStep(steps: ChatStepRecorder, model: AnswerModel) {
   const startedAt = Date.now();
   const name = model.name ?? model.providerName;
-  const id = steps.start({ kind: "answer", title: "Working on the answer", detail: name, origin: model.hosted ? "model" : "device", originLabel: modelOriginLabel(model) });
-  return (result: { passages: number; trace?: readonly IntuneChatToolTraceEntry[]; tenantContext?: boolean; failed?: boolean }): void => {
-    const trace = result.trace ?? [];
-    const toolMs = trace.reduce((sum, entry) => sum + entry.durationMs, 0);
-    const parts = ["question"];
-    if (result.passages > 0) parts.push(`${result.passages} doc ${result.passages === 1 ? "passage" : "passages"}`);
-    const servers = [...new Set(trace.filter((entry) => entry.mcpSource && !entry.error).map((entry) => entry.mcpSource!.serverName))];
-    if (servers.length > 0) parts.push(`${joinList(servers)} results`);
-    const tenant = trace.filter((entry) => isTenantTool(entry.tool) && !entry.error).length;
-    if (tenant > 0) parts.push(`${tenant} tenant ${tenant === 1 ? "result" : "results"}`);
-    else if (result.tenantContext) parts.push("cached tenant data");
+  const id = steps.start({ kind: "answer", title: "Working", detail: name, origin: model.hosted ? "model" : "device", originLabel: modelOriginLabel(model) });
+  let writing = false;
+  const finish = (result: { passages: number; trace?: readonly IntuneChatToolTraceEntry[]; tenantContext?: boolean; failed?: boolean }): void => {
     steps.finish(id, {
       status: result.failed ? "failed" : "completed",
       title: result.failed ? "Could not write the answer" : "Wrote the answer",
-      detail: `${name} · ${joinList(parts)}`,
-      durationMs: Math.max(0, Date.now() - startedAt - toolMs),
+      detail: `${name} · ${answerInputs(result.passages, result.trace ?? [], result.tenantContext)}`,
+      durationMs: Math.max(0, Date.now() - startedAt),
     });
   };
+  /** The first answer text arrived. */
+  const startWriting = () => {
+    if (writing) return;
+    writing = true;
+    steps.update(id, { title: "Writing the answer" });
+  };
+  return Object.assign(finish, { writing: startWriting });
 }
 
 /** "2026-08-26" as "Aug 26, 2026". */

@@ -140,6 +140,7 @@ import {
   planChatSources,
   QuestionKindTracker,
   relabelUnverifiedLearn,
+  modelStepHooks,
   startAnswerStep,
   tenantTieInFollowUp,
   toolStepHooks,
@@ -1896,9 +1897,9 @@ export class IntuneChatService {
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
             const learnFirst = learnMayLead(answerPlan.sources, lazyRefresh, mcp.mcp);
             const documentation = learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
-            const finishAnswerStep = startAnswerStep(steps, answerModel);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
+              modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               questionKind: answerPlan.sources.kind,
@@ -1922,12 +1923,10 @@ export class IntuneChatService {
             toolTrace = agentic.toolTrace;
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
-              finishAnswerStep({ passages: (agentic.documentationSources ?? []).filter((source) => source.kind === "docs-index").length, trace: agentic.toolTrace });
               assistantContent = agentic.answer;
               modelFollowUps = agentic.followUps ?? [];
               documentationSources = agentic.documentationSources ?? [];
             } else {
-              finishAnswerStep({ passages: 0, trace: agentic.toolTrace, failed: true });
               const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
               assistantContent = deterministic.content;
               responseModel = deterministic.model ?? responseModel;
@@ -2483,6 +2482,7 @@ export class IntuneChatService {
           }
           responseModel = chunk.model;
           assistantContent = chunk.accumulated;
+          if (assistantContent.trim()) finishAnswerStep.writing();
           // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
           emitDelta(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
         }
@@ -2524,9 +2524,9 @@ export class IntuneChatService {
             const documentation = options.voice
               ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
               : learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
-            const finishAnswerStep = startAnswerStep(steps, answerModel);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
+              modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
@@ -2603,7 +2603,6 @@ export class IntuneChatService {
             toolTrace = agentic.toolTrace;
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
-              finishAnswerStep({ passages: (agentic.documentationSources ?? []).filter((source) => source.kind === "docs-index").length, trace: agentic.toolTrace });
               modelFollowUps = agentic.followUps ?? [];
               documentationSources = agentic.documentationSources ?? [];
               sendProgress({
@@ -2620,7 +2619,6 @@ export class IntuneChatService {
               assistantContent = relabelUnverifiedLearn(agentic.answer.trim(), learnAnswered(agentic.toolTrace));
               emitDelta(assistantContent);
             } else {
-              finishAnswerStep({ passages: 0, trace: agentic.toolTrace, failed: true });
               sendProgress({
                 message: options.webSearch ? "Nova could not complete the investigation within its tool or context limits." : agentic.fallbackNotice,
                 stage: "building-context",
@@ -2888,7 +2886,9 @@ export class IntuneChatService {
       kind.settle();
       if (kind.sources.kind === "docs") input.planned.resources = [];
     };
+    // The first step's time is local planning only; a model classification shows on the model step.
     if (!input.modelClassifies) settleKind();
+    else kind.awaitModel();
     return { mcp, mcpInstalled: Boolean(installed.mcp), get sources() { return kind.sources; }, kind, settleKind, tieInResources };
   }
 

@@ -15,7 +15,7 @@ import { GRAPH_CACHE_RESOURCES, pathForResource, resolveQuestionKind } from "./p
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
-import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, type ChatSourcePlan, type DocsIndexPassage, type QuestionKindReason } from "./chat-steps.js";
+import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
 import {
   MCP_TOOL_RULES,
   executeIntuneChatTool,
@@ -140,7 +140,7 @@ export interface RunAgenticChatInput {
    */
   classify?: {
     tenantReference: boolean;
-    onKind: (kind: IntuneChatQuestionKind, reason: Exclude<QuestionKindReason, "keywords">, declaredSources: string[]) => Pick<ChatSourcePlan, "requiredServerIds" | "learnFirst">;
+    onKind: (kind: IntuneChatQuestionKind, reason: Exclude<QuestionKindReason, "keywords">, declaredSources: string[]) => Pick<ChatSourcePlan, "requiredServerIds" | "learnFirst"> & { detail?: string };
   };
   /** A docs answer called a tenant tool, so it is now mixed. */
   onUpgrade?: () => void;
@@ -201,6 +201,13 @@ export interface RunAgenticChatInput {
    * Tool calls are never shown.
    */
   onAnswerText?: (text: string, learnAnswered: boolean) => void;
+  /**
+   * One timeline step per model call: started before the call, retitled
+   * once a streamed reply is recognizably a final answer, and finished
+   * with what the reply decided before anything it decided runs. With the
+   * classification of the reply that decided the question kind.
+   */
+  modelStep?: ModelStepHooks;
 }
 
 export type RunAgenticChatResult =
@@ -325,12 +332,14 @@ export async function runAgenticChat(
       signal: input.signal,
     };
     let completion: { text: string; model: string };
+    input.modelStep?.start();
     if (input.onAnswerText && input.llm.streamsIncrementally) {
       completion = { text: "", model: responseModel ?? "" };
       for await (const chunk of input.llm.stream(options)) {
         completion = { text: chunk.accumulated, model: chunk.model };
         const partial = partialFinalAnswer(chunk.accumulated);
         if (partial !== undefined && partial.trim()) {
+          if (!answerShown) input.modelStep?.writing();
           answerShown = true;
           input.onAnswerText(partial, learnAnswered);
         }
@@ -343,8 +352,20 @@ export async function runAgenticChat(
     turns.push({ role: "assistant", content: assistantText });
 
     const action = parseModelAction(assistantText, input.tools.mcp);
+    // The model step finishes with what the reply decided, then the work
+    // the classification started (a docs index search, a tenant refresh)
+    // runs, so every step appends below the one before it.
+    let classification: string | undefined;
+    let afterClassification: (() => Promise<void>) | undefined;
+    const settleModelStep = async (outcome: ModelStepOutcome) => {
+      input.modelStep?.finish(outcome, classification);
+      const work = afterClassification;
+      afterClassification = undefined;
+      await work?.();
+    };
     if (action.kind === "malformed") {
       malformedCount += 1;
+      await settleModelStep({ kind: "repair", reason: "malformed" });
       if (malformedCount > MAX_MALFORMED_RETRIES) {
         if (invalidQueries.size) return blockedAnswer();
         return {
@@ -376,6 +397,7 @@ export async function runAgenticChat(
       // One repair for a missing or invalid kind, then the keyword kind decides.
       if (!action.questionKind && !kindRepaired) {
         kindRepaired = true;
+        await settleModelStep({ kind: "repair", reason: "kind" });
         turns.push({ role: "repair", content: KIND_REPAIR });
         continue;
       }
@@ -385,20 +407,30 @@ export async function runAgenticChat(
       questionKind = decided.kind;
       const plan = input.classify.onKind(decided.kind, !action.questionKind ? "fallback" : decided.vetoed ? "veto" : "model", action.sources);
       required = new Set(plan.requiredServerIds);
-      if (!plan.learnFirst && fallbackPending && input.documentationFallback) {
-        // Microsoft Learn is no longer the chosen source, so the withheld local index is loaded now.
-        fallbackPending = false;
-        addDocumentation(await input.documentationFallback());
-      }
-      if (questionKind !== "docs") {
-        await input.ensureTenantData?.();
-        assertNotCancelled(input.signal);
-      }
+      classification = plan.detail;
+      const loadIndex = !plan.learnFirst && fallbackPending && input.documentationFallback;
+      const tenantData = questionKind !== "docs";
+      afterClassification = async () => {
+        if (loadIndex) {
+          // Microsoft Learn is no longer the chosen source, so the withheld local index is loaded now.
+          fallbackPending = false;
+          addDocumentation(await input.documentationFallback!());
+        }
+        if (tenantData) {
+          await input.ensureTenantData?.();
+          assertNotCancelled(input.signal);
+        }
+      };
     }
     const docsOnly = questionKind === "docs";
+    const finalOutcome = (): ModelStepOutcome => ({ kind: "final", passages: documentation.length, trace: toolTrace });
 
-    if (invalidQueries.size && action.kind === "final" && ++invalidFinals >= 2) return blockedAnswer();
+    if (invalidQueries.size && action.kind === "final" && ++invalidFinals >= 2) {
+      await settleModelStep(finalOutcome());
+      return blockedAnswer();
+    }
     if (input.voice && action.kind === "final" && (!action.answer.trim() || /\b(?:let me (?:check|look|query|search|investigate|find|retrieve)|i(?:'ll| will) (?:check|look|query|search|investigate|find|retrieve)|i(?:'m| am) (?:currently )?(?:checking|querying|searching|investigating|retrieving))\b/i.test(action.answer))) {
+      await settleModelStep({ kind: "repair", reason: "unfinished" });
       if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
         ok: false, reason: "unfinished-answer", fallbackNotice: "The model returned progress instead of a completed answer.",
         toolTrace, iterations: iteration, model: responseModel,
@@ -409,6 +441,7 @@ export async function runAgenticChat(
     const missingSources = [...required].filter((id) => !attemptedServers.has(id));
     if (action.kind === "final" && missingSources.length > 0 && missingSourceCount < MAX_NO_EVIDENCE_RETRIES) {
       missingSourceCount += 1;
+      await settleModelStep({ kind: "repair", reason: "sources" });
       const names = missingSources.map((id) => input.tools.mcp?.servers?.find((server) => server.id === id)?.name ?? id);
       const tools = (input.tools.mcp?.tools ?? []).filter((tool) => missingSources.includes(tool.serverId)).map((tool) => tool.name);
       turns.push({ role: "repair", content: `Call ${names.join(" and ")} before answering: it is the source chosen for this question. Its tools are ${tools.join(", ")}. Send only a standalone public question.` });
@@ -416,6 +449,7 @@ export async function runAgenticChat(
     }
     if (action.kind === "final" && !docsOnly && !input.smallTalk && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
       noEvidenceCount += 1;
+      await settleModelStep({ kind: "repair", reason: "evidence" });
       if (noEvidenceCount > MAX_NO_EVIDENCE_RETRIES) {
         return {
           ok: false,
@@ -440,9 +474,11 @@ export async function runAgenticChat(
     iteration += 1;
     if (action.kind === "final") {
       if (invalidQueries.size) {
+        await settleModelStep({ kind: "repair", reason: "lookup" });
         turns.push({ role: 'repair', content: `A failed data lookup cannot support a final answer or a zero count. Correct the query for ${[...invalidQueries.keys()].join(', ')} using the available fields before answering.` });
         continue;
       }
+      await settleModelStep(finalOutcome());
       return {
         ok: true,
         answer: stripTenantDataFences(action.answer).trim(),
@@ -455,6 +491,7 @@ export async function runAgenticChat(
       };
     }
 
+    await settleModelStep({ kind: "tool", tool: action.tool, params: action.params });
     if (isTenantTool(action.tool)) {
       // A docs answer that needs tenant data becomes mixed: it then needs tenant evidence too.
       if (questionKind === "docs") {

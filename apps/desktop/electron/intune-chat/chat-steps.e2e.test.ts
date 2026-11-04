@@ -164,6 +164,9 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
 const learnTool = "mcp__microsoft-learn__microsoft_docs_search";
 const kqlTool = "mcp__kql-search__search_kql_queries";
 const kinds = (steps: readonly IntuneChatStep[] | undefined) => (steps ?? []).map((step) => step.kind);
+/** The model's classification, shown on the model step that decided the kind. */
+const classifiedAs = (steps: readonly IntuneChatStep[] | undefined) =>
+  (steps ?? []).flatMap((step) => (step.kind === "answer" ? (step.detail ?? "").split(" · ") : [])).find((part) => /^(?:Classified as|Treated as|The model gave no)/.test(part));
 
 describe("Chat steps, sources and follow-ups end to end", () => {
   it("answers the Defender for macOS docs question from Microsoft Learn without touching the tenant", async () => {
@@ -178,21 +181,26 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
       // Live steps: the plan first, the MCP row shows what it sent while it runs, then the answer.
       const snapshots = events.flatMap((event) => (event.type === "steps" ? [event.steps] : []));
-      // The plan step shows before the MCP tools load, then gets the model's kind and sources from its first reply.
+      // The plan step shows at once and finishes before the model is asked; the model's kind shows on its own step.
       assert.deepEqual([snapshots[0]![0]!.kind, snapshots[0]![0]!.status, snapshots[0]![0]!.title], ["plan", "active", "Reading the question"]);
-      const decided = snapshots.findIndex((list) => list[0]!.status === "completed");
-      assert.ok(decided > snapshots.findIndex((list) => list.some((step) => step.kind === "answer")), "the kind is decided once the model replies");
-      assert.equal(snapshots[decided]![0]!.title, "Read the question");
-      assert.match(snapshots[decided]![0]!.detail!, /^Documentation question\. Sources: Microsoft Learn\. Your tenant is not checked\.$/);
+      const working = snapshots.find((list) => list.some((step) => step.kind === "answer"))!;
+      assert.deepEqual([working[0]!.status, working[0]!.title], ["completed", "Read the question"]);
+      assert.deepEqual([working[1]!.title, working[1]!.status], ["Working", "active"]);
       const live = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active"));
       const liveMcp = live!.find((step) => step.kind === "mcp")!;
       assert.equal(liveMcp.sent, "Defender for Endpoint on macOS");
       assert.deepEqual([liveMcp.origin, liveMcp.originLabel], ["third-party", "127.0.0.1"]);
-      assert.equal(live!.at(-1)!.kind, "answer", "the model step stays last while it runs");
+      assert.equal(live!.at(-1)!.kind, "mcp", "a new step appends below the model step that chose it");
+      // Append-only: every snapshot starts with the previous one's step ids.
+      snapshots.forEach((list, index) => {
+        if (index > 0) assert.deepEqual(list.slice(0, snapshots[index - 1]!.length).map((step) => step.id), snapshots[index - 1]!.map((step) => step.id));
+      });
 
       assert.equal(message.questionKind, "docs");
-      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "answer"]);
-      const [, mcp, answer] = message.steps!;
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "answer"]);
+      const [, chose, mcp, answer] = message.steps!;
+      assert.equal(chose!.title, "Chose to ask Microsoft Learn");
+      assert.equal(classifiedAs(message.steps), "Classified as a docs question. Sources: Microsoft Learn. Your tenant is not checked.");
       assert.deepEqual([mcp!.status, mcp!.title, mcp!.detail], ["completed", "Asked Microsoft Learn", "microsoft_docs_search · 2 results"]);
       assert.deepEqual([answer!.title, answer!.origin, answer!.originLabel], ["Wrote the answer", "device", "On device"]);
       assert.ok(message.steps!.every((step) => typeof step.durationMs === "number"));
@@ -249,7 +257,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       ]);
       const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
       assert.equal(message.questionKind, "docs");
-      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "answer"]);
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "answer"]);
       assert.deepEqual(docsSearches, []);
       assert.ok(prompts.every((entry) => !entry.prompt.includes("passages from the local docs index")));
       assert.deepEqual(message.documentationSources?.map((source) => source.kind), ["mcp", "mcp"]);
@@ -263,8 +271,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         { final: true, answer: "Microsoft Learn says to deploy the onboarding package [1]." },
       ]);
       const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
-      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "docs-index", "answer"]);
-      assert.equal(message.steps![2]!.title, "Searched the local docs index, because Microsoft Learn returned nothing");
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "docs-index", "answer"]);
+      assert.equal(message.steps![3]!.title, "Searched the local docs index, because Microsoft Learn returned nothing");
       assert.equal(docsSearches.length, 1);
       assert.match(prompts[1]!.prompt, /Microsoft Learn returned nothing\. Passages from the local docs index are now in the prompt/);
       assert.deepEqual(message.documentationSources?.map((source) => [source.citation, source.kind]), [[1, "docs-index"], [2, "docs-index"]]);
@@ -279,9 +287,9 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         { final: true, answer: "Deploy the onboarding package [1]." },
       ]);
       const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
-      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "docs-index", "answer"]);
-      assert.equal(message.steps![1]!.status, "blocked");
-      assert.equal(message.steps![2]!.title, "Searched the local docs index, because the Microsoft Learn query was blocked");
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "docs-index", "answer"]);
+      assert.equal(message.steps![2]!.status, "blocked");
+      assert.equal(message.steps![3]!.title, "Searched the local docs index, because the Microsoft Learn query was blocked");
     }, { docsIndex: true });
   });
 
@@ -293,9 +301,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       ]);
       const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
       assert.equal(message.questionKind, "mixed");
-      const order = kinds(message.steps);
-      assert.equal(order[0], "plan");
-      assert.ok(order.indexOf("docs-index") > 0 && order.indexOf("docs-index") < order.indexOf("answer"));
+      // The index search follows the model step that decided the kind, in the order it ran.
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "docs-index", "graph-refresh", "tool", "answer"]);
       assert.equal(message.steps!.find((step) => step.kind === "docs-index")!.title, "Searched the local docs index");
       assert.equal(docsSearches.length, 1);
     }, { docsIndex: true });
@@ -344,11 +351,12 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       const result = await store.sendIntuneChatMessage({ content: KQL_QUESTION });
       const message = result.assistantMessage;
       assert.equal(message.questionKind, "docs");
-      assert.match(message.steps![0]!.detail!, /^Documentation question\. Sources: KQL Search\. Your tenant is not checked\.$/);
+      assert.equal(classifiedAs(message.steps), "Classified as a docs question. Sources: KQL Search. Your tenant is not checked.");
       assert.match(prompts[1]!.prompt, /Call KQL Search before answering/);
       assert.deepEqual(message.toolTrace?.map((entry) => entry.tool), [kqlTool]);
-      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "answer"]);
-      assert.equal(message.steps![1]!.sent, "failed sign-ins last 24 hours");
+      // The answer before the required source is its own model step, then the one that chose KQL Search.
+      assert.deepEqual(message.steps!.map((step) => step.kind === "answer" ? step.title : step.kind), ["plan", "Answered before asking the chosen source", "Chose to ask KQL Search", "mcp", "Wrote the answer"]);
+      assert.equal(message.steps![3]!.sent, "failed sign-ins last 24 hours");
       assert.deepEqual(graphPaths, []);
       assert.deepEqual(message.documentationSources?.map((source) => [source.citation, source.serverName, source.url]), [[1, "KQL Search", "https://www.kqlsearch.com/query/failed-sign-ins-24h"]]);
       assert.deepEqual(message.followUps, ["Check how this applies to our sign-in logs"]);
@@ -398,7 +406,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       const message = (await store.sendIntuneChatMessage({ content: "What are the noncompliant devices?" })).assistantMessage;
       assert.equal(message.questionKind, "mixed");
       assert.match(prompts[1]!.prompt, /That reply did not give the question kind/);
-      assert.match(message.steps![0]!.detail!, /^Documentation and tenant question\. .* The model gave no question kind, so keyword rules decided\.$/);
+      assert.match(classifiedAs(message.steps)!, /^The model gave no question kind, so keyword rules decided: a docs and tenant question\. /);
+      assert.equal(message.steps![1]!.title, "Reply gave no question kind");
       assert.match(prompts[2]!.prompt, /That answer used no tenant evidence/);
       assert.ok(message.toolTrace?.some((entry) => entry.tool === "query_cache" && !entry.error));
       assert.equal(message.content, "2 devices are noncompliant.");
@@ -416,8 +425,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         const result = await store.sendIntuneChatMessage({ content: question });
         const message = result.assistantMessage;
         assert.equal(message.questionKind, "docs", question);
-        assert.match(message.steps![0]!.detail!, /^Documentation question\. Sources: Microsoft Learn\. Your tenant is not checked\.$/, question);
-        assert.deepEqual(kinds(message.steps), ["plan", "mcp", "answer"], question);
+        assert.equal(classifiedAs(message.steps), "Classified as a docs question. Sources: Microsoft Learn. Your tenant is not checked.", question);
+        assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "answer"], question);
         assert.deepEqual(graphPaths, [], question);
         assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), false, question);
         assert.equal(message.tenantContext, undefined, question);
@@ -435,8 +444,9 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       ]);
       const message = (await store.sendIntuneChatMessage({ content: "What do the docs say about our devices?" })).assistantMessage;
       assert.equal(message.questionKind, "mixed");
-      assert.match(message.steps![0]!.detail!, /^Treated as docs and tenant: the question mentions your tenant\. Sources: /);
-      assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "mcp", "tool", "answer"]);
+      assert.match(classifiedAs(message.steps)!, /^Treated as docs and tenant: the question mentions your tenant\. Sources: /);
+      // The refresh the mixed kind needs runs after the model step that decided it.
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "graph-refresh", "mcp", "answer", "answer", "tool", "answer"]);
       assert.ok(graphPaths.length > 0, "the mixed question refreshed the stale planned resources");
       assert.ok(prompts.some((entry) => /That answer used no tenant evidence/.test(entry.prompt)));
     });
@@ -451,8 +461,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       const result = await store.sendIntuneChatMessage({ content: "What are unmanaged devices?" });
       const message = result.assistantMessage;
       assert.equal(message.questionKind, "tenant");
-      assert.match(message.steps![0]!.detail!, /^Tenant question\. Sources: cached tenant data and Microsoft Graph\.$/);
-      assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "tool", "answer"]);
+      assert.equal(classifiedAs(message.steps), "Classified as a tenant question. Sources: cached tenant data and Microsoft Graph.");
+      assert.deepEqual(message.steps!.map((step) => step.kind === "answer" ? step.title : step.kind), ["plan", "Chose to query cached Intune managed devices", "graph-refresh", "tool", "Wrote the answer"]);
       assert.ok(graphPaths.length > 0);
       assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), true);
     });
@@ -468,10 +478,10 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       ]);
       const message = (await store.streamIntuneChatMessage({ content: "How do I enroll macOS devices?" }, (event) => events.push(event))).assistantMessage;
       assert.equal(message.questionKind, "mixed");
-      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "plan", "graph-refresh", "tool", "answer"]);
-      const upgrade = message.steps![2]!;
+      assert.deepEqual(kinds(message.steps), ["plan", "answer", "mcp", "answer", "plan", "graph-refresh", "tool", "answer"]);
+      const upgrade = message.steps![4]!;
       assert.deepEqual([upgrade.title, upgrade.detail], ["Treated as docs and tenant", "The model asked for tenant data, so the answer now needs tenant evidence."]);
-      assert.equal(message.steps![4]!.status, "completed");
+      assert.equal(message.steps![6]!.status, "completed");
       assert.ok(graphPaths.length > 0, "the refresh ran before the tool");
       // The refresh step showed live before the tool step started.
       const live = events.flatMap((event) => (event.type === "steps" ? [event.steps] : []));
@@ -530,7 +540,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       ]);
       const followUp = (await store.sendIntuneChatMessage({ conversationId: first.conversation.id, content: "And for Windows?" })).assistantMessage;
       assert.equal(followUp.questionKind, "mixed");
-      assert.match(followUp.steps![0]!.detail!, /^Treated as docs and tenant: earlier answers in this chat used your tenant data\. Sources: /);
+      assert.match(classifiedAs(followUp.steps)!, /^Treated as docs and tenant: earlier answers in this chat used your tenant data\. Sources: /);
       assert.ok(prompts.some((entry) => /That answer used no tenant evidence/.test(entry.prompt)));
       assert.equal(followUp.content, "None of your 4 Windows PCs is noncompliant.");
 
@@ -559,7 +569,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         assert.doesNotMatch(message.content, /LLM provider failed/, send);
         const refresh = message.steps!.find((step) => step.kind === "graph-refresh")!;
         assert.deepEqual([refresh.status, refresh.title, refresh.detail], ["failed", "Could not refresh tenant data", "Sign-in for Contoso expired. Reconnect the tenant."], send);
-        assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "tool", "answer"], send);
+        assert.deepEqual(kinds(message.steps), ["plan", "answer", "graph-refresh", "tool", "answer"], send);
       }, { graphError: "Sign-in for Contoso expired. Reconnect the tenant." });
     }
   });
@@ -575,13 +585,15 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       const result = await store.sendIntuneChatMessage({ content: MIXED_QUESTION });
       const message = result.assistantMessage;
       assert.equal(message.questionKind, "mixed");
-      assert.match(message.steps![0]!.detail!, /^Documentation and tenant question\. Sources: Microsoft Learn, and cached tenant data and Microsoft Graph\.$/);
-      assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "mcp", "tool", "answer"]);
-      const refresh = message.steps![1]!;
+      assert.equal(classifiedAs(message.steps), "Classified as a docs and tenant question. Sources: Microsoft Learn, and cached tenant data and Microsoft Graph.");
+      assert.deepEqual(message.steps!.map((step) => step.kind === "answer" ? step.title : step.kind), [
+        "plan", "Chose to ask Microsoft Learn", "graph-refresh", "mcp", "Answered without checking tenant data", "Chose to query cached Intune managed devices", "tool", "Wrote the answer",
+      ]);
+      const refresh = message.steps![2]!;
       assert.deepEqual([refresh.origin, refresh.originLabel], ["graph", "Microsoft Graph"]);
       assert.ok(graphPaths.length > 0, "stale planned resources were refreshed from Graph");
       assert.equal(cache.listToolCalls(result.conversation.id).some((call) => call.type === "graph-cache-refresh"), true);
-      const tool = message.steps![3]!;
+      const tool = message.steps![6]!;
       assert.deepEqual([tool.title, tool.origin, tool.originLabel], ["Queried cached data", "device", "On device"]);
       assert.match(tool.detail!, /^Intune managed devices · 2 of 2 cached rows returned$/);
       assert.ok(prompts.some((entry) => /That answer used no tenant evidence/.test(entry.prompt)));
