@@ -94,11 +94,11 @@ export function summarizeSteps(message: Pick<IntuneChatMessage, "steps" | "docum
 } {
   const steps = message.steps ?? [];
   const sources = answerSources(message);
-  // TODO(ugur): Graph refresh and graph_get requests leave the device too, but carry only the
-  // request, not tenant data from the device. They are not listed here; confirm that reading.
+  // Graph refreshes and reads send requests to Microsoft Graph (decision 2026-11-04): they are listed too.
   const sent = new Map<string, Set<string>>();
   const add = (where: string, what: string) => sent.set(where, (sent.get(where) ?? new Set()).add(what));
   for (const step of steps) {
+    if (step.origin === "graph" && step.status !== "blocked") add(step.originLabel, "requests");
     // The host clears sent text when a call was blocked or failed before it reached the host.
     if (step.kind === "mcp" && step.status !== "blocked" && step.sent) add(step.originLabel, "search text");
     if (step.origin === "model" && step.kind === "answer") add(step.originLabel, "answer context");

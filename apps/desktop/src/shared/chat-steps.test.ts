@@ -52,9 +52,12 @@ describe("step summary", () => {
     expect(summary.totalMs).toBe(27_000);
   });
 
-  it("says nothing left the device for a local model with no MCP call", () => {
+  it("lists requests to Microsoft Graph, and says nothing left the device only when nothing did", () => {
     const summary = summarizeSteps({ steps: [step({ kind: "graph-refresh", origin: "graph", originLabel: "Microsoft Graph" }), step({ kind: "answer" })], toolTrace: [cacheTrace] });
-    expect(summary.egress).toBe("Nothing left this device");
+    expect(summary.egress).toBe("Left this device: requests to Microsoft Graph");
+    const hosted = summarizeSteps({ steps: [step({ kind: "tool", origin: "graph", originLabel: "Microsoft Graph" }), step({ kind: "answer", origin: "model", originLabel: "OpenAI Codex" })] });
+    expect(hosted.egress).toBe("Left this device: requests to Microsoft Graph and answer context to OpenAI Codex");
+    expect(summarizeSteps({ steps: [step({ kind: "tool" }), step({ kind: "answer" })] }).egress).toBe("Nothing left this device");
     expect(summary.sources).toBe("your tenant");
     expect(usedTenantEvidence({ toolTrace: [{ ...cacheTrace, error: "failed" }] })).toBe(false);
   });
