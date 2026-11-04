@@ -878,5 +878,8 @@ Vendor sign-in (designed separately as Vendor MCP authentication), local or sand
 - [x] Chat loop: MCP tools in the prompt, executor, trace, evidence guard, prompt rules
 - [x] Trust copy for external tool hosts
 - [x] Marketplace page and sidebar; move the hub out of Agents
-- [ ] Tests, screenshots, live check in the app
-- [ ] SPEC, CHANGELOG, reviews
+- [x] Unit and renderer tests; live check of the MCP host against the three servers
+- [x] Security review fixes: egress check, untrusted metadata, redirects, evidence guard, pilot install guard
+- [ ] Screenshots in light and dark, and a live check in the running app
+- [x] SPEC, CHANGELOG
+- [ ] Separate evaluator and GPT-6.1-Sol reviews
