@@ -642,23 +642,51 @@ export function tenantTieInFollowUp(input: {
   if (input.kind !== "docs" || input.tieInResources.length === 0) return undefined;
   const topic = TOPICS.find((candidate) => new RegExp(`\\b${candidate}\\b`, "i").test(input.question));
   const platform = PLATFORMS.find(([pattern]) => pattern.test(input.question))?.[1];
-  if (platform && input.tieInResources.includes("managedDevices")) {
-    const counts = input.deviceCountsByOs;
-    const count = counts
-      ? Object.entries(counts).filter(([os]) => os.toLowerCase() === platform.toLowerCase() || (platform === "Windows" && /^windows/i.test(os))).reduce((sum, [, value]) => sum + value, 0)
-      : undefined;
-    if (count === 0) return undefined;
-    const devices = count === undefined ? `${platform} devices` : `${count} ${platform} ${count === 1 ? "device" : "devices"}`;
-    // Only what the device records hold. Defender status, for one, is not in them, so a
-    // "Check for Defender" follow-up led to an answer that could not tell.
-    if (topic && DEVICE_RECORD_TOPICS.has(topic)) return `Check our ${devices} for ${topic} in Intune`;
-    return `Show compliance and last sync for our ${devices}`;
-  }
+  if (platform && input.tieInResources.includes("managedDevices")) return deviceFollowUp(platform, topic, input.deviceCountsByOs);
   // The planner lists the most relevant resource first.
   // TODO(ugur): this generic wording is used for every non-device tie-in, such as a KQL
   // question about sign-ins. Confirm it, or name per-resource follow-ups.
   const label = definitionForResource(input.tieInResources[0]!).label;
   return topic ? `Check ${topic} in our ${label.toLowerCase()}` : `Check how this applies to our ${label.toLowerCase()}`;
+}
+
+/**
+ * The device follow-up for a platform the question names, built from the
+ * template, the platform name and the cached count only. No device of
+ * that platform in the cache gives none.
+ */
+function deviceFollowUp(platform: string, topic: string | undefined, counts: Record<string, number> | undefined): string | undefined {
+  const count = counts
+    ? Object.entries(counts).filter(([os]) => os.toLowerCase() === platform.toLowerCase() || (platform === "Windows" && /^windows/i.test(os))).reduce((sum, [, value]) => sum + value, 0)
+    : undefined;
+  if (count === 0) return undefined;
+  const devices = count === undefined ? `${platform} devices` : `${count} ${platform} ${count === 1 ? "device" : "devices"}`;
+  // Only what the device records hold. Defender status, for one, is not in them, so a
+  // "Check for Defender" follow-up led to an answer that could not tell.
+  if (topic && DEVICE_RECORD_TOPICS.has(topic)) return `Check our ${devices} for ${topic} in Intune`;
+  return `Show compliance and last sync for our ${devices}`;
+}
+
+/**
+ * The follow-up after an answer that read tenant data. The model wrote
+ * its `next` after reading tenant rows, so text from a field no index
+ * knows (a street address, a description) could reach a suggestion the
+ * admin then sends as the next question. Such an answer offers only this
+ * one, built by code: the device template for a platform the question
+ * names, with the cached count, and only when it asks for something the
+ * question did not.
+ */
+export function tenantAnswerFollowUp(input: {
+  question: string;
+  resources: readonly GraphCacheResourceKind[];
+  deviceCountsByOs?: Record<string, number>;
+}): string | undefined {
+  // TODO(ugur): tenant answers on other resources now offer no follow-up. Confirm, or name per-resource templates.
+  const platform = PLATFORMS.find(([pattern]) => pattern.test(input.question))?.[1];
+  if (!platform || !input.resources.includes("managedDevices")) return undefined;
+  const topic = TOPICS.find((candidate) => new RegExp(`\\b${candidate}\\b`, "i").test(input.question));
+  const text = deviceFollowUp(platform, topic, input.deviceCountsByOs);
+  return text && !nearDuplicateFollowUp(text, input.question) ? text : undefined;
 }
 
 /** Deterministic follow-ups first, then the model's that ask for something else, at most two in all. */

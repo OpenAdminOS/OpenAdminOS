@@ -91,6 +91,8 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean; chunkDelayMs?: number;
   /** Answers the query writer from its prompt instead of the script's last MCP params. */
   writer?: (prompt: string) => string | undefined;
+  /** Graph responses by path, in place of an empty collection. */
+  graphResponses?: Record<string, unknown>;
 } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
@@ -129,7 +131,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
       return {
       listManagedDevices: async () => [],
       retireManagedDevice: async () => { throw new Error("no writes"); },
-      request: async (request) => { graphPaths.push(request.path); return { value: [] }; },
+      request: async (request) => { graphPaths.push(request.path); return options.graphResponses?.[request.path] ?? { value: [] }; },
       };
     },
     llmFactory: () => ({
@@ -677,7 +679,8 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.match(tool.detail!, /^Intune managed devices · 2 of 2 cached rows returned$/);
       assert.ok(prompts.some((entry) => /That answer used no tenant evidence/.test(entry.prompt)));
       assert.match(message.content, /2 of your macOS devices are noncompliant/);
-      assert.deepEqual(message.followUps, ["Show the compliance policies assigned to these Macs"]);
+      // The answer read tenant data, so the model's follow-up is dropped and the device template is offered.
+      assert.deepEqual(message.followUps, ["Show compliance and last sync for our 5 macOS devices"]);
     });
   });
   it("names a new chat with the answer's title, keeps it on later answers, and falls back to the question", async () => {
@@ -747,5 +750,39 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.equal(mcp?.sent, later);
       assert.deepEqual(second.assistantMessage.toolTrace?.find((entry) => entry.tool === learnTool)?.params, { query: later });
     }, { writer: echoQuestion });
+  });
+  it("offers only a code-built follow-up after a tenant read, and the address never reaches a later query", async () => {
+    const echoQuestion = (prompt: string) => {
+      const body = prompt.match(/^The admin's question:\n<tenant_data [^>]*>\n([\s\S]*?)\n<\/tenant_data /)?.[1];
+      return body ? JSON.stringify({ query: body }) : undefined;
+    };
+    await withHarness(async ({ store, prompts, writerPrompts, script }) => {
+      script([
+        { kind: "tenant", tool: "graph_get", params: { path: "/users", query: { $select: "displayName,streetAddress" } } },
+        { final: true, answer: "Ana Diaz uses MAC-00.", next: ["Which Macs are at 420 Cedar Avenue?", "Check Defender on the Macs at 420 Cedar Avenue"], title: "Primary users of our Macs" },
+      ]);
+      const first = await store.streamIntuneChatMessage({ content: "Who are the primary users of our macOS devices?" }, () => {});
+      assert.equal(first.assistantMessage.status, "completed");
+      assert.ok(prompts.some((entry) => /420 Cedar Avenue/.test(entry.prompt)), "the answering model read the address");
+      const stored = (await store.getIntuneChatMessages(first.conversation.id)).at(-1)!;
+      for (const text of [...(stored.followUps ?? []), ...(stored.tenantFollowUps ?? [])]) assert.doesNotMatch(text, /420 Cedar/);
+      assert.deepEqual(stored.followUps, ["Show compliance and last sync for our 5 macOS devices"]);
+      assert.equal(first.conversation.title, "Primary users of our Macs", "the title may stay model-written");
+
+      // The admin sends the offered follow-up; the model asks Microsoft Learn on that turn.
+      const offered = stored.followUps![0]!;
+      script([
+        { kind: "mixed", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Macs at 420 Cedar Avenue" } },
+        { tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "macOS" } } },
+        { final: true, answer: "All 5 Macs synced today [1]." },
+      ]);
+      const second = await store.streamIntuneChatMessage({ content: offered, conversationId: first.conversation.id }, () => {});
+      assert.equal(writerPrompts.length, 1);
+      assert.ok(writerPrompts[0]!.includes(`\n${offered}\n`));
+      for (const secret of [/420 Cedar/, /streetAddress/, /Ana Diaz/]) assert.doesNotMatch(writerPrompts[0]!, secret);
+      const mcp = second.assistantMessage.steps?.find((step) => step.kind === "mcp");
+      assert.equal(mcp?.sent, offered);
+      assert.deepEqual(second.assistantMessage.toolTrace?.find((entry) => entry.tool === learnTool)?.params, { query: offered });
+    }, { writer: echoQuestion, graphResponses: { "/users": { value: [{ id: "user-1", displayName: "Ana Diaz", streetAddress: "420 Cedar Avenue" }] } } });
   });
 });

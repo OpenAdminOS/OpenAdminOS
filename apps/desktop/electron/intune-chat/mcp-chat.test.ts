@@ -704,6 +704,29 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
+  it("offers no model follow-up after reading tenant data, so an unindexed field never becomes a suggestion", async () => {
+    await withStore(async (store) => {
+      const tools = toolContext(store);
+      tools.graphForScopes = async () => ({
+        listManagedDevices: async () => [],
+        retireManagedDevice: async () => { throw new Error("write should not run"); },
+        request: async () => ({ value: [{ id: "user-1", displayName: "Ana Diaz", streetAddress: "420 Cedar Avenue" }] }),
+      });
+      const result = await runAgenticChat({
+        ...input(store, scriptedLlm([
+          '{"tool":"graph_get","params":{"path":"/users","query":{"$select":"displayName,streetAddress"}}}',
+          JSON.stringify({ final: true, answer: "One user has an office address.", next: ["Which Macs are at 420 Cedar Avenue?", "Show our stale macOS devices"] }),
+        ])),
+        tools,
+      });
+      assert.equal(result.ok, true);
+      assert.equal(result.toolTrace[0]!.error, undefined, "the Graph read ran");
+      const followUps = result.ok ? result.followUps ?? [] : [];
+      assert.ok(followUps.every((text) => !/420 Cedar/.test(text)), "the address is in no suggestion");
+      assert.deepEqual(followUps, [], "no model-written follow-up after a tenant read");
+    });
+  });
+
   it("still blocks a private term the admin typed, after the query writer", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

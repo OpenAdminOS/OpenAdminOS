@@ -127,7 +127,7 @@ import {
   selfTrainingCandidateFromPrompt,
   type PlannedChatContext,
 } from "./planner.js";
-import { executeIntuneChatTool, mcpPrivateTermsForTenant, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
+import { executeIntuneChatTool, isTenantTool, mcpPrivateTermsForTenant, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
 import {
   CitationRegistry,
   MICROSOFT_GRAPH,
@@ -141,6 +141,7 @@ import {
   relabelUnverifiedLearn,
   modelStepHooks,
   startAnswerStep,
+  tenantAnswerFollowUp,
   tenantTieInFollowUp,
   toolStepHooks,
   type AnswerModel,
@@ -1957,7 +1958,7 @@ export class IntuneChatService {
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
     const { followUps, tenantFollowUps } = answered
-      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
+      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: readTenantData(answerPlan.sources.kind, refreshResult, toolTrace) })
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
@@ -2740,7 +2741,7 @@ export class IntuneChatService {
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
     const { followUps, tenantFollowUps } = answerPlan && answered
-      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
+      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: readTenantData(answerPlan.sources.kind, refreshResult, toolTrace) })
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
@@ -2973,7 +2974,13 @@ export class IntuneChatService {
     };
   }
 
-  /** Follow-ups for an answer: the tenant tie-in of a docs question first, then the model's. */
+  /**
+   * Follow-ups for an answer. A docs answer that read no tenant data gets
+   * the tenant tie-in first, then the model's. An answer that read tenant
+   * data (a tenant or mixed kind, a Graph refresh or a tenant tool) gets
+   * only the follow-up code builds: the model wrote its `next` after
+   * reading tenant rows, and a suggestion becomes the next question.
+   */
   private answerFollowUps(input: {
     content: string;
     sources: ChatSourcePlan;
@@ -2981,18 +2988,17 @@ export class IntuneChatService {
     tenantId: string;
     cacheStatus: readonly GraphCacheResourceStatus[];
     modelFollowUps?: readonly string[];
+    readTenantData: boolean;
   }): { followUps: string[]; tenantFollowUps: string[] } {
     const store = this.host.requireIntelligenceStore();
     const devices = input.cacheStatus.find((status) => status.resource === "managedDevices");
-    const tieIn = tenantTieInFollowUp({
-      question: input.content,
-      kind: input.sources.kind,
-      tieInResources: input.tieInResources,
-      ...(devices?.refreshedAt && input.tieInResources.includes("managedDevices")
-        ? { deviceCountsByOs: this.graphAggregatesFor(store, input.tenantId, ["managedDevices"]).managedDevices?.breakdowns.operatingSystem ?? {} }
-        : {}),
-    });
-    const followUps = mergeFollowUps([tieIn], input.modelFollowUps ?? []);
+    const deviceCounts = devices?.refreshedAt && input.tieInResources.includes("managedDevices")
+      ? { deviceCountsByOs: this.graphAggregatesFor(store, input.tenantId, ["managedDevices"]).managedDevices?.breakdowns.operatingSystem ?? {} }
+      : {};
+    const tieIn = input.readTenantData
+      ? tenantAnswerFollowUp({ question: input.content, resources: input.tieInResources, ...deviceCounts })
+      : tenantTieInFollowUp({ question: input.content, kind: input.sources.kind, tieInResources: input.tieInResources, ...deviceCounts });
+    const followUps = mergeFollowUps([tieIn], input.readTenantData ? [] : input.modelFollowUps ?? []);
     // The chip of a docs answer says when its follow-up would read tenant data.
     return { followUps, tenantFollowUps: followUps.filter((text) => text === tieIn || hasTenantReference(text)) };
   }
@@ -3359,6 +3365,11 @@ function modelClassification(
 }
 
 /** Says so when installed MCP tools were held back from a model that skips the tool loop. */
+/** Whether an answer read tenant data: a tenant or mixed kind, a Graph refresh, or a tenant tool call. */
+function readTenantData(kind: ChatSourcePlan["kind"], refresh: GraphCacheRefreshResult | undefined, trace: IntuneChatMessage["toolTrace"]): boolean {
+  return kind !== "docs" || refresh !== undefined || (trace ?? []).some((entry) => isTenantTool(entry.tool));
+}
+
 function withMcpSkippedNotice(capability: AgenticCapabilityDecision, mcpInstalled: boolean): string | undefined {
   // The small-model line already says Marketplace tools are off.
   if (!mcpInstalled || capability.enabled || capability.tooSmall) return capability.notice;

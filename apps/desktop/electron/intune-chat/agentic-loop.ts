@@ -244,7 +244,7 @@ export type RunAgenticChatResult =
       model?: string;
       /** Targets of the [n] citations, in the numbering the model saw. */
       documentationSources?: IntuneChatDocumentationSource[];
-      /** The validated `next` follow-ups from the final answer. */
+      /** The validated `next` follow-ups from the final answer; none when the answer read tenant data. */
       followUps?: string[];
       /** The validated chat `title`, when the input asked for one. */
       title?: string;
@@ -559,7 +559,9 @@ export async function runAgenticChat(
         // Only sources whose content reached the model that wrote this answer.
         documentationSources: citations.sources.slice(0, consultedSources),
         // Injected text can steer next, so links and tenant values never become a suggestion.
-        followUps: validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)),
+        // After tenant data was read (a tenant or mixed kind; a tenant tool makes docs mixed)
+        // the model's next is dropped: a field no index knows could reach the next question.
+        followUps: docsOnly ? validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)) : [],
         ...(input.askTitle ? titleField(validTitle(action.title, (text) => holdsTenantData(input.tools, text))) : {}),
       };
     }

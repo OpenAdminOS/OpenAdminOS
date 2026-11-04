@@ -15,6 +15,7 @@ import {
   planChatSources,
   QuestionKindTracker,
   relabelUnverifiedLearn,
+  tenantAnswerFollowUp,
   tenantTieInFollowUp,
   toolStepFinish,
   toolStepSending,
@@ -305,6 +306,16 @@ describe("follow-ups", () => {
     assert.equal(tenantTieInFollowUp({ ...base, kind: "tenant" }), undefined);
     const kqlQuestion = "Write a KQL query that lists failed sign-ins in the last 24 hours";
     assert.equal(tenantTieInFollowUp({ question: kqlQuestion, kind: "docs", tieInResources: planChatContext(kqlQuestion).resources }), "Check how this applies to our sign-in logs");
+  });
+
+  it("builds the follow-up after a tenant read from the template, platform and count only", () => {
+    assert.equal(tenantAnswerFollowUp({ question: "Who are the primary users of our macOS devices?", resources: ["managedDevices"], deviceCountsByOs: { macOS: 5 } }), "Show compliance and last sync for our 5 macOS devices");
+    assert.equal(tenantAnswerFollowUp({ question: "Who signed in last on our Windows PCs?", resources: ["managedDevices"], deviceCountsByOs: { "Windows 11": 4 } }), "Show compliance and last sync for our 4 Windows devices");
+    // Nothing that repeats the question, nothing without a platform or device records.
+    assert.equal(tenantAnswerFollowUp({ question: "Which Windows devices lack BitLocker?", resources: ["managedDevices"], deviceCountsByOs: { "Windows 11": 4 } }), undefined);
+    assert.equal(tenantAnswerFollowUp({ question: "Show compliance and last sync for our macOS devices", resources: ["managedDevices"] }), undefined);
+    assert.equal(tenantAnswerFollowUp({ question: "Which users have no MFA?", resources: ["users"] }), undefined);
+    assert.equal(tenantAnswerFollowUp({ question: "Which macOS apps are assigned?", resources: ["mobileApps"] }), undefined);
   });
 });
 
