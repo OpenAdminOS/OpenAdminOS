@@ -1,69 +1,69 @@
 {
-  "updatedAt": "2026-11-02T13:00:48.290Z",
+  "updatedAt": "2026-11-04T17:00:47.515Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 33,
-      "installs7d": 1
+      "installs7d": 0
     },
     "intune-device-posture-auditor": {
       "installs": 10,
-      "installs7d": 1
+      "installs7d": 0
     },
     "offboarding-agent": {
       "installs": 22,
-      "installs7d": 3
+      "installs7d": 1
     },
     "compliance-overview": {
-      "installs": 45,
-      "installs7d": 3
+      "installs": 47,
+      "installs7d": 4
     },
     "os-update-posture": {
       "installs": 22,
-      "installs7d": 2
+      "installs7d": 0
     },
     "tenant-health-report": {
-      "installs": 33,
+      "installs": 34,
       "installs7d": 3
     },
     "user-license-overview": {
       "installs": 30,
-      "installs7d": 1
+      "installs7d": 0
     },
     "conditional-access-explainer": {
-      "installs": 49,
-      "installs7d": 1
-    },
-    "dormant-app-registrations": {
-      "installs": 35,
-      "installs7d": 4
-    },
-    "risky-sign-in-triage": {
-      "installs": 19,
+      "installs": 51,
       "installs7d": 3
     },
-    "secure-score-prioritizer": {
-      "installs": 21,
+    "dormant-app-registrations": {
+      "installs": 36,
       "installs7d": 2
+    },
+    "risky-sign-in-triage": {
+      "installs": 20,
+      "installs7d": 1
+    },
+    "secure-score-prioritizer": {
+      "installs": 22,
+      "installs7d": 1
     },
     "sign-in-failure-explainer": {
       "installs": 24,
-      "installs7d": 1
+      "installs7d": 0
     },
     "stale-guest-cleanup": {
-      "installs": 20,
+      "installs": 21,
       "installs7d": 1
     },
     "tenant-change-audit": {
       "installs": 19,
-      "installs7d": 3
+      "installs7d": 1
     },
     "team-evidence-review": {
-      "installs": 12,
-      "installs7d": 3
+      "installs": 13,
+      "installs7d": 2
     },
     "team-script-draft": {
       "installs": 11,
-      "installs7d": 4
+      "installs7d": 1
     }
   }
 }

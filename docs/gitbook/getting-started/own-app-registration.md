@@ -90,7 +90,7 @@ The script uses the Microsoft Graph PowerShell SDK. It:
 4. Stops without changes if an application with the same display name already exists.
 5. Creates a single-tenant public client registration with the `http://localhost` redirect URI.
 6. Adds the delegated Microsoft Graph permissions for the selected services plus the four sign-in permissions, looking up their permission IDs in the tenant at run time.
-7. Creates the enterprise application and grants tenant-wide admin consent for the same permissions. If either step fails, it deletes the registration it created.
+7. Creates the enterprise application and grants tenant-wide admin consent for the same permissions. A new enterprise application can take a few seconds to replicate, so the consent grant is retried up to 6 times, 5 seconds apart, when Entra reports it as not found yet. If either step still fails, it deletes the registration it created.
 8. Prints the Application (client) ID and Directory (tenant) ID to enter in OpenAdminOS.
 
 ## Add A Service To An Existing Registration

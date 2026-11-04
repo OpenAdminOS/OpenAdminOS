@@ -87,39 +87,129 @@ export const DEFAULT_SCOPES = toResourceScopes(BASELINE_SCOPES);
  */
 export const GRAPH_DEFAULT_SCOPE = "https://graph.microsoft.com/.default";
 
-const SUCCESS_TEMPLATE = `<!doctype html>
+// Marker in ERROR_TEMPLATE that the loopback listener replaces with the
+// escaped error Microsoft sent back, or removes when there is none.
+const ERROR_DETAIL_MARKER = "<!--oa:error-detail-->";
+
+// Self-contained page served by the local loopback listener after Microsoft
+// redirects back. No external fonts, scripts, or images: nothing leaves the
+// device. Colors follow the production palette in apps/desktop/src/styles.
+function authResultPage(input: {
+  tone: "success" | "danger";
+  title: string;
+  status: string;
+  heading: string;
+  body: string;
+  detail?: string;
+}): string {
+  return `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>OpenAdminOS - sign-in complete</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>${input.title}</title>
     <style>
-      :root { color-scheme: light dark; }
-      html, body { margin: 0; padding: 0; height: 100%; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, system-ui, sans-serif; }
-      body { display: flex; align-items: center; justify-content: center; background: #0a0c10; color: #e6e2d9; }
-      .card { max-width: 420px; padding: 32px; border-radius: 16px; background: #131418; box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
-      h1 { margin: 0 0 12px 0; font-size: 18px; }
-      p { margin: 0; font-size: 13.5px; line-height: 1.5; color: #9b958a; }
-      .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #6fb98f; margin-right: 8px; vertical-align: middle; }
+      :root {
+        color-scheme: dark;
+        --bg: #17191d; --card: #1e2126; --border: #343940;
+        --text-0: #f4f5f7; --text-1: #c2c7ce; --text-3: #737c89;
+        --kbd: #262a31; --success: #9cc88f; --danger: #f1a0a0;
+      }
+      @media (prefers-color-scheme: light) {
+        :root {
+          color-scheme: light;
+          --bg: #f4f5f7; --card: #ffffff; --border: #dce0e6;
+          --text-0: #17191d; --text-1: #3d434c; --text-3: #6b737f;
+          --kbd: #eef0f3; --success: #3f7a34; --danger: #b23b3b;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; }
+      body {
+        display: flex; align-items: center; justify-content: center; padding: 24px;
+        background: var(--bg); color: var(--text-0);
+        font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+        letter-spacing: -0.005em; -webkit-font-smoothing: antialiased;
+      }
+      .mono { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace; }
+      main { width: 100%; max-width: 440px; }
+      .brand { display: flex; align-items: center; gap: 10px; margin: 0 0 16px 2px; color: var(--text-1); font-weight: 600; font-size: 13px; }
+      .brand svg { width: 22px; height: 15px; }
+      .card { background: var(--card); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+      .content { padding: 24px 24px 22px; }
+      .status { display: inline-flex; align-items: center; gap: 8px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--tone); }
+      .status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--tone); box-shadow: 0 0 0 3px color-mix(in srgb, var(--tone) 22%, transparent); }
+      h1 { margin: 12px 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.01em; }
+      p { margin: 0; color: var(--text-1); }
+      .detail { margin-top: 16px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-size: 12px; color: var(--text-1); word-break: break-word; }
+      .detail strong { display: block; color: var(--danger); font-weight: 500; }
+      .footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 24px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
+      kbd { display: inline-block; min-width: 20px; padding: 1px 6px; border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; background: var(--kbd); color: var(--text-1); font-size: 11px; text-align: center; }
+      .local { margin: 14px 0 0 2px; color: var(--text-3); font-size: 11px; }
     </style>
   </head>
-  <body>
-    <div class="card">
-      <h1><span class="dot"></span>Sign-in complete</h1>
-      <p>OpenAdminOS has received the authorization code. You can close this tab and return to the desktop app.</p>
-    </div>
+  <body style="--tone: var(--${input.tone})">
+    <main>
+      <div class="brand">
+        <svg viewBox="-0.5 11 64 42" aria-hidden="true"><g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"><circle cx="17" cy="32" r="11.5"/><circle cx="46" cy="32" r="11.5"/><path d="M57.5 20.5v23"/></g></svg>
+        OpenAdminOS
+      </div>
+      <div class="card" role="status">
+        <div class="content">
+          <span class="status">${input.status}</span>
+          <h1>${input.heading}</h1>
+          <p>${input.body}</p>
+          ${input.detail ?? ""}
+        </div>
+        <div class="footer">
+          <span>You can close this tab.</span>
+          <span><kbd class="mono" id="mod">Ctrl</kbd> <kbd class="mono">W</kbd></span>
+        </div>
+      </div>
+      <p class="local mono">Served by OpenAdminOS on this device</p>
+    </main>
+    <script>
+      var p = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+      if (/mac/i.test(p)) document.getElementById("mod").textContent = "\\u2318";
+    </script>
   </body>
 </html>`;
+}
 
-const ERROR_TEMPLATE = `<!doctype html>
-<html lang="en">
-  <head><meta charset="utf-8" /><title>OpenAdminOS - sign-in failed</title></head>
-  <body style="margin:0;font-family:system-ui;background:#0a0c10;color:#e6e2d9;display:flex;align-items:center;justify-content:center;height:100vh">
-    <div style="max-width:420px;padding:32px;border-radius:16px;background:#131418">
-      <h1 style="margin:0 0 12px 0;font-size:18px">Sign-in failed</h1>
-      <p style="margin:0;font-size:13.5px;color:#9b958a">Return to the desktop app and try connecting again.</p>
-    </div>
-  </body>
-</html>`;
+const SUCCESS_TEMPLATE = authResultPage({
+  tone: "success",
+  title: "OpenAdminOS: sign-in complete",
+  status: "Signed in",
+  heading: "Sign-in complete",
+  body: "Microsoft returned an authorization code to OpenAdminOS. The desktop app finishes connecting the tenant from here.",
+});
+
+const ERROR_TEMPLATE = authResultPage({
+  tone: "danger",
+  title: "OpenAdminOS: sign-in did not complete",
+  status: "Not connected",
+  heading: "Sign-in did not complete",
+  body: "Microsoft returned an error instead of an authorization code. Return to OpenAdminOS and connect the tenant again.",
+  detail: ERROR_DETAIL_MARKER,
+});
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
+function renderSignInErrorPage(
+  template: string,
+  error?: { error?: string; error_description?: string },
+): string {
+  if (!error?.error) return template.replace(ERROR_DETAIL_MARKER, () => "");
+  // Entra descriptions carry trace and correlation IDs on later lines; the
+  // first line is the part an admin acts on.
+  const description = (error.error_description ?? "").split(/\r?\n/)[0]!.trim().slice(0, 280);
+  const detail = `<div class="detail mono"><strong>${escapeHtml(error.error)}</strong>${
+    description ? escapeHtml(description) : ""
+  }</div>`;
+  return template.replace(ERROR_DETAIL_MARKER, () => detail);
+}
 
 export interface TokenCacheStorage {
   read(): Promise<string>;
@@ -276,7 +366,12 @@ class AbortableLoopbackClient implements ILoopbackClient {
       this.server = createServer((request, response) => {
         const requestUrl = request.url;
         if (!requestUrl) {
-          response.end(errorTemplate ?? "Microsoft sign-in did not return a redirect URL.");
+          if (errorTemplate) response.setHeader("content-type", "text/html; charset=utf-8");
+          response.end(
+            errorTemplate
+              ? renderSignInErrorPage(errorTemplate)
+              : "Microsoft sign-in did not return a redirect URL.",
+          );
           fail(new Error("Microsoft sign-in did not return a redirect URL."));
           return;
         }
@@ -294,7 +389,11 @@ class AbortableLoopbackClient implements ILoopbackClient {
           finish(result);
         } else if (result.error) {
           response.setHeader("content-type", "text/html; charset=utf-8");
-          response.end(errorTemplate ?? "Microsoft sign-in did not complete.");
+          response.end(
+            errorTemplate
+              ? renderSignInErrorPage(errorTemplate, result)
+              : "Microsoft sign-in did not complete.",
+          );
           finish(result);
         } else {
           // Browsers often request /favicon.ico while the authorization tab is

@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { graphCacheRequestFromNextLink, humanizeMsalError } from "./state-helpers.js";
+import {
+  canonicalClientId,
+  graphCacheRequestFromNextLink,
+  humanizeMsalError,
+  sanitizeSavedAppRegistrations,
+  tokenCacheForPartition,
+  tokenCachePartition,
+} from "./state-helpers.js";
 import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
 
 describe("Graph cache nextLink validation", () => {
@@ -515,5 +522,67 @@ describe("sign-in errors name the registration used and the fix", () => {
       humanizeMsalError(msal("something odd"), custom),
       "Sign-in with your app registration (client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee) failed: something odd",
     );
+  });
+});
+
+describe("client ID canonical form and token cache partitions", () => {
+  const CLIENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const UPPER = CLIENT_ID.toUpperCase();
+  const RT_KEY = `home.tid-login.microsoftonline.com-refreshtoken-${CLIENT_ID}----`;
+  const refreshToken = (clientId: string, secret: string) => ({
+    home_account_id: "home.tid",
+    environment: "login.microsoftonline.com",
+    credential_type: "RefreshToken",
+    client_id: clientId,
+    secret,
+  });
+
+  it("lower-cases and trims client IDs and resolves the default partition", () => {
+    assert.equal(canonicalClientId(` ${UPPER} `), CLIENT_ID);
+    assert.equal(tokenCachePartition({ clientId: UPPER }), CLIENT_ID);
+    assert.equal(tokenCachePartition(undefined), OPENADMINOS_CLIENT_ID);
+    assert.equal(tokenCachePartition({ clientId: OPENADMINOS_CLIENT_ID.toUpperCase() }), OPENADMINOS_CLIENT_ID);
+  });
+
+  it("stores remembered registrations with the canonical client ID", () => {
+    assert.deepEqual(
+      sanitizeSavedAppRegistrations([{ clientId: UPPER, lastUsedAt: "2026-11-03T10:00:00.000Z" }]),
+      [{ clientId: CLIENT_ID, lastUsedAt: "2026-11-03T10:00:00.000Z" }],
+    );
+  });
+
+  it("returns a cache with nothing to change unchanged", () => {
+    const cache = JSON.stringify({ RefreshToken: { [RT_KEY]: refreshToken(CLIENT_ID, "rt") } });
+    assert.equal(tokenCacheForPartition(cache, [], CLIENT_ID), cache);
+    assert.equal(tokenCacheForPartition("", [], CLIENT_ID), "");
+    assert.equal(tokenCacheForPartition("not json", ["{}"], CLIENT_ID), "not json");
+  });
+
+  it("gives credentials written with a differently cased client ID the canonical ID", () => {
+    const cache = JSON.stringify({
+      RefreshToken: { [RT_KEY]: refreshToken(UPPER, "rt") },
+      AppMetadata: { [`appmetadata-login.microsoftonline.com-${CLIENT_ID}`]: { client_id: UPPER, environment: "login.microsoftonline.com" } },
+      RefreshTokenOther: { x: { client_id: "11111111-2222-4333-8444-555555555555" } },
+    });
+    const merged = JSON.parse(tokenCacheForPartition(cache, [], CLIENT_ID)) as Record<string, Record<string, { client_id: string }>>;
+    assert.equal(merged.RefreshToken?.[RT_KEY]?.client_id, CLIENT_ID);
+    assert.equal(Object.values(merged.AppMetadata ?? {})[0]?.client_id, CLIENT_ID);
+    assert.equal(merged.RefreshTokenOther?.x?.client_id, "11111111-2222-4333-8444-555555555555");
+  });
+
+  it("merges legacy caches under the primary cache and skips unreadable ones", () => {
+    const primary = JSON.stringify({ RefreshToken: { [RT_KEY]: refreshToken(CLIENT_ID, "primary") } });
+    const legacy = JSON.stringify({
+      RefreshToken: {
+        [RT_KEY]: refreshToken(UPPER, "legacy"),
+        "other.tid-login.microsoftonline.com-refreshtoken-x----": refreshToken(UPPER, "other"),
+      },
+    });
+    const merged = JSON.parse(tokenCacheForPartition(primary, [legacy, "not json"], CLIENT_ID)) as Record<
+      string,
+      Record<string, { client_id: string; secret: string }>
+    >;
+    assert.equal(merged.RefreshToken?.[RT_KEY]?.secret, "primary");
+    assert.equal(merged.RefreshToken?.["other.tid-login.microsoftonline.com-refreshtoken-x----"]?.client_id, CLIENT_ID);
   });
 });

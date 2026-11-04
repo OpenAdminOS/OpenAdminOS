@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 
 import { grantedScopeSet, partIdsFor } from "../shared/openAdminOS";
 import {
+  CONSENT_GRANT_ATTEMPTS,
+  CONSENT_GRANT_RETRY_SECONDS,
   escapePowerShellSingleQuoted,
   generateRegistrationSetup,
   powerShellStringLiteral,
@@ -277,5 +279,83 @@ describe("requiredResourceAccess snippet", () => {
     );
     expect(snippet.notes.join(" ")).toMatch(/Do not replace the array/);
     expect(snippet.notes.join(" ")).toMatch(/Admin consent is still required/);
+  });
+});
+
+describe("admin consent grant retry", () => {
+  const script = generateRegistrationSetup("OpenAdminOS", ["directory"]).script;
+  const loopStart = script.indexOf("    $grantAttempts = ");
+  const loopEnd = script.indexOf("} catch {\n    $setupError");
+
+  it("retries only a not found error, a bounded number of times, inside the rollback", () => {
+    expect(CONSENT_GRANT_ATTEMPTS).toBe(6);
+    expect(CONSENT_GRANT_RETRY_SECONDS).toBe(5);
+    expect(script).toContain(`$grantAttempts = ${CONSENT_GRANT_ATTEMPTS}`);
+    expect(script).toContain(`Start-Sleep -Seconds ${CONSENT_GRANT_RETRY_SECONDS}`);
+    expect(script).toContain("Request_ResourceNotFound");
+    expect(script).toContain("if (-not $notReplicatedYet -or $attempt -eq $grantAttempts) { throw }");
+    expect(loopStart).toBeGreaterThan(script.indexOf("New-MgServicePrincipal"));
+    expect(loopEnd).toBeGreaterThan(loopStart);
+    expect(script.indexOf("Remove-MgApplication -ApplicationId $application.Id")).toBeGreaterThan(loopEnd);
+    expect(script).toMatch(/^[\t\n\r\x20-\x7E]*$/);
+  });
+
+  // Runs the generated retry loop with the Graph cmdlet and Start-Sleep
+  // replaced by functions, so no tenant is contacted and nothing waits.
+  function runGrantLoop(failures: number, message: string): string {
+    const directory = mkdtempSync(join(tmpdir(), "openadminos-ps-"));
+    try {
+      const path = join(directory, "grant.ps1");
+      writeFileSync(
+        path,
+        [
+          "$ErrorActionPreference = 'Stop'",
+          "$servicePrincipal = @{ Id = 'sp' }",
+          "$graphServicePrincipal = @{ Id = 'graph' }",
+          "$requestedScopeValues = @('User.Read')",
+          "$script:calls = 0",
+          "$script:slept = 0",
+          `function New-MgOauth2PermissionGrant { param($BodyParameter) $script:calls++; if ($script:calls -le ${failures}) { throw '${message}' }; [pscustomobject]@{ Id = 'grant' } }`,
+          "function Start-Sleep { param($Seconds) $script:slept += $Seconds }",
+          "try {",
+          "    $scopeString = $requestedScopeValues -join ' '",
+          script.slice(loopStart, loopEnd),
+          "    Write-Output \"GRANTED\"",
+          "} catch {",
+          "    Write-Output \"FAILED=$($_.Exception.Message)\"",
+          "}",
+          "Write-Output \"CALLS=$script:calls SLEPT=$script:slept\"",
+        ].join("\n"),
+        "utf8",
+      );
+      const result = spawnSync("pwsh", ["-NoProfile", "-NonInteractive", "-File", path], {
+        encoding: "utf8",
+      });
+      expect(result.status, result.stderr).toBe(0);
+      return result.stdout;
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+
+  const notFound =
+    "Resource sp does not exist or one of its queried reference-property objects are not present. Status: 404 (NotFound) ErrorCode: Request_ResourceNotFound";
+
+  it.skipIf(!HAS_PWSH)("grants consent once the service principal has replicated", () => {
+    const output = runGrantLoop(2, notFound);
+    expect(output).toContain("GRANTED");
+    expect(output).toContain("CALLS=3 SLEPT=10");
+  });
+
+  it.skipIf(!HAS_PWSH)("gives up after the last attempt so the rollback runs", () => {
+    const output = runGrantLoop(99, notFound);
+    expect(output).toContain(`FAILED=${notFound}`);
+    expect(output).toContain(`CALLS=${CONSENT_GRANT_ATTEMPTS} SLEPT=${(CONSENT_GRANT_ATTEMPTS - 1) * CONSENT_GRANT_RETRY_SECONDS}`);
+  });
+
+  it.skipIf(!HAS_PWSH)("does not retry other errors", () => {
+    const output = runGrantLoop(99, "Insufficient privileges to complete the operation.");
+    expect(output).toContain("FAILED=Insufficient privileges to complete the operation.");
+    expect(output).toContain("CALLS=1 SLEPT=0");
   });
 });
