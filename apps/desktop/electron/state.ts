@@ -1376,7 +1376,14 @@ export class AppStateStore {
     }
     this.sampleGraph = createSampleGraph({ clock: this.clock });
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
-    this.mcpHost = new McpHost({ clientVersion: this.appVersion });
+    this.mcpHost = new McpHost({
+      clientVersion: this.appVersion,
+      // Read again right before each call, so turning a server off stops answers already running.
+      revocation: async (serverId) => {
+        const installed = (await this.read()).mcpServers?.[serverId];
+        return !installed ? "uninstalled" : installed.enabled ? undefined : "disabled";
+      },
+    });
     const host = this;
     this.chatService = new IntuneChatService({
       read: () => host.read(),
@@ -1763,13 +1770,15 @@ export class AppStateStore {
     this.requireMcpCatalogEntry(serverId);
     await this.serialize(async () => {
       const current = await this.read();
-      if (!current.mcpServers?.[serverId]) return;
-      const { [serverId]: _removed, ...rest } = current.mcpServers;
-      const next: PersistedState = { ...current, mcpServers: rest };
-      if (Object.keys(rest).length === 0) delete next.mcpServers;
-      await this.write(next);
+      if (current.mcpServers?.[serverId]) {
+        const { [serverId]: _removed, ...rest } = current.mcpServers;
+        const next: PersistedState = { ...current, mcpServers: rest };
+        if (Object.keys(rest).length === 0) delete next.mcpServers;
+        await this.write(next);
+      }
+      // Answers already running lose the server's tools before anything else can call them.
+      await this.mcpHost.revoke(serverId, "uninstalled");
     });
-    await this.mcpHost.disconnect(serverId);
     this.emitStateChanged("mcp-servers-changed");
     return this.listMcpServers();
   }
@@ -1781,8 +1790,8 @@ export class AppStateStore {
       const existing = current.mcpServers?.[serverId];
       if (!existing) throw new Error(`${entry.name} is not installed. Install it from the Marketplace first.`);
       await this.write({ ...current, mcpServers: { ...current.mcpServers, [serverId]: { ...existing, enabled } } });
+      if (!enabled) await this.mcpHost.revoke(serverId, "disabled");
     });
-    if (!enabled) await this.mcpHost.disconnect(serverId);
     this.emitStateChanged("mcp-servers-changed");
     return this.listMcpServers();
   }
@@ -1792,9 +1801,12 @@ export class AppStateStore {
     const persisted = await this.read();
     const tools: McpChatTool[] = [];
     const servers: McpChatServer[] = [];
+    // The authorization each server had when its tools were listed; turning it off later refuses its calls.
+    const generations = new Map<string, number>();
     for (const entry of this.mcpCatalog) {
       const installed = persisted.mcpServers?.[entry.id];
       if (!installed?.enabled) continue;
+      generations.set(entry.id, this.mcpHost.generation(entry.id));
       servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics });
       for (const tool of installed.tools) {
         if (tool.unavailable) continue;
@@ -1818,7 +1830,7 @@ export class AppStateStore {
       cachedTenantValues: () => this.requireIntelligenceStore().tenantIdentityValues(tenant.id),
       call: (tool, args, signal) => {
         const entry = this.requireMcpCatalogEntry(tool.serverId);
-        return this.mcpHost.callTool(entry, tool.tool, args, signal);
+        return this.mcpHost.callTool(entry, tool.tool, args, signal, generations.get(tool.serverId) ?? -1);
       },
     };
   }

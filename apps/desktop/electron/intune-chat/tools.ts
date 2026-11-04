@@ -17,7 +17,7 @@ import { graphAccessDenialFromError, graphAccessDenialText } from "@openadminos/
 import { fenceTenantData } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import { cleanMcpDescription, cleanMcpSchema } from "../mcp/host.js";
+import { cleanMcpDescription, cleanMcpSchema, McpHostError } from "../mcp/host.js";
 import { canonicalEgressText, egressResidue } from "./mcp-egress.js";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import { hasMixedScriptToken, isCommonWord, normalizeTokens } from "./mcp-stopwords.js";
@@ -820,6 +820,8 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   try {
     result = await ctx.mcp.call(entry, args, ctx.signal);
   } catch (caught) {
+    // The host refused before dispatch, for example because the server was turned off meanwhile.
+    if (caught instanceof McpHostError && !caught.sent) throw new Error(caught.message);
     throw new McpCallFailedError(caught instanceof Error ? caught.message : String(caught));
   }
   return {

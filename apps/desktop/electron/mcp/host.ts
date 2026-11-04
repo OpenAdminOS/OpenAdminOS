@@ -43,14 +43,21 @@ export interface McpCallResult {
   structured?: unknown;
 }
 
-export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "redirect";
+export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "redirect" | "revoked";
 
 export class McpHostError extends Error {
-  constructor(readonly code: McpHostErrorCode, message: string) {
+  /**
+   * @param sent Whether the call may have reached the server. False only
+   * when the host refused it before dispatch.
+   */
+  constructor(readonly code: McpHostErrorCode, message: string, readonly sent = true) {
     super(message);
     this.name = "McpHostError";
   }
 }
+
+/** Why a server's calls are no longer authorized. */
+export type McpRevocation = "disabled" | "uninstalled";
 
 export interface McpHostOptions {
   clientVersion: string;
@@ -61,6 +68,19 @@ export interface McpHostOptions {
   /** Bytes read from any single HTTP response before it is cut off. */
   maxResponseBytes?: number;
   fetch?: FetchLike;
+  /**
+   * Reads the server's installed and enabled state, immediately before a
+   * call is dispatched. A reason refuses the call and nothing is sent.
+   */
+  revocation?: (serverId: string) => McpRevocation | undefined | Promise<McpRevocation | undefined>;
+}
+
+interface Authorization {
+  generation: number;
+  /** Aborts calls of this generation still in flight when it is revoked. */
+  controller: AbortController;
+  /** Why the previous generation was revoked. */
+  revoked?: McpRevocation;
 }
 
 export const MCP_MAX_TOOLS_PER_SERVER = 32;
@@ -111,6 +131,7 @@ interface Session {
 
 export class McpHost {
   private readonly sessions = new Map<string, Promise<Session>>();
+  private readonly authorizations = new Map<string, Authorization>();
   private readonly connectTimeoutMs: number;
   private readonly callTimeoutMs: number;
   private readonly maxOutputChars: number;
@@ -142,24 +163,60 @@ export class McpHost {
     }
   }
 
+  /**
+   * The server's current authorization generation. A Chat answer records
+   * it when its tools are listed; a call from an older generation is
+   * refused.
+   */
+  generation(id: string): number {
+    return this.authorization(id).generation;
+  }
+
+  /**
+   * Turning a server off or uninstalling it revokes the calls of every
+   * answer already running: the generation moves on, calls in flight are
+   * aborted and the session is closed.
+   */
+  async revoke(id: string, reason: McpRevocation): Promise<void> {
+    const current = this.authorization(id);
+    this.authorizations.set(id, { generation: current.generation + 1, controller: new AbortController(), revoked: reason });
+    current.controller.abort();
+    await this.disconnect(id);
+  }
+
+  /**
+   * Calls a tool. With `generation`, the call is refused before anything
+   * is sent when the server was turned off or uninstalled since then, and
+   * the installed and enabled state is read again right before dispatch,
+   * also before a closed session is reopened.
+   */
   async callTool(
     endpoint: McpEndpoint,
     name: string,
     args: Record<string, unknown>,
     signal?: AbortSignal,
+    generation?: number,
   ): Promise<McpCallResult> {
+    await this.authorize(endpoint, generation);
     const session = await this.session(endpoint);
     if (!session.tools.some((tool) => tool.name === name && !tool.unavailable)) {
       throw new McpHostError("unknown-tool", `${endpoint.name} does not list a tool named ${name}.`);
     }
+    await this.authorize(endpoint, generation);
+    // Nothing awaits between this check and the dispatch below.
+    const authorization = this.checkGeneration(endpoint, generation);
+    const signals = [authorization.controller.signal, ...(signal ? [signal] : [])];
     let result: Awaited<ReturnType<Client["callTool"]>>;
     try {
       result = await session.client.callTool({ name, arguments: args }, undefined, {
         timeout: this.callTimeoutMs,
-        ...(signal ? { signal } : {}),
+        signal: signals.length === 1 ? signals[0]! : AbortSignal.any(signals),
       });
     } catch (error) {
       signal?.throwIfAborted();
+      if (authorization.controller.signal.aborted) {
+        throw new McpHostError("revoked", `${endpoint.name} was ${this.authorization(endpoint.id).revoked === "uninstalled" ? "uninstalled" : "turned off"} while it answered. Its answer was not used.`);
+      }
       // A broken session must not stick: the next call opens a new one.
       if (!isTimeout(error)) await this.disconnect(endpoint.id);
       throw describeError(error, endpoint, this.callTimeoutMs);
@@ -172,6 +229,30 @@ export class McpHost {
     const data = structured !== null && typeof structured === "object" ? { structured } : {};
     if (text.length <= this.maxOutputChars) return { text, truncated: false, ...data };
     return { text: text.slice(0, this.maxOutputChars), truncated: true, ...data };
+  }
+
+  private authorization(id: string): Authorization {
+    let authorization = this.authorizations.get(id);
+    if (!authorization) this.authorizations.set(id, (authorization = { generation: 0, controller: new AbortController() }));
+    return authorization;
+  }
+
+  private revokedError(endpoint: McpEndpoint, reason: McpRevocation | undefined): McpHostError {
+    const what = reason === "uninstalled" ? "uninstalled" : "turned off";
+    return new McpHostError("revoked", `${endpoint.name} was ${what} during this answer. Nothing was sent.`, false);
+  }
+
+  private checkGeneration(endpoint: McpEndpoint, generation: number | undefined): Authorization {
+    const authorization = this.authorization(endpoint.id);
+    if (generation !== undefined && authorization.generation !== generation) throw this.revokedError(endpoint, authorization.revoked);
+    return authorization;
+  }
+
+  private async authorize(endpoint: McpEndpoint, generation: number | undefined): Promise<void> {
+    this.checkGeneration(endpoint, generation);
+    const reason = await this.options.revocation?.(endpoint.id);
+    if (reason) throw this.revokedError(endpoint, reason);
+    this.checkGeneration(endpoint, generation);
   }
 
   async disconnect(id: string): Promise<void> {

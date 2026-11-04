@@ -36,11 +36,14 @@ function writerDouble() {
   };
 }
 
+/** search_docs calls the in-process server received, to prove a refused call sent nothing. */
+const searchCalls: string[] = [];
+
 /** A stateless in-process MCP server with tools that exercise each host path. */
 function buildServer(): McpServer {
   const server = new McpServer({ name: "test-docs", version: "1.2.3" });
   server.registerTool("search_docs", { description: "Search   test\ndocs.", inputSchema: { query: z.string() } },
-    async ({ query }) => ({ content: [{ type: "text", text: `Result for ${query}` }] }));
+    async ({ query }) => { searchCalls.push(query); return { content: [{ type: "text", text: `Result for ${query}` }] }; });
   server.registerTool("slow", { description: "Sleeps.", inputSchema: {} },
     async () => { await new Promise((resolve) => setTimeout(resolve, 400)); return { content: [{ type: "text", text: "late" }] }; });
   server.registerTool("fails", { description: "Fails.", inputSchema: {} },
@@ -257,6 +260,26 @@ describe("MCP host connection paths", () => {
     } finally { await host.closeAll(); }
   });
 
+  it("refuses a call from a revoked generation, and a call the revocation check refuses, before anything is sent", async () => {
+    let revoked: "disabled" | "uninstalled" | undefined;
+    const host = new McpHost({ clientVersion: "test", revocation: () => revoked });
+    try {
+      await host.connect(endpoint);
+      const generation = host.generation(endpoint.id);
+      const result = await host.callTool(endpoint, "search_docs", { query: "allowed" }, undefined, generation);
+      assert.equal(result.text, "Result for allowed");
+      searchCalls.length = 0;
+      await host.revoke(endpoint.id, "disabled");
+      await assert.rejects(host.callTool(endpoint, "search_docs", { query: "after revoke" }, undefined, generation), (error: unknown) =>
+        error instanceof McpHostError && error.code === "revoked" && error.sent === false && error.message === "Test Docs was turned off during this answer. Nothing was sent.");
+      // A newer generation is not refused by the old revocation, but the state check still runs.
+      revoked = "uninstalled";
+      await assert.rejects(host.callTool(endpoint, "search_docs", { query: "uninstalled" }, undefined, host.generation(endpoint.id)), (error: unknown) =>
+        error instanceof McpHostError && error.sent === false && error.message === "Test Docs was uninstalled during this answer. Nothing was sent.");
+      assert.deepEqual(searchCalls, []);
+    } finally { await host.closeAll(); }
+  });
+
   it("opens a new session after a failed call", async () => {
     let failNext = false;
     let initializations = 0;
@@ -464,6 +487,54 @@ describe("MCP installs in app state", () => {
       assert.equal(mcpCalls[1]?.error, undefined);
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
+
+  for (const revoke of ["disable", "uninstall"] as const) {
+    it(`refuses a running answer's call when the server is ${revoke === "disable" ? "turned off" : "uninstalled"} while the model responds`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-revoke-"));
+      const statePath = join(dir, "state.json");
+      const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
+      await writeFile(statePath, JSON.stringify({
+        activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
+        installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
+      }));
+      const replies = [
+        JSON.stringify({ kind: "docs", sources: ["test-docs"], tool: "mcp__test-docs__search_docs", params: { query: "Windows Autopatch" } }),
+        JSON.stringify({ final: true, answer: "Windows Autopatch automates Windows updates." }),
+      ];
+      let reply = 0;
+      const writer = writerDouble();
+      let store: AppStateStore;
+      store = new AppStateStore({
+        filePath: statePath, userDataPath: dir, statsApiUrl: "",
+        tokenStore: { read: async () => "", write: async () => undefined },
+        mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url }],
+        graphFactory: () => ({ listManagedDevices: async () => [], retireManagedDevice: async () => { throw new Error("no writes"); }, request: async () => ({ value: [] }) }),
+        llmFactory: () => ({
+          available: true, defaultModel: "llama3.1:8b",
+          async complete(options) {
+            if (writer.answers(options.system)) return { text: writer.reply(), model: "llama3.1:8b" };
+            // The admin changes the server while the model writes the reply that picks its tool.
+            if (reply === 0) await (revoke === "disable" ? store.setMcpServerEnabled("test-docs", false) : store.uninstallMcpServer("test-docs"));
+            return { text: writer.saw(replies[Math.min(reply++, replies.length - 1)]!), model: "llama3.1:8b" };
+          },
+          async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
+        }),
+      });
+      try {
+        await store.installMcpServer("test-docs");
+        searchCalls.length = 0;
+        const result = await store.sendIntuneChatMessage({ content: "What do the docs say about Autopatch?" });
+        const trace = result.assistantMessage.toolTrace?.find((entry) => entry.mcpSource);
+        const message = revoke === "disable" ? "Test Docs was turned off during this answer. Nothing was sent." : "Test Docs was uninstalled during this answer. Nothing was sent.";
+        assert.equal(trace?.error, message);
+        assert.equal(trace?.mcpSource?.sentToHost, false);
+        const step = result.assistantMessage.steps?.find((entry) => entry.kind === "mcp");
+        assert.deepEqual([step?.status, step?.title, step?.sent], ["failed", "Did not send a Test Docs query", undefined]);
+        assert.match(step!.detail!, new RegExp(message.replace(/[.]/g, "\\.")));
+        assert.deepEqual(searchCalls, [], "the server received no call");
+      } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+    });
+  }
 
   it("rejects servers outside the catalog and toggles on servers that are not installed", async () => {
     await withStore(async (store) => {
