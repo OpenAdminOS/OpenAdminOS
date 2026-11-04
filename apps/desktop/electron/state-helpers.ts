@@ -1029,6 +1029,13 @@ export function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProv
 
 
 
+/**
+ * The answer is about the question. Which sources ran, the provider and
+ * whether the tenant was checked are shown by the interface; limits of
+ * the content itself still belong in the answer.
+ */
+export const ANSWER_META_RULE = "Do not describe your sources, the model provider or whether the tenant was checked: the interface shows them. Do state limits of the content itself, for example that the device records do not show Defender status.";
+
 export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicResearch = false): string {
   return [
     "You are OpenAdminOS Chat.",
@@ -1042,13 +1049,13 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicRese
     "For any question about how many, use tenantTotal for unfiltered totals when present, otherwise the breakdown that matches the asked dimension: operatingSystem, complianceState, state, severity, securityEnabled, signInAudience, @odata.type, policyPlatform, appPlatform, platforms, or another named breakdown. Breakdowns are counted over every cached row only when breakdownsCoverAllCachedRows is true; when it is false, they describe selectedRows only, so do not quote them as tenant-wide counts. Boolean buckets may be labelled true/false or 1/0. Never count the sampleRows: they are a small illustrative subset, and counting them undercounts. Array breakdowns such as platforms and groupTypes can count one row in more than one bucket.",
     "When cachedRows is below tenantTotal, or pageLimitReached is true, say that the detail rows cover only part of the tenant.",
     "Do not perform or imply Graph writes from chat. For changes, tell the admin to run an installed write agent so confirmation remains enforced.",
-    isLocalProvider
-      ? publicResearch
-        ? "Reasoning is local, but this hosted Nova session shares audio, answers and public research queries with OpenAI under explicit session consent."
-        : "The selected provider is local; keep wording consistent with local-only trust."
-      : "The selected provider is hosted; be explicit when tenant context is being used to produce the answer.",
+    isLocalProvider && publicResearch
+      ? "Reasoning is local, but this hosted Nova session shares audio, answers and public research queries with OpenAI under explicit session consent."
+      : "",
+    // The interface shows the sources, the provider and the tenant checks; answers that repeated them read as filler.
+    ANSWER_META_RULE,
     "Use concise admin-facing prose. No hype, no exclamation marks.",
-  ].join("\n");
+  ].filter(Boolean).join("\n");
 }
 
 

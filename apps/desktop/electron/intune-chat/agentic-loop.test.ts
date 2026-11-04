@@ -836,3 +836,28 @@ describe("model steps", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });
+
+describe("answer prompt", () => {
+  it("tells a hosted model not to describe its sources, provider or tenant checks, and keeps content limits", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-meta-"));
+    const store = seededStore(dir);
+    try {
+      const systems: string[] = [];
+      const llm: RunLlmApi = {
+        available: true,
+        async complete(options) {
+          systems.push(options.system ?? "");
+          return { text: '{"final":true,"answer":"Deploy the onboarding package."}', model: "m" };
+        },
+        async *stream() {},
+      };
+      const result = await runAgenticChat({ ...baseInput(store, llm), providerId: "openai", providerIsLocal: false, questionKind: "docs" });
+      assert.equal(result.ok, true);
+      const system = systems[0]!;
+      assert.match(system, /Do not describe your sources, the model provider or whether the tenant was checked: the interface shows them\./);
+      assert.match(system, /Do state limits of the content itself/);
+      // The lines that made answers say "The selected provider is hosted" or "I have not checked the tenant".
+      assert.doesNotMatch(system, /be explicit when tenant context|selected provider is (?:hosted|local)|say what the documentation does not cover|tenant is not checked/);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});

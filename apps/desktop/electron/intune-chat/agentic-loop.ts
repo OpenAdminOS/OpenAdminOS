@@ -116,7 +116,7 @@ const DOCS_TOOL_PROTOCOL = [
   "To call a tool, respond with only a fenced JSON block, for example:",
   '```json\n{"tool":"find_graph_endpoint","params":{"query":"conditional access named locations"}}\n```',
   "Every brace and bracket you open must be closed.",
-  "This is a documentation question, so the tenant is not checked. Answer from documentation sources.",
+  "This is a documentation question. Answer from documentation sources.",
   "When you are done, return:",
   '```json\n{"final":true,"answer":"...","next":["..."]}\n```',
   "next is optional: up to two short read-only questions the admin could ask next, each under 120 characters. One may offer to check the tenant.",
@@ -679,7 +679,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
     docsOnly
-      ? "This is a documentation question. Do not check the tenant. Answer from documentation sources and say what the documentation does not cover."
+      ? "This is a documentation question. Do not check the tenant. Answer from documentation sources."
       : "You can investigate read-only tenant data by asking the host to run tools.",
     ...(docsOnly ? [] : input.plannedResources).slice(0, 6).map(resource => {
       const fields = [...new Set([...(pathForResource(resource).select ?? []), ...input.tools.store.graphCacheFields(input.tenant.id, resource)])];
