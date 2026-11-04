@@ -414,10 +414,12 @@ export async function findTenantAccount(input: {
   client: PublicClientApplication;
   homeAccountId: string;
   tenantId: string;
+  /** Stops waiting for the token cache; the call rejects with the signal's reason. */
+  signal?: AbortSignal;
 }): Promise<AccountInfo | null> {
   const homeAccountId = input.homeAccountId.toLowerCase();
   const tenantId = input.tenantId.toLowerCase();
-  const accounts = await input.client.getTokenCache().getAllAccounts();
+  const accounts = await awaitWithSignal(input.client.getTokenCache().getAllAccounts(), input.signal);
   return (
     accounts.find(
       (account) =>
@@ -441,7 +443,12 @@ export async function acquireTokenSilent(input: {
 }): Promise<AuthenticationResult> {
   input.signal?.throwIfAborted();
   const { homeAccountId, tenantId } = input.account;
-  const account = await findTenantAccount({ client: input.client, homeAccountId, tenantId });
+  const account = await findTenantAccount({
+    client: input.client,
+    homeAccountId,
+    tenantId,
+    ...(input.signal ? { signal: input.signal } : {}),
+  });
   if (!account) {
     throw new Error(
       `No cached account for homeAccountId ${homeAccountId} in directory ${tenantId}. Reconnect the tenant.`,

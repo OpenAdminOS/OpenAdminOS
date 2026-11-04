@@ -178,6 +178,7 @@ export {
   type SandboxBrokerInput,
 } from "./sandbox-broker.js";
 export { createTenantSession } from "./msal.js";
+export { awaitWithSignal } from "./cancellation.js";
 export {
   disposeBuiltConnectors,
   findConnectorFactory,

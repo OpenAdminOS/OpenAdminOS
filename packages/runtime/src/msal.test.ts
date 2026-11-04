@@ -275,6 +275,19 @@ describe("silent sign-in bound to the stored directory", () => {
     );
   });
 
+  it("stops waiting for a stalled account cache read when the signal aborts", async () => {
+    const client = {
+      getTokenCache: () => ({ getAllAccounts: () => new Promise(() => undefined) }),
+      acquireTokenSilent: async () => {
+        throw new Error("not expected");
+      },
+    } as unknown as PublicClientApplication;
+    const controller = new AbortController();
+    const pending = acquireTokenSilent({ client, account: guestTenant, signal: controller.signal });
+    controller.abort("timeout");
+    await assert.rejects(pending, (reason: unknown) => reason === "timeout");
+  });
+
   it("keeps the host of the configured authority", () => {
     assert.equal(
       tenantAuthority("guest-tid", "https://login.microsoftonline.us/organizations"),
