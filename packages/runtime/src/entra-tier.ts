@@ -157,7 +157,11 @@ export async function probeSubscribedSkus(
   const token = await tokenProvider(["Organization.Read.All"]);
   signal?.throwIfAborted();
   const timeoutMs = options.timeoutMs ?? SUBSCRIBED_SKUS_TIMEOUT_MS;
-  const timeout = AbortSignal.timeout(timeoutMs);
+  // A plain timer, unlike AbortSignal.timeout, keeps the event loop alive, so the
+  // deadline holds in processes that have nothing else pending. Cleared below.
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(new Error("Deadline reached.")), timeoutMs);
+  const timeout = deadline.signal;
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const failed = (error: unknown): never => {
     if (signal?.aborted) throw signal.reason;
@@ -175,31 +179,35 @@ export async function probeSubscribedSkus(
     );
   };
   let response: Response;
-  try {
-    response = await fetchImpl(`${baseUrl}/subscribedSkus`, {
-      headers: { Authorization: `Bearer ${token}` },
-      signal: requestSignal,
-    });
-  } catch (error) {
-    return failed(error);
-  }
-  if (!response.ok) {
-    throw new SubscribedSkusProbeError(
-      "http",
-      `Microsoft Graph answered /subscribedSkus with HTTP ${response.status}.`,
-      { status: response.status },
-    );
-  }
   let body: SubscribedSkusResponse;
   try {
-    body = (await response.json()) as SubscribedSkusResponse;
-  } catch (error) {
-    if (signal?.aborted || timeout.aborted) return failed(error);
-    throw new SubscribedSkusProbeError(
-      "malformed",
-      "Microsoft Graph answered /subscribedSkus with a body that is not JSON.",
-      { cause: error },
-    );
+    try {
+      response = await fetchImpl(`${baseUrl}/subscribedSkus`, {
+        headers: { Authorization: `Bearer ${token}` },
+        signal: requestSignal,
+      });
+    } catch (error) {
+      return failed(error);
+    }
+    if (!response.ok) {
+      throw new SubscribedSkusProbeError(
+        "http",
+        `Microsoft Graph answered /subscribedSkus with HTTP ${response.status}.`,
+        { status: response.status },
+      );
+    }
+    try {
+      body = (await response.json()) as SubscribedSkusResponse;
+    } catch (error) {
+      if (signal?.aborted || timeout.aborted) return failed(error);
+      throw new SubscribedSkusProbeError(
+        "malformed",
+        "Microsoft Graph answered /subscribedSkus with a body that is not JSON.",
+        { cause: error },
+      );
+    }
+  } finally {
+    clearTimeout(timer);
   }
   if (!body || !Array.isArray(body.value)) {
     throw new SubscribedSkusProbeError(
