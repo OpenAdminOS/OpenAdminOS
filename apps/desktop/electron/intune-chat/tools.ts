@@ -119,7 +119,9 @@ function validateMcpArgs(entry: McpChatTool, params: unknown): Record<string, un
     : undefined;
   const scalarType = (value: unknown) => typeof value === "string" || typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value));
   for (const [key, value] of Object.entries(args)) {
-    if (properties && !Object.hasOwn(properties, key) && entry.inputSchema.additionalProperties !== true) {
+    // Param names travel to the host too, so only names the schema declares
+    // are accepted, even when the schema allows additional properties.
+    if (!properties || !Object.hasOwn(properties, key)) {
       reject(`${entry.tool} has no parameter named ${key}. Use only the params in its schema.`);
     }
     const values = Array.isArray(value) ? value : [value];
@@ -536,10 +538,13 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
   const args = validateMcpArgs(entry, params);
   // Each arg value is checked as plain lowercased text. Checking serialized
   // JSON would compare tenant values against escaped quotes and backslashes.
-  const leaves = Object.values(args)
-    .flatMap((value) => (Array.isArray(value) ? value : [value]))
-    .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
-    .map((value) => String(value).toLowerCase());
+  const leaves = [
+    ...Object.keys(args),
+    ...Object.values(args)
+      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+      .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
+      .map(String),
+  ].map((value) => value.toLowerCase());
   // Defence in depth for the prompt rule. Injected text in tenant data or
   // in third-party results can steer the model, so identifiers that are
   // certainly private never leave the device, whatever the model wrote.

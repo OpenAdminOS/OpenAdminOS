@@ -330,6 +330,11 @@ describe("MCP tools in the Chat loop", () => {
       const open: McpChatContext = { ...mcpContext(calls), tools: [{ ...docsTool, inputSchema: { type: "object", additionalProperties: true } }] };
       const total = await runAgenticChat(input(store, scriptedLlm([JSON.stringify({ tool: docsTool.name, params: { a: "y".repeat(450), b: "y".repeat(450), c: "y".repeat(450), d: "y".repeat(450), e: "y".repeat(450) } }), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), open));
       assert.match(total.toolTrace[0]!.error!, /params exceed 2,000 characters/);
+      // Param names travel to the host too, so a schema that allows extra
+      // properties still cannot carry undeclared names such as a device name.
+      const openWithQuery: McpChatContext = { ...mcpContext(calls), tools: [{ ...docsTool, inputSchema: { ...docsTool.inputSchema, additionalProperties: true } }] };
+      const named = await runAgenticChat(input(store, scriptedLlm([JSON.stringify({ tool: docsTool.name, params: { query: "grace period", "HR-LAPTOP-07": "noncompliant" } }), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), openWithQuery));
+      assert.match(named.toolTrace[0]!.error!, /has no parameter named HR-LAPTOP-07.*Nothing was sent to learn\.microsoft\.com/);
       assert.equal(calls.length, 0);
     });
   });
