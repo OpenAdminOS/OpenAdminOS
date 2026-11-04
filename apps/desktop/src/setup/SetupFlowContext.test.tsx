@@ -272,7 +272,7 @@ describe("contextual tenant setup", () => {
       "contoso.onmicrosoft.com",
     );
     await user.click(
-      screen.getByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
+      screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }),
     );
 
     expect(connectTenant).toHaveBeenCalledWith({
@@ -310,6 +310,45 @@ describe("contextual tenant setup", () => {
     expect(
       screen.getByRole("button", { name: "Approve 20 read scopes and continue to Microsoft" }),
     ).toBeInTheDocument();
+  });
+
+  it("expands a service to its parts and sends only the chosen parts", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectTenant = vi.fn(async () => createMockAppState());
+    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("button", { name: "Review Entra parts and scopes" }));
+    // Parts start unselected like their service.
+    const signIns = screen.getByRole("checkbox", { name: "Entra sign-in logs" });
+    expect(signIns).not.toBeChecked();
+    expect(screen.getByText("AuditLog.Read.All")).toBeVisible();
+    await user.click(signIns);
+    expect(screen.getByRole("checkbox", { name: "Entra" })).toHaveAttribute("aria-checked", "mixed");
+    await user.click(screen.getByRole("checkbox", { name: "Entra Conditional Access and policies" }));
+    await user.click(
+      screen.getByRole("button", { name: "Approve 3 read scopes and continue to Microsoft" }),
+    );
+    expect(connectTenant).toHaveBeenCalledWith({
+      partIds: ["entra.policies", "entra.signins"],
+    });
+  });
+
+  it("hides the service picker for an own app registration", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({}, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    expect(await screen.findByRole("button", { name: "Review Intune parts and scopes" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "Your own app registration" }));
+    expect(screen.getByText(SETUP_COPY.ownRegistrationServicesNote)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review Intune parts and scopes" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/scopes selected/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn })).toBeInTheDocument();
   });
 
   it("generates, copies, and saves an admin registration script", async () => {
@@ -638,7 +677,7 @@ describe("contextual tenant setup", () => {
     await user.click(await screen.findByRole("radio", { name: "Your own app registration" }));
     expect(screen.getByRole("radio", { name: /Contoso admin app/ })).toBeChecked();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    await user.click(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }));
     expect(connectTenant).toHaveBeenLastCalledWith({
       appRegistration: {
         clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
@@ -670,7 +709,7 @@ describe("contextual tenant setup", () => {
       "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     );
     await user.type(screen.getByLabelText(/Label \(optional\)/), "Fabrikam app");
-    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    await user.click(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }));
     expect(connectTenant).toHaveBeenLastCalledWith({
       appRegistration: { clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", label: "Fabrikam app" },
     });
@@ -690,7 +729,7 @@ describe("contextual tenant setup", () => {
       screen.getByLabelText(/Application \(client\) ID/i),
       "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     );
-    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    await user.click(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Microsoft could not find your app registration.",
     );

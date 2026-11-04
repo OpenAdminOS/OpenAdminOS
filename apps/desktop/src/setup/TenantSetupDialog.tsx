@@ -29,14 +29,17 @@ import type {
 import {
   AVAILABLE_SERVICES,
   OPENADMINOS_APP_CLIENT_ID,
+  SERVICE_PARTS,
   partIdsFor,
+  partLabel,
   servicePartById,
+  serviceStatus,
 } from "../shared/openAdminOS";
 import { tenantRegistrationSummary } from "../shared/app-registration";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import type { PendingIntent } from "./pending-intent";
-import { groupRequestedScopes } from "./scope-groups";
+import { groupRequestedScopes, type ScopeGroup } from "./scope-groups";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   DEFAULT_REGISTRATION_DISPLAY_NAME,
@@ -236,14 +239,12 @@ function PermissionsStep({
   const [registrationLabel, setRegistrationLabel] = useState(initialRegistration?.label ?? "");
   // TODO(ugur): no service is preselected and at least one is required.
   // Confirm whether a first connect should preselect a service.
-  // TODO(services-ui): the service picker step replaces these grouped
-  // checkboxes with services that expand to their parts.
-  const [selectedServiceIds, setSelectedServiceIds] = useState<Set<ServiceId>>(
+  const [selectedPartIds, setSelectedPartIds] = useState<Set<string>>(
     () =>
       new Set(
-        (initialOptions?.partIds ?? []).flatMap((partId) => {
+        (initialOptions?.partIds ?? []).filter((partId) => {
           const part = servicePartById(partId);
-          return part ? [part.service] : [];
+          return Boolean(part && !part.planned);
         }),
       ),
   );
@@ -255,17 +256,17 @@ function PermissionsStep({
   const [registrationSetupError, setRegistrationSetupError] = useState<string | null>(null);
   const [registrationSetupStatus, setRegistrationSetupStatus] = useState<string | null>(null);
   const [registrationActionError, setRegistrationActionError] = useState<string | null>(null);
-  const selectedGroups = groups.filter(
-    (group) => group.id === "other" || selectedServiceIds.has(group.id),
-  );
   // Services share scopes such as User.Read.All, so count unique names.
   const selectedScopeCount = new Set(
-    selectedGroups.flatMap((group) => group.scopes.map((scope) => scope.name)),
-  ).size;
-  const selectedPartIds = partIdsFor(
-    AVAILABLE_SERVICES.filter((service) => selectedServiceIds.has(service.id)).map(
-      (service) => service.id,
+    groups.flatMap((group) =>
+      group.parts
+        .filter((part) => group.id === "other" || selectedPartIds.has(part.id))
+        .flatMap((part) => part.scopes.map((scope) => scope.name)),
     ),
+  ).size;
+  // Registry order, so the request and the script list parts the same way.
+  const selectedPartList = SERVICE_PARTS.filter((part) => selectedPartIds.has(part.id)).map(
+    (part) => part.id,
   );
   const savedChoice =
     choice === "own" && savedSelection !== NEW_REGISTRATION
@@ -291,7 +292,7 @@ function PermissionsStep({
   const blockedReason =
     choice === null
       ? SETUP_COPY.chooseSignInReason
-      : choice === "openadminos" && selectedPartIds.length === 0
+      : choice === "openadminos" && selectedPartList.length === 0
         ? SETUP_COPY.selectServiceReason
       : ownRegistration && ownRegistration.clientId.length === 0
         ? SETUP_COPY.clientIdRequiredReason
@@ -301,20 +302,37 @@ function PermissionsStep({
               !DIRECTORY_ID_PATTERN.test(ownRegistration.directoryTenantId)
             ? SETUP_COPY.directoryIdInvalidReason
             : null;
-  const toggleService = (serviceId: ServiceId) => {
-    setSelectedServiceIds((current) => {
-      const next = new Set(current);
-      if (next.has(serviceId)) next.delete(serviceId);
-      else next.add(serviceId);
-      return next;
-    });
+  const resetScript = () => {
     setRegistrationSetup(null);
     setRegistrationSetupStatus(null);
     setRegistrationActionError(null);
   };
+  // A service checkbox selects or clears all of its parts.
+  const toggleService = (serviceId: ServiceId) => {
+    const partIds = partIdsFor([serviceId]);
+    setSelectedPartIds((current) => {
+      const next = new Set(current);
+      const allSelected = partIds.every((partId) => next.has(partId));
+      for (const partId of partIds) {
+        if (allSelected) next.delete(partId);
+        else next.add(partId);
+      }
+      return next;
+    });
+    resetScript();
+  };
+  const togglePart = (partId: string) => {
+    setSelectedPartIds((current) => {
+      const next = new Set(current);
+      if (next.has(partId)) next.delete(partId);
+      else next.add(partId);
+      return next;
+    });
+    resetScript();
+  };
   const generateSetup = () => {
     const validationError =
-      selectedPartIds.length === 0
+      selectedPartList.length === 0
         ? SETUP_COPY.selectServiceReason
         : validateRegistrationDisplayName(registrationDisplayName);
     if (validationError) {
@@ -329,7 +347,7 @@ function PermissionsStep({
       generateRegistrationSetup({
         mode: "create",
         displayName: registrationDisplayName,
-        partIds: selectedPartIds,
+        partIds: selectedPartList,
       }),
     );
   };
@@ -511,6 +529,28 @@ function PermissionsStep({
                   <p className="mt-1 text-xs leading-5 text-[var(--color-text-muted)]">
                     The script creates a tenant-owned public client registration for the selected services. Review it before sending it to your Entra administrator.
                   </p>
+                  <fieldset className="mt-3">
+                    <legend className="text-xs font-medium text-[var(--color-text-muted)]">
+                      {SETUP_COPY.scriptServicesLegend}
+                    </legend>
+                    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1.5">
+                      {AVAILABLE_SERVICES.map((service) => {
+                        const partIds = partIdsFor([service.id]);
+                        const selected = partIds.filter((partId) => selectedPartIds.has(partId)).length;
+                        return (
+                          <label key={service.id} className="flex cursor-pointer items-center gap-2 text-sm text-[var(--color-text-soft)]">
+                            <TriStateCheckbox
+                              ariaLabel={service.title}
+                              checked={selected === partIds.length}
+                              indeterminate={selected > 0 && selected < partIds.length}
+                              onChange={() => toggleService(service.id)}
+                            />
+                            {service.title}
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </fieldset>
                   <label className="mt-3 block text-sm text-[var(--color-text-soft)]">
                     Application display name
                     <input
@@ -605,48 +645,53 @@ function PermissionsStep({
           </div>
         </div>
 
-        <div className="mt-6">
-          <div className="flex items-end justify-between gap-4">
-            <div>
-              <div className="text-xs font-medium text-[var(--color-text-muted)]">
-                Read permissions
+        {choice === "own" ? (
+          <p className="mt-6 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            {SETUP_COPY.ownRegistrationServicesNote}
+          </p>
+        ) : (
+          <div className="mt-6">
+            <div className="flex items-end justify-between gap-4">
+              <div>
+                <div className="text-xs font-medium text-[var(--color-text-muted)]">
+                  {SETUP_COPY.servicePickerLegend}
+                </div>
+                <p className="mt-1 text-sm text-[var(--color-text-soft)]">
+                  {SETUP_COPY.servicePickerHint}
+                </p>
               </div>
-              <p className="mt-1 text-sm text-[var(--color-text-soft)]">
-                Expand a group to review each exact Microsoft Graph scope and why it is needed.
-              </p>
+              {scopes && (
+                <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
+                  {selectedScopeCount} scopes selected
+                </span>
+              )}
             </div>
-            {scopes && (
-              <span className="shrink-0 text-xs tabular-nums text-[var(--color-text-muted)]">
-                {selectedScopeCount} scopes selected
-              </span>
-            )}
-          </div>
 
-          <div className="mt-3 space-y-2">
-            {scopes === null && !scopesError && (
-              <div role="status" className="rounded-xl bg-[var(--color-bg-raised)] px-4 py-5 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
-                Loading requested permissions…
-              </div>
-            )}
-            {scopesError && (
-              <div role="alert" className="rounded-xl bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-                {scopesError}
-              </div>
-            )}
-            {groups.map((group) => {
-              const serviceId = group.id === "other" ? undefined : group.id;
-              return (
-                <ScopeDisclosure
+            <div className="mt-3 space-y-2">
+              {scopes === null && !scopesError && (
+                <div role="status" className="rounded-xl bg-[var(--color-bg-raised)] px-4 py-5 text-sm text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
+                  Loading requested permissions…
+                </div>
+              )}
+              {scopesError && (
+                <div role="alert" className="rounded-xl bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-5 text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+                  {scopesError}
+                </div>
+              )}
+              {groups.map((group) => (
+                <ServiceDisclosure
                   key={group.id}
                   group={group}
-                  defaultOpen={false}
-                  checked={!serviceId || selectedServiceIds.has(serviceId)}
-                  onCheckedChange={serviceId ? () => toggleService(serviceId) : undefined}
+                  selectedPartIds={selectedPartIds}
+                  onToggleService={
+                    group.id === "other" ? undefined : () => toggleService(group.id as ServiceId)
+                  }
+                  onTogglePart={togglePart}
                 />
-              );
-            })}
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         <div className="mt-5 space-y-2 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-xs leading-5 text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)]">
           <p>{SETUP_COPY.readOnlyNote}</p>
@@ -675,16 +720,17 @@ function PermissionsStep({
             onClick={() =>
               onConnect(
                 // An own registration signs in with what the app was granted,
-                // so the services only shape the setup script for it.
-                // TODO(services-ui): hide the picker for own registration
-                // sign-in and show the granted services after connect.
+                // so the services only shape the setup script for it. The
+                // ready step lists the services its permissions switched on.
                 ownRegistration
                   ? { appRegistration: ownRegistration }
-                  : { partIds: selectedPartIds },
+                  : { partIds: selectedPartList },
               )
             }
           >
-            Approve {selectedScopeCount} read scopes and continue to Microsoft
+            {choice === "own"
+              ? SETUP_COPY.ownRegistrationSignIn
+              : `Approve ${selectedScopeCount} read scopes and continue to Microsoft`}
           </Button>
         </div>
       </DialogFooter>
@@ -739,46 +785,75 @@ function SignInChoiceCard({
   );
 }
 
-function ScopeDisclosure({
-  group,
-  defaultOpen,
+function TriStateCheckbox({
+  ariaLabel,
   checked,
-  onCheckedChange,
+  indeterminate,
+  disabled,
+  onChange,
 }: {
-  group: ReturnType<typeof groupRequestedScopes>[number];
-  defaultOpen: boolean;
+  ariaLabel: string;
   checked: boolean;
-  onCheckedChange?: () => void;
+  indeterminate: boolean;
+  disabled?: boolean;
+  onChange?: () => void;
 }) {
-  const [expanded, setExpanded] = useState(defaultOpen);
-  const panelId = `setup-scope-group-${group.id}`;
-  const checkboxId = `setup-scope-checkbox-${group.id}`;
+  return (
+    <input
+      type="checkbox"
+      aria-label={ariaLabel}
+      checked={checked}
+      aria-checked={indeterminate ? "mixed" : checked}
+      ref={(element) => {
+        if (element) element.indeterminate = indeterminate;
+      }}
+      disabled={disabled}
+      onChange={onChange}
+      className="h-4 w-4 shrink-0 accent-[var(--color-accent)] disabled:opacity-60"
+    />
+  );
+}
+
+function ServiceDisclosure({
+  group,
+  selectedPartIds,
+  onToggleService,
+  onTogglePart,
+}: {
+  group: ScopeGroup;
+  selectedPartIds: ReadonlySet<string>;
+  /** Absent for the Other group, whose rows are always requested. */
+  onToggleService?: () => void;
+  onTogglePart: (partId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const panelId = `setup-service-${group.id}`;
+  const selectable = Boolean(onToggleService);
+  const selectedParts = group.parts.filter((part) => selectedPartIds.has(part.id)).length;
+  const allSelected = !selectable || selectedParts === group.parts.length;
   return (
     <div className="overflow-hidden rounded-xl bg-[var(--color-bg-raised)] ring-1 ring-[var(--color-border-soft)]">
       <div className="flex min-h-12 items-center gap-3 px-4 py-3">
-        <input
-          type="checkbox"
-          id={checkboxId}
-          aria-label={group.title}
-          checked={checked}
-          disabled={!onCheckedChange}
-          onChange={onCheckedChange}
-          className="h-4 w-4 shrink-0 accent-[var(--color-accent)] disabled:opacity-60"
-        />
-        <label
-          htmlFor={checkboxId}
-          className={`min-w-0 flex-1 ${onCheckedChange ? "cursor-pointer" : "cursor-not-allowed"}`}
-        >
-          <span className="block text-base font-medium text-[var(--color-text)]">
-            {group.title} · {group.scopes.length} read scope{group.scopes.length === 1 ? "" : "s"}
-          </span>
-          <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">
-            {group.summary}
+        <label className={`flex min-w-0 flex-1 items-center gap-3 ${selectable ? "cursor-pointer" : "cursor-not-allowed"}`}>
+          <TriStateCheckbox
+            ariaLabel={group.title}
+            checked={allSelected}
+            indeterminate={selectable && selectedParts > 0 && !allSelected}
+            disabled={!selectable}
+            {...(onToggleService ? { onChange: onToggleService } : {})}
+          />
+          <span className="min-w-0">
+            <span className="block text-base font-medium text-[var(--color-text)]">
+              {group.title} · {group.scopes.length} read scope{group.scopes.length === 1 ? "" : "s"}
+            </span>
+            <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">
+              {group.summary}
+            </span>
           </span>
         </label>
         <button
           type="button"
-          aria-label={`Review ${group.title} scopes`}
+          aria-label={`Review ${group.title} parts and scopes`}
           aria-expanded={expanded}
           aria-controls={panelId}
           onClick={() => setExpanded((value) => !value)}
@@ -791,24 +866,45 @@ function ScopeDisclosure({
           />
         </button>
       </div>
-      <div
-        id={panelId}
-        hidden={!expanded}
-        className="border-t border-[var(--color-border-soft)]"
-      >
-          {group.scopes.map((scope) => (
-            <div key={scope.name} className="border-b border-[var(--color-border-soft)] px-4 py-3 last:border-b-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="break-all font-mono text-xs text-[var(--color-text)]">
-                  {scope.name}
+      <div id={panelId} hidden={!expanded} className="border-t border-[var(--color-border-soft)]">
+        {group.parts.map((part) => {
+          const registryPart = servicePartById(part.id);
+          return (
+            <div key={part.id} className="border-b border-[var(--color-border-soft)] px-4 py-3 last:border-b-0">
+              <label className={`flex items-start gap-3 ${selectable ? "cursor-pointer" : ""}`}>
+                {selectable ? (
+                  <span className="mt-0.5">
+                    <TriStateCheckbox
+                      ariaLabel={registryPart ? partLabel(registryPart) : part.title}
+                      checked={selectedPartIds.has(part.id)}
+                      indeterminate={false}
+                      onChange={() => onTogglePart(part.id)}
+                    />
+                  </span>
+                ) : null}
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium text-[var(--color-text)]">{part.title}</span>
+                  <span className="mt-0.5 block text-xs leading-5 text-[var(--color-text-muted)]">{part.summary}</span>
                 </span>
-                <Badge tone="info"><StatusDot tone="info" /> Read</Badge>
-              </div>
-              <p className="mt-1.5 text-sm leading-5 text-[var(--color-text-soft)]">
-                {scope.rationale}
-              </p>
+              </label>
+              <ul className={`mt-2 space-y-2 ${selectable ? "pl-7" : ""}`}>
+                {part.scopes.map((scope) => (
+                  <li key={scope.name}>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="break-all font-mono text-xs text-[var(--color-text)]">
+                        {scope.name}
+                      </span>
+                      <Badge tone="info"><StatusDot tone="info" /> Read</Badge>
+                    </div>
+                    <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
+                      {scope.rationale}
+                    </p>
+                  </li>
+                ))}
+              </ul>
             </div>
-          ))}
+          );
+        })}
       </div>
     </div>
   );
@@ -1042,6 +1138,21 @@ function ReadyStep({
         <p className="mt-5 text-base leading-6 text-[var(--color-text-soft)]">
           {registrationSummary}
         </p>
+        {tenant && tenant.kind !== "sample" && tenant.grantedScopes !== undefined ? (
+          <p className="mt-3 text-sm leading-5 text-[var(--color-text-muted)]">
+            {SETUP_COPY.connectedServicesSummary(
+              AVAILABLE_SERVICES.filter((service) => serviceStatus(tenant, service.id) !== "missing").map(
+                (service) =>
+                  serviceStatus(tenant, service.id) === "partial"
+                    ? `${service.title} (partial)`
+                    : service.title,
+              ),
+              AVAILABLE_SERVICES.filter((service) => serviceStatus(tenant, service.id) === "missing").map(
+                (service) => service.title,
+              ),
+            )}
+          </p>
+        ) : null}
         {intent && (
           <p className="mt-3 text-sm leading-5 text-[var(--color-text-muted)]">
             Your original action is ready. Continuing sends it through the normal tenant, provider, and confirmation checks.

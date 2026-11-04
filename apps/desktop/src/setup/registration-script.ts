@@ -373,6 +373,12 @@ Write-Host 'Return to OpenAdminOS and choose Check again.'
   return { script, message };
 }
 
+export const REQUIRED_RESOURCE_ACCESS_NOTES: readonly string[] = [
+  "Merge these entries into the existing requiredResourceAccess array in the app manifest. Do not replace the array: entries it already has must stay.",
+  "If the array already has an entry for this resourceAppId, add the missing resourceAccess items to that entry instead of adding a second one.",
+  "Admin consent is still required after you save the manifest. Grant it under API permissions, then choose Check again in OpenAdminOS.",
+];
+
 export interface RequiredResourceAccessSnippet {
   json: string;
   notes: string[];
@@ -396,12 +402,5 @@ export function generateRequiredResourceAccessSnippet(
     null,
     2,
   );
-  return {
-    json,
-    notes: [
-      "Merge these entries into the existing requiredResourceAccess array in the app manifest. Do not replace the array: entries it already has must stay.",
-      "If the array already has an entry for this resourceAppId, add the missing resourceAccess items to that entry instead of adding a second one.",
-      "Admin consent is still required after you save the manifest. Grant it under API permissions, then choose Check again in OpenAdminOS.",
-    ],
-  };
+  return { json, notes: [...REQUIRED_RESOURCE_ACCESS_NOTES] };
 }

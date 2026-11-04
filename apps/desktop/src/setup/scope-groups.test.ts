@@ -28,6 +28,28 @@ describe("setup scope groups", () => {
     expect(grouped.find((group) => group.id === "intune")?.title).toBe("Intune");
   });
 
+  it("groups each service by part, in registry order, with reasons", () => {
+    const intune = groupRequestedScopes(rows).find((group) => group.id === "intune");
+    expect(intune?.parts.map((part) => part.id)).toEqual([
+      "intune.people",
+      "intune.devices",
+      "intune.apps",
+    ]);
+    const people = intune?.parts[0];
+    expect(people?.title).toBe("Users and groups");
+    expect(people?.scopes.map((scope) => scope.name)).toEqual([
+      "User.Read.All",
+      "GroupMember.Read.All",
+      "Organization.Read.All",
+    ]);
+    expect(people?.scopes.every((scope) => scope.rationale.length > 0)).toBe(true);
+    // Device.Read.All belongs to both Intune devices and Entra devices.
+    const entraDevices = groupRequestedScopes(rows)
+      .find((group) => group.id === "entra")
+      ?.parts.find((part) => part.id === "entra.devices");
+    expect(entraDevices?.scopes.map((scope) => scope.name)).toEqual(["Device.Read.All"]);
+  });
+
   it("keeps rows of an unknown service visible in an Other group", () => {
     const [group] = groupRequestedScopes([
       {
@@ -40,5 +62,6 @@ describe("setup scope groups", () => {
     ]);
     expect(group?.id).toBe("other");
     expect(group?.scopes[0]?.name).toBe("New.Read.All");
+    expect(group?.parts[0]?.scopes[0]?.name).toBe("New.Read.All");
   });
 });

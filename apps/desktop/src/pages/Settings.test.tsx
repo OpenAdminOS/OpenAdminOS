@@ -14,7 +14,7 @@ import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
-import { PROVIDER_DETECTION_COPY, SETUP_COPY } from "../copy";
+import { PROVIDER_DETECTION_COPY, SERVICE_COPY, SETUP_COPY } from "../copy";
 import { setAnswerFont } from "../styles/answer-font";
 import { setDensity } from "../styles/density";
 
@@ -801,8 +801,15 @@ describe("Settings provider section", () => {
       bridge,
     });
 
-    expect(await screen.findByText("Intune (partial)")).toBeInTheDocument();
-    expect(screen.getByText("Entra (partial)")).toBeInTheDocument();
+    const services = await screen.findByRole("region", { name: "Contoso IT services" });
+    const rows = within(services).getAllByRole("listitem");
+    expect(rows.map((row) => row.textContent)).toEqual([
+      expect.stringMatching(/^IntunePartial1 of 3 parts/),
+      expect.stringMatching(/^EntraPartial1 of 6 parts/),
+      expect.stringMatching(/^DefenderNot connected0 of 2 parts/),
+    ]);
+    // The shared app never offers Check again; consent adds access.
+    expect(within(services).queryByRole("button", { name: SERVICE_COPY.checkAgain })).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add Intune access" }));
     expect(screen.getByRole("dialog", { name: "Add Intune access" })).toBeInTheDocument();
     expect(screen.getByText("7 delegated read scopes")).toBeInTheDocument();
@@ -810,6 +817,69 @@ describe("Settings provider section", () => {
     await waitFor(() =>
       expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", ["intune.devices", "intune.apps"]),
     );
+  });
+
+  it("adds a single missing part from its row", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const tenant = {
+      ...base.tenants[0]!,
+      grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"],
+    };
+    const state = createMockAppState({ tenants: [tenant] });
+    const addTenantAccess = vi.fn(async () => state);
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/tenants",
+      bridge: makeMockBridge({ addTenantAccess }, state),
+    });
+
+    await user.click(await screen.findByRole("button", { name: "Add Entra sign-in logs" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Entra access" });
+    expect(within(dialog).getByRole("checkbox", { name: "Sign-in logs" })).toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: "Devices" })).not.toBeChecked();
+    await user.click(within(dialog).getByRole("button", { name: "Continue to Microsoft" }));
+    await waitFor(() => expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", ["entra.signins"]));
+  });
+
+  it("lists missing permissions for an own registration with the extend script, snippet and Check again", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const clientId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    const tenant = {
+      ...base.tenants[0]!,
+      appRegistration: { kind: "custom" as const, clientId },
+      grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"],
+    };
+    const state = createMockAppState({ tenants: [tenant] });
+    const refreshTenantGrants = vi.fn(async () => state);
+    const bridge = makeMockBridge({ refreshTenantGrants }, state);
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/tenants",
+      bridge,
+    });
+
+    const services = await screen.findByRole("region", { name: "Contoso IT services" });
+    expect(within(services).getByText(/Missing: SecurityAlert\.Read\.All, SecurityIncident\.Read\.All, SecurityEvents\.Read\.All/)).toBeInTheDocument();
+    await user.click(within(services).getByRole("button", { name: SERVICE_COPY.checkAgain }));
+    await waitFor(() => expect(refreshTenantGrants).toHaveBeenCalledWith("tenant-1"));
+
+    await user.click(within(services).getByRole("button", { name: "Add Defender permissions" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Defender permissions" });
+    expect(within(dialog).queryByRole("button", { name: "Continue to Microsoft" })).not.toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Copy script" }));
+    const script = vi.mocked(bridge.writeClipboardText).mock.calls.at(-1)?.[0] ?? "";
+    expect(script).toContain(`$clientId = '${clientId}'`);
+    expect(script).toContain("Get-MgApplication");
+    expect(script).toContain("'SecurityAlert.Read.All'");
+    expect(script).not.toContain("'DeviceManagementApps.Read.All'");
+    await user.click(within(dialog).getByRole("button", { name: "Copy JSON snippet" }));
+    const json = JSON.parse(vi.mocked(bridge.writeClipboardText).mock.calls.at(-1)?.[0] ?? "[]");
+    expect(json[0].resourceAppId).toBe("00000003-0000-0000-c000-000000000000");
+    expect(json[0].resourceAccess).toContainEqual({ id: "bc257fb8-46b4-4b15-8713-01e91bfbe4ea", type: "Scope" });
+    await user.click(within(dialog).getByRole("button", { name: SERVICE_COPY.checkAgain }));
+    await waitFor(() => expect(refreshTenantGrants).toHaveBeenCalledTimes(2));
   });
 
   it("shows each tenant's app registration and removes a saved registration", async () => {
