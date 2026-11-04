@@ -1636,7 +1636,40 @@ function liveRunFixture() {
   return { conversation, userMessage, result, events, finalText };
 }
 
+/** The text after the tenant on the pending scope line. */
+const scopeLine = (log: HTMLElement) => log.querySelector(".chat-scope-shimmer")?.textContent;
+
 describe("IntuneChat live run", () => {
+  it("names only the current step on the scope line, never a tool result", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return result;
+      }),
+      getIntuneChatMessages: vi.fn(async () => [userMessage, result.assistantMessage]),
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.type(await screen.findByLabelText(CHAT_COPY.composerLabel), conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    const seen: Array<string | null | undefined> = [scopeLine(log)];
+    for (const event of events.slice(0, -2)) {
+      act(() => emit(event));
+      seen.push(scopeLine(log));
+    }
+    expect(new Set(seen)).toEqual(new Set(["Reading the question", "Working", "Chose to ask Microsoft Learn", "Asking Microsoft Learn", "Asked Microsoft Learn", "Wrote the answer"]));
+    expect(within(log).queryByText(/12,000 characters|answered from learn\.microsoft\.com|Investigative mode started/)).toBeNull();
+    act(() => emit(events.at(-2)!));
+    act(() => emit(events.at(-1)!));
+    finish();
+  });
+
   it("never rearranges visible steps when a tool step arrives while a model step runs", async () => {
     const user = userEvent.setup();
     const { conversation, userMessage, result, events } = liveRunFixture();
@@ -1698,7 +1731,7 @@ describe("IntuneChat live run", () => {
     };
     // Before the host has started the run, and after it started but sent no step yet.
     expect(answerArea()).toEqual([expect.stringContaining("Reading the question")]);
-    expect(within(log).getByText("Checking cached tenant data.")).toBeInTheDocument();
+    expect(scopeLine(log)).toBe("Reading the question");
     act(() => emit(events[0]!));
     expect(answerArea()).toEqual([expect.stringContaining("Reading the question")]);
     for (const event of events.slice(1, -2)) {
@@ -1750,7 +1783,7 @@ describe("IntuneChat live run", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
     act(() => events.slice(0, 5).forEach((event) => emit(event)));
-    expect(await screen.findByText("Investigative mode started.")).toBeInTheDocument();
+    await waitFor(() => expect(scopeLine(screen.getByRole("log", { name: "Conversation" }))).toBe("Working"));
 
     // The admin opens another page and comes back while the answer runs.
     await user.click(screen.getByRole("link", { name: "Marketplace" }));
@@ -1758,7 +1791,7 @@ describe("IntuneChat live run", () => {
     await user.click(await screen.findByTitle(conversation.title));
 
     const log = await screen.findByRole("log", { name: "Conversation" });
-    expect(await within(log).findByText("Investigative mode started.")).toBeInTheDocument();
+    await waitFor(() => expect(scopeLine(log)).toBe("Working"));
     expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
     const timeline = within(log).getByRole("list", { name: "Steps" });
     expect(within(timeline).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
@@ -1769,7 +1802,7 @@ describe("IntuneChat live run", () => {
 
     // Later events reach the page that is showing the conversation now.
     act(() => events.slice(5, 9).forEach((event) => emit(event)));
-    expect(await within(log).findByText("Asked Microsoft Learn")).toBeInTheDocument();
+    expect(await within(within(log).getByRole("list", { name: "Steps" })).findByText("Asked Microsoft Learn")).toBeInTheDocument();
     act(() => events.slice(9).forEach((event) => emit(event)));
     finish();
     expect(await within(log).findByText(/Onboarding has three parts/, {}, { timeout: 4000 })).toBeInTheDocument();

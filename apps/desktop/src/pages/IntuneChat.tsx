@@ -79,7 +79,7 @@ import {
   shouldSubmitComposerKey,
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
-import { appendOnlySteps } from "../shared/chat-steps";
+import { appendOnlySteps, currentStepTitle } from "../shared/chat-steps";
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRun, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
@@ -1937,7 +1937,7 @@ function IntuneChatContent() {
               </div>
             ) : displayedMessages.length === 0 && shownProgress ? (
               <div className="flex flex-1 flex-col justify-center py-16">
-                <PendingAnswer tenant={activeTenant} label={shownProgress.message} />
+                <PendingAnswer tenant={activeTenant} {...(stopping ? { stopping: shownProgress.message } : {})} />
               </div>
             ) : (
               <div className="flex flex-1 flex-col">
@@ -1957,6 +1957,7 @@ function IntuneChatContent() {
                       <ChatMessageBubble
                         message={message}
                         progress={message.id === shownProgressMessageId ? shownProgress : null}
+                        stopping={stopping}
                         copied={message.id === copiedMessageId}
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
@@ -2017,7 +2018,7 @@ function IntuneChatContent() {
                   );
                 })}
                 {runInProgress && shownProgress && !progressMessageVisible ? (
-                  <PendingAnswer tenant={activeTenant} label={shownProgress.message} />
+                  <PendingAnswer tenant={activeTenant} {...(stopping ? { stopping: shownProgress.message } : {})} />
                 ) : null}
               </div>
             )}
@@ -2840,11 +2841,15 @@ function AssistantPendingScopeLine({ tenant, label }: { tenant?: TenantRecord; l
   );
 }
 
-/** The scope line and the live steps, with a first skeleton row until the host sends a step. */
-function PendingAnswer({ tenant, label, steps }: { tenant?: TenantRecord; label: string; steps?: readonly IntuneChatStep[] }) {
+/**
+ * The scope line and the live steps, with a first skeleton row until the
+ * host sends a step. The scope line names the current step only; results
+ * belong in the steps. While stopping it says so instead.
+ */
+function PendingAnswer({ tenant, steps, stopping }: { tenant?: TenantRecord; steps?: readonly IntuneChatStep[]; stopping?: string }) {
   return (
     <>
-      <AssistantPendingScopeLine tenant={tenant} label={label} />
+      <AssistantPendingScopeLine tenant={tenant} label={stopping ?? currentStepTitle(steps)} />
       {steps?.length ? <StepTimeline steps={steps} /> : <StepSkeleton />}
     </>
   );
@@ -4157,6 +4162,7 @@ function estimateProgressPercent(steps: IntuneChatProgressStep[]): number {
 function ChatMessageBubble({
   message,
   progress,
+  stopping,
   copied,
   latestAssistant,
   tenant,
@@ -4170,6 +4176,8 @@ function ChatMessageBubble({
 }: {
   message: IntuneChatMessage;
   progress: ChatProgressState | null;
+  /** Stop was pressed: the scope line shows the stop progress instead of a step. */
+  stopping: boolean;
   copied: boolean;
   latestAssistant: boolean;
   tenant?: TenantRecord;
@@ -4224,7 +4232,7 @@ function ChatMessageBubble({
   return (
     <article className="group mb-[34px] w-full" title={`Answered ${timestamp}`}>
       {progress ? (
-        <PendingAnswer tenant={tenant} label={progress.message} steps={message.steps} />
+        <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
       ) : (
         <>
           <AnswerScopeDisclosure

@@ -34,6 +34,12 @@ export function appendOnlySteps(shown: readonly IntuneChatStep[] | undefined, ne
   return [...kept, ...next.filter((step) => !keptIds.has(step.id))];
 }
 
+/** The scope line while an answer runs: the title of the step running now, or of the last one. */
+export function currentStepTitle(steps: readonly IntuneChatStep[] | undefined): string {
+  const list = steps ?? [];
+  return [...list].reverse().find((step) => step.status === "active")?.title ?? list.at(-1)?.title ?? "Reading the question";
+}
+
 const TENANT_TOOLS = new Set(["list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift"]);
 
 /**
