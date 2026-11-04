@@ -15,7 +15,7 @@ import { GRAPH_CACHE_RESOURCES, pathForResource, resolveQuestionKind } from "./p
 import { buildIntuneChatSystemPrompt } from "../state-helpers.js";
 import { fenceTenantData, stripTenantDataFences } from "@openadminos/runtime";
 import { tenantDataSourceForTool } from "./tools.js";
-import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
+import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, validTitle, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
 import {
   MCP_TOOL_RULES,
   executeIntuneChatTool,
@@ -112,6 +112,12 @@ function kindProtocol(sourceIds: readonly string[]): string {
   ].join("\n");
 }
 
+/**
+ * Asked only on the first answer of a new chat. The title names the chat
+ * in the sidebar and the header; without one the chat keeps the question.
+ */
+const TITLE_PROTOCOL = 'This is the first answer in a new chat. Also add "title" to the final JSON: a plain title for the chat of at most 60 characters that names the topic, for example "Defender onboarding for Windows 11". No links, no names, no tenant values.';
+
 const KIND_REPAIR = 'That reply did not give the question kind. Send it again with "kind" ("docs", "tenant" or "mixed") and "sources" added to the JSON. When unsure, choose "mixed".';
 
 /** The protocol for a docs question, which has no tenant tools. */
@@ -129,6 +135,8 @@ const DOCS_TOOL_PROTOCOL = [
 
 export interface RunAgenticChatInput {
   voice?: boolean;
+  /** The first answer of a new chat: the final JSON may carry a short `title`. */
+  askTitle?: boolean;
   promptByteLimit?: number;
   question: string;
   /**
@@ -226,6 +234,8 @@ export type RunAgenticChatResult =
       documentationSources?: IntuneChatDocumentationSource[];
       /** The validated `next` follow-ups from the final answer. */
       followUps?: string[];
+      /** The validated chat `title`, when the input asked for one. */
+      title?: string;
     }
   | {
       ok: false;
@@ -249,7 +259,7 @@ interface DeclaredKind {
 
 type ParsedModelAction =
   | ({ kind: "tool"; tool: IntuneChatInvestigationToolName; params: unknown } & DeclaredKind)
-  | ({ kind: "final"; answer: string; next?: unknown } & DeclaredKind)
+  | ({ kind: "final"; answer: string; next?: unknown; title?: unknown } & DeclaredKind)
   | { kind: "malformed"; reason: string };
 
 export async function runAgenticChat(
@@ -501,6 +511,7 @@ export async function runAgenticChat(
         documentationSources: citations.sources,
         // Injected text can steer next, so links and tenant values never become a suggestion.
         followUps: validFollowUps(action.next, (text) => holdsTenantData(input.tools, text)),
+        ...(input.askTitle ? titleField(validTitle(action.title, (text) => holdsTenantData(input.tools, text))) : {}),
       };
     }
 
@@ -741,6 +752,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     "JSON protocol:",
     docsOnly ? DOCS_TOOL_PROTOCOL : AGENTIC_TOOL_PROTOCOL,
     questionKind === undefined ? kindProtocol([...servers.map((server) => server.id), ...(docsIndexInPlay ? ["docs-index"] : [])]) : "",
+    input.askTitle && !input.voice ? TITLE_PROTOCOL : "",
     "",
     "Answer style: concise admin-facing prose, cite caveats and stale or missing data, no hype, no exclamation marks.",
   ].join("\n");
@@ -820,6 +832,10 @@ function buildVoiceLoopPrompt(input: RunAgenticChatInput, turns: LoopTurn[], sys
   return prompt;
 }
 
+function titleField(title: string | undefined): { title?: string } {
+  return title ? { title } : {};
+}
+
 function parseModelAction(text: string, mcp: McpChatContext | undefined): ParsedModelAction {
   const extraction = extractLastJsonObject(text);
   if (!extraction.found) {
@@ -841,7 +857,7 @@ function parseModelAction(text: string, mcp: McpChatContext | undefined): Parsed
         : typeof record.content === "string"
           ? record.content
           : "";
-    return { kind: "final", answer, next: record.next, ...declared };
+    return { kind: "final", answer, next: record.next, title: record.title, ...declared };
   }
   if (typeof record.tool === "string") {
     if (!isToolName(record.tool, mcp)) {

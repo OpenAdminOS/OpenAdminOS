@@ -1685,6 +1685,8 @@ export class IntuneChatService {
     if (conversation) {
       assertConversationTenant(conversation, tenant.id);
     }
+    // A new chat is named after the question until the answer gives it a title.
+    const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
     if (!conversation) {
       conversation = store.createConversation({
         id: `chat_${randomUUID()}`,
@@ -1812,6 +1814,7 @@ export class IntuneChatService {
     let toolTrace: IntuneChatMessage["toolTrace"];
     let documentationSources: IntuneChatDocumentationSource[] = [];
     let modelFollowUps: string[] = [];
+    let modelTitle: string | undefined;
 
     const directDeviceAnswer = !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs"
       ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
@@ -1899,6 +1902,7 @@ export class IntuneChatService {
             const documentation = learnFirst || answerPlan.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
+              ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
@@ -1925,6 +1929,7 @@ export class IntuneChatService {
             if (agentic.ok) {
               assistantContent = agentic.answer;
               modelFollowUps = agentic.followUps ?? [];
+              modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
             } else {
               const deterministic = await buildDeterministicAnswer(agentic.fallbackNotice);
@@ -1997,7 +2002,7 @@ export class IntuneChatService {
         toolTrace,
       });
     }
-    store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
+    store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
 
     await this.maybeCreateSelfTrainingSuggestionFromChat({
       tenantId: tenant.id,
@@ -2086,6 +2091,8 @@ export class IntuneChatService {
     if (conversation) {
       assertConversationTenant(conversation, tenant.id);
     }
+    // A new chat is named after the question until the answer gives it a title.
+    const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
     if (!conversation) {
       conversation = store.createConversation({
         id: `chat_${randomUUID()}`,
@@ -2400,6 +2407,7 @@ export class IntuneChatService {
     let toolTrace: IntuneChatMessage["toolTrace"];
     let documentationSources: IntuneChatDocumentationSource[] = [];
     let modelFollowUps: string[] = [];
+    let modelTitle: string | undefined;
 
     const emitDelta = (content: string, delta: string = content) => {
       onEvent({
@@ -2538,6 +2546,7 @@ export class IntuneChatService {
               : learnFirst || answerPlan?.sources.kind === "tenant" ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
+              ...(newConversationTitle ? { askTitle: true } : {}),
               modelStep: modelStepHooks(steps, answerModel, mcp.mcp),
               documentation,
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
@@ -2616,6 +2625,7 @@ export class IntuneChatService {
             if (agentic.ok || agentic.reason !== "context-limit") recordAgenticOutcome(providerId, selectedModel ?? llm.defaultModel, agentic.ok);
             if (agentic.ok) {
               modelFollowUps = agentic.followUps ?? [];
+              modelTitle = agentic.title;
               documentationSources = agentic.documentationSources ?? [];
               sendProgress({
                 message: "Model response started.",
@@ -2771,7 +2781,7 @@ export class IntuneChatService {
         toolTrace,
       });
     }
-    store.touchConversation(conversation.id, undefined, assistantMessage.createdAt);
+    store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
 
     await this.maybeCreateSelfTrainingSuggestionFromChat({
       tenantId: tenant.id,
@@ -2979,6 +2989,15 @@ export class IntuneChatService {
     const followUps = mergeFollowUps([tieIn], input.modelFollowUps ?? []);
     // The chip of a docs answer says when its follow-up would read tenant data.
     return { followUps, tenantFollowUps: followUps.filter((text) => text === tieIn || hasTenantReference(text)) };
+  }
+
+  /**
+   * The model's title for a chat this answer started, unless the chat was
+   * renamed meanwhile. Without one the chat keeps the trimmed question.
+   */
+  private answeredChatTitle(conversationId: string, initialTitle: string | undefined, modelTitle: string | undefined): string | undefined {
+    if (!initialTitle || !modelTitle) return undefined;
+    return this.host.requireIntelligenceStore().getConversation(conversationId)?.title === initialTitle ? modelTitle : undefined;
   }
 
   /** MCP tools for one answer, with the tenant values earlier turns observed. */

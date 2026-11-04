@@ -578,6 +578,24 @@ export function validFollowUps(value: unknown, holdsTenantData: (text: string) =
   return out;
 }
 
+const TITLE_CHARS = 60;
+
+/**
+ * The chat title the model returned in `title`, checked like `next`:
+ * plain text on one line, at most 60 characters, no links, no write
+ * intent and nothing the caller's tenant data check rejects. Surrounding
+ * quotes and a closing period are dropped. Anything else gives no title,
+ * and the chat keeps the trimmed question.
+ */
+export function validTitle(value: unknown, holdsTenantData: (text: string) => boolean = () => false): string | undefined {
+  if (typeof value !== "string" || /[\r\n]/.test(value.trim())) return undefined;
+  const text = value.replace(/\s+/g, " ").trim().replace(/^["'\u201c\u2018]+|["'\u201d\u2019]+$/g, "").replace(/\.$/, "").trim();
+  if (!text || text.length > TITLE_CHARS) return undefined;
+  if (/[`*#<>\[\]{}|\\]/.test(text) || /[\u0000-\u001f\u007f]/.test(text)) return undefined;
+  if (LINK.test(text) || planChatContext(text).hasWriteIntent || holdsTenantData(text)) return undefined;
+  return text;
+}
+
 const PLATFORMS: ReadonlyArray<[RegExp, string]> = [
   [/\bmac\s?os\b|\bmacs?\b/i, "macOS"],
   [/\bipados\b/i, "iPadOS"],

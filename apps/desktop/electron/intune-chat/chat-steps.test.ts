@@ -22,6 +22,7 @@ import {
   mergeFollowUps,
   nearDuplicateFollowUp,
   sourceExcerpt,
+  validTitle,
 } from "./chat-steps.js";
 import { classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -526,6 +527,43 @@ describe("agentic loop sources", () => {
       assert.equal(result.ok, true);
       assert.match(prompts[2]!.prompt, /That answer used no tenant evidence/);
       assert.deepEqual(result.toolTrace.map((entry) => entry.tool), [learnTool.name, "query_cache"]);
+    });
+  });
+});
+
+describe("chat titles", () => {
+  it("keeps a short plain title and rejects links, write intent, tenant values, markup and long text", () => {
+    assert.equal(validTitle("  \u201cDefender onboarding for  Windows 11.\u201d "), "Defender onboarding for Windows 11");
+    assert.equal(validTitle("x".repeat(60)), "x".repeat(60));
+    assert.equal(validTitle("x".repeat(61)), undefined);
+    assert.equal(validTitle("See learn.microsoft.com for onboarding"), undefined);
+    assert.equal(validTitle("Read https://evil.example/x"), undefined);
+    assert.equal(validTitle("Retire the stale Macs"), undefined);
+    assert.equal(validTitle("**Defender** onboarding"), undefined);
+    assert.equal(validTitle("Defender\nonboarding"), undefined);
+    assert.equal(validTitle("Why MAC-07 is offline", (text) => /MAC-07/.test(text)), undefined);
+    assert.equal(validTitle(42), undefined);
+    assert.equal(validTitle(""), undefined);
+  });
+
+  it("asks for a title only on the first answer of a new chat, and returns it validated", async () => {
+    await withStore(async (store) => {
+      const final = JSON.stringify({ kind: "docs", sources: [], final: true, answer: "Use the Intune connector.", title: "Defender onboarding for Windows 11" });
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const first = await runAgenticChat(loopInput(store, scripted([final], prompts), learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs", askTitle: true }));
+      assert.equal(first.ok, true);
+      if (first.ok) assert.equal(first.title, "Defender onboarding for Windows 11");
+      assert.match(prompts[0]!.system!, /Also add "title" to the final JSON/);
+
+      prompts.length = 0;
+      const later = await runAgenticChat(loopInput(store, scripted([final], prompts), learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs" }));
+      assert.equal(later.ok && later.title, undefined);
+      assert.doesNotMatch(prompts[0]!.system!, /"title"/);
+
+      const unsafe = JSON.stringify({ final: true, answer: "Done.", title: "Macs of admin@contoso.example" });
+      const rejected = await runAgenticChat(loopInput(store, scripted([unsafe], []), learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs", askTitle: true }));
+      assert.equal(rejected.ok, true);
+      assert.equal(rejected.ok && rejected.title, undefined);
     });
   });
 });

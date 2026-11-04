@@ -646,4 +646,36 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.deepEqual(message.followUps, ["Show the compliance policies assigned to these Macs"]);
     });
   });
+  it("names a new chat with the answer's title, keeps it on later answers, and falls back to the question", async () => {
+    await withHarness(async ({ store, script, prompts }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
+        { final: true, answer: "Grant full disk access [1].", title: "Defender for Endpoint on macOS", next: ["Explain the system extension profile", "Which Macs miss the system extension profile?"] },
+      ]);
+      const first = await store.streamIntuneChatMessage({ content: DOCS_QUESTION }, () => {});
+      assert.equal(first.conversation.title, "Defender for Endpoint on macOS");
+      assert.match(prompts.at(-1)!.system, /Also add "title"/);
+      // The excerpt the model read is stored with its source and survives a reload.
+      const reloaded = (await store.getIntuneChatMessages(first.conversation.id)).at(-1)!;
+      assert.match(reloaded.documentationSources?.[0]?.excerpt ?? "", /needs full disk access/);
+      // The deterministic tie-in reads tenant data; the model's own follow-up is marked only when it refers to the tenant.
+      assert.deepEqual(reloaded.followUps, ["Show compliance and last sync for our 5 macOS devices", "Explain the system extension profile"]);
+      assert.deepEqual(reloaded.tenantFollowUps, ["Show compliance and last sync for our 5 macOS devices"]);
+
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS requirements" } },
+        { final: true, answer: "The three latest releases [1].", title: "Something else" },
+      ]);
+      const second = await store.streamIntuneChatMessage({ content: "And which macOS versions does it support?", conversationId: first.conversation.id }, () => {});
+      assert.equal(second.conversation.title, "Defender for Endpoint on macOS", "only the first answer names the chat");
+      assert.doesNotMatch(prompts.at(-1)!.system, /"title"/);
+
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
+        { final: true, answer: "Grant full disk access [1].", title: "Visit learn.microsoft.com for this" },
+      ]);
+      const fallback = await store.streamIntuneChatMessage({ content: `  ${DOCS_QUESTION}  ` }, () => {});
+      assert.equal(fallback.conversation.title, DOCS_QUESTION.slice(0, 51).trim() + "...", "an invalid title leaves the trimmed question");
+    });
+  });
 });
