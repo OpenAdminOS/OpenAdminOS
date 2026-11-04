@@ -352,6 +352,8 @@ export async function runAgenticChat(
           input.onAnswerText(partial, learnAnswered);
         }
       }
+      // An adapter may end its stream quietly on abort; nothing the partial reply asked for runs.
+      assertNotCancelled(input.signal);
     } else {
       completion = await input.llm.complete(options);
     }

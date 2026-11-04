@@ -936,3 +936,35 @@ describe("withdrawing a streamed final", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 });
+
+describe("stop during a streamed reply", () => {
+  it("stops when an adapter ends its stream quietly on abort, before the tool the partial reply named", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-abort-"));
+    const store = seededStore(dir);
+    try {
+      const controller = new AbortController();
+      const llm: RunLlmApi = {
+        available: true,
+        streamsIncrementally: true,
+        async complete() { throw new Error("streamed"); },
+        async *stream(options) {
+          yield { delta: "", accumulated: '{"tool":"find_graph_endpoint","params":{"query":"managed devices"}}', done: false, model: "m" };
+          controller.abort();
+          if (options.signal?.aborted) return;
+        },
+      };
+      const ran: string[] = [];
+      await assert.rejects(
+        runAgenticChat({
+          ...baseInput(store, llm),
+          signal: controller.signal,
+          onAnswerText: () => {},
+          onToolStart: (event) => ran.push(event.tool),
+          modelStep: { start: () => {}, writing: () => {}, finish: (outcome) => ran.push(`decided ${outcome.kind}`) },
+        }),
+        (error: Error) => error.name === "AbortError",
+      );
+      assert.deepEqual(ran, []);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});
