@@ -8,7 +8,11 @@ import { SERVICE_COPY, SETUP_COPY } from "../copy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import {
   SERVICE_PARTS,
+  agentServiceIds,
   grantedParts,
+  grantedScopeSet,
+  missingServicesForAgent,
+  normalizeGraphScopeName,
   serviceById,
   serviceStatus,
   type ServiceConnectionStatus,
@@ -27,6 +31,30 @@ import { useAppState } from "../state";
 /** True when the tenant signs in with the admin's own app registration. */
 export function usesOwnRegistration(tenant: TenantRecord): boolean {
   return tenant.appRegistration?.kind === "custom";
+}
+
+/**
+ * The line under an agent's permissions. A service with nothing granted
+ * blocks the run; a scope a connected service has not granted is
+ * requested when the run starts.
+ */
+export function agentConsentNote(
+  tenant: TenantRecord | undefined,
+  agent: { scopes: readonly string[]; services?: readonly ServiceId[] },
+): string {
+  if (!tenant) return SERVICE_COPY.consentNoteGeneric;
+  if (tenant.kind === "sample") return SERVICE_COPY.consentNotePilot;
+  const missing = missingServicesForAgent(tenant, agentServiceIds(agent));
+  if (missing.length > 0) {
+    return SERVICE_COPY.consentNoteBlocked(
+      missing.map((service) => service.title),
+      tenant.displayName,
+    );
+  }
+  const granted = grantedScopeSet(tenant);
+  return agent.scopes.every((scope) => granted.has(normalizeGraphScopeName(scope)))
+    ? SERVICE_COPY.consentNoteGranted(tenant.displayName)
+    : SERVICE_COPY.consentNotePending(tenant.displayName);
 }
 
 /** Requestable parts of a service that the tenant has not been granted. */

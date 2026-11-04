@@ -14,7 +14,11 @@ import { Modal, ModalHeader } from "../components/Modal";
 import { ConfigureAgentModal } from "../components/ConfigureAgentModal";
 import { RunWithMenu } from "../components/RunWithMenu";
 import { useToast } from "../components/Toast";
-import { ServiceChips, ServiceNotConnectedNotice } from "../components/ServiceAccess";
+import {
+  ServiceChips,
+  ServiceNotConnectedNotice,
+  agentConsentNote,
+} from "../components/ServiceAccess";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { CommunityShareModal } from "../components/CommunityShareModal";
 import {
@@ -461,6 +465,7 @@ export default function AgentDetail({
         manifestOpen={manifestOpen}
         onCloseManifest={() => setManifestOpen(false)}
         tenantTier={activeTenant?.entraTier}
+        activeTenant={activeTenant}
       />
     ) : (
       <Drawer open title="Agent not found" onClose={closeDrawer}>
@@ -681,10 +686,19 @@ export default function AgentDetail({
           ) : null}
 
           {!previewLoading && !previewError && preview ? (
-            <ManifestSections preview={preview} sections={["permissions"]} />
+            <ManifestSections
+              preview={preview}
+              sections={["permissions"]}
+              consentNote={agentConsentNote(activeTenant, agent)}
+            />
           ) : null}
 
-          {!previewLoading && !preview ? <FallbackScopesCard scopes={agent.scopes} /> : null}
+          {!previewLoading && !preview ? (
+            <FallbackScopesCard
+              scopes={agent.scopes}
+              consentNote={agentConsentNote(activeTenant, agent)}
+            />
+          ) : null}
 
           <Section id="agent-schedule" title="Schedule" className="scroll-mt-4">
             <AgentScheduleCard
@@ -1024,6 +1038,7 @@ function HubAgentDrawer({
   installing,
   manifestOpen,
   tenantTier,
+  activeTenant,
   onClose,
   onRequestInstall,
   onCancelInstall,
@@ -1039,6 +1054,7 @@ function HubAgentDrawer({
   installing: boolean;
   manifestOpen: boolean;
   tenantTier?: "free" | "p1" | "p2" | "unknown";
+  activeTenant: TenantRecord | undefined;
   onClose: () => void;
   onRequestInstall: () => void;
   onCancelInstall: () => void;
@@ -1147,7 +1163,7 @@ function HubAgentDrawer({
               )) : <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>}
             </div>
             <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-              Missing consent is requested before the first run.
+              {agentConsentNote(activeTenant, agent)}
             </p>
             {!installConfirm && preview ? (
               <DeclaredGraphOperations manifest={preview.manifest} />
@@ -2795,7 +2811,7 @@ function modelSourceLabel(
   return "No model installed for the active provider";
 }
 
-function FallbackScopesCard({ scopes }: { scopes: string[] }) {
+function FallbackScopesCard({ scopes, consentNote }: { scopes: string[]; consentNote: string }) {
   return (
     <Section title="Permissions">
       {scopes.length > 0 ? (
@@ -2809,9 +2825,7 @@ function FallbackScopesCard({ scopes }: { scopes: string[] }) {
       ) : (
         <p className="text-sm text-[var(--color-text-muted)]">No Microsoft Graph scopes declared.</p>
       )}
-      <p className="mt-2 text-sm text-[var(--color-text-muted)]">
-        Missing consent is requested before the first run.
-      </p>
+      <p className="mt-2 text-sm text-[var(--color-text-muted)]">{consentNote}</p>
     </Section>
   );
 }

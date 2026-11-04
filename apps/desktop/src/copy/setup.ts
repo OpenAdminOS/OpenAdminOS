@@ -202,5 +202,13 @@ export const SERVICE_COPY = {
   needsNotConnected: (services: readonly string[]) => `Needs ${joinTitles(services)}, not connected.`,
   needsNotConnectedBody: (tenant: string) =>
     `Runs against ${tenant} are blocked until the service is added.`,
+  consentNoteGeneric:
+    "Runs are blocked while a service this agent needs is not connected for the tenant. Scopes a connected service has not granted yet are requested when the run starts.",
+  consentNoteBlocked: (services: readonly string[], tenant: string) =>
+    `Runs are blocked until ${joinTitles(services)} ${services.length === 1 ? "is" : "are"} connected for ${tenant}. Add ${services.length === 1 ? "it" : "them"} in Settings, Tenants.`,
+  consentNotePending: (tenant: string) =>
+    `Scopes not yet granted for ${tenant} are requested when the run starts.`,
+  consentNoteGranted: (tenant: string) => `Every scope listed here is granted for ${tenant}.`,
+  consentNotePilot: "Pilot mode uses the sample tenant, so no consent is requested.",
 };
 

@@ -94,4 +94,73 @@ describe("agents by service", () => {
     await user.click(within(dialog).getByRole("button", { name: "Add Defender" }));
     expect(screen.getByRole("dialog", { name: "Add Defender access" })).toBeInTheDocument();
   });
+
+  it("says runs are blocked in Permissions when the service is not connected", async () => {
+    const agent = createMockAgent({
+      id: "score",
+      slug: "score",
+      name: "Secure score prioritizer",
+      mode: "read",
+      scopes: ["SecurityEvents.Read.All"],
+      services: ["defender"],
+    });
+    const state = createMockAppState({ tenants: [intuneOnlyTenant], installedAgents: [agent] });
+    renderRoute(<Agents />, {
+      path: "/agents/:slug",
+      route: "/agents/score",
+      bridge: makeMockBridge({}, state),
+    });
+
+    expect(
+      await screen.findByText(
+        `Runs are blocked until Defender is connected for ${intuneOnlyTenant.displayName}. Add it in Settings, Tenants.`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/requested before the first run/)).not.toBeInTheDocument();
+  });
+
+  it("says missing scopes of a connected service are requested when the run starts", async () => {
+    const agent = createMockAgent({
+      id: "devices",
+      slug: "devices",
+      name: "Inactive devices",
+      mode: "read",
+      scopes: ["DeviceManagementManagedDevices.Read.All", "DeviceManagementConfiguration.Read.All"],
+      services: ["intune"],
+    });
+    const state = createMockAppState({ tenants: [intuneOnlyTenant], installedAgents: [agent] });
+    renderRoute(<Agents />, {
+      path: "/agents/:slug",
+      route: "/agents/devices",
+      bridge: makeMockBridge({}, state),
+    });
+
+    expect(
+      await screen.findByText(
+        `Scopes not yet granted for ${intuneOnlyTenant.displayName} are requested when the run starts.`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Needs Intune, not connected.")).not.toBeInTheDocument();
+  });
+
+  it("says every scope is granted when nothing is missing", async () => {
+    const agent = createMockAgent({
+      id: "devices",
+      slug: "devices",
+      name: "Inactive devices",
+      mode: "read",
+      scopes: ["DeviceManagementManagedDevices.Read.All"],
+      services: ["intune"],
+    });
+    const state = createMockAppState({ tenants: [intuneOnlyTenant], installedAgents: [agent] });
+    renderRoute(<Agents />, {
+      path: "/agents/:slug",
+      route: "/agents/devices",
+      bridge: makeMockBridge({}, state),
+    });
+
+    expect(
+      await screen.findByText(`Every scope listed here is granted for ${intuneOnlyTenant.displayName}.`),
+    ).toBeInTheDocument();
+  });
 });
