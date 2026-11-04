@@ -606,7 +606,7 @@ describe("agentic loop sources", () => {
         learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs" }));
       assert.equal(failed.ok, false);
       if (failed.ok) return;
-      assert.equal(failed.reason, "unfinished-answer");
+      assert.equal(failed.reason, "empty-answer");
       assert.equal(failed.fallbackNotice, "The model returned an empty answer 3 times. Deterministic retrieval was used instead.");
     });
   });

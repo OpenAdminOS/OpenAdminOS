@@ -251,7 +251,7 @@ export type RunAgenticChatResult =
     }
   | {
       ok: false;
-      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer" | "no-evidence";
+      reason: "malformed-output" | "iteration-cap" | "provider-unavailable" | "context-limit" | "unfinished-answer" | "empty-answer" | "no-evidence";
       fallbackNotice: string;
       toolTrace: IntuneChatToolTraceEntry[];
       iterations: number;
@@ -483,7 +483,7 @@ export async function runAgenticChat(
       // An empty answer, also one that is only fences, is never a completed answer.
       await settleModelStep({ kind: "repair", reason: "empty" });
       if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
-        ok: false, reason: "unfinished-answer", fallbackNotice: `The model returned an empty answer ${unfinishedCount} times. Deterministic retrieval was used instead.`,
+        ok: false, reason: "empty-answer", fallbackNotice: `The model returned an empty answer ${unfinishedCount} times. Deterministic retrieval was used instead.`,
         toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
       };
       turns.push({ role: "repair", content: 'That final answer was empty. Write the answer in "answer" now, or call a tool if you still need evidence.' });

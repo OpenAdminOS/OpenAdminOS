@@ -2658,6 +2658,8 @@ export class IntuneChatService {
                   ? "This question exceeded Nova's voice context budget. Ask about fewer details or open Chat for a longer investigation."
                   : agentic.reason === "unfinished-answer"
                     ? "The reasoning model described a lookup without finishing it. No completed answer is available. Retry or open Chat to inspect the evidence."
+                  : agentic.reason === "empty-answer"
+                    ? "The reasoning model returned an empty answer. No completed answer is available. Retry or open Chat to inspect the evidence."
                   : agentic.reason === "malformed-output"
                     ? "The selected reasoning model could not produce a valid tool request. Retry or select a model that supports tool use."
                   : agentic.reason === "no-evidence"

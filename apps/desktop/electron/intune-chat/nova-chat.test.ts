@@ -400,3 +400,16 @@ it('answers the reported Windows encryption question through both Chat and Nova 
     } finally { await f.cleanup(); }
   }
 });
+
+it("says an empty reasoning answer was empty, not that a lookup was left unfinished", async () => {
+  const f = await fixture();
+  try {
+    f.llm.complete = async () => ({ text: JSON.stringify({ final: true, answer: "" }), model: "test-model" });
+    const result = await f.store.streamIntuneChatMessage({ content: "Research recent vendor guidance" }, () => {}, {
+      ...options, webSearch: async () => { assert.fail("An empty answer must not search"); },
+    });
+    assert.equal(result.assistantMessage.status, "failed");
+    assert.equal(result.assistantMessage.content, "The reasoning model returned an empty answer. No completed answer is available. Retry or open Chat to inspect the evidence.");
+    assert.doesNotMatch(result.assistantMessage.content, /described a lookup/);
+  } finally { await f.cleanup(); }
+});
