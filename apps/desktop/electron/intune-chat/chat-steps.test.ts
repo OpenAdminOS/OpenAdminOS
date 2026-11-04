@@ -89,6 +89,10 @@ describe("question classification", () => {
       "What do the docs say about our devices?",
       "Write a KQL query that lists Bob's devices",
       "What is Windows Autopatch?",
+      "Who are the global admins? Check the docs.",
+      "Are any devices noncompliant per Microsoft Learn?",
+      "Are all licenses assigned? Cite docs.",
+      "Write a KQL query for failed sign-ins and run it for yesterday",
     ]) assert.notEqual(kind(question), "docs", question);
   });
 });

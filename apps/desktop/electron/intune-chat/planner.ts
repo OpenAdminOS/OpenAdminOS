@@ -465,7 +465,7 @@ const HOW_TO_OR_GUIDANCE =
 const TENANT_VALUE = /[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]*-[A-Z0-9-]*\d/;
 /** Phrases about someone's or something's state: "Bob's laptop", "your devices", "status of". */
 const TENANT_STATE =
-  /\b(?:state of|status of|assigned to|enrolled in|your|their|his|her)\b|\b(?!(?:what|it|that|there|here|let|who|where|how)'s\b)[a-z0-9]+'s\b/;
+  /\b(?:state of|status of|assigned to|enrolled in|your|their|his|her|any|all|who|run it|run this|execute|against)\b|\b(?!(?:what|it|that|there|here|let|who|where|how)'s\b)[a-z0-9]+'s\b/;
 
 /**
  * Decides whether a question needs the tenant. A docs label skips the
