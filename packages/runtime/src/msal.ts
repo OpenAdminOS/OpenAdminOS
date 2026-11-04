@@ -139,12 +139,6 @@ export const DEFAULT_SCOPE_METADATA: readonly RequestedScopeMetadata[] = [
       "Reads /subscribedSkus so the status strip can show which Entra ID tier (Free / P1 / P2) the tenant is on and badge agents that need P1 or P2 features.",
   },
   {
-    name: "Directory.Read.All",
-    mode: "read",
-    rationale:
-      "Reads directory metadata (users, groups, roles) so audit entries and policy targets can be rendered with human-readable names rather than raw object IDs.",
-  },
-  {
     name: "User.Read.All",
     mode: "read",
     rationale:

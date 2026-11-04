@@ -20,7 +20,7 @@ describe("setup scope groups", () => {
     expect(grouped.map((group) => [group.id, group.scopes.length])).toEqual([
       ["devices", 6],
       ["apps", 2],
-      ["directory", 4],
+      ["directory", 3],
       ["identity", 3],
       ["security", 6],
     ]);

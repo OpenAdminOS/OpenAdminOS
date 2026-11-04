@@ -47,7 +47,6 @@ Delegated read permissions requested at sign-in:
 - `Device.Read.All`
 - `GroupMember.Read.All`
 - `Organization.Read.All`
-- `Directory.Read.All`
 - `User.Read.All`
 - `Policy.Read.All`
 - `Application.Read.All`

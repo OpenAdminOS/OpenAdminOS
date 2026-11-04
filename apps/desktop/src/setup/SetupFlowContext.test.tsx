@@ -298,7 +298,7 @@ describe("contextual tenant setup", () => {
     ).toBeInTheDocument();
     expect(
       screen.getByRole("button", {
-        name: "Approve 21 read scopes and continue to Microsoft",
+        name: "Approve 20 read scopes and continue to Microsoft",
       }),
     ).toBeInTheDocument();
 
@@ -306,7 +306,7 @@ describe("contextual tenant setup", () => {
     await user.click(screen.getByRole("checkbox", { name: "Security and sign-ins" }));
     expect(
       screen.getByRole("button", {
-        name: "Approve 13 read scopes and continue to Microsoft",
+        name: "Approve 12 read scopes and continue to Microsoft",
       }),
     ).toBeInTheDocument();
   });
@@ -393,7 +393,7 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Approve 20 read scopes and continue to Microsoft" })).toBeInTheDocument();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
     expectUnchosenSignIn();
   });
@@ -504,7 +504,7 @@ describe("contextual tenant setup", () => {
     await user.click(await screen.findByRole("button", { name: "Open setup" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" }),
+      await screen.findByRole("button", { name: "Approve 20 read scopes and continue to Microsoft" }),
     );
     expect(await screen.findByText(PILOT_COPY.removedAfterConnect)).toBeInTheDocument();
   });

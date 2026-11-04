@@ -4,20 +4,19 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { tsImport } from "tsx/esm/api";
+
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 
-// Read the scope list from source so this test needs no build step.
-function defaultReadScopes() {
-  // The list lives with the permission areas; index.ts re-exports it.
-  const sdk = ["index.ts", "permission-areas.ts"]
-    .map((file) => readFileSync(join(root, "packages", "agent-sdk", "src", file), "utf8"))
-    .join("\n");
-  const block = sdk.match(
-    /export const DEFAULT_GRAPH_READ_SCOPE_NAMES = \[([\s\S]*?)\] as const;/,
+// Load the derived list from the service registry source, so this test
+// needs no build step.
+async function defaultReadScopes() {
+  const { DEFAULT_GRAPH_READ_SCOPE_NAMES } = await tsImport(
+    "../packages/agent-sdk/src/services.ts",
+    import.meta.url,
   );
-  assert.ok(block, "DEFAULT_GRAPH_READ_SCOPE_NAMES not found in agent-sdk");
-  return [...block[1].matchAll(/"([^"]+)"/g)].map((match) => match[1]);
+  return [...DEFAULT_GRAPH_READ_SCOPE_NAMES];
 }
 
 function documentedReadScopes() {
@@ -32,6 +31,6 @@ function documentedReadScopes() {
   return [...section[1].matchAll(/- `([^`]+)`/g)].map((match) => match[1]);
 }
 
-test("own app registration docs list exactly the sign-in read scopes", () => {
-  assert.deepEqual(documentedReadScopes(), defaultReadScopes());
+test("own app registration docs list exactly the sign-in read scopes", async () => {
+  assert.deepEqual([...documentedReadScopes()].sort(), (await defaultReadScopes()).sort());
 });

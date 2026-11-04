@@ -28,11 +28,11 @@ describe("permission areas", () => {
     expect(new Set(PERMISSION_AREAS.flatMap((area) => area.scopes)).size).toBe(
       PERMISSION_AREAS.flatMap((area) => area.scopes).length,
     );
-    expect(scopesForPermissionAreas(["devices", "identity"])).toHaveLength(13);
+    expect(scopesForPermissionAreas(["devices", "identity"])).toHaveLength(12);
   });
 
   it("treats an absent granted set as the legacy full default", () => {
-    expect(grantedScopeSet({}).size).toBe(21);
+    expect(grantedScopeSet({}).size).toBe(20);
     expect(grantedScopeSet({ grantedScopes: ["User.Read.All"] })).toEqual(
       new Set(["User.Read.All"]),
     );

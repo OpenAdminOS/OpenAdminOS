@@ -4,11 +4,23 @@ import { describe, it } from "node:test";
 import {
   BASELINE_SCOPES,
   BASELINE_SERVICE_SCOPES,
+  DEFAULT_GRAPH_READ_SCOPE_NAMES,
   GRAPH_DELEGATED_PERMISSION_IDS,
   SERVICES,
   SERVICE_PARTS,
+  grantedParts,
+  grantedScopeSet,
+  grantsFromTokenScopes,
+  mergeGrantedScopes,
+  missingPartsForScopes,
+  parseScope,
   partIdsFor,
+  partLabel,
+  qualifyScope,
   requestedScopes,
+  serviceForScope,
+  serviceStatus,
+  toResourceScope,
 } from "@openadminos/agent-sdk";
 
 import { GRAPH_CACHE_RESOURCES } from "./intune-chat/planner.js";
@@ -166,5 +178,68 @@ describe("service registry", () => {
       new Set(names),
       new Set([...BASELINE_SCOPES, ...PRE_SERVICES_DEFAULT_SCOPES.filter((scope) => scope !== "Directory.Read.All")]),
     );
+  });
+});
+
+describe("qualified scopes", () => {
+  it("parses stored, resource and bare forms as Graph and qualifies idempotently", () => {
+    for (const form of ["graph:User.Read.All", "https://graph.microsoft.com/User.Read.All", " User.Read.All "]) {
+      assert.deepEqual(parseScope(form), { audience: "graph", name: "User.Read.All" });
+      assert.equal(qualifyScope(form), "graph:User.Read.All");
+      assert.equal(qualifyScope(qualifyScope(form)), "graph:User.Read.All");
+    }
+    assert.equal(toResourceScope("graph:AuditLog.Read.All"), "https://graph.microsoft.com/AuditLog.Read.All");
+    assert.equal(toResourceScope("offline_access"), "offline_access");
+  });
+
+  it("returns bare names per audience and all defaults when grants are unknown", () => {
+    assert.deepEqual(grantedScopeSet({ grantedScopes: ["graph:User.Read.All", "Policy.Read.All"] }), new Set(["User.Read.All", "Policy.Read.All"]));
+    assert.deepEqual(grantedScopeSet({}), new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES));
+    assert.deepEqual(grantedScopeSet({ kind: "sample", grantedScopes: [] }), new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES));
+    assert.equal(DEFAULT_GRAPH_READ_SCOPE_NAMES.length, 20);
+  });
+
+  it("merges into qualified grants without duplicates", () => {
+    assert.deepEqual(
+      mergeGrantedScopes({ grantedScopes: ["User.Read.All"] }, ["graph:User.Read.All", "https://graph.microsoft.com/Directory.Read.All"]),
+      ["graph:User.Read.All", "graph:Directory.Read.All"],
+    );
+    assert.equal(mergeGrantedScopes({}, []).length, 20);
+    assert.ok(mergeGrantedScopes({}, []).every((scope) => scope.startsWith("graph:")));
+  });
+
+  it("never records .default or OIDC scopes from a token", () => {
+    assert.deepEqual(
+      grantsFromTokenScopes(["openid", "profile", "offline_access", "https://graph.microsoft.com/.default", "User.Read", "DeviceManagementApps.Read.All"]),
+      ["graph:User.Read", "graph:DeviceManagementApps.Read.All"],
+    );
+    assert.deepEqual(grantsFromTokenScopes(undefined), []);
+  });
+});
+
+describe("grant status", () => {
+  const intuneOnly = {
+    grantedScopes: requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name)),
+  };
+
+  it("switches a part on only when all of its scopes are granted", () => {
+    assert.deepEqual(grantedParts(intuneOnly).map((part) => part.id), ["intune.people", "intune.devices", "intune.apps", "entra.people", "entra.devices"]);
+    assert.equal(serviceStatus(intuneOnly, "intune"), "connected");
+    assert.equal(serviceStatus(intuneOnly, "entra"), "partial");
+    assert.equal(serviceStatus(intuneOnly, "defender"), "missing");
+    assert.equal(serviceStatus({}, "defender"), "connected");
+  });
+
+  it("names the missing part, preferring the caller's services for shared scopes", () => {
+    const missing = missingPartsForScopes(["AuditLog.Read.All", "User.Read.All"], new Set<string>());
+    assert.deepEqual(missing.map((part) => part.id), ["intune.people", "entra.signins"]);
+    assert.deepEqual(
+      missingPartsForScopes(["User.Read.All"], new Set<string>(), ["entra"]).map((part) => part.id),
+      ["entra.people"],
+    );
+    assert.equal(partLabel(missing[1]!), "Entra sign-in logs");
+    assert.equal(partLabel(SERVICE_PARTS.find((part) => part.id === "defender.score")!), "Defender Secure Score");
+    assert.equal(serviceForScope("User.ReadWrite.All")?.id, "entra");
+    assert.equal(serviceForScope("Directory.Read.All")?.id, "entra");
   });
 });

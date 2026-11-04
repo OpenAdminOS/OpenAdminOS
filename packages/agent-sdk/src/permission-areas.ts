@@ -1,29 +1,8 @@
-export const DEFAULT_GRAPH_READ_SCOPE_NAMES = [
-  "DeviceManagementManagedDevices.Read.All",
-  "DeviceManagementConfiguration.Read.All",
-  "DeviceManagementApps.Read.All",
-  "DeviceManagementServiceConfig.Read.All",
-  "DeviceManagementScripts.Read.All",
-  "DeviceManagementRBAC.Read.All",
-  "Device.Read.All",
-  "GroupMember.Read.All",
-  "Organization.Read.All",
-  "Directory.Read.All",
-  "User.Read.All",
-  "Policy.Read.All",
-  "Application.Read.All",
-  "AuditLog.Read.All",
-  "IdentityRiskyUser.Read.All",
-  "SecurityEvents.Read.All",
-  "RoleManagement.Read.Directory",
-  "AdministrativeUnit.Read.All",
-  "Domain.Read.All",
-  "SecurityAlert.Read.All",
-  "SecurityIncident.Read.All",
-] as const;
-
-export type DefaultGraphReadScopeName =
-  (typeof DEFAULT_GRAPH_READ_SCOPE_NAMES)[number];
+import {
+  grantedScopeSet,
+  normalizeGraphScopeName,
+  qualifyScope,
+} from "./services.js";
 
 export type PermissionAreaId =
   | "devices"
@@ -37,7 +16,7 @@ export interface PermissionAreaDefinition {
   title: string;
   summary: string;
   required: boolean;
-  scopes: readonly DefaultGraphReadScopeName[];
+  scopes: readonly string[];
 }
 
 export const REQUIRED_PERMISSION_AREA_MESSAGE =
@@ -76,7 +55,6 @@ export const PERMISSION_AREAS: readonly PermissionAreaDefinition[] = [
     scopes: [
       "User.Read.All",
       "GroupMember.Read.All",
-      "Directory.Read.All",
       "Organization.Read.All",
     ],
   },
@@ -167,21 +145,12 @@ export function permissionAreaForScope(
   scope: string,
 ): PermissionAreaDefinition | undefined {
   const normalized = normalizeGraphScopeName(scope);
-  const direct = AREA_BY_SCOPE.get(normalized as DefaultGraphReadScopeName);
+  const direct = AREA_BY_SCOPE.get(normalized);
   if (direct) return direct;
   const additionalArea = ADDITIONAL_SCOPE_AREAS[normalized];
   return additionalArea ? AREA_BY_ID.get(additionalArea) : undefined;
 }
 
-export function grantedScopeSet(input: {
-  kind?: "sample";
-  grantedScopes?: readonly string[];
-}): Set<string> {
-  if (input.kind === "sample" || input.grantedScopes === undefined) {
-    return new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES);
-  }
-  return new Set(input.grantedScopes.map(normalizeGraphScopeName));
-}
 
 export function grantedPermissionAreas(input: {
   kind?: "sample";
@@ -214,29 +183,13 @@ export function intersectGrantedScopes(
   const requested = new Map(
     requestedScopes.map((scope) => [normalizeGraphScopeName(scope).toLowerCase(), normalizeGraphScopeName(scope)]),
   );
-  if (!resultScopes || resultScopes.length === 0) return [...requested.values()];
+  if (!resultScopes || resultScopes.length === 0) {
+    return [...requested.values()].map(qualifyScope);
+  }
   const granted = new Set(
     resultScopes.map((scope) => normalizeGraphScopeName(scope).toLowerCase()),
   );
   return [...requested.entries()]
     .filter(([key]) => granted.has(key))
-    .map(([, scope]) => scope);
-}
-
-export function mergeGrantedScopes(
-  current: { kind?: "sample"; grantedScopes?: readonly string[] },
-  additions: readonly string[],
-): string[] {
-  const merged = grantedScopeSet(current);
-  for (const scope of additions) merged.add(normalizeGraphScopeName(scope));
-  const defaults = DEFAULT_GRAPH_READ_SCOPE_NAMES.filter((scope) => merged.delete(scope));
-  return [...defaults, ...[...merged].sort((left, right) => left.localeCompare(right))];
-}
-
-export function normalizeGraphScopeName(scope: string): string {
-  const trimmed = scope.trim();
-  const prefix = "https://graph.microsoft.com/";
-  return trimmed.toLowerCase().startsWith(prefix)
-    ? trimmed.slice(prefix.length)
-    : trimmed;
+    .map(([, scope]) => qualifyScope(scope));
 }

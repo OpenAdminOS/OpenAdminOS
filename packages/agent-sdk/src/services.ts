@@ -548,3 +548,190 @@ export function requestedScopes(partIds: readonly string[]): ServiceScope[] {
   }
   return [...byKey.values()];
 }
+
+export const GRAPH_RESOURCE_PREFIX = "https://graph.microsoft.com/";
+
+/** Reserved OpenID Connect scopes. They are not Graph permissions. */
+export const OIDC_SCOPES: ReadonlySet<string> = new Set(["openid", "profile", "offline_access"]);
+
+const AUDIENCES: ReadonlySet<string> = new Set<ScopeAudience>(["graph"]);
+
+export interface ParsedScope {
+  audience: ScopeAudience;
+  name: string;
+}
+
+/**
+ * Accepts the stored form (`graph:User.Read.All`), the resource form
+ * (`https://graph.microsoft.com/User.Read.All`) and a bare name, which
+ * means Graph. Scope names never contain `:`, so qualifying twice is a
+ * no-op.
+ */
+export function parseScope(scope: string): ParsedScope {
+  const trimmed = scope.trim();
+  if (trimmed.toLowerCase().startsWith(GRAPH_RESOURCE_PREFIX)) {
+    return { audience: "graph", name: trimmed.slice(GRAPH_RESOURCE_PREFIX.length) };
+  }
+  const separator = trimmed.indexOf(":");
+  if (separator > 0 && AUDIENCES.has(trimmed.slice(0, separator))) {
+    return {
+      audience: trimmed.slice(0, separator) as ScopeAudience,
+      name: trimmed.slice(separator + 1),
+    };
+  }
+  return { audience: "graph", name: trimmed };
+}
+
+/** The stored form of a scope, for example `graph:User.Read.All`. */
+export function qualifyScope(scope: string): string {
+  const parsed = parseScope(scope);
+  return `${parsed.audience}:${parsed.name}`;
+}
+
+/** The form MSAL requests. OIDC scopes stay bare. */
+export function toResourceScope(scope: string | ParsedScope): string {
+  const parsed = typeof scope === "string" ? parseScope(scope) : scope;
+  if (OIDC_SCOPES.has(parsed.name)) return parsed.name;
+  return `${GRAPH_RESOURCE_PREFIX}${parsed.name}`;
+}
+
+export function toResourceScopes(scopes: readonly (string | ParsedScope)[]): string[] {
+  return scopes.map(toResourceScope);
+}
+
+/** The bare Graph scope name of any accepted form. */
+export function normalizeGraphScopeName(scope: string): string {
+  return parseScope(scope).name;
+}
+
+/**
+ * Union of every requestable part scope. Tenants connected before grants
+ * were recorded, and the sample tenant, count as having all of these.
+ * `Directory.Read.All` is not among them.
+ */
+export const DEFAULT_GRAPH_READ_SCOPE_NAMES: readonly string[] = [
+  ...new Set(SERVICE_PARTS.flatMap((part) => part.scopes.map((scope) => scope.name))),
+];
+
+interface GrantSource {
+  kind?: "sample";
+  grantedScopes?: readonly string[];
+}
+
+/** Bare scope names granted for one audience. */
+export function grantedScopeSet(
+  input: GrantSource,
+  audience: ScopeAudience = "graph",
+): Set<string> {
+  if (input.kind === "sample" || input.grantedScopes === undefined) {
+    return new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES);
+  }
+  const granted = new Set<string>();
+  for (const entry of input.grantedScopes) {
+    const parsed = parseScope(entry);
+    if (parsed.audience === audience) granted.add(parsed.name);
+  }
+  return granted;
+}
+
+function partIsGranted(part: ServicePart, input: GrantSource): boolean {
+  const granted = grantedScopeSet(input, "graph");
+  return part.scopes.every((scope) => scope.audience !== "graph" || granted.has(scope.name));
+}
+
+/** Requestable parts whose every scope is granted. */
+export function grantedParts(input: GrantSource): ServicePart[] {
+  return SERVICE_PARTS.filter((part) => partIsGranted(part, input));
+}
+
+export type ServiceConnectionStatus = "connected" | "partial" | "missing";
+
+export function serviceStatus(input: GrantSource, serviceId: ServiceId): ServiceConnectionStatus {
+  const parts = SERVICE_PARTS.filter((part) => part.service === serviceId);
+  const granted = parts.filter((part) => partIsGranted(part, input)).length;
+  if (parts.length > 0 && granted === parts.length) return "connected";
+  return granted > 0 ? "partial" : "missing";
+}
+
+/**
+ * The first requestable part that lists the scope. A scope shared by
+ * several services resolves to a part of a preferred service when one
+ * lists it.
+ */
+export function partForScope(
+  scope: string,
+  preferredServices: readonly ServiceId[] = [],
+): ServicePart | undefined {
+  const name = normalizeGraphScopeName(scope);
+  const owners = SERVICE_PARTS.filter((part) => part.scopes.some((entry) => entry.name === name));
+  return owners.find((part) => preferredServices.includes(part.service)) ?? owners[0];
+}
+
+/** The service that owns a part scope or an agent-only scope. */
+export function serviceForScope(
+  scope: string,
+  preferredServices: readonly ServiceId[] = [],
+): ServiceDefinition | undefined {
+  const part = partForScope(scope, preferredServices);
+  if (part) return serviceById(part.service);
+  const name = normalizeGraphScopeName(scope);
+  return AVAILABLE_SERVICES.find((service) =>
+    service.agentOnlyScopes.some((entry) => entry.name === name),
+  );
+}
+
+/** A part named with its service, for example "Entra sign-in logs". */
+export function partLabel(part: ServicePart): string {
+  // Titles with a proper noun inside, such as "Secure Score", keep their case.
+  const title = /[A-Z]/.test(part.title.slice(1))
+    ? part.title
+    : `${part.title.charAt(0).toLowerCase()}${part.title.slice(1)}`;
+  return `${serviceById(part.service).title} ${title}`;
+}
+
+/** Parts that would grant the ungranted part scopes in `scopes`. */
+export function missingPartsForScopes(
+  scopes: readonly string[],
+  granted: ReadonlySet<string>,
+  preferredServices: readonly ServiceId[] = [],
+): ServicePart[] {
+  const missing = new Set<string>();
+  for (const scope of scopes) {
+    const name = normalizeGraphScopeName(scope);
+    if (granted.has(name)) continue;
+    const part = partForScope(name, preferredServices);
+    if (part) missing.add(part.id);
+  }
+  return SERVICE_PARTS.filter((part) => missing.has(part.id));
+}
+
+/** Qualified grants after adding `additions` to the current grants. */
+export function mergeGrantedScopes(
+  current: GrantSource,
+  additions: readonly string[],
+): string[] {
+  const merged = new Set(
+    current.kind === "sample" || current.grantedScopes === undefined
+      ? DEFAULT_GRAPH_READ_SCOPE_NAMES.map(qualifyScope)
+      : current.grantedScopes.map(qualifyScope),
+  );
+  for (const scope of additions) merged.add(qualifyScope(scope));
+  const defaults = DEFAULT_GRAPH_READ_SCOPE_NAMES.map(qualifyScope).filter((scope) =>
+    merged.delete(scope),
+  );
+  return [...defaults, ...[...merged].sort((left, right) => left.localeCompare(right))];
+}
+
+/**
+ * Qualified grants from the scopes a token carries. OIDC scopes and
+ * `.default` are never recorded: they are not permissions.
+ */
+export function grantsFromTokenScopes(scopes: readonly string[] | null | undefined): string[] {
+  const grants = new Set<string>();
+  for (const scope of scopes ?? []) {
+    const parsed = parseScope(scope);
+    if (!parsed.name || parsed.name === ".default" || OIDC_SCOPES.has(parsed.name)) continue;
+    grants.add(`${parsed.audience}:${parsed.name}`);
+  }
+  return [...grants];
+}
