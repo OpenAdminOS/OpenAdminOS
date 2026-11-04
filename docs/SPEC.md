@@ -1619,7 +1619,7 @@ resources. Completed assistant messages include a source-details disclosure for
 each used Graph resource with cache/live status, row count, page count, cap
 status, refresh time, Graph path, selected fields, query parameters, and safe
 error text where available. The disclosure is collapsed by default behind
-"How I checked"; tenant cache source rows are not repeated under the answer.
+the step summary row; tenant cache source rows are not repeated under the answer.
 Sources list only resources the answer actually
 read: investigative answers derive them from the executed tool trace,
 deterministic answers from the planned resources their answer pack was built

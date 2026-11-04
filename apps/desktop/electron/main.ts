@@ -1993,11 +1993,24 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     responseCount = expectedResponseCount;
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
-  await clickSummary("How I checked");
+  // The step summary row under an answer expands to the step timeline and,
+  // below it, the tenant sources with their Graph paths.
+  const findStepSummary = (): HTMLButtonElement | undefined =>
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button[aria-controls][aria-expanded]"),
+    ).find((button) => /\b\d+ steps?\b/.test(button.textContent ?? ""));
+  await waitFor(() => Boolean(findStepSummary()), "answer step summary");
+  findStepSummary()?.click();
+  await waitFor(
+    () => findStepSummary()?.getAttribute("aria-expanded") === "true",
+    "expanded answer step summary",
+  );
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
   );
+  // Read here: the expansion does not survive switching conversations.
+  const sawSourceDetails = bodyText().includes("/deviceManagement/managedDevices");
   // The agent suggestion card lives in the write-intent conversation; switch
   // to it for the details assertions, then return to the read conversation.
   await clickButton("Always retire stale Windows devices");
@@ -2118,7 +2131,6 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const sawAnswer = bodyText().includes("WIN-01 is stale");
   const sawConversationLifecycle =
     bodyText().includes("Smoke lifecycle review") && sawUnpinAction;
-  const sawSourceDetails = bodyText().includes("/deviceManagement/managedDevices");
   const sawEditResend = (() => {
     const textarea = document.querySelector("textarea");
     return textarea instanceof HTMLTextAreaElement &&

@@ -4426,7 +4426,7 @@ function AnswerSources({
 }: {
   trace: IntuneChatToolTraceEntry[];
 }) {
-  // Tenant cache sources already live behind "How I checked" above the
+  // Tenant cache sources already live behind the step summary row of the
   // answer. Repeating every cache row count under the answer makes a
   // simple response look like a diagnostics dump, so only public web
   // citations stay visible here.
