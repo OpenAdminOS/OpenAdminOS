@@ -148,6 +148,12 @@ export interface RunAgenticChatInput {
    * tenant or mixed and before each tenant tool; it runs the refresh once.
    */
   ensureTenantData?: () => Promise<void>;
+  /**
+   * The question carries no admin intent ("hi", "thanks"), so a prose
+   * answer needs no tenant evidence. Every other tenant or mixed answer
+   * does, also when the planner found no resources in the question.
+   */
+  smallTalk?: boolean;
   /** MCP servers the answer must call before it finishes. */
   requiredServerIds?: readonly string[];
   /**
@@ -373,7 +379,7 @@ export async function runAgenticChat(
       turns.push({ role: "repair", content: `Call ${names.join(" and ")} before answering: it is the source chosen for this question. Its tools are ${tools.join(", ")}. Send only a standalone public question.` });
       continue;
     }
-    if (action.kind === "final" && !docsOnly && input.plannedResources.length > 0 && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
+    if (action.kind === "final" && !docsOnly && !input.smallTalk && evidenceToolCalls === 0 && webSearchAttempts === 0 && invalidQueries.size === 0) {
       noEvidenceCount += 1;
       if (noEvidenceCount > MAX_NO_EVIDENCE_RETRIES) {
         return {
@@ -390,7 +396,7 @@ export async function runAgenticChat(
         content: [
           "That answer used no tenant evidence. The tenant query tools are available in this session: they run on the host when you request them with the JSON protocol. Tenant rows are not in this prompt and documentation does not describe this tenant.",
           "Call a tool now with exactly one fenced JSON block, for example:",
-          '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":25}}\n```',
+          evidenceExample(input.plannedResources[0]),
         ].join("\n"),
       });
       continue;
@@ -516,6 +522,13 @@ export async function runAgenticChat(
     iterations: MAX_AGENTIC_ITERATIONS,
     ...(responseModel ? { model: responseModel } : {}),
   };
+}
+
+/** A tool call that reads tenant evidence: the first planned resource, or the cache inventory to choose one from. */
+function evidenceExample(resource: GraphCacheResourceKind | undefined): string {
+  return resource
+    ? `\`\`\`json\n${JSON.stringify({ tool: "query_cache", params: { resource, limit: 25 } })}\n\`\`\``
+    : '```json\n{"tool":"list_cached_resources","params":{}}\n```\nThen query the resource that answers the question with query_cache, or read it with graph_get.';
 }
 
 interface LoopPassage extends DocsIndexPassage {

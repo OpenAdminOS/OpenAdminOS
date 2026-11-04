@@ -374,17 +374,40 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
-  it("still allows a prose final when no tenant data was planned", async () => {
+  it("still allows a prose final for small talk", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
     try {
       const result = await runAgenticChat({
         ...baseInput(store, scriptedLlm(["Hello. What would you like to check?"])),
+        question: "hi",
         plannedResources: [],
+        smallTalk: true,
       });
       assert.equal(result.ok, true);
       assert.equal(result.answer, "Hello. What would you like to check?");
       assert.equal(result.toolTrace.length, 0);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires tenant evidence for a tenant or mixed answer when the planner found no resources", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      for (const questionKind of ["tenant", "mixed"] as const) {
+        const prompts: string[] = [];
+        const llm = scriptedLlm(["There are 12 of them.", '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```', '```json\n{"final":true,"answer":"Checked."}\n```']);
+        const complete = llm.complete.bind(llm);
+        llm.complete = async (options) => { prompts.push(options.prompt); return complete(options); };
+        const result = await runAgenticChat({ ...baseInput(store, llm), question: "How are we doing on the rollout?", plannedResources: [], questionKind });
+        assert.equal(result.ok, true, questionKind);
+        assert.match(prompts[1]!, /That answer used no tenant evidence/, questionKind);
+        assert.match(prompts[1]!, /"tool":"list_cached_resources"/, questionKind);
+        assert.deepEqual(result.toolTrace.map((entry) => entry.tool), ["query_cache"], questionKind);
+      }
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
