@@ -861,6 +861,28 @@ describe("answer prompt", () => {
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
+  it("keeps a short hosted provider disclosure for spoken Nova answers, which have no step summary", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-voice-"));
+    const store = seededStore(dir);
+    try {
+      const systems: string[] = [];
+      const llm: RunLlmApi = {
+        available: true,
+        async complete(options) {
+          systems.push(options.system ?? "");
+          return { text: systems.length === 1 ? '{"tool":"query_cache","params":{"resource":"managedDevices"}}' : '{"final":true,"answer":"Done."}', model: "m" };
+        },
+        async *stream() {},
+      };
+      await runAgenticChat({ ...baseInput(store, llm), providerId: "openai", providerIsLocal: false, voice: true });
+      assert.match(systems[0]!, /The reasoning provider is hosted\. When the answer uses tenant data, say once, briefly, that tenant context went to the provider\./);
+      assert.doesNotMatch(systems[0]!, /Do not describe your sources/);
+      systems.length = 0;
+      await runAgenticChat({ ...baseInput(store, llm), providerIsLocal: true, voice: true });
+      assert.doesNotMatch(systems[0]!, /reasoning provider is hosted/);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("asks for follow-ups the listed tools can answer, in the docs and the tenant protocol", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-next-"));
     const store = seededStore(dir);

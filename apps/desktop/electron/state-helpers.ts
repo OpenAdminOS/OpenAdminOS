@@ -1036,7 +1036,14 @@ export function intuneChatProviderBudget(providerId: ProviderId): IntuneChatProv
  */
 export const ANSWER_META_RULE = "Do not describe your sources, the model provider or whether the tenant was checked: the interface shows them. Do state limits of the content itself, for example that the device records do not show Defender status.";
 
-export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicResearch = false): string {
+/**
+ * Spoken Nova answers have no step summary, and while a session runs Nova
+ * does not show the reasoning provider, so a hosted provider is still
+ * named in the answer there.
+ */
+export const VOICE_HOSTED_DISCLOSURE = "The reasoning provider is hosted. When the answer uses tenant data, say once, briefly, that tenant context went to the provider.";
+
+export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicResearch = false, voice = false): string {
   return [
     "You are OpenAdminOS Chat.",
     TENANT_DATA_INSTRUCTIONS,
@@ -1052,8 +1059,8 @@ export function buildIntuneChatSystemPrompt(isLocalProvider: boolean, publicRese
     isLocalProvider && publicResearch
       ? "Reasoning is local, but this hosted Nova session shares audio, answers and public research queries with OpenAI under explicit session consent."
       : "",
-    // The interface shows the sources, the provider and the tenant checks; answers that repeated them read as filler.
-    ANSWER_META_RULE,
+    // Chat shows the sources, the provider and the tenant checks; answers that repeated them read as filler.
+    voice ? (isLocalProvider ? "" : VOICE_HOSTED_DISCLOSURE) : ANSWER_META_RULE,
     "Use concise admin-facing prose. No hype, no exclamation marks.",
   ].filter(Boolean).join("\n");
 }

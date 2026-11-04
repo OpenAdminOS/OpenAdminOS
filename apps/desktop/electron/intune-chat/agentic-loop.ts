@@ -688,7 +688,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
   const servers = input.tools.mcp?.servers ?? [];
   const missing = servers.filter((server) => missingSourceIds.includes(server.id)).map((server) => server.name);
   return [
-    buildIntuneChatSystemPrompt(input.providerIsLocal, Boolean(input.tools.webSearch)),
+    buildIntuneChatSystemPrompt(input.providerIsLocal, Boolean(input.tools.webSearch), Boolean(input.voice)),
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
     docsOnly
