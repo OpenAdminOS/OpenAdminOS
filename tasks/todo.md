@@ -1097,3 +1097,12 @@ Verification: typecheck, electron 774 pass, renderer (Node 22) 398 pass in 53 fi
   - The lab checks: `.default` delegated sign-in with an own registration, the Defender alerts, incidents and Secure Score endpoints with a permissioned connection, and the extend script's PATCH writes.
   - The `TODO(ugur)` decisions in code.
   - Approval to push the two PR #162 fixes (b8f79f4, af761fd) and to open the stacked PR.
+
+## PR 167 review
+
+| # | Severity | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| 1 | Blocking | About 11 tier probe tests were cancelled on Node 22 because the tenant check deadline in `runTenantCheck` used an unreferenced timer, so a process with nothing else pending exited before it fired. | The deadline is a referenced timer started right before the operation runs and cleared in its finally block on success, failure, cancel and supersede, as `entra-tier.ts` already does since 42e07c6. No other deadline timer was added unreferenced by this PR; the remaining `AbortSignal.timeout` and `.unref()` uses predate it. `tier-probe-warning.test.ts` on Node 22: 35 pass, 0 cancelled (was 24 pass, 11 cancelled). | `c1b3884` |
+| 2 | Should fix | The Changes permission filter only affected status rows; the timeline and comparisons still read snapshots of a service that is no longer connected as current. | Timeline, baseline drift, new baselines, time, bundle and cross-tenant compare, rollback plans and fleet counts apply the part-level `availableScopeSet` rule and return `omittedResources`. Changes and Fleet name the service ("Intune is not connected. Its earlier snapshots are not compared."), and entry detail from those snapshots is labelled "Historical snapshot, no longer refreshed." Tests: an Entra-only fixture requesting deviceConfigurations gets no current comparison and a visible omission; renderer tests for the timeline notice, the compare notice and the historical label. | `7d8a3ee`, `fa4b7fe` |
+
+Verification on Node 22: electron 796 pass, renderer 407 pass in 53 files, runtime 255 pass and 2 skipped, test:scripts 18 pass, `npm run qa` 197 pass, 4 warn, 0 fail, typecheck and docs:check clean.
