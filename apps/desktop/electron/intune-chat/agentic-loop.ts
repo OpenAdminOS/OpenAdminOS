@@ -588,7 +588,8 @@ export async function runAgenticChat(
         fallbackPending = false;
         const reason = mcpSource.blocked ? "the Microsoft Learn query was blocked"
           : learnEmpty ? "Microsoft Learn returned nothing"
-            : "Microsoft Learn did not answer";
+            : !mcpSource.sentToHost ? "no Microsoft Learn query was sent"
+              : "Microsoft Learn did not answer";
         const fallback = await input.documentationFallback(reason);
         addDocumentation(fallback);
         const lead = `${reason[0]!.toUpperCase()}${reason.slice(1)}.`;

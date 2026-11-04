@@ -373,8 +373,9 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneC
     if (blocked) {
       return { status: "blocked", title: `Blocked a ${serverName} query`, detail: `${entry.error ?? "The query held tenant data."}`, sent: undefined, durationMs };
     }
-    // A call that failed before sending (bad params, the query writer, the cache index) sent nothing.
-    if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs, ...(entry.mcpSource.sentToHost ? {} : { sent: undefined }) };
+    // A call that stopped before sending (bad params, the query writer, the cache index, a server turned off) sent nothing.
+    if (entry.error && !entry.mcpSource.sentToHost) return { status: "failed", title: `Did not send a ${serverName} query`, detail: `${tool} · ${entry.error}`, sent: undefined, durationMs };
+    if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs };
     const count = results?.length ?? 0;
     return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? `${count} ${count === 1 ? "result" : "results"}` : `answer from ${host}`}`, durationMs };
   }

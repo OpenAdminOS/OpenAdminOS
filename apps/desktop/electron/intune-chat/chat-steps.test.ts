@@ -373,8 +373,10 @@ describe("source labels and steps", () => {
     const failure = { id: "t", tool: learnTool.name, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "", error: "params must be an object." };
     const notSent = toolStepFinish({ ...failure, mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", sentToHost: false } });
     assert.ok("sent" in notSent && notSent.sent === undefined, "a call that failed before sending clears its sent text");
+    assert.deepEqual([notSent.status, notSent.title, notSent.detail], ["failed", "Did not send a Microsoft Learn query", "microsoft_docs_search · params must be an object."]);
     const reached = toolStepFinish({ ...failure, mcpSource: { serverId: learn.id, serverName: learn.name, host: learn.host, tool: "microsoft_docs_search", sentToHost: true } });
     assert.equal("sent" in reached, false, "a call that reached the host keeps its sent text");
+    assert.equal(reached.title, "Could not reach Microsoft Learn");
   });
 });
 
@@ -533,6 +535,26 @@ describe("agentic loop sources", () => {
       assert.match(prompts[1]!.prompt, /\[1\] Deploy on macOS - defender\/mac-install\.md/);
       assert.match(prompts[1]!.prompt, /Microsoft Learn did not answer/);
       assert.deepEqual(result.documentationSources?.map((source) => [source.citation, source.kind, source.file]), [[1, "docs-index", "defender/mac-install.md"]]);
+    });
+  });
+
+  it("says no Learn query was sent when the call stopped before sending, and falls back to the local index", async () => {
+    await withStore(async (store) => {
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const calls: unknown[] = [];
+      // The written params name a param the schema does not declare, so nothing is sent.
+      const result = await runAgenticChat(loopInput(store, scripted([JSON.stringify({ tool: learnTool.name, params: { q: "Defender" } }), '{"final":true,"answer":"The local docs index says so [1]."}'], prompts),
+        learnContext(async (_tool, args) => { calls.push(args); return { text: "", truncated: false }; }), {
+          questionKind: "docs",
+          requiredServerIds: ["microsoft-learn"],
+          documentationFallback: async (reason) => [{ file: "defender/mac-install.md", title: `Deploy on macOS (${reason})`, text: "Grant full disk access." }],
+        }));
+      assert.equal(calls.length, 0);
+      assert.equal(result.toolTrace[0]!.mcpSource?.sentToHost, false);
+      assert.match(prompts[1]!.prompt, /No Microsoft Learn query was sent\. Passages from the local docs index are now in the prompt/);
+      assert.doesNotMatch(prompts[1]!.prompt, /Microsoft Learn did not answer/);
+      assert.match(prompts[1]!.prompt, /Deploy on macOS \(no Microsoft Learn query was sent\)/);
+      assert.deepEqual(toolStepFinish(result.toolTrace[0]!).title, "Did not send a Microsoft Learn query");
     });
   });
 
