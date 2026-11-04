@@ -21,6 +21,7 @@ import {
   validFollowUps,
   mergeFollowUps,
   nearDuplicateFollowUp,
+  sourceExcerpt,
 } from "./chat-steps.js";
 import { classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -526,5 +527,27 @@ describe("agentic loop sources", () => {
       assert.match(prompts[2]!.prompt, /That answer used no tenant evidence/);
       assert.deepEqual(result.toolTrace.map((entry) => entry.tool), [learnTool.name, "query_cache"]);
     });
+  });
+});
+
+describe("source excerpts", () => {
+  it("keeps the start of a passage as plain text, cut at a word", () => {
+    assert.equal(sourceExcerpt("## Prerequisites\n\n- Grant **full disk access** to [Defender](https://learn.microsoft.com/x).\n```bash\nsudo x\n```"), "Prerequisites Grant full disk access to Defender.");
+    const long = sourceExcerpt(`${"word ".repeat(100)}end`)!;
+    assert.ok(long.length <= 323 && long.endsWith("..."), long);
+    assert.doesNotMatch(long, /\s\.\.\.$/);
+    assert.equal(sourceExcerpt("   "), undefined);
+    assert.equal(sourceExcerpt(undefined), undefined);
+  });
+
+  it("stores the excerpt the model read with each numbered source, the first chunk for a merged article", () => {
+    const registry = new CitationRegistry();
+    registry.addPassages([{ file: "intune/compliance.md", title: "Compliance", text: "Compliance policies mark a device." }]);
+    registry.addMcpResults([
+      { title: "Defender on Mac", url: "https://learn.microsoft.com/mac#a", excerpt: "Grant full disk access." },
+      { title: "Defender on Mac", url: "https://learn.microsoft.com/mac#b", excerpt: "A later chunk." },
+      { title: "No excerpt", url: "https://learn.microsoft.com/other" },
+    ], learnTool);
+    assert.deepEqual(registry.sources.map((source) => source.excerpt), ["Compliance policies mark a device.", "Grant full disk access.", undefined]);
   });
 });

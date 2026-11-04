@@ -23,6 +23,32 @@ export interface DocsIndexPassage {
   indexVersion?: string;
 }
 
+const EXCERPT_CHARS = 320;
+
+/**
+ * The start of a passage as plain text, for the popover of a citation
+ * chip: Markdown markers, links and code fences removed, whitespace
+ * collapsed, cut at a word near 320 characters.
+ */
+export function sourceExcerpt(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const plain = text
+    .replace(/```[\s\S]*?(?:```|$)/g, " ")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/^\s{0,3}#{1,6}\s+/gm, "")
+    .replace(/^\s*(?:[-*+]|\d+\.)\s+/gm, "")
+    .replace(/[*_`>|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!plain) return undefined;
+  if (plain.length <= EXCERPT_CHARS) return plain;
+  const cut = plain.slice(0, EXCERPT_CHARS);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > EXCERPT_CHARS * 0.6 ? cut.slice(0, space) : cut).replace(/[\s,;:.]+$/, "")}...`;
+}
+
 /**
  * Records the timeline of one answer. Steps are appended in the order they
  * start and never move, live or stored. Every change hands the full list
@@ -237,25 +263,31 @@ export class CitationRegistry {
   }
 
   addPassages(passages: readonly DocsIndexPassage[]): number[] {
-    return passages.map((passage) => this.push({
-      kind: "docs-index",
-      title: passage.title?.trim() || passage.file,
-      file: passage.file,
-      ...(passage.indexVersion ? { indexVersion: passage.indexVersion } : {}),
-    }));
+    return passages.map((passage) => {
+      const excerpt = sourceExcerpt(passage.text);
+      return this.push({
+        kind: "docs-index",
+        title: passage.title?.trim() || passage.file,
+        file: passage.file,
+        ...(passage.indexVersion ? { indexVersion: passage.indexVersion } : {}),
+        ...(excerpt ? { excerpt } : {}),
+      });
+    });
   }
 
-  addMcpResults(results: ReadonlyArray<{ title: string; url?: string }>, tool: Pick<McpChatTool, "serverName" | "host">): Array<{ cite: string; title: string; url?: string }> {
+  addMcpResults(results: ReadonlyArray<{ title: string; url?: string; excerpt?: string }>, tool: Pick<McpChatTool, "serverName" | "host">): Array<{ cite: string; title: string; url?: string }> {
     const items = results.length > 0 ? results : [{ title: `${tool.serverName} result` }];
-    return items.map((item) => {
+    return items.map((item: { title: string; url?: string; excerpt?: string }) => {
       // Chunks of one article (other fragment, locale segment or trailing slash) share its number.
       const existing = item.url ? this.list.find((source) => source.url && normalizeSourceUrl(source.url) === normalizeSourceUrl(item.url!)) : undefined;
+      const excerpt = sourceExcerpt(item.excerpt);
       const citation = existing?.citation ?? this.push({
         kind: "mcp",
         title: item.title,
         ...(item.url ? { url: item.url } : {}),
         serverName: tool.serverName,
         host: tool.host,
+        ...(excerpt ? { excerpt } : {}),
       });
       return { cite: `[${citation}]`, title: item.title, ...(item.url ? { url: item.url } : {}) };
     });

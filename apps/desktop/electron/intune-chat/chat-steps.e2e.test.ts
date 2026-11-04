@@ -221,12 +221,16 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       ]);
       assert.match(message.content, /^Microsoft Learn says/);
       assert.deepEqual(message.followUps, ["Show compliance and last sync for our 5 macOS devices", "Which Macs miss the system extension profile?"]);
+      // Both would read tenant data: the tie-in, and a "which" question about our Macs.
+      assert.deepEqual(message.tenantFollowUps, message.followUps);
 
       // A reload shows the same steps, sources and follow-ups.
       const reloaded = (await store.getIntuneChatMessages(result.conversation.id)).at(-1)!;
       assert.deepEqual(reloaded.steps, message.steps);
       assert.deepEqual(reloaded.documentationSources, message.documentationSources);
       assert.deepEqual(reloaded.followUps, message.followUps);
+      assert.deepEqual(reloaded.tenantFollowUps, message.tenantFollowUps);
+      assert.deepEqual(reloaded.documentationSources?.map((source) => source.excerpt), ["Results for Defender for Endpoint on macOS: needs full disk access.", "Three latest macOS releases."]);
       assert.equal(reloaded.questionKind, "docs");
     });
   });

@@ -1016,6 +1016,8 @@ export interface IntuneChatMessage {
   documentationSources?: IntuneChatDocumentationSource[];
   /** Read-only follow-up questions, at most two. Never sent automatically. */
   followUps?: string[];
+  /** The follow-ups that would use tenant data, so a docs answer can say so on its chip. */
+  tenantFollowUps?: string[];
   /**
    * The answer rests on tenant data, such as the cached rows the
    * deterministic path puts in the prompt, even when no tenant tool ran.
@@ -1060,6 +1062,8 @@ export interface IntuneChatDocumentationSource {
   /** Local index passages: the source file and the index version date. */
   file?: string;
   indexVersion?: string;
+  /** The start of the passage the model read under this number, as plain text. */
+  excerpt?: string;
 }
 
 export type IntuneChatInvestigationToolName =

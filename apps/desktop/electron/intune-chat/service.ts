@@ -1949,9 +1949,9 @@ export class IntuneChatService {
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
-    const followUps = answered
+    const { followUps, tenantFollowUps } = answered
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
-      : [];
+      : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
     const assistantMessage: IntuneChatMessage = {
@@ -1968,6 +1968,7 @@ export class IntuneChatService {
       steps: steps.steps,
       ...(documentationSources.length > 0 ? { documentationSources } : {}),
       ...(followUps.length > 0 ? { followUps } : {}),
+      ...(tenantFollowUps.length > 0 ? { tenantFollowUps } : {}),
       ...(tenantContext ? { tenantContext: true } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
@@ -2722,9 +2723,9 @@ export class IntuneChatService {
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
-    const followUps = answerPlan && answered
+    const { followUps, tenantFollowUps } = answerPlan && answered
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
-      : [];
+      : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
     const assistantMessage: IntuneChatMessage = {
@@ -2741,6 +2742,7 @@ export class IntuneChatService {
       steps: steps.steps,
       ...(documentationSources.length > 0 ? { documentationSources } : {}),
       ...(followUps.length > 0 ? { followUps } : {}),
+      ...(tenantFollowUps.length > 0 ? { tenantFollowUps } : {}),
       ...(tenantContext ? { tenantContext: true } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
@@ -2963,7 +2965,7 @@ export class IntuneChatService {
     tenantId: string;
     cacheStatus: readonly GraphCacheResourceStatus[];
     modelFollowUps?: readonly string[];
-  }): string[] {
+  }): { followUps: string[]; tenantFollowUps: string[] } {
     const store = this.host.requireIntelligenceStore();
     const devices = input.cacheStatus.find((status) => status.resource === "managedDevices");
     const tieIn = tenantTieInFollowUp({
@@ -2974,7 +2976,9 @@ export class IntuneChatService {
         ? { deviceCountsByOs: this.graphAggregatesFor(store, input.tenantId, ["managedDevices"]).managedDevices?.breakdowns.operatingSystem ?? {} }
         : {}),
     });
-    return mergeFollowUps([tieIn], input.modelFollowUps ?? []);
+    const followUps = mergeFollowUps([tieIn], input.modelFollowUps ?? []);
+    // The chip of a docs answer says when its follow-up would read tenant data.
+    return { followUps, tenantFollowUps: followUps.filter((text) => text === tieIn || hasTenantReference(text)) };
   }
 
   /** MCP tools for one answer, with the tenant values earlier turns observed. */
