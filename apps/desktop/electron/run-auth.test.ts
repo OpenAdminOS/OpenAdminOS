@@ -200,3 +200,71 @@ it("Chat and cache Graph access never widens consent beyond the tenant's granted
     assert.equal(browserCalls, 0);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });
+
+for (const [label, account] of [
+  ["a different account", { homeAccountId: "other.fabrikam-tenant-id", tenantId: "fabrikam-tenant-id", username: "it@fabrikam.example" }],
+  ["the same account in another directory", { homeAccountId: "home.contoso-tenant-id", tenantId: "fabrikam-tenant-id", username: "admin@contoso.example" }],
+] as const) {
+  it(`Teams and Outlook deliveries reject ${label} before any Graph request`, async () => {
+    const { RunDeliveryService } = await import("./run-delivery.js");
+    const run = { id: "manual", agentSlug: "test", status: "completed", trigger: "manual",
+      queuedAt: new Date().toISOString(), summary: "Test completed", logs: [], steps: [], tenantId: "contoso-tenant-id" } as const;
+    const settings = { enabled: true, notifyOnSuccess: true };
+    const tenant = { id: "contoso-tenant-id", displayName: "Contoso", homeAccountId: "home.contoso-tenant-id",
+      username: "admin@contoso.example", grantedScopes: ["graph:User.Read"] };
+    const writes: unknown[] = [];
+    const signIns: Array<{ loginHint?: string; authority?: string }> = [];
+    const host = {
+      read: async () => ({ installedAgents: [{ id: "test", slug: "test", name: "Test", delivery: {
+        teams: { ...settings, useDefaultTarget: true }, outlook: { ...settings, useDefaultRecipients: true },
+      } }], tenants: [tenant], activeTenantId: tenant.id,
+      connectors: { teams: { config: { defaultTeamId: "team", defaultChannelId: "channel" } },
+        outlook: { config: { defaultRecipients: "test@example.com" } } }, runs: [],
+      }),
+      write: async (state: unknown) => { writes.push(state); },
+      // No cached profile for this directory, so every token comes from
+      // the interactive fallback, which returns the wrong account.
+      msalClientForTenant: () => ({
+        getTokenCache: () => ({ getAllAccounts: async () => [] }),
+        acquireTokenInteractive: async (request: { loginHint?: string; authority?: string }) => {
+          signIns.push({ ...(request.loginHint ? { loginHint: request.loginHint } : {}),
+            ...(request.authority ? { authority: request.authority } : {}) });
+          return { accessToken: "wrong-token", scopes: ["ChannelMessage.Send", "Mail.Send"], account, tenantId: account.tenantId };
+        },
+      }),
+      openBrowser: async () => undefined,
+      connectorSecretsFor: () => ({ get: async () => undefined }),
+      appendRunStep: async () => "step", finishRunStep: async () => undefined, appendRunLog: async () => undefined,
+    };
+    const service = new RunDeliveryService(host as unknown as import("./run-delivery.js").RunDeliveryHost);
+    const internal = service as unknown as {
+      deliverRunToTeams(run: unknown): Promise<{ error?: string; retryable?: boolean }>;
+      deliverRunToOutlook(run: unknown): Promise<{ error?: string; retryable?: boolean }>;
+    };
+    const graphCalls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      graphCalls.push(String(input));
+      return new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+    let teams: { error?: string; retryable?: boolean };
+    let outlook: { error?: string; retryable?: boolean };
+    try {
+      teams = await internal.deliverRunToTeams(run);
+      outlook = await internal.deliverRunToOutlook(run);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+    // The connector's generic token error must not hide the account copy,
+    // and an automatic retry would only open the same sign-in again.
+    assert.match(teams.error ?? "", /^Signed in as .+ Sign in as admin@contoso\.example( to that directory)? and try again\.$/);
+    assert.match(outlook.error ?? "", /^Signed in as .+ Sign in as admin@contoso\.example( to that directory)? and try again\.$/);
+    assert.equal(teams.retryable, false);
+    assert.equal(outlook.retryable, false);
+    assert.ok(signIns.length >= 2);
+    assert.ok(signIns.every((entry) => entry.loginHint === "admin@contoso.example"
+      && entry.authority === "https://login.microsoftonline.com/contoso-tenant-id"));
+    assert.deepEqual(graphCalls, []);
+    assert.deepEqual(writes, []);
+  });
+}
