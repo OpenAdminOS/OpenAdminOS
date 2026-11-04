@@ -106,7 +106,16 @@ async function withHarness(run: (harness: Harness) => Promise<void>): Promise<vo
         prompts.push({ system: options.system ?? "", prompt: options.prompt });
         return { text: replies[Math.min(reply++, replies.length - 1)]!, model: "llama3.1:8b" };
       },
-      async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
+      async *stream(options) {
+        prompts.push({ system: options.system ?? "", prompt: options.prompt });
+        const text = replies[Math.min(reply++, replies.length - 1)]!;
+        let accumulated = "";
+        for (const delta of text.split(/(?<= )/)) {
+          accumulated += delta;
+          yield { delta, accumulated, done: false, model: "llama3.1:8b" };
+        }
+        yield { delta: "", accumulated, done: true, model: "llama3.1:8b" };
+      },
     }),
   });
   try {
@@ -123,7 +132,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>): Promise<vo
     });
     await run({
       store, cache, graphPaths, prompts,
-      script(next) { replies = next.map((item) => JSON.stringify(item)); reply = 0; prompts.length = 0; graphPaths.length = 0; },
+      script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; graphPaths.length = 0; },
     });
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 }
@@ -238,6 +247,19 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.equal(tenantAnswer.tenantContext, true);
       const reloaded = (await store.getIntuneChatMessages(tenantAnswer.conversationId)).at(-1)!;
       assert.equal(reloaded.tenantContext, true);
+    });
+  });
+
+  it("streams the same relabelled text that it stores", async () => {
+    await withHarness(async ({ store, script }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      script(["Microsoft Learn says Defender for Endpoint on macOS needs full disk access."]);
+      const deltas: string[] = [];
+      const result = await store.streamIntuneChatMessage({ content: DOCS_QUESTION }, (event) => { if (event.type === "delta") deltas.push(event.content); });
+      assert.ok(deltas.length > 3);
+      assert.ok(deltas.every((content) => !/Microsoft Learn says/.test(content)), "no live delta attributes text to Learn");
+      assert.equal(deltas.at(-1), "The Microsoft documentation says Defender for Endpoint on macOS needs full disk access.");
+      assert.equal(result.assistantMessage.content, deltas.at(-1));
     });
   });
 

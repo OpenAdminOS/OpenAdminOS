@@ -2424,9 +2424,10 @@ export class IntuneChatService {
           }
           responseModel = chunk.model;
           assistantContent = chunk.accumulated;
-          emitDelta(assistantContent, chunk.delta);
+          // No Learn call runs on this path, so the live text is relabelled the same way as the stored one.
+          emitDelta(relabelUnverifiedLearn(assistantContent, false), chunk.delta);
         }
-        assistantContent = assistantContent.trim();
+        assistantContent = relabelUnverifiedLearn(assistantContent.trim(), false);
         emitDelta(assistantContent, "");
         finishAnswerStep({ passages: documentation.length, tenantContext: planned.resources.length > 0, failed: isCancelled() });
       };
