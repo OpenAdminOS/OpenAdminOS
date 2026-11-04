@@ -220,10 +220,10 @@ function InstallReview({
           No sign-in needed. This server is public and asks for no account, key or token.
         </Step>
         <Step icon={<IconCloud size={16} />} title="Where queries go" warning>
-          Tool queries the model writes go to <code className="font-mono text-xs">{server.host}</code>. The status strip names this host while the server is on.
+          Tool queries go to <code className="font-mono text-xs">{server.host}</code>. Each query is written from your current question only, never from Graph or cache data. The status strip names this host while the server is on.
         </Step>
         <Step icon={<IconShield size={16} />} title="What is sent">
-          The model is told to send only public questions. Known tenant values, email addresses and IDs are blocked before sending. This filter is a safety net, not a guarantee. Answers are passed to the model as reference material, not instructions.
+          Words from your question can be sent to {server.host}. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail. Every query is shown in its Chat step. Answers are passed to the model as reference material, not instructions.
         </Step>
         <Step icon={<IconHardDrive size={16} />} title="Tenant access">
           None. The server cannot read or change your tenant.
@@ -232,7 +232,7 @@ function InstallReview({
       {toolUse?.available === false && toolUse.notice ? <ToolUseNotice notice={toolUse.notice} /> : null}
       <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-sm text-[var(--color-text-soft)]">
         <input type="checkbox" className="mt-0.5" checked={acknowledged} disabled={busy} onChange={(event) => onAcknowledge(event.target.checked)} />
-        I reviewed where {server.name} sends tool queries.
+        I understand that words from my question can be sent to {server.host}.
       </label>
       {busy ? (
         <p role="status" className="text-sm text-[var(--color-text-muted)]">Connecting to {server.host} and listing its tools.</p>
@@ -249,17 +249,17 @@ function QueryFlow({ host }: { host: string }) {
     <div className="grid gap-2 md:grid-cols-[minmax(0,1fr)_28px_minmax(0,1fr)_28px_minmax(0,1fr)]">
       <div className={node}>
         <b className="text-sm font-medium text-[var(--color-text)]">Chat on this device</b>
-        <span className="text-xs text-[var(--color-text-muted)]">The model writes a public question</span>
+        <span className="text-xs text-[var(--color-text-muted)]">A query is written from your current question</span>
       </div>
       <div className={edge} aria-hidden="true">→</div>
       <div className={node}>
         <b className="text-sm font-medium text-[var(--color-text)]">OpenAdminOS on this device</b>
-        <span className="text-xs text-[var(--color-text-muted)]">Known tenant values, email addresses and IDs are blocked before sending</span>
+        <span className="text-xs text-[var(--color-text-muted)]">Known tenant names, IDs, email and IP addresses are blocked before sending</span>
       </div>
       <div className={`${edge} text-[var(--color-warning)]`} aria-hidden="true">→</div>
       <div className={`${node} bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/35`}>
         <b className="break-all text-sm font-medium text-[var(--color-text)]">{host}</b>
-        <span className="text-xs text-[var(--color-text-muted)]">Receives the question text</span>
+        <span className="text-xs text-[var(--color-text-muted)]">Receives the query text</span>
       </div>
     </div>
   );

@@ -63,15 +63,17 @@ describe("v0.4 copy catalog", () => {
     const local = deriveTrustCopy({ provider: { name: "Ollama", isLocal: true }, scope: { tenantNames: ["Contoso"] }, toolHosts: hosts });
     expect(local.strip).toBe("local model · tool queries to learn.microsoft.com +2");
     expect(local.strip).not.toMatch(/no data leaves/);
-    expect(local.toolHosts?.detail).toBe(
-      "MCP tool queries the model writes go to learn.microsoft.com, www.kqlsearch.com and www.intuneautomation.com. The model is told to send only public questions, never tenant names, IDs or tenant data.",
-    );
-    expect(local.toolHosts?.composer).toBe("MCP tool queries go to learn.microsoft.com, www.kqlsearch.com and www.intuneautomation.com.");
+    const disclosure = "MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com, www.kqlsearch.com and www.intuneautomation.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.";
+    expect(local.toolHosts?.detail).toBe(disclosure);
+    expect(local.toolHosts?.composer).toBe(disclosure);
+    // With MCP tools on, a local model no longer claims that prompts stay on the device.
+    expect(local.storage).toBe("The model, Graph and cache data, and chat history stay on this device.");
+    expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true } }).storage).toBe("Tenant data, prompts, and chat history stay on this device.");
     const hosted = deriveTrustCopy({ provider: { name: "Anthropic", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
     expect(hosted.strip).toBe("hosted · tenant context sent to Anthropic · tool queries to learn.microsoft.com");
     expect(deriveToolHostsCopy([])).toBeUndefined();
     expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true }, toolHosts: [] }).strip).toBe("local-only · no data leaves this device");
-    for (const value of stringsIn(local.toolHosts)) {
+    for (const value of [...stringsIn(local.toolHosts), local.storage]) {
       expect(value).not.toMatch(/[!\u2014\u2013]| - /u);
     }
   });

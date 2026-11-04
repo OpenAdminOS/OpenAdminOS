@@ -16,18 +16,24 @@ export interface TrustCopyInput {
   model?: string;
   scope?: TrustScope;
   attachments?: TrustAttachments;
-  /** Hosts of enabled MCP servers that receive the tool queries the model writes. */
+  /** Hosts of enabled MCP servers that receive tool queries written from the admin's current question. */
   toolHosts?: readonly string[];
 }
 
 export interface ToolHostsCopy {
   /** Short status strip segment, for example "tool queries to learn.microsoft.com +2". */
   strip: string;
-  /** Tooltip sentence naming every host. */
+  /** Tooltip sentences naming every host. */
   detail: string;
   /** Composer line naming every host. */
   composer: string;
 }
+
+/** The local composer line. With MCP tools on, only the model and the tenant data stay local: words from the question can leave. */
+export const LOCAL_BOUNDARY_COPY = {
+  plain: "Local model. Tenant data stays on this device.",
+  withTools: "Local model. Graph and cache data stay on this device.",
+} as const;
 
 export interface DerivedTrustCopy {
   strip: string;
@@ -45,17 +51,20 @@ function listHosts(hosts: readonly string[]): string {
 }
 
 /**
- * Names the third-party hosts that receive MCP tool queries. Shown with
- * local providers too: the queries leave the device even when the model
- * does not.
+ * Names the third-party hosts that receive MCP tool queries, and says
+ * plainly what can reach them. Shown with local providers too: the queries
+ * leave the device even when the model does not. A query is written from
+ * the admin's current question only, so the admin's own words can reach
+ * the host; the egress filter is best effort.
  */
 export function deriveToolHostsCopy(hosts: readonly string[] | undefined): ToolHostsCopy | undefined {
   const unique = [...new Set(hosts ?? [])].filter(Boolean);
   if (unique.length === 0) return undefined;
+  const disclosure = `MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to ${listHosts(unique)}. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.`;
   return {
     strip: `tool queries to ${unique[0]}${unique.length > 1 ? ` +${unique.length - 1}` : ""}`,
-    detail: `MCP tool queries the model writes go to ${listHosts(unique)}. The model is told to send only public questions, never tenant names, IDs or tenant data.`,
-    composer: `MCP tool queries go to ${listHosts(unique)}.`,
+    detail: disclosure,
+    composer: disclosure,
   };
 }
 
@@ -107,7 +116,9 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
         : {}),
       confirmTitle: "Process tenant context on this device",
       confirmBody: `${providerName}${modelDetail} will process context from ${scope} locally${attachments ? `, including ${attachments}` : ""}.`,
-      storage: "Tenant data, prompts, and chat history stay on this device.",
+      storage: toolHosts
+        ? "The model, Graph and cache data, and chat history stay on this device."
+        : "Tenant data, prompts, and chat history stay on this device.",
       isLocal: true,
     };
   }

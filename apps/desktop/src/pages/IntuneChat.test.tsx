@@ -711,6 +711,23 @@ describe("IntuneChat hosted-provider disclosure", () => {
     expect(screen.getByRole("note")).toHaveTextContent(sentence);
     expect(screen.getByRole("button", { name: "Where data goes" })).toHaveAttribute("aria-expanded", "true");
   });
+  it("adds the MCP disclosure to the hosted sentence and the shield tooltip when MCP servers are on", async () => {
+    const bridge = makeMockBridge(
+      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },
+      createMockAppState({
+        activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" },
+        mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }),
+      }),
+    );
+    renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
+    expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
+    const full = `${sentence} MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.`;
+    // The shield carries the full text and opens the same line.
+    const icon = screen.getByRole("button", { name: "Where data goes" });
+    expect(icon).toHaveAccessibleDescription(full);
+    await userEvent.setup().click(icon);
+    expect(screen.getByRole("note")).toHaveTextContent(full);
+  });
 });
 
 describe("IntuneChat hosted-provider consent", () => {
@@ -843,9 +860,11 @@ describe("IntuneChat trust presentation", () => {
       },
     );
     await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
-    expect(screen.getByText(/^Local model\. Tenant data stays on this device\./)).toHaveTextContent(
-      "Local model. Tenant data stays on this device. MCP tool queries go to learn.microsoft.com and www.kqlsearch.com.",
+    // With MCP tools on, the local line keeps the claim for the model and the tenant data only.
+    expect(screen.getByText(/^Local model\. Graph and cache data stay on this device\./)).toHaveTextContent(
+      "Local model. Graph and cache data stay on this device. MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com and www.kqlsearch.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.",
     );
+    expect(screen.queryByText(/Tenant data stays on this device/)).not.toBeInTheDocument();
   });
 
   it("activates the provider when picking another provider's model", async () => {

@@ -15,9 +15,11 @@ import type { McpChatTool } from "./tools.js";
  * writes what leaves for a third-party host.
  *
  * The admin's own words in the current question can reach the host. The
- * egress check behind the writer removes known tenant names, IDs, email
- * addresses and other known tenant values, but it cannot guarantee that
- * every private detail the admin typed is caught. The UI says so.
+ * egress check behind the writer blocks a query with known tenant names,
+ * IDs, email addresses, IP addresses or other indexed tenant values, but it
+ * cannot guarantee that every private detail the admin typed is caught.
+ * The composer, the status strip tooltip and the install review say so
+ * (copy/trust.ts).
  */
 export const MCP_QUERY_WRITER_SYSTEM = [
   "You write the params for one call to a public reference tool on a third-party host.",

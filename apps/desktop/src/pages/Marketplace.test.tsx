@@ -100,7 +100,9 @@ describe("Marketplace", () => {
     const install = within(dialog).getByRole("button", { name: "Install" });
     expect(install).toBeDisabled();
 
-    await user.click(within(dialog).getByRole("checkbox", { name: /I reviewed where Microsoft Learn sends tool queries/ }));
+    expect(within(dialog).getByText(/Each query is written from your current question only, never from Graph or cache data\./)).toBeInTheDocument();
+    expect(within(dialog).getByText(/^Words from your question can be sent to learn\.microsoft\.com\. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail\./)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("checkbox", { name: "I understand that words from my question can be sent to learn.microsoft.com." }));
     await user.click(install);
     await waitFor(() => expect(bridge.installMcpServer).toHaveBeenCalledWith("microsoft-learn"));
     expect(bridge.installMcpServer).toHaveBeenCalledTimes(1);

@@ -73,7 +73,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -2541,7 +2541,7 @@ function ChatComposer({
         <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
           <IconLock size={13} />
           <span>
-            Local model. Tenant data stays on this device.
+            {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : LOCAL_BOUNDARY_COPY.plain}
             {dataBoundary.toolHostsNote ? <span className="text-[var(--color-warning)]"> {dataBoundary.toolHostsNote}</span> : null}
           </span>
         </div>

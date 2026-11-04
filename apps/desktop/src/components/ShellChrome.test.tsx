@@ -91,7 +91,9 @@ describe("shell chrome", () => {
 
     const status = await screen.findByRole("status", { name: /Local · Ollama · llama3\.1 · tool queries to learn\.microsoft\.com \+1/ });
     await user.hover(status);
-    expect(await screen.findByText(/MCP tool queries the model writes go to learn\.microsoft\.com and www\.kqlsearch\.com\./)).toBeInTheDocument();
+    const tooltip = await screen.findByText(/Words from that question can be sent to learn\.microsoft\.com and www\.kqlsearch\.com\./);
+    expect(tooltip).toHaveTextContent("Ollama using llama3.1. The model, Graph and cache data, and chat history stay on this device. MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com and www.kqlsearch.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.");
+    expect(tooltip.textContent).not.toMatch(/prompts, and chat history stay/);
     expect(screen.queryByText(/www\.intuneautomation\.com/)).not.toBeInTheDocument();
   });
 
