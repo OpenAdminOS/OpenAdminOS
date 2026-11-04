@@ -1016,6 +1016,11 @@ export interface IntuneChatMessage {
   documentationSources?: IntuneChatDocumentationSource[];
   /** Read-only follow-up questions, at most two. Never sent automatically. */
   followUps?: string[];
+  /**
+   * The answer rests on tenant data, such as the cached rows the
+   * deterministic path puts in the prompt, even when no tenant tool ran.
+   */
+  tenantContext?: boolean;
 }
 
 /**

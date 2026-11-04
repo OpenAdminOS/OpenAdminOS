@@ -229,6 +229,15 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.match(message.engineNotice ?? "", /Installed MCP tools were not used because Chat is set to deterministic retrieval/);
       assert.deepEqual(message.followUps, ["Check our 5 macOS devices for Defender in Intune"]);
       assert.deepEqual(graphPaths, []);
+      assert.equal(message.tenantContext, undefined, "a docs answer carries no tenant rows");
+
+      // The deterministic path puts cached tenant rows in the prompt for a tenant question.
+      script(["5 of your 9 devices run macOS."]);
+      const tenantAnswer = (await store.sendIntuneChatMessage({ content: "How many managed devices run macOS?" })).assistantMessage;
+      assert.equal(tenantAnswer.questionKind, "tenant");
+      assert.equal(tenantAnswer.tenantContext, true);
+      const reloaded = (await store.getIntuneChatMessages(tenantAnswer.conversationId)).at(-1)!;
+      assert.equal(reloaded.tenantContext, true);
     });
   });
 
@@ -240,6 +249,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.match(prompts[1]!.prompt, /That answer used no tenant evidence/);
       assert.ok(message.toolTrace?.some((entry) => entry.tool === "query_cache" && !entry.error));
       assert.equal(message.content, "2 devices are noncompliant.");
+      assert.equal(message.tenantContext, true);
     });
   });
 

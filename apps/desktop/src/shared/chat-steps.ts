@@ -20,9 +20,13 @@ function joinList(items: readonly string[]): string {
 
 const TENANT_TOOLS = new Set(["list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift"]);
 
-/** Whether the answer read the tenant: a completed Graph refresh step or a tenant tool that succeeded. */
-export function usedTenantEvidence(message: Pick<IntuneChatMessage, "steps" | "toolTrace">): boolean {
-  return (message.steps ?? []).some((step) => step.kind === "graph-refresh" && step.status === "completed") ||
+/**
+ * Whether the answer rests on tenant data: the host marked it (cached rows
+ * in a deterministic answer), a completed Graph refresh step, or a tenant
+ * tool that succeeded.
+ */
+export function usedTenantEvidence(message: Pick<IntuneChatMessage, "steps" | "toolTrace" | "tenantContext">): boolean {
+  return message.tenantContext === true || (message.steps ?? []).some((step) => step.kind === "graph-refresh" && step.status === "completed") ||
     (message.toolTrace ?? []).some((entry) => TENANT_TOOLS.has(entry.tool) && !entry.error);
 }
 
@@ -31,7 +35,7 @@ export function usedTenantEvidence(message: Pick<IntuneChatMessage, "steps" | "t
  * sources, and what left the device and where it went. Labels come from
  * the steps and the citation targets, never from model text.
  */
-export function summarizeSteps(message: Pick<IntuneChatMessage, "steps" | "documentationSources" | "toolTrace">): {
+export function summarizeSteps(message: Pick<IntuneChatMessage, "steps" | "documentationSources" | "toolTrace" | "tenantContext">): {
   count: number;
   totalMs: number;
   sources: string;

@@ -57,6 +57,13 @@ describe("answer blocks", () => {
     ]);
   });
 
+  it("treats a deterministic answer built on cached tenant rows as tenant evidence", () => {
+    expect(usedTenantEvidence({ tenantContext: true })).toBe(true);
+    const content = "Defender needs full disk access [2].\n\n5 of your 9 devices run macOS.";
+    const blocks = splitAnswerBlocks(content, { documentationSources: [index], tenantEvidence: usedTenantEvidence({ tenantContext: true }) });
+    expect(blocks.map((block) => [block.kind, block.label])).toEqual([["docs", "Docs index"], ["tenant", "Your tenant"]]);
+  });
+
   it("leaves an answer without documentation sources as one unlabelled block", () => {
     expect(splitAnswerBlocks("Two devices [9] need review.", { documentationSources: [], tenantEvidence: true })).toEqual([{ kind: "plain", text: "Two devices [9] need review." }]);
     expect(splitAnswerBlocks("Two devices need review.", { documentationSources: [learn], tenantEvidence: true })).toEqual([{ kind: "plain", text: "Two devices need review." }]);

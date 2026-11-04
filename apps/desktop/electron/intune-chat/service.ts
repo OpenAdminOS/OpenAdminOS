@@ -1918,9 +1918,12 @@ export class IntuneChatService {
 
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
-    const followUps = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage
+    const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
+    const followUps = answered
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
       : [];
+    // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
+    const tenantContext = answered && planned.resources.length > 0;
     const assistantMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -1935,6 +1938,7 @@ export class IntuneChatService {
       steps: steps.steps,
       ...(documentationSources.length > 0 ? { documentationSources } : {}),
       ...(followUps.length > 0 ? { followUps } : {}),
+      ...(tenantContext ? { tenantContext: true } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
           ? packCacheStatus
@@ -2642,9 +2646,12 @@ export class IntuneChatService {
     }
     assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
-    const followUps = answerPlan && assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage
+    const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
+    const followUps = answerPlan && answered
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
       : [];
+    // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
+    const tenantContext = answered && planned.resources.length > 0;
     const assistantMessage: IntuneChatMessage = {
       id: assistantId,
       conversationId: conversation.id,
@@ -2659,6 +2666,7 @@ export class IntuneChatService {
       steps: steps.steps,
       ...(documentationSources.length > 0 ? { documentationSources } : {}),
       ...(followUps.length > 0 ? { followUps } : {}),
+      ...(tenantContext ? { tenantContext: true } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
           ? packCacheStatus
