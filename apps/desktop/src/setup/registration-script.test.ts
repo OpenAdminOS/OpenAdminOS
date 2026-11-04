@@ -283,7 +283,11 @@ describe("requiredResourceAccess snippet", () => {
 });
 
 describe("admin consent grant retry", () => {
-  const script = generateRegistrationSetup("OpenAdminOS", ["directory"]).script;
+  const script = generateRegistrationSetup({
+    mode: "create",
+    displayName: "OpenAdminOS",
+    partIds: ["entra.people"],
+  }).script;
   const loopStart = script.indexOf("    $grantAttempts = ");
   const loopEnd = script.indexOf("} catch {\n    $setupError");
 
