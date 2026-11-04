@@ -358,7 +358,10 @@ export async function runAgenticChat(
         fallbackPending = false;
         addDocumentation(await input.documentationFallback());
       }
-      if (questionKind !== "docs") await input.ensureTenantData?.();
+      if (questionKind !== "docs") {
+        await input.ensureTenantData?.();
+        assertNotCancelled(input.signal);
+      }
     }
     const docsOnly = questionKind === "docs";
 
@@ -427,6 +430,7 @@ export async function runAgenticChat(
         input.onUpgrade?.();
       }
       await input.ensureTenantData?.();
+      assertNotCancelled(input.signal);
     }
     const startedAt = new Date().toISOString();
     input.onToolStart?.({

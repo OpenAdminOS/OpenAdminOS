@@ -414,6 +414,32 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
+  it("stops after the tenant refresh when the admin pressed Stop during it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const reply = '```json\n{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```';
+      for (const classify of [true, false]) {
+        const controller = new AbortController();
+        const started: string[] = [];
+        await assert.rejects(
+          runAgenticChat({
+            ...baseInput(store, scriptedLlm([reply])),
+            signal: controller.signal,
+            ...(classify ? { classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) } } : {}),
+            ensureTenantData: async () => { controller.abort(); },
+            onToolStart: (event) => started.push(event.tool),
+          }),
+          /stopped by user/,
+        );
+        assert.deepEqual(started, [], `no tool runs after the stop (classify ${classify})`);
+      }
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("respects cancellation between tool iterations", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
