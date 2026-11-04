@@ -2801,6 +2801,8 @@ export class IntuneChatService {
     toolsOffered: boolean;
     steps: ChatStepRecorder;
   }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; sources: ChatSourcePlan; tieInResources: GraphCacheResourceKind[] }> {
+    // The first step shows at once; its detail follows when the sources are known.
+    const planStep = input.steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: ON_DEVICE });
     const installed = await this.mcpToolsFor(input.tenant, input.conversationId);
     // A model that skips the tool loop is offered no MCP tools, so none is planned as a source.
     const mcp = input.toolsOffered ? installed : {};
@@ -2811,7 +2813,7 @@ export class IntuneChatService {
     const sources = planChatSources({ question: input.content, kind, servers, docsIndexAvailable: Boolean(this.host.documentationIndexVersion?.()) });
     const tieInResources = [...input.planned.resources];
     if (kind === "docs") input.planned.resources = [];
-    input.steps.finish(input.steps.start({ kind: "plan", title: "Read the question", detail: sources.detail, origin: "device", originLabel: ON_DEVICE }));
+    input.steps.finish(planStep, { title: "Read the question", detail: sources.detail });
     return { mcp, mcpInstalled: Boolean(installed.mcp), sources, tieInResources };
   }
 

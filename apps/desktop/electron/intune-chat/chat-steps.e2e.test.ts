@@ -154,8 +154,10 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
       // Live steps: the plan first, the MCP row shows what it sent while it runs, then the answer.
       const snapshots = events.flatMap((event) => (event.type === "steps" ? [event.steps] : []));
-      assert.equal(snapshots[0]![0]!.kind, "plan");
-      assert.match(snapshots[0]![0]!.detail!, /^Documentation question\. Sources: Microsoft Learn\. Your tenant is not checked\.$/);
+      // The plan step shows before the MCP tools load, then gets its detail.
+      assert.deepEqual([snapshots[0]![0]!.kind, snapshots[0]![0]!.status, snapshots[0]![0]!.title], ["plan", "active", "Reading the question"]);
+      assert.deepEqual([snapshots[1]![0]!.status, snapshots[1]![0]!.title], ["completed", "Read the question"]);
+      assert.match(snapshots[1]![0]!.detail!, /^Documentation question\. Sources: Microsoft Learn\. Your tenant is not checked\.$/);
       const live = snapshots.find((list) => list.some((step) => step.kind === "mcp" && step.status === "active"));
       const liveMcp = live!.find((step) => step.kind === "mcp")!;
       assert.equal(liveMcp.sent, "Defender for Endpoint on macOS");
