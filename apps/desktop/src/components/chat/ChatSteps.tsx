@@ -211,7 +211,6 @@ export function StepSummary({ message, details }: { message: IntuneChatMessage; 
           <span className="font-medium text-[var(--color-text)]">{summary.count} {summary.count === 1 ? "step" : "steps"}</span>
           <span className="text-[var(--color-text-muted)]">· {formatStepDuration(summary.totalMs)}{sources.map((part) => ` · ${part}`).join("")}</span>
         </button>
-        <span aria-hidden="true" className="text-[var(--color-text-muted)]">·</span>
         {summary.sent.length === 0 ? (
           <span className="text-[var(--color-text-muted)]">{summary.egress}</span>
         ) : (

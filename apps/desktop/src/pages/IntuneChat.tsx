@@ -6,6 +6,7 @@ import { Modal, ModalHeader } from "../components/Modal";
 import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
 import {
   IconCloud,
+  IconShield,
   IconCopy,
   IconArrowDown,
   IconArrowUp,
@@ -2493,7 +2494,7 @@ function ChatComposer({
                 onClick={() => setDisclosureOpen((open) => !open)}
                 className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] text-[var(--color-warning)] transition-colors hover:bg-[var(--color-warning-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
               >
-                <IconCloud size={13} />
+                <IconShield size={13} />
               </button>
             </Tooltip>
           ) : null}
