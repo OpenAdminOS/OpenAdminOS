@@ -160,6 +160,79 @@ describe("shell chrome", () => {
     expect(screen.queryByText("Team content")).not.toBeInTheDocument();
   });
 
+  it("shows which app registration each tenant is connected with in the tenant menu", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const openAdminOSTenant = {
+      ...base.tenants[0]!,
+      appRegistration: { kind: "openadminos" as const, clientId: "d1de0a94-f67a-421d-8804-a235955ffd69" },
+    };
+    const customTenant = {
+      ...base.tenants[0]!,
+      id: "tenant-2",
+      displayName: "Fabrikam",
+      appRegistration: {
+        kind: "custom" as const,
+        clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+        authority: "https://login.microsoftonline.com/fabrikam.onmicrosoft.com",
+      },
+    };
+    const legacyTenant = {
+      ...base.tenants[0]!,
+      id: "tenant-3",
+      displayName: "Northwind",
+      appRegistration: { kind: "openadminos" as const, clientId: "14d82eec-204b-4c2f-b7e8-296a70dab67e" },
+    };
+    const state = createMockAppState({
+      tenants: [openAdminOSTenant, customTenant, legacyTenant, pilotState().tenants[0]!],
+    });
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, state),
+    });
+
+    await user.click(await screen.findByRole("button", { name: /Switch tenant/ }));
+    const ours = screen.getByRole("menuitemradio", { name: /Contoso IT/ });
+    expect(within(ours).getByText("OpenAdminOS app")).toHaveAttribute(
+      "title",
+      "OpenAdminOS app, client ID d1de0a94-f67a-421d-8804-a235955ffd69",
+    );
+    const custom = screen.getByRole("menuitemradio", { name: /Fabrikam/ });
+    expect(within(custom).getByText("Own app registration · aaaaaaaa…")).toHaveAttribute(
+      "title",
+      "Own app registration, client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee, directory fabrikam.onmicrosoft.com",
+    );
+    const legacy = screen.getByRole("menuitemradio", { name: /Northwind/ });
+    expect(within(legacy).getByText("Microsoft Graph Command Line Tools")).toHaveAttribute(
+      "title",
+      expect.stringContaining("client ID 14d82eec-204b-4c2f-b7e8-296a70dab67e. Connected before v0.5."),
+    );
+    expect(within(legacy).queryByText("OpenAdminOS app")).not.toBeInTheDocument();
+    const pilot = screen.getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
+    expect(within(pilot).queryByText(/app registration|OpenAdminOS app/i)).not.toBeInTheDocument();
+  });
+
+  it("opens the unchosen sign-in choice from the tenant menu and the pilot banner", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, pilotState()),
+    });
+
+    const banner = await screen.findByRole("region", { name: "Pilot mode" });
+    await user.click(within(banner).getByRole("button", { name: "Connect your tenant" }));
+    expect(await screen.findByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    await user.click(screen.getByRole("button", { name: /Switch tenant/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Connect tenant" }));
+    expect(await screen.findByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
+  });
+
   it("opens pilot mode from the tenant menu", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });

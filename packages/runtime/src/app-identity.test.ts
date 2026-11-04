@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
+import { OPENADMINOS_APP_CLIENT_ID } from "@openadminos/agent-sdk";
 import {
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
@@ -17,6 +18,10 @@ describe("app identity resolution", () => {
       OPENADMINOS_CLIENT_ID,
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
     );
+  });
+
+  it("shows the renderer the same client ID the host signs in with", () => {
+    assert.equal(OPENADMINOS_CLIENT_ID, OPENADMINOS_APP_CLIENT_ID);
   });
 
   it("uses the common authority when no directory is supplied", () => {

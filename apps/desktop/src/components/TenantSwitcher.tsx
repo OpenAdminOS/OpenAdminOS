@@ -19,6 +19,7 @@ import { TenantTile } from "./TenantTile";
 import { useToast } from "./Toast";
 import { Tooltip } from "./ui";
 import { PILOT_COPY } from "../shared/pilot-mode";
+import { tenantRegistrationSummary } from "../shared/app-registration";
 
 const MENU_ITEM_CLASS =
   "flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]";
@@ -167,6 +168,7 @@ export function TenantSwitcher() {
                 const domain = tenant.username.includes("@")
                   ? tenant.username.split("@").at(-1)
                   : tenant.username;
+                const registration = tenantRegistrationSummary(tenant);
                 return (
                   <div
                     key={tenant.id}
@@ -186,6 +188,11 @@ export function TenantSwitcher() {
                         <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
                           {tenant.kind === "sample" ? `${PILOT_COPY.modeName} · fictional company` : `${domain} · ${entraTierLabel(tenant.entraTier)}`}
                         </span>
+                        {registration ? (
+                          <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
+                            {registration.text}
+                          </span>
+                        ) : null}
                       </span>
                       {active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
                     </button>

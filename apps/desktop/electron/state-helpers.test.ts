@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { graphCacheRequestFromNextLink } from "./state-helpers.js";
+import {
+  canonicalClientId,
+  graphCacheRequestFromNextLink,
+  humanizeMsalError,
+  sanitizeSavedAppRegistrations,
+  tokenCacheForPartition,
+  tokenCachePartition,
+} from "./state-helpers.js";
+import { GRAPH_CLI_CLIENT_ID, OPENADMINOS_CLIENT_ID } from "@openadminos/runtime";
 
 describe("Graph cache nextLink validation", () => {
   it("keeps beta paths, query values, and caller headers", () => {
@@ -400,5 +408,181 @@ describe("chat sources come from executed tools, not the plan", () => {
       refreshedResources: new Set(),
     });
     assert.deepEqual(sources.map((source) => source.resource), ["users"]);
+  });
+});
+
+describe("sign-in errors name the registration used and the fix", () => {
+  const custom = {
+    kind: "custom" as const,
+    clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    authority: "https://login.microsoftonline.com/common",
+  };
+  const openAdminOS = { kind: "openadminos" as const, clientId: OPENADMINOS_CLIENT_ID };
+  const customName = "your app registration (client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee)";
+  const msal = (message: string) => new Error(message);
+
+  it("AADSTS50011 asks for the http://localhost redirect under Mobile and desktop applications", () => {
+    const text = humanizeMsalError(
+      msal("AADSTS50011: The redirect URI 'http://localhost:51234' specified in the request does not match the redirect URIs configured for the application."),
+      custom,
+    );
+    assert.match(text, new RegExp(customName.replace(/[()]/g, "\\$&")));
+    assert.match(text, /Mobile and desktop applications with the redirect URI http:\/\/localhost/);
+  });
+
+  it("AADSTS500113 is treated as the same missing redirect", () => {
+    assert.match(
+      humanizeMsalError(msal("AADSTS500113: No reply address is registered for the application."), custom),
+      /redirect URI http:\/\/localhost/,
+    );
+  });
+
+  it("AADSTS7000218 asks to allow public client flows", () => {
+    const text = humanizeMsalError(
+      msal("AADSTS7000218: The request body must contain the following parameter: 'client_assertion' or 'client_secret'."),
+      custom,
+    );
+    assert.match(text, /client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/);
+    assert.match(text, /set Allow public client flows to Yes/);
+    assert.match(text, /never uses a client secret/);
+  });
+
+  it("AADSTS700016 asks to check the client ID and directory ID", () => {
+    const text = humanizeMsalError(
+      msal("AADSTS700016: Application with identifier 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' was not found in the directory 'Fabrikam'."),
+      custom,
+    );
+    assert.match(text, /could not find your app registration \(client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\)/);
+    assert.match(text, /Application \(client\) ID/);
+    assert.match(text, /Directory \(tenant\) ID/);
+  });
+
+  it("AADSTS700016 for the OpenAdminOS app points at third-party app blocking", () => {
+    const text = humanizeMsalError(
+      msal("AADSTS700016: Application with identifier was not found in the directory."),
+      openAdminOS,
+    );
+    assert.match(text, new RegExp(`the OpenAdminOS app \\(client ID ${OPENADMINOS_CLIENT_ID}\\)`));
+    assert.match(text, /connect with your own app registration/);
+  });
+
+  it("AADSTS50194 asks for the Directory (tenant) ID of a single-tenant app", () => {
+    const text = humanizeMsalError(
+      msal("AADSTS50194: Application 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' is not configured as a multi-tenant application."),
+      custom,
+    );
+    assert.match(text, /^Your app registration \(client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee\) is single-tenant/);
+    assert.match(text, /Enter the Directory \(tenant\) ID/);
+  });
+
+  it("AADSTS65001 asks to grant admin consent or use the setup script", () => {
+    const text = humanizeMsalError(
+      msal("AADSTS65001: The user or administrator has not consented to use the application."),
+      custom,
+    );
+    assert.match(text, /Admin consent has not been granted for your app registration/);
+    assert.match(text, /Grant admin consent/);
+    assert.match(text, /setup script/);
+    assert.match(
+      humanizeMsalError(msal("AADSTS65001: not consented"), openAdminOS),
+      /Admin consent is required for the OpenAdminOS app/,
+    );
+  });
+
+  it("defaults to the OpenAdminOS app and never mentions the Microsoft Graph CLI", () => {
+    const codes = ["50011", "7000218", "700016", "50194", "65001", "50105", "900023"];
+    for (const code of codes) {
+      const text = humanizeMsalError(msal(`AADSTS${code}: failure`));
+      assert.doesNotMatch(text, /Graph CLI/);
+      assert.match(text, /the OpenAdminOS app|The OpenAdminOS app|OpenAdminOS app/);
+    }
+  });
+
+  it("names a tenant still pinned to its original client by that client ID", () => {
+    const text = humanizeMsalError(
+      msal("AADSTS65001: not consented"),
+      { kind: "openadminos", clientId: GRAPH_CLI_CLIENT_ID },
+    );
+    assert.match(text, new RegExp(`client ID ${GRAPH_CLI_CLIENT_ID}`));
+    assert.doesNotMatch(text, /Graph CLI/);
+  });
+
+  it("keeps the existing mappings for other errors", () => {
+    const cancelled = new Error("cancelled");
+    cancelled.name = "TenantConnectCancelledError";
+    assert.equal(humanizeMsalError(cancelled), "Sign-in was cancelled. Nothing was connected.");
+    assert.match(humanizeMsalError(msal("fetch failed")), /Couldn't reach Microsoft's sign-in endpoint/);
+    assert.match(humanizeMsalError(msal("invalid_grant")), /previous sign-in session expired/);
+    assert.match(humanizeMsalError(msal("AADSTS50020: user account from identity provider does not exist")), /doesn't exist in this tenant/);
+    assert.match(
+      humanizeMsalError(msal("AADSTS50105: The signed in user is not assigned to a role"), custom),
+      /isn't assigned to your app registration \(client ID/,
+    );
+    assert.equal(
+      humanizeMsalError(msal("something odd"), custom),
+      "Sign-in with your app registration (client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee) failed: something odd",
+    );
+  });
+});
+
+describe("client ID canonical form and token cache partitions", () => {
+  const CLIENT_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const UPPER = CLIENT_ID.toUpperCase();
+  const RT_KEY = `home.tid-login.microsoftonline.com-refreshtoken-${CLIENT_ID}----`;
+  const refreshToken = (clientId: string, secret: string) => ({
+    home_account_id: "home.tid",
+    environment: "login.microsoftonline.com",
+    credential_type: "RefreshToken",
+    client_id: clientId,
+    secret,
+  });
+
+  it("lower-cases and trims client IDs and resolves the default partition", () => {
+    assert.equal(canonicalClientId(` ${UPPER} `), CLIENT_ID);
+    assert.equal(tokenCachePartition({ clientId: UPPER }), CLIENT_ID);
+    assert.equal(tokenCachePartition(undefined), OPENADMINOS_CLIENT_ID);
+    assert.equal(tokenCachePartition({ clientId: OPENADMINOS_CLIENT_ID.toUpperCase() }), OPENADMINOS_CLIENT_ID);
+  });
+
+  it("stores remembered registrations with the canonical client ID", () => {
+    assert.deepEqual(
+      sanitizeSavedAppRegistrations([{ clientId: UPPER, lastUsedAt: "2026-11-03T10:00:00.000Z" }]),
+      [{ clientId: CLIENT_ID, lastUsedAt: "2026-11-03T10:00:00.000Z" }],
+    );
+  });
+
+  it("returns a cache with nothing to change unchanged", () => {
+    const cache = JSON.stringify({ RefreshToken: { [RT_KEY]: refreshToken(CLIENT_ID, "rt") } });
+    assert.equal(tokenCacheForPartition(cache, [], CLIENT_ID), cache);
+    assert.equal(tokenCacheForPartition("", [], CLIENT_ID), "");
+    assert.equal(tokenCacheForPartition("not json", ["{}"], CLIENT_ID), "not json");
+  });
+
+  it("gives credentials written with a differently cased client ID the canonical ID", () => {
+    const cache = JSON.stringify({
+      RefreshToken: { [RT_KEY]: refreshToken(UPPER, "rt") },
+      AppMetadata: { [`appmetadata-login.microsoftonline.com-${CLIENT_ID}`]: { client_id: UPPER, environment: "login.microsoftonline.com" } },
+      RefreshTokenOther: { x: { client_id: "11111111-2222-4333-8444-555555555555" } },
+    });
+    const merged = JSON.parse(tokenCacheForPartition(cache, [], CLIENT_ID)) as Record<string, Record<string, { client_id: string }>>;
+    assert.equal(merged.RefreshToken?.[RT_KEY]?.client_id, CLIENT_ID);
+    assert.equal(Object.values(merged.AppMetadata ?? {})[0]?.client_id, CLIENT_ID);
+    assert.equal(merged.RefreshTokenOther?.x?.client_id, "11111111-2222-4333-8444-555555555555");
+  });
+
+  it("merges legacy caches under the primary cache and skips unreadable ones", () => {
+    const primary = JSON.stringify({ RefreshToken: { [RT_KEY]: refreshToken(CLIENT_ID, "primary") } });
+    const legacy = JSON.stringify({
+      RefreshToken: {
+        [RT_KEY]: refreshToken(UPPER, "legacy"),
+        "other.tid-login.microsoftonline.com-refreshtoken-x----": refreshToken(UPPER, "other"),
+      },
+    });
+    const merged = JSON.parse(tokenCacheForPartition(primary, [legacy, "not json"], CLIENT_ID)) as Record<
+      string,
+      Record<string, { client_id: string; secret: string }>
+    >;
+    assert.equal(merged.RefreshToken?.[RT_KEY]?.secret, "primary");
+    assert.equal(merged.RefreshToken?.["other.tid-login.microsoftonline.com-refreshtoken-x----"]?.client_id, CLIENT_ID);
   });
 });

@@ -73,6 +73,7 @@ import type {
   RunHistoryRetentionSettings,
   ProviderTestResult,
   StartRunOptions,
+  SavedAppRegistration,
   TenantAppRegistration,
   ConnectTenantOptions,
   PermissionAreaId,
@@ -272,14 +273,21 @@ import {
 } from "./provider-detail.js";
 import {
   DEFAULT_STATS_API_URL,
+  canonicalClientId,
   createLocalOnlyTenantSession,
   entryToRegistrySummary,
+  forgetAppRegistration,
   humanizeMsalError,
   humanizeScheduledRunError,
   isNodeError,
   normalizeWorkspaceInstructions,
   normalizeWorkspaceTitle,
+  rememberAppRegistration,
+  sanitizeSavedAppRegistrations,
+  SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH,
   tenantNamesById,
+  tokenCacheForPartition,
+  tokenCachePartition,
 } from "./state-helpers.js";
 import { lookupEndpoint } from "./graph-catalog.js";
 export { __agentDraftTestUtils } from "./agent-draft-helpers.js";
@@ -313,6 +321,12 @@ interface PersistedState {
   runs: RunRecord[];
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /**
+   * Custom app registrations used for a successful connect, most recent
+   * first. Public identifiers only, never secrets. Bounded and validated
+   * on read.
+   */
+  savedAppRegistrations?: SavedAppRegistration[];
   /**
    * Stable per-installation UUID, generated on first agent install and
    * persisted thereafter. Sent to the stats aggregator alongside each
@@ -971,7 +985,7 @@ function requireClientId(value: string): string {
       "Application (client) ID must be a GUID from your Entra app registration.",
     );
   }
-  return trimmed;
+  return canonicalClientId(trimmed);
 }
 
 function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
@@ -1124,9 +1138,18 @@ export interface AppStateStoreOptions {
   /**
    * Factory for a per-client-id token cache when a tenant is connected
    * with a bring-your-own app registration. Custom registrations must
-   * not share the default identity's cache. Omit in tests.
+   * not share the default identity's cache. Receives the canonical
+   * (lower case) client ID from `tokenCachePartition`. Omit in tests.
    */
-  tokenStoreFor?(clientId: string): TokenCacheStorage;
+  tokenStoreFor?(partition: string): TokenCacheStorage;
+  /**
+   * Token cache files for a partition that were named with a differently
+   * cased client ID before client IDs were stored in one case, and that
+   * still exist next to the canonical file. Their accounts stay readable
+   * and are removed together with the canonical file's, so disconnect
+   * never leaves a refresh token behind. The files are never deleted.
+   */
+  legacyTokenStoresFor?(partition: string): TokenCacheStorage[];
   /**
    * Base URL for the opt-in usage-telemetry collector. Empty (the
    * default) means usage pings never fire regardless of the user's
@@ -1212,6 +1235,7 @@ export class AppStateStore {
     | undefined;
   private readonly msalClients = new Map<string, PublicClientApplication>();
   private readonly tokenStoreFor: AppStateStoreOptions["tokenStoreFor"];
+  private readonly legacyTokenStoresFor: AppStateStoreOptions["legacyTokenStoresFor"];
   private readonly statsApiUrl: string;
   private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
@@ -1264,6 +1288,7 @@ export class AppStateStore {
       this.onStateChanged = undefined;
       this.statsApiUrl = "";
       this.tokenStoreFor = undefined;
+      this.legacyTokenStoresFor = undefined;
       this.usageTelemetryUrl = "";
       this.appVersion = "0.0.0";
       this.sandboxedCodeDefault = false;
@@ -1292,6 +1317,7 @@ export class AppStateStore {
           ? options.statsApiUrl
           : DEFAULT_STATS_API_URL;
       this.tokenStoreFor = options.tokenStoreFor;
+      this.legacyTokenStoresFor = options.legacyTokenStoresFor;
       // No default: usage telemetry stays inert until a collector URL is
       // configured for the build AND the user opts in. // TODO(ugur):
       // decide where the usage collector is hosted and set it here.
@@ -1463,7 +1489,7 @@ export class AppStateStore {
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
       getAppState: () => host.getAppState(),
-      getMsalClient: () => host.getMsalClient(),
+      msalClientForTenant: (tenant) => host.msalClientForTenant(tenant),
       openBrowser: (url) => host.openBrowser(url),
       connectorSecretsFor: (connectorId) => host.connectorSecretsFor(connectorId),
       whatsAppWebClient: () => host.whatsAppWebClient(),
@@ -2061,38 +2087,98 @@ export class AppStateStore {
     return enabled;
   }
 
-  private getMsalClient(): PublicClientApplication {
-    return this.msalClientFor(undefined);
-  }
-
   /**
-   * MSAL clients are cached per (clientId, authority). Tokens are bound
-   * to the client id that issued them, so silent refresh for a tenant
-   * must reuse the exact registration it was connected with. Custom
-   * registrations get their own token cache file; the default identity
-   * keeps the original `tokens.bin` so existing installs are untouched.
+   * MSAL clients are cached per (token cache partition, authority). Tokens
+   * are bound to the client id that issued them, so silent refresh for a
+   * tenant must reuse the exact registration it was connected with. The
+   * partition is the canonical (lower case) client ID, so differently
+   * cased IDs share one client and one cache. Custom registrations get
+   * their own token cache file; the default identity keeps the original
+   * `tokens.bin` so existing installs are untouched.
    */
   private msalClientFor(
     registration: TenantAppRegistration | undefined,
   ): PublicClientApplication {
-    const clientId = registration?.clientId ?? defaultClientId();
+    const partition = tokenCachePartition(registration);
     const authority = registration?.authority ?? DEFAULT_AUTHORITY;
-    const key = `${clientId}|${authority}`;
+    const key = `${partition}|${authority}`;
     const cached = this.msalClients.get(key);
     if (cached) return cached;
 
-    const isDefault = clientId === defaultClientId();
     const store =
-      isDefault || !this.tokenStoreFor
+      partition === tokenCachePartition(undefined) || !this.tokenStoreFor
         ? this.tokenStore
-        : this.tokenStoreFor(clientId);
+        : this.tokenStoreFor(partition);
+    const legacyStores = this.legacyTokenStoresFor?.(partition) ?? [];
     const cacheStorage: TokenCacheStorage = {
-      read: () => store.read(),
+      read: async () =>
+        tokenCacheForPartition(
+          await store.read(),
+          await Promise.all(legacyStores.map((legacy) => legacy.read().catch(() => ""))),
+          partition,
+        ),
       write: (serialized) => store.write(serialized),
     };
-    const client = createMsalClient({ storage: cacheStorage, clientId, authority });
+    const client = createMsalClient({ storage: cacheStorage, clientId: partition, authority });
     this.msalClients.set(key, client);
     return client;
+  }
+
+  /**
+   * Remove one account from a registration's token cache, and from any
+   * legacy cache file of the same partition first, because the partition's
+   * client reads those too and would otherwise bring the account back.
+   * Only that account's entries change; other accounts in the same files
+   * are untouched, and no file is deleted.
+   */
+  private async removeCachedAccount(
+    registration: TenantAppRegistration | undefined,
+    homeAccountId: string,
+  ): Promise<void> {
+    const partition = tokenCachePartition(registration);
+    for (const legacy of this.legacyTokenStoresFor?.(partition) ?? []) {
+      await removeAccount({
+        client: createMsalClient({
+          storage: {
+            read: async () => tokenCacheForPartition(await legacy.read(), [], partition),
+            write: (serialized) => legacy.write(serialized),
+          },
+          clientId: partition,
+        }),
+        homeAccountId,
+      });
+    }
+    await removeAccount({ client: this.msalClientFor(registration), homeAccountId });
+  }
+
+  /**
+   * Reconnecting a tenant with a different app registration leaves the
+   * previous client's refresh token on disk. Remove that account unless
+   * another connected tenant still signs in with the same account from the
+   * same token cache. Token caches are partitioned by canonical client ID
+   * only, not by authority (see `msalClientFor`), so an authority or letter
+   * case change alone never removes anything. Failure leaves an unused
+   * cached account behind, never a broken connection, so it is logged
+   * rather than surfaced.
+   */
+  private async forgetReplacedSignIn(previous: TenantRecord, current: TenantRecord): Promise<void> {
+    if (previous.kind === "sample") return;
+    const previousPartition = tokenCachePartition(previous.appRegistration);
+    if (previousPartition === tokenCachePartition(current.appRegistration)) return;
+    const stillUsed = (await this.read()).tenants.some(
+      (tenant) =>
+        tenant.kind !== "sample" &&
+        tenant.homeAccountId === previous.homeAccountId &&
+        tokenCachePartition(tenant.appRegistration) === previousPartition,
+    );
+    if (stillUsed) return;
+    try {
+      await this.removeCachedAccount(previous.appRegistration, previous.homeAccountId);
+    } catch (cause) {
+      console.warn(
+        `[tenants] the previous sign-in for ${previous.id} could not be removed from its token cache: ${cause instanceof Error ? cause.message : String(cause)}`,
+      );
+    }
   }
 
   /** The MSAL client that issued this tenant's tokens. */
@@ -2378,6 +2464,7 @@ export class AppStateStore {
         model: activeModel,
       }),
       tenants: persisted.tenants,
+      savedAppRegistrations: persisted.savedAppRegistrations ?? [],
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
@@ -5409,13 +5496,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // Resolve which Entra app identity signs in. A custom registration
     // must be a public client (Authorization Code + PKCE, loopback
     // redirect); there is deliberately no client secret to supply.
-    const registration: TenantAppRegistration | undefined = options.appRegistration
+    const directoryTenantId = options.appRegistration?.directoryTenantId?.trim();
+    const label = options.appRegistration?.label
+      ?.trim()
+      .slice(0, SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH);
+    const registration: TenantAppRegistration = options.appRegistration
       ? {
           kind: "custom",
           clientId: requireClientId(options.appRegistration.clientId),
-          authority: authorityForDirectory(
-            options.appRegistration.directoryTenantId,
-          ),
+          authority: authorityForDirectory(directoryTenantId),
+          ...(label ? { label } : {}),
         }
       : { kind: "openadminos", clientId: defaultClientId() };
     const client = this.msalClientFor(registration);
@@ -5434,7 +5524,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         timeoutMs: 300_000,
       });
     } catch (error) {
-      throw new Error(humanizeMsalError(error));
+      throw new Error(humanizeMsalError(error, registration));
     } finally {
       if (this.tenantConnectController === controller) {
         this.tenantConnectController = undefined;
@@ -5463,14 +5553,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       addedAt,
       lastUsedAt: addedAt,
       grantedScopes: intersectGrantedScopes(result.scopes, requestedScopeNames),
-      ...(registration ? { appRegistration: registration } : {}),
+      appRegistration: registration,
     };
 
+    let replaced: TenantRecord | undefined;
     await this.serialize(async () => {
       const persisted = await this.read();
       const existingIdx = persisted.tenants.findIndex((t) => t.id === tenant.id);
       const nextTenants = [...persisted.tenants];
       if (existingIdx >= 0) {
+        replaced = nextTenants[existingIdx];
         nextTenants[existingIdx] = { ...nextTenants[existingIdx], ...tenant };
       } else {
         nextTenants.push(tenant);
@@ -5479,8 +5571,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         ...persisted,
         tenants: nextTenants,
         activeTenantId: tenant.id,
+        ...(registration.kind === "custom"
+          ? {
+              savedAppRegistrations: rememberAppRegistration(
+                persisted.savedAppRegistrations,
+                {
+                  clientId: registration.clientId,
+                  ...(directoryTenantId ? { directoryTenantId } : {}),
+                  ...(label ? { label } : {}),
+                  lastUsedAt: addedAt,
+                },
+              ),
+            }
+          : {}),
       });
     });
+
+    if (replaced) await this.forgetReplacedSignIn(replaced, tenant);
 
     // Background probe: detect the tenant's Entra ID tier so Agent Hub
     // can badge incompatible agents. Failure here is silent. `unknown`
@@ -5495,6 +5602,25 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await this.setActiveTenant(tenant.id);
     }
 
+    return this.getAppState();
+  }
+
+  /**
+   * Forget a remembered custom registration. Connected tenants keep their
+   * own pinned registration, so their sign-in is unaffected.
+   */
+  async removeSavedAppRegistration(
+    clientId: string,
+    directoryTenantId?: string,
+  ): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const savedAppRegistrations = forgetAppRegistration(
+        persisted.savedAppRegistrations,
+        { clientId, directoryTenantId },
+      );
+      await this.write({ ...persisted, savedAppRegistrations });
+    });
     return this.getAppState();
   }
 
@@ -5525,7 +5651,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         timeoutMs: 300_000,
       });
     } catch (error) {
-      throw new Error(humanizeMsalError(error));
+      throw new Error(humanizeMsalError(error, tenant.appRegistration));
     }
     const newlyGranted = intersectGrantedScopes(result.scopes, requestedScopes);
     await this.serialize(async () => {
@@ -5769,10 +5895,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const target = persisted.tenants.find((tenant) => tenant.id === id);
       if (target && target.kind !== "sample") {
         try {
-          await removeAccount({
-            client: this.msalClientForTenant(target),
-            homeAccountId: target.homeAccountId,
-          });
+          await this.removeCachedAccount(target.appRegistration, target.homeAccountId);
         } catch (cause) {
           const detail = cause instanceof Error ? cause.message : String(cause);
           throw new Error(
@@ -6113,19 +6236,35 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // client to those records so they keep refreshing silently instead
       // of forcing every existing install to reconnect. New connections
       // use the OpenAdminOS registration.
+      //
+      // Client IDs are stored in canonical lower case. Records saved before
+      // that keep the case the user typed; normalize them so they resolve to
+      // the same MSAL client and token cache as a new connection would.
       const tenants = (Array.isArray(parsed.tenants) ? parsed.tenants : []).map(
-        (tenant) =>
-          isPlainRecordValue(tenant) &&
-          tenant.kind !== "sample" &&
-          tenant.appRegistration === undefined
+        (tenant) => {
+          if (!isPlainRecordValue(tenant) || tenant.kind === "sample") return tenant;
+          const registration = tenant.appRegistration;
+          if (registration === undefined) {
+            return {
+              ...tenant,
+              appRegistration: {
+                kind: "openadminos" as const,
+                clientId: GRAPH_CLI_CLIENT_ID,
+              },
+            };
+          }
+          return isPlainRecordValue(registration) &&
+            typeof registration.clientId === "string" &&
+            registration.clientId !== canonicalClientId(registration.clientId)
             ? {
                 ...tenant,
                 appRegistration: {
-                  kind: "openadminos" as const,
-                  clientId: GRAPH_CLI_CLIENT_ID,
+                  ...registration,
+                  clientId: canonicalClientId(registration.clientId),
                 },
               }
-            : tenant,
+            : tenant;
+        },
       );
       const activeTenantId =
         typeof parsed.activeTenantId === "string" &&
@@ -6168,6 +6307,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       };
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
+      }
+      const savedAppRegistrations = sanitizeSavedAppRegistrations(
+        (parsed as { savedAppRegistrations?: unknown }).savedAppRegistrations,
+      );
+      if (savedAppRegistrations.length > 0) {
+        state.savedAppRegistrations = savedAppRegistrations;
       }
       // See PersistedState.providerChosenByUser: a missing field means an
       // install from before provider detection, which is never switched.

@@ -33,8 +33,6 @@ export const SETUP_COPY = {
     "A Global Administrator is only needed once to grant the requested admin consent. Use your daily account after consent is granted.",
   scopedRoles:
     "Scoped roles such as Security Reader, Conditional Access Administrator, and Intune Administrator also work, with reduced coverage outside their area. Consent does not add role permissions or licences.",
-  appListing:
-    "Entra lists the app as OpenAdminOS, or under your own registration's name. Access can be revoked from Enterprise applications.",
   tokenStorage:
     "Tokens are stored through the operating system's protected credential store and are never sent to an OpenAdminOS server.",
   readOnlyNote:
@@ -60,13 +58,40 @@ export const SETUP_COPY = {
     "No tenant connected. You can draft a question now; connecting happens when you send.",
   guestComposerPlaceholder:
     "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
-  appIdentityTitle: "Which app registration signs you in",
-  appIdentityDefault:
-    "Connecting uses the OpenAdminOS app registration. Your admin approves the read permissions above, and OpenAdminOS appears by name in your tenant's audit log.",
-  useOwnRegistration: "Connect with your own app registration",
-  ownRegistrationTitle: "Use your own app registration",
+  signInChoiceLegend: "Sign in with",
+  signInChoiceHint:
+    "Choose the Entra app registration that signs you in. The read permissions below are the same for both. Access can be revoked from Enterprise applications at any time.",
+  openAdminOSAppTitle: "OpenAdminOS app",
+  openAdminOSAppPoints: (clientId: string) => [
+    `Appears in Enterprise applications and sign-in logs as OpenAdminOS, client ID ${clientId}.`,
+    "An administrator who can grant tenant-wide consent approves once for the tenant.",
+    "No client secret. Tokens are stored on this device only.",
+  ],
+  ownRegistrationTitle: "Your own app registration",
+  ownRegistrationPoints: [
+    "An app your organization creates and owns. No third-party multi-tenant app is added to the tenant.",
+    "Sign-in logs show your app's name, and your Conditional Access and consent rules apply to it.",
+    "No client secret. Tokens are stored on this device only.",
+  ],
   ownRegistrationBody:
-    "For organizations that do not allow third-party multi-tenant apps. Register a public client (mobile and desktop) in Entra with the redirect URI http://localhost, then enter its details below.",
+    "Register a public client in Entra under Mobile and desktop applications with the redirect URI http://localhost and Allow public client flows set to Yes, then enter its details below. The setup script below can create it for you.",
+  savedRegistrationsLegend: "Saved registrations",
+  savedRegistrationsHint: "Registrations you connected with before. Remove them in Settings, Tenants.",
+  newRegistrationOption: "Enter a different registration",
+  chooseSignInReason: "Choose OpenAdminOS app or your own app registration above to continue.",
+  clientIdRequiredReason: "Enter the Application (client) ID of your app registration to continue.",
+  clientIdInvalidReason:
+    "The Application (client) ID must be a GUID from your app registration overview.",
+  directoryIdInvalidReason:
+    "The Directory (tenant) ID must be a GUID or a verified domain name.",
+  editSignIn: "Change sign-in options",
+  savedRegistrationsSettingsTitle: "Saved app registrations",
+  savedRegistrationsSettingsBody:
+    "Your own app registrations used on this device. Removing one only removes it from the connect dialog. Tenants already connected with it keep working.",
+  removeSavedRegistration: (name: string) => `Remove saved registration ${name}`,
+  removeSavedRegistrationFailed: (reason: string) =>
+    `The saved registration was not removed. ${reason} Try again.`,
+  savedRegistrationRemoved: "Saved registration removed. Connected tenants are unchanged.",
   ownRegistrationNoSecret:
     "No client secret is used. OpenAdminOS signs in as a public client (Authorization Code with PKCE), so there is no secret to store on this device.",
   delegatedPermissionsNote:
@@ -76,7 +101,8 @@ export const SETUP_COPY = {
   directoryIdLabel: "Directory (tenant) ID",
   directoryIdHint:
     "Only needed when your registration is single-tenant. Leave empty for a multi-tenant registration.",
-  useDefaultRegistration: "Use the OpenAdminOS registration instead",
+  registrationLabelLabel: "Label (optional)",
+  registrationLabelHint: "Shown in Settings and the tenant menu. Stored on this device only.",
   statusNoTenant: "No active tenant · Connect",
 } as const;
 

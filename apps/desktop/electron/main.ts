@@ -1,4 +1,4 @@
-import { runNotificationTitle } from "./state-helpers.js";
+import { runNotificationTitle, tokenCachePartition } from "./state-helpers.js";
 import { saveAuditLogExport } from "./save-audit-log-export.js";
 import { NovaService } from "./nova.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
@@ -42,6 +42,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, win32 } from "node:path";
 import { AppStateStore } from "./state.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
+import {
+  DEFAULT_TOKEN_CACHE_FILE,
+  adoptLegacyTokenCacheFiles,
+  tokenCacheFileName,
+} from "./token-cache-files.js";
 import {
   applyUpdateNow,
   checkForUpdatesNow,
@@ -4534,6 +4539,13 @@ function validateConnectTenantOptions(value: unknown): ConnectTenantOptions {
         128,
       );
     }
+    if (registration.label !== undefined && registration.label !== "") {
+      options.appRegistration.label = requireBoundedString(
+        registration.label,
+        "label",
+        80,
+      );
+    }
   }
   if (value.permissionAreaIds !== undefined) {
     if (!Array.isArray(value.permissionAreaIds)) {
@@ -6461,6 +6473,17 @@ function registerIpcHandlers() {
     store.disconnectTenant(requireBoundedString(id, "tenantId", 256)),
   ),
   );
+  ipcMain.handle(
+    "openadminos:remove-saved-app-registration",
+    handleTrusted((_event, clientId: unknown, directoryTenantId?: unknown) =>
+      store.removeSavedAppRegistration(
+        requireBoundedString(clientId, "clientId", 64),
+        directoryTenantId === undefined || directoryTenantId === ""
+          ? undefined
+          : requireBoundedString(directoryTenantId, "directoryTenantId", 128),
+      ),
+    ),
+  );
   ipcMain.handle("openadminos:get-agent-manifest", handleTrusted((_event, slug: unknown) =>
     store.getAgentManifest(requireAgentSlug(slug, "slug")),
   ),
@@ -6752,13 +6775,28 @@ if (!gotLock) {
     }
 
     const userDataDir = app.getPath("userData");
-    const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, "tokens.bin"));
-    // Bring-your-own registrations get an isolated token cache: MSAL
-    // binds tokens to a client id, so mixing caches would surface
-    // accounts that the active client can never refresh.
-    const tokenStoreFor = (clientId: string) =>
+    const tokenStore = new SafeStorageTokenCacheStore(join(userDataDir, DEFAULT_TOKEN_CACHE_FILE));
+    // Token cache files are named by canonical (lower case) client ID; see
+    // token-cache-files.ts. Files named with another letter case before
+    // that are moved onto the canonical name, or kept as legacy caches
+    // when the canonical file already exists.
+    const defaultPartition = tokenCachePartition(undefined);
+    const tokenStoreFor = (partition: string) =>
       new SafeStorageTokenCacheStore(
-        join(userDataDir, `tokens-${clientId.replace(/[^0-9a-zA-Z-]/g, "")}.bin`),
+        join(userDataDir, tokenCacheFileName(partition, defaultPartition)),
+      );
+    const legacyTokenCacheFiles = await adoptLegacyTokenCacheFiles(
+      userDataDir,
+      defaultPartition,
+    ).catch((error: unknown) => {
+      console.warn(
+        `[tokens] token cache files named with another client ID letter case could not be checked: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return new Map<string, string[]>();
+    });
+    const legacyTokenStoresFor = (partition: string) =>
+      (legacyTokenCacheFiles.get(partition) ?? []).map(
+        (path) => new SafeStorageTokenCacheStore(path),
       );
     seedIntuneChatSmokeState(userDataDir);
     seedReportIssueSmokeState(userDataDir);
@@ -6783,6 +6821,7 @@ if (!gotLock) {
       filePath: join(userDataDir, "state.json"),
       tokenStore,
       tokenStoreFor,
+      legacyTokenStoresFor,
       userDataPath: userDataDir,
       userAgentsDir: join(userDataDir, "agents"),
       // Only packaged production builds report installs to the public

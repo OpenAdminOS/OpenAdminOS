@@ -70,6 +70,7 @@ interface AppStateContextValue {
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
   disconnectTenant: (id: string) => Promise<void>;
+  removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
   updateAgentSettings: (
     slug: string,
     values: Record<string, unknown>,
@@ -595,6 +596,19 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const removeSavedAppRegistration = useCallback(
+    async (clientId: string, directoryTenantId?: string) => {
+      const api = getOpenAdminOSApi();
+      if (!api) {
+        throw new Error("Saved app registrations are unavailable in browser development.");
+      }
+      const nextState = await api.removeSavedAppRegistration(clientId, directoryTenantId);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    },
+    [],
+  );
+
   const updateAgentSettings = useCallback(
     async (slug: string, values: Record<string, unknown>) => {
       const api = getOpenAdminOSApi();
@@ -1092,6 +1106,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       getRequestedScopes,
       setActiveTenant,
       disconnectTenant,
+      removeSavedAppRegistration,
       updateAgentSettings,
       updateAgentSchedule,
       updateAgentTeamsDelivery,
@@ -1117,6 +1132,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       addTenantAccess,
       addSampleTenant,
       disconnectTenant,
+      removeSavedAppRegistration,
       draftAgentManifest,
       error,
       exportAgentDraftBundle,

@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
-import { TENANT_DATA_INSTRUCTIONS } from "@openadminos/runtime";
-import { graphAccessDenialFromError, graphAccessDenialText, type GraphAccessDenial } from "@openadminos/agent-sdk";
+import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS, defaultClientId } from "@openadminos/runtime";
+import {
+  graphAccessDenialFromError,
+  graphAccessDenialText,
+  SAVED_APP_REGISTRATION_LIMIT,
+  type GraphAccessDenial,
+  type SavedAppRegistration,
+} from "@openadminos/agent-sdk";
 import type {
   GraphCacheRefreshResourceResult,
   GraphCacheResourceKind,
@@ -20,6 +26,7 @@ import type {
   RunRecord,
   SelfTrainingSuggestion,
   TenantGroup,
+  TenantAppRegistration,
   TenantReadinessStatus,
   TenantRecord,
   TenantScope,
@@ -110,15 +117,219 @@ export function humanizeScheduledRunError(message: string, accessDenial?: GraphA
 
 
 
+const CLIENT_ID_PATTERN =
+  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+const DIRECTORY_ID_PATTERN = /^[0-9a-zA-Z.-]{1,100}$/;
+export const SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH = 80;
+
+/**
+ * The one form of an application (client) ID that the app stores and
+ * compares. Entra accepts client IDs in any letter case, so differently
+ * cased input must resolve to the same MSAL client and token cache.
+ */
+export function canonicalClientId(clientId: string): string {
+  return clientId.trim().toLowerCase();
+}
+
+/**
+ * The token cache a registration's tokens live in. Caches are partitioned
+ * by canonical client ID only, never by authority. MSAL clients, token
+ * cache files, and account cleanup all resolve through this.
+ */
+export function tokenCachePartition(registration: { clientId: string } | undefined): string {
+  return canonicalClientId(registration?.clientId ?? defaultClientId());
+}
+
+const TOKEN_CACHE_CLIENT_SECTIONS = ["IdToken", "AccessToken", "RefreshToken", "AppMetadata"];
+
+function isPlainJsonObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The serialized MSAL cache a partition's client reads. `legacy` holds
+ * caches from files named before client IDs were stored in one case; their
+ * entries are merged under the primary cache, which wins on key collisions
+ * (MSAL keys are lower case, so the same credential collapses to one
+ * entry). Credentials written by a client configured with a differently
+ * cased client ID get the canonical ID, because MSAL matches client IDs
+ * case-sensitively and would never find them otherwise. A legacy cache that
+ * is not valid JSON is left out; a primary cache that is not valid JSON is
+ * returned unchanged so MSAL reports it as before.
+ */
+export function tokenCacheForPartition(
+  primary: string,
+  legacy: string[],
+  partition: string,
+): string {
+  const parse = (serialized: string): Record<string, unknown> | undefined => {
+    try {
+      const value: unknown = JSON.parse(serialized);
+      return isPlainJsonObject(value) ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+  const legacyCaches = legacy
+    .filter((serialized) => serialized.length > 0)
+    .map(parse)
+    .filter((cache): cache is Record<string, unknown> => cache !== undefined);
+  const primaryCache = primary.length > 0 ? parse(primary) : {};
+  if (!primaryCache) return primary;
+
+  let changed = legacyCaches.length > 0;
+  const merged: Record<string, unknown> = {};
+  for (const cache of [...legacyCaches, primaryCache]) {
+    for (const [section, entries] of Object.entries(cache)) {
+      const previous = merged[section];
+      merged[section] =
+        isPlainJsonObject(previous) && isPlainJsonObject(entries)
+          ? { ...previous, ...entries }
+          : entries;
+    }
+  }
+  for (const section of TOKEN_CACHE_CLIENT_SECTIONS) {
+    const entries = merged[section];
+    if (!isPlainJsonObject(entries)) continue;
+    for (const [key, entry] of Object.entries(entries)) {
+      if (
+        isPlainJsonObject(entry) &&
+        typeof entry.client_id === "string" &&
+        entry.client_id !== partition &&
+        entry.client_id.toLowerCase() === partition
+      ) {
+        entries[key] = { ...entry, client_id: partition };
+        changed = true;
+      }
+    }
+  }
+  if (!changed) return primary;
+  return JSON.stringify(merged);
+}
+
+function savedRegistrationKey(entry: {
+  clientId: string;
+  directoryTenantId?: string | undefined;
+}): string {
+  return `${canonicalClientId(entry.clientId)}|${(entry.directoryTenantId ?? "").toLowerCase()}`;
+}
+
+/**
+ * Validate remembered custom registrations read from state.json. Drops
+ * anything that is not a public client id plus optional directory and
+ * label, stores client IDs in canonical lower case, dedupes by client id
+ * and directory, keeps the most recent use first, and bounds the list.
+ */
+export function sanitizeSavedAppRegistrations(value: unknown): SavedAppRegistration[] {
+  if (!Array.isArray(value)) return [];
+  const entries: SavedAppRegistration[] = [];
+  for (const candidate of value) {
+    if (typeof candidate !== "object" || candidate === null || Array.isArray(candidate)) continue;
+    const record = candidate as Record<string, unknown>;
+    const clientId = typeof record.clientId === "string" ? canonicalClientId(record.clientId) : "";
+    if (!CLIENT_ID_PATTERN.test(clientId)) continue;
+    if (typeof record.lastUsedAt !== "string" || !Number.isFinite(Date.parse(record.lastUsedAt))) continue;
+    const entry: SavedAppRegistration = { clientId, lastUsedAt: record.lastUsedAt };
+    if (record.directoryTenantId !== undefined) {
+      const directoryTenantId =
+        typeof record.directoryTenantId === "string" ? record.directoryTenantId.trim() : "";
+      if (!DIRECTORY_ID_PATTERN.test(directoryTenantId)) continue;
+      entry.directoryTenantId = directoryTenantId;
+    }
+    if (typeof record.label === "string") {
+      const label = record.label.trim().slice(0, SAVED_APP_REGISTRATION_LABEL_MAX_LENGTH);
+      if (label) entry.label = label;
+    }
+    entries.push(entry);
+  }
+  entries.sort((a, b) => Date.parse(b.lastUsedAt) - Date.parse(a.lastUsedAt));
+  const seen = new Set<string>();
+  return entries
+    .filter((entry) => {
+      const key = savedRegistrationKey(entry);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, SAVED_APP_REGISTRATION_LIMIT);
+}
+
+/** Record a successful connect with a custom registration as the most recent. */
+export function rememberAppRegistration(
+  current: SavedAppRegistration[] | undefined,
+  entry: SavedAppRegistration,
+): SavedAppRegistration[] {
+  const key = savedRegistrationKey(entry);
+  const previous = (current ?? []).find((candidate) => savedRegistrationKey(candidate) === key);
+  const label = entry.label ?? previous?.label;
+  return sanitizeSavedAppRegistrations([
+    { ...entry, ...(label ? { label } : {}) },
+    ...(current ?? []).filter((candidate) => savedRegistrationKey(candidate) !== key),
+  ]);
+}
+
+/** Forget one remembered registration; matching ignores case. */
+export function forgetAppRegistration(
+  current: SavedAppRegistration[] | undefined,
+  target: { clientId: string; directoryTenantId?: string | undefined },
+): SavedAppRegistration[] {
+  const key = savedRegistrationKey({
+    clientId: target.clientId.trim(),
+    directoryTenantId: target.directoryTenantId?.trim() || undefined,
+  });
+  return (current ?? []).filter((candidate) => savedRegistrationKey(candidate) !== key);
+}
+
+/**
+ * The Entra app identity a sign-in used, named the way an admin finds it
+ * in the Entra admin center. Errors must name the registration actually
+ * used so the admin knows which app to fix.
+ */
+function describeRegistration(registration: TenantAppRegistration | undefined): {
+  name: string;
+  custom: boolean;
+} {
+  if (registration?.kind === "custom") {
+    return {
+      name: `your app registration (client ID ${registration.clientId})`,
+      custom: true,
+    };
+  }
+  const clientId = registration?.clientId ?? OPENADMINOS_CLIENT_ID;
+  return clientId === OPENADMINOS_CLIENT_ID
+    ? { name: `the OpenAdminOS app (client ID ${clientId})`, custom: false }
+    : {
+        name: `the app this tenant was first connected with (client ID ${clientId})`,
+        custom: false,
+      };
+}
+
+function hasAadstsCode(lower: string, code: string): boolean {
+  // Codes share prefixes (AADSTS50011 and AADSTS500113), so the code
+  // must not continue with another digit.
+  return new RegExp(`aadsts${code}(?!\\d)`).test(lower);
+}
+
+function capitalize(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 /**
  * MSAL's interactive flow throws raw library errors whose messages are
- * accurate but unfriendly ("AADSTS500113: No reply address was found"…).
- * Map the common ones to plain English; fall back to the original message
- * so we never hide signal.
+ * accurate but unfriendly ("AADSTS500113: No reply address was found"...).
+ * Map the common ones to plain English that names the registration used
+ * and the specific fix; fall back to the original message so we never
+ * hide signal.
  */
-export function humanizeMsalError(error: unknown): string {
+export function humanizeMsalError(
+  error: unknown,
+  registration?: TenantAppRegistration,
+): string {
   const raw = error instanceof Error ? error.message : String(error);
   const lower = raw.toLowerCase();
+  const app = describeRegistration(registration);
+  const publishedAppFix =
+    "This is a problem with the published app, not your tenant. Report it to OpenAdminOS, and connect with your own app registration in the meantime.";
   if (error instanceof Error && error.name === "TenantConnectCancelledError") {
     return "Sign-in was cancelled. Nothing was connected.";
   }
@@ -128,25 +339,48 @@ export function humanizeMsalError(error: unknown): string {
   if (lower.includes("user_cancelled") || lower.includes("cancelled by user")) {
     return "Sign-in was cancelled in the browser. Try again from Settings → Tenants.";
   }
-  if (lower.includes("aadsts50105") || lower.includes("assigned to a role")) {
-    return "The account isn't assigned to access Microsoft Graph CLI for this tenant. Ask a tenant admin to grant access, or sign in with a different account.";
+  if (hasAadstsCode(lower, "50011") || hasAadstsCode(lower, "500113")) {
+    return app.custom
+      ? `Microsoft rejected the sign-in redirect for ${app.name}. In Entra, open the registration, go to Authentication, add the platform Mobile and desktop applications with the redirect URI http://localhost, save, then try again.`
+      : `Microsoft rejected the sign-in redirect for ${app.name}. ${publishedAppFix}`;
+  }
+  if (hasAadstsCode(lower, "7000218")) {
+    return app.custom
+      ? `Microsoft asked for a client secret because ${app.name} is not set up as a public client. In Entra, open the registration, go to Authentication, set Allow public client flows to Yes, save, then try again. OpenAdminOS never uses a client secret.`
+      : `Microsoft asked for a client secret for ${app.name}. ${publishedAppFix}`;
+  }
+  if (hasAadstsCode(lower, "50194")) {
+    return app.custom
+      ? `${capitalize(app.name)} is single-tenant, so sign-in must go to its own directory. Enter the Directory (tenant) ID from the registration overview in the connect dialog, then try again.`
+      : `Microsoft rejected ${app.name} as single-tenant. ${publishedAppFix}`;
+  }
+  if (hasAadstsCode(lower, "900023")) {
+    return app.custom
+      ? `Microsoft does not recognise the Directory (tenant) ID entered for ${app.name}. Use the Directory (tenant) ID GUID or a verified domain from the registration overview, then try again.`
+      : `Microsoft does not recognise the directory used to sign in with ${app.name}. Check the account you signed in with, then try again.`;
   }
   if (
-    lower.includes("aadsts65001") ||
+    hasAadstsCode(lower, "700016") ||
+    lower.includes("not found in the directory")
+  ) {
+    return app.custom
+      ? `Microsoft could not find ${app.name} in the directory you signed in to. Check the Application (client) ID on the registration overview. If the app is single-tenant, also enter its Directory (tenant) ID, then try again.`
+      : `Microsoft could not find ${app.name} in this tenant. Your organization may block third-party multi-tenant apps. Ask an Entra administrator to allow it, or connect with your own app registration.`;
+  }
+  if (hasAadstsCode(lower, "50105") || lower.includes("assigned to a role")) {
+    return `Your account isn't assigned to ${app.name} in this tenant. Ask a tenant admin to assign you under Enterprise applications, or sign in with a different account.`;
+  }
+  if (
+    hasAadstsCode(lower, "65001") ||
     lower.includes("consent") ||
     lower.includes("requires admin")
   ) {
-    return "Admin consent is required for the Microsoft Graph CLI in this tenant. Have a Global Administrator approve the app, then try again.";
+    return app.custom
+      ? `Admin consent has not been granted for ${app.name}. In Entra, open the registration, go to API permissions, and select Grant admin consent. Or create a new registration with the setup script in the connect dialog. Then try again.`
+      : `Admin consent is required for ${app.name} in this tenant. Have a Global Administrator sign in once and approve the requested permissions, then try again.`;
   }
-  if (lower.includes("aadsts50020") || lower.includes("user account") || lower.includes("not exist")) {
+  if (hasAadstsCode(lower, "50020") || lower.includes("user account") || lower.includes("not exist")) {
     return "That account doesn't exist in this tenant. Pick a directory account during sign-in instead of a personal Microsoft account.";
-  }
-  if (
-    lower.includes("aadsts700016") ||
-    lower.includes("aadsts900023") ||
-    lower.includes("not found in the directory")
-  ) {
-    return "Microsoft rejected the sign-in because the tenant doesn't recognise our app id. This can happen if Conditional Access blocks the Microsoft Graph CLI; check with your security team.";
   }
   if (
     lower.includes("network") ||
@@ -167,7 +401,7 @@ export function humanizeMsalError(error: unknown): string {
     return raw;
   }
   // Fall back to the raw message so debugging is still possible.
-  return `Sign-in failed: ${raw}`;
+  return `Sign-in with ${app.name} failed: ${raw}`;
 }
 
 
