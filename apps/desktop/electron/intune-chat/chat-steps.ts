@@ -383,20 +383,58 @@ export function formatIndexVersion(version: string): string {
 
 const LINK = /\bhttps?:\/\/|\bwww\.|\b[a-z0-9-]+\.(?:com|net|org|io|dev|app|cloud|ms)\b/i;
 
+/** An offer to the admin at the start of a follow-up, such as "Would you like me to". */
+const OFFER = /^(?:would you like(?: me)? to|do you want(?: me)? to|want me to|should i|shall i|can i|could i|may i|i can|let me)\s+/i;
+
+/**
+ * A follow-up in the admin's voice, as something they would type: an
+ * offer such as "Would you like to check this tenant's macOS onboarding
+ * status?" becomes "Check our macOS onboarding status". Text that still
+ * speaks to the admin is dropped.
+ */
+export function inAdminVoice(text: string): string | undefined {
+  let out = text;
+  if (OFFER.test(out)) {
+    out = out.replace(OFFER, "").replace(/\?+$/, "").trim();
+    out = out.replace(/\b(?:this|the|your) tenant(?:'|\u2019)s\b/gi, "our").replace(/\byour\b/gi, "our");
+    out = out.charAt(0).toUpperCase() + out.slice(1);
+  }
+  if (!out || /\b(?:you|your|yours)\b/i.test(out)) return undefined;
+  return out;
+}
+
+const OVERLAP_STOPWORDS = new Set([
+  "a", "an", "and", "are", "check", "do", "does", "find", "for", "how", "i", "in", "is", "list", "me", "of", "on", "or", "our",
+  "see", "show", "status", "tenant", "tenants", "the", "this", "to", "we", "what", "which", "with",
+]);
+
+function overlapTokens(text: string): Set<string> {
+  return new Set(text.toLowerCase().replace(/(?:'|\u2019)s\b/g, "").split(/[^a-z0-9]+/).filter((token) => token && !/^\d+$/.test(token) && !OVERLAP_STOPWORDS.has(token)));
+}
+
+/** Whether two follow-ups ask for the same thing: at least half the words of the shorter one are in the other. */
+export function nearDuplicateFollowUp(a: string, b: string): boolean {
+  const left = overlapTokens(a);
+  const right = overlapTokens(b);
+  const smaller = Math.min(left.size, right.size);
+  if (smaller === 0) return a.trim().toLowerCase() === b.trim().toLowerCase();
+  return [...left].filter((token) => right.has(token)).length / smaller >= 0.5;
+}
+
 /**
  * Follow-ups the model returned in `next`: at most two, trimmed, at most
- * 120 characters, only read-only questions, no links, and nothing the
- * caller's tenant data check rejects.
+ * 120 characters, only read-only questions in the admin's voice, no
+ * links, and nothing the caller's tenant data check rejects.
  */
-export function validFollowUps(value: unknown, holdsTenantData: (text: string) => boolean = () => false): string[] {
+export function validFollowUps(value: unknown, holdsTenantData: (text: string) => boolean = () => false, limit = 2): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
   for (const item of value) {
     if (typeof item !== "string") continue;
-    const text = item.replace(/\s+/g, " ").trim();
+    const text = inAdminVoice(item.replace(/\s+/g, " ").trim());
     if (!text || text.length > 120 || LINK.test(text) || planChatContext(text).hasWriteIntent || holdsTenantData(text)) continue;
     if (!out.some((existing) => existing.toLowerCase() === text.toLowerCase())) out.push(text);
-    if (out.length === 2) break;
+    if (out.length === limit) break;
   }
   return out;
 }
@@ -446,9 +484,13 @@ export function tenantTieInFollowUp(input: {
   return topic ? `Check ${topic} in our ${label.toLowerCase()}` : `Check how this applies to our ${label.toLowerCase()}`;
 }
 
-/** Deterministic follow-ups first, then the model's, at most two in all. */
+/** Deterministic follow-ups first, then the model's that ask for something else, at most two in all. */
 export function mergeFollowUps(...lists: ReadonlyArray<ReadonlyArray<string | undefined>>): string[] {
-  return validFollowUps(lists.flat().filter((item): item is string => Boolean(item)));
+  const kept: string[] = [];
+  for (const text of validFollowUps(lists.flat().filter((item): item is string => Boolean(item)), undefined, Number.POSITIVE_INFINITY)) {
+    if (!kept.some((existing) => nearDuplicateFollowUp(existing, text))) kept.push(text);
+  }
+  return kept.slice(0, 2);
 }
 
 /** Whether a Microsoft Learn call answered: a failed or blocked call, or one with no results, does not count. */

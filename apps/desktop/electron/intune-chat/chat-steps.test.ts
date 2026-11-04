@@ -17,6 +17,8 @@ import {
   toolStepFinish,
   toolStepStart,
   validFollowUps,
+  mergeFollowUps,
+  nearDuplicateFollowUp,
 } from "./chat-steps.js";
 import { classifyChatQuestion, hasTenantReference, planChatContext, resolveQuestionKind } from "./planner.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -248,6 +250,28 @@ describe("follow-ups", () => {
     assert.deepEqual(validFollowUps("not a list"), []);
     assert.deepEqual(validFollowUps(["Read https://evil.example/x", "Open www.contoso.com", "See learn.microsoft.com", "Which Macs miss the profile?"]), ["Which Macs miss the profile?"]);
     assert.deepEqual(validFollowUps(["Why is MAC-07 offline?", "Which Macs are offline?"], (text) => /MAC-07/.test(text)), ["Which Macs are offline?"]);
+  });
+
+  it("keeps follow-ups in the admin's voice: offers to the admin are rewritten, other questions to the admin dropped", () => {
+    assert.deepEqual(validFollowUps([
+      "Would you like to check this tenant\u2019s macOS onboarding status?",
+      "Do you want me to list Macs without the system extension?",
+      "Should I show the onboarding package steps?",
+    ]), ["Check our macOS onboarding status", "List Macs without the system extension"]);
+    assert.deepEqual(validFollowUps(["Shall I compare your Defender settings?", "Are you using Platform SSO?", "Which Macs miss full disk access?"]), [
+      "Compare our Defender settings", "Which Macs miss full disk access?",
+    ]);
+  });
+
+  it("drops a model follow-up that repeats the deterministic one, and keeps the next distinct one", () => {
+    const tieIn = "Check our 5 macOS devices for Defender in Intune";
+    assert.deepEqual(mergeFollowUps([tieIn], ["Would you like to check this tenant's macOS onboarding status?", "How do I deploy the onboarding package with Intune?"]), [
+      tieIn, "How do I deploy the onboarding package with Intune?",
+    ]);
+    assert.deepEqual(mergeFollowUps([tieIn], ["Check Defender on our Macs in Intune", "Which Macs miss the system extension profile?"]), [
+      tieIn, "Which Macs miss the system extension profile?",
+    ]);
+    assert.equal(nearDuplicateFollowUp("Which Macs miss full disk access?", tieIn), false);
   });
 
   it("offers a tenant check for a docs question with a tenant tie-in, counted from the cache", () => {
