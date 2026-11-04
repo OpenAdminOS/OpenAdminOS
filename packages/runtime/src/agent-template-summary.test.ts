@@ -255,6 +255,13 @@ definition:
     assert.deepEqual(summary.scopes, []);
   });
 
+  it("accepts an empty list for an agent whose only scope is the sign-in User.Read", () => {
+    const signInOnly = manifest("  services: []").replace("Policy.Read.All", "User.Read").replace("/identity/conditionalAccess/policies", "/me");
+    const summary = agentTemplateToRegistrySummary(parseAgentTemplate(signInOnly));
+    assert.deepEqual(summary.services, []);
+    assert.deepEqual(summary.scopes, ["User.Read"]);
+  });
+
   it("declares services for every bundled agent, empty only without Graph scopes", () => {
     for (const slug of readdirSync(agentsRoot)) {
       const manifestPath = join(agentsRoot, slug, "manifest.yaml");

@@ -908,6 +908,15 @@ export function unmappedScopesCopy(scopes: readonly string[]): string | undefine
 }
 
 /**
+ * Declared scopes that need a service: every scope except the baseline
+ * sign-in scopes, which each tenant grants at sign-in. An agent whose
+ * scopes are all baseline may declare `services: []`.
+ */
+export function scopesRequiringService(scopes: readonly string[]): string[] {
+  return scopes.filter((scope) => !BASELINE_NAMES.has(normalizeGraphScopeName(scope)));
+}
+
+/**
  * Declared scopes that none of the declared services lists. Baseline
  * sign-in scopes are always covered. Unknown scopes are never covered,
  * so a new scope has to be added to the registry first.
@@ -917,8 +926,7 @@ export function scopesNotCoveredByServices(
   services: readonly ServiceId[],
 ): string[] {
   const declared = new Set(services);
-  return scopes.filter((scope) => {
-    if (BASELINE_NAMES.has(normalizeGraphScopeName(scope))) return false;
-    return !servicesOwningScope(scope).some((id) => declared.has(id));
-  });
+  return scopesRequiringService(scopes).filter(
+    (scope) => !servicesOwningScope(scope).some((id) => declared.has(id)),
+  );
 }

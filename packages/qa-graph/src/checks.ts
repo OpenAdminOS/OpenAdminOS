@@ -5,6 +5,7 @@ import { load as parseYaml } from "js-yaml";
 import {
   AVAILABLE_SERVICES,
   scopesNotCoveredByServices,
+  scopesRequiringService,
   servicesForScopes,
   type GraphOperation,
   type ServiceId,
@@ -59,17 +60,19 @@ export function checkServicesCoverScopes(
     };
   }
   if (agent.services.length === 0) {
-    return agent.scopes.length === 0
+    // Baseline sign-in scopes, such as User.Read, need no service.
+    const needing = scopesRequiringService(agent.scopes);
+    return needing.length === 0
       ? {
           name: "services-cover-scopes",
           severity: "pass",
-          message: "The agent declares no Graph scopes and needs no service.",
+          message: "The agent declares no Graph scopes beyond sign-in and needs no service.",
         }
       : {
           name: "services-cover-scopes",
           severity: "fail",
-          message: `descriptor.services is empty, but the agent declares Graph scopes: ${agent.scopes.join(", ")}.${suggest}`,
-          details: [...agent.scopes],
+          message: `descriptor.services is empty, but the agent declares Graph scopes: ${needing.join(", ")}.${suggest}`,
+          details: needing,
         };
   }
   const isAvailable = (service: string): service is ServiceId =>

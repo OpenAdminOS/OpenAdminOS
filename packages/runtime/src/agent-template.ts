@@ -31,6 +31,7 @@ import type {
 import {
   AVAILABLE_SERVICES,
   assertWritePlanLimits,
+  scopesRequiringService,
   servicesForScopes,
   writeLimitsValidationIssue,
   type ServiceId,
@@ -178,7 +179,8 @@ export function parseAgentTemplate(source: string): AgentTemplate {
     definition: definition as AgentTemplate["definition"],
   };
   if (Array.isArray(descriptor.services) && descriptor.services.length === 0) {
-    const scopes = collectScopes(template);
+    // Baseline sign-in scopes, such as User.Read, need no service.
+    const scopes = scopesRequiringService(collectScopes(template));
     if (scopes.length > 0) {
       throw new ManifestValidationError(
         "descriptor.services",

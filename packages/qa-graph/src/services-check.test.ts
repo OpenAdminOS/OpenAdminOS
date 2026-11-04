@@ -33,10 +33,16 @@ describe("services-cover-scopes", () => {
     assert.deepEqual(unknown.details, ["exchange-online", "exchange"]);
   });
 
-  it("accepts an empty list only when the agent declares no Graph scopes", () => {
+  it("accepts an empty list only when the agent declares no Graph scopes beyond sign-in", () => {
     const none = checkServicesCoverScopes({ scopes: [], services: [] });
     assert.equal(none.severity, "pass");
-    assert.equal(none.message, "The agent declares no Graph scopes and needs no service.");
+    assert.equal(none.message, "The agent declares no Graph scopes beyond sign-in and needs no service.");
+    // Baseline sign-in scopes need no service, matching scopesNotCoveredByServices.
+    const baseline = checkServicesCoverScopes({ scopes: ["User.Read", "openid", "offline_access"], services: [] });
+    assert.equal(baseline.severity, "pass");
+    const mixed = checkServicesCoverScopes({ scopes: ["User.Read", "Policy.Read.All"], services: [] });
+    assert.equal(mixed.severity, "fail");
+    assert.deepEqual(mixed.details, ["Policy.Read.All"]);
     const withScopes = checkServicesCoverScopes({ scopes: ["Policy.Read.All"], services: [] });
     assert.equal(withScopes.severity, "fail");
     assert.deepEqual(withScopes.details, ["Policy.Read.All"]);
