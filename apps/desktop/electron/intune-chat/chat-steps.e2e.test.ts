@@ -183,6 +183,20 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     });
   });
 
+  it("does not label the answer Microsoft Learn when the Learn call was blocked", async () => {
+    await withHarness(async ({ store, script }) => {
+      script([
+        { tool: learnTool, params: { query: "Contoso Defender for macOS setup" } },
+        { final: true, answer: "Microsoft Learn says Defender for Endpoint on macOS needs full disk access." },
+      ]);
+      const message = (await store.sendIntuneChatMessage({ content: DOCS_QUESTION })).assistantMessage;
+      assert.equal(message.toolTrace?.[0]?.mcpSource?.blocked, true);
+      assert.equal(message.steps?.find((step) => step.kind === "mcp")?.status, "blocked");
+      assert.equal(message.content, "The Microsoft documentation says Defender for Endpoint on macOS needs full disk access.");
+      assert.equal(message.documentationSources, undefined);
+    });
+  });
+
   it("calls KQL Search for a KQL question, even when the model tries to answer first", async () => {
     await withHarness(async ({ store, graphPaths, prompts, script }) => {
       script([

@@ -373,6 +373,11 @@ export function mergeFollowUps(...lists: ReadonlyArray<ReadonlyArray<string | un
   return validFollowUps(lists.flat().filter((item): item is string => Boolean(item)));
 }
 
+/** Whether a Microsoft Learn call answered: a failed or blocked call does not count. */
+export function learnAnswered(trace: readonly IntuneChatToolTraceEntry[]): boolean {
+  return trace.some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID && !entry.error && !entry.mcpSource.blocked);
+}
+
 /**
  * The answer may only call text Microsoft Learn when a Learn call ran in
  * it. Otherwise the passages came from the local index or the model, so

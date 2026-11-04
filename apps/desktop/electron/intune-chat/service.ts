@@ -127,10 +127,10 @@ import {
 import { executeIntuneChatTool, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
 import {
   CitationRegistry,
-  LEARN_SERVER_ID,
   MICROSOFT_GRAPH,
   ON_DEVICE,
   formatIndexVersion,
+  learnAnswered,
   mergeFollowUps,
   namedServers,
   planChatSources,
@@ -1916,7 +1916,7 @@ export class IntuneChatService {
       }
     }
 
-    assistantContent = relabelUnverifiedLearn(assistantContent, (toolTrace ?? []).some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID));
+    assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const followUps = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
@@ -2549,7 +2549,7 @@ export class IntuneChatService {
                   schedule: store.getGraphCacheRefreshSchedule(tenant.id),
                 },
               });
-              assistantContent = relabelUnverifiedLearn(agentic.answer.trim(), agentic.toolTrace.some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID));
+              assistantContent = relabelUnverifiedLearn(agentic.answer.trim(), learnAnswered(agentic.toolTrace));
               emitDelta(assistantContent);
             } else {
               finishAnswerStep({ passages: 0, trace: agentic.toolTrace, failed: true });
@@ -2640,7 +2640,7 @@ export class IntuneChatService {
       ).join("\n");
       emitDelta(assistantContent, "");
     }
-    assistantContent = relabelUnverifiedLearn(assistantContent, (toolTrace ?? []).some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID));
+    assistantContent = relabelUnverifiedLearn(assistantContent, learnAnswered(toolTrace ?? []));
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const followUps = answerPlan && assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage
       ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps })
