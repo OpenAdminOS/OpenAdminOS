@@ -24,7 +24,7 @@ function buildServer(kind: "learn" | "kql"): McpServer {
   const server = new McpServer({ name: kind, version: "1.0.0" });
   if (kind === "learn") {
     server.registerTool("microsoft_docs_search", { description: "Search Microsoft documentation.", inputSchema: { query: z.string() } },
-      async ({ query }) => ({ content: [{ type: "text", text: JSON.stringify({ results: [
+      async ({ query }) => ({ content: [{ type: "text", text: JSON.stringify({ results: query.includes("nothing") ? [] : [
         { title: "Microsoft Defender for Endpoint on Mac", content: `Results for ${query}: needs full disk access.`, contentUrl: "https://learn.microsoft.com/defender-endpoint/microsoft-defender-endpoint-mac" },
         { title: "Prerequisites and system requirements", content: "Three latest macOS releases.", contentUrl: "https://learn.microsoft.com/defender-endpoint/mac-requirements" },
       ] }) }] }));
@@ -71,6 +71,8 @@ after(async () => {
 });
 
 interface Harness {
+  /** Local docs index searches, when the harness has an index. */
+  docsSearches: string[];
   store: AppStateStore;
   cache: IntelligenceSqliteStore;
   graphPaths: string[];
@@ -78,7 +80,7 @@ interface Harness {
   script(replies: unknown[]): void;
 }
 
-async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string; incremental?: boolean } = {}): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string; incremental?: boolean; docsIndex?: boolean } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
@@ -122,6 +124,20 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
       },
     }),
   });
+  const docsSearches: string[] = [];
+  if (options.docsIndex) {
+    // A local docs index with two passages, in place of the installed index.
+    Object.assign(store, {
+      documentationIndexVersion: () => "2026-08-26",
+      retrieveDocumentation: async (query: string) => {
+        docsSearches.push(query);
+        return [
+          { file: "defender/mac-install-manually.md", title: "Manual deployment for Defender on macOS", text: "Download the onboarding package.", score: 0.9 },
+          { file: "defender/mac-prerequisites.md", title: "Prerequisites for Defender on macOS", text: "Grant full disk access.", score: 0.8 },
+        ];
+      },
+    });
+  }
   try {
     await store.installMcpServer("microsoft-learn");
     await store.installMcpServer("kql-search");
@@ -135,7 +151,7 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
       ],
     });
     await run({
-      store, cache, graphPaths, prompts,
+      docsSearches, store, cache, graphPaths, prompts,
       script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; graphPaths.length = 0; },
     });
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
@@ -217,6 +233,68 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.equal(deltas.at(-1), "The Microsoft documentation says Defender for Endpoint on macOS needs full disk access and a system extension.");
       assert.equal(result.assistantMessage.content, deltas.at(-1));
     }, { incremental: true });
+  });
+
+  const ONBOARDING_QUESTION = "how does defender onboarding for macos work?";
+
+  it("keeps the local docs index back while Microsoft Learn answers a docs question", async () => {
+    await withHarness(async ({ store, docsSearches, prompts, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint onboarding on macOS" } },
+        { final: true, answer: "Deploy the onboarding package [1] and grant full disk access [2]." },
+      ]);
+      const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
+      assert.equal(message.questionKind, "docs");
+      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "answer"]);
+      assert.deepEqual(docsSearches, []);
+      assert.ok(prompts.every((entry) => !entry.prompt.includes("passages from the local docs index")));
+      assert.deepEqual(message.documentationSources?.map((source) => source.kind), ["mcp", "mcp"]);
+    }, { docsIndex: true });
+  });
+
+  it("searches the local docs index after Microsoft Learn returns nothing, as its own step after the Learn call", async () => {
+    await withHarness(async ({ store, docsSearches, prompts, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "nothing about onboarding" } },
+        { final: true, answer: "Microsoft Learn says to deploy the onboarding package [1]." },
+      ]);
+      const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
+      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "docs-index", "answer"]);
+      assert.equal(message.steps![2]!.title, "Searched the local docs index, because Microsoft Learn returned nothing");
+      assert.equal(docsSearches.length, 1);
+      assert.match(prompts[1]!.prompt, /Microsoft Learn returned nothing\. Passages from the local docs index are now in the prompt/);
+      assert.deepEqual(message.documentationSources?.map((source) => [source.citation, source.kind]), [[1, "docs-index"], [2, "docs-index"]]);
+      assert.match(message.content, /^The Microsoft documentation says/);
+    }, { docsIndex: true });
+  });
+
+  it("searches the local docs index after a blocked Microsoft Learn query, and says why", async () => {
+    await withHarness(async ({ store, script }) => {
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Contoso Defender onboarding" } },
+        { final: true, answer: "Deploy the onboarding package [1]." },
+      ]);
+      const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
+      assert.deepEqual(kinds(message.steps), ["plan", "mcp", "docs-index", "answer"]);
+      assert.equal(message.steps![1]!.status, "blocked");
+      assert.equal(message.steps![2]!.title, "Searched the local docs index, because the Microsoft Learn query was blocked");
+    }, { docsIndex: true });
+  });
+
+  it("searches the local docs index once the model's kind leaves Microsoft Learn out", async () => {
+    await withHarness(async ({ store, docsSearches, script }) => {
+      script([
+        { kind: "mixed", sources: ["docs-index"], tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "macOS" }, limit: 5 } },
+        { final: true, answer: "Five Macs are enrolled; onboarding needs the package [1]." },
+      ]);
+      const message = (await store.streamIntuneChatMessage({ content: ONBOARDING_QUESTION }, () => {})).assistantMessage;
+      assert.equal(message.questionKind, "mixed");
+      const order = kinds(message.steps);
+      assert.equal(order[0], "plan");
+      assert.ok(order.indexOf("docs-index") > 0 && order.indexOf("docs-index") < order.indexOf("answer"));
+      assert.equal(message.steps!.find((step) => step.kind === "docs-index")!.title, "Searched the local docs index");
+      assert.equal(docsSearches.length, 1);
+    }, { docsIndex: true });
   });
 
   it("does not label the answer Microsoft Learn when the Learn call was blocked", async () => {

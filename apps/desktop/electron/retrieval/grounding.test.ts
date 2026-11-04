@@ -44,9 +44,9 @@ describe("Chat documentation grounding", () => {
       "both agentic call sites should pass retrieved documentation",
     );
     assert.equal(
-      (service.match(/documentationFallback: \(\) => this\.searchDocsIndex\(modelQuestion, steps, true\)/g) ?? []).length,
+      (service.match(/documentationFallback: \(reason\?: string\) => this\.searchDocsIndex\(modelQuestion, steps, reason\)/g) ?? []).length,
       2,
-      "both agentic call sites should fall back to the index when Learn does not answer",
+      "both agentic call sites should fall back to the index when Learn is left out, fails, is blocked or returns nothing",
     );
   });
 });

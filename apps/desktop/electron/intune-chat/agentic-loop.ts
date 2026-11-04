@@ -163,10 +163,12 @@ export interface RunAgenticChatInput {
    */
   documentation?: ReadonlyArray<DocsIndexPassage>;
   /**
-   * Microsoft Learn is chosen, so the local index is withheld and loaded
-   * from here only once a Learn call fails or is blocked.
+   * Microsoft Learn may be the chosen source, so the local index is
+   * withheld. It is loaded from here once the decided sources do not
+   * include Learn, or a Learn call fails, is blocked or returns nothing.
+   * `reason` says which, such as "Microsoft Learn returned nothing".
    */
-  documentationFallback?: () => Promise<DocsIndexPassage[]>;
+  documentationFallback?: (reason?: string) => Promise<DocsIndexPassage[]>;
   tenant: TenantRecord;
   providerId: ProviderId;
   providerIsLocal: boolean;
@@ -475,19 +477,22 @@ export async function runAgenticChat(
     let observed = execution.result;
     if (mcpSource) {
       attemptedServers.add(mcpSource.serverId);
-      if (!execution.trace.error) {
+      const learnEmpty = mcpSource.serverId === LEARN_SERVER_ID && !execution.trace.error && (mcpSource.results?.length ?? 0) === 0;
+      if (!execution.trace.error && !learnEmpty) {
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
         const { results: _results, ...rest } = execution.result as Record<string, unknown>;
         observed = { ...rest, citations: citations.addMcpResults(mcpSource.results ?? [], mcpSource) };
       } else if (mcpSource.serverId === LEARN_SERVER_ID && fallbackPending && !learnAnswered && input.documentationFallback) {
-        // Learn is offline or the query was blocked: the local index takes over.
+        // Learn is offline, the query was blocked or nothing matched: the local index takes over.
         fallbackPending = false;
-        const fallback = await input.documentationFallback();
+        const reason = mcpSource.blocked ? "the Microsoft Learn query was blocked" : learnEmpty ? "Microsoft Learn returned nothing" : "Microsoft Learn did not answer";
+        const fallback = await input.documentationFallback(reason);
         addDocumentation(fallback);
+        const lead = `${reason[0]!.toUpperCase()}${reason.slice(1)}.`;
         turns.push({ role: "repair", content: fallback.length > 0
-          ? "Microsoft Learn did not answer. Passages from the local docs index are now in the prompt. Cite them with their numbers and call them the local docs index, not Microsoft Learn."
-          : "Microsoft Learn did not answer and the local docs index has no passages for this question. Say so, and do not present text as Microsoft Learn content." });
+          ? `${lead} Passages from the local docs index are now in the prompt. Cite them with their numbers and call them the local docs index, not Microsoft Learn.`
+          : `${lead} The local docs index has no passages for this question either. Say so, and do not present text as Microsoft Learn content.` });
       }
     }
     // In a consented web-research session, public evidence is

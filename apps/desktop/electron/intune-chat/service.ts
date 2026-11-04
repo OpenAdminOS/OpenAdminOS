@@ -134,6 +134,7 @@ import {
   ON_DEVICE,
   formatIndexVersion,
   learnAnswered,
+  LEARN_SERVER_ID,
   mergeFollowUps,
   namedServers,
   planChatSources,
@@ -1893,13 +1894,13 @@ export class IntuneChatService {
           if (capability.enabled) {
             const tenantObservations = new TenantValueIndex();
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
-            const learnFirst = answerPlan.sources.learnFirst;
+            const learnFirst = learnMayLead(answerPlan.sources, lazyRefresh, mcp.mcp);
             const documentation = learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
             const finishAnswerStep = startAnswerStep(steps, answerModel);
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               documentation,
-              ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
+              ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               questionKind: answerPlan.sources.kind,
               requiredServerIds: answerPlan.sources.requiredServerIds,
               ...(lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
@@ -2519,7 +2520,7 @@ export class IntuneChatService {
               },
             });
             const toolSteps = toolStepHooks(steps, mcp.mcp, answerModel.providerName);
-            const learnFirst = answerPlan?.sources.learnFirst === true;
+            const learnFirst = answerPlan ? learnMayLead(answerPlan.sources, lazyRefresh, mcp.mcp) : false;
             const documentation = options.voice
               ? options.webSearch ? [] : await this.retrieveDocumentationSafely(modelQuestion)
               : learnFirst ? [] : await this.searchDocsIndex(modelQuestion, steps);
@@ -2527,7 +2528,7 @@ export class IntuneChatService {
             const agentic = await this.rememberingTenantValues(conversation.id, tenantObservations, async () => runAgenticChat({
               question: modelQuestion,
               documentation,
-              ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
+              ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
               ...(answerPlan && lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
               tenant,
@@ -2891,12 +2892,17 @@ export class IntuneChatService {
     return { mcp, mcpInstalled: Boolean(installed.mcp), get sources() { return kind.sources; }, kind, settleKind, tieInResources };
   }
 
-  /** Searches the local docs index and records the step. Passages carry the index version. */
-  private async searchDocsIndex(query: string, steps: ChatStepRecorder, fallback = false): Promise<DocsIndexPassage[]> {
+  /**
+   * Searches the local docs index and records the step. Passages carry the
+   * index version. `fallbackReason` says why the index stands in for
+   * Microsoft Learn, such as "Microsoft Learn returned nothing".
+   */
+  private async searchDocsIndex(query: string, steps: ChatStepRecorder, fallbackReason?: string): Promise<DocsIndexPassage[]> {
     const version = this.host.documentationIndexVersion?.();
-    const title = fallback ? "Searched the local docs index instead" : "Searched the local docs index";
+    const because = fallbackReason ? `, because ${fallbackReason}` : "";
+    const title = `Searched the local docs index${because}`;
     const step = () => ({ kind: "docs-index" as const, title, origin: "device" as const, originLabel: ON_DEVICE });
-    const id = version ? steps.start({ ...step(), title: fallback ? "Searching the local docs index instead" : "Searching the local docs index" }) : undefined;
+    const id = version ? steps.start({ ...step(), title: `Searching the local docs index${because}` }) : undefined;
     const passages: DocsIndexPassage[] = (await this.retrieveDocumentationSafely(query)).map((passage) => ({
       file: passage.file,
       ...(passage.title ? { title: passage.title } : {}),
@@ -3283,6 +3289,17 @@ function refreshedResourceSet(result: GraphCacheRefreshResult | undefined): Set<
  * check vetoes a docs label that refers to the tenant, and the tenant is
  * refreshed only once the kind needs it.
  */
+/**
+ * Whether the local docs index waits for Microsoft Learn. It does when
+ * Learn is the chosen source, and while the model has yet to classify a
+ * question with Learn installed: a docs answer then asks Learn first, and
+ * the loop loads the index only when the decided sources leave Learn out
+ * or Learn fails, is blocked or returns nothing.
+ */
+function learnMayLead(sources: ChatSourcePlan, modelClassifies: boolean, mcp: McpChatContext | undefined): boolean {
+  return sources.learnFirst || (modelClassifies && Boolean(mcp?.servers?.some((server) => server.id === LEARN_SERVER_ID)));
+}
+
 function modelClassification(
   veto: string | undefined,
   kind: QuestionKindTracker,

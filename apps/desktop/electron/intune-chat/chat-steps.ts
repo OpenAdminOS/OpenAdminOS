@@ -451,9 +451,9 @@ export function mergeFollowUps(...lists: ReadonlyArray<ReadonlyArray<string | un
   return validFollowUps(lists.flat().filter((item): item is string => Boolean(item)));
 }
 
-/** Whether a Microsoft Learn call answered: a failed or blocked call does not count. */
+/** Whether a Microsoft Learn call answered: a failed or blocked call, or one with no results, does not count. */
 export function learnAnswered(trace: readonly IntuneChatToolTraceEntry[]): boolean {
-  return trace.some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID && !entry.error && !entry.mcpSource.blocked);
+  return trace.some((entry) => entry.mcpSource?.serverId === LEARN_SERVER_ID && !entry.error && !entry.mcpSource.blocked && (entry.mcpSource.results?.length ?? 0) > 0);
 }
 
 /**
