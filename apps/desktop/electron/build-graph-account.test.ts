@@ -133,6 +133,32 @@ const MISMATCHED: ReadonlyArray<readonly [string, Account]> = [
   ["the same account in another directory", { homeAccountId: TENANT.homeAccountId, tenantId: "fabrikam-tenant-id", username: TENANT.username }],
 ];
 
+describe("connector tenant session interactive fallback", () => {
+  for (const [label, account] of MISMATCHED) {
+    it(`rejects ${label} before any Graph request`, async () => {
+      const fixture = await makeFixture(account);
+      try {
+        const session = (fixture.store as unknown as {
+          createTenantSessionForRecord(tenant: TenantRecord): import("@openadminos/agent-sdk").TenantSession;
+        }).createTenantSessionForRecord(TENANT);
+        await assert.rejects(session.acquireTokenForScopes(["ChannelMessage.Send"]), { name: "TenantAccountMismatchError" });
+        await assert.rejects(session.acquireTokenWithScopes!(["Mail.Send"]), { name: "TenantAccountMismatchError" });
+        await settle();
+        assert.deepEqual(fixture.loginHints, [TENANT.username, TENANT.username]);
+        assert.deepEqual(fixture.authorities, [
+          "https://login.microsoftonline.com/contoso-tenant-id",
+          "https://login.microsoftonline.com/contoso-tenant-id",
+        ]);
+        assert.equal(fixture.fetches.length, 0);
+        const state = await fixture.store.getAppState();
+        assert.deepEqual(state.tenants.find((t) => t.id === TENANT.id)?.grantedScopes, TENANT.grantedScopes);
+      } finally {
+        await fixture.close();
+      }
+    });
+  }
+});
+
 describe("Entra tier probe interactive fallback", () => {
   const licensed: TenantRecord = {
     ...TENANT,
