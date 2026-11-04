@@ -373,7 +373,7 @@ describe("MCP installs in app state", () => {
     });
     try {
       await store.installMcpServer("test-docs");
-      const result = await store.sendIntuneChatMessage({ content: "What is Windows Autopatch?" });
+      const result = await store.sendIntuneChatMessage({ content: "What do the docs say about Autopatch?" });
       assert.equal(result.assistantMessage.content, "Windows Autopatch is a cloud service that automates Windows updates.");
       const trace = result.assistantMessage.toolTrace?.find((entry) => entry.mcpSource);
       assert.equal(trace?.mcpSource?.host, "127.0.0.1");
@@ -383,7 +383,7 @@ describe("MCP installs in app state", () => {
       // A disabled server offers nothing to Chat.
       await store.setMcpServerEnabled("test-docs", false);
       prompts.length = 0;
-      const disabled = await store.sendIntuneChatMessage({ content: "What is Windows Autopatch?" });
+      const disabled = await store.sendIntuneChatMessage({ content: "What do the docs say about Autopatch?" });
       assert.equal(disabled.assistantMessage.toolTrace?.some((entry) => entry.mcpSource) ?? false, false);
     } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
   });

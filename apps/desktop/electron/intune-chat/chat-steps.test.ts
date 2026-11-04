@@ -41,7 +41,6 @@ describe("question classification", () => {
   it("keeps docs questions off the tenant even when they name a platform", () => {
     for (const question of [
       "What does the microsoft learn say about defender for macos?",
-      "What is Windows Autopatch?",
       "Write a KQL query that lists failed sign-ins in the last 24 hours",
       "Microsoft Learn on FileVault escrow requirements",
     ]) assert.equal(kind(question), "docs", question);
@@ -74,6 +73,22 @@ describe("question classification", () => {
       "Do any devices fail the BitLocker requirements?",
       "Are all devices meeting the minimum requirements?",
       "Is there a policy that runs a PowerShell script on Macs?",
+      "What are unmanaged devices?",
+      "What are jailbroken devices?",
+      "What are guest users doing?",
+      "What is Bob's device?",
+      "What is jdoe's last sign-in?",
+      "What are your devices?",
+      "What's wrong with enrollment?",
+      "Is Bob's laptop compliant according to Intune?",
+      "Does Bob's phone meet the compliance requirements according to Intune?",
+      "Give me examples of stale devices",
+      "Give me a sample of devices not checked in",
+      "Give me the script that failed on Bob's device",
+      "Create a sample list of noncompliant devices",
+      "What do the docs say about our devices?",
+      "Write a KQL query that lists Bob's devices",
+      "What is Windows Autopatch?",
     ]) assert.notEqual(kind(question), "docs", question);
   });
 });

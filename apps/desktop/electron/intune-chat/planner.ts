@@ -450,40 +450,34 @@ export function isGeneralKnowledgeQuestion(question: string): boolean {
   return GENERAL_QUESTION_START.test(lower) && !TENANT_REFERENCE.test(lower);
 }
 
-/** Asks for an example query or script, not for tenant state. */
-const AUTHORING_REQUEST =
-  /^(?:write|draft|give me|suggest|find|is there|create|build)\b[^?]*\b(?:kql|kusto|queries|query|scripts?|powershell|samples?|examples?)\b/;
-/** Asks what documentation or a named reference says. */
-const DOCS_REFERENCE =
-  /\b(?:documentation|docs|microsoft learn|learn\.microsoft\.com|according to)\b/;
-/** Product guidance words. They also appear in tenant questions ("Do any devices fail the BitLocker requirements?"). */
-const GUIDANCE_REFERENCE = /\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?)\b/;
-/** Authoring requests that start like a tenant lookup ("Is there a policy that runs a script on Macs?"). */
-const LOOKUP_START = /^(?:is there|find)\b/;
-/** A definition question about a product or feature: "What is Windows Autopatch?", "What is a compliance policy?". Not "What is the oldest device?". */
-const DEFINITION = /^(?:what is|what's|what are)\s+(?:an?\s+)?(?!(?:the|our|my|any|all|these|those|this|that|we|us)\b)\S/;
-/** A how-to or how-it-works request. */
-const HOW_TO =
-  /^(?:how (?:do|does|can|should|would|to)|how (?:long|often) (?:is|does|do|will|should|can)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can))\b/;
-/** "What is Autopatch?" or "What does Microsoft Learn say about X?". */
-const WHAT_IS = /^(?:what is|what's|what does|what do|what happens)\b/;
-/** Words that make a "what is" question ask for tenant state: a definite plural or a measure. */
-const STATE_WORDS =
-  /\b(?:the|these|those|any)\s+(?:[\w-]+\s+){0,2}(?:devices|users|groups|policies|apps|accounts|machines|computers|laptops|macs|pcs)\b|\b(?:noncompliant|non-compliant|stale|rate|count|number of|percentage|total|offline|inactive|failing|failed|status|state)\b/;
+/** Asks to write a query or script: code authoring, not tenant state. */
+const CODE_AUTHORING =
+  /^(?:write|draft)\b[^?]*\b(?:kql|kusto|queries|query|scripts?|powershell|cmdlets?)\b/;
+/** Names documentation itself. */
+const DOCS_REFERENCE = /\b(?:documentation|docs|microsoft learn|learn\.microsoft\.com)\b/;
+/** Wording that sounds general but also starts many tenant questions. */
+const WEAK_DOCS =
+  /^(?:how (?:do|does|can|should|would|to|long|often)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can)|what (?:is|are|does|do|happens)|what's|give me|suggest|create|build|find|is there)\b|\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?|according to)\b/;
+/** How-to and guidance wording: about a tenant object, it asks for docs and tenant state together. */
+const HOW_TO_OR_GUIDANCE =
+  /^(?:how (?:do|does|can|should|would|to)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can))\b|\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?)\b/;
 /** Values that only make sense in one tenant: an email address, a GUID, or a name like HR-LAPTOP-07. */
 const TENANT_VALUE = /[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]*-[A-Z0-9-]*\d/;
-const TENANT_STATE = /\b(?:state of|status of|assigned to|enrolled in)\b/;
+/** Phrases about someone's or something's state: "Bob's laptop", "your devices", "status of". */
+const TENANT_STATE =
+  /\b(?:state of|status of|assigned to|enrolled in|your|their|his|her)\b|\b(?!(?:what|it|that|there|here|let|who|where|how)'s\b)[a-z0-9]+'s\b/;
 
 /**
- * Decides whether a question needs the tenant. Docs is a positive label
- * only: it needs an explicit docs signal (a named source, a documentation
- * reference, an authoring request or a definition question), or a weak one (how-to, guidance
- * words, "what is" without a tenant-state word) with no tenant resources
- * planned, and no tenant reference. Docs questions never touch the tenant. A docs signal with a
- * tenant reference is mixed. A general-sounding question without a docs
- * signal ("What are the stale devices?") is ambiguous: with planned
- * resources it is mixed, which still requires tenant evidence. When in
- * doubt the answer is mixed or tenant, never docs.
+ * Decides whether a question needs the tenant. A docs label skips the
+ * tenant refresh and tenant tools, so it is given only when it is safe:
+ * the question names documentation or a source, or asks to write a query
+ * or script, and refers to nothing in the tenant. Wording that only sounds
+ * general (how-to, "what is", guidance words) also starts many tenant
+ * questions ("What is the oldest device?", "Can I see the noncompliant
+ * devices?"), so it makes a question docs only when the planner found no
+ * tenant resources in it. Everything else with planned resources is mixed,
+ * which still requires tenant evidence. When in doubt the label is mixed
+ * or tenant, never docs.
  */
 export function classifyChatQuestion(
   question: string,
@@ -492,20 +486,13 @@ export function classifyChatQuestion(
   const trimmed = question.trim();
   const lower = trimmed.toLowerCase();
   const tenantReference = TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
-  // An explicit signal names documentation or asks for a query or script.
-  // A weak signal only sounds general: how-to, "what is" or guidance words
-  // also start many tenant questions ("What is the oldest device?", "Can I
-  // see the noncompliant devices?"). A weak signal is docs only when the
-  // planner found no tenant resources in the question; otherwise it is
-  // mixed, which still requires tenant evidence.
-  const explicitDocs = input.namesSource || DOCS_REFERENCE.test(lower) ||
-    (AUTHORING_REQUEST.test(lower) && !LOOKUP_START.test(lower)) ||
-    (DEFINITION.test(lower) && !STATE_WORDS.test(lower));
-  const weakDocs = AUTHORING_REQUEST.test(lower) || GUIDANCE_REFERENCE.test(lower) || HOW_TO.test(lower) ||
-    (WHAT_IS.test(lower) && !STATE_WORDS.test(lower));
+  const planned = input.plannedResources.length > 0;
+  const explicitDocs = input.namesSource || DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower);
   if (explicitDocs) return tenantReference ? "mixed" : "docs";
-  if (weakDocs) return tenantReference || input.plannedResources.length > 0 ? "mixed" : "docs";
-  if (!tenantReference && GENERAL_QUESTION_START.test(lower) && input.plannedResources.length > 0) return "mixed";
+  if (WEAK_DOCS.test(lower) || GENERAL_QUESTION_START.test(lower)) {
+    if (tenantReference) return HOW_TO_OR_GUIDANCE.test(lower) ? "mixed" : "tenant";
+    return planned ? "mixed" : "docs";
+  }
   return "tenant";
 }
 
