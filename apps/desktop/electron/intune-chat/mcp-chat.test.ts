@@ -12,7 +12,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { runAgenticChat } from "./agentic-loop.js";
-import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
+import { isMcpQueryWriterRequest, parseMcpQueryParams } from "./mcp-query-writer.js";
 import { classifyChatQuestion, isGeneralKnowledgeQuestion } from "./planner.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
@@ -779,11 +779,33 @@ describe("The MCP query writer boundary", () => {
       const failed = await runAgenticChat(input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}'], [], [], ["I would search for grace periods."]), mcpContext(calls)));
       assert.match(failed.toolTrace[0]!.error!, /^the Microsoft Learn query could not be written: the model's reply was not one JSON object of params\. Nothing was sent to learn\.microsoft\.com\.$/);
       assert.deepEqual([failed.toolTrace[0]!.mcpSource?.sentToHost, failed.toolTrace[0]!.mcpSource?.blocked], [false, undefined]);
+      // A valid object inside prose is not taken out of it.
+      const prose = await runAgenticChat(input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}'], [], [],
+        ['Here are the params: {"query":"Intune compliance grace period"} for the street at 420 Cedar Avenue.']), mcpContext(calls)));
+      assert.match(prose.toolTrace[0]!.error!, /query could not be written: the model's reply was not one JSON object of params\. Nothing was sent/);
+      assert.equal(prose.toolTrace[0]!.mcpSource?.sentToHost, false);
       const { adminQuestion: _omitted, ...withoutMessages } = input(store, scriptedLlm([callDocs("x"), '{"tool":"list_cached_resources","params":{}}', '{"final":true,"answer":"Done."}']), mcpContext(calls));
       const none = await runAgenticChat(withoutMessages);
       assert.match(none.toolTrace[0]!.error!, /no admin question was given to write it from\. Nothing was sent/);
       assert.equal(calls.length, 0);
     });
+  });
+});
+
+describe("MCP query writer reply parsing", () => {
+  it("accepts one JSON object, optionally in one outer fence, and refuses JSON inside prose", () => {
+    assert.deepEqual(parseMcpQueryParams('{"query":"Intune grace period"}'), { query: "Intune grace period" });
+    assert.deepEqual(parseMcpQueryParams('  ```json\n{"query":"Intune grace period"}\n```  '), { query: "Intune grace period" });
+    assert.deepEqual(parseMcpQueryParams('```\n{"params":{"query":"x"}}\n```'), { query: "x" });
+    for (const reply of [
+      'Here is the query: {"query":"Intune grace period"}',
+      '{"query":"Intune grace period"} I left out the street address 420 Cedar Avenue.',
+      'Sure.\n```json\n{"query":"Intune grace period"}\n```',
+      '```json\n{"query":"a"}\n```\nAlso ```{"query":"b"}```',
+      '{"query":"a"} {"query":"b"}',
+      '["query"]',
+      "",
+    ]) assert.equal(parseMcpQueryParams(reply), undefined, reply);
   });
 });
 

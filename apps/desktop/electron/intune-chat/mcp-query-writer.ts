@@ -78,18 +78,23 @@ export async function writeMcpQuery(input: McpQueryWriterInput): Promise<Record<
     maxTokens: 300,
     ...(input.signal ? { signal: input.signal } : {}),
   });
-  const params = parseParams(completion.text);
+  const params = parseMcpQueryParams(completion.text);
   if (!params) throw new McpQueryWriterError("the model's reply was not one JSON object of params");
   return params;
 }
 
-function parseParams(text: string): Record<string, unknown> | undefined {
-  const body = text.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1");
-  const start = body.indexOf("{");
-  const end = body.lastIndexOf("}");
-  if (start < 0 || end < start) return undefined;
+/**
+ * The reply must be one JSON object, optionally inside one outer code
+ * fence. JSON inside prose is refused: the prose around it was not checked
+ * as params, and a reply that is not exactly params sends nothing.
+ */
+export function parseMcpQueryParams(text: string): Record<string, unknown> | undefined {
+  const trimmed = text.trim();
+  const fenced = /^```(?:json)?[ \t]*\n?([\s\S]*?)\n?[ \t]*```$/i.exec(trimmed);
+  const body = (fenced ? fenced[1]! : trimmed).trim();
+  if (!body.startsWith("{") || !body.endsWith("}")) return undefined;
   try {
-    const value = JSON.parse(body.slice(start, end + 1)) as unknown;
+    const value = JSON.parse(body) as unknown;
     if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
     // A writer that wraps its params as {"params":{...}} is read the same way.
     const record = value as Record<string, unknown>;
