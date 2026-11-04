@@ -478,7 +478,18 @@ export async function runAgenticChat(
       await settleModelStep(finalOutcome());
       return blockedAnswer();
     }
-    if (input.voice && action.kind === "final" && (!action.answer.trim() || /\b(?:let me (?:check|look|query|search|investigate|find|retrieve)|i(?:'ll| will) (?:check|look|query|search|investigate|find|retrieve)|i(?:'m| am) (?:currently )?(?:checking|querying|searching|investigating|retrieving))\b/i.test(action.answer))) {
+    const finalAnswer = action.kind === "final" ? stripTenantDataFences(action.answer).trim() : "";
+    if (action.kind === "final" && !finalAnswer) {
+      // An empty answer, also one that is only fences, is never a completed answer.
+      await settleModelStep({ kind: "repair", reason: "empty" });
+      if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
+        ok: false, reason: "unfinished-answer", fallbackNotice: `The model returned an empty answer ${unfinishedCount} times. Deterministic retrieval was used instead.`,
+        toolTrace, iterations: iteration, ...(responseModel ? { model: responseModel } : {}),
+      };
+      turns.push({ role: "repair", content: 'That final answer was empty. Write the answer in "answer" now, or call a tool if you still need evidence.' });
+      continue;
+    }
+    if (input.voice && action.kind === "final" && (/\b(?:let me (?:check|look|query|search|investigate|find|retrieve)|i(?:'ll| will) (?:check|look|query|search|investigate|find|retrieve)|i(?:'m| am) (?:currently )?(?:checking|querying|searching|investigating|retrieving))\b/i.test(action.answer))) {
       await settleModelStep({ kind: "repair", reason: "unfinished" });
       if (++unfinishedCount > MAX_UNFINISHED_RETRIES) return {
         ok: false, reason: "unfinished-answer", fallbackNotice: "The model returned progress instead of a completed answer.",
@@ -541,7 +552,7 @@ export async function runAgenticChat(
       await settleModelStep(finalOutcome(), true);
       return {
         ok: true,
-        answer: stripTenantDataFences(action.answer).trim(),
+        answer: finalAnswer,
         toolTrace,
         iterations: iteration,
         ...(responseModel ? { model: responseModel } : {}),

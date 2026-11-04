@@ -592,6 +592,25 @@ describe("agentic loop sources", () => {
     });
   });
 
+  it("retries an empty final answer, then fails with a designed notice", async () => {
+    await withStore(async (store) => {
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const retried = await runAgenticChat(loopInput(store, scripted(['{"final":true,"answer":""}', '{"final":true}', '{"final":true,"answer":"Grant full disk access."}'], prompts),
+        learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs" }));
+      assert.equal(retried.ok && retried.answer, "Grant full disk access.");
+      assert.match(prompts[1]!.prompt, /That final answer was empty/);
+      assert.equal(prompts.length, 3);
+
+      const fenced = '{"final":true,"answer":"<tenant_data source=\\"x\\" nonce=\\"1\\"></tenant_data nonce=\\"1\\">"}';
+      const failed = await runAgenticChat(loopInput(store, scripted(['{"final":true,"answer":"   "}', fenced, ""], []),
+        learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs" }));
+      assert.equal(failed.ok, false);
+      if (failed.ok) return;
+      assert.equal(failed.reason, "unfinished-answer");
+      assert.equal(failed.fallbackNotice, "The model returned an empty answer 3 times. Deterministic retrieval was used instead.");
+    });
+  });
+
   it("still requires tenant evidence for a mixed question after a docs call", async () => {
     await withStore(async (store) => {
       store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: new Date().toISOString(),
