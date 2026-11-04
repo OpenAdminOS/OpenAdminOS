@@ -12,7 +12,7 @@ import type {
   RunGraphApi,
 } from "@openadminos/agent-sdk";
 
-import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy } from "@openadminos/agent-sdk";
+import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
@@ -757,12 +757,15 @@ async function queryDrift(
     : timeline.hasMore
       ? `Local drift timeline scan reached ${QUERY_DRIFT_SCAN_LIMIT.toLocaleString()} entries. More matching rows may exist; narrow resource, from, to, or changeKind for more detail.`
       : undefined;
+  // Snapshots of a service that is not connected are historical, not current.
+  const omitted = omittedSnapshotsCopy(timeline.omittedResources ?? [], "shown");
   return enforcePayloadCap({
     rows,
     returnedRows: rows.length,
     matchedRows: matched.length,
     top,
     ...(note ? { note } : {}),
+    ...(omitted ? { omitted } : {}),
   });
 }
 

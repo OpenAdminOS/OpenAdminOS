@@ -955,6 +955,121 @@ describe("Changes page", () => {
       screen.getByText("Conditional Access baseline").closest("button"),
     ).toHaveAttribute("type", "button");
   });
+
+  it("leaves a resource of a service that is not connected out of the timeline", async () => {
+    const user = userEvent.setup();
+    const intuneNotConnected = {
+      serviceId: "intune" as const,
+      service: "Intune",
+      partId: "intune.devices",
+      part: "Intune devices and configuration",
+      serviceMissing: true,
+    };
+    const getDriftTimeline = vi.fn(
+      async (input: DriftTimelineInput): Promise<DriftTimelineResult> => ({
+        tenantId: "tenant-1",
+        entries: input.resources?.[0] === "deviceConfigurations" ? [] : [unknownActorEntry],
+        hasMore: false,
+        limit: input.limit ?? 100,
+        omittedResources: [
+          {
+            resource: "deviceConfigurations",
+            resourceLabel: "Device configurations",
+            notGrantedService: intuneNotConnected,
+          },
+        ],
+      }),
+    );
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes",
+      bridge: makeTimelineBridge([], {
+        getDriftStatus: vi.fn(async (): Promise<DriftStatus> => ({
+          tenantId: "tenant-1",
+          resources: [
+            { ...driftStatus.resources[0]!, notGrantedService: intuneNotConnected },
+            driftStatus.resources[1]!,
+          ],
+        })),
+        getDriftTimeline,
+      }),
+    });
+
+    expect(await screen.findByText("Conditional Access baseline")).toBeInTheDocument();
+    expect(
+      screen.getByText("Intune is not connected. Its earlier snapshots are not shown."),
+    ).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Resource"), "deviceConfigurations");
+    expect(await screen.findByText("No current change history")).toBeInTheDocument();
+    expect(
+      screen.getByText(/Intune is not connected\. Its earlier snapshots are not shown\./),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Baseline captured")).not.toBeInTheDocument();
+  });
+
+  it("labels change detail from a service that is not connected as historical", async () => {
+    const user = userEvent.setup();
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes",
+      bridge: makeTimelineBridge([modifiedEntry], {
+        getDriftEntryDetail: vi.fn(async (): Promise<DriftEntryDetail> => ({
+          summary: "One field changed.",
+          changes: [{ path: "settings.passwordRequired", kind: "changed", before: false, after: true }],
+          notGrantedService: {
+            serviceId: "intune",
+            service: "Intune",
+            partId: "intune.devices",
+            part: "Intune devices and configuration",
+            serviceMissing: true,
+          },
+        })),
+      }),
+    });
+
+    await user.click((await screen.findByText("Device restriction policy")).closest("button")!);
+    expect(
+      await screen.findByText(
+        "Historical snapshot, no longer refreshed. Intune is not connected for this tenant.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("names services left out of a time comparison", async () => {
+    const user = userEvent.setup();
+    renderRoute(<Changes />, {
+      path: "/changes",
+      route: "/changes",
+      bridge: makeTimelineBridge([], {
+        getDriftTimeCompare: vi.fn(async (): Promise<DriftTimeCompareResult> => ({
+          ...timeCompareResult,
+          resources: [],
+          entries: [],
+          retentionLimited: false,
+          omittedResources: [
+            {
+              resource: "deviceConfigurations",
+              resourceLabel: "Device configurations",
+              notGrantedService: {
+                serviceId: "intune",
+                service: "Intune",
+                partId: "intune.devices",
+                part: "Intune devices and configuration",
+                serviceMissing: true,
+              },
+            },
+          ],
+        })),
+      }),
+    });
+
+    await user.click(await screen.findByRole("tab", { name: "Compare" }));
+    await user.click(screen.getByRole("button", { name: "Run compare" }));
+    expect(
+      await screen.findByText("Intune is not connected. Its earlier snapshots are not compared."),
+    ).toBeInTheDocument();
+  });
 });
 
 function makeTimelineBridge(

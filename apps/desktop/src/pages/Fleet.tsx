@@ -20,6 +20,7 @@ import type {
   MultiTenantAgentBatch,
   TenantGroup,
 } from "../shared/openAdminOS";
+import { omittedSnapshotsCopy } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 
 export interface FleetScopeProps {
@@ -352,16 +353,22 @@ export default function FleetScope({ reloadToken = 0 }: FleetScopeProps) {
 function FleetDriftBadge({ tenant }: { tenant: FleetTenantDriftStatus }) {
   if (!tenant.drift) return <Badge tone="neutral">Not evaluated</Badge>;
   const total = driftTotal(tenant);
+  const omittedNotice = omittedSnapshotsCopy(tenant.omittedResources ?? [], "compared");
   return (
-    <Badge
-      tone={total === 0 ? "success" : "warning"}
-      aria-label={`${tenant.drift.added} added, ${tenant.drift.removed} removed, ${tenant.drift.modified} modified`}
-    >
-      <StatusDot tone={total === 0 ? "success" : "warning"} />
-      {total === 0
-        ? "No drift"
-        : `${tenant.drift.added} added, ${tenant.drift.removed} removed, ${tenant.drift.modified} modified`}
-    </Badge>
+    <span className="inline-flex flex-col items-start gap-1">
+      <Badge
+        tone={total === 0 ? "success" : "warning"}
+        aria-label={`${tenant.drift.added} added, ${tenant.drift.removed} removed, ${tenant.drift.modified} modified`}
+      >
+        <StatusDot tone={total === 0 ? "success" : "warning"} />
+        {total === 0
+          ? "No drift"
+          : `${tenant.drift.added} added, ${tenant.drift.removed} removed, ${tenant.drift.modified} modified`}
+      </Badge>
+      {omittedNotice ? (
+        <span className="text-xs text-[var(--color-text-muted)]">{omittedNotice}</span>
+      ) : null}
+    </span>
   );
 }
 

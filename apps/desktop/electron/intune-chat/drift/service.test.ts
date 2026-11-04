@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import type { TenantRecord } from "@openadminos/agent-sdk";
+import { SERVICE_PARTS, omittedSnapshotsCopy, qualifyScope } from "@openadminos/agent-sdk";
 import { definitionForResource } from "../planner.js";
 import { IntelligenceSqliteStore } from "../sqlite-store.js";
 import { DriftService, type DriftPersistedState } from "./service.js";
@@ -699,12 +700,13 @@ async function withDriftService(
     service: DriftService;
     store: IntelligenceSqliteStore;
   }) => Promise<void> | void,
+  tenants: TenantRecord[] = [tenant, secondTenant],
 ): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-drift-service-"));
   const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
   const persisted: DriftPersistedState = {
-    tenants: [tenant, secondTenant],
-    activeTenantId: tenant.id,
+    tenants,
+    activeTenantId: tenants[0]?.id,
   };
   const service = new DriftService({
     read: async () => persisted,
@@ -772,3 +774,212 @@ const secondTenant: TenantRecord = {
   homeAccountId: "home-account-2",
   addedAt: "2026-07-05T09:00:00.000Z",
 };
+
+describe("drift views for a service that is not connected", () => {
+  // Entra only: Intune was connected once, so its snapshots are still on
+  // the device, but they are historical and must not read as current.
+  const entraOnly: TenantRecord = {
+    ...tenant,
+    grantedScopes: SERVICE_PARTS.filter((part) => part.service === "entra").flatMap((part) =>
+      part.scopes.filter((scope) => scope.audience === "graph").map((scope) => qualifyScope(scope.name)),
+    ),
+  };
+
+  function refresh(
+    store: IntelligenceSqliteStore,
+    resource: "deviceConfigurations" | "namedLocations",
+    refreshedAt: string,
+    rows: Array<Record<string, unknown>>,
+  ): void {
+    store.replaceGraphResources({
+      tenantId: "tenant-1",
+      resource,
+      label: definitionForResource(resource).label,
+      scopeSet: definitionForResource(resource).scopes,
+      refreshedAt,
+      rows,
+    });
+  }
+
+  function seed(store: IntelligenceSqliteStore): void {
+    refresh(store, "deviceConfigurations", "2026-08-10T10:00:00.000Z", [
+      { id: "profile-1", displayName: "Wi-Fi profile", ssid: "corp" },
+    ]);
+    refresh(store, "namedLocations", "2026-08-10T10:00:00.000Z", [
+      { id: "location-1", displayName: "Office", ipRanges: ["10.0.0.0/8"] },
+    ]);
+  }
+
+  function seedChanges(store: IntelligenceSqliteStore): void {
+    refresh(store, "deviceConfigurations", "2026-08-15T10:00:00.000Z", [
+      { id: "profile-1", displayName: "Wi-Fi profile", ssid: "guest" },
+      { id: "profile-2", displayName: "VPN profile", server: "vpn" },
+    ]);
+    refresh(store, "namedLocations", "2026-08-15T10:00:00.000Z", [
+      { id: "location-1", displayName: "Office", ipRanges: ["10.1.0.0/16"] },
+    ]);
+  }
+
+  it("leaves Intune out of the timeline and reports the omission", async () => {
+    await withDriftService(async ({ service, store }) => {
+      seed(store);
+      seedChanges(store);
+
+      const requested = await service.getDriftTimeline({
+        tenantId: "tenant-1",
+        resources: ["deviceConfigurations"],
+      });
+      assert.deepEqual(requested.entries, []);
+      assert.equal(requested.omittedResources?.length, 1);
+      assert.equal(requested.omittedResources?.[0]?.resource, "deviceConfigurations");
+      // Entra's user and group scopes also satisfy Intune users and groups,
+      // so Intune is partial and the missing part is named.
+      assert.equal(requested.omittedResources?.[0]?.notGrantedService.part, "Intune devices and configuration");
+      assert.equal(requested.omittedResources?.[0]?.notGrantedService.serviceMissing, false);
+
+      const all = await service.getDriftTimeline({ tenantId: "tenant-1" });
+      assert.equal(all.entries.some((entry) => entry.resource === "deviceConfigurations"), false);
+      assert.equal(all.entries.some((entry) => entry.resource === "namedLocations"), true);
+      // Only resources with retained history are named, not every Intune resource.
+      assert.deepEqual(all.omittedResources?.map((entry) => entry.resource), ["deviceConfigurations"]);
+      assert.equal(
+        omittedSnapshotsCopy(all.omittedResources ?? [], "shown"),
+        "Intune devices and configuration is not granted. Its earlier snapshots are not shown.",
+      );
+    }, [entraOnly]);
+  });
+
+  it("names a service with no part granted as not connected", async () => {
+    const policiesOnly: TenantRecord = { ...tenant, grantedScopes: [qualifyScope("Policy.Read.All")] };
+    await withDriftService(async ({ service, store }) => {
+      seed(store);
+      seedChanges(store);
+      const compare = await service.getTimeCompare({
+        tenantId: "tenant-1",
+        from: "2026-08-10T12:00:00.000Z",
+        to: "2026-08-15T12:00:00.000Z",
+        resources: ["deviceConfigurations"],
+      });
+      assert.deepEqual(compare.entries, []);
+      assert.equal(compare.omittedResources?.[0]?.notGrantedService.serviceMissing, true);
+      assert.equal(
+        omittedSnapshotsCopy(compare.omittedResources ?? [], "compared"),
+        "Intune is not connected. Its earlier snapshots are not compared.",
+      );
+    }, [policiesOnly]);
+  });
+
+  it("gives an Entra-only tenant no current comparison for deviceConfigurations", async () => {
+    await withDriftService(async ({ service, store }) => {
+      seed(store);
+      // A baseline from when Intune was connected still holds Intune pins.
+      store.createDriftBaseline({
+        tenantId: "tenant-1",
+        name: "Before",
+        now: "2026-08-11T10:00:00.000Z",
+        resources: ["deviceConfigurations", "namedLocations"],
+      });
+      seedChanges(store);
+
+      const drift = await service.getBaselineDrift({
+        tenantId: "tenant-1",
+        resources: ["deviceConfigurations"],
+      });
+      assert.deepEqual(drift.resources, []);
+      assert.deepEqual(drift.entries, []);
+      assert.equal(drift.omittedResources?.[0]?.resource, "deviceConfigurations");
+
+      const allDrift = await service.getBaselineDrift({ tenantId: "tenant-1" });
+      assert.equal(allDrift.resources.some((entry) => entry.resource === "deviceConfigurations"), false);
+      assert.equal(allDrift.entries.some((entry) => entry.resource === "deviceConfigurations"), false);
+      assert.equal(allDrift.entries.some((entry) => entry.resource === "namedLocations"), true);
+      assert.deepEqual(allDrift.omittedResources?.map((entry) => entry.resource), ["deviceConfigurations"]);
+
+      const compare = await service.getTimeCompare({
+        tenantId: "tenant-1",
+        from: "2026-08-10T12:00:00.000Z",
+        to: "2026-08-15T12:00:00.000Z",
+        resources: ["deviceConfigurations"],
+      });
+      assert.deepEqual(compare.resources, []);
+      assert.deepEqual(compare.entries, []);
+      assert.equal(compare.omittedResources?.[0]?.notGrantedService.service, "Intune");
+
+      const rollback = await service.buildBaselineRollbackPlan({ tenantId: "tenant-1" });
+      assert.equal(
+        JSON.stringify(rollback.draft).includes("profile-"),
+        false,
+      );
+
+      const fleet = await service.getFleetDriftStatus({});
+      assert.deepEqual(fleet.tenants[0]?.drift && { ...fleet.tenants[0].drift, evaluatedAt: "" }, {
+        added: 0,
+        removed: 0,
+        modified: 1,
+        evaluatedAt: "",
+      });
+      assert.deepEqual(fleet.tenants[0]?.omittedResources?.map((entry) => entry.resource), ["deviceConfigurations"]);
+    }, [entraOnly]);
+  });
+
+  it("does not pin historical snapshots into a new baseline", async () => {
+    await withDriftService(async ({ service, store }) => {
+      seed(store);
+      const baseline = await service.createBaseline({ tenantId: "tenant-1", name: "Now" });
+      assert.deepEqual(baseline.resources, ["namedLocations"]);
+    }, [entraOnly]);
+  });
+
+  it("names the missing services when no tracked resource is granted", async () => {
+    const defenderOnly: TenantRecord = { ...tenant, grantedScopes: [qualifyScope("SecurityAlert.Read.All")] };
+    await withDriftService(async ({ service, store }) => {
+      seed(store);
+      await assert.rejects(
+        service.createBaseline({ tenantId: "tenant-1", name: "Now" }),
+        /No connected service has tracked configuration/,
+      );
+    }, [defenderOnly]);
+  });
+
+  it("labels an entry detail of a resource that is not connected as historical", async () => {
+    await withDriftService(async ({ service, store }) => {
+      seed(store);
+      seedChanges(store);
+      const snapshot = store
+        .listDriftSnapshots("tenant-1", { resource: "deviceConfigurations" })
+        .find((entry) => entry.capturedAt === "2026-08-15T10:00:00.000Z");
+      assert.ok(snapshot);
+      const detail = await service.getDriftEntryDetail({
+        tenantId: "tenant-1",
+        snapshotId: snapshot.id,
+        resource: "deviceConfigurations",
+        graphId: "profile-1",
+      });
+      assert.equal(detail.notGrantedService?.service, "Intune");
+    }, [entraOnly]);
+  });
+
+  it("compares tenants only on resources both can read now", async () => {
+    await withDriftService(async ({ service, store }) => {
+      seed(store);
+      store.replaceGraphResources({
+        tenantId: "tenant-2",
+        resource: "deviceConfigurations",
+        label: definitionForResource("deviceConfigurations").label,
+        scopeSet: definitionForResource("deviceConfigurations").scopes,
+        refreshedAt: "2026-08-10T10:00:00.000Z",
+        rows: [{ id: "profile-9", displayName: "Wi-Fi profile", ssid: "other" }],
+      });
+      const compare = await service.getTenantCompare({
+        tenantIdA: "tenant-1",
+        tenantIdB: "tenant-2",
+        resources: ["deviceConfigurations", "namedLocations"],
+      });
+      assert.deepEqual(compare.resources.map((entry) => entry.resource), ["namedLocations"]);
+      assert.equal(compare.entries.some((entry) => entry.resource === "deviceConfigurations"), false);
+      assert.deepEqual(compare.omittedResources?.map((entry) => [entry.resource, entry.tenantId]), [
+        ["deviceConfigurations", "tenant-1"],
+      ]);
+    }, [entraOnly, secondTenant]);
+  });
+});

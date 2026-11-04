@@ -1714,6 +1714,17 @@ can improve attribution, but answering a drift query never calls Microsoft Graph
 The desktop host exposes timeline, entry detail, object history, and status APIs
 from local SQLite snapshot/version rows.
 
+Drift views follow the tenant's current grants by the same part-level rule as
+Chat and the cache (`availableScopeSet`). The timeline, baseline drift, new
+baselines, point-in-time, bundle and cross-tenant compare, rollback plans and
+fleet drift counts leave out resources whose service part is not granted now.
+Their earlier snapshots stay on the device until retention prunes them, but they
+are historical and no longer refreshed, so they are never shown or compared as
+current. Results list the left-out resources that were asked for by name or
+still hold snapshots, and the UI names the service: "Intune is not connected.
+Its earlier snapshots are not compared." Entry detail for such a resource is
+labelled as a historical snapshot that is no longer refreshed.
+
 Diffs are deterministic. The host canonicalizes tracked objects, ignores known
 volatile fields, hashes canonical JSON, and computes field-level before/after
 paths with the pure diff engine. The LLM never computes drift and is not allowed
