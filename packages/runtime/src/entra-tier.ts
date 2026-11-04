@@ -3,10 +3,10 @@
  * subscribed SKUs and looking for the well-known service-plan names
  * that grant Azure AD Premium P1 / P2.
  *
- * Required scope: `Organization.Read.All` (delegated). The probe
- * returns `"unknown"` on any failure — the caller treats `unknown` as
- * informational (badges shown, runs not blocked) rather than as a
- * negative confirmation.
+ * Required scope: `Organization.Read.All` (delegated). `detectEntraTier`
+ * returns `"unknown"` on any failure, which callers treat as
+ * informational (badges shown, runs not blocked). `probeSubscribedSkus`
+ * throws instead, so a caller can keep what it stored before.
  */
 
 import type { DetectedEntraTier, TenantLicense } from "@openadminos/agent-sdk";
@@ -94,49 +94,130 @@ export async function detectEntraTier(
   baseUrl = "https://graph.microsoft.com/beta",
   fetchImpl: typeof fetch = fetch,
 ): Promise<DetectedEntraTier> {
-  const result = await probeSubscribedSkus(tokenProvider, baseUrl, fetchImpl);
-  return result?.tier ?? "unknown";
+  try {
+    return (await probeSubscribedSkus(tokenProvider, baseUrl, fetchImpl)).tier;
+  } catch {
+    return "unknown";
+  }
 }
 
-/**
- * Single-call probe that returns both the Entra tier and the list of
- * tenant-relevant SKUs from one `/subscribedSkus` fetch. Saves a
- * round trip vs. calling `detectEntraTier` separately. Returns null
- * on any failure (callers treat as `tier: 'unknown'`, no licenses).
- */
-export async function probeSubscribedSkus(
-  tokenProvider: (scopes: string[]) => Promise<string>,
-  baseUrl = "https://graph.microsoft.com/beta",
-  fetchImpl: typeof fetch = fetch,
-): Promise<{
+/** What one `/subscribedSkus` read found. */
+export interface SubscribedSkusProbe {
   tier: DetectedEntraTier;
   relevantLicenses: TenantLicense[];
   /** Every `skuPartNumber` returned by Graph, including ones we did not surface. Useful for diagnosing missing entries in the lookup table. */
   allSkuPartNumbers: string[];
   intuneLicensed: boolean;
-} | null> {
-  try {
-    const token = await tokenProvider(["Organization.Read.All"]);
-    const response = await fetchImpl(`${baseUrl}/subscribedSkus`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!response.ok) return null;
-    const body = (await response.json()) as SubscribedSkusResponse;
-    if (!Array.isArray(body.value)) return null;
-    const skus = body.value;
-    const allSkuPartNumbers = skus
-      .map((s) => s.skuPartNumber)
-      .filter((p): p is string => typeof p === "string" && p.length > 0);
-    return {
-      tier: classifySkus(skus),
-      relevantLicenses: extractRelevantLicenses(skus),
-      allSkuPartNumbers,
-      intuneLicensed: skus.some(sku => sku.capabilityStatus === "Enabled"
-        && sku.servicePlans?.some(plan => plan.servicePlanName === "INTUNE_A" && plan.provisioningStatus === "Success")),
-    };
-  } catch {
-    return null;
+}
+
+/** Why `/subscribedSkus` gave no usable answer once a token was in hand. */
+export type SubscribedSkusFailureReason = "http" | "network" | "timeout" | "malformed";
+
+/**
+ * The licence read failed after the token was acquired. Token errors, such
+ * as another account signing in or a cancelled sign-in, are rethrown as
+ * they are, so the caller can tell them apart.
+ */
+export class SubscribedSkusProbeError extends Error {
+  readonly reason: SubscribedSkusFailureReason;
+  /** The HTTP status, when Graph answered with an error. */
+  readonly status?: number;
+
+  constructor(
+    reason: SubscribedSkusFailureReason,
+    message: string,
+    options: { status?: number; cause?: unknown } = {},
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "SubscribedSkusProbeError";
+    this.reason = reason;
+    if (options.status !== undefined) this.status = options.status;
   }
+}
+
+/** Longest wait for Graph to answer `/subscribedSkus`. */
+export const SUBSCRIBED_SKUS_TIMEOUT_MS = 30_000;
+
+/**
+ * Single-call probe that returns both the Entra tier and the list of
+ * tenant-relevant SKUs from one `/subscribedSkus` fetch. Saves a
+ * round trip vs. calling `detectEntraTier` separately. Throws on any
+ * failure: the token provider's own error, or a `SubscribedSkusProbeError`
+ * for an HTTP error, a network error, no answer in time or a malformed
+ * body. An aborted `signal` rejects with its reason.
+ */
+export async function probeSubscribedSkus(
+  tokenProvider: (scopes: string[]) => Promise<string>,
+  baseUrl = "https://graph.microsoft.com/beta",
+  fetchImpl: typeof fetch = fetch,
+  options: { signal?: AbortSignal; timeoutMs?: number } = {},
+): Promise<SubscribedSkusProbe> {
+  const { signal } = options;
+  signal?.throwIfAborted();
+  const token = await tokenProvider(["Organization.Read.All"]);
+  signal?.throwIfAborted();
+  const timeoutMs = options.timeoutMs ?? SUBSCRIBED_SKUS_TIMEOUT_MS;
+  const timeout = AbortSignal.timeout(timeoutMs);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const failed = (error: unknown): never => {
+    if (signal?.aborted) throw signal.reason;
+    if (timeout.aborted) {
+      throw new SubscribedSkusProbeError(
+        "timeout",
+        `Microsoft Graph did not answer /subscribedSkus within ${Math.round(timeoutMs / 1000)} seconds.`,
+        { cause: error },
+      );
+    }
+    throw new SubscribedSkusProbeError(
+      "network",
+      `Microsoft Graph could not be reached for /subscribedSkus: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  };
+  let response: Response;
+  try {
+    response = await fetchImpl(`${baseUrl}/subscribedSkus`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: requestSignal,
+    });
+  } catch (error) {
+    return failed(error);
+  }
+  if (!response.ok) {
+    throw new SubscribedSkusProbeError(
+      "http",
+      `Microsoft Graph answered /subscribedSkus with HTTP ${response.status}.`,
+      { status: response.status },
+    );
+  }
+  let body: SubscribedSkusResponse;
+  try {
+    body = (await response.json()) as SubscribedSkusResponse;
+  } catch (error) {
+    if (signal?.aborted || timeout.aborted) return failed(error);
+    throw new SubscribedSkusProbeError(
+      "malformed",
+      "Microsoft Graph answered /subscribedSkus with a body that is not JSON.",
+      { cause: error },
+    );
+  }
+  if (!body || !Array.isArray(body.value)) {
+    throw new SubscribedSkusProbeError(
+      "malformed",
+      "Microsoft Graph answered /subscribedSkus without a list of subscriptions.",
+    );
+  }
+  const skus = body.value;
+  const allSkuPartNumbers = skus
+    .map((s) => s.skuPartNumber)
+    .filter((p): p is string => typeof p === "string" && p.length > 0);
+  return {
+    tier: classifySkus(skus),
+    relevantLicenses: extractRelevantLicenses(skus),
+    allSkuPartNumbers,
+    intuneLicensed: skus.some(sku => sku.capabilityStatus === "Enabled"
+      && sku.servicePlans?.some(plan => plan.servicePlanName === "INTUNE_A" && plan.provisioningStatus === "Success")),
+  };
 }
 
 /**

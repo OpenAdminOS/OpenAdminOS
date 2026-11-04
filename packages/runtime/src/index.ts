@@ -153,6 +153,10 @@ export {
 export {
   detectEntraTier,
   probeSubscribedSkus,
+  SubscribedSkusProbeError,
+  SUBSCRIBED_SKUS_TIMEOUT_MS,
+  type SubscribedSkusFailureReason,
+  type SubscribedSkusProbe,
   classifySkus,
   extractRelevantLicenses,
   tenantSatisfiesRequirement,
