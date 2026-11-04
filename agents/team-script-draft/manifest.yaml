@@ -11,10 +11,8 @@ descriptor:
   category: devices
   tier: agent
   requiresEntraTier: free
-  # TODO(ugur): this agent reads no Graph data. Intune is an interim
-  # choice because the drafts target Intune managed devices.
-  services:
-    - intune
+  # Reads no Graph data, so it needs no service.
+  services: []
   mode: read
 skills:
   - id: review

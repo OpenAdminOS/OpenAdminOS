@@ -51,12 +51,26 @@ export function checkServicesCoverScopes(
 ): CheckResult {
   const suggestion = servicesForScopes(agent.scopes);
   const suggest = suggestion.length > 0 ? ` Scopes suggest: [${suggestion.join(", ")}].` : "";
-  if (!agent.services || agent.services.length === 0) {
+  if (!agent.services) {
     return {
       name: "services-cover-scopes",
       severity: "fail",
       message: `descriptor.services is missing. Declare the services this agent needs.${suggest}`,
     };
+  }
+  if (agent.services.length === 0) {
+    return agent.scopes.length === 0
+      ? {
+          name: "services-cover-scopes",
+          severity: "pass",
+          message: "The agent declares no Graph scopes and needs no service.",
+        }
+      : {
+          name: "services-cover-scopes",
+          severity: "fail",
+          message: `descriptor.services is empty, but the agent declares Graph scopes: ${agent.scopes.join(", ")}.${suggest}`,
+          details: [...agent.scopes],
+        };
   }
   const isAvailable = (service: string): service is ServiceId =>
     AVAILABLE_SERVICES.some((entry) => entry.id === service);

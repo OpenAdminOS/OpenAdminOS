@@ -221,19 +221,49 @@ definition:
   it("rejects unknown, planned, empty and duplicate services", () => {
     for (const [services, pattern] of [
       ["  services:\n    - exchange", /descriptor\.services\[0\]/],
-      ["  services: []", /must list at least one service/],
+      ["  services: []", /must list at least one service when the agent declares Graph scopes \(Policy\.Read\.All\)/],
       ["  services:\n    - entra\n    - entra", /must not list a service twice/],
     ] as const) {
       assert.throws(() => parseAgentTemplate(manifest(services)), pattern);
     }
   });
 
-  it("declares services for every bundled agent", () => {
+  it("accepts an empty list for an agent that declares no Graph scopes", () => {
+    const noGraph = `descriptor:
+  id: evidence-only
+  name: Evidence only
+  description: Reviews supplied evidence.
+  version: 1.0.0
+  author:
+    name: Test
+    handle: test
+  category: compliance
+  services: []
+  mode: read
+skills:
+  - id: review
+    format: llm
+    label: Review
+    settings:
+      prompt: Review the evidence.
+definition:
+  result:
+    summary: Done.
+`;
+    const summary = agentTemplateToRegistrySummary(parseAgentTemplate(noGraph));
+    assert.deepEqual(summary.services, []);
+    assert.deepEqual(summary.scopes, []);
+  });
+
+  it("declares services for every bundled agent, empty only without Graph scopes", () => {
     for (const slug of readdirSync(agentsRoot)) {
       const manifestPath = join(agentsRoot, slug, "manifest.yaml");
       if (!existsSync(manifestPath)) continue;
       const parsed = parseAgentTemplate(readFileSync(manifestPath, "utf8"));
-      assert.ok((parsed.descriptor.services ?? []).length > 0, `${slug} declares no services`);
+      assert.ok(parsed.descriptor.services, `${slug} declares no services`);
+      if (parsed.descriptor.services.length === 0) {
+        assert.deepEqual(agentTemplateToRegistrySummary(parsed).scopes, [], `${slug} reads Graph without a service`);
+      }
     }
   });
 });

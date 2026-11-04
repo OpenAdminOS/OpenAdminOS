@@ -108,8 +108,10 @@ export function parseAgentTemplate(source: string): AgentTemplate {
   if (descriptor.services !== undefined) {
     const available = new Set<string>(AVAILABLE_SERVICES.map((service) => service.id));
     const services = descriptor.services;
-    if (!Array.isArray(services) || services.length === 0) {
-      throw new ManifestValidationError("descriptor.services", "must list at least one service");
+    // An empty list is checked against the declared scopes once the
+    // skills are parsed: only agents that read no Graph data may use it.
+    if (!Array.isArray(services)) {
+      throw new ManifestValidationError("descriptor.services", "must be a list of services");
     }
     for (const [index, service] of services.entries()) {
       if (typeof service !== "string" || !available.has(service)) {
@@ -169,12 +171,22 @@ export function parseAgentTemplate(source: string): AgentTemplate {
     }
   }
 
-  return {
+  const template: AgentTemplate = {
     descriptor: descriptor as AgentTemplate["descriptor"],
     ...(execution ? { execution } : {}),
     skills: validated,
     definition: definition as AgentTemplate["definition"],
   };
+  if (Array.isArray(descriptor.services) && descriptor.services.length === 0) {
+    const scopes = collectScopes(template);
+    if (scopes.length > 0) {
+      throw new ManifestValidationError(
+        "descriptor.services",
+        `must list at least one service when the agent declares Graph scopes (${scopes.join(", ")})`,
+      );
+    }
+  }
+  return template;
 }
 
 function requireObject(obj: Record<string, unknown>, key: string): Record<string, unknown> {

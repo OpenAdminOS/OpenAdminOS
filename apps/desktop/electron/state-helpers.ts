@@ -11,6 +11,7 @@ import {
   SAVED_APP_REGISTRATION_LIMIT,
   servicesForScopes,
   type GraphAccessDenial,
+  type ServiceId,
   type SavedAppRegistration,
 } from "@openadminos/agent-sdk";
 import type {
@@ -82,13 +83,7 @@ export function entryToRegistrySummary(
     tier: entry.tier,
     requiresEntraTier: entry.requiresEntraTier ?? "free",
     scopes: entry.scopes,
-    // Index entries are untrusted input: keep only known services, and
-    // derive them from the scopes for indexes built before services.
-    services: Array.isArray(entry.services)
-      ? entry.services.filter((service) =>
-          AVAILABLE_SERVICES.some((available) => available.id === service),
-        )
-      : servicesForScopes(entry.scopes),
+    services: registryEntryServices(entry),
     author: entry.author,
     manifestUrl: entry.manifestUrl,
     manifestSha256: entry.manifestSha256,
@@ -387,6 +382,20 @@ export function sanitizeGraphResources(
 }
 
 
+
+/**
+ * Index entries are untrusted input: keep only known services, and derive
+ * them from the scopes for indexes built before services. An empty list
+ * stands only for an agent without Graph scopes, so an entry whose
+ * services were all unknown still gets the services its scopes need.
+ */
+function registryEntryServices(entry: RegistryIndexEntry): ServiceId[] {
+  if (!Array.isArray(entry.services)) return servicesForScopes(entry.scopes);
+  const known = entry.services.filter((service): service is ServiceId =>
+    AVAILABLE_SERVICES.some((available) => available.id === service),
+  );
+  return known.length === 0 && entry.scopes.length > 0 ? servicesForScopes(entry.scopes) : known;
+}
 
 /** The account and directory a stored tenant was connected with. */
 export function connectedAccountOf(tenant: TenantRecord): ExpectedTenantAccount {

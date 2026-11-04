@@ -787,14 +787,15 @@ export function missingServiceCopy(
   return `This needs ${formatServiceList(labels)}, which ${labels.length === 1 ? "is" : "are"} not granted for ${tenant.displayName ?? "this tenant"}. Add ${labels.length === 1 ? "it" : "them"} in Settings, Tenants.`;
 }
 
-/** Services an agent needs: its declaration, or derived from its scopes. */
+/**
+ * Services an agent needs: its declaration, or derived from its scopes.
+ * An empty declaration means the agent reads no Graph data.
+ */
 export function agentServiceIds(agent: {
   services?: readonly ServiceId[];
   scopes: readonly string[];
 }): ServiceId[] {
-  return agent.services && agent.services.length > 0
-    ? [...agent.services]
-    : servicesForScopes(agent.scopes);
+  return agent.services !== undefined ? [...agent.services] : servicesForScopes(agent.scopes);
 }
 
 /**

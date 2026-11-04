@@ -33,6 +33,16 @@ describe("services-cover-scopes", () => {
     assert.deepEqual(unknown.details, ["exchange-online", "exchange"]);
   });
 
+  it("accepts an empty list only when the agent declares no Graph scopes", () => {
+    const none = checkServicesCoverScopes({ scopes: [], services: [] });
+    assert.equal(none.severity, "pass");
+    assert.equal(none.message, "The agent declares no Graph scopes and needs no service.");
+    const withScopes = checkServicesCoverScopes({ scopes: ["Policy.Read.All"], services: [] });
+    assert.equal(withScopes.severity, "fail");
+    assert.deepEqual(withScopes.details, ["Policy.Read.All"]);
+    assert.match(withScopes.message, /descriptor\.services is empty, but the agent declares Graph scopes: Policy\.Read\.All\. Scopes suggest: \[entra\]/);
+  });
+
   it("passes for every bundled agent", () => {
     for (const agent of loadAgentManifests()) {
       const result = checkServicesCoverScopes(agent);
@@ -61,7 +71,9 @@ describe("agent template schema services", () => {
     };
     assert.equal(validate(descriptor), false);
     assert.equal(validate({ ...descriptor, services: ["entra"] }), true);
-    assert.equal(validate({ ...descriptor, services: [] }), false);
+    // Empty is valid in the schema; the parser and the QA check refuse it
+    // when the agent declares Graph scopes.
+    assert.equal(validate({ ...descriptor, services: [] }), true);
     assert.equal(validate({ ...descriptor, services: ["exchange"] }), false);
     assert.equal(validate({ ...descriptor, services: ["entra", "entra"] }), false);
   });

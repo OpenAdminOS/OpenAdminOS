@@ -132,8 +132,9 @@ export interface AgentContract {
   scopes: string[];
   /**
    * Services the agent reads or changes. Every declared scope must belong
-   * to one of them. Absent on agents installed before services existed;
-   * derive it with `servicesForScopes(scopes)`.
+   * to one of them. Empty for an agent that reads no Graph data. Absent on
+   * agents installed before services existed; derive it with
+   * `servicesForScopes(scopes)`.
    */
   services?: ServiceId[];
   author: AgentAuthor;
@@ -3444,7 +3445,8 @@ export interface AgentTemplate {
     /**
      * Services this agent needs, for example `[intune]`. Required for
      * registry agents; the registry QA fails when a declared scope is not
-     * covered by these services. Derived from the scopes when absent.
+     * covered by these services. `[]` only for an agent that declares no
+     * Graph scopes. Derived from the scopes when absent.
      */
     services?: ServiceId[];
     mode: AgentMode;

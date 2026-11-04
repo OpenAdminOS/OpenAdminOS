@@ -59,10 +59,9 @@
         },
         "services": {
           "type": "array",
-          "minItems": 1,
           "uniqueItems": true,
           "items": { "type": "string", "enum": ["intune", "entra", "defender"] },
-          "description": "Microsoft 365 services the agent needs. Every declared scope must belong to one of these services in the OpenAdminOS service registry (packages/agent-sdk/src/services.ts). The registry QA check services-cover-scopes enforces this."
+          "description": "Microsoft 365 services the agent needs. Every declared scope must belong to one of these services in the OpenAdminOS service registry (packages/agent-sdk/src/services.ts). An empty list is allowed only for an agent that declares no Graph scopes, such as one that reviews evidence the host supplies. The parser and the registry QA check services-cover-scopes enforce this."
         },
         "mode": {
           "type": "string",

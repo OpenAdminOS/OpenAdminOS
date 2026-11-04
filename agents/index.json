@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "revision": 9,
+  "revision": 10,
   "agents": [
     {
       "id": "compliance-overview",
@@ -304,12 +304,10 @@
         "verified": true
       },
       "scopes": [],
-      "services": [
-        "intune"
-      ],
+      "services": [],
       "minAppVersion": "0.6.3",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-evidence-review/manifest.yaml",
-      "manifestSha256": "a087097ccc350a38e79c2b57791b54d677f7402d03e74396bf249e95904e0ec4"
+      "manifestSha256": "1c96070c3aa72510c5081407ec2e8b0aba5609b8c3d02b9324d81ff26ea54078"
     },
     {
       "id": "team-script-draft",
@@ -327,12 +325,10 @@
         "verified": true
       },
       "scopes": [],
-      "services": [
-        "intune"
-      ],
+      "services": [],
       "minAppVersion": "0.6.0",
       "manifestUrl": "https://raw.githubusercontent.com/OpenAdminOS/OpenAdminOS/main/agents/team-script-draft/manifest.yaml",
-      "manifestSha256": "c98ba1b7dc0ca59b95ce95dc2a037bd3a8d799bb4e3dee3cdb96d6ec4e2c0c25"
+      "manifestSha256": "f69de9ae482f4d187f8733dde1926cc6ed6c74506076c27891b60e80e6e6c92f"
     },
     {
       "id": "tenant-change-audit",
