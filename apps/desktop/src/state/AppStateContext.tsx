@@ -1241,9 +1241,17 @@ export function useAppState() {
   return context;
 }
 
+/** Electron wraps host errors as "Error invoking remote method '<channel>': <Name>: <message>". */
+const REMOTE_ERROR_PREFIX = /^Error invoking remote method ['"][^'"]+['"]: (?:(\w*Error): )?/;
+
 function toError(error: unknown): Error {
   if (error instanceof Error) {
-    return error;
+    const prefix = REMOTE_ERROR_PREFIX.exec(error.message);
+    if (!prefix) return error;
+    // The host's message without the wrapper, under the host's error name.
+    const hostError = new Error(error.message.slice(prefix[0].length));
+    hostError.name = prefix[1] ?? error.name;
+    return hostError;
   }
 
   return new Error(typeof error === "string" ? error : "Unknown OpenAdminOS error.");
