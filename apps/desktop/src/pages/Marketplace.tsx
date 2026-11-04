@@ -156,7 +156,12 @@ export default function Marketplace() {
               ) : null}
               <div className="grid grid-cols-[repeat(auto-fill,minmax(250px,1fr))] gap-3.5">
                 {shownServers.map((server) => (
-                  <McpCard key={server.id} server={server} onOpen={() => openListing(server.id)} />
+                  <McpCard
+                    key={server.id}
+                    server={server}
+                    toolUseNotice={toolUse?.available === false ? toolUse.notice : undefined}
+                    onOpen={() => openListing(server.id)}
+                  />
                 ))}
               </div>
               {servers.length === 0 ? (
@@ -227,7 +232,7 @@ function Ledger({ server, onDark = false }: { server: McpServerSummary; onDark?:
   );
 }
 
-function McpCard({ server, onOpen }: { server: McpServerSummary; onOpen: () => void }) {
+function McpCard({ server, toolUseNotice, onOpen }: { server: McpServerSummary; toolUseNotice?: string; onOpen: () => void }) {
   const status = serverState(server);
   return (
     <button
@@ -247,6 +252,7 @@ function McpCard({ server, onOpen }: { server: McpServerSummary; onOpen: () => v
         </span>
         <span className="text-sm text-[var(--color-text-soft)]">{server.pitch}</span>
         <Ledger server={server} />
+        {toolUseNotice ? <span className="text-xs leading-5 text-[var(--color-warning)]">{toolUseNotice}</span> : null}
         <span className="mt-auto flex items-center justify-between gap-2 pt-1 text-sm">
           <span className="text-[var(--color-text-soft)]">No sign-in needed</span>
           {status ? <span className={`whitespace-nowrap text-xs ${status.tone}`}>{status.label}</span> : null}

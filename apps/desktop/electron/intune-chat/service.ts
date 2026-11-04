@@ -2958,12 +2958,20 @@ function agenticModelHasFailedRepeatedly(
 type AgenticCapabilityDecision = {
   enabled: boolean;
   reason: "setting" | "capable" | "capability-fallback";
+  /** The model is too small for tool use, as opposed to having failed the format. */
+  tooSmall?: true;
   notice?: string;
 };
 
+/** The plain line Chat and the Marketplace show when the model is too small for tool use. */
+export function smallModelNotice(model: string): string {
+  return `${model} is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger.`;
+}
+
 /** Says so when installed MCP tools were held back from a model that skips the tool loop. */
 function withMcpSkippedNotice(capability: AgenticCapabilityDecision, mcpInstalled: boolean): string | undefined {
-  if (!mcpInstalled || capability.enabled) return capability.notice;
+  // The small-model line already says Marketplace tools are off.
+  if (!mcpInstalled || capability.enabled || capability.tooSmall) return capability.notice;
   const skipped = capability.reason === "setting"
     ? "Installed MCP tools were not used because Chat is set to deterministic retrieval."
     : "Installed MCP tools were not used because the selected model is too small for tool use.";
@@ -2977,12 +2985,11 @@ function withMcpSkippedNotice(capability: AgenticCapabilityDecision, mcpInstalle
 export function chatToolUseStatus(input: Parameters<typeof resolveAgenticCapability>[0]): { available: boolean; notice?: string } {
   const capability = resolveAgenticCapability(input);
   if (capability.enabled) return { available: true };
-  const model = input.model ?? input.provider?.defaultModel ?? input.provider?.models?.[0] ?? input.provider?.name ?? input.providerId;
   return {
     available: false,
     notice: capability.reason === "setting"
       ? "Chat is set to deterministic retrieval, so it does not call tools. MCP tools are not used."
-      : `The selected model, ${model}, is too small for tool use. Installed MCP tools are not offered to it. Choose a larger model in Settings.`,
+      : capability.notice,
   };
 }
 
@@ -3022,7 +3029,8 @@ function resolveAgenticCapability(input: {
     return {
       enabled: false,
       reason: "capability-fallback",
-      notice: `Deterministic retrieval: ${model ?? input.provider?.name ?? input.providerId} does not support investigative mode.`,
+      tooSmall: true,
+      notice: smallModelNotice(model ?? input.provider?.name ?? input.providerId),
     };
   }
   return { enabled: true, reason: "capable" };

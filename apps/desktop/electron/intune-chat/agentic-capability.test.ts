@@ -64,7 +64,7 @@ describe("agentic capability routing", () => {
 
     assert.equal(
       decision.notice,
-      "Deterministic retrieval: tiny-2b does not support investigative mode.",
+      "tiny-2b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger.",
     );
   });
 

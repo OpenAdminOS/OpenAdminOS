@@ -600,7 +600,7 @@ describe("chat tool use status", () => {
   it("says a small local model gets no MCP tools", () => {
     const status = chatToolUseStatus({ mode: "auto", provider: undefined, providerId: "ollama", model: "llama3.2:3b" });
     assert.equal(status.available, false);
-    assert.match(status.notice!, /llama3\.2:3b, is too small for tool use\. Installed MCP tools are not offered to it/);
+    assert.equal(status.notice, "llama3.2:3b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger.");
     assert.deepEqual(chatToolUseStatus({ mode: "auto", provider: undefined, providerId: "ollama", model: "llama3.1:8b" }), { available: true });
     assert.match(chatToolUseStatus({ mode: "always-deterministic", provider: undefined, providerId: "ollama", model: "llama3.1:8b" }).notice!, /deterministic retrieval/);
   });

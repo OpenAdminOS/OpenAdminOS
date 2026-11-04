@@ -105,9 +105,13 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       provider,
       ...(model ? { model } : {}),
       scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
-      toolHosts: (state.mcpServers ?? [])
-        .filter((server) => server.installed && server.enabled)
-        .map((server) => server.host),
+      // Hosts are named only when the model is offered the tools; a model
+      // too small for tool use never sends a query to them.
+      toolHosts: state.chatToolUse?.available === false
+        ? []
+        : (state.mcpServers ?? [])
+          .filter((server) => server.installed && server.enabled)
+          .map((server) => server.host),
     });
     const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
     const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";
