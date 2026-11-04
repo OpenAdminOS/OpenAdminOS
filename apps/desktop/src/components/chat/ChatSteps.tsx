@@ -163,14 +163,14 @@ function formatTime(value: string | undefined): string | undefined {
 
 /** Source cards for the cited documentation and, when tenant tools ran, the tenant resources. */
 export function SourceCards({ message, content }: { message: IntuneChatMessage; content: string }) {
-  const docs = sourcesForCards(content, message.documentationSources ?? []);
+  const { cited, sources: docs } = sourcesForCards(content, message.documentationSources ?? []);
   const tenant: IntuneChatSource[] = usedTenantEvidence(message) && docs.length > 0
     ? (message.sources ?? []).filter((source) => source.rows > 0 && !source.error).slice(0, 3)
     : [];
   if (docs.length === 0) return null;
   return (
-    <section aria-label="Sources" className="mb-4 mt-2">
-      <h3 className="mb-2 text-sm font-normal text-[var(--color-text-muted)]">Sources</h3>
+    <section aria-label={cited ? "Sources" : "Consulted"} className="mb-4 mt-2">
+      <h3 className="mb-2 text-sm font-normal text-[var(--color-text-muted)]">{cited ? "Sources" : "Consulted"}</h3>
       <div className="grid grid-cols-[repeat(auto-fill,minmax(210px,1fr))] gap-2">
         {docs.map((source) => {
           const tone = sourceTone(source);
@@ -181,7 +181,7 @@ export function SourceCards({ message, content }: { message: IntuneChatMessage; 
               tabIndex={-1}
               className={`rounded-lg border-t-2 px-3 py-2.5 ring-1 ring-inset ring-[var(--color-border-soft)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] ${source.kind === "mcp" ? "border-[var(--color-warning)]" : "border-[var(--color-success)]"}`}
             >
-              <div className={`font-mono text-[11px] ${tone.text}`}>{source.citation} · {source.kind === "mcp" ? source.serverName ?? "MCP server" : "Docs index"}</div>
+              <div className={`font-mono text-[11px] ${tone.text}`}>{cited ? `${source.citation} · ` : ""}{source.kind === "mcp" ? source.serverName ?? "MCP server" : "Docs index"}</div>
               <div className="my-0.5 text-sm font-medium leading-snug text-[var(--color-text)]">
                 {source.url ? (
                   <a href={source.url} target="_blank" rel="noopener noreferrer" className="rounded hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">{source.title}</a>

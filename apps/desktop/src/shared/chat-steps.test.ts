@@ -72,7 +72,7 @@ describe("answer blocks", () => {
   });
 
   it("shows cards for cited sources only, and MCP results when nothing is cited", () => {
-    expect(sourcesForCards("X [2] and [9].", [learn, index])).toEqual([index]);
-    expect(sourcesForCards("No citations.", [learn, index])).toEqual([learn]);
+    expect(sourcesForCards("X [2] and [9].", [learn, index])).toEqual({ cited: true, sources: [index] });
+    expect(sourcesForCards("No citations.", [learn, index])).toEqual({ cited: false, sources: [learn] });
   });
 });

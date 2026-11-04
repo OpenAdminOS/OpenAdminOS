@@ -69,6 +69,16 @@ describe("chat steps", () => {
     expect(document.getElementById("source-answer-1-1")).toHaveFocus();
   });
 
+  it("shows uncited MCP results as consulted, without citation numbers", () => {
+    const content = "Defender for Endpoint needs full disk access.";
+    render(<SourceCards message={{ ...message, content }} content={content} />);
+    expect(screen.queryByRole("region", { name: "Sources" })).toBeNull();
+    const consulted = screen.getByRole("region", { name: "Consulted" });
+    expect(within(consulted).getByText("Microsoft Learn")).toBeInTheDocument();
+    expect(within(consulted).queryByText(/^1 ·/)).toBeNull();
+    expect(within(consulted).queryByText(/Docs index/)).toBeNull();
+  });
+
   it("fills the composer from a follow-up chip and sends nothing", async () => {
     const user = userEvent.setup();
     const onPick = vi.fn();

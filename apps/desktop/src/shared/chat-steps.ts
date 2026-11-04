@@ -141,11 +141,16 @@ export function splitAnswerBlocks(content: string, input: {
   }));
 }
 
-/** Source cards: the cited sources in citation order, or the MCP results when nothing was cited. */
-export function sourcesForCards(content: string, sources: readonly IntuneChatDocumentationSource[]): IntuneChatDocumentationSource[] {
+/**
+ * Source cards: the cited sources in citation order. When the answer cites
+ * nothing, the MCP results it was given are shown as consulted, not cited.
+ * The host registers MCP results only for calls that answered, so a failed
+ * or blocked call never appears.
+ */
+export function sourcesForCards(content: string, sources: readonly IntuneChatDocumentationSource[]): { cited: boolean; sources: IntuneChatDocumentationSource[] } {
   const cited = citedNumbers(content, sources);
-  if (cited.length > 0) return sources.filter((source) => cited.includes(source.citation));
-  return sources.filter((source) => source.kind === "mcp").slice(0, 4);
+  if (cited.length > 0) return { cited: true, sources: sources.filter((source) => cited.includes(source.citation)) };
+  return { cited: false, sources: sources.filter((source) => source.kind === "mcp").slice(0, 4) };
 }
 
 /** "2026-08-26" as "Aug 26, 2026". */
