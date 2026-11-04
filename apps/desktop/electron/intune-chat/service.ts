@@ -1740,7 +1740,7 @@ export class IntuneChatService {
           refreshResult = await this.refreshGraphCache({
             tenantId: tenant.id,
             resources: staleResources,
-          });
+          }).catch(refreshStep.fail);
           refreshStep.finish(refreshResult);
           store.insertToolCall({
             id: `tool_${randomUUID()}`,
@@ -1787,9 +1787,11 @@ export class IntuneChatService {
     let { cacheStatus, rows, packCacheStatus, packAggregates } = readPack();
     // As in the streaming path: a tool-loop run refreshes once the kind
     // needs it, and a fallback answers from the pack read right after.
+    // A failed refresh shows on its step; the evidence guard and the
+    // fallback then deal with the missing data.
     let lazyPack: ReturnType<typeof readPack> | undefined;
     const loadTenantData = once(async () => {
-      await refreshPlanned();
+      await refreshPlanned().catch(() => undefined);
       lazyPack = readPack();
     });
     const prepareDeterministic = async () => {
@@ -2294,7 +2296,7 @@ export class IntuneChatService {
             // Graph call run to completion before the result was thrown
             // away. The signal now reaches the requests themselves.
             options.signal,
-          );
+          ).catch(refreshStep.fail);
           refreshStep.finish(refreshResult);
           store.insertToolCall({
             id: `tool_${randomUUID()}`,
@@ -2370,9 +2372,14 @@ export class IntuneChatService {
     // A tool-loop run refreshes once the kind needs it. As on the
     // deterministic path, a fallback answers from the pack read right
     // after that refresh, not from data a tool refreshed later.
+    // A failed refresh shows on its step and the answer continues: the
+    // evidence guard and the fallback deal with the missing data. A stop
+    // still ends the answer.
     let lazyPack: ReturnType<typeof readPack> | undefined;
     const loadTenantData = once(async () => {
-      await refreshPlanned();
+      await refreshPlanned().catch((error: unknown) => {
+        if (isCancelled()) throw error;
+      });
       lazyPack = readPack();
     });
     /** Before a deterministic answer in a tool-loop run, the kind is settled and a tenant or mixed question reads the tenant. */
@@ -2911,6 +2918,11 @@ export class IntuneChatService {
     });
     return {
       progress: (label: string) => steps.update(id, { detail: label }),
+      /** Shows the real reason on the step, then rethrows. */
+      fail: (error: unknown): never => {
+        steps.finish(id, { status: "failed", title: "Could not refresh tenant data", detail: error instanceof Error ? error.message : String(error) });
+        throw error;
+      },
       finish: (result: GraphCacheRefreshResult) => {
         const ok = result.resources.filter((resource) => resource.ok);
         const first = ok[0];

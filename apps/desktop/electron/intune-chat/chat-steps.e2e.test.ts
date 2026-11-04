@@ -78,7 +78,7 @@ interface Harness {
   script(replies: unknown[]): void;
 }
 
-async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean } = {}): Promise<void> {
+async function withHarness(run: (harness: Harness) => Promise<void>, options: { emptyCache?: boolean; graphError?: string } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
@@ -95,11 +95,14 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: { 
     filePath: statePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     mcpCatalog: [{ ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` }],
-    graphFactory: () => ({
+    graphFactory: () => {
+      if (options.graphError) throw new Error(options.graphError);
+      return {
       listManagedDevices: async () => [],
       retireManagedDevice: async () => { throw new Error("no writes"); },
       request: async (request) => { graphPaths.push(request.path); return { value: [] }; },
-    }),
+      };
+    },
     llmFactory: () => ({
       available: true, defaultModel: "llama3.1:8b",
       async complete(options) {
@@ -418,6 +421,27 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       ]);
       assert.equal((await store.sendIntuneChatMessage({ content: "And for Windows?" })).assistantMessage.questionKind, "docs");
     });
+  });
+
+  it("shows a failed refresh on its step and still answers from the cache", async () => {
+    for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+      await withHarness(async ({ store, script }) => {
+        script([
+          { kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices", limit: 25 } },
+          { final: true, answer: "9 devices are cached; none is unmanaged." },
+        ]);
+        const result = send === "sendIntuneChatMessage"
+          ? await store.sendIntuneChatMessage({ content: "What are unmanaged devices?" })
+          : await store.streamIntuneChatMessage({ content: "What are unmanaged devices?" }, () => undefined);
+        const message = result.assistantMessage;
+        assert.equal(message.status, "completed", send);
+        assert.equal(message.content, "9 devices are cached; none is unmanaged.", send);
+        assert.doesNotMatch(message.content, /LLM provider failed/, send);
+        const refresh = message.steps!.find((step) => step.kind === "graph-refresh")!;
+        assert.deepEqual([refresh.status, refresh.title, refresh.detail], ["failed", "Could not refresh tenant data", "Sign-in for Contoso expired. Reconnect the tenant."], send);
+        assert.deepEqual(kinds(message.steps), ["plan", "graph-refresh", "tool", "answer"], send);
+      }, { graphError: "Sign-in for Contoso expired. Reconnect the tenant." });
+    }
   });
 
   it("refreshes, asks Learn and still requires tenant evidence for a mixed tenant question", async () => {
