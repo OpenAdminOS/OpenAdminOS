@@ -44,6 +44,8 @@ export function summarizeSteps(message: Pick<IntuneChatMessage, "steps" | "docum
     ...((message.documentationSources ?? []).some((source) => source.kind === "docs-index") ? ["docs index"] : []),
     ...(usedTenantEvidence(message) ? ["your tenant"] : []),
   ];
+  // TODO(ugur): Graph refresh and graph_get requests leave the device too, but carry only the
+  // request, not tenant data from the device. They are not listed here; confirm that reading.
   const sent = new Map<string, Set<string>>();
   const add = (where: string, what: string) => sent.set(where, (sent.get(where) ?? new Set()).add(what));
   for (const step of steps) {

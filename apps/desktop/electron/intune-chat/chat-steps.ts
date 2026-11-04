@@ -360,6 +360,8 @@ export function tenantTieInFollowUp(input: {
     return `Check our ${devices}${topic ? ` for ${topic}` : ""} in Intune`;
   }
   // The planner lists the most relevant resource first.
+  // TODO(ugur): this generic wording is used for every non-device tie-in, such as a KQL
+  // question about sign-ins. Confirm it, or name per-resource follow-ups.
   const label = definitionForResource(input.tieInResources[0]!).label;
   return topic ? `Check ${topic} in our ${label.toLowerCase()}` : `Check how this applies to our ${label.toLowerCase()}`;
 }
