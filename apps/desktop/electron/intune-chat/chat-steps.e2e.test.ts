@@ -389,6 +389,37 @@ describe("Chat steps, sources and follow-ups end to end", () => {
     }
   });
 
+  it("does not let a follow-up be docs only when an earlier answer in the chat used tenant data", async () => {
+    await withHarness(async ({ store, prompts, script }) => {
+      script([
+        { kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "macOS", complianceState: "noncompliant" } } },
+        { final: true, answer: "2 of your 5 Macs are noncompliant." },
+      ]);
+      const first = await store.sendIntuneChatMessage({ content: "Which of our Macs are noncompliant?" });
+      assert.equal(first.assistantMessage.questionKind, "tenant");
+
+      // The follow-up carries no tenant wording, but the memory in its prompt holds tenant numbers.
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Intune Windows compliance" } },
+        { final: true, answer: "2 of your 4 Windows PCs are noncompliant." },
+        { tool: "query_cache", params: { resource: "managedDevices", where: { operatingSystem: "Windows" } } },
+        { final: true, answer: "None of your 4 Windows PCs is noncompliant." },
+      ]);
+      const followUp = (await store.sendIntuneChatMessage({ conversationId: first.conversation.id, content: "And for Windows?" })).assistantMessage;
+      assert.equal(followUp.questionKind, "mixed");
+      assert.match(followUp.steps![0]!.detail!, /^Treated as docs and tenant: earlier answers in this chat used your tenant data\. Sources: /);
+      assert.ok(prompts.some((entry) => /That answer used no tenant evidence/.test(entry.prompt)));
+      assert.equal(followUp.content, "None of your 4 Windows PCs is noncompliant.");
+
+      // A new chat with no tenant answers keeps the model's docs label.
+      script([
+        { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Intune Windows compliance" } },
+        { final: true, answer: "Microsoft Learn describes compliance policies [1]." },
+      ]);
+      assert.equal((await store.sendIntuneChatMessage({ content: "And for Windows?" })).assistantMessage.questionKind, "docs");
+    });
+  });
+
   it("refreshes, asks Learn and still requires tenant evidence for a mixed tenant question", async () => {
     await withHarness(async ({ store, cache, graphPaths, prompts, script }) => {
       script([

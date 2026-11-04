@@ -73,6 +73,7 @@ import {
   assertConversationTenant,
   buildChatProgressSteps,
   boundedConversationMemory,
+  CHAT_MEMORY_MAX_TURNS,
   buildIntuneChatSources,
   executedResourcesForAnswer,
   toolRefreshedResources,
@@ -147,6 +148,7 @@ import {
   type DocsIndexPassage,
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
+import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
 import { answerPilotChatMessage } from "./pilot-chat.js";
 import { PILOT_COPY } from "../../src/shared/pilot-mode.js";
 
@@ -1691,9 +1693,8 @@ export class IntuneChatService {
       });
     }
 
-    const conversationMemory = boundedConversationMemory(
-      store.listMessages(conversation.id),
-    );
+    const history = store.listMessages(conversation.id);
+    const conversationMemory = boundedConversationMemory(history);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -1715,7 +1716,8 @@ export class IntuneChatService {
     // directResources is set exactly when a direct answer can apply; direct answers read the cache
     // before any model call, so those questions keep the refresh before the answer.
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
-    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, steps });
+    const veto = docsVeto(content, history);
+    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
 
     let refreshResult: GraphCacheRefreshResult | undefined;
     // A write prompt is answered by the deterministic block below.
@@ -1898,7 +1900,7 @@ export class IntuneChatService {
               ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
               questionKind: answerPlan.sources.kind,
               requiredServerIds: answerPlan.sources.requiredServerIds,
-              ...(lazyRefresh ? modelClassification(content, answerPlan.kind, loadTenantData) : {}),
+              ...(lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -2093,9 +2095,10 @@ export class IntuneChatService {
     const voiceContext = options.voice
       ? voiceConversationContext(content, input.conversationId ? store.listMessages(conversation.id) : [], providerId === "apple-foundation", options.voiceHistory)
       : undefined;
+    const history = options.voice ? [] : store.listMessages(conversation.id);
     const conversationMemory = options.voice
       ? undefined
-      : boundedConversationMemory(store.listMessages(conversation.id));
+      : boundedConversationMemory(history);
     const voiceByteLimit = providerId === "apple-foundation" ? 3000 : VOICE_PROMPT_BYTE_LIMIT;
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
@@ -2146,10 +2149,11 @@ export class IntuneChatService {
     // directResources is set exactly when a direct answer can apply; direct answers read the cache
     // before any model call, so those questions keep the refresh before the answer.
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
+    const veto = docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
       ? undefined
-      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, steps });
+      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
     const isCancelled = () => options.signal?.aborted === true;
     const finishCancelled = (): SendIntuneChatMessageResult => {
       const cancelledAt = new Date().toISOString();
@@ -2518,7 +2522,7 @@ export class IntuneChatService {
               documentation,
               ...(learnFirst ? { documentationFallback: () => this.searchDocsIndex(modelQuestion, steps, true) } : {}),
               ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
-              ...(answerPlan && lazyRefresh ? modelClassification(content, answerPlan.kind, loadTenantData) : {}),
+              ...(answerPlan && lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
               tenant,
               providerId,
               providerIsLocal: provider?.isLocal === true,
@@ -2854,6 +2858,8 @@ export class IntuneChatService {
     conversationId: string;
     toolsOffered: boolean;
     modelClassifies: boolean;
+    /** Why a docs label is not allowed, when it is not. */
+    veto?: string;
     steps: ChatStepRecorder;
   }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
     // The first step shows at once; its detail follows when the kind and sources are known.
@@ -2866,7 +2872,7 @@ export class IntuneChatService {
       ? "tenant"
       : classifyChatQuestion(input.content, { plannedResources: input.planned.resources, namesSource: namedServers(input.content, servers).length > 0 });
     const context = { question: input.content, servers, docsIndexAvailable: Boolean(this.host.documentationIndexVersion?.()) };
-    const kind = new QuestionKindTracker(input.steps, planStep, context, planChatSources({ ...context, kind: keywordKind }));
+    const kind = new QuestionKindTracker(input.steps, planStep, { ...context, ...(input.veto ? { veto: input.veto } : {}) }, planChatSources({ ...context, kind: keywordKind }));
     const tieInResources = [...input.planned.resources];
     const settleKind = () => {
       kind.settle();
@@ -3236,6 +3242,18 @@ export function smallModelNotice(model: string): string {
   return `${model} is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger.`;
 }
 
+/**
+ * Why the question may not be docs only: its wording refers to the
+ * tenant, or an answer in the conversation memory used tenant data, so a
+ * docs answer could repeat tenant facts without fresh evidence.
+ */
+function docsVeto(content: string, history: readonly IntuneChatMessage[]): string | undefined {
+  if (hasTenantReference(content)) return "the question mentions your tenant";
+  const recent = history.filter((message) => message.role === "assistant" && message.status === "completed").slice(-CHAT_MEMORY_MAX_TURNS);
+  if (recent.some((message) => usedTenantEvidence(message))) return "earlier answers in this chat used your tenant data";
+  return undefined;
+}
+
 /** Runs a refresh at most once; later calls wait for the same run. */
 function once(run: () => Promise<void>): () => Promise<void> {
   let pending: Promise<void> | undefined;
@@ -3252,12 +3270,12 @@ function refreshedResourceSet(result: GraphCacheRefreshResult | undefined): Set<
  * refreshed only once the kind needs it.
  */
 function modelClassification(
-  content: string,
+  veto: string | undefined,
   kind: QuestionKindTracker,
   loadTenantData: () => Promise<void>,
 ): Pick<RunAgenticChatInput, "classify" | "onUpgrade" | "ensureTenantData"> {
   return {
-    classify: { tenantReference: hasTenantReference(content), onKind: (decided, reason, declared) => kind.resolve(decided, reason, declared) },
+    classify: { tenantReference: Boolean(veto), onKind: (decided, reason, declared) => kind.resolve(decided, reason, declared) },
     onUpgrade: () => { kind.upgrade(); },
     ensureTenantData: loadTenantData,
   };

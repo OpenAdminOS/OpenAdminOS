@@ -149,13 +149,21 @@ export type QuestionKindReason = "model" | "veto" | "fallback" | "keywords";
  */
 export class QuestionKindTracker {
   private decided = false;
+  private readonly keywordVetoed: boolean;
 
+  /**
+   * `veto` says why a docs label is not allowed, for example "the question
+   * mentions your tenant". A keyword docs kind with a veto starts as mixed.
+   */
   constructor(
     private readonly steps: ChatStepRecorder,
     private readonly planStepId: string,
-    private readonly input: { question: string; servers: readonly McpChatServer[]; docsIndexAvailable: boolean },
+    private readonly input: { question: string; servers: readonly McpChatServer[]; docsIndexAvailable: boolean; veto?: string },
     private plan: ChatSourcePlan,
-  ) {}
+  ) {
+    this.keywordVetoed = plan.kind === "docs" && Boolean(input.veto);
+    if (this.keywordVetoed) this.plan = { ...plan, kind: "mixed" };
+  }
 
   get sources(): ChatSourcePlan {
     return this.plan;
@@ -165,11 +173,12 @@ export class QuestionKindTracker {
   resolve(kind: IntuneChatQuestionKind, reason: QuestionKindReason, declaredServerIds: readonly string[] = []): ChatSourcePlan {
     if (this.decided) return this.plan;
     this.decided = true;
+    const { veto, ...context } = this.input;
     this.plan = planChatSources({
-      ...this.input,
+      ...context,
       kind,
       declaredServerIds,
-      ...(reason === "veto" ? { lead: "Treated as docs and tenant: the question mentions your tenant." } : {}),
+      ...(reason === "veto" ? { lead: `Treated as docs and tenant: ${veto ?? "the question mentions your tenant"}.` } : {}),
     });
     const detail = reason === "fallback" ? `${this.plan.detail} The model gave no question kind, so keyword rules decided.` : this.plan.detail;
     this.steps.finish(this.planStepId, { title: "Read the question", detail });
@@ -178,7 +187,7 @@ export class QuestionKindTracker {
 
   /** Decides the keyword kind when nothing else did, for example after a fallback. */
   settle(): void {
-    this.resolve(this.plan.kind, "keywords");
+    this.resolve(this.plan.kind, this.keywordVetoed ? "veto" : "keywords");
   }
 
   /** A docs answer asked for tenant data: it becomes mixed, shown as its own step. */
