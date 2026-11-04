@@ -19,6 +19,7 @@ import { fenceTenantData } from "@openadminos/runtime";
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import { cleanMcpDescription, cleanMcpSchema } from "../mcp/host.js";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
+import { isGenericTokens, normalizeTokens } from "./mcp-stopwords.js";
 import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
 import {
   GRAPH_CACHE_RESOURCES,
@@ -523,13 +524,16 @@ function executeToolUnchecked(
   }
 }
 
-const PRODUCT_WORDS = /\b(?:microsoft|intune|entra|azure|windows|office|defender|m365|graph)\b/i;
-
-/** Tenant words a public tool query must not contain. Product names are never blocked. */
+/**
+ * Tenant words a public tool query must not contain: the sign-in name, its
+ * domain, and each distinctive word of the tenant name. Product and common
+ * words in the name ("Contoso Microsoft Practice") are dropped, the rest
+ * ("contoso") is blocked.
+ */
 export function mcpPrivateTermsForTenant(tenant: { displayName: string; username: string }): string[] {
-  const terms = [tenant.username, tenant.username.split("@")[1] ?? ""];
-  if (!PRODUCT_WORDS.test(tenant.displayName)) terms.push(tenant.displayName);
-  return [...new Set(terms.map((term) => term.trim()).filter((term) => term.length >= 4))];
+  const distinctive = normalizeTokens(tenant.displayName).filter((token) => !isGenericTokens([token]) && token.length >= 3);
+  const terms = [tenant.username, tenant.username.split("@")[1] ?? "", ...distinctive];
+  return [...new Set(terms.map((term) => term.trim()).filter((term) => term.length >= 3))];
 }
 
 async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName, params: unknown): Promise<unknown> {
@@ -544,13 +548,17 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
       .flatMap((value) => (Array.isArray(value) ? value : [value]))
       .filter((value): value is string | number => typeof value === "string" || typeof value === "number")
       .map(String),
-  ].map((value) => value.toLowerCase());
+  ];
+  // Leaves are joined so a value split across params or list items is
+  // still one token sequence; the index normalizes both sides.
+  const joined = leaves.join(" ");
   // Defence in depth for the prompt rule. Injected text in tenant data or
   // in third-party results can steer the model, so identifiers that are
   // certainly private never leave the device, whatever the model wrote.
-  const privateTerms = ctx.mcp.privateTerms.map((term) => term.toLowerCase());
-  if (leaves.some((leaf) => /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i.test(leaf) ||
-    privateTerms.some((term) => leaf.includes(term)))) {
+  const privateTerms = new TenantValueIndex();
+  privateTerms.addAll(ctx.mcp.privateTerms);
+  if (leaves.some((leaf) => /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|\b(?:sk-proj-|bearer\s)/i.test(leaf)) ||
+    privateTerms.matches(joined)) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained a tenant name, domain, email address, ID, IP address or credential. Nothing was sent to ${entry.host}. Rephrase it as a public question.`);
   }
   if (ctx.mcp.seedTenantValues) {
@@ -558,7 +566,7 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     ctx.mcp.seedTenantValues = undefined;
   }
   const indexes = [ctx.mcp.tenantValues, ...(ctx.tenantObservations ? [ctx.tenantObservations] : [])];
-  if (leaves.some((leaf) => indexes.some((index) => index.matches(leaf)))) {
+  if (indexes.some((index) => index.matches(joined))) {
     throw new McpQueryBlockedError(`the ${entry.serverName} query contained tenant data from this conversation, such as a user, device or group name or an ID. Nothing was sent to ${entry.host}. Rephrase it as a public question without tenant values.`);
   }
   const result = await ctx.mcp.call(entry, args, ctx.signal);

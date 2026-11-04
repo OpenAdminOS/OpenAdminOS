@@ -14,7 +14,7 @@ import { runAgenticChat } from "./agentic-loop.js";
 import { isGeneralKnowledgeQuestion } from "./planner.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
-import { TenantValueIndex } from "./tenant-values.js";
+import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import {
   mcpChatToolName,
   mcpPrivateTermsForTenant,
@@ -272,7 +272,7 @@ describe("MCP tools in the Chat loop", () => {
     await withStore(async (store) => {
       store.replaceGraphResources({ tenantId: tenant.id, resource: "users", label: "Users", scopeSet: [],
         refreshedAt: "2026-06-01T10:00:00.000Z",
-        rows: [{ id: "user-1", displayName: "Avery Quinlan", userPrincipalName: "avery@contoso.example", userType: "Member" }] });
+        rows: [{ id: "usr-7f3k", displayName: "Avery Quinlan", userPrincipalName: "avery@contoso.example", userType: "Member" }] });
       store.replaceGraphResources({ tenantId: tenant.id, resource: "signIns", label: "Sign-ins", scopeSet: [],
         refreshedAt: "2026-06-01T10:00:00.000Z",
         rows: [{ id: "signin-1", userDisplayName: "Avery Quinlan", deviceDetail: { deviceId: "kiosk-device-0042", operatingSystem: "Windows" } }] });
@@ -280,7 +280,7 @@ describe("MCP tools in the Chat loop", () => {
       store.collectTenantIdentityValues(tenant.id, seeded);
       // Same key rule as tool observations: identity keys, nested keys ending in Id, no common values.
       assert.ok(seeded.matches("avery quinlan"));
-      assert.ok(seeded.matches("user-1"));
+      assert.ok(seeded.matches("usr-7f3k"));
       assert.ok(seeded.matches("kiosk-device-0042"));
       assert.ok(!seeded.matches("member"));
       assert.ok(!seeded.matches("windows"));
@@ -333,10 +333,10 @@ describe("MCP tools in the Chat loop", () => {
 
   it("matches values in large indexes without a cap", () => {
     const index = new TenantValueIndex();
-    for (let i = 0; i < 200_000; i += 1) index.add(`device-${i.toString().padStart(6, "0")}`);
+    for (let i = 0; i < 200_000; i += 1) index.add(`kiosk-${i.toString().padStart(6, "0")}`);
     assert.equal(index.size, 200_000);
-    assert.ok(index.matches("why is device-199999 offline"));
-    assert.ok(!index.matches("why is a device offline"));
+    assert.ok(index.matches("why is kiosk-199999 offline"));
+    assert.ok(!index.matches("why is a kiosk offline"));
   });
 
   it("validates params against the schema and size limits before sending", async () => {
@@ -368,7 +368,68 @@ describe("MCP tools in the Chat loop", () => {
 
   it("never blocks product names that match a tenant called after a product", () => {
     assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Microsoft Intune Lab", username: "admin@lab.example" }), ["admin@lab.example", "lab.example"]);
-    assert.deepEqual(mcpPrivateTermsForTenant(tenant), ["admin@contoso.example", "contoso.example", "Contoso"]);
+    assert.deepEqual(mcpPrivateTermsForTenant(tenant), ["admin@contoso.example", "contoso.example", "contoso"]);
+    assert.deepEqual(mcpPrivateTermsForTenant({ displayName: "Contoso Microsoft Practice", username: "admin@fabrikam.example" }), ["admin@fabrikam.example", "fabrikam.example", "contoso"]);
+  });
+
+  it("blocks the distinctive word of a tenant name that contains product words", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const context: McpChatContext = { ...mcpContext(calls), privateTerms: mcpPrivateTermsForTenant({ displayName: "Contoso Microsoft Practice", username: "admin@fabrikam.example" }) };
+      const result = await runAgenticChat(input(store, scriptedLlm([
+        callDocs("Contoso licensing for Intune"),
+        callDocs("Microsoft best practice for Intune licensing"),
+        '{"final":true,"answer":"Done."}',
+      ]), context));
+      assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
+      assert.equal(result.toolTrace[1]!.error, undefined);
+      assert.deepEqual(calls.map((call) => call.args.query), ["Microsoft best practice for Intune licensing"]);
+    });
+  });
+
+  it("matches whole token sequences, so common names and product words do not over-block", async () => {
+    await withStore(async (store) => {
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "groups", label: "Groups", scopeSet: [], refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "grp-a1", displayName: "Windows 11" }, { id: "grp-b2", displayName: "All Users" }] });
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "users", label: "Users", scopeSet: [], refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "usr-c3", displayName: "Mark", givenName: "Grant", surname: "Hollis" }] });
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "dev-d4", deviceName: "HR-LAPTOP-07" }] });
+      const index = new TenantValueIndex();
+      store.collectTenantIdentityValues(tenant.id, index);
+      for (const allowed of ["Windows 11 compliance", "grant admin consent", "marketplace apps", "All users group assignment", "laptop 07 battery"]) {
+        assert.equal(index.matches(allowed), false, allowed);
+      }
+      for (const blocked of ["HR LAPTOP 07", "why is hr-laptop-07 slow", "\uff28\uff32-\uff2c\uff21\uff30\uff34\uff2f\uff30-\uff10\uff17 slow", "H\u200bR-LAP\u200dTOP-07", "Grant Hollis mailbox"]) {
+        assert.equal(index.matches(blocked), true, blocked);
+      }
+    });
+  });
+
+  it("blocks a tenant value split across two params", async () => {
+    await withStore(async (store) => {
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: "2026-06-01T10:00:00.000Z",
+        rows: [{ id: "dev-d4", deviceName: "HR-LAPTOP-07" }] });
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const twoParams: McpChatTool = { ...docsTool, inputSchema: { type: "object", properties: { query: { type: "string" }, scope: { type: "string" } } } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [twoParams], seedTenantValues: (into) => store.collectTenantIdentityValues(tenant.id, into) };
+      const result = await runAgenticChat(input(store, scriptedLlm([
+        JSON.stringify({ tool: docsTool.name, params: { query: "why is HR LAPTOP", scope: "07 offline" } }),
+        '{"final":true,"answer":"Done."}',
+      ]), context));
+      assert.equal(result.toolTrace[0]!.mcpSource?.blocked, true);
+      assert.equal(calls.length, 0);
+    });
+  });
+
+  it("collects string lists under identity keys and every Id or ID key", () => {
+    const index = new TenantValueIndex();
+    collectTenantValues({ tenantID: "zeta-tenant-77", device: { deviceIds: ["kiosk-dev-a1", "kiosk-dev-b2"] }, otherMails: ["avery.q@fabrikam.example"], givenName: "Grant", surname: "Hollis" }, index);
+    for (const value of ["zeta tenant 77", "kiosk dev a1", "kiosk dev b2", "avery q fabrikam example", "grant hollis"]) {
+      assert.equal(index.matches(value), true, value);
+    }
+    assert.equal(index.matches("grant"), false);
+    assert.equal(index.matches("hollis"), false);
   });
 
   it("is not reachable through the external gateway's read tools", async () => {
