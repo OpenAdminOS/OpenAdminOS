@@ -128,6 +128,25 @@ describe("pilot mode", () => {
     }
   });
 
+  it("refuses agent installs from the host while the pilot tenant is active", async () => {
+    const fixture = await makeFixture();
+    try {
+      const before = await fixture.store.addSampleTenant();
+      const candidate = fixture.store.listRegistryAgents().find(
+        (agent) => !(PILOT_AGENT_SLUGS as readonly string[]).includes(agent.slug),
+      );
+      assert.ok(candidate, "the bundled registry offers a non-pilot agent");
+      await assert.rejects(
+        fixture.store.installAgent(candidate.slug),
+        { message: "Agent install is available in production. Connect your tenant to use it." },
+      );
+      const after = await fixture.store.getAppState();
+      assert.equal(after.installedAgents.length, before.installedAgents.length);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("removes the pilot tenant after a real tenant connects", async () => {
     const fixture = await makeFixture();
     try {

@@ -4931,6 +4931,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async installAgent(agentId: string): Promise<AppState> {
+    // Agent install is a production feature. The renderer hides it in pilot
+    // mode; the host refuses it too so no other caller can bypass that.
+    if (this.isPilotModeActive(await this.read())) {
+      throw new Error(PILOT_COPY.featureInProduction("Agent install"));
+    }
     let installedSlug: string | undefined;
     let installIdForReport: string | undefined;
     const initialCandidate = this.listRegistryAgents().find(
@@ -4948,6 +4953,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     await this.serialize(async () => {
       const persisted = await this.read();
+      if (this.isPilotModeActive(persisted)) {
+        throw new Error(PILOT_COPY.featureInProduction("Agent install"));
+      }
       const existing = persisted.installedAgents.find(
         (agent) =>
           agent.id === agentId ||
