@@ -88,4 +88,38 @@ describe("an agent with an invalid manifest", () => {
     expect(await screen.findByRole("dialog", { name: /Uninstall agent/ })).toBeInTheDocument();
     expect(screen.getAllByText("Unavailable").length).toBeGreaterThan(0);
   });
+
+  it("does not load the invalid manifest again, so the reason shows only in the notice", async () => {
+    // The host rejects getAgentManifest for an invalid manifest with the same reason.
+    const getAgentManifest = vi.fn(async () => {
+      throw new Error(REASON);
+    });
+    renderRoute(<Agents />, {
+      path: "/agents/:slug",
+      route: "/agents/wrong-services",
+      bridge: makeMockBridge({ getAgentManifest }, state()),
+    });
+
+    await screen.findByRole("alert", { name: "Wrong services manifest is invalid" });
+    expect(getAgentManifest).not.toHaveBeenCalled();
+    expect(screen.queryByText(/The manifest could not be loaded/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Refresh the agent and try again/)).not.toBeInTheDocument();
+  });
+
+  it("ends the manifest load error with a period before the recovery", async () => {
+    const getAgentManifest = vi.fn(async () => {
+      throw new Error("Manifest file not found");
+    });
+    renderRoute(<Agents />, {
+      path: "/agents/:slug",
+      route: "/agents/devices",
+      bridge: makeMockBridge({ getAgentManifest }, state()),
+    });
+
+    expect(
+      await screen.findByText(
+        "The manifest could not be loaded: Manifest file not found. Refresh the agent and try again.",
+      ),
+    ).toBeInTheDocument();
+  });
 });

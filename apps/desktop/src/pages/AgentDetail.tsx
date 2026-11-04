@@ -76,6 +76,12 @@ import {
   type WhatsAppWebRecipientType,
 } from "../shared/openAdminOS";
 
+function manifestLoadErrorCopy(error: string, recovery: string): string {
+  const reason = error.trim();
+  const sentence = /[.?]$/.test(reason) ? reason : `${reason}.`;
+  return `The manifest could not be loaded: ${sentence} ${recovery}`;
+}
+
 function scrollAgentSection(targetId: string) {
   const target = document.getElementById(targetId);
   const scrollRoot = target?.closest<HTMLElement>("[data-drawer-scroll-root]");
@@ -105,6 +111,7 @@ export default function AgentDetail({
   const { requireTenantAndProvider, openSetup } = useSetupFlow();
   const {
     state,
+    loading: appStateLoading,
     registryAgents,
     installAgent,
     startRun,
@@ -357,13 +364,17 @@ export default function AgentDetail({
     }
   };
 
+  const manifestError = agent?.manifestError;
   useEffect(() => {
     if (!slug) return;
     let cancelled = false;
     setPreviewLoading(true);
     setPreviewError(null);
     const api = window.openAdminOS;
-    if (!api) {
+    // Wait for the installed agents, because an invalid manifest has its
+    // own notice and loading it again would only repeat the same error.
+    if (appStateLoading) return;
+    if (!api || manifestError) {
       setPreview(null);
       setPreviewLoading(false);
       return;
@@ -384,7 +395,7 @@ export default function AgentDetail({
     return () => {
       cancelled = true;
     };
-  }, [slug, agent?.version, registryAgent?.version]);
+  }, [slug, agent?.version, registryAgent?.version, manifestError, appStateLoading]);
 
   useEffect(() => {
     window.openAdminOS
@@ -702,7 +713,7 @@ export default function AgentDetail({
 
           {previewError ? (
             <p role="alert" className="text-sm text-[var(--color-danger)]">
-              The manifest could not be loaded: {previewError} Refresh the agent and try again.
+              {manifestLoadErrorCopy(previewError, "Refresh the agent and try again.")}
             </p>
           ) : null}
 
@@ -896,7 +907,7 @@ export default function AgentDetail({
             </div>
           ) : previewError ? (
             <p role="alert" className="text-sm text-[var(--color-danger)]">
-              The manifest could not be loaded: {previewError} Refresh the agent and try again.
+              {manifestLoadErrorCopy(previewError, "Refresh the agent and try again.")}
             </p>
           ) : preview ? (
             <ManifestPreview preview={preview} settingsOverrides={agent.settings} />
@@ -1206,7 +1217,7 @@ function HubAgentDrawer({
             </div>
           ) : previewError ? (
             <p role="alert" className="text-sm text-[var(--color-danger)]">
-              The manifest could not be loaded: {previewError} Refresh the hub and try again.
+              {manifestLoadErrorCopy(previewError, "Refresh the hub and try again.")}
             </p>
           ) : preview ? (
             <ManifestSections preview={preview} sections={["settings", "result", "pipeline"]} />
