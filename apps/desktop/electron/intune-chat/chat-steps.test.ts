@@ -611,6 +611,28 @@ describe("agentic loop sources", () => {
     });
   });
 
+  it("checks titles and follow-ups for the tenant name and cached values also without an MCP server", async () => {
+    await withStore(async (store) => {
+      store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: new Date().toISOString(),
+        rows: [{ id: "dev-1", deviceName: "HR-LAPTOP-07", operatingSystem: "Windows" }] });
+      const run = (title: string) => {
+        const input = loopInput(store, scripted([JSON.stringify({ final: true, answer: "Done.", title, next: [`Why is HR-LAPTOP-07 offline?`, "Which Contoso Macs are stale?", "Which Macs are stale?"] })], []),
+          learnContext(async () => ({ text: "", truncated: false })), { questionKind: "docs", askTitle: true });
+        const { mcp: _mcp, ...tools } = input.tools;
+        return runAgenticChat({ ...input, tools: { ...tools, privateTerms: mcpPrivateTermsForTenant(tenant), cachedTenantValues: () => store.tenantIdentityValues(tenant.id) } });
+      };
+      for (const title of ["Contoso device review", "Why HR-LAPTOP-07 is offline"]) {
+        const result = await run(title);
+        assert.equal(result.ok, true);
+        if (!result.ok) continue;
+        assert.equal(result.title, undefined, title);
+        assert.deepEqual(result.followUps, ["Which Macs are stale?"]);
+      }
+      const plain = await run("Stale Mac review");
+      assert.equal(plain.ok && plain.title, "Stale Mac review");
+    });
+  });
+
   it("still requires tenant evidence for a mixed question after a docs call", async () => {
     await withStore(async (store) => {
       store.replaceGraphResources({ tenantId: tenant.id, resource: "managedDevices", label: "Devices", scopeSet: [], refreshedAt: new Date().toISOString(),

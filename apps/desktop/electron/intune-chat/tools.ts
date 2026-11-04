@@ -325,6 +325,13 @@ export function tenantDataSourceForTool(tool: IntuneChatInvestigationToolName, p
 export interface IntuneChatToolContext {
   /** Identity values from this turn's tenant tool results, for the MCP egress check. */
   tenantObservations?: TenantValueIndex;
+  /**
+   * The tenant's names, domain and sign-in name, and the cache's identity
+   * values, for the tenant data check on titles and follow-ups. Set also
+   * when no MCP server is installed; an MCP context's own values win.
+   */
+  privateTerms?: McpPrivateTerms;
+  cachedTenantValues?: () => TenantValueIndex;
   webSearch?: WebSearch;
   /** Installed MCP tools. Chat only; never set for the external gateway. */
   mcp?: McpChatContext;
@@ -724,13 +731,14 @@ const PRIVATE_PATTERN = /\b[\w.+-]+@[\w.-]+\.[a-z]{2,}\b|\b[0-9a-f]{8}-[0-9a-f]{
 export function holdsTenantData(ctx: IntuneChatToolContext, raw: string): boolean {
   const text = canonicalEgressText(raw);
   if (PRIVATE_PATTERN.test(text) || hasMixedScriptToken(text) || egressResidue(text)) return true;
-  if (ctx.mcp) {
+  const terms = ctx.mcp?.privateTerms ?? ctx.privateTerms;
+  if (terms) {
     const privateTerms = new TenantValueIndex();
-    privateTerms.addAll(ctx.mcp.privateTerms.tokens);
-    if (privateTerms.matches(text) || containsPrivateTerm(text, ctx.mcp.privateTerms.compact)) return true;
+    privateTerms.addAll(terms.tokens);
+    if (privateTerms.matches(text) || containsPrivateTerm(text, terms.compact)) return true;
   }
   try {
-    const indexes = [ctx.mcp?.tenantValues, ctx.mcp?.cachedTenantValues?.(), ctx.tenantObservations];
+    const indexes = [ctx.mcp?.tenantValues, (ctx.mcp?.cachedTenantValues ?? ctx.cachedTenantValues)?.(), ctx.tenantObservations];
     return indexes.some((index) => index?.matches(text));
   } catch {
     return true;

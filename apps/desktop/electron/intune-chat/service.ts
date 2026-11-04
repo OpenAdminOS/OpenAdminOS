@@ -127,7 +127,7 @@ import {
   selfTrainingCandidateFromPrompt,
   type PlannedChatContext,
 } from "./planner.js";
-import { executeIntuneChatTool, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
+import { executeIntuneChatTool, mcpPrivateTermsForTenant, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
 import {
   CitationRegistry,
   MICROSOFT_GRAPH,
@@ -3038,6 +3038,9 @@ export class IntuneChatService {
       tenantId,
       store,
       signal,
+      // Titles and follow-ups are checked for tenant names and cached values also without an MCP server.
+      privateTerms: mcpPrivateTermsForTenant(tenant),
+      cachedTenantValues: () => store.tenantIdentityValues(tenantId),
       grantedScopes: grantedScopeSet(tenant),
       graphForScopes: async (scopes) => {
         const uniqueScopes = [...new Set(scopes)].sort();

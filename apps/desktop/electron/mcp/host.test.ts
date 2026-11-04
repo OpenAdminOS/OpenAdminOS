@@ -556,6 +556,32 @@ describe("MCP installs in app state", () => {
     });
   });
 
+  it("checks titles for the tenant name with no MCP server installed", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-title-"));
+    const statePath = join(dir, "state.json");
+    const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
+    await writeFile(statePath, JSON.stringify({
+      activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
+      installedAgents: [], runs: [], tenants: [tenant], activeTenantId: tenant.id,
+    }));
+    const store = new AppStateStore({
+      filePath: statePath, userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      mcpCatalog: [],
+      graphFactory: () => ({ listManagedDevices: async () => [], retireManagedDevice: async () => { throw new Error("no writes"); }, request: async () => ({ value: [] }) }),
+      llmFactory: () => ({
+        available: true, defaultModel: "llama3.1:8b",
+        async complete() { return { text: JSON.stringify({ kind: "docs", sources: [], final: true, answer: "Autopatch automates Windows updates.", title: "Contoso Autopatch rollout" }), model: "llama3.1:8b" }; },
+        async *stream() { yield { delta: "", accumulated: "", done: true, model: "llama3.1:8b" }; },
+      }),
+    });
+    try {
+      const result = await store.sendIntuneChatMessage({ content: "What is Windows Autopatch?" });
+      assert.equal(result.assistantMessage.content, "Autopatch automates Windows updates.");
+      assert.notEqual(result.conversation.title, "Contoso Autopatch rollout");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("rejects servers outside the catalog and toggles on servers that are not installed", async () => {
     await withStore(async (store) => {
       await assert.rejects(store.installMcpServer("evil"), /not in the Marketplace catalog/);
