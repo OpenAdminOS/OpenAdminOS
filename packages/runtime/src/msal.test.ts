@@ -137,9 +137,9 @@ describe("interactive tenant sign-in listener", () => {
         // untrusted text must be inserted literally.
         const patterns = encodeURIComponent("a$`b$&c$$d");
         const literal = await (
-          await fetch(`${redirectUri}/?error=x&error_description=${patterns}`)
+          await fetch(`${redirectUri}/?error=${patterns}&error_description=${patterns}`)
         ).text();
-        assert.match(literal, /<strong>x<\/strong>a\$`b\$&#38;c\$\$d<\/div>/);
+        assert.match(literal, /<strong>a\$`b\$&#38;c\$\$d<\/strong>a\$`b\$&#38;c\$\$d<\/div>/);
         assert.equal(literal.match(/<!doctype/g)?.length, 1);
         assert.doesNotMatch(literal, /oa:error-detail/);
 
