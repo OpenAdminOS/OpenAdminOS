@@ -1,4 +1,5 @@
 import type { PendingIntent } from "../setup/pending-intent";
+import { formatServiceList } from "../shared/openAdminOS";
 
 export const WELCOME_COPY = {
   title: "Welcome to OpenAdminOS",
@@ -79,6 +80,25 @@ export const SETUP_COPY = {
   savedRegistrationsHint: "Registrations you connected with before. Remove them in Settings, Tenants.",
   newRegistrationOption: "Enter a different registration",
   chooseSignInReason: "Choose OpenAdminOS app or your own app registration above to continue.",
+  selectServiceReason: "Select at least one service.",
+  servicePickerLegend: "Services",
+  servicePickerHint:
+    "Choose the services to connect. Expand a service to review its parts, each exact Microsoft Graph scope and why it is needed. You can add services later in Settings, Tenants.",
+  scriptServicesLegend: "Services in the script",
+  ownRegistrationServicesNote:
+    "Your app registration's API permissions decide which services are available. OpenAdminOS reads the granted permissions from the token after sign-in and switches on each service part that is fully granted.",
+  ownRegistrationSignIn: "Sign in with your app registration",
+  connectedServicesSummary: (connected: readonly string[], missing: readonly string[]) =>
+    [
+      connected.length > 0
+        ? `Connected services: ${connected.join(", ")}.`
+        : "No service is connected yet.",
+      missing.length > 0
+        ? `Not connected: ${missing.join(", ")}. Add them in Settings, Tenants.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
   clientIdRequiredReason: "Enter the Application (client) ID of your app registration to continue.",
   clientIdInvalidReason:
     "The Application (client) ID must be a GUID from your app registration overview.",
@@ -137,3 +157,82 @@ export function resumeIntentLabel(intent: PendingIntent | null, agentName?: stri
       return intent.mode === "due" ? "Run due schedules" : "Run enabled schedules";
   }
 }
+
+const joinTitles = formatServiceList;
+
+export const SERVICE_COPY = {
+  status: {
+    connected: "Connected",
+    partial: "Partial",
+    missing: "Not connected",
+  },
+  servicesHeading: "Services",
+  chipsLabel: (services: readonly string[]) => `Services: ${services.join(", ")}`,
+  filterAll: "All services",
+  filterLabel: (service: string) => `Needs ${service}`,
+  addAction: (service: string) => `Add ${service}`,
+  addPermissionsAction: (service: string) => `Add ${service} permissions`,
+  addAccessTitle: (service: string) => `Add ${service} access`,
+  addPermissionsTitle: (service: string) => `Add ${service} permissions`,
+  addPartLabel: (part: string) => `Add ${part}`,
+  sharedAppSubtitle: (tenant: string) => `Review delegated access for ${tenant}`,
+  ownRegistrationSubtitle: (tenant: string, clientId: string) =>
+    `Your app registration ${clientId} for ${tenant}`,
+  ownRegistrationSteps:
+    "OpenAdminOS cannot change your app registration. Add these delegated Microsoft Graph permissions with the script or the JSON snippet, grant admin consent, then choose Check again.",
+  missingPermissions: (scopes: readonly string[]) => `Missing: ${scopes.join(", ")}`,
+  partsSummary: (granted: number, total: number) => `${granted} of ${total} parts`,
+  checkAgain: "Check again",
+  checkAgainHint:
+    "Reads the permissions a new token carries from your app registration and switches on each part that is fully granted.",
+  checkedAgain: "Permissions checked. Services follow what the new token carries.",
+  checkedAgainWithWarning: (message: string) =>
+    `Permissions checked, but the license check did not finish. ${message}`,
+  tierProbeWarningTitle: "License check did not finish.",
+  tierProbeWarningKept: "The stored Entra tier and licenses are kept.",
+  tierProbeWarningShort: "License check did not finish",
+  retryLicenseCheck: "Retry license check",
+  retryLicenseCheckFor: (tenant: string) => `Retry license check for ${tenant}`,
+  licenseCheckFinished: "License check finished. The Entra tier and licenses are up to date.",
+  licenseCheckStillFailing: "Tried again. The license check still did not finish.",
+  licensesNotChecked: "Licenses not checked",
+  licensesNotCheckedBody:
+    "The license check needs Organization.Read.All, which comes with Users and groups in Intune or Entra.",
+  checkingPermissions: "Checking permissions.",
+  checkingLicenses: "Checking licenses.",
+  addingAccess: "Adding access.",
+  waitingForSignIn: "Waiting for Microsoft sign-in. Finish it in your browser, or cancel.",
+  waitingForSignInButton: "Waiting for Microsoft sign-in",
+  checkRunning: "Checking",
+  checkRunningFor: (tenant: string) => `Check in progress for ${tenant}`,
+  cancelCheck: "Cancel check",
+  cancelCheckFor: (tenant: string) => `Cancel the check for ${tenant}`,
+  cancellingCheck: "Cancelling",
+  accessAddedWithWarning: (message: string) =>
+    `Access added, but the license check did not finish. ${message}`,
+  copied: (label: string) => `${label} copied.`,
+  alreadyConnected: (service: string, tenant: string) =>
+    `${service} is connected for ${tenant}. Every part is granted.`,
+  notConnectedTitle: (services: readonly string[], tenant: string) =>
+    `${joinTitles(services)} ${services.length === 1 ? "is" : "are"} not connected for ${tenant}`,
+  notConnectedBody: (feature: string, services: readonly string[], ownRegistration: boolean) =>
+    `${feature} reads data from ${joinTitles(services, "or")}. ${
+      ownRegistration
+        ? "Add the permissions to your app registration, grant admin consent, then choose Check again."
+        : "Add the service to ask Microsoft for consent to its read scopes only. Your other services stay as they are."
+    }`,
+  cacheSkipped: (count: number) =>
+    `${count} ${count === 1 ? "resource belongs" : "resources belong"} to service parts that are not connected for this tenant. Refresh skips them until the access is added.`,
+  needsNotConnected: (services: readonly string[]) => `Needs ${joinTitles(services)}, not connected.`,
+  needsNotConnectedBody: (tenant: string) =>
+    `Runs against ${tenant} are blocked until the service is added.`,
+  consentNoteGeneric:
+    "Runs are blocked while a service this agent needs is not connected for the tenant. Scopes a connected service has not granted yet are requested when the run starts.",
+  consentNoteBlocked: (services: readonly string[], tenant: string) =>
+    `Runs are blocked until ${joinTitles(services)} ${services.length === 1 ? "is" : "are"} connected for ${tenant}. Add ${services.length === 1 ? "it" : "them"} in Settings, Tenants.`,
+  consentNotePending: (tenant: string) =>
+    `Scopes not yet granted for ${tenant} are requested when the run starts.`,
+  consentNoteGranted: (tenant: string) => `Every scope listed here is granted for ${tenant}.`,
+  consentNotePilot: "Pilot mode uses the sample tenant, so no consent is requested.",
+};
+

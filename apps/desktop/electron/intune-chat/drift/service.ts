@@ -12,6 +12,7 @@ import type {
   DriftEntryDetail,
   DriftEntryDetailInput,
   DriftFieldChange,
+  DriftOmittedResource,
   DriftObjectHistoryInput,
   DriftObjectHistoryResult,
   DriftStatus,
@@ -33,8 +34,10 @@ import type {
   RenameDriftBaselineInput,
   RetireDriftBaselineInput,
   TenantGroup,
+  NotGrantedService,
   TenantRecord,
 } from "@openadminos/agent-sdk";
+import { notGrantedServiceForScopes } from "@openadminos/agent-sdk";
 import { definitionForResource } from "../planner.js";
 import type {
   CachedGraphResourceRecord,
@@ -170,7 +173,7 @@ export class DriftService {
   async getDriftTimeline(input: DriftTimelineInput): Promise<DriftTimelineResult> {
     const tenant = await this.resolveTenant(input.tenantId);
     const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
-    const resources = normalizeTrackedResources(input.resources);
+    const { resources, omittedResources } = this.grantedResources(tenant, input.resources);
     const previousBySnapshotId = this.previousSnapshotMap(tenant.id, resources);
     const auditCache = this.readAuditCache(tenant.id);
     const entries: DriftTimelineEntry[] = [];
@@ -248,6 +251,7 @@ export class DriftService {
       hasMore: filteredEntries.length > limit,
       limit,
       ...(historyTruncated ? { historyTruncated: true } : {}),
+      ...omittedField(omittedResources),
     };
   }
 
@@ -271,6 +275,7 @@ export class DriftService {
 
     const changes = fieldChangesFor(change);
     const detail: DriftEntryDetail = {
+      ...notGrantedServiceFor(tenant, input.resource),
       changes,
       summary: summarizeDriftChanges(changes),
       attribution: attributeDriftChange({
@@ -352,17 +357,25 @@ export class DriftService {
         ...(cacheStatus.get(stat.resource)?.pageLimitReached
           ? { pageLimitReached: true }
           : {}),
+        ...notGrantedServiceFor(tenant, stat.resource),
       })),
     };
   }
 
   async createBaseline(input: CreateDriftBaselineInput): Promise<DriftBaseline> {
     const tenant = await this.resolveTenant(input.tenantId);
+    // Earlier snapshots of a service that is not connected are not pinned.
+    const { resources } = this.grantedResources(tenant, undefined);
+    if (resources.length === 0) {
+      throw new Error(
+        "No connected service has tracked configuration for this tenant. Add Intune or Entra in Settings, Tenants.",
+      );
+    }
     return this.host.createDriftBaseline({
       tenantId: tenant.id,
       name: input.name,
       now: new Date().toISOString(),
-      resources: TRACKED_RESOURCES,
+      resources,
     });
   }
 
@@ -399,7 +412,7 @@ export class DriftService {
           : "No active baseline exists for this tenant. Create one from the Changes view first.",
       );
     }
-    const resources = normalizeTrackedResources(input.resources);
+    const { resources, omittedResources } = this.grantedResources(tenant, input.resources);
     const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
     const changes = this.host.listDriftBaselineChanges({
       tenantId: tenant.id,
@@ -441,6 +454,7 @@ export class DriftService {
       entries: entries.slice(0, limit),
       hasMore: entries.length > limit,
       limit,
+      ...omittedField(omittedResources),
     };
   }
 
@@ -451,7 +465,7 @@ export class DriftService {
     if (Date.parse(from) >= Date.parse(to)) {
       throw new Error("Compare requires the from moment to be before the to moment.");
     }
-    const resources = normalizeTrackedResources(input.resources);
+    const { resources, omittedResources } = this.grantedResources(tenant, input.resources);
     const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
 
     let retentionLimited = false;
@@ -531,6 +545,7 @@ export class DriftService {
       hasMore: entries.length > limit,
       limit,
       ...(retentionLimited ? { retentionLimited: true } : {}),
+      ...omittedField(omittedResources),
     };
   }
 
@@ -558,10 +573,12 @@ export class DriftService {
           : "No active baseline exists for this tenant. Create one from the Changes view first.",
       );
     }
+    // Objects of a service that is not connected are not rolled back: the
+    // drift view does not show them and the write would have no grant.
     const changes = this.host.listDriftBaselineChanges({
       tenantId: tenant.id,
       baselineId: baseline.id,
-      resources: TRACKED_RESOURCES,
+      resources: this.grantedResources(tenant, undefined).resources,
     });
     const draft = buildRollbackPlan({
       changes,
@@ -635,9 +652,13 @@ export class DriftService {
       ensureTrackedResource(entry.resource);
       bundleByResource.set(entry.resource, entry.objects);
     }
-    const resources = input.resources
+    const candidates = input.resources
       ? normalizeTrackedResources(input.resources)
       : [...bundleByResource.keys()];
+    const { resources, omittedResources } =
+      candidates.length > 0
+        ? this.grantedResources(tenant, candidates, { requested: true })
+        : { resources: [], omittedResources: [] };
     const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
     const includeAssignments = input.includeAssignments === true;
     const now = new Date().toISOString();
@@ -680,6 +701,7 @@ export class DriftService {
       entries: entries.slice(0, limit),
       hasMore: entries.length > limit,
       limit,
+      ...omittedField(omittedResources),
     };
   }
 
@@ -698,7 +720,8 @@ export class DriftService {
     }
     const evaluatedAt = new Date().toISOString();
     const statuses: FleetTenantDriftStatus[] = tenants.map((tenant) => {
-      const stats = this.host.getDriftResourceStats(tenant.id, TRACKED_RESOURCES);
+      const { resources, omittedResources } = this.grantedResources(tenant, undefined);
+      const stats = this.host.getDriftResourceStats(tenant.id, resources);
       const lastCaptureAt = stats
         .map((stat) => stat.lastSnapshotAt)
         .filter((value): value is string => typeof value === "string")
@@ -714,6 +737,7 @@ export class DriftService {
         tenantName: tenant.displayName,
         trackedObjectCount,
         ...(lastCaptureAt ? { lastCaptureAt } : {}),
+        ...omittedField(omittedResources),
       };
       if (baseline) {
         status.baseline = {
@@ -725,7 +749,7 @@ export class DriftService {
           ...this.host.countDriftBaselineChanges({
             tenantId: tenant.id,
             baselineId: baseline.id,
-            resources: TRACKED_RESOURCES,
+            resources,
           }),
           evaluatedAt,
         };
@@ -744,7 +768,17 @@ export class DriftService {
     if (tenantA.id === tenantB.id) {
       throw new Error("Cross-tenant compare requires two different tenants.");
     }
-    const resources = normalizeTrackedResources(input.resources);
+    // A resource is compared only when both tenants can read it now.
+    const grantedA = this.grantedResources(tenantA, input.resources, { tenantId: tenantA.id });
+    const grantedB =
+      grantedA.resources.length > 0
+        ? this.grantedResources(tenantB, grantedA.resources, {
+            requested: input.resources !== undefined && input.resources.length > 0,
+            tenantId: tenantB.id,
+          })
+        : { resources: [], omittedResources: [] };
+    const resources = grantedB.resources;
+    const omittedResources = [...grantedA.omittedResources, ...grantedB.omittedResources];
     const limit = normalizeLimit(input.limit, DEFAULT_TIMELINE_LIMIT);
     const includeAssignments = input.includeAssignments === true;
     const now = new Date().toISOString();
@@ -783,7 +817,49 @@ export class DriftService {
       entries: entries.slice(0, limit),
       hasMore: entries.length > limit,
       limit,
+      ...omittedField(omittedResources),
     };
+  }
+
+  /**
+   * Tracked resources the tenant can read now, by the same part-level
+   * grant rule as Chat and the cache, and the ones left out. A resource
+   * of a service that is not connected keeps its earlier snapshots, but
+   * they are no longer refreshed, so no drift view reads them as current.
+   * A left-out resource is reported when it was asked for by name or
+   * still holds retained snapshots.
+   */
+  private grantedResources(
+    tenant: TenantRecord,
+    requested: readonly GraphCacheResourceKind[] | undefined,
+    options: { requested?: boolean; tenantId?: string } = {},
+  ): { resources: GraphCacheResourceKind[]; omittedResources: DriftOmittedResource[] } {
+    const resources: GraphCacheResourceKind[] = [];
+    const notGranted: Array<{ resource: GraphCacheResourceKind; notGrantedService: NotGrantedService }> = [];
+    for (const resource of normalizeTrackedResources(requested)) {
+      const { notGrantedService } = notGrantedServiceFor(tenant, resource);
+      if (notGrantedService) notGranted.push({ resource, notGrantedService });
+      else resources.push(resource);
+    }
+    if (notGranted.length === 0) return { resources, omittedResources: [] };
+    const named = options.requested ?? (requested !== undefined && requested.length > 0);
+    const withHistory = named
+      ? undefined
+      : new Set(
+          this.host
+            .getDriftResourceStats(tenant.id, notGranted.map((entry) => entry.resource))
+            .filter((stat) => stat.snapshotCount > 0)
+            .map((stat) => stat.resource),
+        );
+    const omittedResources = notGranted
+      .filter((entry) => !withHistory || withHistory.has(entry.resource))
+      .map(({ resource, notGrantedService }) => ({
+        resource,
+        resourceLabel: labelForResource(resource),
+        notGrantedService,
+        ...(options.tenantId ? { tenantId: options.tenantId } : {}),
+      }));
+    return { resources, omittedResources };
   }
 
   private async resolveTenant(tenantId: string): Promise<TenantRecord> {
@@ -1149,6 +1225,22 @@ function displayNameFromRaw(rawJson: string | undefined): string | undefined {
     stringValue(row.name) ??
     stringValue(row.deviceName)
   );
+}
+
+// Drift snapshots come from the cache, so a resource of a service that is
+// not connected never gets one. The status says so instead of looking empty.
+function notGrantedServiceFor(
+  tenant: TenantRecord,
+  resource: GraphCacheResourceKind,
+): { notGrantedService?: NotGrantedService } {
+  const notGrantedService = notGrantedServiceForScopes(tenant, definitionForResource(resource).scopes);
+  return notGrantedService ? { notGrantedService } : {};
+}
+
+function omittedField(
+  omittedResources: DriftOmittedResource[],
+): { omittedResources?: DriftOmittedResource[] } {
+  return omittedResources.length > 0 ? { omittedResources } : {};
 }
 
 function labelForResource(resource: GraphCacheResourceKind): string {

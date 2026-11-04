@@ -59,6 +59,7 @@ Top-level keys:
 | `author.verified` | Maintainer-owned marker for bundled or verified authors. |
 | `category` | `devices`, `apps`, `policies`, `compliance`, or `updates`. |
 | `tier` | `agent` or `dashboard`. Defaults to `agent` at parse time. Use `dashboard` for single-source narrated reports. |
+| `services` | Required for registry agents. The Microsoft 365 services the agent needs: `intune`, `entra` or `defender`, no duplicates. Use `services: []` only for an agent that declares no Graph scopes beyond the sign-in baseline (`openid`, `profile`, `offline_access`, `User.Read`), such as one that reviews evidence the host supplies. Every declared Graph scope must belong to one of these services in the service registry (`packages/agent-sdk/src/services.ts`). The agent cannot run while one of its services is not connected for the tenant. When a local manifest omits it, the services are derived from the scopes. |
 | `requiresEntraTier` | `free`, `p1`, or `p2`. Defaults to `free`. Use `p1` for sign-ins, directory audits, Conditional Access policies, or user `signInActivity`. Use `p2` for Identity Protection data. |
 | `mode` | `read` or `write`. Write mode requires a `write` step. Read mode cannot declare a `write` step. |
 | `preferredModel` | Optional advisory model name. This is the current model field. There is no `modelRequirements` object in the manifest schema today. |
@@ -67,6 +68,32 @@ Top-level keys:
 Graph scopes are not declared as one top-level list. They are collected from
 `graph` step `settings.scopes` and `write` step `settings.scopes`, then shown
 to the user during install and preflight.
+
+Declare the least-privileged scope that covers each operation. Prefer a scope
+that is already part of a service, so connected tenants need no extra consent:
+`User.Read.All` rather than `Directory.Read.All`, and a `.Read.All` scope for
+every read. `Directory.Read.All` and write scopes are not part of any service.
+They are requested only when the agent runs, with their own Microsoft consent
+prompt. The service registry also lists these run-time scopes per service, so
+`services` still has to cover them. The
+[Permissions by service](gitbook/generated/reference/permissions-by-service.md)
+reference lists every scope, its service and part.
+
+```yaml
+descriptor:
+  id: find-inactive-devices
+  # ...
+  services:
+    - intune
+  mode: read
+```
+
+The registry QA check `services-cover-scopes` fails when `services` is
+missing, names a planned or unknown service, or leaves a declared scope
+uncovered. Its message suggests the services that would cover the scopes.
+The app applies the same rule: the manifest parser rejects a declaration
+that leaves a scope uncovered, and run preflight blocks an installed agent
+whose stored services do not cover its scopes, naming those scopes.
 
 ## Execution Kinds
 

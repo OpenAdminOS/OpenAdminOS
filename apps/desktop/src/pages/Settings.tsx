@@ -36,10 +36,13 @@ import {
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
-  PERMISSION_AREAS,
-  grantedPermissionAreas,
-  type PermissionAreaDefinition,
-  type PermissionAreaId,
+  AVAILABLE_SERVICES,
+  SERVICE_PARTS,
+  grantedParts,
+  grantedScopeSet,
+  partLabel,
+  serviceStatus,
+  type ServiceId,
   type AuditLogExportFormat,
   type AzureOpenAIProviderConfig,
   type ChatInvestigationMode,
@@ -53,7 +56,6 @@ import {
   type ProviderId,
   type ProviderTestResult,
   type ProviderSummary,
-  type RequestedScope,
   type ReleaseDiagnostics,
   type RetrievalStatus,
   type RunHistoryPruneResult,
@@ -82,6 +84,7 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import {
   SETTINGS_ITEMS,
   SETTINGS_SECTIONS,
+  SERVICE_COPY,
   SETUP_COPY,
   searchSettings,
   userFacingErrorReason,
@@ -92,6 +95,19 @@ import { DataSettingsSection } from "./Cache";
 import { ConnectorsSettingsSection } from "./Connectors";
 import { PilotProductionPage } from "../components/PilotMode";
 import { useToast } from "../components/Toast";
+import {
+  ServiceAccessDialog,
+  TenantCheckResultLine,
+  TenantCheckStatus,
+  TenantLicensesNotChecked,
+  TenantProbeWarning,
+  ServiceStatusBadge,
+  checkAgainResult,
+  licensesNotChecked,
+  tenantCheckButtonLabel,
+  useTenantCheck,
+  usesOwnRegistration,
+} from "../components/ServiceAccess";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   Badge,
@@ -183,7 +199,6 @@ export default function Settings() {
     setActiveProvider,
     setActiveModel,
     setActiveTenant,
-    addTenantAccess,
     disconnectTenant,
     removeSavedAppRegistration,
     setRegistrySource,
@@ -503,7 +518,6 @@ export default function Settings() {
                 error={null}
                 savedRegistrations={state.savedAppRegistrations ?? []}
                 onSetActive={setActiveTenant}
-                onAddAccess={addTenantAccess}
                 onDisconnect={disconnectTenant}
                 onRemoveSavedRegistration={removeSavedAppRegistration}
               />
@@ -1201,7 +1215,6 @@ function TenantsSection({
   error,
   savedRegistrations,
   onSetActive,
-  onAddAccess,
   onDisconnect,
   onRemoveSavedRegistration,
 }: {
@@ -1210,7 +1223,6 @@ function TenantsSection({
   error: string | null;
   savedRegistrations: SavedAppRegistration[];
   onSetActive: (id: string) => Promise<void>;
-  onAddAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
   onRemoveSavedRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
 }) {
@@ -1236,7 +1248,6 @@ function TenantsSection({
               tenant={tenant}
               isActive={tenant.id === activeTenantId}
               onSetActive={onSetActive}
-              onAddAccess={onAddAccess}
               onDisconnect={onDisconnect}
             />
           ))
@@ -1321,33 +1332,132 @@ function SavedRegistrationsList({
   );
 }
 
+function TenantServices({
+  tenant,
+  onAdd,
+}: {
+  tenant: TenantRecord;
+  onAdd: (serviceId: ServiceId, partIds?: string[]) => void;
+}) {
+  const { refreshTenantGrants } = useAppState();
+  const ownRegistration = usesOwnRegistration(tenant);
+  const tenantCheck = useTenantCheck(tenant.id);
+  const [checkResult, setCheckResult] = useState<ReturnType<typeof checkAgainResult> | null>(null);
+  const grantedPartIds = new Set(grantedParts(tenant).map((part) => part.id));
+  return (
+    <section
+      aria-label={`${tenant.displayName} services`}
+      className="border-b border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-4 py-3 last:border-b-0"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="text-xs font-medium text-[var(--color-text-muted)]">
+          {SERVICE_COPY.servicesHeading}
+        </span>
+        {ownRegistration ? (
+          <UiButton
+            size="sm"
+            variant="secondary"
+            leadingIcon={<IconRefresh size={12} />}
+            disabled={tenantCheck.busy}
+            title={SERVICE_COPY.checkAgainHint}
+            onClick={() => {
+              setCheckResult(null);
+              void tenantCheck
+                .run(() => refreshTenantGrants(tenant.id))
+                .then((result) => setCheckResult(checkAgainResult(result, tenant.id)));
+            }}
+          >
+            {tenantCheck.running ? tenantCheckButtonLabel(tenantCheck.progress) : SERVICE_COPY.checkAgain}
+          </UiButton>
+        ) : null}
+      </div>
+      <TenantCheckResultLine result={checkResult} />
+      <ul className="mt-2 divide-y divide-[var(--color-border-soft)]">
+        {AVAILABLE_SERVICES.map((service) => {
+          const status = serviceStatus(tenant, service.id);
+          const parts = SERVICE_PARTS.filter((part) => part.service === service.id);
+          const missing = parts.filter((part) => !grantedPartIds.has(part.id));
+          const missingScopes = [
+            ...new Set(
+              missing.flatMap((part) => part.scopes.map((scope) => scope.name)),
+            ),
+          ].filter((name) => !grantedScopeSet(tenant).has(name));
+          return (
+            <li key={service.id} className="py-2.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="min-w-[72px] text-sm font-medium text-[var(--color-text)]">{service.title}</span>
+                <ServiceStatusBadge status={status} />
+                <span className="text-xs text-[var(--color-text-muted)]">
+                  {SERVICE_COPY.partsSummary(parts.length - missing.length, parts.length)}
+                </span>
+                {missing.length > 0 ? (
+                  <UiButton
+                    className="ml-auto"
+                    size="sm"
+                    variant="secondary"
+                    aria-label={
+                      ownRegistration
+                        ? SERVICE_COPY.addPermissionsTitle(service.title)
+                        : SERVICE_COPY.addAccessTitle(service.title)
+                    }
+                    disabled={tenantCheck.busy}
+                    onClick={() => onAdd(service.id)}
+                  >
+                    {ownRegistration ? "Add permissions" : "Add access"}
+                  </UiButton>
+                ) : null}
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                {parts.map((part) =>
+                  grantedPartIds.has(part.id) ? (
+                    <span key={part.id} className="inline-flex items-center gap-1.5 text-xs text-[var(--color-text-soft)]">
+                      <StatusDot tone="success" />
+                      {part.title}
+                    </span>
+                  ) : (
+                    <button
+                      key={part.id}
+                      type="button"
+                      aria-label={SERVICE_COPY.addPartLabel(partLabel(part))}
+                      disabled={tenantCheck.busy}
+                      onClick={() => onAdd(service.id, [part.id])}
+                      className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:pointer-events-none disabled:opacity-50"
+                    >
+                      <StatusDot tone="muted" />
+                      {part.title}
+                    </button>
+                  ),
+                )}
+              </div>
+              {ownRegistration && missingScopes.length > 0 ? (
+                <p className="mt-1.5 break-words font-mono text-xs leading-5 text-[var(--color-text-muted)]">
+                  {SERVICE_COPY.missingPermissions(missingScopes)}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 function TenantRow({
   tenant,
   isActive,
   onSetActive,
-  onAddAccess,
   onDisconnect,
 }: {
   tenant: TenantRecord;
   isActive: boolean;
   onSetActive: (id: string) => Promise<void>;
-  onAddAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
   onDisconnect: (id: string) => Promise<void>;
 }) {
   const { openSetup } = useSetupFlow();
-  const { getRequestedScopes } = useAppState();
   const [confirmDisconnect, setConfirmDisconnect] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
   const [disconnectError, setDisconnectError] = useState<string | null>(null);
-  const [accessArea, setAccessArea] = useState<PermissionAreaDefinition | null>(null);
-  const [addingAccess, setAddingAccess] = useState(false);
-  const [accessError, setAccessError] = useState<string | null>(null);
-  const [accessScopeDetails, setAccessScopeDetails] = useState<RequestedScope[]>([]);
-  const grantedAreas = grantedPermissionAreas(tenant);
-  const grantedAreaIds = new Set(grantedAreas.map((area) => area.id));
-  const missingAreas = PERMISSION_AREAS.filter(
-    (area) => !grantedAreaIds.has(area.id),
-  );
+  const [access, setAccess] = useState<{ serviceId: ServiceId; partIds?: string[] } | null>(null);
   const entraLicenseName =
     tenant.entraTier && tenant.entraTier !== "unknown"
       ? tenant.entraTier === "free"
@@ -1387,13 +1497,20 @@ function TenantRow({
           <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
             {tenant.kind === "sample"
               ? "Fictional company, stored on this device"
-              : `${domain} · ${entraLicenseName ?? "Entra tier not available"}`}
+              : entraLicenseName
+                ? `${domain} · ${entraLicenseName}`
+                : licensesNotChecked(tenant)
+                  ? domain
+                  : `${domain} · Entra tier not available`}
           </div>
           {registration ? (
             <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
               {registration.text}
             </div>
           ) : null}
+          <TenantProbeWarning tenant={tenant} />
+          <TenantLicensesNotChecked tenant={tenant} />
+          <TenantCheckStatus tenant={tenant} />
         </div>
         <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample data" : licenses.map((license) => license.displayName).join(", ")}>
           {tenant.kind === "sample"
@@ -1430,114 +1547,15 @@ function TenantRow({
         />
       </div>
       {tenant.kind !== "sample" && (
-        <div className="border-b border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-4 py-3 last:border-b-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="mr-1 text-xs font-medium text-[var(--color-text-muted)]">
-              Granted areas
-            </span>
-            {grantedAreas.map((area) => (
-              <Badge key={area.id} tone="neutral">{area.title}</Badge>
-            ))}
-          </div>
-          {missingAreas.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <span className="mr-1 text-xs text-[var(--color-text-muted)]">
-                Additional access
-              </span>
-              {missingAreas.map((area) => (
-                <UiButton
-                  key={area.id}
-                  size="sm"
-                  variant="secondary"
-                  aria-label={`Add ${area.title} access`}
-                  onClick={() => {
-                    setAccessError(null);
-                    setAccessArea(area);
-                    void getRequestedScopes()
-                      .then(setAccessScopeDetails)
-                      .catch(() => setAccessScopeDetails([]));
-                  }}
-                >
-                  Add access: {area.title}
-                </UiButton>
-              ))}
-            </div>
-          )}
-        </div>
+        <TenantServices tenant={tenant} onAdd={(serviceId, partIds) => setAccess({ serviceId, ...(partIds ? { partIds } : {}) })} />
       )}
-      <Modal
-        open={accessArea !== null}
-        onClose={() => {
-          if (!addingAccess) setAccessArea(null);
-        }}
-        size="md"
-      >
-        <ModalHeader
-          title={accessArea ? `Add ${accessArea.title} access` : "Add access"}
-          subtitle={`Review delegated access for ${tenant.displayName}`}
-          onClose={() => {
-            if (!addingAccess) setAccessArea(null);
-          }}
-        />
-        {accessArea && (
-          <div className="space-y-4 p-6">
-            <p className="text-sm leading-6 text-[var(--color-text-soft)]">
-              {accessArea.summary}
-            </p>
-            <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-              <div className="text-xs font-medium text-[var(--color-text-muted)]">
-                {accessArea.scopes.length} delegated read scopes
-              </div>
-              <ul className="mt-2 space-y-2">
-                {accessArea.scopes.map((scope) => (
-                  <li key={scope}>
-                    <div className="break-all font-mono text-xs text-[var(--color-text-soft)]">
-                      {scope}
-                    </div>
-                    {accessScopeDetails.find((entry) => entry.name === scope)?.rationale && (
-                      <p className="mt-0.5 text-xs leading-5 text-[var(--color-text-muted)]">
-                        {accessScopeDetails.find((entry) => entry.name === scope)?.rationale}
-                      </p>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-            <div className="space-y-1 text-xs leading-5 text-[var(--color-text-muted)]">
-              <p>Microsoft opens in your system browser for interactive consent.</p>
-              <p>{SETUP_COPY.readOnlyNote}</p>
-              <p>{SETUP_COPY.signInScopesNote}</p>
-              <p>{SETUP_COPY.delegatedPermissionsNote}</p>
-            </div>
-            {accessError && (
-              <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">
-                {accessError}
-              </div>
-            )}
-            <div className="flex justify-end gap-2">
-              <Button variant="ghost" disabled={addingAccess} onClick={() => setAccessArea(null)}>
-                Cancel
-              </Button>
-              <Button
-                variant="primary"
-                disabled={addingAccess}
-                onClick={() => {
-                  setAddingAccess(true);
-                  setAccessError(null);
-                  void onAddAccess(tenant.id, accessArea.id)
-                    .then(() => setAccessArea(null))
-                    .catch((caught) =>
-                      setAccessError(caught instanceof Error ? caught.message : String(caught)),
-                    )
-                    .finally(() => setAddingAccess(false));
-                }}
-              >
-                {addingAccess ? "Waiting for Microsoft" : "Continue to Microsoft"}
-              </Button>
-            </div>
-          </div>
-        )}
-      </Modal>
+      <ServiceAccessDialog
+        tenant={tenant}
+        serviceId={access?.serviceId ?? null}
+        {...(access?.partIds ? { initialPartIds: access.partIds } : {})}
+        open={access !== null}
+        onClose={() => setAccess(null)}
+      />
       <Modal
       open={confirmDisconnect}
       onClose={() => {

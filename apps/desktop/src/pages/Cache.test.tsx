@@ -57,7 +57,13 @@ it("shows ungranted resources without selecting or refreshing them", async () =>
         label: "Managed devices",
         rows: 0,
         scopeSet: ["DeviceManagementManagedDevices.Read.All"],
-        notGrantedArea: "Devices and configuration",
+        notGrantedService: {
+          serviceId: "intune",
+          service: "Intune",
+          partId: "intune.devices",
+          part: "Intune devices and configuration",
+          serviceMissing: false,
+        },
       },
       {
         resource: "users",
@@ -76,8 +82,10 @@ it("shows ungranted resources without selecting or refreshing them", async () =>
 
   expect(await screen.findByRole("button", { name: "Preload all 1 resources" })).toBeInTheDocument();
   await user.click(screen.getByText("Show 2 resources"));
-  expect(screen.getByText("Not granted")).toBeInTheDocument();
-  expect(screen.getByText("Devices and configuration area")).toBeInTheDocument();
+  expect(screen.getByText("Not connected")).toBeInTheDocument();
+  expect(screen.getByText("Needs Intune devices and configuration")).toBeInTheDocument();
+  expect(screen.queryByText("Refresh failed")).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Add Intune access" })).toBeInTheDocument();
   expect(screen.getByRole("checkbox", { name: "Managed devices" })).toBeDisabled();
   await user.click(screen.getByRole("button", { name: "Preload all 1 resources" }));
   await waitFor(() =>

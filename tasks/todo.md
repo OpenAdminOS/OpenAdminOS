@@ -895,3 +895,214 @@ Decided 2026-11-03: a connection is stored per tenant, and the user can reuse it
 3. A credential belongs to a connection, not to a listing. A connection is defined by the publisher (verified domain plus connection id) and lists the hosts it may be sent to. Listings from the same publisher that name the same connection share it, so the user enters a secret once.
 4. Connections are stored in the OS keychain through safeStorage, bound to a tenant, and are only attached to requests to the hosts the connection declares. A sandboxed local server receives the secret only at spawn and can only reach the declared hosts.
 5. Settings shows each connection, the listings using it, when it was added, and lets the user rotate, sign out or delete it. Removing the last listing that uses a connection asks whether to delete the credential.
+
+# Services as modules (2026-11-04)
+
+Branch `services/modular`, stacked on `tenant/own-app-registration` (PR #162). Worktree `.claude/worktrees/services-modular`.
+
+## Why
+
+An admin who only works in Intune still consents to Entra and Defender reads. Every permission area starts selected, and the required "directory" area includes `Directory.Read.All`. Areas mix services: "Apps" covers both Intune and Entra, and "Security and sign-ins" covers both Entra and Defender. Agents, cache resources, pages, the setup script and the docs know nothing about services. An own app registration requests a fixed list and never checks what it was granted. A finished run marks an agent's declared scopes as granted (`runs.ts`), which hides real gaps. Everything assumes Microsoft Graph.
+
+## Decisions (user, 2026-11-04)
+
+- Baseline is sign-in only: `openid`, `profile`, `offline_access`, `User.Read`. Each service pulls in the shared scopes it needs.
+- Own app registration: sign in with the registration's `.default` scope, read what was granted, and switch on the matching services. Missing services show the exact permissions to add, a script that adds them to the existing app, and Check again.
+- First wave: Intune, Entra and Defender, all on Graph. Exchange, Teams and SharePoint are documented as planned. The scope model records the audience so they can be added later.
+- Build now, stacked on PR #162.
+
+## Acceptance criteria
+
+1. One service registry in `packages/agent-sdk` is the only source for services, parts, scopes, reasons, audience, cache resources, roles and licences. Every default read scope belongs to at least one part. Shared scopes are deduplicated. The baseline is exactly the four sign-in scopes. `Directory.Read.All` is not in any service and is requested only when an agent that declares it runs.
+2. Connecting with the shared app shows a picker by service, and each service expands to its parts. At least one service is required. Intune-only consent requests the baseline plus the Intune part scopes and nothing else, which a test asserts exactly. Preselection is flagged as `TODO(ugur)`.
+3. From Settings, and from any "not connected" state, a service can be added later. Consent is requested for that service only and merged with the existing grants.
+4. With an own registration:
+   - Sign-in uses `https://graph.microsoft.com/.default`, and granted scopes come from the token.
+   - A service or part switches on only when all of its scopes are granted.
+   - A missing part lists its exact permissions. It offers a PowerShell script that adds them to the existing app ID, keeps the permissions the app already has, and grants consent. It also offers a `requiredResourceAccess` JSON snippet and a Check again action that gets a new token.
+   - The script can still create a new registration, now per service.
+5. Grants reflect the token only. The run-time merge of declared scopes into `grantedScopes` is removed. Tenants without `grantedScopes` keep the current all-defaults behaviour until their next sign-in. Stored grants carry their audience, with a migration and tests.
+6. The app adapts to connected services:
+   - Chat names a missing service, for example "Defender is not connected for this tenant. Add it in Settings, Tenants."
+   - Cache refresh skips resources of services that are not connected.
+   - Agents and the Marketplace show which services an agent needs and filter by service.
+   - Navigation shows a designed "not connected" state instead of an error.
+7. Agent manifests declare `services`, which the schema and SDK types accept. The registry QA fails when an agent's scopes are not covered by its services. All bundled and registry agents are updated, and `agents/index.json` is regenerated.
+8. Docs, with `docs/gitbook` as the source and `npm run docs:check` passing:
+   - a generated "Permissions by service" reference, built from the registry;
+   - Intune, Entra and Defender guides covering what each service does, its permissions with reasons, the least-privilege roles, licences, the Chat questions it answers and its agents;
+   - a "Planned services" page for Exchange, Teams and SharePoint;
+   - setup pages split into "Shared app" and "Own app registration", the latter with per-service tables, the script and the manifest snippet;
+   - a roles guide;
+   - a troubleshooting page for consent errors;
+   - authoring docs that require `services` and least-privilege scopes;
+   - a SPEC section on services, with wording reframed from Intune-first to "Microsoft 365, starting with Intune, Entra and Defender";
+   - a CHANGELOG line.
+9. Every scope name, permission ID and endpoint in the registry is verified with Lokka and the msgraph skill. Results are recorded below.
+10. Typecheck, electron, renderer (Node 22), runtime, qa and docs:check are green. The UI is checked with screenshots in light and dark. A separate Claude evaluator and the GPT-6.1-Sol review of the whole diff pass before any PR.
+
+## Out of scope
+
+- The Exchange, Teams and SharePoint implementations, and non-Graph tokens. The model only records the audience.
+- Defender advanced hunting (`ThreatHunting.Read.All`) as a Chat tool. It is listed as a planned Defender part.
+- Renaming internal `intune-chat` ids.
+
+## Lokka verification
+
+Checked with Lokka on 2026-11-04 (lab tenant, app-only connection): `GET /v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')?$select=oauth2PermissionScopes` returns 867 delegated scopes. Every scope below is present and enabled. The ID is the delegated permission ID, and the last column shows who can consent.
+
+| Scope | Delegated permission ID | Consent |
+| --- | --- | --- |
+| openid | 37f7f235-527c-4136-accd-4a02d197296e | User |
+| profile | 14dad69e-099b-42c9-810b-d002981feec1 | User |
+| offline_access | 7427e0e9-2fba-42fe-b0c0-848c9e6a8182 | User |
+| User.Read | e1fe6dd8-ba31-4d61-89e7-88639da4683d | User |
+| DeviceManagementManagedDevices.Read.All | 314874da-47d6-4978-88dc-cf0d37f0bb82 | Admin |
+| DeviceManagementConfiguration.Read.All | f1493658-876a-4c87-8fa7-edb559b3476a | Admin |
+| DeviceManagementApps.Read.All | 4edf5f54-4666-44af-9de9-0144fb4b6e8c | Admin |
+| DeviceManagementServiceConfig.Read.All | 8696daa5-bce5-4b2e-83f9-51b6defc4e1e | Admin |
+| DeviceManagementScripts.Read.All | d32381d8-ee89-4220-9c83-b672aa68d404 | Admin |
+| DeviceManagementRBAC.Read.All | 49f0cc30-024c-4dfd-ab3e-82e137ee5431 | Admin |
+| Device.Read.All | 951183d1-1a61-466f-a6d1-1fde911bfd95 | Admin |
+| GroupMember.Read.All | bc024368-1153-4739-b217-4326f2e966d0 | Admin |
+| Organization.Read.All | 4908d5b9-3fb2-4b1e-9336-1888b7937185 | Admin |
+| Directory.Read.All | 06da0dbc-49e2-44d2-8312-53f166ab848a | Admin |
+| User.Read.All | a154be20-db9c-4678-8ab7-66f6cc099a59 | Admin |
+| User.ReadBasic.All | b340eb25-3456-403f-be2f-af7a0d370277 | User |
+| Policy.Read.All | 572fea84-0151-49b2-9301-11cb16974376 | Admin |
+| Application.Read.All | c79f8feb-a9db-4090-85f9-90d820caa0eb | Admin |
+| AuditLog.Read.All | e4c9e354-4dc5-45b8-9e7c-e1393b0b1a20 | Admin |
+| IdentityRiskyUser.Read.All | d04bb851-cb7c-4146-97c7-ca3e71baf56c | Admin |
+| SecurityEvents.Read.All | 64733abd-851e-478a-bffb-e47a14b18235 | Admin |
+| RoleManagement.Read.Directory | 741c54c3-0c1e-44a1-818b-3f97ab4e8c83 | Admin |
+| AdministrativeUnit.Read.All | 3361d15d-be43-4de6-b441-3c746d05163d | Admin |
+| Domain.Read.All | 2f9ee017-59c1-4f1d-9472-bd5529a7b311 | Admin |
+| SecurityAlert.Read.All | bc257fb8-46b4-4b15-8713-01e91bfbe4ea | Admin |
+| SecurityIncident.Read.All | b9abcc4f-94fc-4457-9141-d20ce80ec952 | Admin |
+| ThreatHunting.Read.All | b152eca8-ea73-4a48-8c98-1a6742673d99 | Admin (planned part only) |
+
+Microsoft Graph app ID: 00000003-0000-0000-c000-000000000000.
+
+Not covered by this check:
+- The `.default` delegated sign-in. Lokka runs app-only, so it cannot exercise this. It needs a live sign-in with an own registration in the lab tenant.
+- The Defender endpoints. The Lokka app lacks SecurityAlert, SecurityIncident and ThreatHunting permissions. Before the Defender service ships, verify the alerts, incidents and Secure Score endpoints with a delegated or permissioned connection.
+
+Checked with Lokka on 2026-11-04: `GET /v1.0/oauth2PermissionGrants?$filter=clientId eq '<service principal id>'&$select=id,clientId,consentType,resourceId,scope` works. It returns one grant per resource, with `consentType` `AllPrincipals` and a space-separated `scope`. This is the read path behind `Get-MgOauth2PermissionGrant -Filter "clientId eq ..."` in the extend script. One app in the lab carries grants for two resources, so the script must keep filtering on `resourceId` (it does).
+
+Still to test in the lab before merge: the writes in the extend script (`PATCH /applications/{id}` requiredResourceAccess and `PATCH /oauth2PermissionGrants/{id}` scope), and the `.default` delegated sign-in with an own registration.
+
+## Review round 1
+
+Findings from the GPT-6.1-Sol review of the whole diff and from the separate Claude evaluator, numbered in the order of the fix brief.
+
+| # | Source | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| 1 | GPT-6.1-Sol, blocking | Display-name escaping handled only the ASCII apostrophe. PowerShell also ends a single-quoted string at U+2018, U+2019, U+201A and U+201B. | On PR #162: validation rejects those four characters and points to the straight apostrophe, which is still doubled. A second commit writes non-ASCII display-name characters as `[char]` codes, because Windows PowerShell 5.1 reads a BOM-less .ps1 in the system code page and Windows-1252 decodes UTF-8 bytes of letters such as U+00C2 as quote delimiters. Both create and extend modes were checked after the rebase; the only other user value, the client ID, is GUID-validated. Tests run the generated assignment in pwsh when it is installed. | `b8f79f4`, `af761fd` (PR #162 branch) |
+| 2 | GPT-6.1-Sol, blocking; also the evaluator's account-verification finding | Check again (interactive fallback) and Add access accepted whatever account signed in. | The stored username is sent as `loginHint`. After sign-in the returned homeAccountId and tenant ID must match the stored tenant; otherwise nothing is saved and `TenantAccountMismatchError` names both accounts. The same check covers the connector session, Entra tier probe and run delivery fallbacks. Correction from round 2: the earlier text said the run path was covered. It was not; the `buildGraph` fallback behind agent runs, Chat Graph tools and cache refresh still signed in without the hint or the check (round 2, finding 1). | `39c9cc7` |
+| 3 | GPT-6.1-Sol, should fix | Gating checked single scopes, so an own registration with only SecurityAlert.Read.All showed Defender as not connected while alerts refreshed and Chat used them. | `availableScopeSet`: a part scope counts only when a part that lists it is fully granted. It backs cache refresh, Changes, missing-service copy, Chat planning and tools, and the run review, matching Settings and agent preflight. Unrecorded grants and the sample tenant stay fully connected. | `afd43ae` |
+| 4 | GPT-6.1-Sol, should fix | Agents without Graph reads were tagged `intune` with `TODO(ugur)`. | `services: []` is allowed only without Graph scopes (schema, SDK types, parser, `services-cover-scopes`, preflight). Both team agents use it, the TODOs are gone, the index is at revision 10 and the generated docs are refreshed. | `0b571dd`, `4b1b235` |
+| 5 | GPT-6.1-Sol, should fix | Inference for manifests without `services` dropped unowned scopes, so Group.Read.All meant no dependency. | Group.Read.All, GroupMember.ReadWrite.All, IdentityRiskyUser.ReadWrite.All (Entra), SecurityAlert.ReadWrite.All and SecurityIncident.ReadWrite.All (Defender) are agent-only scopes with reasons. Any scope still unmapped blocks preflight and the run review: "This agent uses <scope>, which OpenAdminOS does not map to a service yet." | `89e56d6` |
+| 6 | Evaluator | Chat answered silently when some planned resources were dropped. | A partial answer ends with "Not included in this answer: <resources>." plus the missing service or part and "Add it in Settings, Tenants.", in both the sent and the streamed answer. | `0be8b0b` |
+| 7 | Evaluator | Reconnecting overwrites stored grants. | Kept on purpose. Grants mirror the token on every sign-in (criterion 5). | none |
+
+Lokka check on 2026-11-04 (lab tenant, app-only), `GET /v1.0/servicePrincipals(appId='00000003-0000-0000-c000-000000000000')?$select=oauth2PermissionScopes`: Group.Read.All `5f8c59db-677d-491f-a6b8-5f174b11ec1d`, GroupMember.ReadWrite.All `f81125ac-d3b7-4573-a3b2-7099cc39df9e`, IdentityRiskyUser.ReadWrite.All `e0a7cdbb-08b0-4697-8264-0069786e9674`, SecurityAlert.ReadWrite.All `471f2a7f-2a42-4d45-a2bf-594d0838070d` and SecurityIncident.ReadWrite.All `128ca929-1a19-45e6-a3b8-435ec44a36ba` are enabled delegated scopes needing admin consent. Device.ReadWrite.All is not a delegated scope, so it was not added.
+
+## Review round 2
+
+Findings from the second GPT-6.1-Sol review of the whole diff and from the separate Claude evaluator.
+
+| # | Source | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| 1 | GPT-6.1-Sol and evaluator, blocking | The `buildGraph` interactive fallback, which serves agent runs, Chat Graph tools and cache refresh, signed in without `loginHint` and without `assertSignedInAccount`. Round 1 wrongly listed the run path as covered. | The fallback goes through `interactiveSignIn` with `loginHintFor(tenant)` and calls `assertSignedInAccount` before returning the result, so another account or directory throws `TenantAccountMismatchError` before any Graph request and before `recordTokenGrants`. Tests through `buildGraph` cover both mismatch cases (no fetch, grants unchanged) and the matching account. Every interactive path now has the hint and the check: `buildGraph` (runs, Chat, cache refresh, drift), the connector session, Add access, Check again, the Entra tier probe and both run delivery fallbacks. First connect has no stored account, so it takes no hint. | `ac12d03` |
+| 2 | GPT-6.1-Sol, should fix | Multi-tenant Chat preflight took missing access only from cached Graph errors. A tenant granted only User.Read was ready for a Windows compliance comparison, and refresh skips were dropped, so old or empty cache rows of an unavailable service read as a current scan. | Preflight applies `availableScopeSet` per tenant: unavailable resources make the tenant `missing-scopes`, list the scopes to add and name the service ("Not included: ..." plus the missing service copy), and their cache rows and errors no longer count. A refresh skip of managed devices marks the tenant skipped with the service named; other skips add the same warning. Either way the job ends partial. Tests cover the User.Read-only tenant, a tenant whose Intune access was removed after rows were cached, and grants removed between preflight and refresh. | `863d69f` |
+| 3 | Evaluator, nit | `services: []` was refused for an agent with only baseline sign-in scopes, because the parser and `services-cover-scopes` counted User.Read while `scopesNotCoveredByServices` exempted it. | `scopesRequiringService` in the service registry is the one rule: baseline scopes need no service. The parser, the QA check and `scopesNotCoveredByServices` use it; the schema description and authoring docs say so. | `062e16c` |
+
+## Review round 3
+
+Findings from the third GPT-6.1-Sol review of the whole diff and from the separate Claude evaluator.
+
+| # | Source | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| 1 | GPT-6.1-Sol, blocking | Silent token acquisition picked the cached account by homeAccountId only. A B2B guest shares one homeAccountId across directory profiles and MSAL returns the first, so Check again for tenant B could silently get tenant A's token and save A's grants under B. | `findTenantAccount` matches homeAccountId and tenant ID among the per-profile accounts that `getAllAccounts` returns in msal-node 5.3.1 (msal-common 16.11.0). Silent requests use `tenantAuthority(tenantId, configured authority)`, which keeps the registration's host. Interactive sign-ins for a stored tenant use the same authority through `signInTargetFor`. `acquireTokenSilent` and `createTenantSession` check every silent and interactive result with `assertSignedInAccount`, which also compares the token's tenant ID, before the token is used or grants are recorded. This covers the connector session, `buildGraph`, Add access, Check again, the Entra tier probe and run delivery. A silent mismatch never falls back to sign-in. | `660845b` |
+| 2 | GPT-6.1-Sol, should fix | The parser checked coverage only for `services: []`, so an agent with Intune scopes declaring `services: [entra]` passed run preflight with Entra connected and Intune missing. | The parser applies `scopesNotCoveredByServices` to every explicit declaration and suggests the covering services. Run preflight and the run review block an installed agent whose stored services leave a scope uncovered (`uncoveredScopesCopy` names the scopes and the service to declare), which covers agents installed before the check. Manifests without `services` still get them derived. The schema description and authoring docs say which checks enforce it. | `7ef5036` |
+| 3 | Evaluator, coverage gap | No account-mismatch tests for the connector tenant session, the Entra tier probe and both run delivery fallbacks. | Tests for each, asserting no Graph request and nothing saved. They found two gaps, fixed in their own commits: the tier probe saved an unknown tier and cleared licences on a mismatch, and the Teams and Outlook connectors hid the mismatch behind a generic token error that was then retried. | `102a6ec`, `8ad2794`, `a0bfbd0` |
+
+## Review round 4
+
+Findings from the fourth GPT-6.1-Sol review of the whole diff and from the separate Claude evaluator.
+
+| # | Source | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| 1 | GPT-6.1-Sol, blocking | One invalid bundled, user-authored or local manifest made `listAgentsInRoot` throw, so `getAppState()` failed and tenants, installed agents and history did not load. The stricter services coverage check (round 3, finding 2) adds a new way to hit this. | Validation stays strict, but each manifest is parsed on its own. `listAllRegistryAgentsWithIssues` returns the valid agents plus an `InvalidAgentManifest` per failure (id or folder, registry path, file path, reason, source, and the text of a user-authored manifest). `AppState.invalidAgents` carries them, and an installed agent whose folder matches gets `manifestError`, derived on every read and not persisted. The Agents list shows it as unavailable with the reason and a disabled Run; the hub lists each invalid manifest with the reason, file and Edit manifest; the agent page shows the designed notice with Edit manifest (local agents, through the existing editor and `updateUserAgentDraft`) and Uninstall (which already removes a local agent's folder). `startRun` refuses it from every caller, enabling its schedule is refused, and the scheduler skips it without recording a run. Tests: the runtime listing with a services mismatch and broken YAML, `getAppState()` with one invalid local manifest (Intune scopes declared as `services: [entra]`) loading tenants, history and the other agents, run and schedule refusal, the scheduler skip, and the renderer list, hub row and agent notice. The Claude evaluator noted that installed agents cannot carry a `services` field from before this branch, so the new check cannot break an existing install by itself; it can break a local manifest edited or authored on this branch. The fix also covers the older weakness where any invalid user manifest broke listing. | `f2d594a`, `e1aceb9` |
+| 2 | GPT-6.1-Sol, should fix | Entra tier probe account mismatches were swallowed: Check again, connect and `probeAllTenants` discarded the probe's rejection, so a mismatch kept the stored tier silently and Check again reported plain success. | `probeEntraTierWithWarning` runs the probe for those callers, keeps the stored tier and licenses, and saves `tierProbeWarning` (message, `accountMismatch`, time) on the tenant, using the `TenantAccountMismatchError` text. Other probe rejections were also silent, so they are saved the same way; failures inside `probeSubscribedSkus` still save an unknown tier as before. Check again awaits the probe and returns the warning with the new grants; Settings and the add permissions dialog show "Permissions checked, but the license check did not finish." with the recovery text instead of success. Settings, Tenants and the tenant switcher show the warning. A probe that finishes, a new sign-in or new grants clear it. Tests through `refreshTenantGrants`, `connectTenant` and `probeAllTenants`, plus renderer tests for Settings, Check again and the switcher. | `5933d67`, `4493007` |
+
+## Review round 5
+
+Findings from the fifth GPT-6.1-Sol review of the whole diff and from the separate Claude evaluator.
+
+| # | Source | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| 1 | GPT-6.1-Sol, blocking | `probeSubscribedSkus` returned null for HTTP errors, network errors, cancelled sign-in and malformed answers, and the caller saved tier unknown, licences [] and cleared the warning, so Check again reported success. | The probe throws `SubscribedSkusProbeError` with a reason (`http` with status, `network`, `timeout`, `malformed`) and passes token errors through. Any failure keeps the stored tier, licences and `intuneLicensed`, and saves `tierProbeWarning` with `reason`: `http` (and `status`), `network`, `timeout`, `malformed`, `cancelled`, `account-mismatch` or `sign-in`. Only an answer clears it. Without Organization.Read.All the probe does not run and no warning is saved; Settings and the switcher show "Licenses not checked". Tests: each failure through `probeAllTenants`, Check again with HTTP 500, the not-granted case, and the runtime probe. | `5388160`, `b1a09ae`, `aa87a91` |
+| 2 | GPT-6.1-Sol, should fix | Check again had no working cancel and the probe fetch had no deadline. | Check again, Retry license check and Add access run as tenant checks: one per tenant, a cancel IPC (`cancelTenantCheck`) whose AbortSignal reaches silent MSAL, the interactive sign-in and the Graph fetch, a five minute deadline for the whole check, and a 30 second deadline on the fetch. `AppState.tenantChecks` carries the phase, so the UI shows "Waiting for Microsoft sign-in" while a sign-in window is open. Grants and the probe result are saved in one write after the probe, so a cancel leaves both as they were and ends in a designed message; a deadline during the probe saves the grants with a `timeout` warning. Tests: cancel during sign-in and during the fetch, cancel of a retry, deadline before a token and during the fetch, and the renderer waiting and cancelled states. | `8367935`, `b1a09ae`, `aa87a91` |
+| 3 | GPT-6.1-Sol, should fix | A failed licence check could not be retried when grants were unchanged, because `TenantGrantsUnchangedError` was thrown before the probe. | With a `tierProbeWarning`, Check again runs the probe even when grants are unchanged; without one it still reports unchanged grants. Shared-app tenants retry through item 5. Tests for both cases. | `b1a09ae` |
+| 4 | GPT-6.1-Sol, should fix | Invalid-manifest detection skipped agent update overrides in `<userData>/agent-updates/<slug>/manifest.yaml`, and invalid bundled entries were dropped once the registry index loaded. | `effectiveAgentManifestIssue` in the runtime validates the manifest the resolver would load for each installed agent, whatever the index holds. `getAppState`, `startRun`, schedule enable and the scheduler use it, and its entry replaces a listing entry for the same folder, so a valid update over an invalid bundled copy runs. An update source is labelled `update` with its own recovery text. Tests: an invalid update is unavailable, refused and skipped by the scheduler; a valid update runs; a populated index does not hide an invalid bundled manifest; the renderer names the update source. | `34423a9` |
+| 5 | Evaluator | Shared-app tenants never got a licence probe after Add access, and their warning could not clear. | Add access clears the warning and runs the probe with the new grants before saving both. The warning in Settings, Tenants and the tenant switcher offers Retry license check for every tenant kind, through `retryTenantLicenseCheck`, which runs only the probe with the same cancel and deadline. Add access stays open with the warning when the probe did not finish. Tests through `addTenantAccess`, `retryTenantLicenseCheck` for both tenant kinds, and the renderer. | `b1a09ae`, `aa87a91` |
+| 6 | Evaluator | The agent page showed the manifest error twice for an invalid agent, the second with the wrong recovery and a missing period. | The page does not load a manifest already known to be invalid and waits for the app state before loading one. Load errors end with a period before the recovery. Tests fail on the old code. | `70d80e1` |
+| 7 | Evaluator | The `InvalidAgentManifest` JSDoc sat on `TenantTierProbeWarning`. | Moved back. | `91248be` |
+
+## Review round 6
+
+Findings from the sixth GPT-6.1-Sol review of the whole diff (G) and from the separate Claude evaluator (E). The round 5 design, which saved grants and the license result in one write after the probe, with the cancel guard outside the write queue and a busy guard for foreground checks only, caused most of them. It was replaced by a simpler one: grants are saved as soon as the token is verified and a cancel never rolls them back; the license check is its own step that only changes tier, licenses and `tierProbeWarning`; every check and probe runs as one operation per tenant that rejects as soon as its signal aborts; and saves check a per-connection `connectionId` inside the write queue. `saveGrantsWithLicenseCheck`, `probeEntraTierWithWarning`, `settleEntraTierProbe`, `rejectOnCancel`, `throwIfCancelled` and the public `probeEntraTier` were removed.
+
+| # | Source | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| G1, E-B | GPT-6.1-Sol and evaluator, blocking | A cancel after the save was queued still committed while the UI said nothing changed. | Grants from a verified token are saved without a cancel check, and the operation records that before queuing the write, so a cancel says "Access was added. The license check was cancelled; the Entra tier and licenses are as they were. Retry license check to update them." Test: cancel while the save waits behind another write. | `037a3e9` |
+| G2 | GPT-6.1-Sol, blocking | The deadline did not cover `findTenantAccount`/`getAllAccounts`, so a stalled cache read hung Check again and kept the tenant guard. | `findTenantAccount` waits through the signal, and the operation itself rejects on any abort, cancel or deadline, so the guard is always released. Tests: runtime stalled cache read, and a stalled read that reaches the deadline and lets the next check start. | `d4e15cb`, `037a3e9` |
+| G3 | GPT-6.1-Sol, blocking | An old check could save grants onto a replacement connection of the same tenant ID. | `TenantRecord.connectionId` changes on every connect; connect and disconnect stop the running operation, and every save re-reads the tenant in the write queue and drops results from another connection. Token grants recorded during runs follow the same rule. Test: a reconnect during Add access, with the old sign-in answering late, saves nothing. | `037a3e9` |
+| G4 | GPT-6.1-Sol, should fix | The background connect probe bypassed the per-tenant guard, so a slow older probe could overwrite a newer retry and two sign-ins could compete. | Connect and `probeAllTenants` probes run as tenant operations (skipped while another one runs); a foreground check gets the busy message and can cancel it. A stopped operation saves nothing, and a license result older than the last saved one is dropped. Test: a slow background probe, cancelled, then a successful retry, then the late answer; the retry's tier stays. | `037a3e9` |
+| G5, E-C | GPT-6.1-Sol and evaluator, should fix | "The tenant's permissions are unchanged" was false after Microsoft consent succeeded. | The host builds the message from what the operation did: "Sign-in was cancelled. Nothing changed." before a token, the added or updated access plus the license line after it. The renderer shows the host's message. A cancelled or expired license check is saved as a warning, so Retry license check is offered. | `037a3e9`, `2dd0075` |
+| E-A | Evaluator, should fix | Progress and Cancel rendered only in the component that started the check. | `TenantCheckStatus` reads `AppState.tenantChecks` and renders in the Settings row, the add access dialog and each switcher row, whichever view started the check. Test: the switcher starts Retry license check, its menu closes, and Settings shows the progress and a working Cancel. | `2dd0075` |
+| E-D | Evaluator, should fix | Check errors showed Electron's "Error invoking remote method ..." prefix. | `toError` in AppStateContext strips the prefix once and keeps the host's error name, which tells a cancel from a failure. Tests for a named cancel and a plain error. | `b5eae66`, `2dd0075` |
+| UI | Evaluator, nits | The switcher cancel X sat next to the disconnect X; "Licenses not checked" showed twice on the Settings row; Add permissions stayed enabled during Check again. | Cancel is a labelled "Cancel check" button under the tenant; the Settings row names it once; Add access, Add permissions and the part buttons wait while a check runs. Tests for each. | `2dd0075` |
+
+## Review round 7
+
+Findings from the seventh GPT-6.1-Sol review of the whole diff (G) and from the separate Claude evaluator (E). Each fix has tests that fail on the code before it.
+
+| # | Source | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| G1 | GPT-6.1-Sol, blocking | `saveTierProbeOutcome` checked the cancel before `await this.read()` in the write queue, so a cancel or deadline during the read still wrote the new tier and licenses, and the queued cancel warning kept them while the message said the old values were kept. | One commit point inside the serialized callback, after the read and right before the write: a stopped operation, an older result or another connection saves nothing. Past it `operation.committed` is set and cancel and deadline are ignored, so the check reports the result it saved. For grants the commit point stays the verified token, as in round 6: `operation.grants` is recorded before the save is queued, a cancel keeps them and says so, and inside the queue only the connection is checked after the read. Tests: cancel while the save's read is held (tier kept, cancel warning saved), cancel while the write is held (normal result, new tier, no warning). | `a092205` |
+| G2 | GPT-6.1-Sol, should fix | `runTenantCheck` releases the caller on abort without stopping the work, so a sign-in that ignored the signal and answered later was still verified and saved. | `tenantCheckSignIn` (Add access, the Check again fallback and the license check sign-in) and the silent token in Check again reject with `signal.throwIfAborted()` as soon as the token returns, before grants are recorded. Grants recorded and queued before a cancel are still saved. Tests: Add access with a sign-in that ignores the cancel and answers late saves nothing (fails before the fix); the same for the silent token in Check again (regression guard; the runtime already drops it). | `d15a63c` |
+| E1 | Evaluator, low | A reconnect in the gap before a check registered made `saveCheckGrants` and `saveTierProbeOutcome` return quietly on the connection mismatch, so the dialog reported success. | Both throw `TenantCheckSupersededError`: "This tenant was reconnected while the check ran. Run the check again.", or a disconnected variant. Connect stops an operation on another connection again after `forgetReplacedSignIn`, right before its background license check, so a stale check that registered in between cannot block it. Tests: Add access whose read is held across a reconnect rejects with the message; a stale check that registers during the reconnect is stopped and the new connection's license check saves P2. | `586d94e` |
+| E2 | Evaluator, copy | "Sign-in was cancelled. Nothing changed." can be false when consent was accepted on Microsoft's page before the cancel. | "Sign-in was cancelled. OpenAdminOS saved nothing." The Check again cancel and both deadline messages had the same claim and use the same words. | `2180c2c` |
+| E3 | Evaluator, copy | The Marketplace service filter labels prefixed "✓ ". | The prefix was the established pattern for every filter on the Agents page, so all of them changed. `Menu` items take `checked` (and `radio`), rendered as `menuitemradio` or `menuitemcheckbox` with `aria-checked`, the selected background and a check icon, as in the tenant switcher. Keyboard navigation covers every item kind. Tests: Menu checked state and focus, the service filter's checked state. | `8753761` |
+| G3 | GPT-6.1-Sol, nit | SPEC said Connect used the same per-tenant operation mechanism. | SPEC says Connect has its own controller and cancel, stops a running check after saving the new connection, and starts the license check as an operation on the new one. It also records the commit point and the reconnect message. CHANGELOG line updated. | `cbaab3d` |
+
+Verification: typecheck, electron 774 pass, renderer (Node 22) 398 pass in 53 files, runtime 254 pass and 2 skipped, qa-graph 71 pass, `npm run qa` 197 pass, 4 warn, 0 fail, test:scripts 18 pass, docs:check clean.
+
+## Criterion 10 evidence
+
+- Light and dark screenshots of the service picker, the own-registration view, the Settings per-service rows and dialogs, the not-connected panel, the Changes gate, the Marketplace chips and filter, the agent detail notice and the run review were captured on 2026-11-04 in `/private/tmp/claude-501/-Users-ugurkoc-Desktop-GitHub-OpenAdminOS/330f8253-e29b-4f12-aead-2997aec35ed3/scratchpad/services-shots/`. They are local only and not committed.
+
+## Review round 8
+
+- **GPT-6.1-Sol:** no blocking issue. The round 7 fixes were checked: licence commit point, late tokens rejected, the superseded error, cancel copy against what is saved, Menu roles, and SPEC. 177 focused tests pass. One nit: CONTRIBUTING.md said `services: []` was allowed only with no Graph scopes. Fixed in 7d75e1b to say "beyond the sign-in baseline".
+- **Claude evaluator:** no blocking issue. All suites are green: electron 774, renderer 398, runtime 254 with 2 skipped, qa-graph 71, qa 0 fail, scripts 18, docs:check clean. Criteria 1 to 9 pass. Criterion 10 was pending only on this GPT round. The menus were checked live for keyboard and screen reader behaviour. Screenshots are r8-*.png.
+- **Known edge, not fixed:** a cancel after "Access was added" followed by a complete interactive reconnect while the grants save is still queued. The save then throws superseded, but the cancel message already said access was added. This needs a full reconnect inside a write-queue wait, so it is left as is.
+
+## Status before PR
+
+- Both reviewers are clean at 7d75e1b.
+- Still open, needs the owner:
+  - The lab checks: `.default` delegated sign-in with an own registration, the Defender alerts, incidents and Secure Score endpoints with a permissioned connection, and the extend script's PATCH writes.
+  - The `TODO(ugur)` decisions in code.
+  - Approval to push the two PR #162 fixes (b8f79f4, af761fd) and to open the stacked PR.
+
+## PR 167 review
+
+| # | Severity | Finding | Resolution | Commit |
+| --- | --- | --- | --- | --- |
+| 1 | Blocking | About 11 tier probe tests were cancelled on Node 22 because the tenant check deadline in `runTenantCheck` used an unreferenced timer, so a process with nothing else pending exited before it fired. | The deadline is a referenced timer started right before the operation runs and cleared in its finally block on success, failure, cancel and supersede, as `entra-tier.ts` already does since 42e07c6. No other deadline timer was added unreferenced by this PR; the remaining `AbortSignal.timeout` and `.unref()` uses predate it. `tier-probe-warning.test.ts` on Node 22: 35 pass, 0 cancelled (was 24 pass, 11 cancelled). | `c1b3884` |
+| 2 | Should fix | The Changes permission filter only affected status rows; the timeline and comparisons still read snapshots of a service that is no longer connected as current. | Timeline, baseline drift, new baselines, time, bundle and cross-tenant compare, rollback plans and fleet counts apply the part-level `availableScopeSet` rule and return `omittedResources`. Changes and Fleet name the service ("Intune is not connected. Its earlier snapshots are not compared."), and entry detail from those snapshots is labelled "Historical snapshot, no longer refreshed." Tests: an Entra-only fixture requesting deviceConfigurations gets no current comparison and a visible omission; renderer tests for the timeline notice, the compare notice and the historical label. | `7d8a3ee`, `fa4b7fe` |
+
+Verification on Node 22: electron 796 pass, renderer 407 pass in 53 files, runtime 255 pass and 2 skipped, test:scripts 18 pass, `npm run qa` 197 pass, 4 warn, 0 fail, typecheck and docs:check clean.

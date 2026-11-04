@@ -64,8 +64,10 @@ import type {
   DriftTimelineResult,
   GraphCacheResourceKind,
   GraphCacheStatus,
+  NotGrantedService,
   WorkspaceSummary,
 } from "../shared/openAdminOS";
+import { omittedSnapshotsCopy } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -669,11 +671,25 @@ export default function Changes() {
 
   const selectedStatusResources = useMemo(() => {
     if (!status) return [];
-    if (selectedResource === "all") return status.resources;
+    // Snapshots of a service that is not connected are historical and no
+    // longer refreshed, so they do not decide whether a baseline exists.
     return status.resources.filter(
-      (resource) => resource.resource === selectedResource,
+      (resource) =>
+        !resource.notGrantedService &&
+        (selectedResource === "all" || resource.resource === selectedResource),
     );
   }, [selectedResource, status]);
+  const timelineOmittedNotice = omittedSnapshotsCopy(
+    timeline?.omittedResources ?? [],
+    "shown",
+  );
+  const selectionOmitted =
+    selectedResource !== "all" &&
+    Boolean(
+      timeline?.omittedResources?.some(
+        (resource) => resource.resource === selectedResource,
+      ),
+    );
   const visibleEntries = timeline?.entries ?? [];
   const noBaselineYet =
     Boolean(status) &&
@@ -1278,6 +1294,8 @@ export default function Changes() {
               baselineOnly={baselineOnly}
               baselineDate={baselineDate}
               notice={notice}
+              omittedNotice={timelineOmittedNotice}
+              selectionOmitted={selectionOmitted}
               filtersActive={
                 selectedResource !== "all" ||
                 dateRange !== "all" ||
@@ -1397,7 +1415,9 @@ function TimelineFilters({
         <option value="all">All resources</option>
         {resources.map((resource) => (
           <option key={resource.resource} value={resource.resource}>
-            {resource.resourceLabel}
+            {resource.notGrantedService
+              ? `${resource.resourceLabel} (${resource.notGrantedService.serviceMissing ? `${resource.notGrantedService.service} not connected` : "not connected"})`
+              : resource.resourceLabel}
           </option>
         ))}
       </Select>
@@ -1453,6 +1473,8 @@ function TimelineView({
   baselineOnly,
   baselineDate,
   notice,
+  omittedNotice,
+  selectionOmitted,
   filtersActive,
   onSelectEntry,
   onLoadMore,
@@ -1468,18 +1490,38 @@ function TimelineView({
   baselineOnly: boolean;
   baselineDate?: string;
   notice: string | null;
+  /** Names services whose earlier snapshots are left out of the timeline. */
+  omittedNotice?: string;
+  /** True when the selected resource belongs to a service that is not connected. */
+  selectionOmitted: boolean;
   filtersActive: boolean;
   onSelectEntry: (entry: DriftTimelineEntry) => void;
   onLoadMore: () => void;
   onClearFilters: () => void;
   onRefresh: () => void;
 }) {
+  if (selectionOmitted && omittedNotice) {
+    return (
+      <EmptyState
+        icon={<IconWarning size={18} />}
+        title="No current change history"
+        description={`${omittedNotice} Add it in Settings, Tenants to track changes again.`}
+        action={
+          <Button variant="secondary" onClick={onClearFilters}>
+            Show all resources
+          </Button>
+        }
+      />
+    );
+  }
   if (noBaselineYet) {
     return (
       <EmptyState
         icon={<IconClock size={18} />}
         title="No change history yet"
-        description="Refresh the tenant cache to capture a baseline, then refresh again to detect changes."
+        description={`Refresh the tenant cache to capture a baseline, then refresh again to detect changes.${
+          omittedNotice ? ` ${omittedNotice} Add it in Settings, Tenants to track its changes again.` : ""
+        }`}
         action={
           <Button variant="primary" onClick={onRefresh}>
             Refresh data
@@ -1495,7 +1537,7 @@ function TimelineView({
         title="Baseline captured"
         description={`No configuration changes detected${
           baselineDate ? ` since ${formatDateTime(baselineDate)}` : ""
-        }.`}
+        }.${omittedNotice ? ` ${omittedNotice}` : ""}`}
       />
     );
   }
@@ -1503,6 +1545,7 @@ function TimelineView({
   return (
     <div className="space-y-3">
       {notice ? <CompactNotice tone="success">{notice}</CompactNotice> : null}
+      {omittedNotice ? <CompactNotice tone="info">{omittedNotice}</CompactNotice> : null}
       {coverageCapped ? (
         <CompactNotice tone="info">
           At least one collection exceeded the local 1,000-row cache limit. Unseen objects are not inferred as removed.
@@ -1655,6 +1698,11 @@ function ChangeDetailDrawer({
             <CompactNotice tone="danger">{error}</CompactNotice>
           ) : detail ? (
             <>
+              {detail.notGrantedService ? (
+                <CompactNotice tone="info">
+                  {historicalSnapshotCopy(detail.notGrantedService)}
+                </CompactNotice>
+              ) : null}
               <AttributionDetails attribution={detail.attribution ?? entry.attribution} />
               {detail.truncated ? (
                 <CompactNotice tone="warning">
@@ -2023,9 +2071,11 @@ function BaselineDriftSection({
     ],
     [onToggleSelected, selected],
   );
+  const omittedNotice = omittedSnapshotsCopy(drift.omittedResources ?? [], "compared");
 
   return (
     <div className="space-y-6">
+      {omittedNotice ? <CompactNotice tone="info">{omittedNotice}</CompactNotice> : null}
       <Section
         title="Drift by resource"
         action={
@@ -2327,9 +2377,11 @@ function TimeCompareResults({
     );
   }
   if (!result) return null;
+  const omittedNotice = omittedSnapshotsCopy(result.omittedResources ?? [], "compared");
 
   return (
     <div className="space-y-6">
+      {omittedNotice ? <CompactNotice tone="info">{omittedNotice}</CompactNotice> : null}
       {result.retentionLimited ? (
         <CompactNotice tone="info">
           Retention pruned part of this window, so the earlier side may be incomplete.
@@ -2398,6 +2450,22 @@ function TenantCompareResults({
     );
   }
   if (!result || !tenantB) return null;
+  const omitted = result.omittedResources ?? [];
+  const omittedNotice = [
+    omittedSnapshotsCopy(omitted.filter((entry) => entry.tenantId === result.tenantIdA), "compared", tenantA.displayName),
+    omittedSnapshotsCopy(omitted.filter((entry) => entry.tenantId === result.tenantIdB), "compared", tenantB.displayName),
+  ]
+    .filter(Boolean)
+    .join(" ");
+  if (omittedNotice && result.resources.length === 0) {
+    return (
+      <EmptyState
+        icon={<IconWarning size={18} />}
+        title="Nothing to compare"
+        description={`${omittedNotice} Add it in Settings, Tenants to compare it again.`}
+      />
+    );
+  }
   if (!result.tenantAHasData || !result.tenantBHasData) {
     const missing = [
       ...(!result.tenantAHasData ? [tenantA.displayName] : []),
@@ -2419,6 +2487,7 @@ function TenantCompareResults({
 
   return (
     <div className="space-y-6">
+      {omittedNotice ? <CompactNotice tone="info">{omittedNotice}</CompactNotice> : null}
       <TenantResourceTable resources={result.resources} />
       <TenantDifferenceTable
         entries={result.entries}
@@ -3094,6 +3163,14 @@ function changeKindConfig(kind: DriftTimelineChangeKind): {
   if (kind === "removed") return { label: "Removed", tone: "danger" };
   if (kind === "modified") return { label: "Modified", tone: "info" };
   return { label: "Baseline", tone: "neutral" };
+}
+
+/** Labels data from a resource whose service part is not granted now. */
+function historicalSnapshotCopy(notGranted: NotGrantedService): string {
+  const reason = notGranted.serviceMissing
+    ? `${notGranted.service} is not connected`
+    : `${notGranted.part} is not granted`;
+  return `Historical snapshot, no longer refreshed. ${reason} for this tenant.`;
 }
 
 function displayNameForEntry(entry: DriftTimelineEntry): string {

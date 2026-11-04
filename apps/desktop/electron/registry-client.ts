@@ -20,6 +20,7 @@ import type {
   AgentExecution,
   AgentTier,
   RequiredEntraTier,
+  ServiceId,
   WriteLimits,
 } from "@openadminos/agent-sdk";
 import { writeLimitsValidationIssue } from "@openadminos/agent-sdk";
@@ -57,6 +58,8 @@ export interface RegistryIndexEntry {
     verified: boolean;
   };
   scopes: string[];
+  /** Services the agent needs. Absent on indexes built before services existed. */
+  services?: ServiceId[];
   execution?: AgentExecution;
   connectors?: AgentConnectorRequirement[];
   writeLimits?: WriteLimits;

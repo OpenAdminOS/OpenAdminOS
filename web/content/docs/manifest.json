@@ -33,6 +33,68 @@
           "route": "basics/connect-tenant",
           "path": "basics/connect-tenant",
           "children": []
+        },
+        {
+          "title": "Connect with the shared app",
+          "source": "getting-started/connect-shared-app.md",
+          "route": "basics/connect-shared-app",
+          "path": "basics/connect-shared-app",
+          "children": []
+        },
+        {
+          "title": "Own app registration",
+          "source": "getting-started/own-app-registration.md",
+          "route": "basics/own-app-registration",
+          "path": "basics/own-app-registration",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Services",
+      "slug": "services",
+      "pages": [
+        {
+          "title": "Intune",
+          "source": "generated/services/intune.md",
+          "route": "services/intune",
+          "path": "services/intune",
+          "children": []
+        },
+        {
+          "title": "Entra",
+          "source": "generated/services/entra.md",
+          "route": "services/entra",
+          "path": "services/entra",
+          "children": []
+        },
+        {
+          "title": "Defender",
+          "source": "generated/services/defender.md",
+          "route": "services/defender",
+          "path": "services/defender",
+          "children": []
+        },
+        {
+          "title": "Planned services",
+          "source": "services/planned.md",
+          "route": "services/planned",
+          "path": "services/planned",
+          "children": []
+        },
+        {
+          "title": "Permissions by service",
+          "source": "generated/reference/permissions-by-service.md",
+          "route": "services/permissions-by-service",
+          "path": "services/permissions-by-service",
+          "children": []
+        },
+        {
+          "title": "Roles",
+          "source": "guides/roles.md",
+          "route": "services/roles",
+          "path": "services/roles",
+          "children": []
         }
       ]
     },
@@ -135,6 +197,19 @@
           "source": "trust/eu-ai-act.md",
           "route": "trust-model/eu-ai-act",
           "path": "trust-model/eu-ai-act",
+          "children": []
+        }
+      ]
+    },
+    {
+      "title": "Troubleshooting",
+      "slug": "troubleshooting",
+      "pages": [
+        {
+          "title": "Consent and sign-in errors",
+          "source": "troubleshooting/consent-errors.md",
+          "route": "troubleshooting/consent-errors",
+          "path": "troubleshooting/consent-errors",
           "children": []
         }
       ]
@@ -372,6 +447,34 @@
       "destination": "basics/connect-tenant"
     },
     {
+      "source": "getting-started/connect-shared-app",
+      "destination": "basics/connect-shared-app"
+    },
+    {
+      "source": "getting-started/own-app-registration",
+      "destination": "basics/own-app-registration"
+    },
+    {
+      "source": "generated/services/intune",
+      "destination": "services/intune"
+    },
+    {
+      "source": "generated/services/entra",
+      "destination": "services/entra"
+    },
+    {
+      "source": "generated/services/defender",
+      "destination": "services/defender"
+    },
+    {
+      "source": "generated/reference/permissions-by-service",
+      "destination": "services/permissions-by-service"
+    },
+    {
+      "source": "guides/roles",
+      "destination": "services/roles"
+    },
+    {
       "source": "trust/local-first",
       "destination": "trust-model/local-first"
     },
@@ -492,12 +595,20 @@
       "destination": ""
     },
     {
+      "source": "services",
+      "destination": "services/intune"
+    },
+    {
       "source": "features",
       "destination": "features/intune-chat"
     },
     {
       "source": "trust-model",
       "destination": "trust-model/local-first"
+    },
+    {
+      "source": "troubleshooting",
+      "destination": "troubleshooting/consent-errors"
     },
     {
       "source": "developers",
@@ -508,16 +619,24 @@
       "destination": "basics/installation"
     },
     {
-      "source": "trust",
-      "destination": "trust-model/local-first"
+      "source": "generated/services",
+      "destination": "services/intune"
     },
     {
       "source": "generated",
-      "destination": "agents/agent-catalog"
+      "destination": "services/intune"
     },
     {
       "source": "generated/reference",
-      "destination": "agents/graph-scope-matrix"
+      "destination": "services/permissions-by-service"
+    },
+    {
+      "source": "guides",
+      "destination": "services/roles"
+    },
+    {
+      "source": "trust",
+      "destination": "trust-model/local-first"
     },
     {
       "source": "generated/agents",

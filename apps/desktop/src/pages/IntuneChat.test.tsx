@@ -166,6 +166,7 @@ describe("IntuneChat guest exploration", () => {
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       await screen.findByRole("button", {
         name: /Approve \d+ read scopes and continue to Microsoft/,

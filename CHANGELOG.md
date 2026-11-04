@@ -6,6 +6,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Services as modules: connect Intune, Entra and Defender one at a time, each split into parts with the exact Microsoft Graph scopes and reasons; own app registrations sign in with `.default`, switch on what was granted and offer a script, a manifest snippet and Check again for the rest; agents declare `services`; new docs cover permissions by service, each service, own app registration, roles and consent errors.
 - Application (client) IDs are stored in lower case, so one registration typed in any letter case uses one token cache, and disconnect removes its sign-in from token files named with an earlier letter case; the setup script retries the admin consent grant while a new enterprise application replicates.
 - The connect dialog opens with two equal choices, OpenAdminOS app or your own app registration, neither preselected; own registrations are remembered on the device, each tenant shows its registration, sign-in errors name the registration with specific fixes, and scheduled Teams and Outlook delivery now uses the tenant's own registration.
 - Public roadmap at roadmap.openadminos.com: four stages from the desktop available today to team features and a vendor ecosystem, each item tracked as a public issue.
@@ -26,6 +27,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Changed
 
+- Changes follows the tenant's current grants: the timeline, baselines and comparisons leave out resources of a service that is not connected, name the service, and label any detail from those earlier snapshots as historical and no longer refreshed.
 - The browser page shown after Microsoft sign-in now carries the OpenAdminOS mark, follows the system light or dark theme, shows the close-tab shortcut, and on failure shows the error code and message Microsoft returned instead of a generic note.
 - Runs open on a full, centered run page instead of a live run modal or a side drawer. A status card shows a live headline, step progress, tenant, provider, model, tokens, cost, and where data goes; running work shows a step timeline with the model's reasoning as it streams and the report as it is written; finished runs show the report in reading type, the result data, and collapsible run details.
 - The website, docs, README, installer artwork, and social images describe OpenAdminOS as local-first agents for IT admins instead of a Microsoft 365-only tool. The homepage hero leads with the admin backlog agents take on and the guarantees around them (local models by default, every change approved, every run logged). Microsoft 365, Intune, and Entra are listed as supported today, and the homepage shows which services are available, which only receive run reports, and which are planned.
@@ -44,6 +46,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- An invalid local agent manifest no longer stops tenants, agents and history from loading. The agent shows as unavailable with the validation reason and Edit manifest or Uninstall, and cannot run or be scheduled. A license check that signs in as another account keeps the stored tier and licenses and shows a tenant warning in Settings, Tenants and the tenant switcher.
+- Check again, Add access and the license check can be cancelled from Settings, the add access dialog or the tenant switcher, and stop after five minutes. Granted access is kept when the license check is cancelled, the message says what changed, a check from an earlier connection saves nothing after a reconnect and says so, a sign-in that answers after a cancel is not used, and Retry license check runs it again.
 - The app registration setup script checks for every Microsoft Graph PowerShell module it uses before changing anything, and removes the application it created if admin consent cannot be granted. Before, a machine without `Microsoft.Graph.Identity.SignIns` was left with a registration that had no consent.
 - The Agent Team sidebar row now highlights across the full width on hover like the other rows, and its findings tooltip (and other sidebar tooltips) is no longer cut off at the sidebar edge.
 - Run history no longer keeps failed scheduled runs that were saved without a tenant. Schedules now wait while no tenant is active and say so, and a scheduled run that fails to start is removed with its tenant.

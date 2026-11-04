@@ -1,6 +1,6 @@
-import type { PermissionAreaId } from "./permission-areas.js";
+import type { NotGrantedService, ServiceId } from "./services.js";
 
-export * from "./permission-areas.js";
+export * from "./services.js";
 
 export type ProviderId =
   | "ollama"
@@ -130,6 +130,13 @@ export interface AgentContract {
    */
   requiresEntraTier: RequiredEntraTier;
   scopes: string[];
+  /**
+   * Services the agent reads or changes. Every declared scope must belong
+   * to one of them. Empty for an agent whose only scopes are the baseline
+   * sign-in scopes. Absent on agents installed before services existed;
+   * derive it with `servicesForScopes(scopes)`.
+   */
+  services?: ServiceId[];
   author: AgentAuthor;
   version: string;
   preferredModel?: string;
@@ -187,6 +194,88 @@ export interface AgentSummary extends AgentContract {
    * registry version, or no registry entry was found.
    */
   updateAvailable?: AgentUpdateInfo;
+  /**
+   * Set by the host when this agent's manifest on disk fails validation.
+   * Derived on every `getAppState()` read, not persisted. The agent
+   * cannot run or be scheduled until the manifest is fixed.
+   */
+  manifestError?: string;
+}
+
+/** Why a tenant's license check did not finish. */
+export type TenantTierProbeFailureReason =
+  /** Graph answered `/subscribedSkus` with an HTTP error; `status` says which. */
+  | "http"
+  /** Graph could not be reached. */
+  | "network"
+  /** Graph or the check did not finish in time. */
+  | "timeout"
+  /** Graph answered without a list of subscriptions. */
+  | "malformed"
+  /** The Microsoft sign-in for the check was cancelled. */
+  | "cancelled"
+  /** Another account or directory signed in. */
+  | "account-mismatch"
+  /** No token could be acquired for Organization.Read.All. */
+  | "sign-in";
+
+/**
+ * A license check that did not finish. The stored Entra tier and licenses
+ * stay as they were; only a check that gets an answer replaces them and
+ * clears this warning.
+ */
+export interface TenantTierProbeWarning {
+  /** The failure, such as the TenantAccountMismatchError recovery text. */
+  message: string;
+  reason: TenantTierProbeFailureReason;
+  /** The HTTP status when `reason` is `http`. */
+  status?: number;
+  /** True when another account or directory signed in. */
+  accountMismatch: boolean;
+  /** ISO timestamp of the failed probe. */
+  at: string;
+}
+
+/**
+ * A permissions or license check running in the host for a tenant. Derived
+ * on every `getAppState()` read, not persisted.
+ */
+export interface TenantCheckProgress {
+  tenantId: string;
+  /** Check again, a license check (Retry license check or after connect), or Add access. */
+  kind: "permissions" | "license" | "access";
+  /**
+   * `sign-in` while a Microsoft sign-in window is open for the check,
+   * `licenses` while the license check runs.
+   */
+  phase: "checking" | "sign-in" | "licenses";
+}
+
+/**
+ * A bundled or local agent manifest that failed validation. Registry
+ * enumeration lists it here instead of throwing, so one bad manifest
+ * never blocks the other agents, tenants or history from loading.
+ */
+export interface InvalidAgentManifest {
+  /** `descriptor.id` when the manifest names one, otherwise the folder name. */
+  id: string;
+  /** Folder name under the agents root. */
+  folder: string;
+  /** Same form as `RegistryAgentSummary.registryPath`, to match installed agents. */
+  registryPath: string;
+  /** Absolute path of the manifest file. */
+  manifestPath: string;
+  /** The validation error. */
+  reason: string;
+  /** Where the manifest came from: the app, the user, or an agent update. */
+  source: "bundled" | "user" | "update";
+  /** Manifest text of a user-authored agent, so it can be edited in place. */
+  sourceText?: string;
+}
+
+/** Why an installed agent with an invalid manifest cannot start. */
+export function invalidAgentManifestCopy(agentName: string, reason: string): string {
+  return `${agentName} cannot run or be scheduled because its manifest is invalid. Fix the manifest or uninstall the agent. Reason: ${reason}`;
 }
 
 export interface AgentCommunitySubmissionState {
@@ -548,11 +637,14 @@ export interface StartRunOptions {
  * to the renderer so the pre-consent scope preview can list exactly
  * what MSAL is about to ask for, with a plain-English rationale.
  *
- * The default read set is requested together so Chat and bundled read
- * agents do not discover missing consent mid-answer. Write scopes are
- * never requested by default.
+ * Rows come from the service registry: the scopes of the parts an admin
+ * can choose. Sign-in itself requests only the baseline scopes. Write
+ * scopes are never requested at connect.
  */
 export interface RequestedScope {
+  service: ServiceId;
+  /** The service part that requests this scope, for example `intune.devices`. */
+  partId: string;
   name: string;
   mode: "read" | "write";
   rationale: string;
@@ -580,6 +672,18 @@ export interface TenantRecord {
   entraTier?: DetectedEntraTier;
   /** ISO timestamp of the last successful entraTier probe. */
   entraTierDetectedAt?: string;
+  /**
+   * Why the last Entra tier and license probe did not finish, for example
+   * another account signing in or a cancel. The stored tier and licenses
+   * are kept. Cleared by the next probe that finishes or a new sign-in.
+   */
+  tierProbeWarning?: TenantTierProbeWarning;
+  /**
+   * Changes on every connect and reconnect. A check or license probe that
+   * started on another connection saves nothing. Absent on tenants
+   * connected before it was recorded.
+   */
+  connectionId?: string;
   /** Active Intune service plan, from the existing subscribed-SKU inventory. */
   intuneLicensed?: boolean | undefined;
   /**
@@ -600,9 +704,12 @@ export interface TenantRecord {
    */
   appRegistration?: TenantAppRegistration;
   /**
-   * Microsoft Graph delegated scopes granted for this tenant. Absent means
-   * the full default read set for tenants connected before permission areas
-   * were introduced. The sample tenant always exposes every area.
+   * Delegated scopes the tenant's tokens carry, qualified with their
+   * audience, for example `graph:User.Read.All`. Only scopes a token
+   * returned are recorded, never `.default` or the OIDC scopes. Absent
+   * means every requestable part scope, for tenants connected before
+   * grants were recorded; the next sign-in replaces it. The sample tenant
+   * always exposes every service. Read it with `grantedScopeSet`.
    */
   grantedScopes?: string[];
 }
@@ -659,8 +766,11 @@ export interface ConnectTenantOptions {
    * app. `directoryTenantId` is required only for single-tenant apps.
    */
   appRegistration?: { clientId: string; directoryTenantId?: string; label?: string };
-  /** Permission areas selected in the pre-consent review. */
-  permissionAreaIds?: PermissionAreaId[];
+  /**
+   * Service parts selected in the pre-consent review. Required with the
+   * OpenAdminOS app; at least one part must be chosen.
+   */
+  partIds?: string[];
 }
 
 /** A subscribed SKU surfaced in the Settings → Tenants license panel. */
@@ -941,6 +1051,10 @@ export interface AppState {
   activeModelByProviderId?: Partial<Record<ProviderId, string>>;
   providers: ProviderSummary[];
   registryAgents: RegistryAgentSummary[];
+  /** Local manifests that failed validation, shown as unavailable agents. */
+  invalidAgents?: InvalidAgentManifest[];
+  /** Permissions and license checks in progress, one per tenant at most. */
+  tenantChecks?: TenantCheckProgress[];
   installedAgents: AgentSummary[];
   runs: RunRecord[];
   trust: TrustState;
@@ -1158,8 +1272,8 @@ export interface GraphCacheResourceStatus {
   pageLimitReached?: boolean;
   refreshedAt?: string;
   scopeSet: string[];
-  /** Permission area required before this resource can be cached. */
-  notGrantedArea?: string;
+  /** The service part this resource needs that the tenant has not granted. */
+  notGrantedService?: NotGrantedService;
   lastError?: string;
   accessDenial?: GraphAccessDenial;
   /**
@@ -1230,6 +1344,22 @@ export interface DriftTimelineResult {
   hasMore: boolean;
   limit: number;
   historyTruncated?: boolean;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
+}
+
+/**
+ * A tracked resource that a drift view left out because the service part
+ * it needs is not granted now. Its earlier snapshots stay on the device
+ * but are historical: they are no longer refreshed, so they are never
+ * shown or compared as current configuration.
+ */
+export interface DriftOmittedResource {
+  resource: GraphCacheResourceKind;
+  resourceLabel: string;
+  notGrantedService: NotGrantedService;
+  /** Cross-tenant compare only: the tenant that lacks the grant. */
+  tenantId?: string;
 }
 
 export interface DriftEntryDetailInput {
@@ -1240,6 +1370,11 @@ export interface DriftEntryDetailInput {
 }
 
 export interface DriftEntryDetail {
+  /**
+   * Set when the resource's service part is not granted now: the detail
+   * comes from historical snapshots that are no longer refreshed.
+   */
+  notGrantedService?: NotGrantedService;
   changes: DriftFieldChange[];
   summary: string;
   before?: unknown;
@@ -1282,6 +1417,8 @@ export interface DriftResourceStatus {
   totalTrackedVersions: number;
   currentObjectCount: number;
   pageLimitReached?: boolean;
+  /** Set when the service part this resource needs is not granted. */
+  notGrantedService?: NotGrantedService;
 }
 
 export interface DriftStatus {
@@ -1364,6 +1501,8 @@ export interface DriftBaselineDriftResult {
   entries: DriftBaselineDriftEntry[];
   hasMore: boolean;
   limit: number;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 // ─── Point-in-time compare (v0.5) ────────────────────────────────────────
@@ -1397,6 +1536,8 @@ export interface DriftTimeCompareResult {
    * least one compared resource, so the "before" side may be partial.
    */
   retentionLimited?: boolean;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 // ─── Baseline export bundles (v0.5) ──────────────────────────────────────
@@ -1453,6 +1594,8 @@ export interface DriftBundleCompareResult {
   entries: DriftTenantCompareEntry[];
   hasMore: boolean;
   limit: number;
+  /** Resources left out because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 // ─── Opt-in usage telemetry (v0.5) ───────────────────────────────────────
@@ -1515,6 +1658,8 @@ export interface FleetTenantDriftStatus {
   drift?: { added: number; removed: number; modified: number; evaluatedAt: string };
   lastCaptureAt?: string;
   trackedObjectCount: number;
+  /** Resources left out of the counts because their service part is not granted now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 export interface FleetDriftStatusInput {
@@ -1582,6 +1727,8 @@ export interface DriftTenantCompareResult {
   entries: DriftTenantCompareEntry[];
   hasMore: boolean;
   limit: number;
+  /** Resources left out because either tenant lacks their service part now. */
+  omittedResources?: DriftOmittedResource[];
 }
 
 export interface RefreshGraphCacheOptions {
@@ -1658,6 +1805,13 @@ export interface GraphCacheRefreshResourceResult {
   ok: boolean;
   error?: string;
   accessDenial?: GraphAccessDenial;
+  /**
+   * Set when the refresh did not call Graph because the service this
+   * resource belongs to is not connected. A skipped resource is not a
+   * failure; `notGrantedService` names what to add.
+   */
+  skipped?: "not-connected";
+  notGrantedService?: NotGrantedService;
 }
 
 export interface GraphCacheRefreshResult {
@@ -2815,7 +2969,25 @@ export interface OpenAdminOSApi {
    */
   getRequestedScopes(): Promise<RequestedScope[]>;
   connectTenant(options?: ConnectTenantOptions): Promise<AppState>;
-  addTenantAccess(tenantId: string, areaId: PermissionAreaId): Promise<AppState>;
+  /** Consent to more service parts for a tenant and merge the new grants. */
+  addTenantAccess(tenantId: string, partIds: string[]): Promise<AppState>;
+  /**
+   * Check again for an own app registration: read the permissions a fresh
+   * token carries and replace the tenant's grants with them.
+   */
+  refreshTenantGrants(tenantId: string): Promise<AppState>;
+  /**
+   * Run only the license check for a tenant, for example after it did not
+   * finish. Grants are not read or changed.
+   */
+  retryTenantLicenseCheck(tenantId: string): Promise<AppState>;
+  /**
+   * Cancel the Check again, license check or Add access running for a
+   * tenant. The call that started it rejects with a message that says
+   * what was kept. Grants from a verified token stay saved; the Entra
+   * tier and licenses stay as they were.
+   */
+  cancelTenantCheck(tenantId: string): Promise<void>;
   /** Add or reactivate the built-in fictional tenant. This is idempotent. */
   addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
@@ -3411,6 +3583,14 @@ export interface AgentTemplate {
      * `free` at parse time. See {@link RequiredEntraTier}.
      */
     requiresEntraTier?: RequiredEntraTier;
+    /**
+     * Services this agent needs, for example `[intune]`. Required for
+     * registry agents; the registry QA fails when a declared scope is not
+     * covered by these services. `[]` only for an agent that declares no
+     * Graph scopes beyond the baseline sign-in scopes. Derived from the
+     * scopes when absent.
+     */
+    services?: ServiceId[];
     mode: AgentMode;
     writeLimits?: WriteLimits;
     preferredModel?: string;

@@ -6,6 +6,17 @@
 - [Installation](getting-started/installation.md)
 - [First run](getting-started/first-run.md)
 - [Connect a tenant](getting-started/connect-tenant.md)
+- [Connect with the shared app](getting-started/connect-shared-app.md)
+- [Own app registration](getting-started/own-app-registration.md)
+
+## Services
+
+- [Intune](generated/services/intune.md)
+- [Entra](generated/services/entra.md)
+- [Defender](generated/services/defender.md)
+- [Planned services](services/planned.md)
+- [Permissions by service](generated/reference/permissions-by-service.md)
+- [Roles](guides/roles.md)
 
 ## Features
 
@@ -25,6 +36,10 @@
 - [Registry trust](trust/registry-trust.md)
 - [Sandboxed code](trust/sandboxed-code.md)
 - [EU AI Act](trust/eu-ai-act.md)
+
+## Troubleshooting
+
+- [Consent and sign-in errors](troubleshooting/consent-errors.md)
 
 ## Connectors
 

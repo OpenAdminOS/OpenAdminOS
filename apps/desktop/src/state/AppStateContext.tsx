@@ -27,7 +27,6 @@ import {
   type AgentWhatsAppWebDelivery,
   type AppState,
   type OpenAdminOSApi,
-  type PermissionAreaId,
   type ProviderId,
   type RegistryAgentSummary,
   type RequestedScope,
@@ -64,7 +63,14 @@ interface AppStateContextValue {
   rejectRun: (runId: string) => Promise<RunRecord>;
   cancelRun: (runId: string) => Promise<RunRecord>;
   connectTenant: (options?: ConnectTenantOptions) => Promise<TenantRecord | undefined>;
-  addTenantAccess: (tenantId: string, areaId: PermissionAreaId) => Promise<void>;
+  /** Resolves with the new state, so callers can show a tenant probe warning. */
+  addTenantAccess: (tenantId: string, partIds: string[]) => Promise<AppState>;
+  /** Resolves with the new state, so callers can show a tenant probe warning. */
+  refreshTenantGrants: (tenantId: string) => Promise<AppState>;
+  /** Runs only the license check. Resolves with the new state. */
+  retryTenantLicenseCheck: (tenantId: string) => Promise<AppState>;
+  /** Cancels the check running for the tenant; its caller rejects. */
+  cancelTenantCheck: (tenantId: string) => Promise<void>;
   addSampleTenant: () => Promise<TenantRecord>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
@@ -525,16 +531,17 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   }, []);
 
   const addTenantAccess = useCallback(
-    async (tenantId: string, areaId: PermissionAreaId) => {
+    async (tenantId: string, partIds: string[]) => {
       const api = getOpenAdminOSApi();
       if (!api) {
         throw new Error("Adding tenant access is unavailable in browser development.");
       }
       setError(null);
       try {
-        const nextState = await api.addTenantAccess(tenantId, areaId);
+        const nextState = await api.addTenantAccess(tenantId, partIds);
         setState(nextState);
         setRegistryAgents(nextState.registryAgents);
+        return nextState;
       } catch (caughtError) {
         const tenantError = toError(caughtError);
         setError(tenantError);
@@ -543,6 +550,49 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     },
     [],
   );
+
+  // Check again for an own app registration: a new token decides the grants.
+  const refreshTenantGrants = useCallback(async (tenantId: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      throw new Error("Checking tenant permissions is unavailable in browser development.");
+    }
+    setError(null);
+    try {
+      const nextState = await api.refreshTenantGrants(tenantId);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+      return nextState;
+    } catch (caughtError) {
+      const tenantError = toError(caughtError);
+      setError(tenantError);
+      throw tenantError;
+    }
+  }, []);
+
+  const retryTenantLicenseCheck = useCallback(async (tenantId: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      throw new Error("Checking tenant licenses is unavailable in browser development.");
+    }
+    setError(null);
+    try {
+      const nextState = await api.retryTenantLicenseCheck(tenantId);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+      return nextState;
+    } catch (caughtError) {
+      const tenantError = toError(caughtError);
+      setError(tenantError);
+      throw tenantError;
+    }
+  }, []);
+
+  const cancelTenantCheck = useCallback(async (tenantId: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) return;
+    await api.cancelTenantCheck(tenantId);
+  }, []);
 
   const addSampleTenant = useCallback(async () => {
     const api = getOpenAdminOSApi();
@@ -1101,6 +1151,9 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       cancelRun,
       connectTenant,
       addTenantAccess,
+      refreshTenantGrants,
+      retryTenantLicenseCheck,
+      cancelTenantCheck,
       addSampleTenant,
       cancelConnectTenant,
       getRequestedScopes,
@@ -1130,6 +1183,9 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       confirmRun,
       connectTenant,
       addTenantAccess,
+      refreshTenantGrants,
+      retryTenantLicenseCheck,
+      cancelTenantCheck,
       addSampleTenant,
       disconnectTenant,
       removeSavedAppRegistration,
@@ -1185,9 +1241,17 @@ export function useAppState() {
   return context;
 }
 
+/** Electron wraps host errors as "Error invoking remote method '<channel>': <Name>: <message>". */
+const REMOTE_ERROR_PREFIX = /^Error invoking remote method ['"][^'"]+['"]: (?:(\w*Error): )?/;
+
 function toError(error: unknown): Error {
   if (error instanceof Error) {
-    return error;
+    const prefix = REMOTE_ERROR_PREFIX.exec(error.message);
+    if (!prefix) return error;
+    // The host's message without the wrapper, under the host's error name.
+    const hostError = new Error(error.message.slice(prefix[0].length));
+    hostError.name = prefix[1] ?? error.name;
+    return hostError;
   }
 
   return new Error(typeof error === "string" ? error : "Unknown OpenAdminOS error.");

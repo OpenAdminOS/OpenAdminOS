@@ -1,4 +1,4 @@
-import type { AgentCategory, AgentMode } from "./openAdminOS.js";
+import type { AgentCategory, AgentMode, ServiceId } from "./openAdminOS.js";
 
 export interface AgentDisplayAuthor {
   name: string;
@@ -14,6 +14,8 @@ export interface AgentDisplay {
   mode: AgentMode;
   category: AgentCategory;
   scopes: string[];
+  /** Declared services; derive with `agentServiceIds` when absent. */
+  services?: ServiceId[];
   author: AgentDisplayAuthor;
   version: string;
   installed: boolean;

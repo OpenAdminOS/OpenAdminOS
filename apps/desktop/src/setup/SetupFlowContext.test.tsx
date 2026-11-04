@@ -10,7 +10,9 @@ import {
   renderWithAppState,
 } from "../test/test-utils";
 import { clearPendingIntent, createPendingIntent, writePendingIntent } from "./pending-intent";
-import { OPENADMINOS_APP_CLIENT_ID, PERMISSION_AREAS } from "../shared/openAdminOS";
+import { OPENADMINOS_APP_CLIENT_ID } from "../shared/openAdminOS";
+
+const INTUNE_PARTS = ["intune.people", "intune.devices", "intune.apps"];
 import { useSetupFlow } from "./SetupFlowContext";
 import { FirstLaunchWelcome } from "./WelcomeView";
 import { PROVIDER_DETECTION_COPY, SETUP_COPY, WELCOME_COPY } from "../copy";
@@ -47,6 +49,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "View changes" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -206,11 +209,12 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
     expect(connectTenant).toHaveBeenCalledWith({
-      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
+      partIds: INTUNE_PARTS,
     });
   });
 
@@ -228,8 +232,8 @@ describe("contextual tenant setup", () => {
     const bridge = makeMockBridge(
       {
         getRequestedScopes: vi.fn(async () => [
-          { name: "Device.Read.All", mode: "read" as const, rationale: "Read devices" },
-          { name: "User.Read.All", mode: "read" as const, rationale: "Read users" },
+          { service: "intune" as const, partId: "intune.devices", name: "Device.Read.All", mode: "read" as const, rationale: "Read devices" },
+          { service: "intune" as const, partId: "intune.people", name: "User.Read.All", mode: "read" as const, rationale: "Read users" },
         ]),
         connectTenant: vi.fn(async () => connectedState),
       },
@@ -239,6 +243,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -266,13 +271,11 @@ describe("contextual tenant setup", () => {
       screen.getByLabelText(/Directory \(tenant\) ID/i),
       "contoso.onmicrosoft.com",
     );
-    await user.click(screen.getByRole("checkbox", { name: "Apps" }));
     await user.click(
-      screen.getByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
+      screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }),
     );
 
     expect(connectTenant).toHaveBeenCalledWith({
-      permissionAreaIds: ["devices", "directory", "identity", "security"],
       appRegistration: {
         clientId: "d1de0a94-f67a-421d-8804-a235955ffd69",
         directoryTenantId: "contoso.onmicrosoft.com",
@@ -280,35 +283,135 @@ describe("contextual tenant setup", () => {
     });
   });
 
-  it("locks the required area and updates the approved scope count", async () => {
+  it("requires at least one service and counts shared scopes once", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     renderWelcome(makeMockBridge({}, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
-    const directory = await screen.findByRole("checkbox", {
-      name: "Users, groups, and directory",
-    });
-    expect(directory).toBeChecked();
-    expect(directory).toBeDisabled();
-    expect(
-      screen.getByText(
-        "Required: tenant identity, users, and groups are used by every area.",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", {
-        name: "Approve 21 read scopes and continue to Microsoft",
-      }),
-    ).toBeInTheDocument();
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    for (const name of ["Intune", "Entra", "Defender"]) {
+      expect(await screen.findByRole("checkbox", { name })).not.toBeChecked();
+    }
+    const approve = screen.getByRole("button", { name: /Approve \d+ read scopes/ });
+    expect(approve).toBeDisabled();
+    expect(approve).toHaveAccessibleDescription(SETUP_COPY.selectServiceReason);
 
-    await user.click(screen.getByRole("checkbox", { name: "Apps" }));
-    await user.click(screen.getByRole("checkbox", { name: "Security and sign-ins" }));
+    await user.click(screen.getByRole("checkbox", { name: "Intune" }));
     expect(
-      screen.getByRole("button", {
-        name: "Approve 13 read scopes and continue to Microsoft",
-      }),
+      screen.getByRole("button", { name: "Approve 10 read scopes and continue to Microsoft" }),
+    ).toBeEnabled();
+    // Entra shares users, groups, organization and Entra devices with Intune.
+    await user.click(screen.getByRole("checkbox", { name: "Entra" }));
+    expect(
+      screen.getByRole("button", { name: "Approve 17 read scopes and continue to Microsoft" }),
     ).toBeInTheDocument();
+    await user.click(screen.getByRole("checkbox", { name: "Defender" }));
+    expect(
+      screen.getByRole("button", { name: "Approve 20 read scopes and continue to Microsoft" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows a part another selected service already covers as included", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectTenant = vi.fn(async () => createMockAppState());
+    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
+    await user.click(screen.getByRole("button", { name: "Review Entra parts and scopes" }));
+
+    const people = screen.getByRole("checkbox", { name: "Entra users and groups" });
+    expect(people).toBeChecked();
+    expect(people).toBeDisabled();
+    expect(people).toHaveAccessibleDescription("Included with Intune");
+    const devices = screen.getByRole("checkbox", { name: "Entra devices" });
+    expect(devices).toBeChecked();
+    expect(devices).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Entra sign-in logs" })).not.toBeChecked();
+    // Two of six Entra parts are included, so Entra is partly selected.
+    expect(screen.getByRole("checkbox", { name: "Entra" })).toHaveAttribute("aria-checked", "mixed");
+
+    // Selecting all of Entra adds no scope twice, and the request lists explicit parts.
+    await user.click(screen.getByRole("checkbox", { name: "Entra" }));
+    expect(screen.getByRole("checkbox", { name: "Entra" })).toBeChecked();
+    await user.click(
+      screen.getByRole("button", { name: "Approve 17 read scopes and continue to Microsoft" }),
+    );
+    expect(connectTenant).toHaveBeenCalledWith({
+      partIds: [
+        "intune.people",
+        "intune.devices",
+        "intune.apps",
+        "entra.people",
+        "entra.devices",
+        "entra.apps",
+        "entra.access",
+        "entra.policies",
+        "entra.signins",
+      ],
+    });
+  });
+
+  it("shows the Intune people part as included when Entra is selected", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({}, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Entra" }));
+    await user.click(screen.getByRole("button", { name: "Review Intune parts and scopes" }));
+
+    const people = screen.getByRole("checkbox", { name: "Intune users and groups" });
+    expect(people).toBeChecked();
+    expect(people).toBeDisabled();
+    expect(people).toHaveAccessibleDescription("Included with Entra");
+    expect(screen.getByRole("checkbox", { name: "Intune" })).toHaveAttribute("aria-checked", "mixed");
+    expect(
+      screen.getByRole("button", { name: "Approve 11 read scopes and continue to Microsoft" }),
+    ).toBeEnabled();
+  });
+
+  it("expands a service to its parts and sends only the chosen parts", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    const connectTenant = vi.fn(async () => createMockAppState());
+    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("button", { name: "Review Entra parts and scopes" }));
+    // Parts start unselected like their service.
+    const signIns = screen.getByRole("checkbox", { name: "Entra sign-in logs" });
+    expect(signIns).not.toBeChecked();
+    expect(screen.getByText("AuditLog.Read.All")).toBeVisible();
+    await user.click(signIns);
+    expect(screen.getByRole("checkbox", { name: "Entra" })).toHaveAttribute("aria-checked", "mixed");
+    await user.click(screen.getByRole("checkbox", { name: "Entra Conditional Access and policies" }));
+    await user.click(
+      screen.getByRole("button", { name: "Approve 3 read scopes and continue to Microsoft" }),
+    );
+    expect(connectTenant).toHaveBeenCalledWith({
+      partIds: ["entra.policies", "entra.signins"],
+    });
+  });
+
+  it("hides the service picker for an own app registration", async () => {
+    const user = userEvent.setup();
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
+    renderWelcome(makeMockBridge({}, emptyState));
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    expect(await screen.findByRole("button", { name: "Review Intune parts and scopes" })).toBeInTheDocument();
+    await user.click(screen.getByRole("radio", { name: "Your own app registration" }));
+    expect(screen.getByText(SETUP_COPY.ownRegistrationServicesNote)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Review Intune parts and scopes" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/scopes selected/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn })).toBeInTheDocument();
   });
 
   it("generates, copies, and saves an admin registration script", async () => {
@@ -323,6 +426,9 @@ describe("contextual tenant setup", () => {
       }),
     );
     const displayName = screen.getByLabelText("Application display name");
+    await user.click(screen.getByRole("button", { name: "Generate setup script" }));
+    expect(screen.getByRole("alert")).toHaveTextContent(SETUP_COPY.selectServiceReason);
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.clear(displayName);
     await user.type(displayName, "Contoso's OpenAdminOS");
     await user.click(screen.getByRole("button", { name: "Generate setup script" }));
@@ -393,7 +499,7 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
     ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ })).toBeInTheDocument();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
     expectUnchosenSignIn();
   });
@@ -447,6 +553,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -475,6 +582,7 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
       await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
     );
@@ -503,8 +611,9 @@ describe("contextual tenant setup", () => {
 
     await user.click(await screen.findByRole("button", { name: "Open setup" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(
-      await screen.findByRole("button", { name: "Approve 21 read scopes and continue to Microsoft" }),
+      await screen.findByRole("button", { name: "Approve 10 read scopes and continue to Microsoft" }),
     );
     expect(await screen.findByText(PILOT_COPY.removedAfterConnect)).toBeInTheDocument();
   });
@@ -570,6 +679,7 @@ describe("contextual tenant setup", () => {
     await waitFor(() => expect(approve).toHaveAccessibleDescription(SETUP_COPY.chooseSignInReason));
     expect(screen.getByText(SETUP_COPY.chooseSignInReason)).toBeVisible();
 
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
     await user.click(own);
     expect(approve).toBeDisabled();
     expect(screen.getByText(SETUP_COPY.clientIdRequiredReason)).toBeInTheDocument();
@@ -589,7 +699,7 @@ describe("contextual tenant setup", () => {
     // The custom client ID typed before switching back must not be sent.
     await user.click(approve);
     await waitFor(() => expect(connectTenant).toHaveBeenCalledTimes(1));
-    expect(connectTenant).toHaveBeenCalledWith({ permissionAreaIds: expect.any(Array) });
+    expect(connectTenant).toHaveBeenCalledWith({ partIds: INTUNE_PARTS });
     expect(connectTenant.mock.calls[0]?.[0]).not.toHaveProperty("appRegistration");
   });
 
@@ -630,9 +740,8 @@ describe("contextual tenant setup", () => {
     await user.click(await screen.findByRole("radio", { name: "Your own app registration" }));
     expect(screen.getByRole("radio", { name: /Contoso admin app/ })).toBeChecked();
     expect(screen.queryByLabelText(/Application \(client\) ID/i)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    await user.click(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }));
     expect(connectTenant).toHaveBeenLastCalledWith({
-      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
       appRegistration: {
         clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
         directoryTenantId: "contoso.onmicrosoft.com",
@@ -663,9 +772,8 @@ describe("contextual tenant setup", () => {
       "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     );
     await user.type(screen.getByLabelText(/Label \(optional\)/), "Fabrikam app");
-    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    await user.click(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }));
     expect(connectTenant).toHaveBeenLastCalledWith({
-      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
       appRegistration: { clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", label: "Fabrikam app" },
     });
   });
@@ -684,12 +792,11 @@ describe("contextual tenant setup", () => {
       screen.getByLabelText(/Application \(client\) ID/i),
       "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     );
-    await user.click(screen.getByRole("button", { name: /Approve \d+ read scopes/ }));
+    await user.click(screen.getByRole("button", { name: SETUP_COPY.ownRegistrationSignIn }));
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Microsoft could not find your app registration.",
     );
     const expected = {
-      permissionAreaIds: PERMISSION_AREAS.map((area) => area.id),
       appRegistration: { clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee" },
     };
 

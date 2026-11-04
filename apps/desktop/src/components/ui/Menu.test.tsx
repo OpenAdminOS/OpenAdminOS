@@ -89,6 +89,38 @@ describe("Menu", () => {
   });
 });
 
+describe("Menu selectable items", () => {
+  it("marks the checked item with aria-checked and moves focus across every item kind", async () => {
+    const user = userEvent.setup();
+    render(
+      <Menu
+        trigger={<button>Filter</button>}
+        items={[
+          { id: "all", label: "All modes", checked: true, radio: true, onSelect: vi.fn() },
+          { id: "read", label: "Read mode", checked: false, radio: true, onSelect: vi.fn() },
+          { id: "separator", type: "separator" },
+          { id: "scheduled", label: "Scheduled only", checked: false, onSelect: vi.fn() },
+          { id: "reset", label: "Reset", onSelect: vi.fn() },
+        ]}
+      />,
+    );
+    const trigger = screen.getByRole("button", { name: "Filter" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    const all = await screen.findByRole("menuitemradio", { name: "All modes" });
+    expect(all).toHaveAttribute("aria-checked", "true");
+    await waitFor(() => expect(all).toHaveFocus());
+    expect(screen.getByRole("menuitemradio", { name: "Read mode" })).toHaveAttribute("aria-checked", "false");
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitemradio", { name: "Read mode" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitemcheckbox", { name: "Scheduled only" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Reset" })).toHaveFocus();
+    expect(screen.getByRole("menuitem", { name: "Reset" })).not.toHaveAttribute("aria-checked");
+  });
+});
+
 function renderMenu(onSelect: () => void) {
   return render(
     <Menu

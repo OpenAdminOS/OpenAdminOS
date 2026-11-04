@@ -17,6 +17,9 @@ descriptor:
   category: policies
   tier: agent
   requiresEntraTier: p1
+  # Reads Entra directory audits only (decided 2026-11-04, SPEC.md 2a).
+  services:
+    - entra
   mode: read
   preferredModel: llama3.1:8b
 

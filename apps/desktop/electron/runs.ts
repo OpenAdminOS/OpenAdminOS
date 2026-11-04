@@ -11,7 +11,12 @@ import {
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
-  mergeGrantedScopes,
+  agentServiceIds,
+  formatServiceList,
+  invalidAgentManifestCopy,
+  missingServicesForAgent,
+  uncoveredScopesCopy,
+  unmappedScopesCopy,
   resolveProviderDefaultModel,
   resolveRunModel,
   type AgentSummary,
@@ -93,6 +98,8 @@ export interface RunServiceHost {
     payload: unknown;
   }): void;
   notifyRunFinished(run: RunRecord): void;
+  /** The validation error of the agent's manifest on disk, if it is invalid. */
+  agentManifestError?(agent: AgentSummary): string | undefined;
   emitStateChanged(reason: string, runId?: string): void;
   enqueueRunDeliveries(run: RunRecord): Promise<void>;
   processPendingRunDeliveries(): Promise<void>;
@@ -215,6 +222,10 @@ export class RunService {
       if (!agent) {
         throw new Error(`Agent is not installed: ${agentSlug}`);
       }
+      // A manifest that no longer validates cannot be trusted to run,
+      // manually, from Chat or from a schedule.
+      const manifestError = this.host.agentManifestError?.(agent);
+      if (manifestError) throw new Error(invalidAgentManifestCopy(agent.name, manifestError));
       // Pilot runs use prepared text instead of a provider, and only the
       // pilot agents can run on the pilot tenant. Refuse everything else
       // before any provider or Graph work.
@@ -425,6 +436,30 @@ export class RunService {
             `${agent.name} requires ${requiredLabel}. The active tenant (${tenantRecord?.displayName ?? pinnedTenantId}) is on ${detectedLabel}. Microsoft 365 Business Premium includes Entra ID P1. Check your tenant's subscription, or pick a free-tier agent.`,
           );
         }
+      }
+
+      // A scope no service lists is a dependency that cannot be checked.
+      // Block the run rather than treat it as needing no service.
+      const unmapped = unmappedScopesCopy(agent.scopes);
+      if (unmapped) throw new Error(unmapped);
+      // Declared services must cover every scope, or the service preflight
+      // below checks the wrong services. Agents installed before the parser
+      // enforced this still carry such a declaration.
+      const uncovered = uncoveredScopesCopy(agent);
+      if (uncovered) throw new Error(uncovered);
+
+      // Service preflight: an agent whose service is not connected for
+      // this tenant cannot reach its data. Refuse with the service to add.
+      const runTenant = persisted.tenants.find((t) => t.id === pinnedTenantId);
+      const missingServices = runTenant
+        ? missingServicesForAgent(runTenant, agentServiceIds(agent))
+        : [];
+      if (runTenant && missingServices.length > 0) {
+        const titles = missingServices.map((service) => service.title);
+        const one = titles.length === 1;
+        throw new Error(
+          `${agent.name} needs ${formatServiceList(titles)}, which ${one ? "is" : "are"} not connected for ${runTenant.displayName}. Add ${one ? "it" : "them"} in Settings, Tenants, then run the agent again.`,
+        );
       }
 
       if ((options.office || options.officeContext) && persisted.runs.some(r=>(r.office || r.officeContext) && ["queued","running"].includes(r.status))) throw new Error("Team compute slot is occupied. This assignment remains queued.");
@@ -1218,26 +1253,9 @@ export class RunService {
       const nextRuns = exists
         ? persisted.runs.map((existing) => (existing.id === nextRun.id ? nextRun : existing))
         : [nextRun, ...persisted.runs];
-      const completedAgent =
-        !wasTerminal && nextRun.status === "completed"
-          ? persisted.installedAgents.find(
-              (agent) => agent.slug === nextRun.agentSlug,
-            )
-          : undefined;
-      const nextTenants = completedAgent
-        ? persisted.tenants.map((tenant) =>
-            tenant.id === nextRun.tenantId && tenant.kind !== "sample"
-              ? {
-                  ...tenant,
-                  grantedScopes: mergeGrantedScopes(
-                    tenant,
-                    completedAgent.scopes,
-                  ),
-                }
-              : tenant,
-          )
-        : persisted.tenants;
-      await this.host.write({ ...persisted, runs: nextRuns, tenants: nextTenants });
+      // Grants are recorded from the scopes tokens return during the run
+      // (see the host's buildGraph), never from the agent's declaration.
+      await this.host.write({ ...persisted, runs: nextRuns });
       if (!wasTerminal && isNowTerminal) {
         this.host.notifyRunFinished(nextRun);
       }

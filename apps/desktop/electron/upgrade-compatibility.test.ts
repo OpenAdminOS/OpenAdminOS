@@ -56,7 +56,7 @@ describe("upgrade compatibility", () => {
         [...grantedScopeSet(state.tenants[0]!)],
         [...DEFAULT_GRAPH_READ_SCOPE_NAMES],
       );
-      assert.deepEqual(state.tenants[1]?.grantedScopes, ["User.Read.All"]);
+      assert.deepEqual(state.tenants[1]?.grantedScopes, ["graph:User.Read.All"]);
       assert.equal(state.installedAgents[0]?.slug, "legacy-agent");
       assert.equal(state.runs[0]?.id, "run-v030");
       assert.equal(state.activeModelByProviderId?.ollama, "legacy-model");
@@ -72,7 +72,7 @@ describe("upgrade compatibility", () => {
       const persisted = JSON.parse(await readFile(statePath, "utf8")) as typeof v030State;
       assert.equal(persisted.tenants[0]?.id, "tenant-v030");
       assert.equal(persisted.tenants[0]?.grantedScopes, undefined);
-      assert.deepEqual(persisted.tenants[1]?.grantedScopes, ["User.Read.All"]);
+      assert.deepEqual(persisted.tenants[1]?.grantedScopes, ["graph:User.Read.All"]);
       assert.equal(persisted.runs[0]?.id, "run-v030");
       assert.equal(persisted.installedAgents[0]?.settings?.staleDays, 90);
       assert.equal(persisted.connectors?.teams?.config?.teamId, "legacy-team");
@@ -104,6 +104,72 @@ describe("upgrade compatibility", () => {
       assertColumns(db, "graph_cache_status", ["page_count", "page_limit_reached"]);
     } finally {
       db.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("services grant migration", () => {
+  it("qualifies bare stored grants once and leaves absent grants untouched", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-grant-migration-"));
+    const statePath = join(dir, "state.json");
+    const tenant = (id: string, grantedScopes?: unknown[]) => ({
+      id,
+      displayName: id,
+      username: `admin@${id}.example`,
+      homeAccountId: `home-${id}`,
+      addedAt: "2026-07-05T00:00:00.000Z",
+      appRegistration: { kind: "openadminos", clientId: "d1de0a94-f67a-421d-8804-a235955ffd69" },
+      ...(grantedScopes ? { grantedScopes } : {}),
+    });
+    await writeFile(statePath, JSON.stringify({
+      activeProviderId: "ollama",
+      installedAgents: [],
+      runs: [],
+      tenants: [
+        tenant("legacy"),
+        tenant("bare", ["User.Read.All", "https://graph.microsoft.com/AuditLog.Read.All"]),
+        tenant("mixed", ["graph:User.Read.All", "User.Read.All", "Policy.Read.All", 42]),
+      ],
+    }), "utf8");
+
+    const open = () => new AppStateStore({
+      filePath: statePath,
+      userDataPath: dir,
+      tokenStore,
+      statsApiUrl: "",
+      appVersion: "0.7.2",
+      providerListFactory: () => providers,
+    });
+    const expected = {
+      legacy: undefined,
+      bare: ["graph:User.Read.All", "graph:AuditLog.Read.All"],
+      mixed: ["graph:User.Read.All", "graph:Policy.Read.All"],
+    };
+    try {
+      for (let round = 0; round < 2; round += 1) {
+        const store = open();
+        try {
+          const state = await store.getAppState();
+          assert.deepEqual(
+            Object.fromEntries(state.tenants.map((entry) => [entry.id, entry.grantedScopes])),
+            expected,
+          );
+          // Write the migrated state, then read it again in the next round.
+          await store.setRegistryInstallCountsEnabled(round === 0);
+        } finally {
+          store.close();
+        }
+      }
+      const persisted = JSON.parse(await readFile(statePath, "utf8")) as {
+        tenants: Array<{ id: string; grantedScopes?: string[] }>;
+      };
+      assert.deepEqual(
+        Object.fromEntries(persisted.tenants.map((entry) => [entry.id, entry.grantedScopes])),
+        expected,
+      );
+      assert.deepEqual([...grantedScopeSet(persisted.tenants[1]!)], ["User.Read.All", "AuditLog.Read.All"]);
+    } finally {
       await rm(dir, { recursive: true, force: true });
     }
   });

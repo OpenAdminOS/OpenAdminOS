@@ -1,10 +1,19 @@
 import { createHash } from "node:crypto";
-import { OPENADMINOS_CLIENT_ID, TENANT_DATA_INSTRUCTIONS, defaultClientId } from "@openadminos/runtime";
 import {
+  OPENADMINOS_CLIENT_ID,
+  TENANT_DATA_INSTRUCTIONS,
+  defaultClientId,
+  tenantAuthority,
+  type ExpectedTenantAccount,
+} from "@openadminos/runtime";
+import {
+  AVAILABLE_SERVICES,
   graphAccessDenialFromError,
   graphAccessDenialText,
   SAVED_APP_REGISTRATION_LIMIT,
+  servicesForScopes,
   type GraphAccessDenial,
+  type ServiceId,
   type SavedAppRegistration,
 } from "@openadminos/agent-sdk";
 import type {
@@ -76,6 +85,7 @@ export function entryToRegistrySummary(
     tier: entry.tier,
     requiresEntraTier: entry.requiresEntraTier ?? "free",
     scopes: entry.scopes,
+    services: registryEntryServices(entry),
     author: entry.author,
     manifestUrl: entry.manifestUrl,
     manifestSha256: entry.manifestSha256,
@@ -459,6 +469,38 @@ export function sanitizeGraphResources(
 }
 
 
+
+/**
+ * Index entries are untrusted input: keep only known services, and derive
+ * them from the scopes for indexes built before services. An empty list
+ * stands only for an agent without Graph scopes, so an entry whose
+ * services were all unknown still gets the services its scopes need.
+ */
+function registryEntryServices(entry: RegistryIndexEntry): ServiceId[] {
+  if (!Array.isArray(entry.services)) return servicesForScopes(entry.scopes);
+  const known = entry.services.filter((service): service is ServiceId =>
+    AVAILABLE_SERVICES.some((available) => available.id === service),
+  );
+  return known.length === 0 && entry.scopes.length > 0 ? servicesForScopes(entry.scopes) : known;
+}
+
+/** The account and directory a stored tenant was connected with. */
+export function connectedAccountOf(tenant: TenantRecord): ExpectedTenantAccount {
+  return { tenantId: tenant.id, homeAccountId: tenant.homeAccountId, username: tenant.username };
+}
+
+/**
+ * Sends a sign-in for a stored tenant to its own directory, on the host of
+ * the registration's authority, and prefills the connected account when it
+ * is known. A guest signing in through `/common` would land in its home
+ * directory instead.
+ */
+export function signInTargetFor(tenant: TenantRecord): { loginHint?: string; authority: string } {
+  return {
+    ...(tenant.username ? { loginHint: tenant.username } : {}),
+    authority: tenantAuthority(tenant.id, tenant.appRegistration?.authority),
+  };
+}
 
 export function tenantNamesById(tenants: TenantRecord[]): Map<string, string> {
   return new Map(tenants.map((tenant) => [tenant.id, tenant.displayName]));

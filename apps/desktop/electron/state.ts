@@ -17,21 +17,25 @@ import {
   createLmStudioLlm,
   DEFAULT_AUTHORITY,
   GRAPH_CLI_CLIENT_ID,
+  GRAPH_DEFAULT_SCOPE,
+  scopesFromAuthenticationResult,
   authorityForDirectory,
   createMsalClient,
   defaultClientId,
   createOllamaLlm,
   createRegistryInstallCountPayload,
   createTenantSession,
-  DEFAULT_SCOPE_METADATA,
+  awaitWithSignal,
   probeSubscribedSkus,
+  SubscribedSkusProbeError,
   findConnectorFactory,
   fenceTenantData,
   withTenantDataInstructions,
   withTenantDataOutputFilter,
   wrapConnector,
   findRegistryAgentById,
-  listAllRegistryAgents,
+  effectiveAgentManifestIssue,
+  listAllRegistryAgentsWithIssues,
   listBuiltInRegistryAgents,
   listRegisteredConnectors,
   loadAgentManifestPreview,
@@ -42,6 +46,8 @@ import {
   ollamaEndpointOverride,
   removeAccount,
   runInteractiveFlow,
+  assertSignedInAccount,
+  TenantAccountMismatchError,
   setAgentUpdatesDir,
   toInstalledAgent,
   type TokenCacheStorage,
@@ -76,7 +82,6 @@ import type {
   SavedAppRegistration,
   TenantAppRegistration,
   ConnectTenantOptions,
-  PermissionAreaId,
   TenantRecord,
   TenantSession,
   AzureOpenAIProviderConfig,
@@ -151,15 +156,19 @@ import {
   DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   grantedScopeSet,
-  intersectGrantedScopes,
+  grantsFromTokenScopes,
+  invalidAgentManifestCopy,
   mergeGrantedScopes,
+  missingServiceCopy,
+  qualifyScope,
   normalizeGraphScopeName,
-  normalizePermissionAreaIds,
-  permissionAreaById,
   providerCatalog,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
-  scopesForPermissionAreas,
+  requestedScopes,
+  SERVICE_PARTS,
+  servicePartById,
+  toResourceScopes,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSchedule,
@@ -171,14 +180,21 @@ import {
   type AppState,
   type ProviderId,
   type ProviderSummary,
+  type InvalidAgentManifest,
   type RegistryAgentSummary,
+  type TenantTierProbeWarning,
+  type TenantCheckProgress,
   type RunRecord,
   type UpdateChannel,
   type WhatsAppWebGroupRef,
   type WhatsAppWebSendResult,
   type WhatsAppWebStatus,
 } from "@openadminos/agent-sdk";
-import type { PublicClientApplication } from "@azure/msal-node";
+import {
+  InteractionRequiredAuthError,
+  type AuthenticationResult,
+  type PublicClientApplication,
+} from "@azure/msal-node";
 import {
   WHATSAPP_WEB_CONNECTOR_ID,
   getWhatsAppWebClient,
@@ -274,12 +290,14 @@ import {
 import {
   DEFAULT_STATS_API_URL,
   canonicalClientId,
+  connectedAccountOf,
   createLocalOnlyTenantSession,
   entryToRegistrySummary,
   forgetAppRegistration,
   humanizeMsalError,
   humanizeScheduledRunError,
   isNodeError,
+  signInTargetFor,
   normalizeWorkspaceInstructions,
   normalizeWorkspaceTitle,
   rememberAppRegistration,
@@ -514,6 +532,32 @@ function sanitizeNonNegativeInteger(value: unknown): number | undefined {
     return undefined;
   }
   return Math.round(value);
+}
+
+function normalizedRegistryPath(path: string): string {
+  return path.replace(/\\/g, "/");
+}
+
+/**
+ * The invalid manifests to list. Installed agents are checked against the
+ * manifest the runtime would load, so a listing entry for the same folder
+ * is replaced by that result: an invalid agent update shows, and a valid
+ * update over an invalid bundled copy does not.
+ */
+function mergeInvalidManifests(
+  installedAgents: readonly AgentSummary[],
+  installedIssues: readonly InvalidAgentManifest[],
+  listed: readonly InvalidAgentManifest[],
+): InvalidAgentManifest[] {
+  const installedPaths = new Set(
+    installedAgents.flatMap((agent) =>
+      agent.registryPath ? [normalizedRegistryPath(agent.registryPath)] : [],
+    ),
+  );
+  return [
+    ...installedIssues,
+    ...listed.filter((entry) => !installedPaths.has(normalizedRegistryPath(entry.registryPath))),
+  ];
 }
 
 function scheduleDueAtMs(agent: AgentSummary, nowMs: number): number {
@@ -988,6 +1032,246 @@ function requireClientId(value: string): string {
   return canonicalClientId(trimmed);
 }
 
+/** Own registrations sign in with every permission the app was granted. */
+const CUSTOM_REGISTRATION_SCOPES = [GRAPH_DEFAULT_SCOPE, "offline_access"];
+
+/** Check again found the same permissions as before. */
+export class TenantGrantsUnchangedError extends Error {
+  constructor() {
+    super("Microsoft returned no new permissions. Admin consent can take a minute to appear.");
+    this.name = "TenantGrantsUnchangedError";
+  }
+}
+
+/**
+ * Longest a tenant check or license probe may take, Microsoft sign-in
+ * included.
+ */
+export const TENANT_CHECK_DEADLINE_MS = 5 * 60_000;
+
+type TenantCheckKind = TenantCheckProgress["kind"];
+
+/** Why a tenant operation's signal aborted. */
+type TenantCheckAbort = "cancelled" | "timeout" | "superseded";
+
+/** The admin cancelled a running tenant check. The message says what was kept. */
+export class TenantCheckCancelledError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TenantCheckCancelledError";
+  }
+}
+
+/** A tenant check reached its deadline. The message says what was kept. */
+export class TenantCheckTimeoutError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TenantCheckTimeoutError";
+  }
+}
+
+/** How a tenant's connection was replaced while a check ran. */
+type TenantSuperseded = "reconnected" | "disconnected";
+
+/** The tenant was reconnected or disconnected while a check ran. */
+export class TenantCheckSupersededError extends Error {
+  constructor(how: TenantSuperseded) {
+    super(
+      how === "reconnected"
+        ? "This tenant was reconnected while the check ran. Run the check again."
+        : "This tenant was disconnected while the check ran, so its result was not saved.",
+    );
+    this.name = "TenantCheckSupersededError";
+  }
+}
+
+/** Another check is already running for the tenant. */
+export class TenantCheckBusyError extends Error {
+  constructor() {
+    super("A permissions or license check is already running for this tenant. Wait for it to finish or cancel it.");
+    this.name = "TenantCheckBusyError";
+  }
+}
+
+function deadlineText(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  return minutes >= 1
+    ? `${minutes} minute${minutes === 1 ? "" : "s"}`
+    : `${Math.max(1, Math.round(ms / 1000))} second${Math.round(ms / 1000) > 1 ? "s" : ""}`;
+}
+
+/**
+ * A check or license probe running for one tenant connection. Every
+ * check, foreground or background, runs as one, at most one per tenant.
+ */
+interface TenantOperation {
+  readonly tenantId: string;
+  /** The tenant's connection when the operation started. Saves need the same one. */
+  readonly connectionId: string | undefined;
+  /** Start order. A license result older than the last one saved is dropped. */
+  readonly seq: number;
+  /** Aborts on cancel, at the deadline, or when the tenant is reconnected or disconnected. */
+  readonly signal: AbortSignal;
+  readonly phase: TenantCheckProgress["phase"];
+  setPhase(phase: TenantCheckProgress["phase"]): void;
+  /**
+   * What a verified token did to the grants. Set before they are saved,
+   * and never rolled back by a cancel.
+   */
+  grants?: "added" | "updated" | "unchanged";
+  /** The license check is part of this operation. */
+  probing: boolean;
+  /**
+   * The license result passed its commit point and is being written. From
+   * here a cancel or the deadline no longer stops the operation, so it
+   * reports what it saved.
+   */
+  committed: boolean;
+}
+
+/** What a license check found, or why it did not read anything. */
+type TierProbeOutcome =
+  /** Organization.Read.All is not granted, so the check is not run. */
+  | { kind: "not-granted" }
+  /** The last check finished within a day. */
+  | { kind: "recent" }
+  | {
+      kind: "found";
+      fields: Pick<
+        TenantRecord,
+        "entraTier" | "entraTierDetectedAt" | "relevantLicenses" | "intuneLicensed"
+      >;
+    }
+  | { kind: "failed"; warning: TenantTierProbeWarning }
+  /** Cancelled: records the warning only when none is stored. */
+  | { kind: "cancelled"; warning: TenantTierProbeWarning };
+
+/**
+ * The tenant with a license check outcome applied. Only an answer replaces
+ * the tier and licenses; a failure or cancel keeps them and records why.
+ */
+function withTierProbeOutcome<T extends TenantRecord>(tenant: T, outcome: TierProbeOutcome): T {
+  if (outcome.kind === "recent") return tenant;
+  if (outcome.kind === "failed") return { ...tenant, tierProbeWarning: outcome.warning };
+  if (outcome.kind === "cancelled") {
+    return tenant.tierProbeWarning ? tenant : { ...tenant, tierProbeWarning: outcome.warning };
+  }
+  const { tierProbeWarning: _cleared, ...rest } = tenant;
+  return (outcome.kind === "found" ? { ...rest, ...outcome.fields } : rest) as T;
+}
+
+/** True when the license check would run for the tenant. */
+function needsTierProbe(tenant: TenantRecord): boolean {
+  return tenant.kind === "sample" || grantedScopeSet(tenant).has("Organization.Read.All");
+}
+
+/** The warning saved when a license check is cancelled or reaches the deadline. */
+function abortedTierProbe(abort: "cancelled" | "timeout", within: string): TierProbeOutcome {
+  const at = new Date().toISOString();
+  return abort === "cancelled"
+    ? {
+        kind: "cancelled",
+        warning: { message: "The license check was cancelled.", reason: "cancelled", accountMismatch: false, at },
+      }
+    : {
+        kind: "failed",
+        warning: {
+          message: `The license check did not finish within ${within}.`,
+          reason: "timeout",
+          accountMismatch: false,
+          at,
+        },
+      };
+}
+
+/** What a cancelled or expired check kept, in the admin's words. */
+function abortedCheckMessage(
+  kind: TenantCheckKind,
+  operation: TenantOperation,
+  abort: "cancelled" | "timeout",
+  within: string,
+): string {
+  const kept = "the Entra tier and licenses are as they were. Retry license check to update them.";
+  const license =
+    abort === "cancelled"
+      ? `The license check was cancelled; ${kept}`
+      : `The license check did not finish within ${within}; ${kept}`;
+  if (kind === "license") return license;
+  const grants =
+    operation.grants === "added"
+      ? "Access was added."
+      : operation.grants === "updated"
+        ? "Permissions were updated."
+        : operation.grants === "unchanged"
+          ? "Permissions are unchanged."
+          : undefined;
+  if (grants) return operation.probing ? `${grants} ${license}` : grants;
+  if (abort === "cancelled") {
+    return kind === "access"
+      ? "Sign-in was cancelled. OpenAdminOS saved nothing."
+      : "Check again was cancelled. OpenAdminOS saved nothing.";
+  }
+  return kind === "access"
+    ? `Add access did not finish within ${within}. OpenAdminOS saved nothing. Try again when Microsoft sign-in is ready.`
+    : `Check again did not finish within ${within}. OpenAdminOS saved nothing. Choose Check again to try again.`;
+}
+
+/** A specific reason for a license check that did not finish. */
+function tierProbeWarningFor(
+  error: unknown,
+  registration: TenantAppRegistration | undefined,
+): TenantTierProbeWarning {
+  const at = new Date().toISOString();
+  const name = error instanceof Error ? error.name : "";
+  const raw = error instanceof Error ? error.message : String(error);
+  const base = (
+    reason: TenantTierProbeWarning["reason"],
+    message: string,
+    extra: { status?: number } = {},
+  ): TenantTierProbeWarning => ({
+    message,
+    reason,
+    ...extra,
+    accountMismatch: reason === "account-mismatch",
+    at,
+  });
+  if (error instanceof TenantAccountMismatchError) return base("account-mismatch", raw);
+  if (error instanceof SubscribedSkusProbeError) {
+    return base(error.reason, raw, error.status === undefined ? {} : { status: error.status });
+  }
+  if (name === "TenantConnectTimeoutError") {
+    return base("timeout", "The Microsoft sign-in for the license check timed out.");
+  }
+  if (
+    name === "TenantConnectCancelledError" ||
+    raw.toLowerCase().includes("user_cancelled") ||
+    raw.toLowerCase().includes("cancelled by user")
+  ) {
+    return base("cancelled", "The Microsoft sign-in for the license check was cancelled.");
+  }
+  return base(
+    "sign-in",
+    `No token for Organization.Read.All. ${humanizeMsalError(error, registration)}`,
+  );
+}
+
+function isInteractionRequired(error: unknown): boolean {
+  if (error instanceof InteractionRequiredAuthError) return true;
+  // acquireTokenSilent rewrites these into plain errors with recovery text.
+  return (
+    error instanceof Error &&
+    (error.message.includes("is no longer valid") || error.message.includes("No cached account"))
+  );
+}
+
+function qualifyStoredGrants(entries: readonly unknown[]): string[] {
+  return [
+    ...new Set(
+      entries.filter((entry): entry is string => typeof entry === "string").map(qualifyScope),
+    ),
+  ];
+}
+
 function isPlainRecordValue(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -1221,6 +1505,8 @@ export interface AppStateStoreOptions {
    * Production leaves this unset so sign-in always runs through MSAL.
    */
   interactiveSignIn?: typeof runInteractiveFlow;
+  /** Test hook for the tenant check deadline. Defaults to five minutes. */
+  tenantCheckDeadlineMs?: number;
 }
 
 export class AppStateStore {
@@ -1269,6 +1555,24 @@ export class AppStateStore {
   private readonly interactiveSignIn: typeof runInteractiveFlow;
   private sampleGraph: SampleGraph;
   private tenantConnectController: AbortController | undefined;
+  /** Tenant checks and license probes in progress, by tenant ID. */
+  private readonly tenantChecks = new Map<
+    string,
+    {
+      progress: TenantCheckProgress;
+      controller: AbortController;
+      /** The connection the operation started on. */
+      connectionId: string | undefined;
+      /** Set when a reconnect or disconnect stopped the operation. */
+      superseded?: TenantSuperseded;
+      /** Cancel or deadline: ignored once the license result is committed. */
+      stop(reason: "cancelled" | "timeout"): void;
+    }
+  >();
+  private readonly tenantCheckDeadlineMs: number;
+  private tenantCheckSeq = 0;
+  /** The `seq` of the last license result saved, by tenant ID. */
+  private readonly savedTierProbeSeq = new Map<string, number>();
   private whatsappWebClientInstance: WhatsAppWebClientLike | undefined;
 
   // Registry cache: populated by initRegistry(), falls back to
@@ -1305,6 +1609,7 @@ export class AppStateStore {
       this.allowDevRegistrySource = false;
       this.clock = () => new Date();
       this.interactiveSignIn = runInteractiveFlow;
+      this.tenantCheckDeadlineMs = TENANT_CHECK_DEADLINE_MS;
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
@@ -1350,6 +1655,7 @@ export class AppStateStore {
       this.allowDevRegistrySource = options.allowDevRegistrySource === true;
       this.clock = options.clock ?? (() => new Date());
       this.interactiveSignIn = options.interactiveSignIn ?? runInteractiveFlow;
+      this.tenantCheckDeadlineMs = options.tenantCheckDeadlineMs ?? TENANT_CHECK_DEADLINE_MS;
     }
     this.sampleGraph = createSampleGraph({ clock: this.clock });
     const host = this;
@@ -1447,6 +1753,7 @@ export class AppStateStore {
         host.selfTrainingPromptOverlay(tenantId, agentSlug),
       recordLearningEventSafely: (input) => host.recordLearningEventSafely(input),
       notifyRunFinished: (run) => host.notifyRunFinished(run),
+      agentManifestError: (agent) => host.agentManifestError(agent),
       emitStateChanged: (reason, runId) => host.emitStateChanged(reason, runId),
       enqueueRunDeliveries: (run) => host.enqueueRunDeliveries(run),
       processPendingRunDeliveries: () => host.processPendingRunDeliveries(),
@@ -1970,8 +2277,17 @@ export class AppStateStore {
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        this.interactiveSignIn({ client, scopes, openBrowser }),
+      authority: tenant.appRegistration?.authority,
+      acquireInteractive: async (scopes) => {
+        const result = await this.interactiveSignIn({
+          client,
+          scopes,
+          openBrowser,
+          ...signInTargetFor(tenant),
+        });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
+      },
     });
   }
 
@@ -2445,10 +2761,23 @@ export class AppStateStore {
       persisted.activeModelByProviderId,
     ).model;
 
-    const registryAgents = this.listRegistryAgents();
+    const { agents: registryAgents, invalid: listedInvalid } = this.listRegistryWithIssues();
+    const installedIssues: InvalidAgentManifest[] = [];
     const installedAgents = this.decorateInstalledWithUpdateInfo(
       persisted.installedAgents,
       registryAgents,
+    ).map((agent) => {
+      // Checked whatever the registry index holds, because this is the
+      // manifest a run or schedule would load.
+      const issue = effectiveAgentManifestIssue(agent);
+      if (!issue) return agent;
+      installedIssues.push(issue);
+      return { ...agent, manifestError: issue.reason };
+    });
+    const invalidAgents = mergeInvalidManifests(
+      persisted.installedAgents,
+      installedIssues,
+      listedInvalid,
     );
 
     const state: AppState = {
@@ -2456,6 +2785,7 @@ export class AppStateStore {
       appVersion: this.appVersion,
       providers,
       registryAgents,
+      invalidAgents,
       installedAgents,
       runs: persisted.runs,
       trust: deriveTrustState({
@@ -2479,6 +2809,9 @@ export class AppStateStore {
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
     }
+    if (this.tenantChecks.size > 0) {
+      state.tenantChecks = [...this.tenantChecks.values()].map((entry) => entry.progress);
+    }
     const autoSelection = persisted.providerAutoSelection;
     if (
       autoSelection &&
@@ -2496,21 +2829,49 @@ export class AppStateStore {
   }
 
   listRegistryAgents(): RegistryAgentSummary[] {
+    return this.listRegistryWithIssues().agents;
+  }
+
+  /**
+   * Registry agents plus the local manifests that failed validation. An
+   * invalid manifest is listed, never thrown, so it cannot stop tenants,
+   * installed agents and history from loading.
+   */
+  private listRegistryWithIssues(): {
+    agents: RegistryAgentSummary[];
+    invalid: InvalidAgentManifest[];
+  } {
     if (!this.registryCacheEntries) {
       // Before first HTTP fetch: fall back to filesystem scan (dev + cold start).
-      return listAllRegistryAgents(this.userAgentsDir).map((agent) =>
-        withAgentCompatibility(agent, this.appVersion),
-      );
+      const listing = listAllRegistryAgentsWithIssues(this.userAgentsDir);
+      return {
+        agents: listing.agents.map((agent) => withAgentCompatibility(agent, this.appVersion)),
+        invalid: listing.invalid,
+      };
     }
     // HTTP cache populated: use it as base and overlay user-authored agents.
     const dir = this.userAgentsDir;
+    const listing = dir
+      ? listAllRegistryAgentsWithIssues(dir)
+      : { agents: [], invalid: [] };
     const userAgents = dir
-      ? listAllRegistryAgents(dir).filter((a) => a.registryPath?.startsWith(dir))
+      ? listing.agents.filter((a) => a.registryPath?.startsWith(dir))
       : [];
     const bySlug = new Map<string, RegistryAgentSummary>();
     for (const a of this.registryCacheEntries) bySlug.set(a.slug, a);
     for (const a of userAgents) bySlug.set(a.slug, withAgentCompatibility(a, this.appVersion));
-    return [...bySlug.values()].sort((l, r) => l.name.localeCompare(r.name));
+    return {
+      agents: [...bySlug.values()].sort((l, r) => l.name.localeCompare(r.name)),
+      invalid: listing.invalid.filter((entry) => entry.source === "user"),
+    };
+  }
+
+  /**
+   * The validation error of the manifest the runtime would load for an
+   * installed agent: an agent update, a local folder or the bundled copy.
+   */
+  private agentManifestError(agent: AgentSummary): string | undefined {
+    return effectiveAgentManifestIssue(agent)?.reason;
   }
 
   async getAgentManifest(slug: string): Promise<AgentManifestPreview | undefined> {
@@ -4092,6 +4453,8 @@ export class AppStateStore {
       }
       const next = [...persisted.installedAgents];
       const existing = next[idx];
+      const manifestError = schedule?.enabled ? this.agentManifestError(existing) : undefined;
+      if (manifestError) throw new Error(invalidAgentManifestCopy(existing.name, manifestError));
       if (schedule === null) {
         const { schedule: _, ...rest } = existing;
         next[idx] = rest;
@@ -4226,6 +4589,12 @@ export class AppStateStore {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
+      // The Agents page shows an invalid manifest as unavailable; its
+      // schedule waits until the manifest is fixed.
+      if (this.agentManifestError(agent)) {
+        console.info(`[scheduler] skipped "${agent.slug}" because its manifest is invalid`);
+        continue;
+      }
 
       // Skip if there's already an in-flight run for this agent because we
       // don't want a long-running agent to queue more copies of itself.
@@ -5478,15 +5847,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async listRequestedScopes(): Promise<RequestedScope[]> {
-    // Strips the Graph resource prefix so the renderer can display the
-    // bare scope name (e.g. "DeviceManagementManagedDevices.Read.All")
-    // while the constant in msal.ts keeps the fully-qualified URI MSAL
-    // requires.
-    return DEFAULT_SCOPE_METADATA.map((scope) => ({
-      name: scope.name,
-      mode: scope.mode,
-      rationale: scope.rationale,
-    }));
+    // One row per part scope, with the reason from the service registry.
+    // A scope shared by several parts appears once per part. Bare names:
+    // MSAL gets the resource form.
+    return SERVICE_PARTS.flatMap((part) =>
+      part.scopes.map((scope) => ({
+        service: part.service,
+        partId: part.id,
+        name: scope.name,
+        mode: "read" as const,
+        rationale: scope.reason,
+      })),
+    );
   }
 
   async connectTenant(options: ConnectTenantOptions = {}): Promise<AppState> {
@@ -5509,11 +5881,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
       : { kind: "openadminos", clientId: defaultClientId() };
     const client = this.msalClientFor(registration);
-    const permissionAreaIds = normalizePermissionAreaIds(options.permissionAreaIds);
-    const requestedScopeNames = scopesForPermissionAreas(permissionAreaIds);
-    const scopes = requestedScopeNames.map(
-      (scope) => `https://graph.microsoft.com/${scope}`,
-    );
+    // An own registration signs in with everything the app was granted and
+    // its services follow from the token. The OpenAdminOS app asks for the
+    // baseline sign-in scopes plus the chosen parts, deduplicated.
+    const scopes =
+      registration.kind === "custom"
+        ? CUSTOM_REGISTRATION_SCOPES
+        : toResourceScopes(requestedScopes(options.partIds ?? []));
     let result;
     try {
       result = await this.interactiveSignIn({
@@ -5552,8 +5926,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       username: account.username,
       addedAt,
       lastUsedAt: addedAt,
-      grantedScopes: intersectGrantedScopes(result.scopes, requestedScopeNames),
+      // Only what the token carries counts as granted.
+      grantedScopes: grantsFromTokenScopes(scopesFromAuthenticationResult(result)),
       appRegistration: registration,
+      // A check still running for the previous connection saves nothing.
+      connectionId: randomUUID(),
     };
 
     let replaced: TenantRecord | undefined;
@@ -5563,7 +5940,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const nextTenants = [...persisted.tenants];
       if (existingIdx >= 0) {
         replaced = nextTenants[existingIdx];
-        nextTenants[existingIdx] = { ...nextTenants[existingIdx], ...tenant };
+        // A new sign-in starts a new probe, so an earlier warning is stale.
+        const { tierProbeWarning: _stale, ...previous } = nextTenants[existingIdx]!;
+        nextTenants[existingIdx] = { ...previous, ...tenant };
       } else {
         nextTenants.push(tenant);
       }
@@ -5587,12 +5966,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       });
     });
 
+    // A check that started on the previous connection stops and saves nothing.
+    this.supersedeTenantCheck(tenant.id, "reconnected", tenant.connectionId);
     if (replaced) await this.forgetReplacedSignIn(replaced, tenant);
+    // One that registered for the previous connection in the meantime too,
+    // so it cannot block this connection's license check.
+    this.supersedeTenantCheck(tenant.id, "reconnected", tenant.connectionId);
 
     // Background probe: detect the tenant's Entra ID tier so Agent Hub
-    // can badge incompatible agents. Failure here is silent. `unknown`
-    // is treated as informational (badges shown, runs not blocked).
-    void this.probeEntraTier(tenant).catch(() => undefined);
+    // can badge incompatible agents. `unknown` is treated as informational
+    // (badges shown, runs not blocked). A probe that cannot finish, such as
+    // another account signing in, is saved as a tenant warning.
+    void this.backgroundTierProbe(tenant);
 
     // Connecting a real tenant ends pilot mode. The pilot tenant goes
     // through the normal disconnect path, which purges its runs, cache,
@@ -5626,7 +6011,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   async addTenantAccess(
     tenantId: string,
-    areaId: PermissionAreaId,
+    partIds: readonly string[],
   ): Promise<AppState> {
     const persisted = await this.read();
     const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
@@ -5634,39 +6019,285 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       throw new Error("Tenant not found. Refresh Settings and try again.");
     }
     if (tenant.kind === "sample") {
-      throw new Error("The sample tenant already includes every permission area.");
+      throw new Error("The sample tenant already includes every service.");
     }
-    const area = permissionAreaById(areaId);
-    if (!area) throw new Error("Permission area is invalid.");
-    const client = this.msalClientForTenant(tenant);
-    const requestedScopes = [...area.scopes];
-    let result;
-    try {
-      result = await runInteractiveFlow({
-        client,
-        scopes: requestedScopes.map(
-          (scope) => `https://graph.microsoft.com/${scope}`,
-        ),
-        openBrowser: this.openBrowser,
-        timeoutMs: 300_000,
-      });
-    } catch (error) {
-      throw new Error(humanizeMsalError(error, tenant.appRegistration));
-    }
-    const newlyGranted = intersectGrantedScopes(result.scopes, requestedScopes);
-    await this.serialize(async () => {
-      const current = await this.read();
-      const tenants = current.tenants.map((entry) =>
-        entry.id === tenantId
-          ? {
-              ...entry,
-              grantedScopes: mergeGrantedScopes(entry, newlyGranted),
-            }
-          : entry,
+    if (tenant.appRegistration?.kind === "custom") {
+      // Consent for an own registration is granted on the app itself.
+      throw new Error(
+        "Add these permissions to your app registration, then choose Check again.",
       );
-      await this.write({ ...current, tenants });
+    }
+    const parts = partIds.map((id) => servicePartById(id));
+    if (parts.length === 0 || parts.some((part) => !part || part.planned)) {
+      throw new Error("Choose a service part that can be added.");
+    }
+    const scopeNames = [
+      ...new Set(parts.flatMap((part) => part!.scopes.map((scope) => scope.name))),
+    ];
+    return this.runTenantCheck(tenant, "access", async (operation) => {
+      let result;
+      try {
+        result = await this.tenantCheckSignIn(operation, tenant, toResourceScopes(scopeNames));
+      } catch (error) {
+        throw new Error(humanizeMsalError(error, tenant.appRegistration));
+      }
+      // Consent from another account must not change this tenant's grants.
+      assertSignedInAccount(result, connectedAccountOf(tenant));
+      const granted = grantsFromTokenScopes(result.scopes);
+      const updated = { ...tenant, grantedScopes: mergeGrantedScopes(tenant, granted) };
+      // From here a cancel keeps the new access; only the license check stops.
+      operation.grants = "added";
+      operation.probing = needsTierProbe(updated);
+      await this.saveCheckGrants(operation, (entry) => mergeGrantedScopes(entry, granted));
+      // The new grants can include Organization.Read.All, so the license
+      // check runs now instead of waiting for the next sign-in.
+      await this.probeTenantTier(operation, updated, { force: true });
+      return this.getAppState();
     });
-    return this.getAppState();
+  }
+
+  /**
+   * Check again for an own registration: get a fresh `.default` token and
+   * replace the stored grants with what it carries. Falls back to an
+   * interactive sign-in when the refresh token cannot be used. When the
+   * last license check did not finish, it runs again even if the grants
+   * are unchanged.
+   */
+  async refreshTenantGrants(tenantId: string): Promise<AppState> {
+    const persisted = await this.read();
+    const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
+    if (!tenant) {
+      throw new Error("Tenant not found. Refresh Settings and try again.");
+    }
+    if (tenant.kind === "sample") {
+      throw new Error("The sample tenant already includes every service.");
+    }
+    if (tenant.appRegistration?.kind !== "custom") {
+      throw new Error(
+        "Check again applies to your own app registration. Use Add access in Settings, Tenants for the OpenAdminOS app.",
+      );
+    }
+    return this.runTenantCheck(tenant, "permissions", async (operation) => {
+      let result;
+      try {
+        // Bound to the stored account in the stored directory, and checked
+        // against both before the grants are replaced.
+        result = await acquireTokenSilent({
+          client: this.msalClientForTenant(tenant),
+          account: connectedAccountOf(tenant),
+          authority: tenant.appRegistration?.authority,
+          scopes: CUSTOM_REGISTRATION_SCOPES,
+          forceRefresh: true,
+          signal: operation.signal,
+        });
+      } catch (silentError) {
+        if (silentError instanceof TenantAccountMismatchError) throw silentError;
+        if (!isInteractionRequired(silentError)) {
+          throw new Error(humanizeMsalError(silentError, tenant.appRegistration));
+        }
+        try {
+          result = await this.tenantCheckSignIn(operation, tenant, CUSTOM_REGISTRATION_SCOPES);
+        } catch (error) {
+          throw new Error(humanizeMsalError(error, tenant.appRegistration));
+        }
+        // A fresh sign-in could be anyone, so it must match before grants
+        // are replaced.
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+      }
+      // A token that answers after a cancel or the deadline is not used.
+      operation.signal.throwIfAborted();
+      const grants = grantsFromTokenScopes(scopesFromAuthenticationResult(result));
+      const previous = new Set((tenant.grantedScopes ?? []).map(qualifyScope));
+      const unchanged =
+        tenant.grantedScopes !== undefined &&
+        grants.length === previous.size &&
+        grants.every((grant) => previous.has(grant));
+      // Unchanged grants still retry a license check that did not finish.
+      if (unchanged && !tenant.tierProbeWarning) throw new TenantGrantsUnchangedError();
+      const updated = { ...tenant, grantedScopes: grants };
+      operation.grants = unchanged ? "unchanged" : "updated";
+      operation.probing = needsTierProbe(updated);
+      if (!unchanged) await this.saveCheckGrants(operation, () => grants);
+      await this.probeTenantTier(operation, updated, { force: true });
+      return this.getAppState();
+    });
+  }
+
+  /**
+   * Retry license check: run only the Entra tier and license probe, with
+   * the same cancel and deadline as Check again. Grants are not changed.
+   */
+  async retryTenantLicenseCheck(tenantId: string): Promise<AppState> {
+    const persisted = await this.read();
+    const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
+    if (!tenant) {
+      throw new Error("Tenant not found. Refresh Settings and try again.");
+    }
+    return this.runTenantCheck(tenant, "license", async (operation) => {
+      await this.probeTenantTier(operation, tenant, { force: true });
+      return this.getAppState();
+    });
+  }
+
+  /**
+   * Cancel the check or license probe running for a tenant. Its caller
+   * rejects with `TenantCheckCancelledError`, whose message says what was
+   * kept.
+   */
+  cancelTenantCheck(tenantId: string): void {
+    this.tenantChecks.get(tenantId)?.stop("cancelled");
+  }
+
+  /**
+   * Stops the operation of a tenant that was reconnected or disconnected.
+   * It is released at once, so a new operation can start. An operation
+   * already on `keepConnectionId` keeps running.
+   */
+  private supersedeTenantCheck(
+    tenantId: string,
+    how: TenantSuperseded,
+    keepConnectionId?: string,
+  ): void {
+    const entry = this.tenantChecks.get(tenantId);
+    if (!entry) return;
+    if (keepConnectionId !== undefined && entry.connectionId === keepConnectionId) return;
+    this.tenantChecks.delete(tenantId);
+    entry.superseded = how;
+    entry.controller.abort("superseded" satisfies TenantCheckAbort);
+  }
+
+  /**
+   * Runs one tenant operation: at most one per tenant, with a cancel and
+   * an overall deadline. It rejects as soon as its signal aborts, even
+   * when a step ignores the signal, so the tenant is always released.
+   * A cancelled or expired license check is saved as a warning.
+   */
+  private async runTenantCheck<T>(
+    tenant: TenantRecord,
+    kind: TenantCheckKind,
+    work: (operation: TenantOperation) => Promise<T>,
+  ): Promise<T> {
+    if (this.tenantChecks.has(tenant.id)) throw new TenantCheckBusyError();
+    const controller = new AbortController();
+    const deadlineMs = this.tenantCheckDeadlineMs;
+    const entry = {
+      progress: { tenantId: tenant.id, kind, phase: "checking" } as TenantCheckProgress,
+      controller,
+      connectionId: tenant.connectionId,
+      superseded: undefined as TenantSuperseded | undefined,
+      stop(reason: "cancelled" | "timeout") {
+        if (!operation.committed) controller.abort(reason satisfies TenantCheckAbort);
+      },
+    };
+    this.tenantChecks.set(tenant.id, entry);
+    this.emitStateChanged("tenant-check");
+    const owns = () => this.tenantChecks.get(tenant.id) === entry;
+    const host = this;
+    const operation: TenantOperation = {
+      tenantId: tenant.id,
+      connectionId: tenant.connectionId,
+      seq: ++this.tenantCheckSeq,
+      signal: controller.signal,
+      get phase() {
+        return entry.progress.phase;
+      },
+      setPhase(phase) {
+        if (entry.progress.phase === phase || !owns()) return;
+        entry.progress = { ...entry.progress, phase };
+        host.emitStateChanged("tenant-check");
+      },
+      probing: kind === "license" && needsTierProbe(tenant),
+      committed: false,
+    };
+    // A referenced timer keeps the deadline real in any process; it is cleared
+    // in the finally block below whichever way the operation ends.
+    const timer = setTimeout(() => entry.stop("timeout"), deadlineMs);
+    try {
+      return await awaitWithSignal(work(operation), controller.signal);
+    } catch (error) {
+      if (!controller.signal.aborted) throw error;
+      const abort = controller.signal.reason as TenantCheckAbort;
+      if (abort === "superseded") throw new TenantCheckSupersededError(entry.superseded ?? "reconnected");
+      const within = deadlineText(deadlineMs);
+      if (operation.probing) {
+        void this.saveTierProbeOutcome(operation, abortedTierProbe(abort, within), { afterAbort: true })
+          .catch((writeError) => console.error(`[probeEntraTier] ${tenant.displayName}: could not save the stopped license check`, writeError));
+      }
+      const message = abortedCheckMessage(kind, operation, abort, within);
+      throw abort === "cancelled"
+        ? new TenantCheckCancelledError(message)
+        : new TenantCheckTimeoutError(message);
+    } finally {
+      clearTimeout(timer);
+      if (owns()) this.tenantChecks.delete(tenant.id);
+      this.emitStateChanged("tenant-check");
+    }
+  }
+
+  /** An interactive sign-in inside a tenant operation, reported as its sign-in phase. */
+  private async tenantCheckSignIn(
+    operation: TenantOperation,
+    tenant: TenantRecord,
+    scopes: string[],
+  ): Promise<AuthenticationResult> {
+    const previous = operation.phase;
+    operation.setPhase("sign-in");
+    try {
+      const result = await this.interactiveSignIn({
+        client: this.msalClientForTenant(tenant),
+        scopes,
+        openBrowser: this.openBrowser,
+        signal: operation.signal,
+        timeoutMs: 300_000,
+        ...signInTargetFor(tenant),
+      });
+      // A sign-in that answers after a cancel or the deadline is not used.
+      operation.signal.throwIfAborted();
+      return result;
+    } finally {
+      operation.setPhase(previous);
+    }
+  }
+
+  /**
+   * Saves grants from a verified token. Their commit point is the token:
+   * the caller records `operation.grants` before queuing the save, so a
+   * later cancel keeps them and the message says so. Inside the write
+   * queue, after the read and right before the write, only the connection
+   * is checked again: a reconnect or disconnect drops the save.
+   */
+  private async saveCheckGrants(
+    operation: TenantOperation,
+    grantsFor: (entry: TenantRecord) => string[],
+  ): Promise<void> {
+    let saved = false;
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      this.assertSameConnection(persisted, operation);
+      await this.write({
+        ...persisted,
+        tenants: persisted.tenants.map((entry) =>
+          entry.id === operation.tenantId ? { ...entry, grantedScopes: grantsFor(entry) } : entry,
+        ),
+      });
+      saved = true;
+    });
+    if (saved) this.emitStateChanged("tenant-grants");
+  }
+
+  private sameConnection(entry: TenantRecord, operation: TenantOperation): boolean {
+    return entry.id === operation.tenantId && entry.connectionId === operation.connectionId;
+  }
+
+  /**
+   * Throws when the tenant was reconnected or disconnected since the
+   * operation started, including in the gap before it registered, which
+   * no supersede reaches. The caller then reports it instead of success.
+   */
+  private assertSameConnection(persisted: PersistedState, operation: TenantOperation): void {
+    const current = persisted.tenants.find((entry) => entry.id === operation.tenantId);
+    if (current && this.sameConnection(current, operation)) return;
+    throw new TenantCheckSupersededError(current ? "reconnected" : "disconnected");
   }
 
   async addSampleTenant(): Promise<AppState> {
@@ -5772,12 +6403,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   /**
-   * Fetch `/subscribedSkus` for the given tenant and persist the
-   * detected Entra ID tier on the tenant record. Skipped if the last
-   * probe succeeded within the past 24 hours (license states change
-   * rarely). Best effort, silent on failure.
-   */
-  /**
    * Fire a tenant tier probe for every persisted tenant. Do not call
    * this during app startup: MSAL token-cache reads can trigger the
    * macOS Keychain prompt before the user has taken an auth-related
@@ -5786,33 +6411,112 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async probeAllTenants(): Promise<void> {
     const persisted = await this.read().catch(() => null);
     if (!persisted) return;
-    for (const tenant of persisted.tenants) {
-      void this.probeEntraTier(tenant, { force: true }).catch(() => undefined);
-    }
+    await Promise.all(
+      persisted.tenants.map((tenant) => this.backgroundTierProbe(tenant, { force: true })),
+    );
   }
 
-  async probeEntraTier(
+  /**
+   * A license check nobody waits for, as a tenant operation, so Settings
+   * and the tenant switcher show it with a Cancel. Skipped while another
+   * check runs for the tenant. A probe that cannot finish keeps the
+   * stored tier and licenses and is saved as a warning.
+   */
+  private async backgroundTierProbe(
     tenant: TenantRecord,
     options: { force?: boolean } = {},
   ): Promise<void> {
-    if (tenant.kind === "sample") {
-      const detectedAt = new Date().toISOString();
-      await this.serialize(async () => {
-        const persisted = await this.read();
-        const tenants = persisted.tenants.map((entry) =>
-          entry.id === tenant.id
-            ? {
-                ...entry,
-                entraTier: "p2" as const,
-                entraTierDetectedAt: detectedAt,
-                relevantLicenses: sampleRelevantLicenses(),
-              }
-            : entry,
-        );
-        await this.write({ ...persisted, tenants });
-      });
-      return;
+    if (this.tenantChecks.has(tenant.id)) return;
+    await this.runTenantCheck(tenant, "license", (operation) =>
+      this.probeTenantTier(operation, tenant, options),
+    ).catch((error) =>
+      console.warn(
+        `[probeEntraTier] ${tenant.displayName}: ${error instanceof Error ? error.message : String(error)}`,
+      ),
+    );
+  }
+
+  /**
+   * Fetch `/subscribedSkus` inside a tenant operation and save the Entra
+   * tier and licenses, or the warning that says why the check did not
+   * finish. Skipped when Organization.Read.All is not granted, and,
+   * without `force`, when the last probe finished within a day.
+   */
+  private async probeTenantTier(
+    operation: TenantOperation,
+    tenant: TenantRecord,
+    options: { force?: boolean },
+  ): Promise<void> {
+    let outcome: TierProbeOutcome;
+    try {
+      outcome = await this.readEntraTier(operation, tenant, options);
+    } catch (error) {
+      // A stopped operation is reported by runTenantCheck.
+      if (operation.signal.aborted) throw error;
+      outcome = { kind: "failed", warning: tierProbeWarningFor(error, tenant.appRegistration) };
     }
+    await this.saveTierProbeOutcome(operation, outcome);
+  }
+
+  /**
+   * Saves a license check result. The commit point is inside the write
+   * queue, after the read and right before the write: the result is
+   * dropped when its operation was stopped (unless this is the stop being
+   * recorded), when a newer result is saved, or when the tenant was
+   * reconnected or disconnected. Past that point the operation is
+   * committed and a cancel no longer stops it.
+   */
+  private async saveTierProbeOutcome(
+    operation: TenantOperation,
+    outcome: TierProbeOutcome,
+    options: { afterAbort?: boolean } = {},
+  ): Promise<void> {
+    if (outcome.kind === "recent") return;
+    let saved = false;
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      // Commit point.
+      if (operation.signal.aborted && !options.afterAbort) return;
+      if ((this.savedTierProbeSeq.get(operation.tenantId) ?? 0) > operation.seq) return;
+      if (options.afterAbort) {
+        if (!persisted.tenants.some((entry) => this.sameConnection(entry, operation))) return;
+      } else {
+        this.assertSameConnection(persisted, operation);
+        operation.committed = true;
+      }
+      await this.write({
+        ...persisted,
+        tenants: persisted.tenants.map((entry) =>
+          entry.id === operation.tenantId ? withTierProbeOutcome(entry, outcome) : entry,
+        ),
+      });
+      this.savedTierProbeSeq.set(operation.tenantId, operation.seq);
+      saved = true;
+    });
+    if (saved) this.emitStateChanged("tenant-probe");
+  }
+
+  /** Reads the tier and licenses without saving them. Throws on any failure. */
+  private async readEntraTier(
+    operation: TenantOperation,
+    tenant: TenantRecord,
+    options: { force?: boolean },
+  ): Promise<Exclude<TierProbeOutcome, { kind: "failed" | "cancelled" }>> {
+    if (tenant.kind === "sample") {
+      return {
+        kind: "found",
+        fields: {
+          entraTier: "p2",
+          entraTierDetectedAt: new Date().toISOString(),
+          relevantLicenses: sampleRelevantLicenses(),
+        },
+      };
+    }
+    // The probe reads /subscribedSkus. Without Organization.Read.All it
+    // would open a consent prompt the admin did not ask for, so the
+    // licenses are not checked until a service that includes it is
+    // connected. That is a designed state, not a warning.
+    if (!needsTierProbe(tenant)) return { kind: "not-granted" };
     const DAY_MS = 24 * 60 * 60 * 1000;
     const recent =
       tenant.entraTier &&
@@ -5823,50 +6527,50 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // populated yet (migration from pre-license-panel persisted state).
     const licensesMissing = tenant.relevantLicenses === undefined;
     if (recent && !licensesMissing && !options.force) {
-      return;
+      return { kind: "recent" };
     }
-    const client = this.msalClientForTenant(tenant);
-    const openBrowser = this.openBrowser;
+    operation.setPhase("licenses");
     const session = createTenantSession({
-      client,
+      client: this.msalClientForTenant(tenant),
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
-      acquireInteractive: async (scopes) =>
-        await this.interactiveSignIn({ client, scopes, openBrowser }),
+      authority: tenant.appRegistration?.authority,
+      signal: operation.signal,
+      acquireInteractive: async (scopes) => {
+        const signIn = await this.tenantCheckSignIn(operation, tenant, scopes);
+        assertSignedInAccount(signIn, connectedAccountOf(tenant));
+        return signIn;
+      },
     });
+    // Any failure throws, including another account signing in, so what
+    // is stored is never replaced by a guess.
     const result = await probeSubscribedSkus(
       (scopes) => session.acquireTokenForScopes(scopes),
+      undefined,
+      undefined,
+      { signal: operation.signal },
     );
-    const detected = result?.tier ?? "unknown";
-    const relevantLicenses = result?.relevantLicenses ?? [];
     // Surface SKUs we recognise but couldn't map to a friendly name.
     // Lands in the dev log so we can grow RELEVANT_SKU_NAMES quickly
     // when Microsoft ships a new tier.
-    if (result?.allSkuPartNumbers) {
-      const surfaced = new Set(relevantLicenses.map((l) => l.skuPartNumber));
-      const unmatched = result.allSkuPartNumbers.filter((p) => !surfaced.has(p));
-      if (unmatched.length > 0) {
-        console.log(
-          `[probeEntraTier] ${tenant.displayName}: unmatched skuPartNumbers (add to RELEVANT_SKU_NAMES if these should appear in the Licenses panel):`,
-          unmatched,
-        );
-      }
+    const surfaced = new Set(result.relevantLicenses.map((l) => l.skuPartNumber));
+    const unmatched = result.allSkuPartNumbers.filter((p) => !surfaced.has(p));
+    if (unmatched.length > 0) {
+      console.log(
+        `[probeEntraTier] ${tenant.displayName}: unmatched skuPartNumbers (add to RELEVANT_SKU_NAMES if these should appear in the Licenses panel):`,
+        unmatched,
+      );
     }
-    await this.serialize(async () => {
-      const persisted = await this.read();
-      const idx = persisted.tenants.findIndex((t) => t.id === tenant.id);
-      if (idx < 0) return;
-      const next = [...persisted.tenants];
-      next[idx] = {
-        ...next[idx],
-        entraTier: detected,
+    return {
+      kind: "found",
+      fields: {
+        entraTier: result.tier,
         entraTierDetectedAt: new Date().toISOString(),
-        relevantLicenses,
-        intuneLicensed: result?.intuneLicensed,
-      };
-      await this.write({ ...persisted, tenants: next });
-    });
+        relevantLicenses: result.relevantLicenses,
+        intuneLicensed: result.intuneLicensed,
+      },
+    };
   }
 
   async setActiveTenant(id: string): Promise<AppState> {
@@ -5925,6 +6629,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await this.write(next);
       if (target?.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     });
+    this.supersedeTenantCheck(id, "disconnected");
     await this.officeService.purgeTenant(id);
 
     return this.getAppState();
@@ -6078,6 +6783,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (requestedScopes: string[]) => {
         if (execution) {
           execution.signal.throwIfAborted();
@@ -6095,19 +6801,25 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
             .filter((scope) => !OIDC_SCOPES.has(scope) && !granted.has(scope));
           if (ungranted.length > 0) {
             throw new Error(
-              `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Settings, Tenants.`,
+              missingServiceCopy(tenant, ungranted) ??
+                `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Settings, Tenants.`,
             );
           }
         }
         // Re-authentication, or per-capability incremental consent for
         // manually started agents. Subsequent silent acquisitions for the
-        // same scope set succeed from cache.
-        return await runInteractiveFlow({
+        // same scope set succeed from cache. Another account must not
+        // reach Graph or this tenant's grants, so it fails here before
+        // the token is used or recorded.
+        const result = await this.interactiveSignIn({
           client,
           scopes: requestedScopes,
           openBrowser,
           signal: execution?.signal,
+          ...signInTargetFor(tenant),
         });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
       },
     });
     // When the agent declares Graph scopes, route the tokenProvider
@@ -6116,18 +6828,38 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // interactive consent on the first run that requires a new one.
     // Connectors already do this for their declared scopes; agents now
     // get the same treatment.
+    // Grants follow what tokens carry, never what an agent declares. Each
+    // new set of returned scopes is recorded once per selection.
+    const recorded = new Set<string>();
+    const recordTokenScopes = <T extends string | { accessToken: string; scopes?: readonly string[] }>(
+      acquired: T,
+    ): T => {
+      if (typeof acquired !== "string") {
+        const grants = grantsFromTokenScopes(acquired.scopes).filter((grant) => !recorded.has(grant));
+        if (grants.length > 0) {
+          for (const grant of grants) recorded.add(grant);
+          void this.recordTokenGrants(tenant, grants).catch((error) =>
+            console.warn(
+              `[tenants] granted scopes for ${tenant.id} could not be recorded: ${error instanceof Error ? error.message : String(error)}`,
+            ),
+          );
+        }
+      }
+      return acquired;
+    };
     const tokenProvider =
       scopes.length > 0
-        ? async () => tenantSession.acquireTokenWithScopes
+        ? async () => recordTokenScopes(tenantSession.acquireTokenWithScopes
           ? await tenantSession.acquireTokenWithScopes(scopes)
-          : await tenantSession.acquireTokenForScopes(scopes)
+          : await tenantSession.acquireTokenForScopes(scopes))
         : async () => {
             const result = await acquireTokenSilent({
               client,
-              homeAccountId: tenant.homeAccountId,
+              account: connectedAccountOf(tenant),
+              authority: tenant.appRegistration?.authority,
               scopes: [...grantedScopeSet(tenant)],
             });
-            return { accessToken: result.accessToken, scopes: result.scopes };
+            return recordTokenScopes({ accessToken: result.accessToken, scopes: result.scopes });
           };
     return {
       createGraph: (log) => this.graphFactory
@@ -6142,6 +6874,35 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       tenantId: tenant.id,
       tenantSession,
     };
+  }
+
+  /**
+   * Merge scopes a token returned into the tenant's grants. Tenants whose
+   * grants were never recorded keep the all-defaults assumption until
+   * their next sign-in replaces it with what Microsoft returned.
+   */
+  private async recordTokenGrants(
+    signedIn: TenantRecord,
+    grants: readonly string[],
+  ): Promise<void> {
+    const tenantId = signedIn.id;
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
+      if (!tenant || tenant.kind === "sample" || tenant.grantedScopes === undefined) return;
+      // A token from an earlier connection says nothing about this one.
+      if (tenant.connectionId !== signedIn.connectionId) return;
+      const known = new Set(tenant.grantedScopes.map(qualifyScope));
+      if (grants.every((grant) => known.has(qualifyScope(grant)))) return;
+      await this.write({
+        ...persisted,
+        tenants: persisted.tenants.map((entry) =>
+          entry.id === tenantId
+            ? { ...entry, grantedScopes: mergeGrantedScopes(entry, grants) }
+            : entry,
+        ),
+      });
+    });
   }
 
   private async persistRunSnapshot(run: RunRecord): Promise<void> {
@@ -6265,7 +7026,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
               }
             : tenant;
         },
-      );
+      )
+        // Services migration: grants were stored as bare Graph scope
+        // names. They are now qualified with their audience, for example
+        // `graph:User.Read.All`. Qualifying is idempotent, and an absent
+        // list keeps meaning "every default" until the next sign-in.
+        .map((tenant) =>
+          isPlainRecordValue(tenant) && Array.isArray(tenant.grantedScopes)
+            ? { ...tenant, grantedScopes: qualifyStoredGrants(tenant.grantedScopes) }
+            : tenant,
+        );
       const activeTenantId =
         typeof parsed.activeTenantId === "string" &&
         tenants.some((tenant) => tenant.id === parsed.activeTenantId)

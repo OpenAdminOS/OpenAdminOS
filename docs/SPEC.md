@@ -6,7 +6,7 @@
 
 ## 1. What we're building
 
-**OpenAdminOS** is an open-source desktop platform for IT administrators to run AI agents against the services they manage, starting with Microsoft 365 (initially Intune & Entra). Agents are TypeScript modules contributed by the community, run locally on the admin's machine, and operate against the tenant via Microsoft Graph.
+**OpenAdminOS** is an open-source desktop platform for IT administrators to run AI agents against the services they manage. The first is Microsoft 365, starting with Intune, Entra and Defender. Agents are TypeScript modules contributed by the community, run locally on the admin's machine, and operate against the tenant via Microsoft Graph.
 
 The product is local-first: by default, tenant data and LLM prompts never leave the user's device. The user can opt into hosted LLM providers (Anthropic, OpenAI, Azure OpenAI), and when they do, the UI honestly reflects that data leaves the device.
 
@@ -18,7 +18,7 @@ There is no separate CLI. Power users get the same GUI; contributor tooling (age
 
 ### Audience
 
-- Primary: Microsoft 365 / Intune / Entra administrators in mid-to-large organizations and MSPs
+- Primary: Microsoft 365 administrators, starting with Intune, Entra and Defender, in mid-to-large organizations and MSPs
 - Secondary: IT consultants, MVP community members, scripting-fluent admins
 - Explicitly NOT: end users, developers building general-purpose AI apps, hybrid AD admins
 
@@ -1714,6 +1714,17 @@ can improve attribution, but answering a drift query never calls Microsoft Graph
 The desktop host exposes timeline, entry detail, object history, and status APIs
 from local SQLite snapshot/version rows.
 
+Drift views follow the tenant's current grants by the same part-level rule as
+Chat and the cache (`availableScopeSet`). The timeline, baseline drift, new
+baselines, point-in-time, bundle and cross-tenant compare, rollback plans and
+fleet drift counts leave out resources whose service part is not granted now.
+Their earlier snapshots stay on the device until retention prunes them, but they
+are historical and no longer refreshed, so they are never shown or compared as
+current. Results list the left-out resources that were asked for by name or
+still hold snapshots, and the UI names the service: "Intune is not connected.
+Its earlier snapshots are not compared." Entry detail for such a resource is
+labelled as a historical snapshot that is no longer refreshed.
+
 Diffs are deterministic. The host canonicalizes tracked objects, ignores known
 volatile fields, hashes canonical JSON, and computes field-level before/after
 paths with the pure diff engine. The LLM never computes drift and is not allowed
@@ -1946,6 +1957,30 @@ Public page: `docs/gitbook/trust/eu-ai-act.md` (docs.openadminos.com, Trust mode
 - **OpenAdmin models.** The Commission's GPAI guidelines treat modification compute above one third of the original training compute as an indicative criterion for a modifier becoming a model provider. Fine-tunes stay several orders of magnitude below it, so the project does not expect to be the general-purpose model provider. Model cards and the public SFT dataset are kept anyway.
 - **Model developers** (Anthropic, OpenAI, Google, or the publisher of a local model) are the general-purpose model providers. Hosting or relay services such as GitHub Copilot and Azure OpenAI carry their own terms. **Deployers** (organisations using the app) keep their own obligations, such as Article 4 AI literacy.
 - **Re-assess when:** the Act or its guidance changes, the app is distributed on different terms, the registry accepts a new category of agent that evaluates people, or model training changes materially. Timeline note: the Digital Omnibus on AI (reported as Regulation (EU) 2026/1744, in force 27 July 2026, per secondary sources) moved stand-alone high-risk obligations to 2 December 2027 and left Article 50 at 2 August 2026, with a reported grace period for Article 50(2) marking to 2 December 2026. Verify against EUR-Lex before relying on these dates.
+
+## 2a. Services
+
+Decided 2026-11-04. OpenAdminOS connects Microsoft 365 by service, starting with Intune, Entra and Defender, all read through Microsoft Graph. Exchange, Teams and SharePoint are planned and documented only.
+
+- **Registry.** `packages/agent-sdk/src/services.ts` is the only source for services, parts, scopes, the reason for each scope, its audience and delegated permission ID, the cache resources each part feeds, Chat example questions, least-privilege roles and licences. The connect dialog, Settings, the setup scripts, the `requiredResourceAccess` snippet, Chat and cache gating, agent gating, registry QA and the generated docs (`docs/gitbook/generated/reference/permissions-by-service.md`, `generated/services/*.md`) all read it. Permission IDs are the ones verified with Lokka on 2026-11-04 (`tasks/todo.md`, "Lokka verification") and pinned by a test.
+- **Parts.** A service is split into parts; a part is the smallest set of scopes granted or added on its own (`intune.people`, `intune.devices`, `intune.apps`, `entra.people`, `entra.devices`, `entra.apps`, `entra.access`, `entra.policies`, `entra.signins`, `defender.incidents`, `defender.score`). Parts may share scopes, such as `User.Read.All` in `intune.people` and `entra.people`; requests deduplicate them, and the picker shows a part whose scopes another selected part already requests as included. A part is on only when every one of its scopes is granted. A service is connected when all of its parts are on, partial when some are, and not connected when none are. Planned parts (`defender.hunting`, `ThreatHunting.Read.All`) are never requested.
+- **Baseline.** Sign-in requests exactly `openid`, `profile`, `offline_access` and `User.Read`. Each service adds its own scopes. `Directory.Read.All` is in no service and is requested only when an agent that declares it runs. Write scopes are run-time only, listed per service as agent-only scopes.
+- **Qualified scopes.** Stored grants carry their audience, for example `graph:User.Read.All`, so services on other audiences can be added later. Bare entries from earlier versions are migrated on read. `TenantRecord.grantedScopes` holds only scopes Microsoft returned in a token; declared scopes are never merged in after a run. A tenant without recorded grants keeps the all-defaults behaviour until its next sign-in.
+- **Shared app.** The connect dialog requires at least one service and preselects none. Intune-only consent requests the baseline plus the Intune part scopes and nothing else. Add access in Settings, Tenants, or from a not-connected state, consents one service's scopes and merges them with the existing grants.
+- **Own registration.** Sign-in requests `https://graph.microsoft.com/.default` plus `offline_access`, and the granted set comes from the token (MSAL's returned scopes, or the access token's `scp` claim when only `.default` is listed). There is no picker; the services follow the grants. A missing part shows its exact permissions, a script that adds them to the existing app ID (keeping every existing entry and extending the tenant-wide grant), a `requiredResourceAccess` snippet to merge, and Check again, which forces a new token and reports when nothing changed. The create script works per service.
+- **Tenant checks.** Add access, Check again, Retry license check and every background license probe run as one operation per tenant, with a cancel and a five minute deadline that also bound token cache reads. Connect is not one of them: it has its own sign-in controller and cancel, and after it saves the new connection it stops any operation still running for the tenant's previous connection, then starts the background license probe as an operation on the new one. A token that arrives after a cancel or the deadline is not used. Grants are saved as soon as the token is verified, and a cancel never rolls them back. The license check is a separate step that only changes the Entra tier, licenses and `tierProbeWarning`; a failed, cancelled or expired check keeps the stored tier and licenses and saves the warning. Its commit point is inside the write queue, after the read and right before the write: a cancel before it saves nothing new, and a cancel after it is ignored so the check reports what it saved. `TenantRecord.connectionId` changes on every connect; a save from another connection fails with "This tenant was reconnected while the check ran. Run the check again.", and a stopped operation or an older license check saves nothing. Progress and Cancel come from the host, so every view that shows the tenant shows them.
+- **Gating.** Chat names a missing service or part ("Defender is not connected for this tenant. Add it in Settings, Tenants.") without a Graph call. Cache refresh skips resources of services that are not connected. Agents declare `services` in the manifest (schema, SDK types and the `services-cover-scopes` QA check); an agent cannot run while one of its services is not connected, and a missing part of a connected service is consented when a manual run starts. Agents and the Marketplace show service chips and filter by service. Routes that need a service show a designed not-connected panel with an Add action.
+- **Planned services.** Exchange, Teams and SharePoint are documented on `docs/gitbook/services/planned.md` with no dates. Parts of their admin surface need service-specific APIs with their own token audience, which the qualified scope model allows.
+
+
+**Decisions (owner, 2026-11-04).** These were open questions during the build and are now settled:
+- The connect dialog preselects no service.
+- `Organization.Read.All` sits in the people parts of both Intune and Entra.
+- `Device.Read.All` is listed in both `intune.devices` and `entra.devices`.
+- Secure Score sits under Defender.
+- Planned services appear only in the docs.
+- `offboarding-agent` declares Intune only.
+- `tenant-change-audit` declares Entra only.
 
 ## 3. Design system
 
@@ -2233,9 +2268,9 @@ Chat is the first-run surface, and the full shell remains browsable without a te
 
 **Connect flow wording (2026-10-26).** The permissions stage states that permissions are delegated: OpenAdminOS reads only what both the consented scopes and the signed-in admin's role allow, so Intune RBAC roles and scope tags still apply. The own-registration form says no client secret is used, so there is nothing secret to store on the device. After sign-in, the connected stage reports what now exists in the customer tenant in Entra terms: the enterprise application name, its application (client) ID, and the delegated permission count (default read scopes plus openid, profile, and offline_access), computed from the scope list rather than hard-coded. A custom registration reports its own client ID.
 
-**Permission areas and registration script (2026-10-27).** Admin teams are often siloed, so the connect flow no longer requests every read scope unconditionally. The permissions stage lists the scope groups as areas with checkboxes, all selected by default; "Users, groups, and directory" is required. `TenantRecord.grantedScopes` stores the intersection of requested and granted scopes; absent means the full default read set (tenants connected earlier). Chat and the Graph cache read only granted areas: a question that needs another area gets a designed message naming it, with no Graph call and no consent prompt. Chat and cache refreshes may re-authenticate an expired session, but an interactive request from those paths is refused when it would add scopes. Settings, Tenants offers Add access per missing area (user-initiated consent). Manually started agents keep incremental consent for their declared scopes, the run review names the missing area first, and successful runs merge the consented scopes into the tenant record. Scheduled runs never open a sign-in. This supersedes the earlier rule that all default read scopes are requested together at first sign-in.
+**Services replace permission areas (2026-11-04).** Admin teams are often siloed, so the connect flow requests only what the admin chooses. The permission areas of 2026-10-27 (all selected by default, a required "Users, groups, and directory" area that included `Directory.Read.All`, and areas that mixed services) are replaced by services and parts; see §2a. Chat and cache refreshes may re-authenticate an expired session, but an interactive request from those paths is refused when it would add scopes. Scheduled runs never open a sign-in.
 
-The own-registration form generates a deterministic PowerShell script (Microsoft Graph PowerShell SDK, no LLM) for an administrator who can create app registrations, plus a message to send with it. The script explains each change, refuses to run when a Graph PowerShell module it uses is missing or the display name already exists, creates a single-tenant public client with the loopback redirect, resolves delegated permission IDs at run time, creates the service principal, grants tenant-wide consent for the chosen areas (deleting the registration it created if either of those steps fails), and never creates a secret or certificate. Separate app registrations per team or agent remain a later architecture change.
+The own-registration form generates a deterministic PowerShell script (Microsoft Graph PowerShell SDK, no LLM) for an administrator who can create app registrations, plus a message to send with it. The script explains each change, refuses to run when a Graph PowerShell module it uses is missing or the display name already exists, creates a single-tenant public client with the loopback redirect, resolves delegated permission IDs at run time, creates the service principal, grants tenant-wide consent for the chosen services (deleting the registration it created if either of those steps fails), and never creates a secret or certificate. A second script extends an existing registration (§2a). Separate app registrations per team or agent remain a later architecture change.
 
 Setup opens only when an action needs tenant context: sending Chat, starting or rerunning an agent, opening tenant Changes from its empty state, refreshing tenant cache data, or explicitly choosing Connect tenant. The shared setup dialog follows this order:
 

@@ -1,9 +1,11 @@
 import { PILOT_COPY } from "../src/shared/pilot-mode.js";
 import {
+  assertSignedInAccount,
   createTenantSession,
   findConnectorFactory,
   noSecrets,
   runInteractiveFlow,
+  TenantAccountMismatchError,
 } from "@openadminos/runtime";
 import type {
   AgentDiscordDelivery,
@@ -25,8 +27,10 @@ import type { PublicClientApplication } from "@azure/msal-node";
 import { WHATSAPP_WEB_CONNECTOR_ID } from "@openadminos/connector-whatsapp-web";
 
 import {
+  connectedAccountOf,
   createLocalOnlyTenantSession,
   isTerminalRunStatus,
+  signInTargetFor,
 } from "./state-helpers.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -570,12 +574,20 @@ export class RunDeliveryService {
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (scopes) => {
         if (run.trigger === "schedule") {
           scheduledAuthRequired = true;
           throw new Error(authRecovery);
         }
-        return runInteractiveFlow({ client, scopes, openBrowser });
+        const result = await runInteractiveFlow({
+          client,
+          scopes,
+          openBrowser,
+          ...signInTargetFor(tenant),
+        });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
       },
     });
 
@@ -634,7 +646,10 @@ export class RunDeliveryService {
       });
       return { retryable: false };
     } catch (error) {
-      const message = scheduledAuthRequired ? authRecovery : error instanceof Error ? error.message : String(error);
+      const mismatch = accountMismatchIn(error);
+      const message = scheduledAuthRequired
+        ? authRecovery
+        : mismatch?.message ?? (error instanceof Error ? error.message : String(error));
       const audit = createDeliveryAuditEntry({
         runId: run.id,
         stepId,
@@ -662,7 +677,7 @@ export class RunDeliveryService {
           connectorAudit: audit as unknown as Record<string, unknown>,
         },
       );
-      return { retryable: !scheduledAuthRequired, error: message };
+      return { retryable: !scheduledAuthRequired && !mismatch, error: message };
     } finally {
       await instance?.dispose().catch(() => undefined);
     }
@@ -891,12 +906,20 @@ export class RunDeliveryService {
       tenantId: tenant.id,
       username: tenant.username,
       homeAccountId: tenant.homeAccountId,
+      authority: tenant.appRegistration?.authority,
       acquireInteractive: async (scopes) => {
         if (run.trigger === "schedule") {
           scheduledAuthRequired = true;
           throw new Error(authRecovery);
         }
-        return runInteractiveFlow({ client, scopes, openBrowser });
+        const result = await runInteractiveFlow({
+          client,
+          scopes,
+          openBrowser,
+          ...signInTargetFor(tenant),
+        });
+        assertSignedInAccount(result, connectedAccountOf(tenant));
+        return result;
       },
     });
 
@@ -957,7 +980,10 @@ export class RunDeliveryService {
       });
       return { retryable: false };
     } catch (error) {
-      const message = scheduledAuthRequired ? authRecovery : error instanceof Error ? error.message : String(error);
+      const mismatch = accountMismatchIn(error);
+      const message = scheduledAuthRequired
+        ? authRecovery
+        : mismatch?.message ?? (error instanceof Error ? error.message : String(error));
       const audit = createDeliveryAuditEntry({
         runId: run.id,
         stepId,
@@ -980,7 +1006,7 @@ export class RunDeliveryService {
         connectorId: OUTLOOK_CONNECTOR_ID,
         connectorAudit: audit as unknown as Record<string, unknown>,
       });
-      return { retryable: !scheduledAuthRequired && isRetryableDeliveryError(error), error: message };
+      return { retryable: !scheduledAuthRequired && !mismatch && isRetryableDeliveryError(error), error: message };
     } finally {
       await instance?.dispose().catch(() => undefined);
     }
@@ -1422,4 +1448,18 @@ export class RunDeliveryService {
       await instance?.dispose().catch(() => undefined);
     }
   }
+}
+
+/**
+ * Connectors wrap token errors in their own auth error. Another account or
+ * directory signing in has its own recovery copy, and retrying would only
+ * open the same sign-in again.
+ */
+function accountMismatchIn(error: unknown): TenantAccountMismatchError | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 5 && current instanceof Error; depth += 1) {
+    if (current instanceof TenantAccountMismatchError) return current;
+    current = current.cause;
+  }
+  return undefined;
 }

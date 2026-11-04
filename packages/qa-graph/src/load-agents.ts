@@ -11,6 +11,8 @@ export interface AgentManifest {
   slug: string;
   name: string;
   scopes: string[];
+  /** As declared in the manifest. Absent when the manifest omits it. */
+  services?: string[];
   mode: "read" | "write";
   graphOperations: GraphOperation[];
   manifestPath: string;
@@ -48,6 +50,7 @@ interface ParsedManifest {
     id?: string;
     name?: string;
     mode?: string;
+    services?: unknown;
   };
   skills?: ParsedSkill[];
 }
@@ -98,6 +101,9 @@ function parseManifest(manifestPath: string): AgentManifest {
     slug: id,
     name: typeof descriptor.name === "string" ? descriptor.name : id,
     scopes: [...scopes],
+    ...(Array.isArray(descriptor.services)
+      ? { services: descriptor.services.filter((entry): entry is string => typeof entry === "string") }
+      : {}),
     mode: descriptor.mode === "write" ? "write" : "read",
     graphOperations,
     manifestPath,

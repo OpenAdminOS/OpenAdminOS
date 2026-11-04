@@ -2,7 +2,14 @@ import { readFileSync } from "node:fs";
 
 import { load as parseYaml } from "js-yaml";
 
-import type { GraphOperation } from "@openadminos/agent-sdk";
+import {
+  AVAILABLE_SERVICES,
+  scopesNotCoveredByServices,
+  scopesRequiringService,
+  servicesForScopes,
+  type GraphOperation,
+  type ServiceId,
+} from "@openadminos/agent-sdk";
 
 import type { AgentManifest } from "./load-agents.js";
 import type { MsgraphClient } from "./msgraph-client.js";
@@ -23,6 +30,7 @@ export async function runAgentChecks(
 ): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
+  results.push(checkServicesCoverScopes(agent));
   results.push(...(await checkScopesAreKnown(agent, client)));
   const opResults = await checkOperationsExist(agent, client);
   results.push(...opResults.results);
@@ -32,6 +40,66 @@ export async function runAgentChecks(
   results.push(checkAgentUsesLlm(agent));
 
   return results;
+}
+
+/**
+ * Every declared scope must belong to a declared service, so the app can
+ * name the service an agent needs and gate it when that service is not
+ * connected.
+ */
+export function checkServicesCoverScopes(
+  agent: Pick<AgentManifest, "scopes" | "services">,
+): CheckResult {
+  const suggestion = servicesForScopes(agent.scopes);
+  const suggest = suggestion.length > 0 ? ` Scopes suggest: [${suggestion.join(", ")}].` : "";
+  if (!agent.services) {
+    return {
+      name: "services-cover-scopes",
+      severity: "fail",
+      message: `descriptor.services is missing. Declare the services this agent needs.${suggest}`,
+    };
+  }
+  if (agent.services.length === 0) {
+    // Baseline sign-in scopes, such as User.Read, need no service.
+    const needing = scopesRequiringService(agent.scopes);
+    return needing.length === 0
+      ? {
+          name: "services-cover-scopes",
+          severity: "pass",
+          message: "The agent declares no Graph scopes beyond sign-in and needs no service.",
+        }
+      : {
+          name: "services-cover-scopes",
+          severity: "fail",
+          message: `descriptor.services is empty, but the agent declares Graph scopes: ${needing.join(", ")}.${suggest}`,
+          details: needing,
+        };
+  }
+  const isAvailable = (service: string): service is ServiceId =>
+    AVAILABLE_SERVICES.some((entry) => entry.id === service);
+  const unknown = agent.services.filter((service) => !isAvailable(service));
+  if (unknown.length > 0) {
+    return {
+      name: "services-cover-scopes",
+      severity: "fail",
+      message: `Unknown or planned service(s) in descriptor.services: ${unknown.join(", ")}.`,
+      details: unknown,
+    };
+  }
+  const uncovered = scopesNotCoveredByServices(agent.scopes, agent.services.filter(isAvailable));
+  if (uncovered.length > 0) {
+    return {
+      name: "services-cover-scopes",
+      severity: "fail",
+      message: `Scope(s) not covered by [${agent.services.join(", ")}]: ${uncovered.join(", ")}.${suggest}`,
+      details: uncovered,
+    };
+  }
+  return {
+    name: "services-cover-scopes",
+    severity: "pass",
+    message: `Every declared scope belongs to [${agent.services.join(", ")}].`,
+  };
 }
 
 function checkAgentUsesLlm(agent: AgentManifest): CheckResult {

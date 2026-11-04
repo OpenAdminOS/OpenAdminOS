@@ -3,6 +3,8 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import { DEFAULT_GRAPH_READ_SCOPE_NAMES } from "@openadminos/agent-sdk";
+
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import {
   GRAPH_CACHE_RESOURCES,
@@ -929,7 +931,7 @@ describe("Intune Chat planner", () => {
         permissions?: { delegatedWork?: string[] };
       }>;
     };
-    const initialConsentScopes = new Set(await readDefaultScopeNames());
+    const partScopes = new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES);
 
     for (const resource of GRAPH_CACHE_RESOURCES) {
       const request = pathForResource(resource.resource);
@@ -955,8 +957,8 @@ describe("Intune Chat planner", () => {
           `${resource.resource} must not request read-write scope ${scope} for chat cache.`,
         );
         assert.ok(
-          initialConsentScopes.has(scope),
-          `${resource.resource} requires ${scope}, but tenant connection does not request it up front.`,
+          partScopes.has(scope),
+          `${resource.resource} requires ${scope}, but no service part requests it.`,
         );
       }
     }
@@ -1102,14 +1104,6 @@ function graphPmResourceName(
     secureScoreControlProfiles: "secureScoreControlProfile",
   };
   return resourceNames[resource];
-}
-
-async function readDefaultScopeNames(): Promise<string[]> {
-  const source = await readFile(
-    new URL("../../../../packages/runtime/src/msal.ts", import.meta.url),
-    "utf8",
-  );
-  return [...source.matchAll(/name:\s*"([^"]+)"/g)].map((match) => match[1] ?? "");
 }
 
 describe("exact aggregate counts for how-many questions", () => {
