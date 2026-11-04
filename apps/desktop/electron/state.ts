@@ -179,6 +179,7 @@ import {
   type ProviderSummary,
   type InvalidAgentManifest,
   type RegistryAgentSummary,
+  type TenantTierProbeWarning,
   type RunRecord,
   type UpdateChannel,
   type WhatsAppWebGroupRef,
@@ -5622,7 +5623,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const nextTenants = [...persisted.tenants];
       if (existingIdx >= 0) {
         replaced = nextTenants[existingIdx];
-        nextTenants[existingIdx] = { ...nextTenants[existingIdx], ...tenant };
+        // A new sign-in starts a new probe, so an earlier warning is stale.
+        const { tierProbeWarning: _stale, ...previous } = nextTenants[existingIdx]!;
+        nextTenants[existingIdx] = { ...previous, ...tenant };
       } else {
         nextTenants.push(tenant);
       }
@@ -5649,9 +5652,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (replaced) await this.forgetReplacedSignIn(replaced, tenant);
 
     // Background probe: detect the tenant's Entra ID tier so Agent Hub
-    // can badge incompatible agents. Failure here is silent. `unknown`
-    // is treated as informational (badges shown, runs not blocked).
-    void this.probeEntraTier(tenant).catch(() => undefined);
+    // can badge incompatible agents. `unknown` is treated as informational
+    // (badges shown, runs not blocked). A probe that cannot finish, such as
+    // another account signing in, is saved as a tenant warning.
+    void this.probeEntraTierWithWarning(tenant);
 
     // Connecting a real tenant ends pilot mode. The pilot tenant goes
     // through the normal disconnect path, which purges its runs, cache,
@@ -5801,14 +5805,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     await this.serialize(async () => {
       const current = await this.read();
-      const tenants = current.tenants.map((entry) =>
-        entry.id === tenantId ? { ...entry, grantedScopes: grants } : entry,
-      );
+      // New grants make an earlier probe warning stale; the probe below
+      // records a new one if it still cannot finish.
+      const tenants = current.tenants.map((entry) => {
+        if (entry.id !== tenantId) return entry;
+        const { tierProbeWarning: _stale, ...rest } = entry;
+        return { ...rest, grantedScopes: grants };
+      });
       await this.write({ ...current, tenants });
     });
-    void this.probeEntraTier({ ...tenant, grantedScopes: grants }, { force: true }).catch(
-      () => undefined,
-    );
+    // Awaited, so Check again reports a probe that hit another account
+    // instead of plain success.
+    await this.probeEntraTierWithWarning({ ...tenant, grantedScopes: grants }, { force: true });
     return this.getAppState();
   }
 
@@ -5929,8 +5937,46 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async probeAllTenants(): Promise<void> {
     const persisted = await this.read().catch(() => null);
     if (!persisted) return;
-    for (const tenant of persisted.tenants) {
-      void this.probeEntraTier(tenant, { force: true }).catch(() => undefined);
+    await Promise.all(
+      persisted.tenants.map((tenant) => this.probeEntraTierWithWarning(tenant, { force: true })),
+    );
+  }
+
+  /**
+   * The tier probe for callers that do not show its error. A probe that
+   * cannot finish keeps the stored tier and licenses, and is saved on the
+   * tenant as a warning that Settings, Tenants and the tenant switcher show.
+   * Resolves with the warning, or undefined when the probe finished.
+   */
+  private async probeEntraTierWithWarning(
+    tenant: TenantRecord,
+    options: { force?: boolean } = {},
+  ): Promise<TenantTierProbeWarning | undefined> {
+    try {
+      await this.probeEntraTier(tenant, options);
+      return undefined;
+    } catch (error) {
+      const warning: TenantTierProbeWarning = {
+        message: error instanceof Error ? error.message : String(error),
+        accountMismatch: error instanceof TenantAccountMismatchError,
+        at: new Date().toISOString(),
+      };
+      try {
+        await this.serialize(async () => {
+          const persisted = await this.read();
+          if (!persisted.tenants.some((entry) => entry.id === tenant.id)) return;
+          await this.write({
+            ...persisted,
+            tenants: persisted.tenants.map((entry) =>
+              entry.id === tenant.id ? { ...entry, tierProbeWarning: warning } : entry,
+            ),
+          });
+        });
+      } catch (writeError) {
+        console.error(`[probeEntraTier] ${tenant.displayName}: could not save the probe warning`, writeError);
+      }
+      this.emitStateChanged("tenant-probe-warning");
+      return warning;
     }
   }
 
@@ -6023,8 +6069,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const idx = persisted.tenants.findIndex((t) => t.id === tenant.id);
       if (idx < 0) return;
       const next = [...persisted.tenants];
+      const { tierProbeWarning: _cleared, ...current } = next[idx]!;
       next[idx] = {
-        ...next[idx],
+        ...current,
         entraTier: detected,
         entraTierDetectedAt: new Date().toISOString(),
         relevantLicenses,

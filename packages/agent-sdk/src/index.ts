@@ -207,6 +207,15 @@ export interface AgentSummary extends AgentContract {
  * enumeration lists it here instead of throwing, so one bad manifest
  * never blocks the other agents, tenants or history from loading.
  */
+export interface TenantTierProbeWarning {
+  /** The failure, such as the TenantAccountMismatchError recovery text. */
+  message: string;
+  /** True when another account or directory signed in. */
+  accountMismatch: boolean;
+  /** ISO timestamp of the failed probe. */
+  at: string;
+}
+
 export interface InvalidAgentManifest {
   /** `descriptor.id` when the manifest names one, otherwise the folder name. */
   id: string;
@@ -622,6 +631,12 @@ export interface TenantRecord {
   entraTier?: DetectedEntraTier;
   /** ISO timestamp of the last successful entraTier probe. */
   entraTierDetectedAt?: string;
+  /**
+   * Why the last Entra tier and license probe did not finish, for example
+   * another account signing in. The stored tier and licenses are kept.
+   * Cleared by the next probe that finishes, a new sign-in or new grants.
+   */
+  tierProbeWarning?: TenantTierProbeWarning;
   /** Active Intune service plan, from the existing subscribed-SKU inventory. */
   intuneLicensed?: boolean | undefined;
   /**
