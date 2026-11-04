@@ -56,7 +56,7 @@ npm run qa
 - Every `select` field exists on the operation's resource type.
 - A best-effort lookup of curated samples backing each GET operation (warning when none found).
 - Every agent includes at least one `format: llm` step (`uses-llm` check, hard fail).
-- `descriptor.services` is present, lists only available services (empty only when the agent declares no Graph scopes), and covers every declared scope according to the service registry in `packages/agent-sdk/src/services.ts` (`services-cover-scopes` check, hard fail).
+- `descriptor.services` is present, lists only available services (empty only when the agent declares no Graph scopes beyond the sign-in baseline: `openid`, `profile`, `offline_access`, `User.Read`), and covers every declared scope according to the service registry in `packages/agent-sdk/src/services.ts` (`services-cover-scopes` check, hard fail).
 
 The synthetic Graph fixture in `@openadminos/runtime` is also cross-checked against the real `managedDevice` schema. Adding a field to the fixture that doesn't exist on Graph fails the gate.
 
