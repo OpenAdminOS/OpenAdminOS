@@ -250,9 +250,34 @@ export function mcpToolPages(tool: Pick<McpChatTool, "inputSchema">): boolean {
   return properties.some((key) => /^(?:skip|offset|start|page|page_?token|cursor|after|next_?(?:offset|start|cursor|page))$/i.test(key));
 }
 
-/** The result's own counts say the server has more records than it returned, as hasMore: true does. */
-export function mcpServerHasMore(counts: Readonly<Record<string, number | boolean>> | undefined): boolean {
-  return Object.entries(counts ?? {}).some(([key, value]) => value === true && /^(?:has_?more|has_?next(?:_?page)?|more_?available)$/i.test(key));
+const MORE_KEY = /^(?:has_?more|has_?next(?:_?page)?|more_?available)$/i;
+const TOTAL_KEY = /^(?:total(?:_?(?:count|results|records|items))?|count|(?:match|version|record|item)_?count)$/i;
+const OFFSET_KEY = /^(?:offset|skip|start)$/i;
+
+/** The largest record total a result's counts give, under keys such as totalCount, count or match_count. */
+function countsTotal(counts: Readonly<Record<string, number | boolean>> | undefined): number | undefined {
+  const totals = Object.entries(counts ?? {}).flatMap(([key, value]) => (typeof value === "number" && TOTAL_KEY.test(key) ? [value] : []));
+  return totals.length > 0 ? Math.max(...totals) : undefined;
+}
+
+/**
+ * The result's own counts say the server has more records than it
+ * returned: a flag such as hasMore says so, or without one, a total above
+ * the offset plus the records the result holds.
+ */
+export function mcpServerHasMore(counts: Readonly<Record<string, number | boolean>> | undefined, matched: number): boolean {
+  const entries = Object.entries(counts ?? {});
+  const flag = entries.find(([key, value]) => typeof value === "boolean" && MORE_KEY.test(key));
+  if (flag) return flag[1] === true;
+  const total = countsTotal(counts);
+  const offset = entries.find(([key, value]) => typeof value === "number" && OFFSET_KEY.test(key))?.[1] as number | undefined;
+  return total !== undefined && total > (offset ?? 0) + matched;
+}
+
+/** Whether an MCP tool result's counts say the server has more records than the result holds. */
+function mcpResultHasMore(result: unknown): boolean {
+  const { counts, matched, results } = result as { counts?: Record<string, number | boolean>; matched?: number; results?: unknown[] };
+  return mcpServerHasMore(counts, matched ?? results?.length ?? 0);
 }
 
 /** The items read, how many records matched, and the envelope counts, as one result. */
@@ -277,11 +302,10 @@ export function mcpListingNote(serverName: string, read: { listed: number; match
   const matched = read.matched ?? read.listed;
   const left = matched - read.listed;
   if (left > 0) lines.push(`OpenAdminOS lists ${read.listed} of the ${matched} records in this result below. The other ${left} ${left === 1 ? "was" : "were"} left out here and ${left === 1 ? "is" : "are"} not absent.`);
-  const more = mcpServerHasMore(read.counts);
+  const more = mcpServerHasMore(read.counts, matched);
   if (more) lines.push(`${serverName} has more records than this result returned.`);
   if (left > 0 || more) {
-    const totals = counts.flatMap(([key, value]) => (typeof value === "number" && /total/i.test(key) ? [value] : []));
-    const total = Math.max(matched, ...totals);
+    const total = Math.max(matched, countsTotal(read.counts) ?? 0);
     const of = total > matched || !more ? String(total) : `more than ${matched}`;
     const further = read.pages ? "To read further records, call the same tool again for the next page." : "This tool reads no further pages, so a narrower question is the way to reach the others.";
     lines.push(`The list below is not complete. Say so in the answer: give how many are shown and how many exist, as in "Showing ${read.listed} of ${of}". ${further}`);
@@ -876,7 +900,7 @@ export async function executeIntuneChatTool(
         results: ((result as { results?: McpResultItem[] }).results ?? []).map(({ title, url }) => ({ title, ...(url ? { url } : {}) })),
         ...((result as { empty?: boolean }).empty ? { empty: true } : {}),
         ...(typeof (result as { matched?: unknown }).matched === "number" ? { matched: (result as { matched: number }).matched } : {}),
-        ...(mcpServerHasMore((result as { counts?: Record<string, number | boolean> }).counts) ? { more: true } : {}),
+        ...(mcpResultHasMore(result) ? { more: true } : {}),
         sentToHost: true,
       } } : {}),
       ...(cacheSource ? { cacheSource } : {}),

@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 
 import type { McpResultFormat } from "../mcp/catalog.js";
 import { toolStepFinish } from "./chat-steps.js";
-import { readMcpResult } from "./tools.js";
+import { mcpListingNote, mcpServerHasMore, readMcpResult } from "./tools.js";
 
 const format: McpResultFormat = {
   items: [
@@ -72,6 +72,21 @@ describe("MCP results read by a catalog format", () => {
     assert.equal(readMcpResult(JSON.stringify({ items: records.slice(0, 10) }), { format }).matched, undefined);
     const single = readMcpResult(JSON.stringify({ product: "windows-server", version: "2016", ends: "2027-01-12", days: 68, supported: true }), { format });
     assert.deepEqual([single.items.length, single.counts], [1, undefined]);
+  });
+
+  it("reads a total above the records returned as more, unless a hasMore flag says otherwise, and takes only record totals as the total", () => {
+    assert.equal(mcpServerHasMore({ count: 5, returned: 3 }, 3), true);
+    assert.equal(mcpServerHasMore({ count: 5, returned: 5 }, 5), false);
+    assert.equal(mcpServerHasMore({ totalCount: 515, offset: 450, returnedCount: 50 }, 50), true);
+    assert.equal(mcpServerHasMore({ totalCount: 515, offset: 500, returnedCount: 15 }, 15), false);
+    assert.equal(mcpServerHasMore({ totalCount: 33, hasMore: false }, 3), false);
+    assert.equal(mcpServerHasMore({ hasMore: true }, 3), true);
+    assert.equal(mcpServerHasMore({ totalPages: 9, page: 1 }, 3), false);
+    assert.match(mcpListingNote("endoflife.ai", { listed: 3, counts: { count: 5, returned: 3 } }), /endoflife\.ai has more records than this result returned\.\nThe list below is not complete\. Say so in the answer: give how many are shown and how many exist, as in "Showing 3 of 5"\./);
+    assert.match(mcpListingNote("Server", { listed: 10, matched: 20, counts: { totalPages: 9, totalCount: 40, hasMore: true }, pages: true }), /as in "Showing 10 of 40"\. To read further records, call the same tool again for the next page\./);
+    // A complete list only states its counts.
+    assert.equal(mcpListingNote("Server", { listed: 3, counts: { totalCount: 3, hasMore: false } }), "Server result counts: totalCount 3, hasMore false.");
+    assert.equal(mcpListingNote("Server", { listed: 3 }), "");
   });
 
   it("is empty for blank text, and for a structure with nothing to match when the format has no whole-result rule", () => {
