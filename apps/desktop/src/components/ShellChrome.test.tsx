@@ -97,6 +97,21 @@ describe("shell chrome", () => {
     expect(screen.queryByText(/www\.intuneautomation\.com/)).not.toBeInTheDocument();
   });
 
+  it("names no host for a server Chat skips because an offered tool is missing", async () => {
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({
+        mcpServers: createMockMcpServers({
+          "microsoft-learn": { installed: true, enabled: true },
+          "kql-search": { installed: true, enabled: true, offeredTools: ["search_kql_queries"], missingTools: ["search_kql_queries"] },
+        }),
+      })),
+    });
+    const status = await screen.findByRole("status", { name: /tool queries to learn\.microsoft\.com/ });
+    expect(status.getAttribute("aria-label")).not.toMatch(/\+1|kqlsearch/);
+  });
+
   it("names no MCP hosts when the model is too small to be offered the tools", async () => {
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",

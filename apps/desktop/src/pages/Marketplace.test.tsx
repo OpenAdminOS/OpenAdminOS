@@ -111,6 +111,27 @@ describe("Marketplace", () => {
     expect(within(dialog).getByText("search")).toBeInTheDocument();
   });
 
+  it("names offered tools a server stopped listing, on its card and in its details", async () => {
+    const user = userEvent.setup();
+    render("/marketplace?kind=mcp", {
+      mcpServers: createMockMcpServers({
+        "kql-search": { installed: true, enabled: true, offeredTools: ["search_kql_queries", "get_kql_query"], missingTools: ["get_kql_query"],
+          tools: [{ name: "search_kql_queries", description: "Search queries." }] },
+      }),
+    });
+    const card = await screen.findByRole("button", { name: /^KQL Search, MCP tool/ });
+    expect(card).toHaveTextContent("Installed · tools missing");
+    await user.click(card);
+    const dialog = await screen.findByRole("dialog", { name: "KQL Search details" });
+    const alert = within(dialog).getByRole("alert");
+    expect(alert).toHaveTextContent("KQL Search no longer lists a tool OpenAdminOS offers");
+    expect(alert).toHaveTextContent("Missing: get_kql_query. Chat does not use KQL Search until every offered tool is back. Check the connection again later.");
+    // Nothing in the dialog says queries still go to the host while Chat skips the server.
+    expect(within(dialog).getByText("Chat skips this server until its offered tools are back")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Tool queries go to www\.kqlsearch\.com/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Chat calls none of these until every offered tool is back.")).toBeInTheDocument();
+  });
+
   it("shows a designed error with retry when the server is unreachable", async () => {
     const user = userEvent.setup();
     const installMcpServer = vi.fn()

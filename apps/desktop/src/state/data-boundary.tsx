@@ -54,7 +54,8 @@ interface DataBoundaryContextValue {
  */
 export function chatToolHosts(state: Pick<AppState, "mcpServers" | "chatToolUse">): string[] {
   if (state.chatToolUse?.available === false) return [];
-  return (state.mcpServers ?? []).filter((server) => server.installed && server.enabled).map((server) => server.host);
+  // A server missing one of its offered tools is skipped by Chat, so it receives nothing.
+  return (state.mcpServers ?? []).filter((server) => server.installed && server.enabled && !server.missingTools?.length).map((server) => server.host);
 }
 
 const DataBoundaryContext = createContext<DataBoundaryContextValue | undefined>(undefined);

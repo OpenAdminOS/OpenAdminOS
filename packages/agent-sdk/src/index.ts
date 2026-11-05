@@ -1263,6 +1263,16 @@ export interface McpServerSummary {
   lastConnectedAt?: string;
   /** Tools from the last successful live listing. Empty until installed. */
   tools: McpServerToolSummary[];
+  /**
+   * The tools OpenAdminOS uses from this server, when the catalog limits
+   * them. Other tools the server lists are never shown or offered.
+   */
+  offeredTools?: string[];
+  /**
+   * Offered tools the server did not list at its last connection. While
+   * any is missing, Chat does not use the server.
+   */
+  missingTools?: string[];
 }
 
 /**

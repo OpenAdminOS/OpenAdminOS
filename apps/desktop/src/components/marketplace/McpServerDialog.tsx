@@ -36,16 +36,16 @@ export function McpServerDialog({
   const [notice, setNotice] = useState<string | null>(null);
 
   const api = window.openAdminOS;
-  const run = async (action: Action, task: () => Promise<unknown> | undefined, success: string, failed: string) => {
+  const run = async (action: Action, task: () => Promise<unknown> | undefined, success: string | ((servers: unknown) => string), failed: string) => {
     setBusy(action);
     setFailure(null);
     setNotice(null);
     try {
       const pending = task();
       if (!pending) throw new Error("This build of OpenAdminOS cannot manage MCP servers. Update the app, then try again.");
-      await pending;
+      const servers = await pending;
       await refresh();
-      setNotice(success);
+      setNotice(typeof success === "string" ? success : success(servers));
       if (action === "install") setView("details");
     } catch (error) {
       setFailure({ action, title: failed, message: ipcErrorMessage(error) });
@@ -53,8 +53,14 @@ export function McpServerDialog({
       setBusy(null);
     }
   };
-  const install = () => void run("install", () => api?.installMcpServer?.(server.id), `Installed ${server.name}. Its tools are available to Chat.`, `${server.name} could not be installed`);
-  const check = () => void run("check", () => api?.checkMcpServer?.(server.id), `${server.name} answered. The tool list is up to date.`, `${server.name} did not respond`);
+  // A server that answered without an offered tool is recorded, but Chat does not use it.
+  const missingAfter = (servers: unknown) => (Array.isArray(servers) ? (servers as McpServerSummary[]) : []).find((entry) => entry.id === server.id)?.missingTools ?? [];
+  const install = () => void run("install", () => api?.installMcpServer?.(server.id), (servers) => missingAfter(servers).length > 0
+    ? `Installed ${server.name}, but it does not list ${missingAfter(servers).join(", ")}. Chat does not use it until it does.`
+    : `Installed ${server.name}. Its tools are available to Chat.`, `${server.name} could not be installed`);
+  const check = () => void run("check", () => api?.checkMcpServer?.(server.id), (servers) => missingAfter(servers).length > 0
+    ? `${server.name} answered, but it does not list ${missingAfter(servers).join(", ")}. Chat does not use it until it does.`
+    : `${server.name} answered. The tool list is up to date.`, `${server.name} did not respond`);
   const uninstall = () => void run("uninstall", () => api?.uninstallMcpServer?.(server.id), `Removed ${server.name}. Chat no longer offers its tools.`, `Could not uninstall ${server.name}`);
   const toggle = (enabled: boolean) => void run("toggle", () => api?.setMcpServerEnabled?.(server.id, enabled),
     enabled ? `${server.name} is available to Chat.` : `${server.name} is off. Chat does not offer its tools.`,
@@ -119,7 +125,7 @@ export function McpServerDialog({
                 disabled={busy !== null}
                 onCheckedChange={toggle}
                 label="Available in Chat"
-                description={server.enabled ? `Tool queries go to ${server.host}` : "Chat does not offer these tools"}
+                description={!server.enabled ? "Chat does not offer these tools" : server.missingTools?.length ? "Chat skips this server until its offered tools are back" : `Tool queries go to ${server.host}`}
               />
             </div>
             <div className="flex gap-2">
@@ -153,6 +159,7 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
         </p>
       ) : null}
       {toolUse?.available === false && toolUse.notice ? <ToolUseNotice notice={toolUse.notice} /> : null}
+      {server.missingTools?.length ? <MissingTools server={server} missing={server.missingTools} /> : null}
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Where queries go</h3>
         <QueryFlow host={server.host} />
@@ -163,6 +170,9 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
       </div>
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Tools Chat can call</h3>
+        {server.missingTools?.length ? (
+          <p className="mb-3 text-sm text-[var(--color-warning)]">Chat calls none of these until every offered tool is back.</p>
+        ) : null}
         {server.tools.length > 0 ? (
           <div className="grid gap-px overflow-hidden rounded-xl ring-1 ring-[var(--color-border-soft)]">
             {server.tools.map((tool) => (
@@ -179,7 +189,9 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
             ))}
           </div>
         ) : (
-          <p className="text-sm text-[var(--color-text-muted)]">The server lists its tools when you install it. OpenAdminOS shows them here and offers them to Chat.</p>
+          <p className="text-sm text-[var(--color-text-muted)]">{server.installed
+            ? `${server.name} listed none of the tools OpenAdminOS offers at its last connection.`
+            : "The server lists its tools when you install it. OpenAdminOS shows them here and offers them to Chat."}</p>
         )}
       </section>
       <section>
@@ -274,6 +286,22 @@ function Step({ icon, title, warning = false, children }: { icon: ReactNode; tit
         {children}
       </span>
     </li>
+  );
+}
+
+/** An offered tool the server stopped listing: Chat leaves the server alone until a check finds it again. */
+function MissingTools({ server, missing }: { server: McpServerSummary; missing: string[] }) {
+  const names = missing.map((name, index) => (
+    <span key={name}>{index > 0 ? (index === missing.length - 1 ? " and " : ", ") : null}<code className="font-mono text-xs">{name}</code></span>
+  ));
+  return (
+    <div role="alert" className="flex gap-2.5 rounded-xl bg-[var(--color-warning-soft)] px-4 py-3 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+      <IconWarning size={16} className="mt-0.5 shrink-0" />
+      <span>
+        <span className="block font-medium">{server.name} no longer lists {missing.length === 1 ? "a tool" : "tools"} OpenAdminOS offers</span>
+        Missing: {names}. Chat does not use {server.name} until every offered tool is back. Check the connection again later.
+      </span>
+    </div>
   );
 }
 

@@ -418,6 +418,36 @@ describe("MCP installs in app state", () => {
     });
   });
 
+  it("shows only allowlisted tools, names missing ones, and keeps Chat off the server until they are back", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-allowlist-"));
+    const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
+    const make = (tools: string[]) => new AppStateStore({
+      filePath: join(dir, "state.json"), tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "",
+      mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url, tools }],
+    });
+    const chatTools = async (store: AppStateStore) =>
+      (await (store as unknown as { mcpChatContext(tenant: unknown): Promise<{ tools: Array<{ tool: string }> } | undefined> }).mcpChatContext(tenant))?.tools.map((tool) => tool.tool);
+    const missing = make(["search_docs", "get_article"]);
+    try {
+      const summary = (await missing.installMcpServer("test-docs")).find((entry) => entry.id === "test-docs")!;
+      assert.deepEqual(summary.tools.map((tool) => tool.name), ["search_docs"]);
+      assert.deepEqual(summary.offeredTools, ["search_docs", "get_article"]);
+      assert.deepEqual(summary.missingTools, ["get_article"]);
+      assert.equal(await chatTools(missing), undefined);
+    } finally { missing.close(); }
+    // Under a catalog whose tools the server does list, the stored listing still lacks one until a check.
+    const listed = make(["search_docs", "fails"]);
+    try {
+      const summary = (await listed.listMcpServers()).find((entry) => entry.id === "test-docs")!;
+      assert.deepEqual(summary.missingTools, ["fails"]);
+      assert.equal(await chatTools(listed), undefined);
+      const checked = (await listed.checkMcpServer("test-docs")).find((entry) => entry.id === "test-docs")!;
+      assert.equal(checked.missingTools, undefined);
+      assert.deepEqual(checked.tools.map((tool) => tool.name), ["search_docs", "fails"]);
+      assert.deepEqual(await chatTools(listed), ["search_docs", "fails"]);
+    } finally { listed.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
   it("records nothing when the server is unreachable", async () => {
     await withStore(async (store, statePath) => {
       await assert.rejects(store.installMcpServer("gone"), /Gone could not be reached at 127\.0\.0\.1/);

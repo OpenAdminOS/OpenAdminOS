@@ -228,7 +228,7 @@ import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } fr
 import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
-import { McpHost, type McpToolInfo } from "./mcp/host.js";
+import { isAllowedTool, McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
 import { GatewayService } from "./gateway/service.js";
@@ -484,6 +484,11 @@ type WhatsAppWebClientLike = Pick<
   | "sendMessage"
   | "dispose"
 >;
+
+/** Allowlisted tools of a catalog server that its last listing did not include. */
+function missingMcpTools(entry: McpCatalogEntry, tools: readonly McpToolInfo[]): string[] {
+  return (entry.tools ?? []).filter((name) => !tools.some((tool) => tool.name === name));
+}
 
 /** Keeps only catalog servers with a well-formed tool list. */
 function sanitizeMcpServers(
@@ -2033,6 +2038,7 @@ export class AppStateStore {
   private mcpServerSummaries(persisted: PersistedState): McpServerSummary[] {
     return this.mcpCatalog.map((entry) => {
       const installed = persisted.mcpServers?.[entry.id];
+      const missingTools = installed ? missingMcpTools(entry, installed.tools) : [];
       return {
         id: entry.id,
         name: entry.name,
@@ -2048,11 +2054,13 @@ export class AppStateStore {
         enabled: installed?.enabled === true,
         ...(installed ? { installedAt: installed.installedAt } : {}),
         ...(installed?.lastConnectedAt ? { lastConnectedAt: installed.lastConnectedAt } : {}),
-        tools: (installed?.tools ?? []).map((tool) => ({
+        tools: (installed?.tools ?? []).filter((tool) => isAllowedTool(entry, tool.name)).map((tool) => ({
           name: tool.name,
           description: tool.description,
           ...(tool.unavailable ? { unavailable: tool.unavailable } : {}),
         })),
+        ...(entry.tools ? { offeredTools: [...entry.tools] } : {}),
+        ...(missingTools.length > 0 ? { missingTools } : {}),
       };
     });
   }
@@ -2155,10 +2163,12 @@ export class AppStateStore {
     for (const entry of this.mcpCatalog) {
       const installed = persisted.mcpServers?.[entry.id];
       if (!installed?.enabled) continue;
+      // A server without one of its allowlisted tools is skipped until a check finds it again.
+      if (missingMcpTools(entry, installed.tools).length > 0) continue;
       generations.set(entry.id, this.mcpHost.generation(entry.id));
       servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics });
       for (const tool of installed.tools) {
-        if (tool.unavailable) continue;
+        if (tool.unavailable || !isAllowedTool(entry, tool.name)) continue;
         tools.push({
           name: mcpChatToolName(entry.id, tool.name),
           serverId: entry.id,

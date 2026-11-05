@@ -215,6 +215,7 @@ function Shelf({ title, note, hidden = false, children }: { title: string; note:
 
 function serverState(server: McpServerSummary): { label: string; tone: string } | undefined {
   if (!server.installed) return undefined;
+  if (server.missingTools?.length) return { label: "Installed · tools missing", tone: "text-[var(--color-warning)]" };
   return server.enabled
     ? { label: "Installed", tone: "text-[var(--color-success)]" }
     : { label: "Installed · off", tone: "text-[var(--color-text-muted)]" };
