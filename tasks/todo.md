@@ -1507,3 +1507,10 @@ A separate Claude evaluator found no blocking issue; its below-threshold notes (
 GPT-6.1-Sol review of the whole diff against 98ddfc3. No blocking finding; one important finding, fixed with tests that fail before the fix:
 
 1. [x] Important: missing-tool gating was bypassed on automatic reconnect. After a restart, the stored listing still offered the server, and a session opened for a call found a tool missing but still dispatched the others. The host now refuses every call while the session lacks an offered tool (`tools-missing`, nothing sent, the message names the tool and Check connection), and a session opened for a call stores its listing so the Marketplace shows "Installed · tools missing" and Chat skips the server.
+
+## Review round 4 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff at 6aa2c13. No blocking finding.
+
+1. [x] Important: the session promise awaited the listing report, which takes the store lock, while uninstall and disable hold that lock and wait on the session. Fixed in e0176a3 (also flagged by the automated security review): the report runs in the call after the session opens; a test closes a session while its report is held.
+2. [x] Minor: a failed listing save was dropped and never retried. The next call on the session retries, the refusal says the Marketplace still shows the old tool list, and the error detail goes to the local log only, since the message reaches the model.
