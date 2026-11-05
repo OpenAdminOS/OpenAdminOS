@@ -1490,3 +1490,14 @@ GPT-6.1-Sol review of the whole diff against 98ddfc3. All six findings fixed, ea
 4. [x] www.microsoft.com named Release Communications. `sharedHost` entries are named by name, aliases or full URL with path; host matches refuse a following label.
 5. [x] Details said a skipped server receives the query text; it now says Chat sends nothing until the tools are back.
 6. [x] The query writer prompt contradicted itself on IDs; it now has one rule for item IDs.
+
+## Review round 2 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff against 98ddfc3. Four findings, all fixed, each with a test that fails before the fix:
+
+1. [x] Important: KEV entries that share one citation lost later CVE identities. In the numbered excerpts, an item whose title differs from its group's first title now starts with its own title, for every server.
+2. [x] Important: formatted lists lost completeness and paging. The reader counts every matching record past the ten it lists and keeps the number and true or false fields of the list's top-level record. The model reads those counts, how many records were left out and whether the server has more (a hasMore flag, or a record total above offset plus records), with the words to use ("Showing 10 of 33"). The step reads "10 of 33 results" and "the server has more". The query writer of a further call to the same tool sees what earlier calls sent, listed and counted, so it can set skip; checked live (skip 50 gives offset 50, hasMore true).
+3. [x] Minor: an empty or blank optional param, such as `"filter": ""`, is left out like null; a required one left empty is refused before sending with a designed message.
+4. [x] Minor: `windowsforum.com` is an alias of WindowsForum; an email address or longer domain still names nothing, and sharedHost is unchanged.
+
+A separate Claude evaluator found no blocking issue; its below-threshold notes (a count above the records returned without a hasMore flag, totalPages read as a total) were fixed too.

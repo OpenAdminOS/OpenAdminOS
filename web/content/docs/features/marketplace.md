@@ -40,7 +40,7 @@ A roadmap ID, an Azure update ID or a KB number is sent only when it appears in 
 
 Each ID must have its tool's form: roadmap IDs are digits, Azure update IDs are digits or an older post's lowercase name such as `2021regions`, and KB numbers are digits with an optional KB prefix. Your question is read as separate tokens, so "109560-109561" names two roadmap items and never 109560109561. "KB5034441" and "5034441" are the same article; no other spelling counts.
 
-The same rule covers filters. Release Communications' list tools take an OData filter such as `status eq 'Rolling out'`. Chat reads the filter before sending it: any comparison on `id` or `baseId` must name an ID from your question or an earlier result, and a filter Chat cannot read, such as plain words, is not sent. The Chat step says why.
+The same rule covers filters. Release Communications' list tools take an OData filter such as `status eq 'Rolling out'`. Chat reads the filter before sending it: any comparison on `id` or `baseId` must name an ID from your question or an earlier result, and a filter Chat cannot read, such as plain words, is not sent. The Chat step says why. A blank filter is left out, as if none was written.
 
 ## Who runs each server
 
@@ -52,7 +52,7 @@ The install review names the operator, links its terms or privacy page where one
 
 ## Which server Chat asks
 
-Naming a server in a question calls it, for example "Ask endoflife.ai about Windows Server 2016". A host counts as a name only when it belongs to that server: Release Communications runs on www.microsoft.com, which serves much more, so "microsoft.com" in a question does not call it. Its name, its aliases and its full address with the path still do. For documentation questions, topic words choose a server:
+Naming a server in a question calls it, for example "Ask endoflife.ai about Windows Server 2016". A host counts as a name only when it belongs to that server: Release Communications runs on www.microsoft.com, which serves much more, so "microsoft.com" in a question does not call it. Its name, its aliases and its full address with the path still do. WindowsForum runs on mcp.windowsforum.com, and "windowsforum.com" names it too. For documentation questions, topic words choose a server:
 
 - roadmap, retirement, what's new, rollout, Azure update: Microsoft Release Communications
 - KB, cumulative update, known issue, patch, update history: WindowsForum
@@ -63,3 +63,13 @@ Other documentation questions go to Microsoft Learn when it is installed.
 ## Empty answers and errors
 
 When a server answers with nothing, the Chat step names it, for example "WindowsForum found nothing", and the answer says so instead of citing anything. When a server answers with an error, the step reads, for example, "endoflife.ai returned an error" with the server's message. When a server cannot be reached, the step reads "Could not reach" and the server name. Nothing fails silently.
+
+## Long lists
+
+Chat lists at most ten records from one result as sources. When a result holds more, or the server says it has more, Chat does not present the list as complete:
+
+- The step says so, for example "10 of 33 results" or "10 of 50 results · the server has more".
+- The model is given the server's own counts, such as `totalCount` and `hasMore`, and how many records were left out, and is told to say how many are shown, for example "Showing 10 of 515".
+- When the tool can page, as Release Communications' list tools can with `skip`, a further call in the same answer can ask for the next page.
+
+Records that cite one page, such as the CVEs of an endoflife.ai KEV answer, share one source number, and each keeps its own ID and name in what the model reads.
