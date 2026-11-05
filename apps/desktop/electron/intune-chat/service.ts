@@ -3611,12 +3611,12 @@ function modelClassification(
   };
 }
 
-/** Says so when installed MCP tools were held back from a model that skips the tool loop. */
 /** Whether an answer read tenant data: a tenant or mixed kind, a Graph refresh, or a tenant tool call. */
 function readTenantData(kind: ChatSourcePlan["kind"], refresh: GraphCacheRefreshResult | undefined, trace: IntuneChatMessage["toolTrace"]): boolean {
   return kind !== "docs" || refresh !== undefined || (trace ?? []).some((entry) => isTenantTool(entry.tool));
 }
 
+/** Says so when installed MCP tools were held back from a model that skips the tool loop. */
 function withMcpSkippedNotice(capability: AgenticCapabilityDecision, mcpInstalled: boolean): string | undefined {
   // The small-model line already says Marketplace tools are off.
   if (!mcpInstalled || capability.enabled || capability.tooSmall) return capability.notice;
