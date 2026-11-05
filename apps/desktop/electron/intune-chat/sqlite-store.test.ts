@@ -759,6 +759,11 @@ describe("Intune Chat planner", () => {
       "Create a remediation script and have it run daily on all devices",
       "Create a KQL query and turn it into a detection rule",
       "Create a query. Then use it in the dynamic group.",
+      "Create a remediation script and upload the script to all Windows devices",
+      "Create a script and run the script on all Windows devices",
+      "Create a remediation script and schedule the script to run hourly on all Windows devices",
+      "Create a script. Upload the script to all Windows devices.",
+      "Create a KQL query and save the query as a custom detection",
     ];
     for (const question of writeQuestions) {
       assert.equal(

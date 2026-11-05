@@ -331,9 +331,16 @@ const TENANT_OBJECT_NOUN =
   /\b(?:rules?|polic(?:y|ies)|profiles?|assignments?|filters?|settings?|packages?|alerts?|groups?)\b/;
 // Text placed into the tenant, or run there, is a tenant change. It
 // is checked against the whole message: "Create a script. Upload it
-// to all Windows devices."
-const ARTIFACT_TENANT_CUE =
-  /\b(?:in|to|into)\s+(?:the\s+|my\s+|our\s+)?(?:tenant|intune|entra|admin center|endpoint manager)\b|\b(?:assigned|deployed|uploaded|published|scheduled)\b|\b(?:upload|publish|schedule|target|attach|push|apply|run|execute|set|roll|distribute|send|install|activate|save|turn|use|paste|put|add)\s+(?:it|them|this|that)\b|\b(?:make|have|let)\s+(?:it|them)\s+run\b/;
+// to all Windows devices." The placed object may be a pronoun or the
+// artifact itself: "upload the script", "run my PowerShell script".
+const ARTIFACT_TENANT_CUE = new RegExp(
+  [
+    "\\b(?:in|to|into)\\s+(?:the\\s+|my\\s+|our\\s+)?(?:tenant|intune|entra|admin center|endpoint manager)\\b",
+    "\\b(?:assigned|deployed|uploaded|published|scheduled)\\b",
+    `\\b(?:upload|publish|schedule|target|attach|push|apply|run|execute|set|roll|distribute|send|install|activate|save|turn|use|paste|put|add)\\s+(?:it|them|this|that|(?:the|this|that|these|those|my|your|our)\\s+(?:[\\w-]+\\s+){0,2}?${ARTIFACT_NOUN})\\b`,
+    "\\b(?:make|have|let)\\s+(?:it|them)\\s+run\\b",
+  ].join("|"),
+);
 
 function artifactRequest(
   question: string,
