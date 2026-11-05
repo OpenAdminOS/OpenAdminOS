@@ -892,6 +892,19 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
+  it("leaves out params the writer set to null, as a schema default of null invites", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const roadmaps: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_m365_roadmaps"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_m365_roadmaps",
+        inputSchema: { type: "object", properties: { filter: { type: "string", default: null }, search: { type: "string", default: null }, skip: { type: ["integer", "null"], default: null } } } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [roadmaps] };
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([JSON.stringify({ tool: roadmaps.name, params: {} }), '{"final":true,"answer":"Done."}'], [], [],
+        ['{"filter":null,"search":"Intune","skip":null}']), context), questionKind: "docs" });
+      assert.equal(result.toolTrace[0]!.error, undefined);
+      assert.deepEqual(calls, [{ tool: "get_recent_m365_roadmaps", args: { search: "Intune" } }]);
+    });
+  });
+
   it("sends nothing when the query writer fails or no admin question was given", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
