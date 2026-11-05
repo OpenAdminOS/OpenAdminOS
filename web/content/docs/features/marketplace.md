@@ -32,7 +32,7 @@ Some servers list more tools than OpenAdminOS needs. For those, the catalog name
 - **endoflife.ai** offers everything except `scan_stack` and `check_sbom`. Those take a whole software inventory or bill of materials, which would send a list of what runs in your estate.
 - **Release Communications** offers all four of its tools.
 
-If a server stops listing an offered tool, its card says "Installed · tools missing", its details name the missing tools, and Chat does not use the server until Check connection finds every offered tool again.
+If a server stops listing an offered tool, its card says "Installed · tools missing", its details name the missing tools, and Chat does not use the server until Check connection finds every offered tool again. Chat also notices this on its own: when a call opens a new session, for example after a restart, and the server no longer lists an offered tool, the call is refused before anything is sent, the answer says which tool is missing, and the card changes to "Installed · tools missing".
 
 ## Item IDs
 

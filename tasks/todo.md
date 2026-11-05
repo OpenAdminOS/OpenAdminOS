@@ -1501,3 +1501,9 @@ GPT-6.1-Sol review of the whole diff against 98ddfc3. Four findings, all fixed, 
 4. [x] Minor: `windowsforum.com` is an alias of WindowsForum; an email address or longer domain still names nothing, and sharedHost is unchanged.
 
 A separate Claude evaluator found no blocking issue; its below-threshold notes (a count above the records returned without a hasMore flag, totalPages read as a total) were fixed too.
+
+## Review round 3 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff against 98ddfc3. No blocking finding; one important finding, fixed with tests that fail before the fix:
+
+1. [x] Important: missing-tool gating was bypassed on automatic reconnect. After a restart, the stored listing still offered the server, and a session opened for a call found a tool missing but still dispatched the others. The host now refuses every call while the session lacks an offered tool (`tools-missing`, nothing sent, the message names the tool and Check connection), and a session opened for a call stores its listing so the Marketplace shows "Installed · tools missing" and Chat skips the server.
