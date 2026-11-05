@@ -436,8 +436,15 @@ function validateMcpArgs(entry: McpChatTool, params: unknown): Record<string, un
   };
   if (params === undefined) params = {};
   if (!params || typeof params !== "object" || Array.isArray(params)) reject(`${entry.tool} params must be an object.`);
+  const required = Array.isArray(entry.inputSchema.required) ? entry.inputSchema.required : [];
   // A null param is one the writer left unset, as schemas with "default": null invite; it is not sent.
-  const args = Object.fromEntries(Object.entries(params as Record<string, unknown>).filter(([, value]) => value !== null));
+  // An optional param left as empty or blank text is unset too. A required one is refused.
+  const args = Object.fromEntries(Object.entries(params as Record<string, unknown>).filter(([key, value]) => {
+    if (value === null) return false;
+    if (typeof value !== "string" || value.trim()) return true;
+    if (required.includes(key)) reject(`the ${entry.serverName} query left the ${key} param empty, and ${entry.tool} needs it.`);
+    return false;
+  }));
   if (JSON.stringify(args).length > MCP_ARGS_LIMIT) reject(`${entry.tool} params exceed ${MCP_ARGS_LIMIT.toLocaleString()} characters. Send a shorter public question.`);
   const properties = entry.inputSchema.properties && typeof entry.inputSchema.properties === "object"
     ? entry.inputSchema.properties as Record<string, JsonSchemaProperty>
@@ -467,7 +474,6 @@ function validateMcpArgs(entry: McpChatTool, params: unknown): Record<string, un
     }
     if (declared === "array" && !Array.isArray(value)) reject(`${entry.tool} param ${key} must be a list.`);
   }
-  const required = Array.isArray(entry.inputSchema.required) ? entry.inputSchema.required : [];
   for (const key of required) {
     if (typeof key === "string" && !Object.hasOwn(args, key)) reject(`${entry.tool} needs the ${key} param.`);
   }

@@ -1001,6 +1001,28 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
+  it("leaves out optional params the writer left empty, and refuses an empty required param", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const roadmaps: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_m365_roadmaps"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_m365_roadmaps",
+        inputSchema: { type: "object", properties: { filter: { type: "string" }, search: { type: "string" } } },
+        itemIds: { filter: { param: "filter", fields: ["id"], literal: "number" }, form: { kind: "number" } } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [roadmaps, docsTool] };
+      const ask = (tool: McpChatTool, writer: string) => runAgenticChat({ ...input(store, scriptedLlm([JSON.stringify({ tool: tool.name, params: {} }), '{"final":true,"answer":"Done."}'], [], [], [writer]), context), questionKind: "docs" });
+      for (const filter of ["", "   ", "\n\t"]) {
+        const result = await ask(roadmaps, JSON.stringify({ filter, search: "Intune" }));
+        assert.equal(result.toolTrace[0]!.error, undefined, JSON.stringify(filter));
+      }
+      assert.deepEqual(calls, [0, 1, 2].map(() => ({ tool: "get_recent_m365_roadmaps", args: { search: "Intune" } })));
+      calls.length = 0;
+      // A required param left empty is refused before sending, with what to do.
+      const empty = await ask(docsTool, '{"query":"  "}');
+      assert.equal(empty.toolTrace[0]!.mcpSource?.sentToHost, false);
+      assert.equal(empty.toolTrace[0]!.error, "the Microsoft Learn query left the query param empty, and microsoft_docs_search needs it. Nothing was sent to learn.microsoft.com.");
+      assert.deepEqual(calls, []);
+    });
+  });
+
   it("sends nothing when the query writer fails or no admin question was given", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
