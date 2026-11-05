@@ -20,7 +20,7 @@ beforeEach(() => {
 });
 
 describe("Sidebar", () => {
-  it("renders the six primary actions in the locked order", () => {
+  it("renders the primary actions in the locked order", () => {
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
@@ -35,8 +35,9 @@ describe("Sidebar", () => {
     ).toEqual(expect.arrayContaining([expect.stringContaining("New chat"), expect.stringContaining("Search")]));
     expect(
       within(primary).getAllByRole("link").map((link) => link.textContent?.trim()),
-    ).toEqual(["Agent Team", "Agents", "Runs", "Changes"]);
+    ).toEqual(["Agent Team", "Agents", "Marketplace", "Runs", "Changes"]);
     expect(screen.getByRole("link", { name: "Agent Team" })).toHaveAttribute("href", "/office");
+    expect(screen.getByRole("link", { name: "Marketplace" })).toHaveAttribute("href", "/marketplace");
   });
 
   it("shows the Runs review badge only when a run awaits confirmation", async () => {

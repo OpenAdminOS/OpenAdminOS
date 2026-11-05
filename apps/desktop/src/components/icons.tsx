@@ -39,6 +39,15 @@ export const IconHub = ({ size = 18, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconMarketplace = ({ size = 18, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M4 9.5 5.5 4h13L20 9.5" />
+    <path d="M4 9.5c0 1.7 1.3 3 3 3s3-1.3 3-3c0 1.7 1.3 3 2 3s2-1.3 2-3c0 1.7 1.3 3 3 3s3-1.3 3-3" />
+    <path d="M5.5 12.2V20h13v-7.8" />
+    <path d="M10 20v-4.5h4V20" />
+  </svg>
+);
+
 export const IconHome = ({ size = 18, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <path d="M4 10.5 L12 4 L20 10.5" />

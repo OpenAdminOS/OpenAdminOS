@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
@@ -6,16 +6,20 @@ import { Route, Routes, useLocation } from "react-router";
 import IntuneChat, { createHostedBatchProviderConsent } from "./IntuneChat";
 import Agents from "./Agents";
 import { AppShell } from "../components/AppShell";
+import { DataBoundaryProvider } from "../state";
 import {
   createAwaitingConfirmationRun,
   createMockAgent,
   createMockAppState,
+  createMockMcpServers,
   makeMockBridge,
   mockProviders,
   renderRoute,
   renderWithAppState,
 } from "../test/test-utils";
 import type {
+  IntuneChatStep,
+  IntuneChatStreamEvent,
   GraphCacheStatus,
   IntuneChatConversation,
   IntuneChatMessage,
@@ -23,7 +27,7 @@ import type {
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
-import { PROVIDER_DETECTION_COPY, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, PROVIDER_DETECTION_COPY, deriveTrustCopy } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
 function LocationProbe() {
@@ -669,6 +673,65 @@ describe("IntuneChat agent picker", () => {
   });
 });
 
+describe("IntuneChat hosted-provider disclosure", () => {
+  const sentence = "Prompts and tenant data go to OpenAI while this model is selected.";
+  const conversation: IntuneChatConversation = {
+    id: "conversation-hosted", title: "Stale devices", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+  };
+  const answered = (model: string) => vi.fn(async () => [
+    { id: "q-h", conversationId: conversation.id, role: "user" as const, content: "Which devices are stale?", status: "completed" as const, createdAt: conversation.createdAt },
+    { id: "a-h", conversationId: conversation.id, role: "assistant" as const, content: "Two devices are stale.", status: "completed" as const, createdAt: conversation.updatedAt, providerId: "openai" as const, model },
+  ]);
+
+  it("folds the sentence into an icon once the conversation sent with this model, keeping it reachable by keyboard and screen reader", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },
+      createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
+    expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
+    const icon = screen.getByRole("button", { name: "Where data goes" });
+    expect(icon).toHaveAccessibleDescription(sentence);
+    expect(icon).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("note")).toBeNull();
+    // The status strip pill is unchanged; the composer icon opens the full sentence on demand.
+    await user.click(icon);
+    expect(icon).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("note")).toHaveTextContent(sentence);
+    await user.click(icon);
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("shows the sentence in full again after switching the model", async () => {
+    const bridge = makeMockBridge(
+      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-4.1") },
+      createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
+    expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
+    expect(screen.getByRole("note")).toHaveTextContent(sentence);
+    expect(screen.getByRole("button", { name: "Where data goes" })).toHaveAttribute("aria-expanded", "true");
+  });
+  it("adds the MCP disclosure to the hosted sentence and the shield tooltip when MCP servers are on", async () => {
+    const bridge = makeMockBridge(
+      { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },
+      createMockAppState({
+        activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" },
+        mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }),
+      }),
+    );
+    renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
+    expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
+    const full = `${sentence} MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.`;
+    // The shield carries the full text and opens the same line.
+    const icon = screen.getByRole("button", { name: "Where data goes" });
+    expect(icon).toHaveAccessibleDescription(full);
+    await userEvent.setup().click(icon);
+    expect(screen.getByRole("note")).toHaveTextContent(full);
+  });
+});
+
 describe("IntuneChat hosted-provider consent", () => {
   it("shows consent copy and waits for explicit confirmation before sending tenant context", async () => {
     const user = userEvent.setup();
@@ -690,7 +753,8 @@ describe("IntuneChat hosted-provider consent", () => {
       name: "Ask about your Microsoft 365 tenant",
     });
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("OpenAI");
-    await screen.findByText(
+    // A new conversation shows the hosted sentence in full under the composer.
+    expect(await screen.findByRole("note")).toHaveTextContent(
       "Prompts and tenant data go to OpenAI while this model is selected.",
     );
 
@@ -739,6 +803,39 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(sent?.hostedProviderConsent).not.toHaveProperty("remember");
   });
 
+  it("names the enabled MCP hosts in what leaves this device", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        activeProviderId: "openai",
+        activeModelByProviderId: { openai: "gpt-5" },
+        mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: false } }),
+      }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.type(composer, "How long is the Intune compliance grace period?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const heading = await screen.findByText("What leaves this device");
+    const detail = heading.parentElement?.querySelector("p")?.textContent ?? "";
+    expect(detail).toContain("sent to the hosted provider for this response.");
+    expect(detail).toContain("MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com.");
+    expect(detail).not.toContain("kqlsearch");
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("names no MCP host in the confirmation when no server is enabled", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.type(composer, "Which Windows devices are stale?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const heading = await screen.findByText("What leaves this device");
+    expect(heading.parentElement?.querySelector("p")?.textContent ?? "").not.toContain("MCP queries");
+  });
+
   it("uses the mocked hosted provider state", () => {
     expect(mockProviders.find((provider) => provider.id === "openai")?.isLocal).toBe(false);
   });
@@ -784,6 +881,25 @@ describe("IntuneChat trust presentation", () => {
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("Ollama");
     expect(screen.queryByText("Local provider")).not.toBeInTheDocument();
     expect(screen.getByText("Local model. Tenant data stays on this device.")).toBeInTheDocument();
+  });
+
+  it("names the MCP hosts in the local boundary footnote when MCP servers are on", async () => {
+    renderRoute(
+      <DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>,
+      {
+        path: "/chat/:conversationId?",
+        route: "/chat",
+        bridge: makeMockBridge({}, createMockAppState({
+          mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: true } }),
+        })),
+      },
+    );
+    await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    // With MCP tools on, the local line keeps the claim for the model and the tenant data only.
+    expect(screen.getByText(/^Local model\. Graph and cache data stay on this device\./)).toHaveTextContent(
+      "Local model. Graph and cache data stay on this device. MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com and www.kqlsearch.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.",
+    );
+    expect(screen.queryByText(/Tenant data stays on this device/)).not.toBeInTheDocument();
   });
 
   it("activates the provider when picking another provider's model", async () => {
@@ -1091,6 +1207,46 @@ describe("IntuneChat conversation routes", () => {
     expect(screen.queryByText(/Detected matching agent/)).not.toBeInTheDocument();
   });
 
+  it("shows the host of each MCP tool call in What ran", async () => {
+    const user = userEvent.setup();
+    const conversation: IntuneChatConversation = {
+      id: "conversation-mcp-1",
+      title: "Grace period",
+      createdAt: "2026-11-03T10:00:00.000Z",
+      updatedAt: "2026-11-03T10:05:00.000Z",
+      tenantId: "tenant-1",
+      scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge();
+    bridge.listIntuneChatConversations = vi.fn(async () => [conversation]);
+    bridge.getIntuneChatMessages = vi.fn(async () => [
+      {
+        id: "mcp-assistant-1",
+        conversationId: conversation.id,
+        role: "assistant" as const,
+        content: "The grace period is set per noncompliance action.",
+        createdAt: "2026-11-03T10:01:00.000Z",
+        status: "completed" as const,
+        toolTrace: [{
+          id: "tool-1",
+          tool: "mcp__microsoft-learn__microsoft_docs_search" as const,
+          params: { query: "Intune compliance grace period" },
+          resultSummary: "Microsoft Learn answered from learn.microsoft.com · 2,400 characters",
+          mcpSource: { serverId: "microsoft-learn", serverName: "Microsoft Learn", host: "learn.microsoft.com", tool: "microsoft_docs_search" },
+          durationMs: 820,
+          createdAt: "2026-11-03T10:00:30.000Z",
+          completedAt: "2026-11-03T10:00:31.000Z",
+        }],
+      },
+    ]);
+
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-mcp-1", bridge });
+
+    await user.click(await screen.findByRole("button", { name: "How the answer was made" }));
+    await user.click(screen.getByRole("button", { name: /What ran/ }));
+    expect(screen.getByText("MCP tool · Microsoft Learn at learn.microsoft.com · third-party content, not tenant evidence")).toBeInTheDocument();
+  });
+
   it("shows a recovery state for a deleted or unknown conversation URL", async () => {
     const bridge = makeMockBridge();
     bridge.listIntuneChatConversations = vi.fn(async () => []);
@@ -1253,8 +1409,239 @@ describe("IntuneChat conversation routes", () => {
 
     expect(await screen.findByText("Two devices need review.")).toBeInTheDocument();
     expect(screen.getByText(notice)).toBeVisible();
-    await user.click(screen.getByText("How I checked"));
+    await user.click(screen.getByRole("button", { name: "How the answer was made" }));
     expect(screen.getByText(notice)).toBeVisible();
+  });
+
+  describe("answer steps and follow-ups", () => {
+    const followUp = "Check our 5 macOS devices for Defender in Intune";
+    const setup = () => {
+      const conversation: IntuneChatConversation = {
+        id: "conversation-follow", title: "Defender for macOS", createdAt: "2026-11-04T09:00:00.000Z",
+        updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+      };
+      const bridge = makeMockBridge({
+        listIntuneChatConversations: vi.fn(async () => [conversation]),
+        getIntuneChatMessages: vi.fn(async () => [
+          { id: "q-1", conversationId: conversation.id, role: "user" as const, content: "What does Microsoft Learn say about Defender for macOS?", status: "completed" as const, createdAt: conversation.createdAt },
+          {
+            id: "a-1", conversationId: conversation.id, role: "assistant" as const, status: "completed" as const, createdAt: conversation.updatedAt,
+            content: "Defender for Endpoint on macOS needs full disk access [1].",
+            questionKind: "docs" as const,
+            followUps: [followUp, "Which Macs miss the system extension profile?"],
+            tenantFollowUps: [followUp],
+            documentationSources: [{ citation: 1, kind: "mcp" as const, title: "Microsoft Defender for Endpoint on Mac", url: "https://learn.microsoft.com/mac", serverName: "Microsoft Learn", host: "learn.microsoft.com" }],
+            steps: [{ id: "s1", kind: "plan" as const, title: "Read the question", status: "completed" as const, origin: "device" as const, originLabel: "On device", startedAt: "", durationMs: 1 }],
+          },
+        ]),
+      });
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-follow", bridge });
+      return bridge;
+    };
+
+    it("shows the follow-up as ghost text that Tab fills, and sends nothing", async () => {
+      const user = userEvent.setup();
+      const bridge = setup();
+      const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+      await waitFor(() => expect(composer).toHaveAttribute("placeholder", followUp));
+      expect(screen.getByText(`Suggestion: ${followUp}, press Tab to use it, Escape to dismiss`)).toBeInTheDocument();
+      expect(composer).toHaveAccessibleDescription(`Suggestion: ${followUp}, press Tab to use it, Escape to dismiss`);
+      composer.focus();
+      await user.keyboard("{Tab}");
+      expect(composer).toHaveValue(followUp);
+      expect(composer).toHaveFocus();
+      // With text in the composer, Tab moves focus as usual.
+      await user.keyboard("{Tab}");
+      expect(composer).not.toHaveFocus();
+      expect(composer).toHaveValue(followUp);
+      expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+      expect(bridge.sendIntuneChatMessage).not.toHaveBeenCalled();
+    });
+
+    it("hides the ghost text on Escape or typing, and fills the composer from the one follow-up chip", async () => {
+      const user = userEvent.setup();
+      const bridge = setup();
+      const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+      await waitFor(() => expect(composer).toHaveAttribute("placeholder", followUp));
+      composer.focus();
+      await user.keyboard("{Escape}");
+      expect(composer).not.toHaveAttribute("placeholder", followUp);
+      expect(screen.queryByText(/press Tab to use it/)).toBeNull();
+
+      // One quiet chip: the first follow-up, tagged because the docs answer's follow-up reads tenant data.
+      expect(screen.queryByRole("button", { name: "Which Macs miss the system extension profile?" })).toBeNull();
+      await user.click(screen.getByRole("button", { name: new RegExp(`^${followUp},\\s*Uses tenant data$`) }));
+      expect(composer).toHaveValue(followUp);
+      expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    });
+
+    it("shows no tenant above a docs answer, names Microsoft Learn once in the step summary, and keeps how it was made there", async () => {
+      const user = userEvent.setup();
+      setup();
+      expect(await screen.findByText(/needs full disk access/)).toBeInTheDocument();
+      const log = screen.getByRole("log", { name: "Conversation" });
+      // No tenant chip: the answer never touched the tenant.
+      expect(within(log).queryByText("Contoso IT")).toBeNull();
+      expect(within(log).getByRole("button", { name: /1 step/ })).toHaveTextContent("Microsoft Learn · Tenant not used");
+      const answer = within(log).getAllByRole("article").at(-1)!;
+      expect(within(answer).getAllByText(/Microsoft Learn/).filter((node) => !node.closest("[role=tooltip]"))).toHaveLength(1);
+      expect(within(log).queryByText("Tenant data")).toBeNull();
+      expect(within(log).queryByText("How I checked")).toBeNull();
+      expect(within(log).queryByText(/data from/)).toBeNull();
+      await user.click(within(log).getByRole("button", { name: /1 step/ }));
+      expect(within(log).getByRole("list", { name: "Steps" })).toBeInTheDocument();
+    });
+
+    it("keeps the tenant chip on a mixed answer, with documentation and tenant blocks labelled", async () => {
+      const conversation: IntuneChatConversation = {
+        id: "conversation-mixed", title: "Macs and Defender", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+      };
+      const bridge = makeMockBridge({
+        listIntuneChatConversations: vi.fn(async () => [conversation]),
+        getIntuneChatMessages: vi.fn(async () => [{
+          id: "a-mixed", conversationId: conversation.id, role: "assistant" as const, status: "completed" as const, createdAt: conversation.updatedAt,
+          content: "Defender needs full disk access [1].\n\n2 of your 5 Macs are noncompliant.",
+          questionKind: "mixed" as const,
+          documentationSources: [{ citation: 1, kind: "mcp" as const, title: "Microsoft Defender for Endpoint on Mac", url: "https://learn.microsoft.com/mac", serverName: "Microsoft Learn", host: "learn.microsoft.com" }],
+          toolTrace: [{ id: "t1", tool: "query_cache" as const, params: {}, resultSummary: "", durationMs: 1, createdAt: "", completedAt: "" }],
+          steps: [{ id: "s1", kind: "tool" as const, title: "Queried cached data", status: "completed" as const, origin: "device" as const, originLabel: "On device", startedAt: "", durationMs: 1 }],
+        }]),
+      });
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-mixed", bridge });
+      expect(await screen.findByText(/are noncompliant/)).toBeInTheDocument();
+      const log = screen.getByRole("log", { name: "Conversation" });
+      expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
+      expect(within(log).getByRole("region", { name: "Microsoft Learn" })).toBeInTheDocument();
+      expect(within(log).getByRole("region", { name: "Your tenant" })).toBeInTheDocument();
+      expect(within(log).getByRole("button", { name: /1 step/ })).not.toHaveTextContent("Tenant not used");
+    });
+
+    it("lists consulted local index passages of an uncited answer the same way after a reload", async () => {
+      const conversation: IntuneChatConversation = {
+        id: "conversation-uncited", title: "Compliance grace period", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+      };
+      const stored: IntuneChatMessage[] = [{
+        id: "a-uncited", conversationId: conversation.id, role: "assistant", status: "completed", createdAt: conversation.updatedAt,
+        content: "A device is marked noncompliant once the grace period ends.",
+        questionKind: "docs",
+        documentationSources: [
+          { citation: 1, kind: "docs-index", title: "Compliance policies", file: "intune/compliance.md", indexVersion: "2026-08-26" },
+          { citation: 2, kind: "mcp", title: "Compliance grace period", url: "https://learn.microsoft.com/intune/grace", serverName: "Microsoft Learn", host: "learn.microsoft.com" },
+        ],
+        steps: [{ id: "s1", kind: "plan", title: "Read the question", status: "completed", origin: "device", originLabel: "On device", startedAt: "", durationMs: 1 }],
+      }];
+      const bridge = makeMockBridge({
+        listIntuneChatConversations: vi.fn(async () => [conversation]),
+        getIntuneChatMessages: vi.fn(async () => structuredClone(stored)),
+      });
+      const consultedRows = async () => {
+        await screen.findByText(/grace period ends/);
+        const consulted = within(screen.getByRole("log", { name: "Conversation" })).getByRole("region", { name: "Consulted" });
+        return {
+          heading: within(consulted).getByRole("heading").textContent,
+          rows: within(consulted).getAllByRole("listitem").map((row) => row.textContent),
+          links: within(consulted).queryAllByRole("link").map((link) => link.getAttribute("href")),
+        };
+      };
+      const first = renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-uncited", bridge });
+      const before = await consultedRows();
+      expect(before).toEqual({
+        heading: "Consulted · learn.microsoft.com, not verified by OpenAdminOS · Local docs index on this device",
+        rows: ["Compliance policiesLocal docs index, Aug 26, 2026", "Compliance grace periodlearn.microsoft.com"],
+        links: ["https://learn.microsoft.com/intune/grace"],
+      });
+      first.unmount();
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-uncited", bridge });
+      expect(await consultedRows()).toEqual(before);
+    });
+
+    it("streams each step live, then folds them into the summary line", async () => {
+      const user = userEvent.setup();
+      const conversation: IntuneChatConversation = {
+        id: "conversation-live", title: "Defender", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:00:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+      };
+      let release: () => void = () => {};
+      const step = (overrides: Partial<IntuneChatStep>): IntuneChatStep => ({ id: "s", kind: "plan", title: "Read the question", status: "completed", origin: "device", originLabel: "On device", startedAt: "", durationMs: 1, ...overrides });
+      const plan = step({ id: "s1", detail: "Documentation question. Sources: Microsoft Learn. Your tenant is not checked." });
+      const asking = step({ id: "s2", kind: "mcp", title: "Asking Microsoft Learn", status: "active", origin: "third-party", originLabel: "learn.microsoft.com", sent: "Defender for Endpoint on macOS", durationMs: undefined });
+      const writing = step({ id: "s3", kind: "answer", title: "Working on the answer", status: "active", origin: "model", originLabel: "OpenAI", durationMs: undefined });
+      let saved: IntuneChatMessage[] = [];
+      const bridge = makeMockBridge({
+        listIntuneChatConversations: vi.fn(async () => (saved.length ? [conversation] : [])),
+        getIntuneChatMessages: vi.fn(async () => saved),
+        streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (input, onEvent) => {
+          const userMessage: IntuneChatMessage = { id: "u-live", conversationId: conversation.id, role: "user", content: input.content, status: "completed", createdAt: conversation.createdAt };
+          const pending: IntuneChatMessage = { id: "a-live", conversationId: conversation.id, role: "assistant", content: "", status: "streaming", createdAt: conversation.createdAt };
+          const cacheStatus = { tenantId: "tenant-1", resources: [] };
+          onEvent({ type: "started", conversation, userMessage, assistantMessage: pending, cacheStatus });
+          onEvent({ type: "status", conversationId: conversation.id, message: "Asking Microsoft Learn.", stage: "running-tools" });
+          onEvent({ type: "steps", conversationId: conversation.id, assistantMessageId: "a-live", steps: [plan, asking, writing] });
+          await new Promise<void>((resolve) => { release = resolve; });
+          const done = [plan, { ...asking, title: "Asked Microsoft Learn", status: "completed" as const, durationMs: 1200 }, { ...writing, title: "Wrote the answer", status: "completed" as const, durationMs: 3400 }];
+          const result = { conversation, userMessage, assistantMessage: { ...pending, status: "completed" as const, content: "Defender needs full disk access.", steps: done }, cacheStatus };
+          saved = [userMessage, result.assistantMessage];
+          onEvent({ type: "completed", result });
+          return result;
+        }),
+      });
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+      const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+      await user.type(composer, "What does Microsoft Learn say about Defender for macOS?");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      const timeline = await screen.findByRole("list", { name: "Steps" });
+      const rows = within(timeline).getAllByRole("listitem");
+      expect(rows.map((row) => row.textContent)).toEqual([
+        expect.stringContaining("Read the question"),
+        expect.stringContaining("Asking Microsoft Learn"),
+        expect.stringContaining("Working on the answer"),
+      ]);
+      expect(rows[1]).toHaveTextContent("Defender for Endpoint on macOS");
+      expect(rows[1]).toHaveAttribute("aria-current", "step");
+      release();
+      // The progress line stays briefly after the answer, then the summary replaces the live timeline.
+      const summary = await screen.findByRole("button", { name: /3 steps/ }, { timeout: 4000 });
+      expect(summary).toHaveAttribute("aria-expanded", "false");
+      expect(screen.getByRole("button", { name: "Sent: search text to learn.microsoft.com, answer context to OpenAI" })).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("stops offering the ghost text once the admin types", async () => {
+      const user = userEvent.setup();
+      setup();
+      const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+      await waitFor(() => expect(composer).toHaveAttribute("placeholder", followUp));
+      await user.type(composer, "W");
+      await user.clear(composer);
+      expect(composer).not.toHaveAttribute("placeholder", followUp);
+    });
+  });
+
+  it("shows Scroll to latest in its own row above the composer, outside the conversation, only away from the bottom", async () => {
+    const user = userEvent.setup();
+    const conversation: IntuneChatConversation = {
+      id: "conversation-scroll", title: "Long answer", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+    };
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+      getIntuneChatMessages: vi.fn(async () => [{ id: "a-long", conversationId: conversation.id, role: "assistant" as const, status: "completed" as const, createdAt: conversation.updatedAt, content: "A long answer." }]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-scroll", bridge });
+    expect(await screen.findByText("A long answer.")).toBeInTheDocument();
+    const log = screen.getByRole("log", { name: "Conversation" });
+    Object.defineProperty(log, "scrollHeight", { configurable: true, value: 2000 });
+    Object.defineProperty(log, "clientHeight", { configurable: true, value: 600 });
+    log.scrollTop = 1380;
+    fireEvent.scroll(log);
+    expect(screen.queryByRole("button", { name: "Scroll to latest" })).toBeNull();
+    log.scrollTop = 400;
+    fireEvent.scroll(log);
+    const button = screen.getByRole("button", { name: "Scroll to latest" });
+    expect(log).not.toContainElement(button);
+    const row = screen.getByTestId("scroll-to-latest-row");
+    expect(row.className).not.toMatch(/\babsolute\b/);
+    // Above the composer in the same column.
+    expect(row.compareDocumentPosition(screen.getByLabelText(CHAT_COPY.composerLabel)) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    await user.click(button);
+    expect(screen.queryByRole("button", { name: "Scroll to latest" })).toBeNull();
   });
 
   it("exposes the transcript as a log and focuses the composer on open", async () => {
@@ -1382,7 +1769,7 @@ describe("IntuneChat conversation routes", () => {
     expect(screen.queryByRole("list", { name: "Sources" })).not.toBeInTheDocument();
     expect(screen.queryByText("· 9 rows")).not.toBeInTheDocument();
 
-    await user.click(screen.getByText("How I checked"));
+    await user.click(screen.getByRole("button", { name: "How the answer was made" }));
     expect(screen.getByText("Sources")).toBeVisible();
   });
 });
@@ -1406,4 +1793,271 @@ it("routes a suggested write-agent dry run through the dry-run preflight", async
   expect(await screen.findByRole("heading", { name: "Review dry run" })).toBeInTheDocument();
   await user.click(screen.getByRole("button", { name: "Start dry run" }));
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
+});
+
+/**
+ * The event sequence of a streamed docs answer, as the host sends it
+ * (recorded from the app store): the first step at once, status lines,
+ * the step list several times, one MCP call, then the answer.
+ */
+function liveRunFixture() {
+  const conversation: IntuneChatConversation = {
+    id: "chat-live-run", title: "how does defender onboarding for macos work?", createdAt: "2026-11-04T10:49:54.264Z",
+    updatedAt: "2026-11-04T10:49:54.264Z", tenantId: "tenant-1", scopeKind: "single-tenant",
+  };
+  const userMessage: IntuneChatMessage = { id: "u-live-run", conversationId: conversation.id, role: "user", content: conversation.title, status: "completed", createdAt: conversation.createdAt };
+  const pending: IntuneChatMessage = { id: "a-live-run", conversationId: conversation.id, role: "assistant", content: "", status: "streaming", createdAt: conversation.createdAt, providerId: "openai" };
+  const step = (overrides: Partial<IntuneChatStep>): IntuneChatStep => ({ id: "step-1", kind: "plan", title: "Reading the question", status: "active", origin: "device", originLabel: "On device", startedAt: "2026-11-04T10:49:54.275Z", ...overrides });
+  const plan = step({});
+  const planDone = step({ title: "Read the question", status: "completed", durationMs: 40, detail: "Sources available: Microsoft Learn. The model classifies the question." });
+  const working = step({ id: "step-2", kind: "answer", title: "Working", origin: "model", originLabel: "OpenAI Codex", detail: "gpt-6-sol" });
+  const chose = { ...working, title: "Chose to ask Microsoft Learn", status: "completed" as const, durationMs: 9300, detail: "gpt-6-sol · Classified as a docs question. Sources: Microsoft Learn. Your tenant is not checked." };
+  const asking = step({ id: "step-3", kind: "mcp", title: "Asking Microsoft Learn", origin: "third-party", originLabel: "learn.microsoft.com", detail: "microsoft_docs_search", sent: "Defender for Endpoint onboarding on macOS" });
+  const asked = { ...asking, title: "Asked Microsoft Learn", status: "completed" as const, durationMs: 1200, detail: "microsoft_docs_search · 10 results" };
+  const working2 = step({ id: "step-4", kind: "answer", title: "Working", origin: "model", originLabel: "OpenAI Codex", detail: "gpt-6-sol" });
+  const answered = { ...working2, title: "Wrote the answer", status: "completed" as const, durationMs: 15400 };
+  const base = { conversationId: conversation.id, assistantMessageId: pending.id };
+  const status = (message: string): IntuneChatStreamEvent => ({ type: "status", conversationId: conversation.id, message, stage: "running-tools" });
+  const finalText = "Onboarding has three parts [1].";
+  const result: SendIntuneChatMessageResult = {
+    conversation, userMessage,
+    assistantMessage: { ...pending, status: "completed", content: finalText, steps: [planDone, chose, asked, answered] },
+    cacheStatus: { tenantId: "tenant-1", resources: [] },
+  };
+  const events: IntuneChatStreamEvent[] = [
+    { type: "started", conversation, userMessage, assistantMessage: pending, cacheStatus: result.cacheStatus },
+    { type: "steps", ...base, steps: [plan] },
+    status("Checking cached tenant data."),
+    status("Investigative mode started."),
+    { type: "steps", ...base, steps: [planDone, working] },
+    { type: "steps", ...base, steps: [planDone, chose] },
+    { type: "steps", ...base, steps: [planDone, chose, asking] },
+    status("Asking Microsoft Learn at learn.microsoft.com: microsoft_docs_search."),
+    { type: "steps", ...base, steps: [planDone, chose, asked] },
+    status("Microsoft Learn answered from learn.microsoft.com · 12,000 characters · shortened"),
+    { type: "steps", ...base, steps: [planDone, chose, asked, working2] },
+    { type: "steps", ...base, steps: [planDone, chose, asked, answered] },
+    status("Model response started."),
+    { type: "delta", ...base, delta: finalText, content: finalText, providerId: "openai" },
+    { type: "completed", result },
+  ];
+  return { conversation, userMessage, result, events, finalText };
+}
+
+/** The text after the tenant on the pending scope line. */
+const scopeLine = (log: HTMLElement) => log.querySelector(".chat-scope-shimmer")?.textContent;
+
+describe("IntuneChat live run", () => {
+  it("names only the current step on the scope line, never a tool result", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return result;
+      }),
+      getIntuneChatMessages: vi.fn(async () => [userMessage, result.assistantMessage]),
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.type(await screen.findByLabelText(CHAT_COPY.composerLabel), conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    const seen: Array<string | null | undefined> = [scopeLine(log)];
+    for (const event of events.slice(0, -2)) {
+      act(() => emit(event));
+      seen.push(scopeLine(log));
+    }
+    expect(new Set(seen)).toEqual(new Set(["Reading the question", "Working", "Chose to ask Microsoft Learn", "Asking Microsoft Learn", "Asked Microsoft Learn", "Wrote the answer"]));
+    expect(within(log).queryByText(/12,000 characters|answered from learn\.microsoft\.com|Investigative mode started/)).toBeNull();
+    act(() => emit(events.at(-2)!));
+    act(() => emit(events.at(-1)!));
+    finish();
+  });
+
+  it("never rearranges visible steps when a tool step arrives while a model step runs", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return result;
+      }),
+      getIntuneChatMessages: vi.fn(async () => [userMessage, result.assistantMessage]),
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.type(await screen.findByLabelText(CHAT_COPY.composerLabel), conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    const rows = () => within(within(log).getByRole("list", { name: "Steps" })).getAllByRole("listitem").map((row) => row.textContent ?? "");
+    const base = { conversationId: conversation.id, assistantMessageId: "a-live-run" };
+    const plan: IntuneChatStep = { id: "step-1", kind: "plan", title: "Read the question", status: "completed", origin: "device", originLabel: "On device", startedAt: "", durationMs: 40 };
+    const working: IntuneChatStep = { id: "step-2", kind: "answer", title: "Working", status: "active", origin: "model", originLabel: "OpenAI Codex", startedAt: "" };
+    const asking: IntuneChatStep = { id: "step-3", kind: "mcp", title: "Asking Microsoft Learn", status: "active", origin: "third-party", originLabel: "learn.microsoft.com", startedAt: "", sent: "Defender for macOS" };
+    act(() => emit(events[0]!));
+    act(() => emit({ type: "steps", ...base, steps: [plan, working] }));
+    expect(rows()).toEqual([expect.stringContaining("Read the question"), expect.stringContaining("Working")]);
+    // A list that puts the new step above the running one, as an older host did.
+    act(() => emit({ type: "steps", ...base, steps: [plan, asking, working] }));
+    expect(rows()).toEqual([expect.stringContaining("Read the question"), expect.stringContaining("Working"), expect.stringContaining("Asking Microsoft Learn")]);
+    act(() => emit({ type: "steps", ...base, steps: [plan, { ...asking, title: "Asked Microsoft Learn", status: "completed" }, { ...working, title: "Chose to ask Microsoft Learn", status: "completed" }] }));
+    expect(rows()).toEqual([expect.stringContaining("Read the question"), expect.stringContaining("Chose to ask Microsoft Learn"), expect.stringContaining("Asked Microsoft Learn")]);
+    act(() => emit(events.at(-1)!));
+    finish();
+  });
+
+  it("shows the scope line and the steps from the moment of sending until the answer, never an empty answer area", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        await new Promise<void>((resolve) => { finish = resolve; });
+        return result;
+      }),
+      getIntuneChatMessages: vi.fn(async () => [userMessage, result.assistantMessage]),
+      listIntuneChatConversations: vi.fn(async () => [conversation]),
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+    await user.type(composer, conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    const answerArea = () => {
+      const steps = within(log).getByRole("list", { name: "Steps" });
+      expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
+      return within(steps).getAllByRole("listitem").map((row) => row.textContent ?? "");
+    };
+    // Before the host has started the run, and after it started but sent no step yet.
+    expect(answerArea()).toEqual([expect.stringContaining("Reading the question")]);
+    expect(scopeLine(log)).toBe("Reading the question");
+    act(() => emit(events[0]!));
+    expect(answerArea()).toEqual([expect.stringContaining("Reading the question")]);
+    for (const event of events.slice(1, -2)) {
+      act(() => emit(event));
+      expect(answerArea().length).toBeGreaterThan(0);
+    }
+    expect(answerArea()).toEqual([
+      expect.stringContaining("Read the question"),
+      expect.stringContaining("Chose to ask Microsoft Learn"),
+      expect.stringContaining("Asked Microsoft Learn"),
+      expect.stringContaining("Wrote the answer"),
+    ]);
+    act(() => emit(events.at(-2)!));
+    expect(answerArea()).toHaveLength(4);
+    act(() => emit(events.at(-1)!));
+    finish();
+    expect(await screen.findByRole("button", { name: /4 steps/ }, { timeout: 4000 })).toBeInTheDocument();
+  });
+
+  it("stays on the page the admin opened when a run finishes after they left Chat", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let saved: IntuneChatMessage[] = [];
+    let listed: IntuneChatConversation[] = [];
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => listed),
+      getIntuneChatMessages: vi.fn(async () => saved),
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        saved = [userMessage];
+        listed = [conversation];
+        await new Promise<void>((resolve) => { finish = resolve; });
+        saved = [userMessage, result.assistantMessage];
+        return result;
+      }),
+    });
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<AppShell><IntuneChat /><LocationProbe /></AppShell>} />
+        <Route path="/marketplace" element={<AppShell><LocationProbe /></AppShell>} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+    await user.type(await screen.findByLabelText(CHAT_COPY.composerLabel), conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    act(() => events.slice(0, 5).forEach((event) => emit(event)));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent(`/chat/${conversation.id}`));
+
+    await user.click(screen.getByRole("link", { name: "Marketplace" }));
+    await waitFor(() => expect(screen.getByTestId("location")).toHaveTextContent("/marketplace"));
+    act(() => events.slice(5).forEach((event) => emit(event)));
+    await act(async () => {
+      finish();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByTestId("location")).toHaveTextContent("/marketplace");
+    // The sidebar still lists the conversation.
+    expect(await screen.findByTitle(conversation.title)).toBeInTheDocument();
+  });
+
+  it("keeps the scope line and the live steps after Chat is opened again during the run", async () => {
+    const user = userEvent.setup();
+    const { conversation, userMessage, result, events } = liveRunFixture();
+    let saved: IntuneChatMessage[] = [];
+    let listed: IntuneChatConversation[] = [];
+    let emit: (event: IntuneChatStreamEvent) => void = () => {};
+    let finish: () => void = () => {};
+    const bridge = makeMockBridge({
+      listIntuneChatConversations: vi.fn(async () => listed),
+      getIntuneChatMessages: vi.fn(async () => saved),
+      streamIntuneChatMessage: vi.fn<OpenAdminOSApi["streamIntuneChatMessage"]>(async (_input, onEvent) => {
+        emit = onEvent;
+        // The host saves the question first; the answer is saved when it is done.
+        saved = [userMessage];
+        listed = [conversation];
+        await new Promise<void>((resolve) => { finish = resolve; });
+        saved = [userMessage, result.assistantMessage];
+        return result;
+      }),
+    });
+    renderWithAppState(
+      <Routes>
+        <Route path="/chat/:conversationId?" element={<AppShell><IntuneChat /></AppShell>} />
+        <Route path="/marketplace" element={<AppShell><LocationProbe /></AppShell>} />
+      </Routes>,
+      { route: "/chat", bridge },
+    );
+    const composer = await screen.findByLabelText(CHAT_COPY.composerLabel);
+    await user.type(composer, conversation.title);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    act(() => events.slice(0, 5).forEach((event) => emit(event)));
+    await waitFor(() => expect(scopeLine(screen.getByRole("log", { name: "Conversation" }))).toBe("Working"));
+
+    // The admin opens another page and comes back while the answer runs.
+    await user.click(screen.getByRole("link", { name: "Marketplace" }));
+    expect(await screen.findByTestId("location")).toHaveTextContent("/marketplace");
+    await user.click(await screen.findByTitle(conversation.title));
+
+    const log = await screen.findByRole("log", { name: "Conversation" });
+    await waitFor(() => expect(scopeLine(log)).toBe("Working"));
+    expect(within(log).getByText("Contoso IT")).toBeInTheDocument();
+    const timeline = within(log).getByRole("list", { name: "Steps" });
+    expect(within(timeline).getAllByRole("listitem").map((row) => row.textContent)).toEqual([
+      expect.stringContaining("Read the question"),
+      expect.stringContaining("Working"),
+    ]);
+    expect(screen.getByRole("button", { name: "Stop" })).toBeInTheDocument();
+
+    // Later events reach the page that is showing the conversation now.
+    act(() => events.slice(5, 9).forEach((event) => emit(event)));
+    expect(await within(within(log).getByRole("list", { name: "Steps" })).findByText("Asked Microsoft Learn")).toBeInTheDocument();
+    act(() => events.slice(9).forEach((event) => emit(event)));
+    finish();
+    expect(await within(log).findByText(/Onboarding has three parts/, {}, { timeout: 4000 })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /4 steps/ }, { timeout: 4000 })).toBeInTheDocument();
+  });
 });

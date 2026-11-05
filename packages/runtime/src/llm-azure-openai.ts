@@ -68,6 +68,7 @@ export function createAzureOpenAiLlm(
   return {
     available: Boolean(endpoint && deployment && apiVersion && apiKey),
     defaultModel,
+    streamsIncrementally: true,
     async complete(opts: LlmOptions): Promise<LlmCompletion> {
       assertConfigured({ endpoint, deployment, apiVersion, apiKey });
       const url = buildChatCompletionsUrl({ endpoint, deployment, apiVersion });

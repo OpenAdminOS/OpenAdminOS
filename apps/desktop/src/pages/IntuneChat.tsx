@@ -6,6 +6,7 @@ import { Modal, ModalHeader } from "../components/Modal";
 import { OutputDataTable, OutputFilterSelect, OutputPane, OutputPaneSection, OutputPaneToolbar, OutputSummaryGrid, OutputSummaryTile, type OutputTableColumn } from "../components/OutputPane";
 import {
   IconCloud,
+  IconShield,
   IconCopy,
   IconArrowDown,
   IconArrowUp,
@@ -37,6 +38,7 @@ import {
   useConversations,
   useConversationsOptional,
   ConversationWorkspaceProvider,
+  chatToolHosts,
   useDataBoundaryOptional,
   useShellChromeOptional,
   useUpdateStateOptional,
@@ -51,6 +53,7 @@ import {
   type IntuneChatConversation,
   type IntuneChatMessage,
   type IntuneChatProgressStep,
+  type IntuneChatStep,
   type IntuneChatSource,
   type IntuneChatStreamEvent,
   type IntuneChatToolTraceEntry,
@@ -71,20 +74,23 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
 import {
   chatSendReducer,
   initialChatSendState,
   shouldSubmitComposerKey,
 } from "../shared/chat-send-state";
 import { clearChatDraft, readChatDraft, writeChatDraft } from "../shared/chat-drafts";
+import { appendOnlySteps, currentStepTitle, renumberCitations, tenantNotUsed, usedTenantEvidence } from "../shared/chat-steps";
+import { hostedDisclosureKey, readHostedDisclosures, recordHostedDisclosure, showFullHostedDisclosure } from "../shared/hosted-disclosure";
+import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
-import { Badge, IconButton, Menu, SegmentedControl } from "../components/ui";
-import { MarkdownPreview } from "../components/MarkdownPreview";
+import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
+import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTimeline } from "../components/chat/ChatSteps";
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
@@ -98,12 +104,6 @@ import { PilotProductionPage } from "../components/PilotMode";
 import Workspaces from "./Workspaces";
 
 const promptGroups = CHAT_PROMPT_GROUPS;
-
-type ChatProgressState = {
-  message: string;
-  progressPercent: number;
-  steps: IntuneChatProgressStep[];
-};
 
 type OptimisticChatDraft = {
   userMessage: IntuneChatMessage;
@@ -136,6 +136,8 @@ type HostedChatConsentPrompt = {
   model?: string;
   workspaceContext?: WorkspacePromptContextInput;
   workspaceContextSummary?: WorkspacePromptContextSummary;
+  /** Hosts of the enabled MCP servers this answer can query. */
+  toolHosts?: string[];
 };
 
 type HostedProviderConsentInput = NonNullable<
@@ -245,6 +247,15 @@ function IntuneChatContent() {
   const [error, setError] = useState<string | null>(null);
   const [chatProgress, setChatProgress] = useState<ChatProgressState | null>(null);
   const [progressAssistantMessageId, setProgressAssistantMessageId] = useState<string | null>(null);
+  // A run this page did not start, for the conversation it shows: Chat was
+  // opened again while the answer streams. Its live steps show here too.
+  const liveRuns = useLiveChatRuns();
+  const adoptedRun = sending
+    ? null
+    : liveRuns.find((run) => run.conversationId != null && run.conversationId === activeConversationId && run.tenantId === state.activeTenantId) ?? null;
+  const runInProgress = sending || adoptedRun !== null;
+  const shownProgress = adoptedRun ? adoptedRun.progress : chatProgress;
+  const shownProgressMessageId = adoptedRun ? adoptedRun.assistantMessageId : progressAssistantMessageId;
   const [optimisticDraft, setOptimisticDraft] = useState<OptimisticChatDraft | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [hostedConsentPrompt, setHostedConsentPrompt] =
@@ -287,6 +298,14 @@ function IntuneChatContent() {
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const sendInFlightRef = useRef(false);
   const activeStreamIdRef = useRef<string | null>(null);
+  // A run keeps going after the admin leaves Chat. Its end must not bring them back.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
   const activeTenantIdRef = useRef(state.activeTenantId);
   activeTenantIdRef.current = state.activeTenantId;
   const initialQuestionConsumedRef = useRef(false);
@@ -296,7 +315,9 @@ function IntuneChatContent() {
   const draftConversationRef = useRef<string | null | undefined>(undefined);
   const skipDraftWriteRef = useRef(false);
   const [dismissedSuggestionMessageIds, setDismissedSuggestionMessageIds] = useState<string[]>([]);
+  const [dismissedSuggestion, setDismissedSuggestion] = useState<string | null>(null);
   const [showScrollToLatest, setShowScrollToLatest] = useState(false);
+  const [hostedDisclosures, setHostedDisclosures] = useState(readHostedDisclosures);
   const followLatestRef = useRef(true);
   const restoreConversationScrollRef = useRef<string | null>(null);
 
@@ -503,7 +524,8 @@ function IntuneChatContent() {
     return () => {
       stale = true;
     };
-  }, [activeConversationId, conversations, sending, errorReloadToken, state.activeTenantId]);
+    // An adopted run ending reloads the saved answer.
+  }, [activeConversationId, conversations, sending, errorReloadToken, state.activeTenantId, adoptedRun?.streamId]);
 
   useEffect(() => {
     if (draftConversationRef.current === activeConversationId) return;
@@ -540,7 +562,7 @@ function IntuneChatContent() {
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
     }
     setShowScrollToLatest(false);
-  }, [messages, sending, chatProgress?.message, pilot]);
+  }, [messages, sending, shownProgress?.message, pilot]);
 
   useEffect(
     () => () => {
@@ -611,13 +633,13 @@ function IntuneChatContent() {
 
   const handleStopGeneration = async () => {
     const api = window.openAdminOS;
-    if (!api || !sending || stopping) return;
+    if (!api || !runInProgress || stopping) return;
     setStopping(true);
     dispatchSend({ type: "request-stop" });
     setError(null);
     setChatProgress(createStoppedChatProgress("Stopping response."));
     try {
-      await api.cancelIntuneChatStream(activeStreamIdRef.current ?? undefined);
+      await api.cancelIntuneChatStream(activeStreamIdRef.current ?? adoptedRun?.streamId ?? undefined);
     } catch (caught) {
       setStopping(false);
       dispatchSend({ type: "stop-failed" });
@@ -631,7 +653,7 @@ function IntuneChatContent() {
   ) => {
     const content = (contentOverride ?? input).trim();
     const api = window.openAdminOS;
-    if (!api || !content || sending) return;
+    if (!api || !content || runInProgress) return;
     const targetConversationId =
       conversationIdOverride !== undefined
         ? conversationIdOverride
@@ -707,6 +729,7 @@ function IntuneChatContent() {
         ...(activeModel ? { model: activeModel } : {}),
         ...(workspaceContext ? { workspaceContext } : {}),
         ...(contextSummary ? { workspaceContextSummary: contextSummary } : {}),
+        toolHosts: chatToolHosts(state),
       });
       setRememberHostedConsent(false);
       return;
@@ -886,6 +909,20 @@ function IntuneChatContent() {
     activeStreamIdRef.current = streamId;
     const sendTenantId = state.activeTenantId;
     const tenantStillActive = () => activeTenantIdRef.current === sendTenantId;
+    startLiveChatRun({
+      streamId,
+      ...(sendTenantId ? { tenantId: sendTenantId } : {}),
+      conversationId: targetConversationId,
+      assistantMessageId: pendingAssistantId,
+      messages: [pendingUserMessage, pendingAssistantMessage],
+      progress: initialProgress,
+    });
+    // Each change goes to this page and to the live run, which a Chat page
+    // mounted later in the run reads.
+    const applyMessages = (update: (current: IntuneChatMessage[]) => IntuneChatMessage[]) => {
+      setMessages(update);
+      updateLiveChatRun(streamId, (run) => ({ ...run, messages: update(run.messages) }));
+    };
     try {
       const result = await api.streamIntuneChatMessage(
         {
@@ -899,16 +936,20 @@ function IntuneChatContent() {
           // After a tenant switch this stream belongs to the previous
           // tenant's scope: let it finish host-side, but stop painting
           // its tenant's data into the new tenant's shell.
-          if (!tenantStillActive()) return;
+          if (!tenantStillActive()) {
+            endLiveChatRun(streamId);
+            return;
+          }
           if (event.type === "started") {
             dispatchSend({ type: "stream" });
             setOptimisticDraft(null);
             setPendingConversation(event.conversation);
             upsertConversation(event.conversation);
-            if (activeTenantIdRef.current === state.activeTenantId) openConversation(event.conversation.id, { replace: true });
+            if (activeTenantIdRef.current === state.activeTenantId && mountedRef.current) openConversation(event.conversation.id, { replace: true });
             setCacheStatus(event.cacheStatus);
             setProgressAssistantMessageId(event.assistantMessage.id);
-            setMessages((current) => {
+            updateLiveChatRun(streamId, (run) => ({ ...run, conversationId: event.conversation.id, assistantMessageId: event.assistantMessage.id }));
+            applyMessages((current) => {
               const withoutDraft = current.filter(
                 (message) =>
                   message.id !== pendingUserId &&
@@ -919,14 +960,33 @@ function IntuneChatContent() {
               return [...withoutDraft, event.userMessage, event.assistantMessage];
             });
           }
+          if (event.type === "steps") {
+            applyMessages((current) =>
+              upsertMessage(
+                current,
+                {
+                  id: event.assistantMessageId,
+                  conversationId: event.conversationId,
+                  role: "assistant",
+                  content: "",
+                  status: "streaming",
+                  createdAt: new Date().toISOString(),
+                  steps: event.steps,
+                },
+                (existing) => ({ ...existing, steps: appendOnlySteps(existing.steps, event.steps) }),
+              ),
+            );
+          }
           if (event.type === "status") {
-            setChatProgress(progressFromStatusEvent(event));
+            const progress = progressFromStatusEvent(event);
+            setChatProgress(progress);
+            updateLiveChatRun(streamId, (run) => ({ ...run, progress }));
             if (event.cacheStatus) {
               setCacheStatus(event.cacheStatus);
             }
           }
           if (event.type === "delta") {
-            setMessages((current) =>
+            applyMessages((current) =>
               upsertMessage(
                 current,
                 {
@@ -953,6 +1013,7 @@ function IntuneChatContent() {
             event.type === "failed" ||
             event.type === "cancelled"
           ) {
+            endLiveChatRun(streamId);
             setOptimisticDraft(null);
             setCacheStatus(event.result.cacheStatus);
             setMessages((current) => {
@@ -988,9 +1049,14 @@ function IntuneChatContent() {
       if (tenantStillActive()) {
         setPendingConversation(result.conversation);
         upsertConversation(result.conversation);
-        openConversation(result.conversation.id, { replace: true });
         setCacheStatus(result.cacheStatus);
-        await loadShell(result.conversation.id);
+        if (mountedRef.current) {
+          openConversation(result.conversation.id, { replace: true });
+          await loadShell(result.conversation.id);
+        } else {
+          // Refresh the sidebar without opening the conversation.
+          await loadShell();
+        }
       }
     } catch (caught) {
       failed = true;
@@ -1036,6 +1102,7 @@ function IntuneChatContent() {
         ),
       );
     } finally {
+      endLiveChatRun(streamId);
       if (activeStreamIdRef.current === streamId) activeStreamIdRef.current = null;
       sendInFlightRef.current = false;
       setSending(false);
@@ -1360,7 +1427,8 @@ function IntuneChatContent() {
   };
 
   const handleCopyMessage = async (message: IntuneChatMessage) => {
-    const text = message.content.trim();
+    // An answer is copied with the citation numbers it shows.
+    const text = (message.role === "assistant" ? renumberCitations(message.content, message.documentationSources ?? []) : message.content).trim();
     if (!text) return;
     try {
       await copyTextToClipboard(text);
@@ -1482,13 +1550,45 @@ function IntuneChatContent() {
     window.addEventListener("keydown", onRenameShortcut);
     return () => window.removeEventListener("keydown", onRenameShortcut);
   }, [activeConversation, requestRename, sending, workspaceView]);
-  const displayedMessages = mergeOptimisticMessages(messages, optimisticDraft);
+  const displayedMessages = mergeOptimisticMessages(
+    adoptedRun ? adoptedRun.messages.reduce((list, message) => upsertMessage(list, message), messages) : messages,
+    optimisticDraft,
+  );
   const latestAssistantMessageId = [...displayedMessages]
     .reverse()
     .find((message) => message.role === "assistant")?.id;
   const progressMessageVisible =
-    progressAssistantMessageId !== null &&
-    displayedMessages.some((message) => message.id === progressAssistantMessageId);
+    shownProgressMessageId !== null &&
+    displayedMessages.some((message) => message.id === shownProgressMessageId);
+  // The first follow-up of the latest answer, offered as ghost text until dismissed.
+  const latestAssistant = displayedMessages.find((message) => message.id === latestAssistantMessageId);
+  const latestFollowUp = latestAssistant?.status === "completed" && latestAssistant.id !== shownProgressMessageId ? latestAssistant.followUps?.[0] : undefined;
+  const composerSuggestion = latestFollowUp && `${latestAssistant!.id}:${latestFollowUp}` !== dismissedSuggestion
+    ? { text: latestFollowUp, key: `${latestAssistant!.id}:${latestFollowUp}` }
+    : undefined;
+  // The full hosted sentence shows on a conversation's first message and
+  // after the provider, model or MCP hosts change; otherwise an icon.
+  const disclosureKey = hostedDisclosureKey({
+    providerId: state.activeProviderId,
+    ...(activeModel ? { model: activeModel } : {}),
+    ...(dataBoundary.kind === "hosted" && dataBoundary.toolHostsNote ? { toolHosts: dataBoundary.toolHostsNote } : {}),
+  });
+  const hostedDisclosureFull = showFullHostedDisclosure({
+    hosted: dataBoundary.kind === "hosted",
+    currentKey: disclosureKey,
+    conversationId: activeConversationId,
+    messages: displayedMessages,
+    acknowledged: hostedDisclosures,
+    providerId: state.activeProviderId,
+    ...(activeModel ? { model: activeModel } : {}),
+  });
+  useEffect(() => {
+    // A message sent with this provider, model and hosts: later messages show the icon only.
+    // Only the conversation whose answer is running: switching chats mid-run records nothing.
+    if (!runInProgress || !progressMessageVisible || !activeConversationId || dataBoundary.kind !== "hosted") return;
+    if (hostedDisclosures[activeConversationId] === disclosureKey) return;
+    setHostedDisclosures((current) => recordHostedDisclosure(current, activeConversationId, disclosureKey));
+  }, [runInProgress, progressMessageVisible, activeConversationId, dataBoundary.kind, disclosureKey, hostedDisclosures]);
   const fillComposer = (value: string) => {
     setInput(value);
     writeChatDraft(activeConversationId, value);
@@ -1578,7 +1678,7 @@ function IntuneChatContent() {
       onValueChange={setInput}
       onSend={() => void handleSend()}
       onStop={() => void handleStopGeneration()}
-      sending={sending}
+      sending={runInProgress}
       stopping={stopping}
       disabled={unknownConversation}
       activeTenant={activeTenant}
@@ -1592,6 +1692,9 @@ function IntuneChatContent() {
       onModelSelect={(providerId, model) => void handleModelSelect(providerId, model)}
       onOpenProviders={() => navigate("/settings/providers")}
       dataBoundary={dataBoundary}
+      hostedDisclosureFull={hostedDisclosureFull}
+      suggestion={composerSuggestion?.text}
+      onDismissSuggestion={() => composerSuggestion && setDismissedSuggestion(composerSuggestion.key)}
     />
   );
 
@@ -1601,7 +1704,7 @@ function IntuneChatContent() {
     !unknownConversation &&
     !multiTenantPreflight &&
     displayedMessages.length === 0 &&
-    !chatProgress;
+    !shownProgress;
 
   const calmTopBar = shellChrome ? (
     <>
@@ -1876,9 +1979,9 @@ function IntuneChatContent() {
                   batchNotice={batchNotice}
                 />
               </div>
-            ) : displayedMessages.length === 0 && chatProgress ? (
+            ) : displayedMessages.length === 0 && shownProgress ? (
               <div className="flex flex-1 flex-col justify-center py-16">
-                <AssistantPendingScopeLine tenant={activeTenant} label={chatProgress.message} />
+                <PendingAnswer tenant={activeTenant} {...(stopping ? { stopping: shownProgress.message } : {})} />
               </div>
             ) : (
               <div className="flex flex-1 flex-col">
@@ -1897,7 +2000,8 @@ function IntuneChatContent() {
                     <div key={message.id} data-message-id={message.id} className="scroll-mt-[18px]">
                       <ChatMessageBubble
                         message={message}
-                        progress={message.id === progressAssistantMessageId ? chatProgress : null}
+                        progress={message.id === shownProgressMessageId ? shownProgress : null}
+                        stopping={stopping}
                         copied={message.id === copiedMessageId}
                         latestAssistant={message.id === latestAssistantMessageId}
                         tenant={messageTenant}
@@ -1912,13 +2016,21 @@ function IntuneChatContent() {
                           setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
                         }}
                       />
-                      {pilot && message.role === "assistant" && message.status === "completed" && message.id !== progressAssistantMessageId ? (
+                      {pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId ? (
                         <PilotFollowUps
                           prompt={previousUserPromptForMessage(displayedMessages, message)}
                           disabled={sending}
                           agentName={pilotAgentName}
                           onPick={(prompt) => void handleSend(prompt)}
                           onOpenAgent={(slug) => navigate(`/agents/${encodeURIComponent(slug)}`)}
+                        />
+                      ) : null}
+                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.[0] ? (
+                        <FollowUpChip
+                          followUp={message.followUps[0]}
+                          usesTenant={tenantNotUsed(message) && (message.tenantFollowUps ?? []).includes(message.followUps[0])}
+                          disabled={sending}
+                          onPick={fillComposer}
                         />
                       ) : null}
                       {!pilot && message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
@@ -1954,8 +2066,8 @@ function IntuneChatContent() {
                     </div>
                   );
                 })}
-                {sending && chatProgress && !progressMessageVisible ? (
-                  <AssistantPendingScopeLine tenant={activeTenant} label={chatProgress.message} />
+                {runInProgress && shownProgress && !progressMessageVisible ? (
+                  <PendingAnswer tenant={activeTenant} {...(stopping ? { stopping: shownProgress.message } : {})} />
                 ) : null}
               </div>
             )}
@@ -1964,21 +2076,21 @@ function IntuneChatContent() {
         </div>
 
         <div className="relative shrink-0 px-6 pb-3.5">
-          {showScrollToLatest ? (
-            // Positioned wrapper: IconButton places its own classes on the
-            // inner button, which sits inside the tooltip's relative wrapper.
-            <div className="absolute bottom-[calc(100%+10px)] left-1/2 z-20 -translate-x-1/2">
-              <IconButton
-                label="Scroll to latest"
-                tooltip="Scroll to latest"
-                icon={<IconArrowDown size={13} />}
-                onClick={scrollToLatest}
-                className="bg-[var(--color-surface)] shadow-[var(--shadow-pop)]"
-              />
-            </div>
-          ) : null}
           <div className="pointer-events-none absolute inset-x-0 -top-7 h-7 bg-gradient-to-b from-transparent to-[var(--color-bg)]" />
           <div className="relative mx-auto w-full max-w-[740px]">
+            {showScrollToLatest ? (
+              // Its own row above the composer, outside the scrolling
+              // conversation, so it never covers an answer or a source.
+              <div data-testid="scroll-to-latest-row" className="flex justify-center pb-2">
+                <IconButton
+                  label="Scroll to latest"
+                  tooltip="Scroll to latest"
+                  icon={<IconArrowDown size={13} />}
+                  onClick={scrollToLatest}
+                  className="bg-[var(--color-surface)] shadow-[var(--shadow-pop)]"
+                />
+              </div>
+            ) : null}
             {state.providerAutoSelectNotice && !pilot ? (
               <ProviderAutoSelectNotice
                 providerName={state.providerAutoSelectNotice.providerName}
@@ -2103,6 +2215,9 @@ function ChatComposer({
   onModelSelect,
   onOpenProviders,
   dataBoundary,
+  hostedDisclosureFull,
+  suggestion,
+  onDismissSuggestion,
 }: {
   placement: "home" | "docked";
   textareaRef: RefObject<HTMLTextAreaElement | null>;
@@ -2124,8 +2239,17 @@ function ChatComposer({
   onModelSelect: (providerId: ProviderId, model: string) => void;
   onOpenProviders: () => void;
   dataBoundary: DataBoundary;
+  /** Show the hosted sentence in full under the composer; otherwise its icon carries it. */
+  hostedDisclosureFull: boolean;
+  /** A follow-up shown as ghost text while the composer is empty. Tab fills it; nothing is sent. */
+  suggestion?: string;
+  onDismissSuggestion?: () => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [disclosureOpen, setDisclosureOpen] = useState(false);
+  const disclosureId = `hosted-disclosure-${placement}`;
+  const showSuggestion = Boolean(suggestion) && value === "" && !disabled && !sending;
+  const suggestionHintId = `chat-suggestion-${placement}`;
   const [activePickerIndex, setActivePickerIndex] = useState(0);
   const query = value.startsWith("/") ? value.slice(1).trim().toLocaleLowerCase() : "";
   const hasAgentToken = installedAgents.some((agent) =>
@@ -2182,6 +2306,7 @@ function ChatComposer({
       : "Ask a follow-up, or type / to run an agent"
     : SETUP_COPY.guestComposerPlaceholder;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  const hostedSentence = `Prompts and tenant data go to ${activeProvider?.name ?? "the selected provider"} while this model is selected.${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
 
   return (
     <div className="relative">
@@ -2265,7 +2390,7 @@ function ChatComposer({
         </div>
       ) : null}
 
-      <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
+      <div className="intune-chat-composer relative rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
         {!activeTenant ? (
           <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
             {SETUP_COPY.guestChatHint}
@@ -2292,8 +2417,13 @@ function ChatComposer({
               : undefined
           }
           aria-autocomplete="list"
+          aria-describedby={showSuggestion ? suggestionHintId : undefined}
           autoComplete="off"
-          onChange={(event) => onValueChange(event.target.value)}
+          onChange={(event) => {
+            // Typing hides the suggestion for good; Tab is the only way to use it.
+            if (showSuggestion && event.target.value !== "") onDismissSuggestion?.();
+            onValueChange(event.target.value);
+          }}
           onKeyDown={(event) => {
             if (event.defaultPrevented) return;
             if (pickerOpen && pickerEntries.length > 0) {
@@ -2315,14 +2445,34 @@ function ChatComposer({
               setPickerOpen(false);
               return;
             }
+            if (showSuggestion && suggestion && event.key === "Tab" && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey) {
+              event.preventDefault();
+              onValueChange(suggestion);
+              return;
+            }
+            if (showSuggestion && event.key === "Escape") {
+              event.preventDefault();
+              onDismissSuggestion?.();
+              return;
+            }
             if (shouldSubmitComposerKey(event.nativeEvent)) {
               event.preventDefault();
               onSend();
             }
           }}
-          placeholder={placeholder}
-          className="block min-h-[38px] max-h-[220px] w-full resize-none overflow-y-auto bg-transparent pb-3 pr-2 pt-0.5 text-md leading-[1.55] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none"
+          placeholder={showSuggestion ? suggestion : placeholder}
+          className={`block min-h-[38px] max-h-[220px] w-full resize-none overflow-y-auto bg-transparent pb-3 pt-0.5 text-md leading-[1.55] text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus-visible:outline-none ${showSuggestion ? "pr-14" : "pr-2"}`}
         />
+        {showSuggestion ? (
+          <>
+            <kbd aria-hidden="true" className="pointer-events-none absolute right-3 top-3.5 rounded-[5px] px-1.5 py-px font-sans text-xs text-[var(--color-text-muted)] ring-1 ring-inset ring-[var(--color-border)]">
+              Tab
+            </kbd>
+            <span id={suggestionHintId} role="status" className="sr-only">
+              Suggestion: {suggestion}, press Tab to use it, Escape to dismiss
+            </span>
+          </>
+        ) : null}
         <div className="flex items-center gap-1">
           <ComposerScopePopover {...scopeProps} />
           <IconButton
@@ -2339,6 +2489,20 @@ function ChatComposer({
             }}
           />
           <span className="min-w-2 flex-1" />
+          {dataBoundary.kind === "hosted" ? (
+            <Tooltip content={hostedSentence} panelClassName="max-w-72">
+              <button
+                type="button"
+                aria-label="Where data goes"
+                aria-expanded={hostedDisclosureFull || disclosureOpen}
+                aria-controls={disclosureId}
+                onClick={() => setDisclosureOpen((open) => !open)}
+                className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-[10px] text-[var(--color-warning)] transition-colors hover:bg-[var(--color-warning-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+              >
+                <IconShield size={13} />
+              </button>
+            </Tooltip>
+          ) : null}
           <ComposerModelPopover
             providers={providers}
             activeProviderId={activeProviderId}
@@ -2380,12 +2544,15 @@ function ChatComposer({
       ) : dataBoundary.kind === "local" ? (
         <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
           <IconLock size={13} />
-          <span>Local model. Tenant data stays on this device.</span>
+          <span>
+            {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : LOCAL_BOUNDARY_COPY.plain}
+            {dataBoundary.toolHostsNote ? <span className="text-[var(--color-warning)]"> {dataBoundary.toolHostsNote}</span> : null}
+          </span>
         </div>
       ) : (
-        <div role="note" className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-warning)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
+        <div id={disclosureId} role="note" hidden={!(hostedDisclosureFull || disclosureOpen)} className={`mt-2.5 items-center gap-1.5 text-sm text-[var(--color-warning)] ${hostedDisclosureFull || disclosureOpen ? "flex" : ""} ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
           <IconCloud size={13} />
-          <span>Prompts and tenant data go to {activeProvider?.name ?? "the selected provider"} while this model is selected.</span>
+          <span>{hostedSentence}</span>
         </div>
       )}
     </div>
@@ -2737,6 +2904,20 @@ function AssistantPendingScopeLine({ tenant, label }: { tenant?: TenantRecord; l
       <span aria-hidden="true">·</span>
       <span className="chat-scope-shimmer">{label}</span>
     </div>
+  );
+}
+
+/**
+ * The scope line and the live steps, with a first skeleton row until the
+ * host sends a step. The scope line names the current step only; results
+ * belong in the steps. While stopping it says so instead.
+ */
+function PendingAnswer({ tenant, steps, stopping }: { tenant?: TenantRecord; steps?: readonly IntuneChatStep[]; stopping?: string }) {
+  return (
+    <>
+      <AssistantPendingScopeLine tenant={tenant} label={stopping ?? currentStepTitle(steps)} />
+      {steps?.length ? <StepTimeline steps={steps} /> : <StepSkeleton />}
+    </>
   );
 }
 
@@ -3788,6 +3969,7 @@ function HostedChatConsentModal({
       : { name: "Hosted provider", isLocal: false },
     ...(prompt?.model ? { model: prompt.model } : {}),
     scope: { tenantNames: prompt ? [prompt.tenantName] : [] },
+    ...(prompt?.toolHosts ? { toolHosts: prompt.toolHosts } : {}),
     ...(prompt?.workspaceContextSummary
       ? {
           attachments: {
@@ -3840,6 +4022,7 @@ function HostedChatConsentModal({
                 {prompt?.workspaceContextSummary
                   ? " Selected workspace evidence, notes, and instructions are included in this response prompt."
                   : ""}
+                {trustCopy.toolHosts ? ` ${trustCopy.toolHosts.detail}` : ""}
               </p>
             </div>
           </div>
@@ -4047,6 +4230,7 @@ function estimateProgressPercent(steps: IntuneChatProgressStep[]): number {
 function ChatMessageBubble({
   message,
   progress,
+  stopping,
   copied,
   latestAssistant,
   tenant,
@@ -4060,6 +4244,8 @@ function ChatMessageBubble({
 }: {
   message: IntuneChatMessage;
   progress: ChatProgressState | null;
+  /** Stop was pressed: the scope line shows the stop progress instead of a step. */
+  stopping: boolean;
   copied: boolean;
   latestAssistant: boolean;
   tenant?: TenantRecord;
@@ -4114,25 +4300,16 @@ function ChatMessageBubble({
   return (
     <article className="group mb-[34px] w-full" title={`Answered ${timestamp}`}>
       {progress ? (
-        <AssistantPendingScopeLine tenant={tenant} label={progress.message} />
+        <PendingAnswer tenant={tenant} steps={message.steps} {...(stopping ? { stopping: progress.message } : {})} />
       ) : (
-        <AnswerScopeDisclosure
-          tenant={tenant}
-          multiTenant={multiTenant}
-          notice={message.engineNotice}
-          sources={message.sources ?? []}
-          trace={message.toolTrace ?? []}
-        />
+        <>
+          <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} />
+          <StepSummary message={message} details={tenant?.kind === "sample" && !multiTenant ? undefined : <AnswerDetails message={message} />} />
+        </>
       )}
-      {displayContent ? (
-        <MarkdownPreview
-          source={displayContent}
-          numberedSections={false}
-          tableTools
-          className="chat-answer text-[var(--color-text)]"
-        />
-      ) : null}
+      {displayContent ? <AnswerBody message={message} content={displayContent} /> : null}
       <AnswerSources trace={message.toolTrace ?? []} />
+      {!progress && displayContent ? <SourceList message={message} content={displayContent} /> : null}
       {!progress ? (
         <div className={`-ml-1.5 mt-1 flex gap-0.5 transition-opacity ${latestAssistant ? "opacity-100" : "opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"}`}>
           <IconButton
@@ -4165,28 +4342,31 @@ function ChatMessageBubble({
   );
 }
 
+/**
+ * The line above an answer: the tenant and how old its data was. What the
+ * answer used is named once, in the step summary below it. A docs answer
+ * that never touched the tenant shows no tenant here; its summary says
+ * "Tenant not used".
+ */
 function AnswerScopeDisclosure({
   tenant,
   multiTenant,
-  notice,
-  sources,
-  trace,
+  message,
 }: {
   tenant?: TenantRecord;
   multiTenant: boolean;
-  notice?: string;
-  sources: IntuneChatSource[];
-  trace: IntuneChatToolTraceEntry[];
+  message: IntuneChatMessage;
 }) {
+  const notice = message.engineNotice;
+  const sources = message.sources ?? [];
+  const docsOnly = !multiTenant && tenantNotUsed(message);
+  // Older answers stored tenant rows as sources without a tenant marker.
+  const tenantUsed = usedTenantEvidence(message) || ((message.steps ?? []).length === 0 && sources.some((source) => source.rows > 0 && !source.error));
   // The stalest source bounds how current the answer can be. Showing
   // the newest refresh let a header claim "data from just now" while the
   // rows the answer used were hours old.
-  const refreshedAt = oldestTimestamp(
-    sources.flatMap((source) => source.refreshedAt ?? []),
-  );
-  const resourceNames = [...new Set(sources.map((source) => source.label))].join(", ");
+  const refreshedAt = tenantUsed ? oldestTimestamp(sources.flatMap((source) => source.refreshedAt ?? [])) : undefined;
   const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
-  const hasDetails = Boolean(sources.length > 0 || trace.length > 0);
 
   if (tenant?.kind === "sample" && !multiTenant) {
     return (
@@ -4201,38 +4381,25 @@ function AnswerScopeDisclosure({
 
   return (
     <>
-    <details className="group/details mb-2.5">
-      <summary className="flex cursor-pointer list-none flex-wrap items-center gap-2 rounded-md text-sm text-[var(--color-text-muted)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] [&::-webkit-details-marker]:hidden">
+    {docsOnly ? null : (
+      <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
         {multiTenant ? (
           <MultiTenantTile size="xs" />
         ) : tenant ? (
           <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
         ) : null}
         <span>{scopeName}</span>
-        <span aria-hidden="true" className="opacity-60">·</span>
-        <span>{resourceNames || "Tenant data"}</span>
         {refreshedAt ? (
           <>
             <span aria-hidden="true" className="opacity-60">·</span>
             <span>{sources.length > 1 ? "oldest data from " : "data from "}{formatRelativeAge(refreshedAt)}</span>
           </>
         ) : null}
-        <span aria-hidden="true" className="opacity-60">·</span>
-        <span className="inline-flex items-center gap-0.5 text-[var(--color-text-muted)] hover:text-[var(--color-text)]">
-          How I checked
-          <IconChevronRight size={13} className="transition-transform duration-150 group-open/details:rotate-90" />
-        </span>
-      </summary>
-      <div className="mt-2 border-l-2 border-[var(--color-border)] pl-3 text-sm text-[var(--color-text-soft)]">
-        {sources.length > 0 ? <SourceDetails sources={sources} /> : null}
-        {trace.length > 0 ? <ToolTraceDetails trace={trace} /> : null}
-        {!hasDetails ? <div className="py-1">No source trace was stored for this answer.</div> : null}
       </div>
-    </details>
+    )}
     {notice ? (
       // A fallback or repair notice changes how much the answer can be
-      // trusted, so it stays visible next to the answer instead of
-      // hiding inside the collapsed details.
+      // trusted, so it stays visible next to the answer.
       <div role="status" className="mb-2.5 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)]">
         {notice}
       </div>
@@ -4241,12 +4408,25 @@ function AnswerScopeDisclosure({
   );
 }
 
+/** The tenant sources and tool calls of an answer, shown when its step summary is expanded. */
+function AnswerDetails({ message }: { message: IntuneChatMessage }) {
+  const sources = message.sources ?? [];
+  const trace = message.toolTrace ?? [];
+  if (sources.length === 0 && trace.length === 0) return null;
+  return (
+    <div className="mb-4 border-l-2 border-[var(--color-border)] pl-3 text-sm text-[var(--color-text-soft)]">
+      {sources.length > 0 ? <SourceDetails sources={sources} /> : null}
+      {trace.length > 0 ? <ToolTraceDetails trace={trace} /> : null}
+    </div>
+  );
+}
+
 function AnswerSources({
   trace,
 }: {
   trace: IntuneChatToolTraceEntry[];
 }) {
-  // Tenant cache sources already live behind "How I checked" above the
+  // Tenant cache sources already live behind the step summary row of the
   // answer. Repeating every cache row count under the answer makes a
   // simple response look like a diagnostics dump, so only public web
   // citations stay visible here.
@@ -4365,6 +4545,13 @@ function ToolTraceDetails({ trace }: { trace: IntuneChatToolTraceEntry[] }) {
               <div className="mt-2 text-xs leading-5 text-[var(--color-text-muted)]">
                 {entry.resultSummary}
               </div>
+              {entry.mcpSource ? (
+                <div className="mt-1 text-xs leading-5 text-[var(--color-warning)]">
+                  {entry.mcpSource.blocked
+                    ? `MCP tool · ${entry.mcpSource.serverName} at ${entry.mcpSource.host} · blocked because the query held tenant data, nothing was sent`
+                    : `MCP tool · ${entry.mcpSource.serverName} at ${entry.mcpSource.host} · third-party content, not tenant evidence`}
+                </div>
+              ) : null}
               {entry.error && (
                 <div className="mt-2 rounded-md bg-[var(--color-warning-soft)] px-2.5 py-2 text-xs leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                   {entry.error}

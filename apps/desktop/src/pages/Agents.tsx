@@ -1,6 +1,6 @@
-import { useNavigate, useSearchParams } from "react-router";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
-import { IconChevronDown, IconHub, IconPlus } from "../components/icons";
+import { IconChevronDown, IconMarketplace, IconPlus } from "../components/icons";
 import { PilotProductionPage, usePilotMode } from "../components/PilotMode";
 import { Button, Menu } from "../components/ui";
 import AgentDetail from "./AgentDetail";
@@ -9,14 +9,18 @@ import PilotAgentsHome from "./PilotAgentsHome";
 
 export default function Agents({ startRunOnOpen = false }: { startRunOnOpen?: boolean }) {
   const navigate = useNavigate();
+  const { slug } = useParams();
   const [searchParams] = useSearchParams();
   const pilot = usePilotMode();
   const pilotHiddenTab =
-    pilot && searchParams.get("source") === "hub"
-      ? { feature: "Agent Hub", plural: false }
-      : pilot && searchParams.get("filter") === "scheduled"
-        ? { feature: "Schedules", plural: true }
-        : undefined;
+    pilot && searchParams.get("filter") === "scheduled"
+      ? { feature: "Schedules", plural: true }
+      : undefined;
+
+  // The hub tab moved to the Marketplace. Agent detail links keep working.
+  if (!slug && searchParams.get("source") === "hub") {
+    return <Navigate to="/marketplace?kind=agents" replace />;
+  }
 
   return (
     <>
@@ -39,10 +43,10 @@ export default function Agents({ startRunOnOpen = false }: { startRunOnOpen?: bo
               }
               items={[
                 {
-                  id: "install-hub",
-                  label: "Install from hub",
-                  icon: <IconHub size={14} />,
-                  onSelect: () => navigate("/agents?source=hub"),
+                  id: "browse-marketplace",
+                  label: "Browse the Marketplace",
+                  icon: <IconMarketplace size={14} />,
+                  onSelect: () => navigate("/marketplace?kind=agents"),
                 },
                 {
                   id: "build-agent",

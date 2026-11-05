@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import Agents from "./Agents";
+import Marketplace from "./Marketplace";
 import { createMockAgent, createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
 import type { RegistryAgentSummary } from "../shared/openAdminOS";
 
@@ -22,8 +23,7 @@ const intuneOnlyTenant = {
 };
 
 describe("agents by service", () => {
-  it("shows service chips in the hub and filters by service", async () => {
-    const user = userEvent.setup();
+  it("shows service chips in the Marketplace agent catalog", async () => {
     const state = createMockAppState({
       registryAgents: [
         registryAgent({ id: "devices", slug: "devices", name: "Inactive devices", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] }),
@@ -32,24 +32,45 @@ describe("agents by service", () => {
         registryAgent({ id: "guests", slug: "guests", name: "Stale guests", scopes: ["User.Read.All", "AuditLog.Read.All"] }),
       ],
     });
-    renderRoute(<Agents />, {
-      path: "/agents",
-      route: "/agents?source=hub",
+    renderRoute(<Marketplace />, {
+      path: "/marketplace",
+      route: "/marketplace?kind=agents",
       bridge: makeMockBridge({}, state),
     });
 
-    const hub = await screen.findByLabelText("Agent hub");
-    expect(within(hub).getByLabelText("Services: Defender")).toBeInTheDocument();
-    expect(within(hub).getByLabelText("Services: Entra")).toBeInTheDocument();
-    expect(within(hub).getByText("Inactive devices")).toBeInTheDocument();
+    const catalog = await screen.findByLabelText("Agent catalog");
+    expect(within(catalog).getByLabelText("Services: Defender")).toBeInTheDocument();
+    expect(within(catalog).getByLabelText("Services: Entra")).toBeInTheDocument();
+    expect(within(catalog).getByText("Inactive devices")).toBeInTheDocument();
+  });
+
+  it("filters installed agents by service", async () => {
+    const user = userEvent.setup();
+    const state = createMockAppState({
+      installedAgents: [
+        createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] }),
+        createMockAgent({ id: "score", slug: "score", name: "Secure score prioritizer", mode: "read", scopes: ["SecurityEvents.Read.All"], services: ["defender"] }),
+        // No declaration: derived from the scopes.
+        createMockAgent({ id: "guests", slug: "guests", name: "Stale guests", mode: "read", scopes: ["User.Read.All", "AuditLog.Read.All"] }),
+      ],
+    });
+    renderRoute(<Agents />, {
+      path: "/agents",
+      route: "/agents",
+      bridge: makeMockBridge({}, state),
+    });
+
+    const list = await screen.findByLabelText("Installed agents");
+    expect(within(list).getByLabelText("Services: Defender")).toBeInTheDocument();
+    expect(within(list).getByLabelText("Services: Entra")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
     expect(screen.getByRole("menuitemradio", { name: "All services" })).toHaveAttribute("aria-checked", "true");
     await user.click(screen.getByRole("menuitemradio", { name: "Needs Defender" }));
-    expect(within(hub).getByText("Secure score prioritizer")).toBeInTheDocument();
-    expect(within(hub).queryByText("Inactive devices")).not.toBeInTheDocument();
-    expect(within(hub).queryByText("Stale guests")).not.toBeInTheDocument();
-    expect(screen.getByText("1 of 3 hub agents")).toBeInTheDocument();
+    expect(within(list).getByText("Secure score prioritizer")).toBeInTheDocument();
+    expect(within(list).queryByText("Inactive devices")).not.toBeInTheDocument();
+    expect(within(list).queryByText("Stale guests")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 3 installed agents")).toBeInTheDocument();
     // The selected filter is shown by its checked state, not a mark in the label.
     await user.click(screen.getByRole("button", { name: "Filter" }));
     expect(screen.getByRole("menuitemradio", { name: "Needs Defender" })).toHaveAttribute("aria-checked", "true");

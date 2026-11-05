@@ -37,11 +37,16 @@ describe("Chat documentation grounding", () => {
       2,
       "both deterministic paths should build a grounded prompt",
     );
+    // When Microsoft Learn is the chosen source or the model classifies, the index waits; a tenant question skips it.
     assert.equal(
-      (service.match(/documentation:(?: options\.voice && options\.webSearch\s*\? \[\]\s*:)?\s*await this\.retrieveDocumentationSafely/g) ?? [])
-        .length,
+      (service.match(/learnFirst \|\| answerPlan\??\.sources\.kind === "tenant" \? \[\] : await this\.searchDocsIndex\(modelQuestion, steps\)/g) ?? []).length,
       2,
       "both agentic call sites should pass retrieved documentation",
+    );
+    assert.equal(
+      (service.match(/documentationFallback: \(reason\?: string\) => this\.searchDocsIndex\(modelQuestion, steps, reason\)/g) ?? []).length,
+      2,
+      "both agentic call sites should fall back to the index when Learn is left out, fails, is blocked or returns nothing",
     );
   });
 });

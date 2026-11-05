@@ -34,9 +34,9 @@ const SHOTS: Array<LandingCaptureStep & { name: string }> = [
   },
   {
     name: "hub-grid",
-    route: "/agents?source=hub",
-    waitFor: ["Library", "hub agents"],
-    heading: "Agents",
+    route: "/marketplace",
+    waitFor: ["MCP tools", "agents"],
+    heading: "Marketplace",
   },
   {
     name: "agent-team",

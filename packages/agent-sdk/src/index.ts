@@ -1079,6 +1079,10 @@ export interface AppState {
    * Never set in pilot mode. Hosted providers are never auto-selected.
    */
   providerAutoSelectNotice?: { providerId: ProviderId; providerName: string };
+  /** The MCP catalog with local install state. */
+  mcpServers?: McpServerSummary[];
+  /** Whether Chat offers tools, including MCP tools, to the selected model. */
+  chatToolUse?: ChatToolUseStatus;
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -1144,6 +1148,70 @@ export interface IntuneChatMessage {
   toolTrace?: IntuneChatToolTraceEntry[];
   agentSuggestions?: IntuneChatAgentSuggestion[];
   error?: string;
+  /** How the question was classified, which decides whether the tenant is checked. */
+  questionKind?: IntuneChatQuestionKind;
+  /** What ran for this answer, in order, as the timeline shows it. */
+  steps?: IntuneChatStep[];
+  /** Targets of the [n] citations in the answer. */
+  documentationSources?: IntuneChatDocumentationSource[];
+  /** Read-only follow-up questions, at most two. Never sent automatically. */
+  followUps?: string[];
+  /** The follow-ups that would use tenant data, so a docs answer can say so on its chip. */
+  tenantFollowUps?: string[];
+  /**
+   * The answer rests on tenant data, such as the cached rows the
+   * deterministic path puts in the prompt, even when no tenant tool ran.
+   */
+  tenantContext?: boolean;
+  /**
+   * The answering prompt held more than the admin's current question,
+   * public documentation and MCP results, and the app's instructions:
+   * conversation memory, workspace context, cached or Graph data, or
+   * tenant tool results. Its follow-ups are the ones code builds, never
+   * the model's.
+   */
+  privatePrompt?: boolean;
+}
+
+/**
+ * Docs questions are answered from documentation sources only and never
+ * touch the tenant. Tenant and mixed questions need tenant evidence.
+ */
+export type IntuneChatQuestionKind = "docs" | "tenant" | "mixed";
+
+/** Where a Chat step ran or where its data went. */
+export type IntuneChatStepOrigin = "device" | "graph" | "third-party" | "model";
+
+/** One row of the Chat step timeline, streamed live and stored with the answer. */
+export interface IntuneChatStep {
+  id: string;
+  kind: "plan" | "docs-index" | "mcp" | "graph-refresh" | "tool" | "answer";
+  title: string;
+  detail?: string;
+  status: "active" | "completed" | "failed" | "blocked";
+  origin: IntuneChatStepOrigin;
+  /** Tag text: "On device", "Microsoft Graph", the third-party host or the model provider. */
+  originLabel: string;
+  /** The exact text an MCP call sent to its host. Absent when nothing was sent. */
+  sent?: string;
+  startedAt: string;
+  durationMs?: number;
+}
+
+/** What an [n] citation in an answer points to. */
+export interface IntuneChatDocumentationSource {
+  citation: number;
+  kind: "mcp" | "docs-index";
+  title: string;
+  /** MCP results: the article URL, the server and its host. */
+  url?: string;
+  serverName?: string;
+  host?: string;
+  /** Local index passages: the source file and the index version date. */
+  file?: string;
+  indexVersion?: string;
+  /** The start of the passage the model read under this number, as plain text. */
+  excerpt?: string;
 }
 
 export type IntuneChatInvestigationToolName =
@@ -1153,7 +1221,58 @@ export type IntuneChatInvestigationToolName =
   | "graph_get"
   | "refresh_resource"
   | "query_drift"
-  | "web_search";
+  | "web_search"
+  | McpChatToolName;
+
+/**
+ * Chat-facing name of a tool served by an installed MCP server:
+ * `mcp__<serverId>__<toolName>`. The tool list comes from the server at
+ * connect time; only names the host listed for an enabled server run.
+ */
+export type McpChatToolName = `mcp__${string}`;
+
+/** How a catalog MCP server authenticates. Only public servers ship today. */
+export type McpServerAuth = "none";
+
+export interface McpServerToolSummary {
+  name: string;
+  description: string;
+  /** Why Chat does not offer this tool, for example an oversized schema. */
+  unavailable?: string;
+}
+
+/**
+ * A catalog MCP server with its local install state. Tool queries the
+ * model writes go to `host`; tenant data is never sent there by design.
+ */
+export interface McpServerSummary {
+  id: string;
+  name: string;
+  publisher: string;
+  url: string;
+  host: string;
+  description: string;
+  pitch: string;
+  /** Our own line on what Chat uses this server for, also given to the model. */
+  useFor: string;
+  auth: McpServerAuth;
+  readOnly: true;
+  installed: boolean;
+  enabled: boolean;
+  installedAt?: string;
+  lastConnectedAt?: string;
+  /** Tools from the last successful live listing. Empty until installed. */
+  tools: McpServerToolSummary[];
+}
+
+/**
+ * Whether Chat runs its tool loop for the selected model. MCP tools are
+ * offered only when it does.
+ */
+export interface ChatToolUseStatus {
+  available: boolean;
+  notice?: string;
+}
 
 export interface IntuneChatToolTraceEntry {
   id: string;
@@ -1161,6 +1280,20 @@ export interface IntuneChatToolTraceEntry {
   params: unknown;
   resultSummary: string;
   webSources?: Array<{ title: string; url: string }>;
+  /** Which MCP server answered, and the host the tool query went to. */
+  mcpSource?: {
+    serverId: string;
+    serverName: string;
+    host: string;
+    tool: string;
+    truncated?: boolean;
+    /** The host refused the call before sending it because it held tenant data. */
+    blocked?: boolean;
+    /** Articles or items found in the result, with their links. */
+    results?: Array<{ title: string; url?: string }>;
+    /** The query reached the host. False when it was refused or failed before sending. */
+    sentToHost?: boolean;
+  };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources
    * describe what was actually read instead of inheriting the cache
@@ -2294,6 +2427,13 @@ export type IntuneChatStreamEvent =
       message: string;
     }
   | {
+      /** The step timeline after a step started or changed, in display order. */
+      type: "steps";
+      conversationId: string;
+      assistantMessageId: string;
+      steps: IntuneChatStep[];
+    }
+  | {
       type: "delta";
       conversationId: string;
       assistantMessageId: string;
@@ -2713,6 +2853,12 @@ export interface OpenAdminOSApi {
   disableGateway?(): Promise<GatewayPublicStatus>;
   regenerateGatewayToken?(): Promise<{ status: GatewayPublicStatus; token: string }>;
   revokeGatewayClient?(clientId: string): Promise<GatewayPublicStatus>;
+  /** Connect to a catalog MCP server, list its tools and record the install. */
+  installMcpServer?(serverId: string): Promise<McpServerSummary[]>;
+  uninstallMcpServer?(serverId: string): Promise<McpServerSummary[]>;
+  setMcpServerEnabled?(serverId: string, enabled: boolean): Promise<McpServerSummary[]>;
+  /** Reconnect to an installed server and refresh its tool list. */
+  checkMcpServer?(serverId: string): Promise<McpServerSummary[]>;
   getRetrievalStatus?(): Promise<RetrievalStatus>;
   refreshRetrievalIndex?(): Promise<RetrievalStatus>;
   getRetrievalAutoInstall?(): Promise<boolean>;
@@ -3709,6 +3855,12 @@ export interface LlmStreamChunk {
 export interface RunLlmApi {
   readonly available: boolean;
   readonly defaultModel?: string;
+  /**
+   * `stream()` yields text as the model writes it. Without it the adapter
+   * yields the reply once at the end (Codex CLI), so callers that stream
+   * only for live text use `complete()` instead.
+   */
+  readonly streamsIncrementally?: boolean;
   /**
    * Caller MUST check `available` first. When `available` is `false` both
    * `complete()` and `stream()` will throw before any I/O is performed.

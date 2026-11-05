@@ -405,6 +405,11 @@ export default function AgentDetail({
   }, []);
 
   const closeDrawer = () => {
+    // Listings opened from the Marketplace return there.
+    if (searchParams.get("from") === "marketplace") {
+      navigate("/marketplace?kind=agents");
+      return;
+    }
     const next = new URLSearchParams(searchParams);
     next.delete("action");
     next.delete("install");
@@ -427,7 +432,8 @@ export default function AgentDetail({
     const action = searchParams.get("action");
     if (!slug) return;
     if (!agent) {
-      if (action === "install") setHubInstallConfirm(true);
+      // Agent install is a production feature; pilot mode only shows details.
+      if (action === "install" && !pilot) setHubInstallConfirm(true);
       return;
     }
     if (action === "configure") {
@@ -454,7 +460,7 @@ export default function AgentDetail({
       }
       clearAction();
     }
-  }, [agent, clearAction, preview, searchParams, slug]);
+  }, [agent, clearAction, pilot, preview, searchParams, slug]);
 
   if (!slug) return null;
 
@@ -487,6 +493,8 @@ export default function AgentDetail({
         onCloseManifest={() => setManifestOpen(false)}
         tenantTier={activeTenant?.entraTier}
         activeTenant={activeTenant}
+        pilot={pilot}
+        onConnectTenant={openSetup}
       />
     ) : (
       <Drawer open title="Agent not found" onClose={closeDrawer}>
@@ -1085,6 +1093,8 @@ function HubAgentDrawer({
   onInstall,
   onViewManifest,
   onCloseManifest,
+  pilot,
+  onConnectTenant,
 }: {
   agent: RegistryAgentSummary;
   preview: AgentManifestPreview | null;
@@ -1101,6 +1111,8 @@ function HubAgentDrawer({
   onInstall: () => void;
   onViewManifest: () => void;
   onCloseManifest: () => void;
+  pilot: boolean;
+  onConnectTenant: () => void;
 }) {
   const licenseMissing = hasLicenseShortfall(agent.requiresEntraTier, tenantTier);
   return (
@@ -1111,7 +1123,11 @@ function HubAgentDrawer({
         onClose={onClose}
         actions={
           <>
-            {!installConfirm ? (
+            {pilot ? (
+              <Button size="sm" variant="secondary" title={PILOT_COPY.featureInProduction("Agent install")} onClick={onConnectTenant}>
+                Connect your tenant to install
+              </Button>
+            ) : !installConfirm ? (
               <Button
                 size="sm"
                 variant="primary"

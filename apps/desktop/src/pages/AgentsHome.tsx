@@ -6,6 +6,7 @@ import {
   useState,
 } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
+import { hasLicenseShortfall } from "../components/marketplace/AgentHubList";
 import { NewAgentModal } from "../components/NewAgentModal";
 import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
@@ -17,7 +18,6 @@ import {
   IconBolt,
   IconClock,
   IconPlay,
-  IconRefresh,
   IconSearch,
   IconSettings,
   IconShare,
@@ -41,7 +41,6 @@ import {
   serviceById,
   type AgentSummary,
   type InvalidAgentManifest,
-  type RegistryAgentSummary,
   type RunRecord,
   type ServiceId,
 } from "../shared/openAdminOS";
@@ -49,16 +48,14 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { useAppState } from "../state";
 
-type LibrarySource = "installed" | "hub";
 type ModeFilter = "all" | "read" | "write";
 
+/** Installed agents only. The registry catalog lives in the Marketplace. */
 interface LibraryRow {
   id: string;
   slug: string;
-  source: LibrarySource;
   display: AgentDisplay;
-  installed?: AgentSummary;
-  registry?: RegistryAgentSummary;
+  installed: AgentSummary;
   latestRun?: RunRecord;
   latestScheduledRun?: RunRecord;
   licenseMissing: boolean;
@@ -69,15 +66,9 @@ export default function AgentsHome() {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const toast = useToast();
-  const {
-    state,
-    registryAgents,
-    refreshRegistry,
-    startRun,
-  } = useAppState();
+  const { state, startRun } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const [query, setQuery] = useState("");
-  const [refreshingHub, setRefreshingHub] = useState(false);
   const [bulkRunning, setBulkRunning] = useState<"due" | "all" | null>(null);
   const [schedulerRegistered, setSchedulerRegistered] = useState<boolean | null>(null);
   const resumedBatchRef = useRef<string | null>(null);
@@ -90,14 +81,13 @@ export default function AgentsHome() {
   const editableInvalid = (entry: InvalidAgentManifest | undefined) =>
     entry?.source === "user" && entry.sourceText !== undefined ? entry : undefined;
 
-  const source: LibrarySource = searchParams.get("source") === "hub" ? "hub" : "installed";
   const modeParam = searchParams.get("mode");
   const modeFilter: ModeFilter = modeParam === "read" || modeParam === "write" ? modeParam : "all";
   const categoryFilter = searchParams.get("category") || "all";
   const serviceParam = searchParams.get("service");
   const serviceFilter: ServiceId | "all" = isServiceId(serviceParam) ? serviceParam : "all";
   const scheduledOnly = searchParams.get("filter") === "scheduled";
-  const activeTab = source === "hub" ? "hub" : scheduledOnly ? "schedules" : "installed";
+  const activeTab = scheduledOnly ? "schedules" : "installed";
   const updatesOnly = searchParams.get("updates") === "available";
   const addFlow = searchParams.get("add");
   const activeTenant = state.activeTenantId
@@ -105,10 +95,6 @@ export default function AgentsHome() {
     : undefined;
   const schedulesPaused = activeTenant?.kind === "sample";
 
-  const installedBySlug = useMemo(
-    () => new Map(state.installedAgents.map((agent) => [agent.slug, agent])),
-    [state.installedAgents],
-  );
   const scheduledAgents = useMemo(
     () => state.installedAgents.filter((agent) => agent.schedule?.enabled === true),
     [state.installedAgents],
@@ -201,33 +187,16 @@ export default function AgentsHome() {
       state.runs
         .filter((run) => run.agentSlug === slug && (!scheduled || run.trigger === "schedule"))
         .sort((left, right) => Date.parse(right.queuedAt) - Date.parse(left.queuedAt))[0];
-    if (source === "installed") {
-      return state.installedAgents.map((agent) => ({
-        id: agent.id,
-        slug: agent.slug,
-        source,
-        display: toInstalledDisplay(agent),
-        installed: agent,
-        latestRun: latestRun(agent.slug),
-        latestScheduledRun: latestRun(agent.slug, true),
-        licenseMissing: hasLicenseShortfall(agent.requiresEntraTier, activeTenant?.entraTier),
-      }));
-    }
-    return registryAgents.map((agent) => {
-      const installed = installedBySlug.get(agent.slug);
-      return {
-        id: agent.id,
-        slug: agent.slug,
-        source,
-        display: toRegistryDisplay(agent, installed),
-        registry: agent,
-        installed,
-        latestRun: latestRun(agent.slug),
-        latestScheduledRun: latestRun(agent.slug, true),
-        licenseMissing: hasLicenseShortfall(agent.requiresEntraTier, activeTenant?.entraTier),
-      };
-    });
-  }, [activeTenant?.entraTier, installedBySlug, registryAgents, source, state.installedAgents, state.runs]);
+    return state.installedAgents.map((agent) => ({
+      id: agent.id,
+      slug: agent.slug,
+      display: toInstalledDisplay(agent),
+      installed: agent,
+      latestRun: latestRun(agent.slug),
+      latestScheduledRun: latestRun(agent.slug, true),
+      licenseMissing: hasLicenseShortfall(agent.requiresEntraTier, activeTenant?.entraTier),
+    }));
+  }, [activeTenant?.entraTier, state.installedAgents, state.runs]);
 
   const categories = useMemo(
     () => Array.from(new Set(sourceRows.map((row) => row.display.category))).sort(),
@@ -250,8 +219,8 @@ export default function AgentsHome() {
     const matchesCategory = categoryFilter === "all" || row.display.category === categoryFilter;
     const matchesService =
       serviceFilter === "all" || agentServiceIds(row.display).includes(serviceFilter);
-    const matchesSchedule = !scheduledOnly || row.installed?.schedule?.enabled === true;
-    const matchesUpdates = !updatesOnly || Boolean(row.installed?.updateAvailable);
+    const matchesSchedule = !scheduledOnly || row.installed.schedule?.enabled === true;
+    const matchesUpdates = !updatesOnly || Boolean(row.installed.updateAvailable);
     return matchesQuery && matchesMode && matchesCategory && matchesService && matchesSchedule && matchesUpdates;
   });
 
@@ -259,8 +228,7 @@ export default function AgentsHome() {
     setSearchParams((current) => {
       const next = new URLSearchParams(current);
       next.delete("add");
-      if (nextTab === "hub") next.set("source", "hub");
-      else next.delete("source");
+      next.delete("source");
       if (nextTab === "schedules") next.set("filter", "scheduled");
       else next.delete("filter");
       return next;
@@ -369,7 +337,7 @@ export default function AgentsHome() {
         id: "schedule",
         label: "Schedule",
         icon: <IconClock size={13} />,
-        disabled: Boolean(row.installed?.manifestError),
+        disabled: Boolean(row.installed.manifestError),
         onSelect: () => openAgent(row.slug, "schedule"),
       },
       {
@@ -472,7 +440,6 @@ export default function AgentsHome() {
             onValueChange={setLibraryTab}
             tabs={[
               { id: "installed", label: "Installed" },
-              { id: "hub", label: "Browse" },
               { id: "schedules", label: "Schedules" },
             ]}
           />
@@ -486,24 +453,11 @@ export default function AgentsHome() {
                 autoComplete="off"
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder={source === "hub" ? "Search hub…" : "Search installed agents…"}
+                placeholder="Search installed agents…"
                 className="h-8 w-full rounded-lg bg-[var(--color-surface)] pl-9 pr-3 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] placeholder:text-[var(--color-text-placeholder)] focus:outline-none focus:ring-2 focus:ring-[var(--color-focus)]"
               />
             </label>
             <Menu ariaLabel="Filter agents" align="end" trigger={<Button size="sm" variant="ghost">Filter</Button>} items={filterItems} />
-            {source === "hub" ? (
-              <IconButton
-                label="Refresh hub"
-                icon={<IconRefresh size={14} className={refreshingHub ? "animate-spin" : ""} />}
-                disabled={refreshingHub}
-                onClick={() => {
-                  setRefreshingHub(true);
-                  void refreshRegistry()
-                    .catch((caught) => toast.error(caught instanceof Error ? caught.message : String(caught)))
-                    .finally(() => setRefreshingHub(false));
-                }}
-              />
-            ) : null}
             <Menu
               ariaLabel="Schedule actions"
               trigger={<IconButton label="Schedule actions" icon={<IconChevronDown size={14} />} />}
@@ -527,7 +481,7 @@ export default function AgentsHome() {
           </div>
         </div>
         <div className="mb-2 flex items-center justify-between gap-3 text-xs text-[var(--color-text-muted)]">
-          <span>{rows.length} of {sourceRows.length} {source === "hub" ? "hub" : "installed"} agents</span>
+          <span>{rows.length} of {sourceRows.length} installed agents</span>
           <span className="flex items-center gap-2">
             {serviceFilter !== "all" ? (
               <Badge tone="info">{SERVICE_COPY.filterLabel(serviceById(serviceFilter).title)}</Badge>
@@ -552,11 +506,11 @@ export default function AgentsHome() {
             </Link>
           </div>
         ) : null}
-        <div aria-label={source === "hub" ? "Agent hub" : "Installed agents"}>
+        <div aria-label="Installed agents">
           {rows.map((row) => {
-            const scheduled = row.installed?.schedule?.enabled === true;
+            const scheduled = row.installed.schedule?.enabled === true;
             const meta = scheduled
-              ? `Every ${formatInterval(row.installed!.schedule!.intervalSeconds)}`
+              ? `Every ${formatInterval(row.installed.schedule!.intervalSeconds)}`
               : row.latestRun
                 ? `Last run ${formatRelative(row.latestRun.queuedAt)}`
                 : "Never run";
@@ -579,59 +533,46 @@ export default function AgentsHome() {
                     <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
                     <span className="mt-1 block"><ServiceChips services={agentServiceIds(row.display)} /></span>
                     {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
-                    {row.installed?.manifestError ? (
+                    {row.installed.manifestError ? (
                       <span className="mt-0.5 block truncate text-xs text-[var(--color-danger)]" title={row.installed.manifestError}>
                         {AGENT_COPY.invalidRowHint} {row.installed.manifestError}
                       </span>
                     ) : null}
                   </button>
-                  {scheduled && row.installed ? (
+                  {scheduled ? (
                     <ScheduleUsageForecast agent={row.installed} intervalSeconds={row.installed.schedule!.intervalSeconds} compact />
                   ) : null}
                 </div>
                 <div className="calm-row-actions flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
-                  {row.installed ? (
-                    <>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        leadingIcon={<IconPlay size={13} />}
-                        disabled={row.display.compatibility?.supported === false || Boolean(row.installed.manifestError)}
-                        title={row.installed.manifestError ? AGENT_COPY.invalidRowHint : undefined}
-                        onClick={() => void runAgent(row.installed!)}
-                      >
-                        Run
-                      </Button>
-                      <Menu
-                        ariaLabel={`${row.display.name} actions`}
-                        trigger={<IconButton label={`More actions for ${row.display.name}`} icon={<IconChevronDown size={13} />} size="sm" />}
-                        items={installedAgentMenu(row)}
-                      />
-                    </>
-                  ) : (
-                    <>
-                      <Button size="sm" variant="secondary" disabled={row.display.compatibility?.supported === false} onClick={() => openAgent(row.slug, "install")}>Install</Button>
-                      <Button size="sm" variant="ghost" onClick={() => openAgent(row.slug)}>Details</Button>
-                    </>
-                  )}
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    leadingIcon={<IconPlay size={13} />}
+                    disabled={row.display.compatibility?.supported === false || Boolean(row.installed.manifestError)}
+                    title={row.installed.manifestError ? AGENT_COPY.invalidRowHint : undefined}
+                    onClick={() => void runAgent(row.installed)}
+                  >
+                    Run
+                  </Button>
+                  <Menu
+                    ariaLabel={`${row.display.name} actions`}
+                    trigger={<IconButton label={`More actions for ${row.display.name}`} icon={<IconChevronDown size={13} />} size="sm" />}
+                    items={installedAgentMenu(row)}
+                  />
                 </div>
               </div>
             );
           })}
-          {source === "hub"
-            ? invalidAgents.map((entry) => (
-                <InvalidAgentRow
-                  key={`invalid-${entry.registryPath}`}
-                  entry={entry}
-                  onEdit={editableInvalid(entry) ? () => setEditingInvalid(entry) : undefined}
-                />
-              ))
-            : null}
-          {rows.length === 0 && (source !== "hub" || invalidAgents.length === 0) ? (
+          {rows.length === 0 ? (
             <div role="status" className="px-6 py-12 text-center">
-              <div className="font-medium text-[var(--color-text)]">{source === "hub" ? "No hub agents match" : "No installed agents match"}</div>
+              <div className="font-medium text-[var(--color-text)]">No installed agents match</div>
               <p className="mt-1 text-sm text-[var(--color-text-muted)]">
-                {source === "hub" ? "Clear filters or refresh the hub catalog." : state.installedAgents.length === 0 ? "Install an agent from the hub to add it to this library." : "Clear filters or search for another agent."}
+                {state.installedAgents.length === 0 ? (
+                  <>
+                    Install an agent from the Marketplace to add it to this library.{" "}
+                    <Link className="font-medium text-[var(--color-text)] underline underline-offset-2" to="/marketplace?kind=agents">Open the Marketplace</Link>
+                  </>
+                ) : "Clear filters or search for another agent."}
               </p>
             </div>
           ) : null}
@@ -650,40 +591,6 @@ export default function AgentsHome() {
   );
 }
 
-/** A local manifest that failed validation, listed as unavailable. */
-function InvalidAgentRow({
-  entry,
-  onEdit,
-}: {
-  entry: InvalidAgentManifest;
-  onEdit?: () => void;
-}) {
-  return (
-    <div className="calm-list-row group" aria-label={`${entry.id} ${AGENT_COPY.invalidBadge.toLowerCase()}`}>
-      <span className="calm-row-icon text-[var(--color-danger)]">
-        <IconShield size={16} />
-      </span>
-      <div className="min-w-0 flex-1">
-        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-          <span className="truncate font-medium text-[var(--color-text)]">{entry.id}</span>
-          <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge>
-        </span>
-        <span className="mt-0.5 block text-sm text-[var(--color-danger)]">
-          {AGENT_COPY.invalidTitle}. {entry.reason}
-        </span>
-        <span className="mt-0.5 block truncate font-mono text-xs text-[var(--color-text-muted)]" title={entry.manifestPath}>
-          {entry.manifestPath}
-        </span>
-      </div>
-      {onEdit ? (
-        <div className="calm-row-actions flex shrink-0 items-center gap-1">
-          <Button size="sm" variant="secondary" onClick={onEdit}>{AGENT_COPY.invalidEditAction}</Button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
 function toInstalledDisplay(agent: AgentSummary): AgentDisplay {
   return {
     ...agent,
@@ -694,29 +601,6 @@ function toInstalledDisplay(agent: AgentSummary): AgentDisplay {
       verified: agent.author.verified ?? false,
     },
   };
-}
-
-function toRegistryDisplay(agent: RegistryAgentSummary, installed?: AgentSummary): AgentDisplay {
-  return {
-    ...agent,
-    installed: Boolean(installed),
-    lastRunAt: installed?.lastRunAt,
-    updateAvailable: installed?.updateAvailable,
-    author: {
-      name: agent.author.name,
-      handle: agent.author.handle ?? "community",
-      verified: agent.author.verified ?? false,
-    },
-  };
-}
-
-function hasLicenseShortfall(
-  required: "free" | "p1" | "p2",
-  actual: "free" | "p1" | "p2" | "unknown" | undefined,
-) {
-  if (!actual || actual === "unknown") return false;
-  const rank = { free: 0, p1: 1, p2: 2 } as const;
-  return rank[actual] < rank[required];
 }
 
 function nextRunTime(agent: AgentSummary) {

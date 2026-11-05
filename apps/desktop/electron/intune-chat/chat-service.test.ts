@@ -439,7 +439,7 @@ describe("Intune Chat host service", () => {
         completeCalls += 1;
         if (completeCalls === 1) {
           return {
-            text: '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
+            text: '```json\n{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
             model: "llama3.1:8b",
           };
         }
@@ -660,7 +660,7 @@ describe("Intune Chat host service", () => {
         completeCalls += 1;
         if (completeCalls === 1) {
           return {
-            text: '```json\n{"tool":"refresh_resource","params":{"resource":"users"}}\n```',
+            text: '```json\n{"kind":"tenant","sources":[],"tool":"refresh_resource","params":{"resource":"users"}}\n```',
             model: "agg-model",
           };
         }
@@ -810,7 +810,7 @@ describe("Intune Chat host service", () => {
         completeCalls += 1;
         if (completeCalls === 1) {
           return {
-            text: '```json\n{"tool":"refresh_resource","params":{"resource":"users"}}\n```',
+            text: '```json\n{"kind":"tenant","sources":[],"tool":"refresh_resource","params":{"resource":"users"}}\n```',
             model: "agg-model-sync",
           };
         }

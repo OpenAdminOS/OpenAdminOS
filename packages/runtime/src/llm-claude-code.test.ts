@@ -82,6 +82,7 @@ it("uses the existing default Claude login without creating a config override", 
     const probe = await probeClaudeCodeLlm({ binaryPath: fixture.binaryPath });
     assert.equal(probe.ready, true);
     const llm = createClaudeCodeLlm({ binaryPath: fixture.binaryPath });
+    assert.equal(llm.streamsIncrementally, true);
     assert.equal((await llm.complete({ prompt: "Hello" })).text, "Hello");
     for await (const _chunk of llm.stream({ prompt: "Hello" })) { /* consume */ }
     assert.doesNotMatch(await fixture.readEnv(), /^CLAUDE_CONFIG_DIR=/m);

@@ -838,6 +838,316 @@ npm run typecheck && npm run qa && npm run build
 
 See [`README.md`](../README.md) for the full quickstart.
 
+# Marketplace in the app, first wave (2026-11-03)
+
+Branch `marketplace/first-wave` off `main`, in its own worktree. Runs locally only until approved; no merge, so no nightly.
+
+## Deliverable
+
+A Marketplace sidebar item that replaces the Agent Hub. It lists the registry agents and three remote MCP servers: Microsoft Learn (`https://learn.microsoft.com/api/mcp`), KQL Search (`https://www.kqlsearch.com/mcp`) and IntuneAutomation (`https://www.intuneautomation.com/mcp/`). All three were probed on 2026-11-03: streamable HTTP, protocol 2025-06-18, no sign-in, read-only. Installing a server once makes its tools available to Chat with any provider, because OpenAdminOS runs the tool loop itself.
+
+## Acceptance criteria
+
+1. Sidebar shows Marketplace. The Agents page shows installed agents only; "Install from hub", the command palette entry and the `/hub` redirects open the Marketplace instead.
+2. Marketplace lists all registry agents (install, details and license gating as today) and the three MCP servers, styled after `docs/mockups/25-marketplace.html`, without prices or vendor commerce.
+3. Installing an MCP server shows an authentication step ("No sign-in needed") and the host its queries go to, then connects, lists its tools and stores the install in `state.json`. Uninstall and enable or disable work. A server that is unreachable shows a designed error with retry, never a silent failure.
+4. Chat lists installed MCP tools to the model, calls them through the MCP client in the main process, shows each call in the tool trace with its host, and fences results as third-party content. A docs-only question answered from an MCP tool is not rejected by the tenant-evidence guard.
+5. The model is told to send MCP tools only standalone public questions, never tenant names, user names, device names, IDs or tenant data. MCP tools never reach the external MCP gateway.
+6. Trust copy is honest: with any MCP server enabled, the status strip and its tooltip name the hosts that receive tool queries, also when the model is local.
+7. Pilot mode: the Marketplace is browsable and MCP servers can be installed; agent install stays production-only as today.
+8. Unit tests for the MCP host (connect, list, call, timeout, error), the loop integration and the trust copy; renderer tests for the Marketplace page; Playwright or app screenshots in light and dark.
+9. Verified live in the running app: install all three, ask Chat a question each one answers.
+10. SPEC.md decision, CHANGELOG [Unreleased], separate evaluator and GPT-6.1-Sol review before any PR merge.
+
+## Decisions (2026-11-03)
+
+- Status strip names the MCP hosts whenever an MCP server is enabled, also with a local model.
+- Small local models that skip the tool loop get no MCP tools; Marketplace and Chat say the selected model is too small for tool use.
+- Pilot: the Marketplace is browsable and MCP install is allowed; agent install stays production-only.
+- Every install shows an authentication step, even when it is "No sign-in needed", plus the host queries go to.
+- The catalog of the three servers lives in code for now (typed module with id, name, publisher, host URL, description, auth `none`). No public catalog file yet.
+
+## Out of scope
+
+Vendor sign-in (designed separately as Vendor MCP authentication), local or sandboxed servers, paid listings, publishing a public MCP catalog file, MCP tools in agents or schedules.
+
+## Steps
+
+- [x] MCP host in the main process: catalog of the three servers, connect, list tools, call with timeout and output cap
+- [x] Persist installs, IPC and preload API
+- [x] Chat loop: MCP tools in the prompt, executor, trace, evidence guard, prompt rules
+- [x] Trust copy for external tool hosts
+- [x] Marketplace page and sidebar; move the hub out of Agents
+- [x] Unit and renderer tests; live check of the MCP host against the three servers
+- [x] Security review fixes: egress check, untrusted metadata, redirects, evidence guard, pilot install guard
+- [ ] Screenshots in light and dark, and a live check in the running app
+- [x] SPEC, CHANGELOG
+- [ ] Separate evaluator and GPT-6.1-Sol reviews
+
+# Chat steps, follow-ups and source routing (2026-11-04)
+
+Same branch, `marketplace/first-wave`. Runs locally only. The design reference is the "Chat steps proposal" mockup, shown in the thread on 2026-11-04 (scratchpad file chat-steps.html).
+
+## Why
+
+A docs question ("What does the Microsoft Learn say about Defender for macOS?") never called the Learn MCP server. The run log shows a graph-cache-refresh of 8 resources and 3 cache tools. The [1] [4] [5] citations came from the local docs index (55,193 passages, version 2026-08-26). That index is injected into the prompt and never shown. The model wrote "Microsoft Learn says". The planner refreshed tenant data because the question mentioned macOS, and the evidence guard then forced device queries. While the run was in progress, the UI only showed "Investigative mode started."
+
+## Decisions (user, 2026-11-04)
+
+- Docs-only questions do not touch the tenant. Tenant context is offered as a follow-up.
+- Follow-ups are prefilled as ghost text in the empty composer, and Tab accepts. No background model is used. The answering model returns them in its final JSON, and a deterministic rule covers docs questions that have a tenant tie-in.
+- Source routing is layered: a "use for" line we write per source, the first step names the chosen sources, naming a source in the question forces it, and labels come from the steps that ran. When the Learn server is installed, it is used before the local index. The `@` picker is left out of v1.
+- Small models: say plainly why tools are off and recommend 8B or larger. The status strip names MCP hosts only when the model can call them.
+
+## Acceptance criteria
+
+1. Chat streams every step live as a timeline row: plan, local docs index, each MCP call, Graph refresh, each cache or Graph tool, and writing the answer. Each row has a title, a detail line, a duration and an origin tag: On device, Microsoft Graph, the third-party host, or the model provider. An MCP row shows the exact text that was sent. Blocked and failed steps show as designed states.
+2. After the answer, the timeline folds into one summary line: step count, total time, sources, and what left the device and where it went. The line expands to show the full timeline. Persisted messages reload with the same steps.
+3. The answer separates documentation and tenant blocks. The labels come from the trace, not from model text. Every citation maps to a source card: Microsoft Learn or other MCP results with title and URL, local index passages with file and index date, and tenant resources. A citation that matches no source is not rendered as a source.
+4. A docs-only question runs no graph-cache-refresh and no tenant tools, and the evidence guard does not force them. A tenant or mixed question still requires tenant evidence.
+5. If the question names an installed source by name or host, that source is called. An answer only labels text as Microsoft Learn when a Learn call ran in that answer. When Learn is installed it is preferred over the local index, and the index is the fallback when Learn is offline or blocked.
+6. Each catalog entry carries our own "use for" line, and the prompt lists it. The first step names the sources chosen for the question.
+7. Follow-ups: the final protocol JSON accepts an optional `next` array of up to 2 strings. They are validated: read-only intent (existing write-intent check), at most 120 characters, trimmed. A deterministic follow-up is generated when a docs-only question matches tenant resources (for example "Check our 5 macOS devices for Defender in Intune", with the count from the local cache). The deterministic path also produces them.
+8. Composer: when it is empty and a follow-up exists, the follow-up shows as ghost text with a Tab hint. Tab fills it, Esc dismisses it, typing hides it, and nothing is sent automatically. Tab keeps its normal behaviour otherwise. Screen readers announce "Suggestion: ..., press Tab to use it". The chips under the answer remain.
+9. Small models: the notice reads, for example, "llama3.2:3b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger." The Marketplace server cards show the same line. The status strip lists MCP hosts only when tools are actually offered.
+10. Tests cover each criterion. Renderer tests run under Node 22. Live check in the running app with the Defender for macOS question, a KQL question and a mixed tenant question.
+
+## Out of scope
+
+The `@` picker, parallel tool calls, and changing the local index content.
+
+## Steps
+
+- [x] MCP egress filter review fixes S1 to S5 and N1
+- [x] Source classification as the first step; docs-only questions skip the tenant refresh and tenant tools
+- [x] Source routing: "use for" lines, named sources forced, Learn before the local index
+- [x] Live step events with origin tags, persisted with the message
+- [x] Follow-ups from the final JSON and the deterministic rule
+- [x] Small-model notice wording and status strip hosts only when tools are offered
+- [x] Renderer: timeline, folded summary, documentation and tenant blocks, source cards, composer ghost text
+- [x] Integration test for the docs, KQL and mixed tenant questions
+- [x] SPEC, CHANGELOG
+- [ ] Live check in the running app with the three questions (needs an app restart; not done in this session)
+- [ ] Screenshots in light and dark
+- [ ] Separate evaluator and GPT-6.1-Sol reviews
+
+## Review (2026-11-04)
+
+- Criteria 1 to 9 are covered by tests: `chat-steps.test.ts` (classification, source plan, citations, follow-ups, relabelling, step recorder, loop routing and fallback), `chat-steps.e2e.test.ts` (the Defender for macOS docs question streamed live, a KQL question, a mixed tenant question and the deterministic path, through the app store with an in-process MCP server), renderer tests for the timeline, summary, blocks, source cards, chips and composer ghost text, and the Marketplace and status strip small-model cases.
+- Criterion 10: the live check in the running app is still open, because the main-process changes need a restart of the running dev instance. The end-to-end test stands in for it until then.
+- Found while testing: a final answer containing a fenced KQL block was read as malformed tool JSON and fell back to deterministic retrieval. Fixed in its own commit.
+
+
+# Model-declared question kinds with a keyword veto (2026-11-04)
+
+Same branch, `marketplace/first-wave`. Runs locally only.
+
+## Why
+
+A keyword classifier decided docs, tenant or mixed before the loop. A docs label skips the tenant refresh and tenant tools, so a tenant question misread as docs could get invented tenant facts. Reviews kept finding phrasings that slipped through, and the rule became so strict that most docs questions turned mixed and paid for a tenant refresh they did not need.
+
+## Decision (user, 2026-11-04)
+
+The answering model classifies the question, and the keyword rule stays as a veto.
+
+## Acceptance criteria
+
+1. No extra model call. The model's first response in the agentic loop declares the question kind (docs, tenant or mixed) and the sources it intends to use, as part of the existing JSON protocol. A malformed or missing kind gets the existing repair once, then falls back to the keyword classification.
+2. The final kind is docs only when the model says docs and the keyword tenant-reference checks (TENANT_REFERENCE, TENANT_STATE, TENANT_VALUE, or a named tenant-state phrase) find no tenant reference. The planned-resources fallback is not a veto. Tenant or mixed from the model is used as given. Docs with the veto firing becomes mixed. The kind can be upgraded later but never downgraded.
+3. Lazy tenant refresh in the agentic path. graph-cache-refresh no longer runs before the loop. It runs once the kind resolves to tenant or mixed, before the first tenant tool executes, or when a docs-labelled run calls a tenant tool; then the kind is upgraded to mixed, the refresh runs and the tool executes. A docs question that stays docs triggers no refresh and no Graph calls.
+4. The evidence guard uses the final kind. Tenant and mixed answers still need tenant evidence.
+5. The deterministic path (small models and fallbacks) keeps the keyword classification and today's pre-refresh.
+6. Timeline: "Read the question" appears at once and updates with the model's kind and sources when the first response arrives. A veto says so in plain words ("Treated as docs and tenant: the question mentions your tenant."). The refresh step appears where it actually ran. Upgrades show as a visible step.
+7. The prompt tells the model how to classify: docs means public product knowledge only, with no fact about this tenant needed; when unsure, mixed. Short.
+8. Tests, each written to fail without its fix: model docs plus a tenant reference gives mixed; model tenant for "What are unmanaged devices?" gives tenant with a refresh; a missing or malformed kind falls back to keywords; the Defender for macOS question, "How do I enroll macOS devices?" and "Is there a script to find stale devices?" give docs with no refresh and no Graph calls when the model says docs; an upgrade gives mixed, a refresh, then the tool; the deterministic path is unchanged; the existing end-to-end tests for the three questions still pass, adjusted only where the protocol changed.
+9. SPEC.md "Question kinds" rewritten, CHANGELOG [Unreleased] updated, these steps ticked.
+
+## Steps
+
+- [x] Planner: export the tenant-reference check and the kind resolution with its veto
+- [x] Loop: kind and sources on the first reply, one repair, keyword fallback, upgrade on a tenant tool, lazy refresh hook, evidence guard on the final kind
+- [x] Service: lazy refresh in the agentic path, plan step resolved by the model, deterministic path unchanged
+- [x] Tests for criterion 8
+- [x] SPEC, CHANGELOG
+
+## Review (2026-11-04)
+
+- Criteria 1 to 8 are covered by tests: `chat-steps.test.ts` (veto, kind tracker copy, declared sources, upgrade step, loop repair and keyword fallback, veto in the loop with the evidence guard, loop upgrade with refresh before the tool) and `chat-steps.e2e.test.ts` (docs questions with no refresh and no Graph calls, veto to mixed, model tenant with a refresh, upgrade with refresh then tool, missing and invalid kind, deterministic path unchanged, and the three original questions). Mutation checks: disabling model classification, the veto or the upgrade each fails its tests.
+- Electron 721 of 721, renderer 359 of 359 under Node 22, runtime 224 pass and 0 fail, qa 181 pass, 4 warn, 0 fail, root typecheck clean.
+- Open: the live check in the running app needs a restart of the dev instance, and the separate evaluator and GPT-6.1-Sol reviews.
+- Review fixes (2026-11-04): direct answers keep the refresh first (empty-cache test), the evidence guard keys on the kind with only small talk exempt, a follow-up after a tenant answer cannot be docs only, declared sources are intent only (the TODO is resolved), a failed refresh shows on its step and the answer continues, and Stop is checked after the refresh.
+
+# Live answer, Learn first and citable Learn results (2026-11-04)
+
+Same branch, `marketplace/first-wave`. Runs locally only.
+
+## Why
+
+A live run ("how does defender onboarding for macos work?", OpenAI Codex, gpt-6-sol) showed the question and nothing under it for the whole run, then the full answer at once. The local docs index was put in the prompt before Microsoft Learn was asked, so the answer cited only local passages. The Learn source cards were titled from links inside the content ("Apple Configurator", "iMazing Profile Editor"). One follow-up spoke to the admin ("Would you like to check this tenant's macOS onboarding status?") and repeated the deterministic one.
+
+## Acceptance criteria
+
+1. From sending until the first answer text, the answer area always shows the scope line and the live step timeline, with a "Reading the question" skeleton row before the first step. Never blank, also when Chat is opened again during the run. Reduced motion respected.
+2. With an adapter that streams incrementally, the final answer of the tool loop streams as it arrives; tool calls are never shown; the parsed reply replaces the streamed text; Learn relabelling applies to streamed text. Report which providers stream.
+3. A docs question with Learn installed asks Learn first; the local index is searched only when Learn is left out, fails, is blocked or returns nothing, as its own step that names the reason, in the order it ran.
+4. Learn results are read by their structure, numbered "[n] Title, URL" for the model with the numbers the cards use, and card titles come from the result titles. Checked against the live Learn server and a recorded payload.
+5. Follow-ups are in the admin's voice; offers to the admin are rewritten or dropped; near-duplicates of the deterministic follow-up are dropped.
+6. Each fix has its own commit with a test that fails without it.
+
+## Steps
+
+- [x] Root cause of the blank answer area, renderer replay test, fix
+- [x] Skeleton step until the host sends one, reduced motion
+- [x] Streaming flag on LLM adapters; stream the loop's final answer
+- [x] Learn first, local index as a named fallback step
+- [x] MCP results by structure, numbered for the model, recorded Learn payload
+- [x] Follow-ups in the admin's voice, near-duplicates dropped
+- [x] SPEC, CHANGELOG
+- [ ] Live check in the running app (needs a restart of the dev instance; not done in this session)
+- [ ] Separate evaluator and GPT-6.1-Sol reviews
+
+## Review (2026-11-04)
+
+- Blank answer area: a faithful replay of the host's event sequence renders the scope line and steps throughout in the page that sent the question, so the page logic was not at fault. The only way the code produced the screenshot is a Chat page instance that did not start the stream: after Chat is mounted again mid-run, the new page had no live state (not sending, no progress, only the saved question) and the events still went to the old page's handlers, so the answer appeared only once the saved message loaded. The live run is now kept outside the page. Which remount happened in the user's session could not be confirmed without the renderer console.
+- Providers that stream text as the model writes it: Ollama, LM Studio, Azure OpenAI, Claude Code, Copilot, Gemini, Apple Foundation. Codex CLI 0.166.0 `exec --json` was checked live and sends one `item.completed` event, so it does not.
+- The live Learn search for the question returned 27,458 characters, over the host's 12,000-character cap, so the JSON was cut and titles fell back to Markdown links inside the content. The host now returns the structured result too.
+
+# Append-only chat timeline (2026-11-04)
+
+Same branch. A run showed "Read the question" (9.3 s) and "Working on the answer", then "Asked Microsoft Learn" appeared between them. The scope line showed tool result text, and the sent text wrapped mid-word.
+
+- [x] Steps append-only and chronological; one model step per loop call with its decision; classification on the model step; plan step is local planning time only
+- [x] Renderer keeps visible step order
+- [x] Scope line shows the current step's title only
+- [x] Sent text wraps at word boundaries
+- [ ] Live check in the running app (needs a restart)
+
+# Answer header, sources and suggestions (2026-11-04)
+
+Same branch. From two runs in the app built at 52ca085: a docs answer and the tenant follow-up "Check our 5 macOS devices for Defender in Intune".
+
+- [x] A. Header names what the answer used; "How I checked" folded into the expanded steps
+- [x] B. Summary sources from citations and steps; total time is wall time
+- [x] C. One card per article, every chunk number maps to it
+- [x] D. Adjacent citation chips ascending and deduplicated
+- [x] E. Prompt: no description of sources, provider or tenant checks; content limits stay
+- [x] F. Tenant questions do not search the local docs index
+- [x] G. Follow-ups answerable with the tools (deterministic wording; model follow-ups constrained through the prompt)
+- [x] H. Agent suggestion needs the agent's own topic term; at most one
+- [x] I. Investigated: the 4-hour-old device cache was within the 6-hour managedDevices threshold; the lazy refresh refreshed the stale security alerts and incidents only, as configured
+- [ ] Live check in the running app (needs a restart)
+
+# Review fixes for the timeline and answer rounds (2026-11-04)
+
+- [x] Withdraw a rejected streamed final before slow work and before falling back
+- [x] No navigation back to Chat when a run finishes after the admin left
+- [x] Live runs kept by stream id, with a store unit test
+- [x] Stop checked after a streamed reply; Nova keeps a hosted disclosure; Graph requests in the egress line; live text throttled
+
+## Chat UI pass (2026-11-04)
+
+Same branch. From a screenshot of a docs answer from Microsoft Learn on a hosted model: the tenant chip on a docs answer, "Microsoft Learn" three times, citations numbered with gaps, "third-party content" on every card, the Scroll to latest button over the sources and a long hosted line under the composer.
+
+### Acceptance criteria and status
+
+1. [x] A docs answer that never touched the tenant shows no tenant chip; the summary row says "Tenant not used". Mixed and tenant answers keep the chip.
+2. [x] Only cited sources are numbered, 1..N in order of first appearance, chips remapped; uncited sources sit under a collapsed "Also consulted"; numbering reads only the stored answer and sources, so a reload renders the same (done in the renderer, `numberCitations`).
+3. [x] Scroll to latest sits in its own row above the composer, outside the scrolling conversation, and shows only away from the bottom.
+4. [x] Optional `title` in the final JSON of a new chat's first answer: at most 60 characters, plain text, no links, no tenant values, no write intent; used for the sidebar and header unless renamed meanwhile; trimmed question otherwise. No extra model call.
+5. [x] The source name appears once, in the summary row; the header source label is gone; block labels only when an answer has both documentation and tenant blocks.
+6. [x] Hosted sentence under the composer: in full on a conversation's first message and after a provider, model or MCP host change; otherwise a shield icon with the same sentence as tooltip and accessible description, opening it in full on click. Status strip unchanged.
+7. [x] "Sources · learn.microsoft.com, not verified by OpenAdminOS" once in the heading, not on each row.
+8. [x] Origin icons with counts replace the coloured dots; the full timeline still expands.
+9. [x] Compact source list, three shown and "Show N more"; chip hover or focus shows the excerpt, title and host (excerpts stored host-side).
+10. [x] Chips 12 px with 5.7:1 (light) and 8.2:1 (dark) contrast; a click reveals, scrolls to, focuses and highlights the row; the row title links to the page.
+11. [x] One row: "6 steps · 25 s · Microsoft Learn · Tenant not used" and "Sent: answer context to OpenAI Codex, search text to learn.microsoft.com", with "Sent" expanding to exactly what left the device; local runs say "Nothing left this device".
+12. [x] One follow-up chip under the answer, with "Uses tenant data" when a docs answer's follow-up reads tenant data; clicking fills the composer only.
+13. [x] Copy button on each numbered step (plain text); "Open in Learn" when one Learn page supplies more than half of the citations.
+14. [x] Copying a numbered step includes its nested sub-items and wrapped paragraphs, two spaces per level with bullets and numbers kept; citation chips copy as the shown numbers in brackets, as the answer copy does; the screen reader announcement stays. Nested numbered sub-items have no button of their own.
+15. [x] When an answer cites nothing, consulted local docs index passages are listed with the MCP results, never numbered, labelled with their title (the file when untitled) and "Local docs index, <index date>" in place of a host, without a link when they have no URL. The heading names "Local docs index on this device" and keeps "not verified by OpenAdminOS" for third-party hosts only. Derived from stored sources, so a reload renders the same.
+
+### Review
+
+- Tests: electron unit and end-to-end tests for `validTitle`, `sourceExcerpt`, the title protocol, title persistence and fallback, stored excerpts and `tenantFollowUps`; renderer tests for each item (`chat-steps.test.ts`, `hosted-disclosure.test.ts`, `ChatSteps.test.tsx`, `MarkdownPreview.test.tsx`, `IntuneChat.test.tsx`).
+- Screenshots in light and dark from a scratch Vite and Playwright harness with a mock bridge (not committed).
+- A separate review found no blocking issues; three of its lower-confidence notes were fixed (hosts of consulted rows in the heading, disclosure recorded for the running chat only, copied step announced). Both of the notes left unchanged then (uncited local index passages not listed when nothing is cited, and a step copied without its sub-items) are now done, items 14 and 15.
+- Checks: typecheck clean; electron 757 of 757; renderer 53 files, 395 tests under Node 22 before the review fixes (chat files 185 of 185 after); runtime 225 pass, 0 fail; qa-graph 65 of 65; qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
+- Open: the live check in the running app, and the separate evaluator and GPT-6.1-Sol reviews. Seen in the harness at 1280 px wide and not changed here: a long chat title in the top bar runs under the status strip pill.
+- Follow-ups 14 and 15: tests for a step with lists two levels deep and a wrapped paragraph, for chips copied as shown numbers (in `MarkdownPreview.test.tsx` and through `AnswerBody`), for an uncited answer with only local passages, mixed MCP and local uncited, local passages under "Also consulted", and a reload in `IntuneChat.test.tsx`. Unnumbered local rows use the new label; numbered local rows keep "file · index from <date>". Checks: typecheck clean; electron 757 of 757; renderer 53 files, 401 tests under Node 22. Screenshots in light and dark of the uncited "Consulted" list and "Also consulted" expanded with local passages, from the scratch harness (not committed).
+
+## Review round 1 (marketplace)
+
+Same branch, from head 86bb18f. Findings from the GPT-6.1-Sol review (G) and the separate Claude evaluator (E).
+
+| Finding | Resolution | Commit |
+| --- | --- | --- |
+| G1+G2 (blocking, privacy): the egress filter was a denylist; encoded values (percent escapes, zero-width characters inside GUIDs) bypassed it and tenant data under unindexed keys (streetAddress, descriptions) could leave verbatim. | The answering model only picks the MCP tool; its params are never sent. A separate query writer call (`mcp-query-writer.ts`), on the same provider and model, writes the params from the admin's own messages, the tool's fenced description and schema, and the titles and links of earlier MCP results in this answer, plus queries already sent. It never sees Graph results, cache rows, tenant values, answers or the tenant name. The egress check stays as the second layer and runs on canonical text (`mcp-egress.ts`: NFKC, invisible characters removed, percent escapes, HTML entities and backslash escapes decoded until stable); residue encodings and non-printable characters are refused, the decoded text is sent and shown, and a link is sent only verbatim from an earlier result of the same server. Tests: percent-encoded and entity-encoded tenant name, zero-width GUID, streetAddress from `graph_get` absent from the query writer prompt and the sent params, unlisted fetch URL refused and a listed one sent, admin-typed email still blocked, writer failure and missing admin messages send nothing, and the Learn docs question end to end with the writer prompt checked. | a88849b |
+| G3 (blocking): disable or uninstall did not revoke a running answer's access, and the host could reconnect. | `McpHost` keeps an authorization generation per server; disable and uninstall bump it inside the serialized write, abort calls in flight and close the session. A call carries its answer's generation, and the host reads installed and enabled state again right before dispatch and before reopening a session. A refused call sends nothing: "Test Docs was turned off during this answer. Nothing was sent." Tests: host-level revoke and state check, and app-state disable and uninstall while the model is responding, with the server receiving no call. | 7588cc3 |
+| G4: documentation loaded by `afterClassification` after a final answer was recorded as consulted without reaching the model. | Such a final loads the passages first and, when any matched, the model answers again with them. Only sources whose content entered a model request are returned as consulted and citable. Tests for both the retry and the no-passages case. | 42b0d5a |
+| G5: empty final answers were accepted outside voice. | Checked after fence stripping on every surface, retried within the bounded repair budget, then the fallback notice "The model returned an empty answer N times." Test. | f5569ac |
+| G6 (nit): SPEC said a tenant tool on a docs question is refused with a repair turn. | SPEC now says the question becomes mixed, a step says so, tenant data is refreshed and the tool runs. | docs commit |
+| E1: calls that never reached the host were titled "Could not reach <server>" and the fallback said "did not answer". | Titled "Did not send a <server> query" with the reason; the fallback says "no Microsoft Learn query was sent". Tests. | 23fd3d8 |
+| E2: toggle and uninstall failures said "<server> did not respond". | Per-action titles: "Could not turn off <server>", "Could not turn on <server>", "Could not uninstall <server>". Renderer test. | 9c8b0de |
+| E3: an uninstall during an install's connect was undone by the install's write. | The serialized write checks whether the server was uninstalled since the install started; if so it closes the session and reports "<server> was uninstalled while it connected. Nothing was installed." Test. | f5b36de |
+| E4: `validTitle` and follow-ups skipped the tenant name terms and cached values without an MCP server. | The Chat tool context carries both regardless of MCP. Loop test and an app-state test with no server installed. | b2bdb08 |
+| E5: orphaned `cappedFetch` comment in `host.ts`. | Moved above `cappedFetch`. | 5f291a2 |
+
+Checks: typecheck clean; electron 772 of 772; renderer 53 files, 402 tests under Node 22 (the known flaky "finds a setting" failed once in the full run and passed alone); runtime 225 pass, 0 fail; qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
+
+Open: the round 2 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, and a live check with a real local model that the query writer writes usable Learn queries.
+
+## Review round 2 (marketplace)
+
+Same branch, from head 08ad4e4. Findings from the GPT-6.1-Sol review (G) and the separate Claude evaluator (E).
+
+Owner decision (2026-11-05): "Disclose + current message only". The query writer sees only the admin's current question, not earlier messages and not queries already sent in earlier turns. The UI states plainly that the admin's words in the question can be sent to the named host after a best-effort filter. Every query is shown in its step. No extra clicks.
+
+| Finding | Resolution | Commit |
+| --- | --- | --- |
+| G1 (blocking, privacy): the query writer got the admin's earlier messages, so a tenant field quoted earlier (`streetAddress: "420 Cedar Avenue"`) could be written into a later docs query. | The writer gets only the current question (`adminQuestion`), the fenced tool description and schema, and titles, links and queries of MCP calls in the same answer. Voice offers no MCP tools. `adminMessagesOf` is gone; the MCP step reads "writing the query from your question". Tests: loop test with the address in the model's question but not in the writer prompt or the sent params; end to end over three turns with persisted history, where the earlier address, the earlier Learn result title and the earlier query never reach the later writer prompt and the sent query is exactly the later question. | 0dabef2 |
+| G2: the disclosure claimed tenant data stays on the device and that the model is told to send only public questions. | One text in the composer line, the shield tooltip, the status strip tooltip and the install review: "MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to <hosts>. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail." With a local model and MCP on, the composer says "Local model. Graph and cache data stay on this device." and the stored-data line no longer claims prompts stay. Acknowledgement: "I understand that words from my question can be sent to <host>." SPEC, CHANGELOG and writer comments aligned. Renderer tests for copy, local line, hosted shield, status strip tooltip and install review. | 4ac2f4c |
+| G3 (nit): `parseParams` took JSON out of prose. | After one optional outer fence, the whole body must parse as one JSON object; anything else sends nothing and shows the designed not-sent step. Unit cases and a loop test with prose around a valid object. | d5737ca |
+| E low 1: a connection check could reinstall a server uninstalled between its read and capturing the uninstall counter. | The counter is captured before the read, and the serialized write returns without writing when a check finds the server gone. Test for both races; the first fails on the old code. | 3d6edde |
+| E low 2: an empty voice answer said the model "described a lookup without finishing it". | New `empty-answer` reason; voice says "The reasoning model returned an empty answer. No completed answer is available. Retry or open Chat to inspect the evidence."; desktop keeps "The model returned an empty answer N times. Deterministic retrieval was used instead." Loop and voice tests. | e0922ad |
+| E nit 3: orphaned `withMcpSkippedNotice` doc comment. | It sat above `adminMessagesOf`; removing that function put the comment back on `withMcpSkippedNotice`. | 0dabef2 |
+
+Checks: typecheck clean; electron 777 of 777; renderer 53 files, 403 tests under Node 22; runtime 225 pass, 0 fail (227 tests); qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
+
+Open: the round 3 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, and a live check with a real local model that the query writer writes usable Learn queries from the current question alone.
+
+## Review round 3 (marketplace)
+
+Same branch, from head 0703e27. Findings from the GPT-6.1-Sol review (G) and the separate Claude evaluator (E).
+
+| Finding | Resolution | Commit |
+| --- | --- | --- |
+| G1 (blocking, privacy): follow-ups written by the answering model after it read tenant data could carry an unindexed field (`streetAddress: "420 Cedar Avenue"`) into a suggestion; sent by the admin, it became the query writer's current question. | After an answer that read tenant data (a tenant or mixed kind, a Graph refresh or any tenant tool), the model's `next` is dropped, in the loop and again in `answerFollowUps`, which every surface reads (stored message, chip, composer ghost text; voice shows no follow-ups). Such an answer offers only `tenantAnswerFollowUp`: the device template built from the platform the question names and the cached count, and only when it does not repeat the question; otherwise none. Docs answers that read no tenant data keep the model's follow-ups. `title` stays model-written with its checks. Tests: loop test with a `graph_get` result holding the address and the model returning it in `next`; end to end over two turns where the stored follow-ups hold no address, the admin sends the offered one, and the address never reaches the query writer prompt or the sent params; unit cases for the template and the near-duplicate rule. TODO(ugur) in code: tenant answers on other resources now offer no follow-up. | 4a8abf8 |
+| G2: once the source repair budget was spent, a final answer that never called a required source was accepted silently. | The kept answer ends with "Microsoft Learn was not consulted for this answer. The model answered without calling it." (names joined, plural form for several). Test with three final replies and no tool call. | 0c749e4 |
+| G3 (nit): `MCP_TOOL_RULES` said the query is written from "the admin's own messages". | Now "from the admin's current question and the tool's schema only". Test. | 7a6d271 |
+| E low: the hosted send confirmation named only the hosted provider. | The prompt carries the enabled MCP hosts (`chatToolHosts`, shared with the status strip), `deriveTrustCopy` gets them, and "What leaves this device" adds the tool host disclosure. Renderer tests with Learn enabled and with no server enabled. | 5e3ec4d |
+| E nit: SPEC and the round 2 record said "on voice the current utterance". | Replaced: voice offers no MCP tools. | 0fb13fe |
+
+Checks (Node 22): typecheck clean; electron 782 of 782; renderer 53 files, 405 tests (the known flaky "finds a setting" failed once in the full run and passed alone); runtime 225 pass, 0 fail (227 tests); qa 181 pass, 4 warn, 0 fail; test:scripts 16 of 16; docs:check clean.
+
+Open: the round 4 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, the per-resource follow-up question for tenant answers, and a live check with a real local model.
+
+## Review round 4 (marketplace)
+
+Same branch, from head e1f4b1c. Findings from the GPT-6.1-Sol review (G), the separate Claude evaluator (E) and CI.
+
+| Finding | Resolution | Commit |
+| --- | --- | --- |
+| CI: the Electron Intune Chat smoke waited for a "How I checked" disclosure, which the Chat UI pass replaced with the step summary row. | The smoke expands the answer's step summary (the button with "N steps") and asserts `/deviceManagement/managedDevices` in the tenant sources; `hasSourceDetails` is read there, since the expansion does not survive switching conversations. The stale comment in `IntuneChat.tsx` and the SPEC sentence name the step summary row. Smoke passes locally under Node 22. | 34b66b2 |
+| G1 (blocking, privacy): model follow-ups still leaked private context through a legacy tenant answer in the conversation memory (no steps or tenant markers, only source rows) and through attached workspace evidence, notes or instructions; both produced "Explain support at 420 Cedar Avenue". | Provenance, not question kind. `PromptProvenance` records, where the answering prompt is built on the send and stream paths, whether it held anything besides the current question, public documentation and MCP results, and the app's instructions: conversation memory (any earlier answer, legacy ones included), workspace context, the deterministic answer pack, or tenant data (`readTenantData`). After a private prompt `answerFollowUps`, which the stored message, the chip and the composer ghost text all read, offers only code-built follow-ups. The answer stores `privatePrompt` in `answer_meta_json`, so a reload keeps it. Tests on both paths: a legacy tenant answer in history, workspace evidence, a note and instructions, each with the model returning the address in `next`; and a fresh docs question with no history that keeps the model's follow-up and has no flag. The new tests fail on the previous service code. | b045aee |
+| E medium: the keyword planner's access block ran before the question was classified, so "How does Microsoft Sentinel correlate alerts into incidents?" on an Intune-only tenant answered "Defender is not connected for this tenant. Add it in Settings, Tenants." | `accessBlockTiming`: with a documentation source (an MCP server offered to the model or the local docs index), a docs kind is not blocked; in the tool loop the block is deferred and `loadTenantData` raises it once the kind settles to tenant or mixed, before any tenant data is read; without any documentation source the line stays the answer at once. Tests on both paths with Intune-only grants: the Sentinel docs question answers from Learn with no Graph paths, and "List our open security incidents" still gets the access line with no follow-ups; with no MCP server and no index the docs question gets the access line and no model call. | a3bb5e7 |
+| E nit: `readTenantData` sat between `withMcpSkippedNotice` and its doc comment. | Comment moved back. | 608a89c |
+
+Note: the tenant display name stays in the tool-loop system prompt as app context; follow-ups are still checked against the tenant name terms and cached values.
+
+Checks (Node 22): typecheck clean; electron 949 of 949; renderer 58 files, 485 tests; runtime 256 pass, 0 fail (258 tests); qa 197 pass, 4 warn, 0 fail; test:scripts 18 of 18; docs:check clean; smoke Intune Chat, Office and report issue pass (Office failed once with "Office game animation is not running" while the test suites ran in parallel, and passed alone).
+
+Open: the round 5 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, the per-resource follow-up question for tenant answers, and a live check with a real local model.
+
 ---
 
 # Own app registration as a first-class choice (2026-11-03)

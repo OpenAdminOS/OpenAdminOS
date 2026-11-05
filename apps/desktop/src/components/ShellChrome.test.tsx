@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createAwaitingConfirmationRun,
   createMockAppState,
+  createMockMcpServers,
   makeMockBridge,
   renderRoute,
 } from "../test/test-utils";
@@ -74,6 +75,41 @@ describe("shell chrome", () => {
     expect(screen.getByText("Nightly")).toBeInTheDocument();
   });
 
+  it("names the hosts that receive MCP tool queries, also with a local model", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({
+        mcpServers: createMockMcpServers({
+          "microsoft-learn": { installed: true, enabled: true },
+          "kql-search": { installed: true, enabled: true },
+          intuneautomation: { installed: true, enabled: false },
+        }),
+      })),
+    });
+
+    const status = await screen.findByRole("status", { name: /Local · Ollama · llama3\.1 · tool queries to learn\.microsoft\.com \+1/ });
+    await user.hover(status);
+    const tooltip = await screen.findByText(/Words from that question can be sent to learn\.microsoft\.com and www\.kqlsearch\.com\./);
+    expect(tooltip).toHaveTextContent("Ollama using llama3.1. The model, Graph and cache data, and chat history stay on this device. MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com and www.kqlsearch.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.");
+    expect(tooltip.textContent).not.toMatch(/prompts, and chat history stay/);
+    expect(screen.queryByText(/www\.intuneautomation\.com/)).not.toBeInTheDocument();
+  });
+
+  it("names no MCP hosts when the model is too small to be offered the tools", async () => {
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({
+        mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }),
+        chatToolUse: { available: false, notice: "llama3.2:3b is too small for tool use. Chat answers from cached tenant data only and Marketplace tools are off. Use a model of 8B or larger." },
+      })),
+    });
+    const status = await screen.findByRole("status", { name: /Local · Ollama/ });
+    expect(status.getAttribute("aria-label")).not.toMatch(/tool queries/);
+  });
+
   it("keeps updater errors and recovery in the sidebar", async () => {
     const user = userEvent.setup();
     const checkForUpdatesNow = vi.fn(async () => ({ status: "checking" as const }));
@@ -131,6 +167,8 @@ describe("shell chrome", () => {
     const primary = screen.getByRole("navigation", { name: "Primary" });
     expect(within(primary).getByRole("link", { name: "Agents" })).toBeInTheDocument();
     expect(within(primary).getByRole("link", { name: "Runs" })).toBeInTheDocument();
+    // The Marketplace stays browsable in pilot mode.
+    expect(within(primary).getByRole("link", { name: "Marketplace" })).toBeInTheDocument();
     expect(within(primary).queryByRole("link", { name: "Agent Team" })).not.toBeInTheDocument();
     expect(within(primary).queryByRole("link", { name: "Changes" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create workspace" })).not.toBeInTheDocument();

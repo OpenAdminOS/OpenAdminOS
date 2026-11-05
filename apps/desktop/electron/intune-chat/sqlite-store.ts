@@ -2,6 +2,14 @@ import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { dirname } from "node:path";
+import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
+
+/** Cached resources whose rows describe people, groups, devices or their activity. */
+const TENANT_IDENTITY_RESOURCES = [
+  "users", "groups", "managedDevices", "entraDevices", "windowsAutopilotDevices", "autopilotEvents",
+  "signIns", "directoryAudits", "intuneAuditEvents", "managedDeviceEncryptionStates", "troubleshootingEvents",
+  "domains", "administrativeUnits", "namedLocations",
+] as const;
 import type {
   ChatInvestigationMode,
   ChatInvestigationSettings,
@@ -57,9 +65,13 @@ interface MessageRow {
   engine_notice: string | null;
   sources_json: string | null;
   agent_suggestions_json: string | null;
+  answer_meta_json: string | null;
   error: string | null;
   created_at: string;
 }
+
+/** Answer fields stored together: the question kind, steps, citation targets, follow-ups and prompt provenance. */
+type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt">;
 
 interface ResourceStatusRow {
   resource: GraphCacheResourceKind;
@@ -394,6 +406,9 @@ export class IntelligenceSqliteStore {
   // resource. A refresh whose fetch started before that moment holds
   // pre-write rows, so its completion must not clear the stale marker.
   private readonly graphInvalidatedAt = new Map<string, string>();
+  // Identity values of the cached rows per tenant, built on the first MCP
+  // call and dropped whenever that tenant's cache changes.
+  private readonly tenantIdentityIndexes = new Map<string, TenantValueIndex>();
 
   constructor(dbPath: string) {
     const root = dirname(dbPath);
@@ -581,9 +596,9 @@ export class IntelligenceSqliteStore {
       .prepare(
         `INSERT INTO chat_messages (
           id, conversation_id, role, content, status, provider_id, model,
-          engine_notice, sources_json, agent_suggestions_json, error, created_at
+          engine_notice, sources_json, agent_suggestions_json, answer_meta_json, error, created_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         message.id,
@@ -596,6 +611,7 @@ export class IntelligenceSqliteStore {
         message.engineNotice ?? null,
         message.sources ? JSON.stringify(message.sources) : null,
         message.agentSuggestions ? JSON.stringify(message.agentSuggestions) : null,
+        answerMetaJson(message),
         message.error ?? null,
         message.createdAt,
       );
@@ -605,7 +621,7 @@ export class IntelligenceSqliteStore {
     const rows = this.db
       .prepare(
         `SELECT id, conversation_id, role, content, status, provider_id, model,
-                engine_notice, sources_json, agent_suggestions_json, error, created_at
+                engine_notice, sources_json, agent_suggestions_json, answer_meta_json, error, created_at
          FROM chat_messages
          WHERE conversation_id = ?
          ORDER BY created_at ASC`,
@@ -667,6 +683,7 @@ export class IntelligenceSqliteStore {
     refreshedAt: string;
   }): void {
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
+    this.tenantIdentityIndexes.delete(input.tenantId);
     this.db.exec("BEGIN");
     try {
       const normalizedRows = input.rows.map((row) => ({
@@ -2058,6 +2075,7 @@ export class IntelligenceSqliteStore {
   }
 
   clearGraphCache(tenantId: string): void {
+    this.tenantIdentityIndexes.delete(tenantId);
     this.db.exec("BEGIN");
     try {
       this.db
@@ -2098,6 +2116,7 @@ export class IntelligenceSqliteStore {
       .filter((row) => readJson<string[]>(row.resolved_tenant_ids_json, []).includes(tenantId))
       .map((row) => row.id);
 
+    this.tenantIdentityIndexes.delete(tenantId);
     this.db.exec("BEGIN IMMEDIATE");
     try {
       for (const table of [
@@ -2270,6 +2289,58 @@ export class IntelligenceSqliteStore {
     if (!path) return [];
     return (this.db.prepare(`SELECT DISTINCT json_type(raw_json, ?) AS type FROM graph_resources WHERE tenant_id = ? AND resource = ?`)
       .all(path, tenantId, resource) as unknown as Array<{ type: string | null }>).flatMap(row => row.type && row.type !== 'null' ? [row.type] : []);
+  }
+
+  /**
+   * Adds the identity values of every cached row that describes people,
+   * groups, devices or their activity, using the same key rule as tool
+   * observations. Policy and app catalogs are left out: their names are
+   * mostly vendor product names, and those still taint a conversation
+   * once a tool result shows them. Rows are streamed, with no limit.
+   */
+  collectTenantIdentityValues(tenantId: string, into: TenantValueIndex): void {
+    const placeholders = TENANT_IDENTITY_RESOURCES.map(() => "?").join(", ");
+    const rows = this.db
+      .prepare(`SELECT graph_id, display_name, raw_json FROM graph_resources WHERE tenant_id = ? AND resource IN (${placeholders})`)
+      .iterate(tenantId, ...TENANT_IDENTITY_RESOURCES) as Iterable<{ graph_id: string; display_name: string | null; raw_json: string }>;
+    for (const row of rows) {
+      into.add(row.graph_id, "identifier");
+      into.add(row.display_name, "name");
+      collectTenantValues(readJson<unknown>(row.raw_json, {}), into);
+    }
+  }
+
+  /**
+   * The identity values of the cache as one index, built once per tenant
+   * and rebuilt after the tenant's cache changes. Callers must not add to it.
+   */
+  tenantIdentityValues(tenantId: string): TenantValueIndex {
+    const cached = this.tenantIdentityIndexes.get(tenantId);
+    if (cached) return cached;
+    const index = new TenantValueIndex();
+    this.collectTenantIdentityValues(tenantId, index);
+    this.tenantIdentityIndexes.set(tenantId, index);
+    return index;
+  }
+
+  /** Tenant values that earlier turns of a conversation observed. */
+  listChatTenantValues(conversationId: string): string[] {
+    const rows = this.db
+      .prepare(`SELECT value FROM chat_tenant_values WHERE conversation_id = ?`)
+      .all(conversationId) as Array<{ value: string }>;
+    return rows.map((row) => row.value);
+  }
+
+  addChatTenantValues(conversationId: string, values: Iterable<string>): void {
+    const insert = this.db.prepare(`INSERT OR IGNORE INTO chat_tenant_values (conversation_id, value) VALUES (?, ?)`);
+    this.db.exec("BEGIN");
+    try {
+      for (const value of values) insert.run(conversationId, value);
+      this.db.exec("COMMIT");
+    } catch (error) {
+      this.db.exec("ROLLBACK");
+      throw error;
+    }
   }
 
   queryGraphCache(input: {
@@ -3402,6 +3473,12 @@ export class IntelligenceSqliteStore {
         completed_at TEXT
       );
 
+      CREATE TABLE IF NOT EXISTS chat_tenant_values (
+        conversation_id TEXT NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+        value TEXT NOT NULL,
+        PRIMARY KEY (conversation_id, value)
+      );
+
       CREATE TABLE IF NOT EXISTS graph_resources (
         tenant_id TEXT NOT NULL,
         resource TEXT NOT NULL,
@@ -3676,6 +3753,7 @@ export class IntelligenceSqliteStore {
     ensureColumn(this.db, "chat_conversations", "scope_json", "TEXT");
     ensureColumn(this.db, "chat_conversations", "multi_tenant_job_id", "TEXT");
     ensureColumn(this.db, "chat_messages", "engine_notice", "TEXT");
+    ensureColumn(this.db, "chat_messages", "answer_meta_json", "TEXT");
     this.ensureDefaultSavedQueries(new Date().toISOString());
   }
 
@@ -3949,9 +4027,23 @@ function readMessage(row: MessageRow): IntuneChatMessage {
     agentSuggestions: row.agent_suggestions_json
       ? readJson(row.agent_suggestions_json, [])
       : undefined,
+    ...(row.answer_meta_json ? readJson<AnswerMeta>(row.answer_meta_json, {}) : {}),
     error: row.error ?? undefined,
     createdAt: row.created_at,
   };
+}
+
+function answerMetaJson(message: IntuneChatMessage): string | null {
+  const meta: AnswerMeta = {
+    ...(message.questionKind ? { questionKind: message.questionKind } : {}),
+    ...(message.steps?.length ? { steps: message.steps } : {}),
+    ...(message.documentationSources?.length ? { documentationSources: message.documentationSources } : {}),
+    ...(message.followUps?.length ? { followUps: message.followUps } : {}),
+    ...(message.tenantFollowUps?.length ? { tenantFollowUps: message.tenantFollowUps } : {}),
+    ...(message.tenantContext ? { tenantContext: true } : {}),
+    ...(message.privatePrompt ? { privatePrompt: true } : {}),
+  };
+  return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
 }
 
 function readSuggestion(row: SuggestionRow): SelfTrainingSuggestion {

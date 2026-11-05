@@ -49,8 +49,8 @@ export function TopBar() {
         ) : null}
         <TenantSwitcher />
       </div>
-      <div ref={setTitleTarget} className="app-region-no-drag pointer-events-auto absolute left-1/2 min-w-0 max-w-[34%] -translate-x-1/2 truncate text-sm font-medium text-[var(--color-text-soft)]" />
-      <div className="ml-auto flex min-w-0 items-center gap-2">
+      <div ref={setTitleTarget} className="app-region-no-drag pointer-events-auto min-w-0 flex-1 truncate px-4 text-center text-sm font-medium text-[var(--color-text-soft)]" />
+      <div className="flex min-w-0 shrink items-center gap-2">
         <div ref={setActionsTarget} className="app-region-no-drag flex shrink-0 items-center gap-1" />
         <Tooltip content={boundary.tooltip} side="bottom">
           {boundary.kind === "none" ? (
@@ -65,9 +65,9 @@ export function TopBar() {
           ) : (
             <span
               role="status"
-              aria-label={`${boundary.label}${boundary.model ? ` · ${boundary.model}` : ""}`}
+              aria-label={`${boundary.label}${boundary.model ? ` · ${boundary.model}` : ""}${boundary.toolHosts ? ` · ${boundary.toolHosts}` : ""}`}
               tabIndex={0}
-              className={`app-region-no-drag flex h-8 min-w-0 max-w-[390px] items-center gap-1.5 rounded-[8px] px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
+              className={`app-region-no-drag flex h-8 min-w-0 max-w-[520px] items-center gap-1.5 rounded-[8px] px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
                 boundary.kind === "hosted"
                   ? "bg-[var(--color-warning-soft)] text-[var(--color-warning)]"
                   : "text-[var(--color-text-soft)]"
@@ -76,6 +76,7 @@ export function TopBar() {
               {boundary.kind === "local" ? <IconLock size={11} className="shrink-0" /> : <IconCloud size={11} className="shrink-0" />}
               <span className="truncate">{boundary.label}</span>
               {boundary.model ? <span className="truncate text-[var(--color-text-muted)]">· {boundary.model}</span> : null}
+              {boundary.toolHosts ? <span className="truncate text-[var(--color-warning)]">· {boundary.toolHosts}</span> : null}
             </span>
           )}
         </Tooltip>

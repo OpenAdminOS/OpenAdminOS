@@ -11,7 +11,7 @@ import {
   type TenantRecord,
 } from "@openadminos/agent-sdk";
 
-import { MAX_AGENTIC_ITERATIONS, runAgenticChat } from "./agentic-loop.js";
+import { MAX_AGENTIC_ITERATIONS, partialFinalAnswer, runAgenticChat } from "./agentic-loop.js";
 import { IntelligenceSqliteStore } from "./sqlite-store.js";
 import type { IntuneChatToolContext } from "./tools.js";
 import { executeIntuneChatTool } from "./tools.js";
@@ -101,6 +101,28 @@ describe("Intune Chat agentic loop", () => {
       assert.deepEqual(starts, ["list_cached_resources", "query_cache"]);
       assert.deepEqual(finishes, ["list_cached_resources", "query_cache"]);
       assert.equal(result.toolTrace.length, 2);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("reads a final answer whose text contains a fenced code block", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const answer = "Start from this query:\n\n```kql\nSigninLogs | where ResultType != 0\n```";
+      for (const reply of [JSON.stringify({ final: true, answer }), `\`\`\`json\n${JSON.stringify({ final: true, answer })}\n\`\`\``]) {
+        const result = await runAgenticChat({
+          question: "Write a KQL query for failed sign-ins",
+          questionKind: "docs",
+          tenant, providerId: "ollama", providerIsLocal: true, model: "llama3.1:8b",
+          llm: scriptedLlm([reply]), tools: toolContext(store), plannedResources: [], agentSuggestions: [],
+          generatedAt: "2026-06-01T10:00:00.000Z", maxTokens: 900,
+        });
+        assert.equal(result.ok, true, reply);
+        if (result.ok) assert.equal(result.answer, answer);
+      }
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -352,17 +374,66 @@ describe("Intune Chat agentic loop", () => {
     }
   });
 
-  it("still allows a prose final when no tenant data was planned", async () => {
+  it("still allows a prose final for small talk", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
     const store = seededStore(dir);
     try {
       const result = await runAgenticChat({
         ...baseInput(store, scriptedLlm(["Hello. What would you like to check?"])),
+        question: "hi",
         plannedResources: [],
+        smallTalk: true,
       });
       assert.equal(result.ok, true);
       assert.equal(result.answer, "Hello. What would you like to check?");
       assert.equal(result.toolTrace.length, 0);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("requires tenant evidence for a tenant or mixed answer when the planner found no resources", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      for (const questionKind of ["tenant", "mixed"] as const) {
+        const prompts: string[] = [];
+        const llm = scriptedLlm(["There are 12 of them.", '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```', '```json\n{"final":true,"answer":"Checked."}\n```']);
+        const complete = llm.complete.bind(llm);
+        llm.complete = async (options) => { prompts.push(options.prompt); return complete(options); };
+        const result = await runAgenticChat({ ...baseInput(store, llm), question: "How are we doing on the rollout?", plannedResources: [], questionKind });
+        assert.equal(result.ok, true, questionKind);
+        assert.match(prompts[1]!, /That answer used no tenant evidence/, questionKind);
+        assert.match(prompts[1]!, /"tool":"list_cached_resources"/, questionKind);
+        assert.deepEqual(result.toolTrace.map((entry) => entry.tool), ["query_cache"], questionKind);
+      }
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops after the tenant refresh when the admin pressed Stop during it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-loop-"));
+    const store = seededStore(dir);
+    try {
+      const reply = '```json\n{"kind":"tenant","sources":[],"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```';
+      for (const classify of [true, false]) {
+        const controller = new AbortController();
+        const started: string[] = [];
+        await assert.rejects(
+          runAgenticChat({
+            ...baseInput(store, scriptedLlm([reply])),
+            signal: controller.signal,
+            ...(classify ? { classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) } } : {}),
+            ensureTenantData: async () => { controller.abort(); },
+            onToolStart: (event) => started.push(event.tool),
+          }),
+          /stopped by user/,
+        );
+        assert.deepEqual(started, [], `no tool runs after the stop (classify ${classify})`);
+      }
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
@@ -645,4 +716,277 @@ it('does not turn failed license reads into an empty-tenant answer from unrelate
     assert.match(result.answer, /No verified count is available/);
     assert.doesNotMatch(result.answer, /no unused seats/);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+});
+
+describe("streamed final answers", () => {
+  it("decodes the answer of a final reply while it streams, in any key order", () => {
+    assert.equal(partialFinalAnswer('```json\n{"tool":"query_cache","params":{"answer":"x"}}'), undefined);
+    assert.equal(partialFinalAnswer('{"final":true,"ans'), undefined);
+    assert.equal(partialFinalAnswer('{"final":true,"answer":"Onboard'), "Onboard");
+    assert.equal(partialFinalAnswer('{"kind":"docs","answer":"Line one\\nLine \\"two\\"","sources":[],"final":true'), 'Line one\nLine "two"');
+    // An escape cut off at the end waits for the next chunk.
+    assert.equal(partialFinalAnswer('{"final": true, "answer": "Tab\\'), "Tab");
+    assert.equal(partialFinalAnswer('{"final": true, "answer": "caf\\u00e'), "caf");
+    assert.equal(partialFinalAnswer('{"final": true, "answer": "caf\\u00e9 [1]", "next": ["Check our Macs"]}'), "café [1]");
+  });
+
+  /** Streams each scripted reply in small pieces, as an incremental adapter does. */
+  function streamingLlm(replies: string[], pieces = 7): RunLlmApi & { completeCalls: number } {
+    let index = 0;
+    const llm = {
+      available: true,
+      streamsIncrementally: true,
+      completeCalls: 0,
+      async complete() {
+        llm.completeCalls += 1;
+        throw new Error("an incremental adapter is streamed");
+      },
+      async *stream() {
+        const text = replies[Math.min(index++, replies.length - 1)]!;
+        for (let end = pieces; end < text.length + pieces; end += pieces) {
+          const accumulated = text.slice(0, Math.min(end, text.length));
+          yield { delta: accumulated.slice(-pieces), accumulated, done: false, model: "stream-model" };
+        }
+        yield { delta: "", accumulated: text, done: true, model: "stream-model" };
+      },
+    };
+    return llm;
+  }
+
+  it("shows a final answer as it streams, never a tool call, and returns the parsed answer", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-stream-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const llm = streamingLlm([
+        '```json\n{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}\n```',
+        '```json\n{"answer":"WIN-01 is \\"compliant\\".\\nNo other devices.","final":true}\n```',
+      ]);
+      const result = await runAgenticChat({ ...baseInput(store, llm), onAnswerText: (text) => shown.push(text) });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.answer, 'WIN-01 is "compliant".\nNo other devices.');
+      assert.equal(llm.completeCalls, 0);
+      assert.ok(shown.length > 1, "the answer arrives in pieces");
+      assert.equal(shown.at(-1), 'WIN-01 is "compliant".\nNo other devices.');
+      assert.ok(shown.every((text, index) => index === 0 || text.startsWith(shown[index - 1]!)), "each piece extends the last");
+      assert.ok(shown.every((text) => !text.includes("query_cache")));
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("withdraws a streamed final the loop did not accept", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-stream-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const llm = streamingLlm([
+        '{"final":true,"answer":"All devices are fine."}',
+        '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+        '{"final":true,"answer":"WIN-01 is compliant."}',
+      ]);
+      const result = await runAgenticChat({ ...baseInput(store, llm), onAnswerText: (text) => shown.push(text) });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.answer, "WIN-01 is compliant.");
+      // The answer without tenant evidence showed, was withdrawn, then the real one streamed.
+      const withdrawn = shown.indexOf("");
+      assert.ok(withdrawn > 0);
+      assert.equal(shown[withdrawn - 1], "All devices are fine.");
+      assert.equal(shown.at(-1), "WIN-01 is compliant.");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("asks an adapter that yields once at the end for the complete reply", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-stream-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const llm = scriptedLlm([
+        '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+        '{"final":true,"answer":"WIN-01 is compliant."}',
+      ]);
+      const result = await runAgenticChat({ ...baseInput(store, llm), onAnswerText: (text) => shown.push(text) });
+      assert.equal(result.ok, true);
+      if (result.ok) assert.equal(result.answer, "WIN-01 is compliant.");
+      assert.deepEqual(shown, []);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("model steps", () => {
+  it("gives each model call its own step, finished with its decision before the tool it chose runs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-steps-"));
+    const store = seededStore(dir);
+    try {
+      const log: string[] = [];
+      const llm = scriptedLlm([
+        '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+        '{"final":true,"answer":"All devices are fine."}',
+      ]);
+      const result = await runAgenticChat({
+        ...baseInput(store, llm),
+        modelStep: {
+          start: () => log.push("model: working"),
+          writing: () => log.push("model: writing"),
+          finish: (outcome) => log.push(`model: ${outcome.kind}${outcome.kind === "tool" ? ` ${outcome.tool}` : ""}`),
+        },
+        onToolStart: (event) => log.push(`tool: ${event.tool}`),
+        onToolFinish: () => log.push("tool: done"),
+      });
+      assert.equal(result.ok, true);
+      assert.deepEqual(log, ["model: working", "model: tool query_cache", "tool: query_cache", "tool: done", "model: working", "model: final"]);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("answer prompt", () => {
+  it("tells a hosted model not to describe its sources, provider or tenant checks, and keeps content limits", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-meta-"));
+    const store = seededStore(dir);
+    try {
+      const systems: string[] = [];
+      const llm: RunLlmApi = {
+        available: true,
+        async complete(options) {
+          systems.push(options.system ?? "");
+          return { text: '{"final":true,"answer":"Deploy the onboarding package."}', model: "m" };
+        },
+        async *stream() {},
+      };
+      const result = await runAgenticChat({ ...baseInput(store, llm), providerId: "openai", providerIsLocal: false, questionKind: "docs" });
+      assert.equal(result.ok, true);
+      const system = systems[0]!;
+      assert.match(system, /Do not describe your sources, the model provider or whether the tenant was checked: the interface shows them\./);
+      assert.match(system, /Do state limits of the content itself/);
+      // The lines that made answers say "The selected provider is hosted" or "I have not checked the tenant".
+      assert.doesNotMatch(system, /be explicit when tenant context|selected provider is (?:hosted|local)|say what the documentation does not cover|tenant is not checked/);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("keeps a short hosted provider disclosure for spoken Nova answers, which have no step summary", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-voice-"));
+    const store = seededStore(dir);
+    try {
+      const systems: string[] = [];
+      const llm: RunLlmApi = {
+        available: true,
+        async complete(options) {
+          systems.push(options.system ?? "");
+          return { text: systems.length === 1 ? '{"tool":"query_cache","params":{"resource":"managedDevices"}}' : '{"final":true,"answer":"Done."}', model: "m" };
+        },
+        async *stream() {},
+      };
+      await runAgenticChat({ ...baseInput(store, llm), providerId: "openai", providerIsLocal: false, voice: true });
+      assert.match(systems[0]!, /The reasoning provider is hosted\. When the answer uses tenant data, say once, briefly, that tenant context went to the provider\./);
+      assert.doesNotMatch(systems[0]!, /Do not describe your sources/);
+      systems.length = 0;
+      await runAgenticChat({ ...baseInput(store, llm), providerIsLocal: true, voice: true });
+      assert.doesNotMatch(systems[0]!, /reasoning provider is hosted/);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("asks for follow-ups the listed tools can answer, in the docs and the tenant protocol", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-next-"));
+    const store = seededStore(dir);
+    try {
+      const systems: string[] = [];
+      const llm: RunLlmApi = {
+        available: true,
+        async complete(options) {
+          systems.push(options.system ?? "");
+          return { text: systems.length === 1 ? '{"tool":"query_cache","params":{"resource":"managedDevices"}}' : '{"final":true,"answer":"Done."}', model: "m" };
+        },
+        async *stream() {},
+      };
+      await runAgenticChat({ ...baseInput(store, llm), questionKind: "docs" });
+      await runAgenticChat({ ...baseInput(store, llm), questionKind: "tenant" });
+      for (const system of [systems[0]!, systems.at(-1)!]) {
+        assert.match(system, /Suggest only what the tools listed here can answer\. Never suggest checking data no listed tool returns, such as Defender for Endpoint status on devices\./);
+      }
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("withdrawing a streamed final", () => {
+  function incremental(replies: string[]): RunLlmApi {
+    let index = 0;
+    return {
+      available: true,
+      streamsIncrementally: true,
+      async complete() { throw new Error("streamed"); },
+      async *stream() {
+        const text = replies[Math.min(index++, replies.length - 1)]!;
+        for (let end = 8; end < text.length + 8; end += 8) {
+          yield { delta: "", accumulated: text.slice(0, Math.min(end, text.length)), done: false, model: "m" };
+        }
+        yield { delta: "", accumulated: text, done: true, model: "m" };
+      },
+    };
+  }
+
+  it("withdraws an evidence-free final before the tenant refresh runs", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-withdraw-"));
+    const store = seededStore(dir);
+    try {
+      const log: string[] = [];
+      const result = await runAgenticChat({
+        ...baseInput(store, incremental([
+          '{"kind":"tenant","sources":[],"final":true,"answer":"All devices are fine."}',
+          '{"tool":"query_cache","params":{"resource":"managedDevices","limit":5}}',
+          '{"final":true,"answer":"WIN-01 is compliant."}',
+        ])),
+        classify: { tenantReference: false, onKind: () => ({ requiredServerIds: [], learnFirst: false }) },
+        ensureTenantData: async () => { log.push("refresh"); },
+        onAnswerText: (text) => log.push(text === "" ? "withdrawn" : "shown"),
+      });
+      assert.equal(result.ok, true);
+      const firstRefresh = log.indexOf("refresh");
+      assert.ok(log.indexOf("shown") < log.indexOf("withdrawn") && log.indexOf("withdrawn") < firstRefresh, log.join(", "));
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("withdraws the last streamed final before giving up without tenant evidence", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-withdraw-"));
+    const store = seededStore(dir);
+    try {
+      const shown: string[] = [];
+      const result = await runAgenticChat({
+        ...baseInput(store, incremental(['{"final":true,"answer":"All devices are fine."}'])),
+        onAnswerText: (text) => shown.push(text),
+      });
+      assert.equal(result.ok, false);
+      if (!result.ok) assert.equal(result.reason, "no-evidence");
+      assert.equal(shown.at(-1), "", "nothing streamed stays on screen when the loop falls back");
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
+});
+
+describe("stop during a streamed reply", () => {
+  it("stops when an adapter ends its stream quietly on abort, before the tool the partial reply named", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agentic-abort-"));
+    const store = seededStore(dir);
+    try {
+      const controller = new AbortController();
+      const llm: RunLlmApi = {
+        available: true,
+        streamsIncrementally: true,
+        async complete() { throw new Error("streamed"); },
+        async *stream(options) {
+          yield { delta: "", accumulated: '{"tool":"find_graph_endpoint","params":{"query":"managed devices"}}', done: false, model: "m" };
+          controller.abort();
+          if (options.signal?.aborted) return;
+        },
+      };
+      const ran: string[] = [];
+      await assert.rejects(
+        runAgenticChat({
+          ...baseInput(store, llm),
+          signal: controller.signal,
+          onAnswerText: () => {},
+          onToolStart: (event) => ran.push(event.tool),
+          modelStep: { start: () => {}, writing: () => {}, finish: (outcome) => ran.push(`decided ${outcome.kind}`) },
+        }),
+        (error: Error) => error.name === "AbortError",
+      );
+      assert.deepEqual(ran, []);
+    } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+  });
 });

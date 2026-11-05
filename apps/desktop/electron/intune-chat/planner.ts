@@ -3,6 +3,7 @@ import type {
   GraphCacheResourceKind,
   GraphCacheResourceStatus,
   IntuneChatAgentSuggestion,
+  IntuneChatQuestionKind,
   TenantRecord,
 } from "@openadminos/agent-sdk";
 import type { GraphCacheResourceDefinition } from "./sqlite-store.js";
@@ -433,6 +434,91 @@ const CATEGORY_RESOURCE_HINTS: Record<AgentSummary["category"], GraphCacheResour
     "windowsFeatureUpdateProfiles",
   ],
 };
+
+const GENERAL_QUESTION_START =
+  /^(?:how (?:do|does|can|should|would|to|long|often)|what (?:is|are|does|do|happens)|what's|why (?:does|do|would)|explain|describe|when (?:does|do|should)|is (?:it|there)|can i|where (?:do|can))\b/;
+const TENANT_REFERENCE =
+  /\b(?:how many|which|our|my|mine|we|us|tenant|list|show|count|currently|right now|are there|do we|do i have)\b/;
+
+/**
+ * A how-to or product-behaviour question that does not ask about this
+ * tenant's state. Only such questions may be answered from public MCP
+ * evidence alone; tenant questions still need tenant evidence.
+ */
+export function isGeneralKnowledgeQuestion(question: string): boolean {
+  const lower = question.trim().toLowerCase();
+  return GENERAL_QUESTION_START.test(lower) && !TENANT_REFERENCE.test(lower);
+}
+
+/** Asks to write a query or script: code authoring, not tenant state. */
+const CODE_AUTHORING =
+  /^(?:write|draft)\b[^?]*\b(?:kql|kusto|queries|query|scripts?|powershell|cmdlets?)\b/;
+/** Names documentation itself. */
+const DOCS_REFERENCE = /\b(?:documentation|docs|microsoft learn|learn\.microsoft\.com)\b/;
+/** Wording that sounds general but also starts many tenant questions. */
+const WEAK_DOCS =
+  /^(?:how (?:do|does|can|should|would|to|long|often)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can)|what (?:is|are|does|do|happens)|what's|give me|suggest|create|build|find|is there)\b|\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?|according to)\b/;
+/** How-to and guidance wording: about a tenant object, it asks for docs and tenant state together. */
+const HOW_TO_OR_GUIDANCE =
+  /^(?:how (?:do|does|can|should|would|to)|why (?:does|do|would)|explain|describe|when (?:does|do|should)|can i|where (?:do|can))\b|\b(?:best practices?|recommended|recommendation|requirements?|prerequisites?)\b/;
+/** Values that only make sense in one tenant: an email address, a GUID, or a name like HR-LAPTOP-07. */
+const TENANT_VALUE = /[\w.+-]+@[\w-]+\.[\w.-]+|\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-|\b[A-Z][A-Z0-9]*-[A-Z0-9-]*\d/;
+/** Phrases about someone's or something's state: "Bob's laptop", "your devices", "status of". */
+const TENANT_STATE =
+  /\b(?:state of|status of|assigned to|enrolled in|your|their|his|her|any|all|who|run it|run this|execute|against)\b|\b(?!(?:what|it|that|there|here|let|who|where|how)'s\b)[a-z0-9]+'s\b/;
+
+/**
+ * Whether the wording refers to this tenant: "our", "which", "your", a
+ * possessive such as "Bob's", or a value such as HR-LAPTOP-07.
+ */
+export function hasTenantReference(question: string): boolean {
+  const trimmed = question.trim();
+  const lower = trimmed.toLowerCase();
+  return TENANT_REFERENCE.test(lower) || TENANT_STATE.test(lower) || TENANT_VALUE.test(trimmed);
+}
+
+/**
+ * The kind the answering model declared, with the keyword check as a
+ * veto: docs stands only when the wording refers to nothing in the
+ * tenant, otherwise it becomes mixed. Tenant and mixed stand as given.
+ */
+export function resolveQuestionKind(
+  declared: IntuneChatQuestionKind,
+  tenantReference: boolean,
+): { kind: IntuneChatQuestionKind; vetoed: boolean } {
+  if (declared === "docs" && tenantReference) return { kind: "mixed", vetoed: true };
+  return { kind: declared, vetoed: false };
+}
+
+/**
+ * Decides by keyword rules whether a question needs the tenant. The tool
+ * loop asks the answering model instead and uses this only when the model
+ * gives no kind; the deterministic path uses it as it is. A docs label
+ * skips the tenant refresh and tenant tools, so it is given only when it is safe:
+ * the question names documentation or a source, or asks to write a query
+ * or script, and refers to nothing in the tenant. Wording that only sounds
+ * general (how-to, "what is", guidance words) also starts many tenant
+ * questions ("What is the oldest device?", "Can I see the noncompliant
+ * devices?"), so it makes a question docs only when the planner found no
+ * tenant resources in it. Everything else with planned resources is mixed,
+ * which still requires tenant evidence. When in doubt the label is mixed
+ * or tenant, never docs.
+ */
+export function classifyChatQuestion(
+  question: string,
+  input: { plannedResources: readonly GraphCacheResourceKind[]; namesSource: boolean },
+): IntuneChatQuestionKind {
+  const lower = question.trim().toLowerCase();
+  const tenantReference = hasTenantReference(question);
+  const planned = input.plannedResources.length > 0;
+  const explicitDocs = input.namesSource || DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower);
+  if (explicitDocs) return tenantReference ? "mixed" : "docs";
+  if (WEAK_DOCS.test(lower) || GENERAL_QUESTION_START.test(lower)) {
+    if (tenantReference) return HOW_TO_OR_GUIDANCE.test(lower) ? "mixed" : "tenant";
+    return planned ? "mixed" : "docs";
+  }
+  return "tenant";
+}
 
 export function planChatContext(question: string): PlannedChatContext {
   const lower = question.toLowerCase();
@@ -1153,6 +1239,16 @@ export function pathForResource(resource: GraphCacheResourceKind): {
   }
 }
 
+/**
+ * Words most device agents share. A match on these alone said nothing
+ * about the agent's own topic, so "Find inactive devices" was offered for
+ * a Defender question because both mention devices.
+ */
+const GENERIC_AGENT_TERMS = new Set([
+  "device", "devices", "intune", "endpoint", "endpoints", "managed", "macos", "mac", "macs", "windows", "ios", "ipados",
+  "android", "linux", "check", "show", "list", "tenant", "microsoft",
+].map((term) => stemAgentWord(term)));
+
 const AGENT_MATCH_STOP_TERMS = new Set([
   "why",
   "are",
@@ -1351,10 +1447,13 @@ export function matchAgentsToQuestion(
     // least two metadata terms. Category and write-intent bonuses alone
     // used to float unrelated agents (a script-drafting helper on every
     // device question, a device offboarder on a guest-account request).
+    // ...and at least one of the agent's own topic terms, not only words
+    // such as "device" or "Intune" that most agents share.
     .filter(
       (entry) =>
         entry.score >= (entry.agent.mode === "write" ? 3 : 1.75) &&
-        (entry.nameMatches >= 1 || entry.matchedTerms.length >= 2),
+        (entry.nameMatches >= 1 || entry.matchedTerms.length >= 2) &&
+        entry.matchedTerms.some((term) => !GENERIC_AGENT_TERMS.has(stemAgentWord(term))),
     )
     .sort(
       (a, b) =>
@@ -1362,7 +1461,8 @@ export function matchAgentsToQuestion(
         b.matchedTerms.length - a.matchedTerms.length ||
         a.agent.slug.localeCompare(b.agent.slug),
     )
-    .slice(0, 3);
+    // One suggestion: the best match. More cards read as noise.
+    .slice(0, 1);
 
   return suggestions.map(({ agent, score, matchedTerms, matchedConcepts, matchedResources }) => ({
     agentSlug: agent.slug,

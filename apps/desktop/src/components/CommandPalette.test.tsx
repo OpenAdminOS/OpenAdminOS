@@ -68,7 +68,7 @@ it("lists the shell destinations and every Settings section", async () => {
   for (const label of [
     "Go to Chat",
     "Agents",
-    "Agents: Hub",
+    "Marketplace",
     "Runs",
     "Runs: Needs review",
     "Runs: Failed",

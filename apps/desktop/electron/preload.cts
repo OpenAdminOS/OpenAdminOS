@@ -281,6 +281,14 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:regenerate-gateway-token"),
   revokeGatewayClient: (clientId: string) =>
     ipcRenderer.invoke("openadminos:revoke-gateway-client", clientId),
+  installMcpServer: (serverId: string) =>
+    ipcRenderer.invoke("openadminos:install-mcp-server", serverId),
+  checkMcpServer: (serverId: string) =>
+    ipcRenderer.invoke("openadminos:check-mcp-server", serverId),
+  uninstallMcpServer: (serverId: string) =>
+    ipcRenderer.invoke("openadminos:uninstall-mcp-server", serverId),
+  setMcpServerEnabled: (serverId: string, enabled: boolean) =>
+    ipcRenderer.invoke("openadminos:set-mcp-server-enabled", serverId, enabled),
   exportDriftBaseline: (input) =>
     ipcRenderer.invoke("openadminos:export-drift-baseline", input),
   readDriftBundleFile: () =>

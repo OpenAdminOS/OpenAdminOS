@@ -22,6 +22,7 @@ import {
   type DriftRetentionSettings,
   type GraphCacheStatus,
   type LocalDataSummary,
+  type McpServerSummary,
   type OpenAdminOSApi,
   type ProviderId,
   type ProviderSummary,
@@ -172,6 +173,24 @@ export function createAwaitingConfirmationRun(
     },
     ...overrides,
   };
+}
+
+/** The first-wave MCP catalog as the host reports it, nothing installed. */
+export function createMockMcpServers(
+  overrides: Partial<Record<string, Partial<McpServerSummary>>> = {},
+): McpServerSummary[] {
+  const base: McpServerSummary[] = [
+    { id: "microsoft-learn", name: "Microsoft Learn", publisher: "Microsoft", url: "https://learn.microsoft.com/api/mcp", host: "learn.microsoft.com",
+      description: "Searches and fetches official Microsoft documentation and code samples.", pitch: "Official Microsoft documentation and code samples, cited in Chat.", useFor: "Current official Microsoft documentation: product behaviour, requirements, setup steps and Graph API reference.",
+      auth: "none", readOnly: true, installed: false, enabled: false, tools: [] },
+    { id: "kql-search", name: "KQL Search", publisher: "KQL Search", url: "https://www.kqlsearch.com/mcp", host: "www.kqlsearch.com",
+      description: "A reference library of community KQL queries.", pitch: "Community KQL examples to start a hunting or reporting query.", useFor: "Example KQL queries for Sentinel, Defender advanced hunting and Log Analytics. Not for product documentation.",
+      auth: "none", readOnly: true, installed: false, enabled: false, tools: [] },
+    { id: "intuneautomation", name: "IntuneAutomation", publisher: "IntuneAutomation", url: "https://www.intuneautomation.com/mcp/", host: "www.intuneautomation.com",
+      description: "A library of PowerShell scripts for Intune automation.", pitch: "PowerShell scripts for Intune automation, with their permissions.", useFor: "Ready-made PowerShell scripts for Intune and Graph automation, with the permissions each needs. Not for product documentation.",
+      auth: "none", readOnly: true, installed: false, enabled: false, tools: [] },
+  ];
+  return base.map((server) => ({ ...server, ...(overrides[server.id] ?? {}) }));
 }
 
 export function createMockAppState(overrides: Partial<AppState> = {}): AppState {
@@ -731,7 +750,22 @@ export function makeMockBridge(
     applyUpdateNow: vi.fn(async () => undefined),
     getUpdateChannel: vi.fn(async () => ({ channel: "stable" as const })),
     setUpdateChannel: vi.fn(async (channel: UpdateChannel) => ({ channel })),
+    installMcpServer: vi.fn(async (serverId: string) => updateMcpServer(serverId, {
+      installed: true, enabled: true, installedAt: now, lastConnectedAt: now,
+      tools: [{ name: "search", description: "Search the library." }],
+    })),
+    checkMcpServer: vi.fn(async (serverId: string) => updateMcpServer(serverId, { lastConnectedAt: now })),
+    uninstallMcpServer: vi.fn(async (serverId: string) => updateMcpServer(serverId, {
+      installed: false, enabled: false, installedAt: undefined, lastConnectedAt: undefined, tools: [],
+    })),
+    setMcpServerEnabled: vi.fn(async (serverId: string, enabled: boolean) => updateMcpServer(serverId, { enabled })),
   };
+
+  function updateMcpServer(serverId: string, patch: Partial<McpServerSummary>): McpServerSummary[] {
+    const servers = (appState.mcpServers ?? []).map((server) => server.id === serverId ? { ...server, ...patch } : server);
+    updateState({ ...appState, mcpServers: servers });
+    return servers;
+  }
 
   return {
     ...bridge,

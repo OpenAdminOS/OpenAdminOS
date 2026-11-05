@@ -8,7 +8,7 @@ import { useToast } from "../components/Toast";
 import {
   IconCheck,
   IconClock,
-  IconHub,
+  IconMarketplace,
   IconPlay,
   IconWarning,
 } from "../components/icons";
@@ -155,10 +155,10 @@ export default function Schedules({ embedded = false }: { embedded?: boolean }) 
       </Button>
       <Button
         variant="secondary"
-        leadingIcon={<IconHub size={14} />}
-        onClick={() => navigate("/agents/hub")}
+        leadingIcon={<IconMarketplace size={14} />}
+        onClick={() => navigate("/marketplace?kind=agents")}
       >
-        Browse hub
+        Browse the Marketplace
       </Button>
     </div>
   );

@@ -9,7 +9,7 @@ import {
 } from "react";
 
 import { deriveTrustCopy } from "../copy";
-import { resolveProviderDefaultModel } from "../shared/openAdminOS";
+import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
@@ -25,6 +25,10 @@ export type DataBoundary =
       kind: "local";
       label: string;
       model?: string;
+      /** Status strip segment naming the MCP hosts that receive tool queries. */
+      toolHosts?: string;
+      /** Composer sentence naming every MCP host. */
+      toolHostsNote?: string;
       tooltip: string;
       isVoiceHosted: false;
     }
@@ -32,6 +36,8 @@ export type DataBoundary =
       kind: "hosted";
       label: string;
       model?: string;
+      toolHosts?: string;
+      toolHostsNote?: string;
       tooltip: string;
       isVoiceHosted: boolean;
     };
@@ -39,6 +45,16 @@ export type DataBoundary =
 interface DataBoundaryContextValue {
   boundary: DataBoundary;
   setVoiceHosted: Dispatch<SetStateAction<boolean>>;
+}
+
+/**
+ * Hosts of the installed, enabled MCP servers that Chat queries can reach.
+ * None when the model is too small for tool use: it is never offered the
+ * tools, so it never sends a query to them.
+ */
+export function chatToolHosts(state: Pick<AppState, "mcpServers" | "chatToolUse">): string[] {
+  if (state.chatToolUse?.available === false) return [];
+  return (state.mcpServers ?? []).filter((server) => server.installed && server.enabled).map((server) => server.host);
 }
 
 const DataBoundaryContext = createContext<DataBoundaryContextValue | undefined>(undefined);
@@ -99,13 +115,17 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       provider,
       ...(model ? { model } : {}),
       scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+      toolHosts: chatToolHosts(state),
     });
+    const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
+    const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";
     if (provider.isLocal) {
       return {
         kind: "local",
         label: `Local · ${provider.name}`,
         ...(model ? { model } : {}),
-        tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}`,
+        ...toolHosts,
+        tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
         isVoiceHosted: false,
       };
     }
@@ -113,7 +133,8 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       kind: "hosted",
       label: `Hosted · ${provider.name}`,
       ...(model ? { model } : {}),
-      tooltip: `${trust.boundary ?? trust.strip}`,
+      ...toolHosts,
+      tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,
       isVoiceHosted: false,
     };
   }, [state, voiceHosted]);

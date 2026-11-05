@@ -1172,11 +1172,11 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Agents",
     },
     {
-      route: "/agents?source=hub",
+      route: "/marketplace",
       name: "hub-grid",
       file: "app/hub-grid.png",
-      waitFor: ["Library", "hub agents"],
-      heading: "Agents",
+      waitFor: ["MCP tools", "agents"],
+      heading: "Marketplace",
     },
     {
       route: "/agents/find-inactive-devices",
@@ -1347,7 +1347,7 @@ async function runScreenshotCapture(): Promise<void> {
       try {
         await runScreenshotCaptureStep(window, {
           kind: "hub-detail",
-          route: "/agents?source=hub",
+          route: "/marketplace?kind=agents",
           slug: entry.slug,
           name: entry.name,
           expectedCount: entries.length,
@@ -1602,7 +1602,7 @@ async function screenshotCaptureStepScript(
 
   await waitFor(
     () =>
-      bodyText().includes(`${step.expectedCount} of ${step.expectedCount} hub agents`) &&
+      bodyText().includes(`${step.expectedCount} of ${step.expectedCount} agents`) &&
       bodyText().includes(step.name),
     `Hub grid for ${step.slug}`,
   );
@@ -1993,11 +1993,24 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
     responseCount = expectedResponseCount;
   }
   await waitFor(() => bodyText().includes("WIN-01 is stale"), "chat answer");
-  await clickSummary("How I checked");
+  // The step summary row under an answer expands to the step timeline and,
+  // below it, the tenant sources with their Graph paths.
+  const findStepSummary = (): HTMLButtonElement | undefined =>
+    Array.from(
+      document.querySelectorAll<HTMLButtonElement>("button[aria-controls][aria-expanded]"),
+    ).find((button) => /\b\d+ steps?\b/.test(button.textContent ?? ""));
+  await waitFor(() => Boolean(findStepSummary()), "answer step summary");
+  findStepSummary()?.click();
+  await waitFor(
+    () => findStepSummary()?.getAttribute("aria-expanded") === "true",
+    "expanded answer step summary",
+  );
   await waitFor(
     () => bodyText().includes("/deviceManagement/managedDevices"),
     "source details endpoint",
   );
+  // Read here: the expansion does not survive switching conversations.
+  const sawSourceDetails = bodyText().includes("/deviceManagement/managedDevices");
   // The agent suggestion card lives in the write-intent conversation; switch
   // to it for the details assertions, then return to the read conversation.
   await clickButton("Always retire stale Windows devices");
@@ -2118,7 +2131,6 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   const sawAnswer = bodyText().includes("WIN-01 is stale");
   const sawConversationLifecycle =
     bodyText().includes("Smoke lifecycle review") && sawUnpinAction;
-  const sawSourceDetails = bodyText().includes("/deviceManagement/managedDevices");
   const sawEditResend = (() => {
     const textarea = document.querySelector("textarea");
     return textarea instanceof HTMLTextAreaElement &&
@@ -6033,6 +6045,31 @@ function registerIpcHandlers() {
     handleTrusted((_event, clientId: unknown) =>
       store.revokeGatewayClient(requireBoundedString(clientId, "clientId", 128)),
     ),
+  );
+  ipcMain.handle(
+    "openadminos:install-mcp-server",
+    handleTrusted((_event, serverId: unknown) =>
+      store.installMcpServer(requireBoundedString(serverId, "serverId", 64)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:check-mcp-server",
+    handleTrusted((_event, serverId: unknown) =>
+      store.checkMcpServer(requireBoundedString(serverId, "serverId", 64)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:uninstall-mcp-server",
+    handleTrusted((_event, serverId: unknown) =>
+      store.uninstallMcpServer(requireBoundedString(serverId, "serverId", 64)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:set-mcp-server-enabled",
+    handleTrusted((_event, serverId: unknown, enabled: unknown) => {
+      if (typeof enabled !== "boolean") throw new Error("enabled must be a boolean.");
+      return store.setMcpServerEnabled(requireBoundedString(serverId, "serverId", 64), enabled);
+    }),
   );
   ipcMain.handle(
     "openadminos:get-fleet-drift-status",

@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import Agents from "./Agents";
+import Marketplace from "./Marketplace";
 import { createMockAgent, createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
 import type { InvalidAgentManifest } from "../shared/openAdminOS";
 
@@ -55,12 +56,12 @@ describe("an agent with an invalid manifest", () => {
     expect(within(rowOf("Inactive devices")).getByRole("button", { name: "Run" })).toBeEnabled();
   });
 
-  it("shows the invalid manifest in the hub with Edit manifest", async () => {
+  it("shows the invalid manifest in the Marketplace agent catalog with Edit manifest", async () => {
     const user = userEvent.setup();
     const validateAgentDraft = vi.fn(async () => ({ yamlSource: SOURCE, validationErrors: [REASON] }));
-    renderRoute(<Agents />, {
-      path: "/agents",
-      route: "/agents?source=hub",
+    renderRoute(<Marketplace />, {
+      path: "/marketplace",
+      route: "/marketplace?kind=agents",
       bridge: makeMockBridge({ validateAgentDraft }, state()),
     });
 

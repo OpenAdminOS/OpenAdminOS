@@ -7,6 +7,7 @@ import {
   FleetRedirect,
   LegacyConnectorRedirect,
   LegacySettingsRedirect,
+  MarketplaceRedirect,
   OfficeRedirect,
   PersonaOfficeRedirect,
   WorkspaceDetailRedirect,
@@ -61,17 +62,17 @@ describe("legacy Workspace routes", () => {
 });
 
 describe("legacy Agents routes", () => {
-  it("redirects Hub and Schedules into Agents filters while preserving state", async () => {
+  it("redirects Hub into the Marketplace and Schedules into Agents filters while preserving state", async () => {
     const { unmount } = renderWithAppState(
       <Routes>
-        <Route path="/agents/hub" element={<AgentsQueryRedirect source="hub" />} />
-        <Route path="/agents" element={<LocationProbe />} />
+        <Route path="/agents/hub" element={<MarketplaceRedirect />} />
+        <Route path="/marketplace" element={<LocationProbe />} />
       </Routes>,
       { route: "/agents/hub?category=devices#catalog" },
     );
 
     expect(await screen.findByTestId("location")).toHaveTextContent(
-      "/agents?category=devices&source=hub#catalog",
+      "/marketplace?category=devices&kind=agents#catalog",
     );
     unmount();
 
@@ -87,17 +88,17 @@ describe("legacy Agents routes", () => {
     );
   });
 
-  it("redirects the root Hub alias to the Hub library source", async () => {
+  it("redirects the root Hub alias to the Marketplace agent listings", async () => {
     renderWithAppState(
       <Routes>
-        <Route path="/hub" element={<AgentsQueryRedirect source="hub" />} />
-        <Route path="/agents" element={<LocationProbe />} />
+        <Route path="/hub" element={<MarketplaceRedirect />} />
+        <Route path="/marketplace" element={<LocationProbe />} />
       </Routes>,
       { route: "/hub?category=identity" },
     );
 
     expect(await screen.findByTestId("location")).toHaveTextContent(
-      "/agents?category=identity&source=hub",
+      "/marketplace?category=identity&kind=agents",
     );
   });
 

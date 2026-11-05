@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { IconCopy } from "./icons";
+import { IconCheck, IconCopy } from "./icons";
 
 /**
  * Renders a constrained subset of Markdown as React nodes, using the same
@@ -27,25 +27,117 @@ import { IconCopy } from "./icons";
  *   - `*italic*` / `_italic_`
  *   - `` `inline code` ``
  *   - `[label](https://…)` links
+ *   - `[1]` citations, rendered through CitationContext when one is provided
  *
  * Anything outside this surface is rendered as plain text.
  */
+
+/**
+ * Renders a numbered citation. Returning undefined leaves the plain "[n]"
+ * text, so a number that matches no source is never shown as one.
+ */
+export const CitationContext = createContext<((citation: number) => ReactNode | undefined) | undefined>(undefined);
+
+/**
+ * The number a citation shows on screen, so copied text uses the same
+ * numbers. A citation without one copies as written.
+ */
+export const CitationNumberContext = createContext<((citation: number) => number | undefined) | undefined>(undefined);
+
+function Citation({ citation }: { citation: number }) {
+  const render = useContext(CitationContext);
+  return <>{render?.(citation) ?? `[${citation}]`}</>;
+}
 export function MarkdownPreview({
   source,
   className,
   numberedSections = true,
   tableTools = false,
+  copySteps = false,
 }: {
   source: string;
   className?: string;
   numberedSections?: boolean;
   tableTools?: boolean;
+  /** A copy button on each item of a numbered list, copying that step and its sub-items as plain text. */
+  copySteps?: boolean;
 }) {
   const blocks = parseBlocks(source, numberedSections);
+  const options = { tableTools, copySteps };
   return (
     <div className={className}>
-      {blocks.map((block, idx) => renderBlock(block, idx, tableTools))}
+      {blocks.map((block, idx) => renderBlock(block, idx, options))}
     </div>
+  );
+}
+
+/** Inline Markdown as the text it shows: markers dropped, link labels kept, citations as their shown numbers in brackets. */
+function inlinePlainText(input: string, shownNumber?: (citation: number) => number | undefined): string {
+  return tokenizeInline(input).map((token) => {
+    switch (token.kind) {
+      case "bold":
+      case "italic":
+      case "strike":
+        return inlinePlainText(token.text, shownNumber);
+      case "cite": {
+        const citation = Number(token.text);
+        return `[${shownNumber?.(citation) ?? citation}]`;
+      }
+      default:
+        return token.text;
+    }
+  }).join("");
+}
+
+/** A block nested in a step as plain lines, indented two spaces per level, keeping bullets and numbers. */
+function plainBlockLines(block: Block, level: number, shownNumber?: (citation: number) => number | undefined): string[] {
+  const pad = "  ".repeat(level);
+  const lines = (text: string) => text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => `${pad}${line}`);
+  switch (block.kind) {
+    case "paragraph":
+    case "heading":
+      return lines(inlinePlainText(block.text, shownNumber));
+    case "ul":
+    case "ol":
+      return block.items.flatMap((item, index) => [
+        `${pad}${block.kind === "ol" ? `${(block.start ?? 1) + index}.` : "-"} ${inlinePlainText(item.text, shownNumber).trim()}`,
+        ...item.children.flatMap((child) => plainBlockLines(child, level + 1, shownNumber)),
+      ]);
+    case "quote":
+      return block.blocks.flatMap((child) => plainBlockLines(child, level, shownNumber));
+    case "code":
+      return block.content.split(/\r?\n/).map((line) => `${pad}${line}`);
+    case "table":
+      return [block.headers, ...block.rows].map((row) => `${pad}${row.map((cell) => inlinePlainText(cell, shownNumber)).join("\t")}`);
+  }
+}
+
+/** One numbered step as plain text: its own line, then its sub-items and paragraphs indented below it. */
+function plainStepText(item: ListItem, shownNumber?: (citation: number) => number | undefined): string {
+  return [inlinePlainText(item.text, shownNumber).trim(), ...item.children.flatMap((child) => plainBlockLines(child, 1, shownNumber))].join("\n");
+}
+
+function CopyStepButton({ item, step }: { item: ListItem; step: number }) {
+  const shownNumber = useContext(CitationNumberContext);
+  const [copied, setCopied] = useState(false);
+  useEffect(() => {
+    if (!copied) return;
+    const timer = window.setTimeout(() => setCopied(false), 1500);
+    return () => window.clearTimeout(timer);
+  }, [copied]);
+  return (
+    <button
+      type="button"
+      aria-label={copied ? `Copied step ${step}` : `Copy step ${step}`}
+      title={copied ? "Copied" : `Copy step ${step}`}
+      onClick={() => {
+        void copyTextToClipboard(plainStepText(item, shownNumber)).then(() => setCopied(true), () => setCopied(false));
+      }}
+      className="absolute right-0 top-[3px] inline-flex h-6 w-6 items-center justify-center rounded-md text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] group-hover/step:opacity-100 group-focus-within/step:opacity-100"
+    >
+      {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+      <span role="status" className="sr-only">{copied ? `Copied step ${step}` : ""}</span>
+    </button>
   );
 }
 
@@ -81,10 +173,12 @@ export function stripMarkdownToPlainText(source: string): string {
     .trim();
 }
 
+interface ListItem { text: string; children: Block[] }
+
 type Block =
   | { kind: "heading"; level: number; text: string }
   | { kind: "paragraph"; text: string }
-  | { kind: "ul" | "ol"; items: { text: string; children: Block[] }[]; start?: number }
+  | { kind: "ul" | "ol"; items: ListItem[]; start?: number }
   | { kind: "table"; headers: string[]; rows: string[][] }
   | { kind: "quote"; blocks: Block[] }
   | { kind: "code"; content: string };
@@ -134,7 +228,7 @@ function parseBlocks(input: string, numberedSections = true, depth = 0): Block[]
     const list = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(line);
     if (list) {
       const indent = list[1].length, ordered = /\d/.test(list[2]);
-      const items: { text: string; children: Block[] }[] = [];
+      const items: ListItem[] = [];
       while (i < lines.length) {
         const item = /^(\s*)([-*+]|\d+\.)\s+(.*)$/.exec(lines[i]!);
         if (!item || item[1].length !== indent || /\d/.test(item[2]) !== ordered) break;
@@ -186,7 +280,13 @@ function parseBlocks(input: string, numberedSections = true, depth = 0): Block[]
   return blocks;
 }
 
-function renderBlock(block: Block, index: number, tableTools = false): ReactNode {
+interface RenderOptions {
+  tableTools: boolean;
+  copySteps: boolean;
+}
+
+function renderBlock(block: Block, index: number, options: RenderOptions): ReactNode {
+  const { tableTools } = options;
   switch (block.kind) {
     case "heading": {
       const headingClasses: Record<number, string> = {
@@ -251,7 +351,7 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
           className="mt-2 list-disc space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
-            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, tableTools))}</li>
+            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, options))}</li>
           ))}
         </ul>
       );
@@ -263,12 +363,17 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
           className="mt-2 list-decimal space-y-1 pl-5 first:mt-0"
         >
           {block.items.map((item, idx) => (
-            <li key={idx}>{renderInline(item.text)}{item.children.map((child, childIndex) => renderBlock(child, childIndex, tableTools))}</li>
+            <li key={idx} className={options.copySteps ? "group/step relative pr-7" : undefined}>
+              {renderInline(item.text)}
+              {/* Sub-items are copied with their step, so they get no button of their own. */}
+              {item.children.map((child, childIndex) => renderBlock(child, childIndex, { ...options, copySteps: false }))}
+              {options.copySteps ? <CopyStepButton item={item} step={(block.start ?? 1) + idx} /> : null}
+            </li>
           ))}
         </ol>
       );
     case "quote":
-      return <blockquote key={index} className="my-2 border-l-2 border-[var(--color-border-strong)] pl-3 text-[var(--color-text-muted)]">{block.blocks.map((child, i) => renderBlock(child, i, tableTools))}</blockquote>;
+      return <blockquote key={index} className="my-2 border-l-2 border-[var(--color-border-strong)] pl-3 text-[var(--color-text-muted)]">{block.blocks.map((child, i) => renderBlock(child, i, options))}</blockquote>;
     case "table":
       return (
         <div key={index} className="group/table relative my-3 max-w-full overflow-auto" role="region" aria-label="Table" tabIndex={0}>
@@ -325,7 +430,7 @@ function renderBlock(block: Block, index: number, tableTools = false): ReactNode
 }
 
 interface InlineToken {
-  kind: "text" | "bold" | "italic" | "strike" | "code" | "link";
+  kind: "text" | "bold" | "italic" | "strike" | "code" | "link" | "cite";
   text: string;
   href?: string;
   index: number;
@@ -363,6 +468,8 @@ function renderInline(input: string): ReactNode[] {
             {token.text}
           </a>
         );
+      case "cite":
+        return <Citation key={index} citation={Number(token.text)} />;
       case "text":
       default:
         return <span key={index}>{token.text}</span>;
@@ -401,6 +508,8 @@ function tokenizeInline(input: string): InlineToken[] {
       pattern: /(?<![_\w])_([^_\s][^_]*?)_(?!\w)/g,
       build: (c) => ({ kind: "italic", text: c[0] ?? "" }),
     },
+    // Last, so a link whose label is a number stays a link.
+    { pattern: /\[(\d{1,2})\](?!\()/g, build: (c) => ({ kind: "cite", text: c[0] ?? "" }) },
   ];
 
   for (const { pattern, build } of patterns) {
