@@ -21,7 +21,7 @@ function read(serverId: string, call: string, tool: string, args: Record<string,
   return readMcpResult(text, { tool, args, host: mcpHost(entry.url), format: entry.results!, ...(result.structuredContent !== undefined ? { structured: result.structuredContent } : {}) });
 }
 
-const servers: McpChatServer[] = MCP_CATALOG.map((entry) => ({ id: entry.id, name: entry.name, host: mcpHost(entry.url), useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics }));
+const servers: McpChatServer[] = MCP_CATALOG.map((entry) => ({ id: entry.id, name: entry.name, host: mcpHost(entry.url), url: entry.url, useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics, ...(entry.sharedHost ? { sharedHost: true } : {}) }));
 const chosen = (question: string, kind: "docs" | "mixed" | "tenant" = "docs") => planChatSources({ question, kind, servers, docsIndexAvailable: true }).requiredServerIds;
 
 describe("Second-wave catalog entries", () => {
@@ -133,6 +133,27 @@ describe("Second-wave source routing", () => {
     assert.deepEqual(chosen("Use release communications for our tenant", "tenant"), ["release-communications"]);
     assert.deepEqual(chosen("Read https://learn.microsoft.com/mem/intune/ and support.microsoft.com", "tenant"), ["microsoft-learn"]);
     assert.deepEqual(chosen("Why can admin@microsoft.com not sign in?", "tenant"), []);
+  });
+
+  it("does not read the shared www.microsoft.com host as a name, but still names each server by its own host or full URL", () => {
+    for (const question of [
+      "Is microsoft.com reachable from the proxy?",
+      "Why does https://www.microsoft.com/x time out for our users?",
+      "microsoft.com.example fails for our devices",
+      "Mail from x@microsoft.com bounces",
+      "Why can admin@microsoft.com not sign in?",
+      "Is www.microsoft.com blocked on our devices?",
+      "Is kqlsearch.com.example a phishing domain on our devices?",
+      "Did admin@kqlsearch.com sign in?",
+    ]) {
+      assert.deepEqual(chosen(question, "tenant"), [], question);
+    }
+    assert.deepEqual(chosen("Use https://www.microsoft.com/releasecommunications/mcp for our tenant", "tenant"), ["release-communications"]);
+    assert.deepEqual(chosen("Read https://learn.microsoft.com/mem/intune/ for our devices", "tenant"), ["microsoft-learn"]);
+    assert.deepEqual(chosen("Find a hunting query on kqlsearch.com.", "tenant"), ["kql-search"]);
+    assert.deepEqual(chosen("Is there a script on intuneautomation.com for our devices?", "tenant"), ["intuneautomation"]);
+    assert.deepEqual(chosen("Look it up on www.kqlsearch.com/mcp for our tenant", "tenant"), ["kql-search"]);
+    assert.deepEqual(chosen("Ask mcp.windowsforum.com about our devices", "tenant"), ["windowsforum"]);
   });
 });
 

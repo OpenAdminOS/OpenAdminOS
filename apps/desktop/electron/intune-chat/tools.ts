@@ -95,6 +95,10 @@ export interface McpChatServer {
   aliases: readonly string[];
   /** Words that make the server a chosen source for a docs question. */
   topics: readonly string[];
+  /** The server URL, from the catalog. */
+  url?: string;
+  /** The host also serves other sites, so only the server URL with its path names the server. From the catalog. */
+  sharedHost?: boolean;
 }
 
 export interface McpChatContext {

@@ -105,6 +105,12 @@ export interface McpCatalogEntry {
   useFor: string;
   /** Lowercase names an admin may use for the server. Naming one in a question calls it. */
   aliases: readonly string[];
+  /**
+   * The host also serves sites other than this server, as www.microsoft.com
+   * does, so naming the host does not name the server. The server URL with
+   * its path, the name and the aliases still do.
+   */
+  sharedHost?: true;
   /** Lowercase words that make the server a chosen source for a docs question. */
   topics: readonly string[];
   auth: McpServerAuth;
@@ -189,6 +195,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     pitch: "Microsoft 365 roadmap and Azure updates, with release and retirement dates.",
     useFor: "What is new, rolling out, in preview or retiring in Microsoft 365 and Azure: roadmap items and Azure updates with their IDs, status and dates. Not for how a feature works.",
     aliases: ["release communications", "microsoft 365 roadmap", "m365 roadmap"],
+    sharedHost: true,
     topics: ["roadmap", "retirement", "retirements", "retiring", "what's new", "rollout", "rolling out", "azure update", "azure updates"],
     auth: "none",
     readOnly: true,

@@ -106,14 +106,32 @@ export interface ChatSourcePlan {
   detail: string;
 }
 
+/**
+ * What names a server in a question: its name, its aliases, and its host
+ * with and without "www.". A host the server shares with other sites
+ * (www.microsoft.com) is no name of its own; there only the server URL
+ * with its path names it.
+ */
+function serverNames(server: McpChatServer): string[] {
+  const names = [server.name.toLowerCase(), ...server.aliases];
+  if (!server.sharedHost) {
+    names.push(server.host, server.host.replace(/^www\./, ""));
+  } else if (server.url) {
+    const url = new URL(server.url);
+    const path = url.pathname.replace(/\/+$/, "").toLowerCase();
+    if (path) names.push(`${url.hostname}${path}`, `${url.hostname.replace(/^www\./, "")}${path}`);
+  }
+  return names.filter(Boolean);
+}
+
 /** Servers the question names by name, alias or host. */
 export function namedServers(question: string, servers: readonly McpChatServer[]): McpChatServer[] {
   const lower = question.toLowerCase();
-  // A name counts only as a whole: "microsoft.com" inside "learn.microsoft.com" or an email address does not name the server at www.microsoft.com.
-  const names = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}-])`, "u").test(lower);
-  return servers.filter((server) =>
-    [server.name.toLowerCase(), server.host, server.host.replace(/^www\./, ""), ...server.aliases].some((name) => name && names(name)),
-  );
+  // A name counts only as a whole: no letter, digit, dot, hyphen or @ may continue it on the left, and no letter, digit, hyphen,
+  // underscore, @ or dot followed by another label on the right. So "learn.microsoft.com", "admin@kqlsearch.com" and
+  // "kqlsearch.com.example" do not name a server, and a sentence ending in "kqlsearch.com." does.
+  const names = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "u").test(lower);
+  return servers.filter((server) => serverNames(server).some(names));
 }
 
 function escapeRegExp(text: string): string {

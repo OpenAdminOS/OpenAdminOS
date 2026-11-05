@@ -2169,7 +2169,7 @@ export class AppStateStore {
       // A server without one of its allowlisted tools is skipped until a check finds it again.
       if (missingMcpTools(entry, installed.tools).length > 0) continue;
       generations.set(entry.id, this.mcpHost.generation(entry.id));
-      servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics });
+      servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), url: entry.url, useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics, ...(entry.sharedHost ? { sharedHost: true } : {}) });
       for (const tool of installed.tools) {
         if (tool.unavailable || !isAllowedTool(entry, tool.name)) continue;
         tools.push({
