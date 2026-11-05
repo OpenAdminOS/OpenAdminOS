@@ -52,6 +52,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Fixed
 
+- Chat no longer refuses requests to write text, such as "create a KQL query" or "update the query to only include guests", as tenant changes; requests that place text in the tenant or change a tenant object are still sent to write agents.
 - Chat offers model-written follow-ups only when the answering prompt held nothing but the current question, public documentation and the app's instructions; after conversation memory, workspace context or tenant data it offers only follow-ups the app builds. A docs question that names a service the tenant has not connected is answered from documentation instead of the "not connected" line.
 - Chat steps appear in the order they ran, one per model call; the answer header names what the answer used, source cards merge chunks of one article, citation chips are ordered, tenant questions skip the local docs index, answers no longer describe their own sources or provider, and follow-ups and agent suggestions only offer what can be answered.
 - Chat shows the scope line and a first step from the moment of sending, also after Chat is opened again during a run, streams the final answer with providers that stream, asks Microsoft Learn before the local docs index, cites Learn results by their real titles and links, and words follow-ups as requests the admin would type.

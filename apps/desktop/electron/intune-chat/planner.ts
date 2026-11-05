@@ -306,18 +306,73 @@ const WRITE_INTENT_TERMS = [
 const READ_QUESTION_START =
   /^(?:which|what|why|how|when|where|who|does|do|did|is|are|was|were|has|have|show|list|tell|find|count|can|could|summarize|describe|explain|give|compare|audit|outline|display|review|inspect|check)\b/;
 
+// Prompts asking the chat to write text, not to change the tenant:
+// "Create a KQL query", "Update the query to only include guests".
+// "Create" may take a described object ("a sign-in report for
+// guests"). The revise verbs only qualify for a bare reference to the
+// artifact, since "the dynamic group query" or "the remediation script
+// on all devices" name tenant objects. "Deploy the script" or "delete
+// the report" never qualify.
+const ARTIFACT_NOUN =
+  "(?:kql|kusto|query|queries|script|scripts|report|summary|chart|table|csv|checklist|runbook|snippet|cmdlet|regex)";
+const ARTIFACT_PREFIX = "^(?:(?:please|i want to|i need to|let's)\\s+)?";
+const CREATE_ARTIFACT = new RegExp(
+  `${ARTIFACT_PREFIX}(create)\\s+(?:(?:me|us)\\s+)?(?:(?:a|an|the|this|that|my|your|another|some)\\s+)?(?:(?!(?:in|on|to|for|from|of|with|by|at|that|which|who|and|or|then)\\b)[\\w-]+\\s+){0,3}?${ARTIFACT_NOUN}(?=$|[\\s,.!?;:])`,
+);
+const REVISE_ARTIFACT = new RegExp(
+  `${ARTIFACT_PREFIX}(edit|update|change|modify)\\s+(?:the|this|that|your|my)\\s+(?:(?:kql|kusto|powershell|sql)\\s+)?${ARTIFACT_NOUN}(?=$|[,.!?;:]|\\s+(?:to|so)\\b)`,
+);
+// The object noun phrase names a tenant object: "a KQL query alert
+// rule", "the query rules". The phrase runs to the first preposition
+// or clause word.
+const NOUN_PHRASE_TAIL =
+  /^(?:\s+(?!(?:in|on|to|for|from|of|with|by|at|that|which|who|and|or|then|so)\b)[\w-]+)*/;
+const TENANT_OBJECT_NOUN =
+  /\b(?:rules?|polic(?:y|ies)|profiles?|assignments?|filters?|settings?|packages?|alerts?|groups?)\b/;
+// Text placed into the tenant, or run there, is a tenant change. It
+// is checked against the whole message: "Create a script. Upload it
+// to all Windows devices."
+const ARTIFACT_TENANT_CUE =
+  /\b(?:in|to|into)\s+(?:the\s+|my\s+|our\s+)?(?:tenant|intune|entra|admin center|endpoint manager)\b|\b(?:assigned|deployed|uploaded|published|scheduled)\b|\b(?:upload|publish|schedule|target|attach|push|apply|run|execute|set|roll|distribute|send|install|activate|save|turn|use|paste|put|add)\s+(?:it|them|this|that)\b|\b(?:make|have|let)\s+(?:it|them)\s+run\b/;
+
+function artifactRequest(
+  question: string,
+): { object: string; rest: string } | undefined {
+  const created = CREATE_ARTIFACT.exec(question);
+  const match = created ?? REVISE_ARTIFACT.exec(question);
+  if (!match?.[1]) return undefined;
+  const verbEnd = match[0].indexOf(match[1]) + match[1].length;
+  const object = match[0].slice(verbEnd);
+  const rest = question.slice(match[0].length);
+  const nounPhraseTail = NOUN_PHRASE_TAIL.exec(rest)?.[0] ?? "";
+  if (TENANT_OBJECT_NOUN.test(`${object}${nounPhraseTail}`)) return undefined;
+  // A revision that names a tenant object is a change to that object:
+  // "Update the query so the dynamic group only includes guests". So
+  // is a follow-on clause after a create: "Create a KQL query and turn
+  // it into a detection rule".
+  const followOn = /\b(?:and|then)\b/.exec(rest);
+  const tail = created ? (followOn ? rest.slice(followOn.index) : "") : rest;
+  if (TENANT_OBJECT_NOUN.test(tail)) return undefined;
+  return { object, rest };
+}
+
 function matchesWriteIntentTerm(lowerQuestion: string, term: string): boolean {
   // Classify per sentence and combine: an explanatory or read first
   // sentence must not exempt a write command in a later one
   // ("Explain which devices are stale. Retire them."), and polite
   // prefixes reset at each sentence boundary ("Show me the stale
   // devices. Can you retire them?").
+  const tenantCue = ARTIFACT_TENANT_CUE.test(lowerQuestion);
   return lowerQuestion
     .split(/(?<=[.!?;])\s+/)
-    .some((sentence) => matchesWriteIntentTermInSentence(sentence, term));
+    .some((sentence) => matchesWriteIntentTermInSentence(sentence, term, tenantCue));
 }
 
-function matchesWriteIntentTermInSentence(lowerSentence: string, term: string): boolean {
+function matchesWriteIntentTermInSentence(
+  lowerSentence: string,
+  term: string,
+  tenantCue: boolean,
+): boolean {
   // Normalize a polite prefix first: "Please list policies that block
   // legacy authentication" is the same main clause as without it, and
   // must not fall through to the whole-word fallback.
@@ -339,6 +394,17 @@ function matchesWriteIntentTermInSentence(lowerSentence: string, term: string): 
   }
   // "Add up the licenses" asks for a sum, not a tenant change.
   if (term === "add" && /^add\s+up\b/.test(question)) return false;
+  // In a request for text, the head verb is exempt once and a purpose
+  // clause right after the object describes the text ("Create a
+  // script to delete stale devices"). Any other write verb in the
+  // sentence is a request, whatever joins it: "Create a report of
+  // stale devices then retire them", "Create a query and create a
+  // group".
+  const artifact = tenantCue ? undefined : artifactRequest(question);
+  if (artifact) {
+    const rest = artifact.rest.replace(new RegExp(`^\\s+to\\s+${term}\\b`), "");
+    return new RegExp(`\\b${term}\\b`).test(`${artifact.object} ${rest}`);
+  }
   // Anchored at the main clause only. Unanchored helper phrases
   // ("need to", "and <verb>") also occur inside descriptive
   // subordinate clauses of read questions: "Why do users need to
