@@ -774,6 +774,7 @@ describe("Intune Chat planner", () => {
       "Create a remediation script and target all Windows devices",
       "Create a remediation script and push to all Windows devices",
       "Create a script and install on all Windows devices",
+      "Create a remediation script and run on the Finance laptops",
       "Create a remediation script under Devices > Scripts and remediations",
     ];
     for (const question of writeQuestions) {
