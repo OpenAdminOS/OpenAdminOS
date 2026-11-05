@@ -1131,6 +1131,23 @@ Checks (Node 22): typecheck clean; electron 782 of 782; renderer 53 files, 405 t
 
 Open: the round 4 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, the per-resource follow-up question for tenant answers, and a live check with a real local model.
 
+## Review round 4 (marketplace)
+
+Same branch, from head e1f4b1c. Findings from the GPT-6.1-Sol review (G), the separate Claude evaluator (E) and CI.
+
+| Finding | Resolution | Commit |
+| --- | --- | --- |
+| CI: the Electron Intune Chat smoke waited for a "How I checked" disclosure, which the Chat UI pass replaced with the step summary row. | The smoke expands the answer's step summary (the button with "N steps") and asserts `/deviceManagement/managedDevices` in the tenant sources; `hasSourceDetails` is read there, since the expansion does not survive switching conversations. The stale comment in `IntuneChat.tsx` and the SPEC sentence name the step summary row. Smoke passes locally under Node 22. | 34b66b2 |
+| G1 (blocking, privacy): model follow-ups still leaked private context through a legacy tenant answer in the conversation memory (no steps or tenant markers, only source rows) and through attached workspace evidence, notes or instructions; both produced "Explain support at 420 Cedar Avenue". | Provenance, not question kind. `PromptProvenance` records, where the answering prompt is built on the send and stream paths, whether it held anything besides the current question, public documentation and MCP results, and the app's instructions: conversation memory (any earlier answer, legacy ones included), workspace context, the deterministic answer pack, or tenant data (`readTenantData`). After a private prompt `answerFollowUps`, which the stored message, the chip and the composer ghost text all read, offers only code-built follow-ups. The answer stores `privatePrompt` in `answer_meta_json`, so a reload keeps it. Tests on both paths: a legacy tenant answer in history, workspace evidence, a note and instructions, each with the model returning the address in `next`; and a fresh docs question with no history that keeps the model's follow-up and has no flag. The new tests fail on the previous service code. | b045aee |
+| E medium: the keyword planner's access block ran before the question was classified, so "How does Microsoft Sentinel correlate alerts into incidents?" on an Intune-only tenant answered "Defender is not connected for this tenant. Add it in Settings, Tenants." | `accessBlockTiming`: with a documentation source (an MCP server offered to the model or the local docs index), a docs kind is not blocked; in the tool loop the block is deferred and `loadTenantData` raises it once the kind settles to tenant or mixed, before any tenant data is read; without any documentation source the line stays the answer at once. Tests on both paths with Intune-only grants: the Sentinel docs question answers from Learn with no Graph paths, and "List our open security incidents" still gets the access line with no follow-ups; with no MCP server and no index the docs question gets the access line and no model call. | a3bb5e7 |
+| E nit: `readTenantData` sat between `withMcpSkippedNotice` and its doc comment. | Comment moved back. | 608a89c |
+
+Note: the tenant display name stays in the tool-loop system prompt as app context; follow-ups are still checked against the tenant name terms and cached values.
+
+Checks (Node 22): typecheck clean; electron 949 of 949; renderer 58 files, 485 tests; runtime 256 pass, 0 fail (258 tests); qa 197 pass, 4 warn, 0 fail; test:scripts 18 of 18; docs:check clean; smoke Intune Chat, Office and report issue pass (Office failed once with "Office game animation is not running" while the test suites ran in parallel, and passed alone).
+
+Open: the round 5 GPT-6.1-Sol review of the whole diff, the separate Claude evaluator, the per-resource follow-up question for tenant answers, and a live check with a real local model.
+
 ---
 
 # Own app registration as a first-class choice (2026-11-03)
