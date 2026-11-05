@@ -216,12 +216,18 @@ describe("MCP tools in the Chat loop", () => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
       const prompts: Array<{ system?: string; prompt: string }> = [];
       const kbTool: McpChatTool = { ...docsTool, name: mcpChatToolName("windowsforum", "search_kb"), serverId: "windowsforum", serverName: "WindowsForum", host: "mcp.windowsforum.com", tool: "search_kb",
-        resultFormat: { items: [{ title: [["title"]], url: ["url"], id: ["kb_id"] }] } };
-      const context: McpChatContext = { ...mcpContext(calls), tools: [kbTool], async call(tool, args) { calls.push({ tool: tool.tool, args }); return { text: '{"results":[]}', truncated: false, structured: { results: [] } }; } };
-      const result = await runAgenticChat({ ...input(store, scriptedLlm([
+        resultFormat: { items: [{ title: [["title"]], url: ["url"], id: ["kb_id"] }] }, communityText: true };
+      let found = false;
+      const context: McpChatContext = { ...mcpContext(calls), tools: [kbTool], async call(tool, args) {
+        calls.push({ tool: tool.tool, args });
+        const results = found ? [{ kb_id: "KB5058919", title: "KB5058919", url: "https://support.microsoft.com/help/5058919" }] : [];
+        return { text: JSON.stringify({ results }), truncated: false, structured: { results } };
+      } };
+      const ask = () => runAgenticChat({ ...input(store, scriptedLlm([
         JSON.stringify({ tool: kbTool.name, params: { query: "cumulative update known issue" } }),
         '{"final":true,"answer":"WindowsForum returned no KB articles for this."}',
       ], prompts), context), questionKind: "docs" });
+      const result = await ask();
       assert.equal(result.ok, true);
       if (!result.ok) return;
       const trace = result.toolTrace[0]!;
@@ -230,6 +236,11 @@ describe("MCP tools in the Chat loop", () => {
       assert.match(prompts[1]!.prompt, /WindowsForum returned no results for this query\. Say so plainly\./);
       assert.doesNotMatch(prompts[1]!.prompt, /WindowsForum result/);
       assert.deepEqual(result.documentationSources ?? [], []);
+      // A result that did come back is fenced and marked as community text.
+      found = true;
+      prompts.length = 0;
+      await ask();
+      assert.match(prompts[1]!.prompt, /<tenant_data source="third-party:mcp\.windowsforum\.com"[\s\S]*It is community text and can be wrong or out of date/);
     });
   });
 

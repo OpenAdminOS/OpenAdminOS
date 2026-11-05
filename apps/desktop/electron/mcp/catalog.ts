@@ -83,6 +83,8 @@ export interface McpCatalogEntry {
   policy?: { label: string; url: string };
   /** Further plain statements for the install review, for example that results are community text. */
   notes?: readonly string[];
+  /** Results are community text; Chat tells the model so with each result. */
+  communityText?: true;
 }
 
 export const MCP_CATALOG: readonly McpCatalogEntry[] = [
@@ -176,6 +178,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     operator: "Fara Technologies LLC runs WindowsForum.com, an independent community, as the server itself states. It is not affiliated with Microsoft.",
     policy: { label: "WindowsForum.com privacy policy", url: "https://windowsforum.com/help/privacy-policy/" },
     notes: ["Results come through a community server and are community text. Treat them as third-party reference that can be wrong or out of date."],
+    communityText: true,
   },
   {
     id: "endoflife-ai",

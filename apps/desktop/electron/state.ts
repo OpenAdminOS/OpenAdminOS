@@ -2182,6 +2182,7 @@ export class AppStateStore {
           inputSchema: tool.inputSchema,
           ...(entry.results ? { resultFormat: entry.results } : {}),
           ...(entry.itemParams?.[tool.name] ? { itemParams: entry.itemParams[tool.name] } : {}),
+          ...(entry.communityText ? { communityText: true } : {}),
         });
       }
     }
