@@ -1478,7 +1478,7 @@ Branch `marketplace/second-wave` off `main` (98ddfc3). The owner asked to add th
 6. [x] Routing topics and aliases as listed; topics match before digits; names match only as whole words; Learn stays default.
 7. [x] Disclosure: strip, composer, tooltip and hosted confirmation name the hosts; install review adds Who runs it and Tools Chat will be offered.
 8. [x] SPEC, CHANGELOG, new docs/gitbook/features/marketplace.md; docs:check passes.
-9. [ ] Tests under Node 22 pass (typecheck, electron 973, renderer 493, runtime, qa, test:scripts, docs:check, three smokes); renderer covers each card and install review; light and dark screenshots taken; separate Claude evaluator run (one finding, fixed). Open: GPT-6.1-Sol review, and a live check in the GUI app. The live check ran through the main-process Chat path with gpt-oss:20b: WindowsForum answered with results and a get_kb_article call on an ID from its own search; Release Communications sent a valid OData query and showed the empty state; endoflife.ai showed the error state. Answer quality from gpt-oss:20b was poor (tenant-evidence guard, protocol drift), unrelated to this branch.
+9. [ ] Tests under Node 22 pass (typecheck, electron 973, renderer 493, runtime, qa, test:scripts, docs:check, three smokes); renderer covers each card and install review; light and dark screenshots taken; separate Claude evaluator run (one finding, fixed). GPT-6.1-Sol reviewed the whole diff in five rounds; round 5 at 47a4648 found nothing. Open: a live check in the GUI app. The live check ran through the main-process Chat path with gpt-oss:20b: WindowsForum answered with results and a get_kb_article call on an ID from its own search; Release Communications sent a valid OData query and showed the empty state; endoflife.ai showed the error state. Answer quality from gpt-oss:20b was poor (tenant-evidence guard, protocol drift), unrelated to this branch.
 
 ## Review round 1 (2026-11-05)
 
@@ -1514,3 +1514,7 @@ GPT-6.1-Sol review of the whole diff at 6aa2c13. No blocking finding.
 
 1. [x] Important: the session promise awaited the listing report, which takes the store lock, while uninstall and disable hold that lock and wait on the session. Fixed in e0176a3 (also flagged by the automated security review): the report runs in the call after the session opens; a test closes a session while its report is held.
 2. [x] Minor: a failed listing save was dropped and never retried. The next call on the session retries, the refusal says the Marketplace still shows the old tool list, and the error detail goes to the local log only, since the message reaches the model.
+
+## Review round 5 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff at 47a4648: no blocking, important or minor findings. Both round 4 fixes held, including Check connection racing a call that opens a session.
