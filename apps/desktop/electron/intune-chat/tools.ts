@@ -295,20 +295,22 @@ function shapeItem(record: Record<string, unknown>, shape: McpResultShape, clean
  */
 function readFormatted(data: unknown, text: string, format: McpResultFormat, call: { args?: Record<string, unknown>; tool?: string }, clean: (value: string) => string): McpReadResult {
   const found: McpResultItem[] = [];
-  const walk = (value: unknown, depth: number): void => {
+  // `inherited` is the nearest enclosing record's link under the format's inheritUrl keys.
+  const walk = (value: unknown, depth: number, inherited: string | undefined): void => {
     if (depth > 6 || found.length >= MCP_RESULT_LIMIT || value === null || typeof value !== "object") return;
     if (Array.isArray(value)) {
-      for (const item of value) walk(item, depth + 1);
+      for (const item of value) walk(item, depth + 1, inherited);
       return;
     }
     const record = value as Record<string, unknown>;
     for (const shape of format.items) {
       const item = shapeItem(record, shape, clean);
-      if (item) { found.push(item); return; }
+      if (item) { found.push(!item.url && inherited ? { ...item, url: inherited } : item); return; }
     }
-    for (const child of Object.values(record)) walk(child, depth + 1);
+    const link = httpsLink(record, format.inheritUrl) ?? inherited;
+    for (const child of Object.values(record)) walk(child, depth + 1, link);
   };
-  walk(data, 0);
+  walk(data, 0, undefined);
   if (found.length > 0 || !format.whole || !data || typeof data !== "object" || Array.isArray(data)) return { items: found, empty: found.length === 0 };
   const record = data as Record<string, unknown>;
   if (format.whole.emptyWhenZero?.some((key) => record[key] === 0)) return { items: [], empty: true };

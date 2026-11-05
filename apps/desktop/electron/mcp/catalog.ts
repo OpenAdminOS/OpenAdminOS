@@ -35,6 +35,12 @@ export interface McpResultShape {
 export interface McpResultFormat {
   items: readonly McpResultShape[];
   /**
+   * Link keys read on the records that enclose a matched record. A matched
+   * record without a link of its own takes the nearest enclosing one, so
+   * entries nested in a cited page (the CVEs of a KEV answer) keep its URL.
+   */
+  inheritUrl?: readonly string[];
+  /**
    * For servers that answer one record per call: the result becomes one
    * source titled by the tool and its params, unless one of the count keys
    * is zero, which means nothing was found.
@@ -270,6 +276,8 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
         { title: [["name"]], url: ["product_url"], facts: ["category", "in_cisa_kev", "successor", "lines"] },
         { title: [["cve"], ["vulnerability_name"]], facts: ["date_added", "due_date", "required_action", "known_ransomware_use"] },
       ],
+      // A KEV answer cites its product page in source.url; its CVE entries carry no link of their own.
+      inheritUrl: ["source.url", "product_url"],
       whole: { url: ["source.url", "product_url"], emptyWhenZero: ["match_count", "returned", "platform_count"] },
     },
     operator: "EndofLife AI Inc., an Alberta (Canada) corporation, runs endoflife.ai, as its privacy policy and terms state.",

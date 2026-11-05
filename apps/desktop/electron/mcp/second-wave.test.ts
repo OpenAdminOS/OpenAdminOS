@@ -169,7 +169,8 @@ describe("Second-wave results read by structure", () => {
     const upcoming = read("endoflife-ai", "get_upcoming_eol", "get_upcoming_eol", { products: ["windows", "windows-server"], days: 365 });
     assert.deepEqual(upcoming.items.map((item) => item.title), ["Windows 11-23h2-e", "Windows 10-21h2-e-lts", "Windows Server 2016"]);
     const kev = read("endoflife-ai", "get_kev_exposure", "get_kev_exposure", { product: "windows-server" });
-    assert.deepEqual(kev.items.map((item) => item.title), ["CVE-2021-34527 Microsoft Windows Print Spooler Remote Code Execution Vulnerability"]);
+    // The CVE entries keep the product page the answer asks to be cited.
+    assert.deepEqual(kev.items.map((item) => [item.title, item.url]), [["CVE-2021-34527 Microsoft Windows Print Spooler Remote Code Execution Vulnerability", "https://endoflife.ai/windows-server"]]);
     const upgrade = read("endoflife-ai", "get_upgrade_path", "get_upgrade_path", { product: "windows", version: "10" });
     assert.deepEqual(upgrade.items.map((item) => [item.title, item.url]), [["get_upgrade_path: windows 10", "https://endoflife.ai/windows"]]);
     assert.match(upgrade.items[0]!.excerpt!, /recommended_target/);

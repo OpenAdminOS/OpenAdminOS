@@ -35,6 +35,24 @@ describe("MCP results read by a catalog format", () => {
     assert.deepEqual(read.items.map((item) => [item.title, item.url, item.excerpt]), [["Windows Server 2016", "https://example.com/ws/2016", "ends: 2027-01-12"]]);
   });
 
+  it("gives a nested record without a link the nearest enclosing link under inheritUrl, and keeps a record's own link", () => {
+    const nested: McpResultFormat = { items: [{ title: [["cve"]], url: ["page"] }], inheritUrl: ["source.url", "product_url"] };
+    const read = readMcpResult("", { format: nested, structured: {
+      product_url: "https://example.com/outer",
+      entries: [{ cve: "CVE-1" }, { cve: "CVE-2", page: "https://example.com/cve-2" }],
+      family: { source: { url: "https://example.com/inner" }, entries: [{ cve: "CVE-3" }] },
+      plain: { product_url: "http://example.com/not-https", entries: [{ cve: "CVE-4" }] },
+    } });
+    assert.deepEqual(read.items.map((item) => [item.title, item.url]), [
+      ["CVE-1", "https://example.com/outer"],
+      ["CVE-2", "https://example.com/cve-2"],
+      ["CVE-3", "https://example.com/inner"],
+      ["CVE-4", "https://example.com/outer"],
+    ]);
+    // Without inheritUrl, nothing is inherited.
+    assert.equal(readMcpResult("", { format: { items: nested.items }, structured: { product_url: "https://example.com/outer", entries: [{ cve: "CVE-1" }] } }).items[0]!.url, undefined);
+  });
+
   it("reads a single-record answer as one source titled by the tool and params, unless a count is zero", () => {
     const record = { product: "windows", recommended: { cycle: "11" }, source: { url: "https://example.com/windows" } };
     const whole = readMcpResult(JSON.stringify(record), { format, tool: "get_upgrade_path", args: { product: "windows", version: "10" } });
