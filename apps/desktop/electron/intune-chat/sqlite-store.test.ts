@@ -690,6 +690,8 @@ describe("Intune Chat planner", () => {
       "Modify the KQL query, it should cover 30 days",
       "Create a PowerShell script to export Intune devices to CSV",
       "Create a KQL query for group membership changes",
+      "Create a KQL query where failed sign-ins > 5 in the last day",
+      "Create a KQL query to find devices that run Windows 10",
     ];
     for (const question of readQuestions) {
       assert.equal(
@@ -769,6 +771,10 @@ describe("Intune Chat planner", () => {
       "Create a script and run remediation.ps1 on all devices",
       "Create a remediation script in Microsoft Intune",
       "Create a remediation script and roll the fix out to all devices",
+      "Create a remediation script and target all Windows devices",
+      "Create a remediation script and push to all Windows devices",
+      "Create a script and install on all Windows devices",
+      "Create a remediation script under Devices > Scripts and remediations",
     ];
     for (const question of writeQuestions) {
       assert.equal(

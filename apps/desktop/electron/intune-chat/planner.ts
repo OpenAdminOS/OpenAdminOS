@@ -334,12 +334,17 @@ const TENANT_OBJECT_NOUN =
 // to all Windows devices." Deployment verbs count wherever they
 // appear. Verbs with everyday read meanings ("run", "use", "save")
 // count only with a placed object: a pronoun, a copy, a file name, or
-// the artifact itself ("run my PowerShell script").
+// the artifact itself ("run my PowerShell script"), or with a fleet
+// target ("install on all devices"). A console path ("under Devices >
+// Scripts and remediations") is a tenant location; a preposition must
+// lead it so KQL comparisons ("failures > 5") stay text.
 const ARTIFACT_TENANT_CUE = new RegExp(
   [
     "\\b(?:in|to|into)\\s+(?:the\\s+|my\\s+|our\\s+)?(?:microsoft\\s+)?(?:tenant|intune|entra|admin center|endpoint manager)\\b",
-    "\\b(?:assigned|deploy(?:s|ed|ing)?|upload(?:s|ed|ing)?|publish(?:es|ed|ing)?|schedul(?:e|es|ed|ing)|distribut(?:e|es|ed|ing)|roll(?:s|ed|ing)?\\s+(?:\\w+\\s+){0,2}?out)\\b",
-    `\\b(?:target|attach|push|apply|run|execute|set|send|install|activate|save|turn|use|paste|put|add)\\s+(?:it|them|this|that|a\\s+copy|copies|[\\w-]+\\.(?:ps1|psm1|sh|zsh|py|kql|csv|json|xml)|(?:the|this|that|these|those|my|your|our)\\s+(?:[\\w-]+\\s+){0,2}?${ARTIFACT_NOUN})\\b`,
+    "\\b(?:in|into|under|at|from)\\s+[a-z][\\w ]*?\\s*>\\s*[a-z]",
+    "\\b(?:assigned|deploy(?:s|ed|ing)?|upload(?:s|ed|ing)?|publish(?:es|ed|ing)?|schedul(?:e|es|ed|ing)|distribut(?:e|es|ed|ing)|target(?:s|ed|ing)?|push(?:es|ed|ing)?|attach(?:es|ed|ing)?|roll(?:s|ed|ing)?\\s+(?:\\w+\\s+){0,2}?out)\\b",
+    "\\b(?:run|execute|apply|send|install|activate)\\s+(?:it\\s+|them\\s+)?(?:to|on|at|across|for)\\s+(?:all|every|each)\\b",
+    `\\b(?:apply|run|execute|set|send|install|activate|save|turn|use|paste|put|add)\\s+(?:it|them|this|that|a\\s+copy|copies|[\\w-]+\\.(?:ps1|psm1|sh|zsh|py|kql|csv|json|xml)|(?:the|this|that|these|those|my|your|our)\\s+(?:[\\w-]+\\s+){0,2}?${ARTIFACT_NOUN})\\b`,
     "\\b(?:make|have|let)\\s+(?:it|them)\\s+run\\b",
   ].join("|"),
 );
