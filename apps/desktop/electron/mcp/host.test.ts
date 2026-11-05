@@ -194,6 +194,30 @@ describe("MCP host", () => {
     } finally { await host.closeAll(); }
   });
 
+  it("closes a session while its listing is still being stored, so an uninstall never waits on the store", async () => {
+    let release: () => void = () => {};
+    let reported: () => void = () => {};
+    const reporting = new Promise<void>((resolve) => { reported = resolve; });
+    const host = new McpHost({
+      clientVersion: "test",
+      // Stands in for a store whose lock is held by the uninstall that closes this session.
+      listed: () => { reported(); return new Promise<void>((resolve) => { release = resolve; }); },
+    });
+    const incomplete = { ...endpoint, id: "held", tools: ["search_docs", "get_article"] };
+    try {
+      const call = host.callTool(incomplete, "search_docs", { query: "held" });
+      await reporting;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const closed = await Promise.race([
+        host.revoke("held", "uninstalled").then(() => true),
+        new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), 2_000); }),
+      ]).finally(() => clearTimeout(timer));
+      assert.equal(closed, true, "revoking waited on the listing report");
+      release();
+      await assert.rejects(call, (error: unknown) => error instanceof McpHostError && error.sent === false);
+    } finally { release(); await host.closeAll(); }
+  });
+
   it("records an allowlisted server that lists none of its tools, so the Marketplace can name them", async () => {
     const host = new McpHost({ clientVersion: "test" });
     try {

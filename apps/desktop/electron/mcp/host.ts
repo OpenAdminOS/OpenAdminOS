@@ -147,6 +147,12 @@ export function isAllowedTool(endpoint: Pick<McpEndpoint, "tools">, name: string
 
 export class McpHost {
   private readonly sessions = new Map<string, Promise<Session>>();
+  /**
+   * Sessions opened for a call whose listing has not gone to `listed` yet.
+   * The report runs in the call, never inside the session promise, so
+   * closing a session never waits on the store that receives it.
+   */
+  private readonly unreported = new WeakSet<Session>();
   private readonly authorizations = new Map<string, Authorization>();
   private readonly connectTimeoutMs: number;
   private readonly callTimeoutMs: number;
@@ -219,6 +225,10 @@ export class McpHost {
     }
     await this.authorize(endpoint, generation);
     const session = await this.session(endpoint);
+    if (this.unreported.delete(session)) {
+      // Keeping the stored listing current is best effort: the call itself is decided by this session.
+      await Promise.resolve(this.options.listed?.(endpoint.id, session.tools)).catch(() => undefined);
+    }
     // A server missing any offered tool is skipped whole, also when a session opened for a call finds this.
     if (session.missingTools.length > 0) {
       const missing = session.missingTools.join(", ");
@@ -298,9 +308,8 @@ export class McpHost {
   private session(endpoint: McpEndpoint): Promise<Session> {
     const existing = this.sessions.get(endpoint.id);
     if (existing) return existing;
-    const session = this.open(endpoint).then(async (opened) => {
-      // Keeping the stored listing current is best effort: the call itself is decided by this session.
-      await Promise.resolve(this.options.listed?.(endpoint.id, opened.tools)).catch(() => undefined);
+    const session = this.open(endpoint).then((opened) => {
+      this.unreported.add(opened);
       return opened;
     });
     this.sessions.set(endpoint.id, session);
