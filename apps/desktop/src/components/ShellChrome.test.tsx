@@ -97,6 +97,24 @@ describe("shell chrome", () => {
     expect(screen.queryByText(/www\.intuneautomation\.com/)).not.toBeInTheDocument();
   });
 
+  it("names the second-wave hosts while their servers are on", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({
+        mcpServers: createMockMcpServers({
+          "release-communications": { installed: true, enabled: true },
+          windowsforum: { installed: true, enabled: true },
+          "endoflife-ai": { installed: true, enabled: true },
+        }),
+      })),
+    });
+    const status = await screen.findByRole("status", { name: /tool queries to www\.microsoft\.com \+2/ });
+    await user.hover(status);
+    expect(await screen.findByText(/Words from that question can be sent to www\.microsoft\.com, mcp\.windowsforum\.com and mcp\.endoflife\.ai\./)).toBeInTheDocument();
+  });
+
   it("names no host for a server Chat skips because an offered tool is missing", async () => {
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",

@@ -825,6 +825,31 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
   });
 
+  it("names the second-wave hosts in what leaves this device and in the composer line", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      {},
+      createMockAppState({
+        activeProviderId: "openai",
+        activeModelByProviderId: { openai: "gpt-5" },
+        mcpServers: createMockMcpServers({
+          "release-communications": { installed: true, enabled: true },
+          windowsforum: { installed: true, enabled: true },
+          "endoflife-ai": { installed: true, enabled: true },
+        }),
+      }),
+    );
+    renderRoute(<DataBoundaryProvider><IntuneChat /></DataBoundaryProvider>, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const hosts = "www.microsoft.com, mcp.windowsforum.com and mcp.endoflife.ai";
+    expect((await screen.findAllByText(new RegExp(`Words from that question can be sent to ${hosts.replace(/\./g, "\\.")}\\.`))).length).toBeGreaterThan(0);
+    const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    await user.type(composer, "When does Windows Server 2016 reach end of support?");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const heading = await screen.findByText("What leaves this device");
+    expect(heading.parentElement?.querySelector("p")?.textContent ?? "").toContain(`Words from that question can be sent to ${hosts}.`);
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+  });
+
   it("names no MCP host in the confirmation when no server is enabled", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));

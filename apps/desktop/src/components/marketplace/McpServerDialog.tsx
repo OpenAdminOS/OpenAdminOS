@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 
 import type { ChatToolUseStatus, McpServerSummary } from "../../shared/openAdminOS";
 import { useAppState } from "../../state";
-import { IconCheck, IconClose, IconCloud, IconHardDrive, IconLock, IconRefresh, IconShield, IconWarning } from "../icons";
+import { IconCheck, IconClose, IconCloud, IconExternal, IconHardDrive, IconLayers, IconLock, IconRefresh, IconShield, IconUsers, IconWarning } from "../icons";
 import { Modal } from "../Modal";
 import { Button, Switch } from "../ui";
 import { CoverArt, inkFor } from "./CoverArt";
@@ -158,6 +158,7 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
           <span className="font-medium text-[var(--color-text-soft)]">Chat uses it for</span> {server.useFor.charAt(0).toLowerCase() + server.useFor.slice(1)}
         </p>
       ) : null}
+      <Operator server={server} className="max-w-[62ch] text-sm text-[var(--color-text-muted)]" />
       {toolUse?.available === false && toolUse.notice ? <ToolUseNotice notice={toolUse.notice} /> : null}
       {server.missingTools?.length ? <MissingTools server={server} missing={server.missingTools} /> : null}
       <section>
@@ -168,6 +169,12 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
         <IconShield size={20} className="text-[var(--color-text)]" />
         <span>Read only. This server never connects to your tenant and cannot propose changes.</span>
       </div>
+      {server.notes?.map((note) => (
+        <div key={note} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3.5 text-sm text-[var(--color-text-soft)]">
+          <IconUsers size={20} className="text-[var(--color-text)]" />
+          <span>{note}</span>
+        </div>
+      ))}
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Tools Chat can call</h3>
         {server.missingTools?.length ? (
@@ -193,11 +200,15 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
             ? `${server.name} listed none of the tools OpenAdminOS offers at its last connection.`
             : "The server lists its tools when you install it. OpenAdminOS shows them here and offers them to Chat."}</p>
         )}
+        {server.offeredTools ? (
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">OpenAdminOS offers only {server.offeredTools.length === 1 ? "this tool" : `these ${server.offeredTools.length} tools`} from {server.name}. Other tools the server lists are never shown or called.</p>
+        ) : null}
       </section>
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Details</h3>
         <dl className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-x-6 gap-y-4 text-sm">
           <Fact label="Publisher" value={server.publisher} />
+          {server.policy ? <Fact label="Terms and privacy" value={<PolicyLink policy={server.policy} />} /> : null}
           <Fact label="Sign-in" value="No sign-in needed" />
           <Fact label="Endpoint" value={<code className="font-mono text-xs">{server.url}</code>} />
           <Fact label="Protocol" value="MCP, streamable HTTP" />
@@ -240,6 +251,22 @@ function InstallReview({
         <Step icon={<IconHardDrive size={16} />} title="Tenant access">
           None. The server cannot read or change your tenant.
         </Step>
+        <Step icon={<IconExternal size={16} />} title="Who runs it">
+          <Operator server={server} />
+          {server.notes?.map((note) => <span key={note} className="mt-1 block">{note}</span>)}
+        </Step>
+        <Step icon={<IconLayers size={16} />} title="Tools Chat will be offered">
+          {server.offeredTools ? (
+            <>
+              <span className="mt-1 flex flex-wrap gap-1.5">
+                {server.offeredTools.map((name) => <code key={name} className="rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text)]">{name}</code>)}
+              </span>
+              <span className="mt-1 block">Only these. Other tools {server.name} lists are never shown or called.</span>
+            </>
+          ) : (
+            <>Every tool {server.name} lists when it connects. They are shown in the details after install.</>
+          )}
+        </Step>
       </ol>
       {toolUse?.available === false && toolUse.notice ? <ToolUseNotice notice={toolUse.notice} /> : null}
       <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-sm text-[var(--color-text-soft)]">
@@ -251,6 +278,24 @@ function InstallReview({
       ) : null}
       {failure ? <ErrorBox title={`${server.name} could not be installed`} message={`${failure} Nothing was installed.`} /> : null}
     </div>
+  );
+}
+
+/** Who runs the server, and its terms or privacy page where one exists. The host is named in Where queries go. */
+function Operator({ server, className }: { server: McpServerSummary; className?: string }) {
+  return (
+    <span className={`block ${className ?? ""}`}>
+      {server.operator ?? `Run by ${server.publisher}.`}
+      {server.policy ? <> <PolicyLink policy={server.policy} /></> : null}
+    </span>
+  );
+}
+
+function PolicyLink({ policy }: { policy: { label: string; url: string } }) {
+  return (
+    <a href={policy.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] underline underline-offset-2 hover:opacity-80">
+      {policy.label}
+    </a>
   );
 }
 
