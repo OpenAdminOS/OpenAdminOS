@@ -1416,3 +1416,54 @@ Verification: typecheck, electron 774 pass, renderer (Node 22) 398 pass in 53 fi
 | 2 | Should fix | The Changes permission filter only affected status rows; the timeline and comparisons still read snapshots of a service that is no longer connected as current. | Timeline, baseline drift, new baselines, time, bundle and cross-tenant compare, rollback plans and fleet counts apply the part-level `availableScopeSet` rule and return `omittedResources`. Changes and Fleet name the service ("Intune is not connected. Its earlier snapshots are not compared."), and entry detail from those snapshots is labelled "Historical snapshot, no longer refreshed." Tests: an Entra-only fixture requesting deviceConfigurations gets no current comparison and a visible omission; renderer tests for the timeline notice, the compare notice and the historical label. | `7d8a3ee`, `fa4b7fe` |
 
 Verification on Node 22: electron 796 pass, renderer 407 pass in 53 files, runtime 255 pass and 2 skipped, test:scripts 18 pass, `npm run qa` 197 pass, 4 warn, 0 fail, typecheck and docs:check clean.
+
+# Marketplace MCP servers, second wave (2026-11-05)
+
+Branch `marketplace/second-wave` off `main` (98ddfc3). The owner asked to add three servers that need no sign-in. Each was probed live on 2026-11-05 with initialize, notifications/initialized and tools/list: no 401 and no OAuth metadata.
+
+| Server | Endpoint | Operator | Transport seen | Tools listed |
+| --- | --- | --- | --- | --- |
+| Microsoft Release Communications | `https://www.microsoft.com/releasecommunications/mcp` | Microsoft (Microsoft API Terms of Use) | SSE, no session id, protocol 2025-06-18 | `get_recent_m365_roadmaps`, `get_m365_roadmap_by_id`, `get_recent_azure_updates`, `get_azure_update_by_id` |
+| WindowsForum | `https://mcp.windowsforum.com/` | WindowsForum.com staff | SSE | 29 readOnly tools, among them `search_kb`, `get_kb_article`, forum search and member lookups |
+| endoflife.ai | `https://mcp.endoflife.ai/mcp` | Not named on the site (built on endoflife.date data) | plain JSON | `check_eol`, `get_product_lifecycle`, `get_upcoming_eol`, `get_kev_exposure`, `get_risk_score`, `get_upgrade_path`, `scan_stack`, `check_sbom`, `list_products`, `get_edge_device_status` |
+
+## Acceptance criteria
+
+1. The catalog in `apps/desktop/electron/mcp/catalog.ts` lists the three servers. Each has its name, publisher, URL, description, pitch, `useFor` line, aliases and topics. Where the operator is not named, the publisher says so plainly ("Operator not named"). Nothing implies Microsoft runs a server it does not run.
+2. **Tool allowlist.**
+   - A catalog entry can list the tool names it exposes. The host still lists tools live, but Chat, the Marketplace tool list and the query writer only ever see allowlisted tools.
+   - A call to any other tool is refused before anything is sent.
+   - If an allowlisted tool is missing from the server, the Marketplace shows a designed state naming the missing tools, and Chat skips that server.
+   - Allowlists:
+     - WindowsForum: `search_kb` and `get_kb_article` only.
+     - endoflife.ai: everything except `scan_stack` and `check_sbom`, which take bulk software inventories.
+     - Release Communications: all four tools, by their live names.
+   - Existing servers stay as they are (no allowlist means every tool the server lists).
+3. **Transports.** The MCP host works with SSE replies that carry no session id (Release Communications), with plain JSON replies (endoflife.ai) and with SSE plus a session (WindowsForum). Unit tests cover each shape with fixtures. A live probe test runs the handshake, tools/list and the allowlist check against all three; it is skipped when offline or in CI, like the existing live test.
+4. **Query writer.**
+   - It writes these servers' arguments from the current question only, as for the first wave.
+   - An argument that names a specific item (a roadmap ID, an Azure update ID, a KB article number) is sent only when it appears in the current question or in an earlier result from the same server in the same answer. This follows the existing rule for Learn fetch URLs.
+   - The egress filter applies unchanged.
+5. **Results.**
+   - Results are parsed by structure into sources: title, URL where the server gives one, and a short excerpt.
+   - Results are numbered and cited like Learn results and fenced as third-party content.
+   - Forum and KB text is treated as untrusted.
+   - A server that answers with an error or an empty result shows a designed state and never fails silently.
+6. **Routing.** Naming a server or its alias calls it. Topic words choose it for docs questions:
+   - roadmap, retirement, "what's new", rollout, Azure update: Release Communications;
+   - KB, cumulative update, known issue, patch, update history: WindowsForum;
+   - end of life, end of support, lifecycle, EOL, support ends: endoflife.ai.
+
+   Learn stays the default docs source.
+7. **Disclosure.**
+   - The status strip, composer, tooltips and hosted send confirmation name the new hosts when the servers are enabled.
+   - The install review shows the operator, the host, a terms or privacy link where one exists, and the tools that will be offered.
+   - For endoflife.ai it says the operator is not named and no privacy page was found.
+   - For WindowsForum it says forum content is community text.
+8. **Docs.** SPEC, CHANGELOG `[Unreleased]` and the Marketplace page in `docs/gitbook` describe the three servers, the allowlists and the reasons for them. `docs:check` passes.
+9. **Tests and reviews.**
+   - All suites pass under Node 22, as CI runs them.
+   - The renderer covers the Marketplace cards and install review for each server.
+   - Light and dark screenshots of the cards and install reviews.
+   - A separate Claude evaluator and GPT-6.1-Sol review the whole diff with no open blocking findings.
+   - A live check in the running app asks one question per server.
