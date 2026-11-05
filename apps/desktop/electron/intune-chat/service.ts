@@ -189,6 +189,30 @@ function restrictPlannedResourcesForTenant(
 }
 
 /**
+ * When the access line of a blocked question applies. The planner's
+ * resources come from keywords, so a docs question that names a service
+ * the tenant has not connected ("How does Sentinel group alerts into
+ * incidents?") would be blocked although documentation answers it. With
+ * a documentation source, a docs kind is never blocked: `now` blocks
+ * before any model call when the kind is already tenant or mixed, and
+ * `deferred` blocks once the model's kind settles to tenant or mixed.
+ * Without any documentation source the line is the answer at once.
+ */
+function accessBlockTiming(
+  blocked: string | undefined,
+  plan: { sources: ChatSourcePlan; docsSourceAvailable: boolean } | undefined,
+  modelClassifies: boolean,
+): { now?: string; deferred?: string } {
+  if (!blocked) return {};
+  if (!plan?.docsSourceAvailable) return { now: blocked };
+  if (modelClassifies) return { deferred: blocked };
+  return plan.sources.kind === "docs" ? {} : { now: blocked };
+}
+
+/** A deferred access block: the kind settled to tenant or mixed, so the access line is the answer. */
+class TenantAccessBlockedError extends Error {}
+
+/**
  * What the answering prompt held besides the admin's current question,
  * public documentation and MCP results, and the app's own instructions.
  * Any other part makes the prompt private: the model writes its `next`
@@ -1842,7 +1866,6 @@ export class IntuneChatService {
       : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const restriction = restrictPlannedResourcesForTenant(planned, tenant);
-    const accessBlockedMessage = restriction.blocked;
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
@@ -1887,6 +1910,8 @@ export class IntuneChatService {
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
     const veto = docsVeto(content, history);
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
+    const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh);
+    let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
 
     let refreshResult: GraphCacheRefreshResult | undefined;
@@ -1961,6 +1986,7 @@ export class IntuneChatService {
     // fallback then deal with the missing data.
     let lazyPack: ReturnType<typeof readPack> | undefined;
     const loadTenantData = once(async () => {
+      if (accessBlock.deferred) throw new TenantAccessBlockedError(accessBlock.deferred);
       await refreshPlanned().catch(() => undefined);
       lazyPack = readPack();
     });
@@ -2114,9 +2140,15 @@ export class IntuneChatService {
             responseModel = deterministic.model ?? responseModel;
           }
         } catch (caught) {
-          assistantStatus = "failed";
-          assistantError = caught instanceof Error ? caught.message : String(caught);
-          assistantContent = `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+          if (caught instanceof TenantAccessBlockedError) {
+            accessBlockedMessage = caught.message;
+            assistantContent = caught.message;
+            responseModel = undefined;
+          } else {
+            assistantStatus = "failed";
+            assistantError = caught instanceof Error ? caught.message : String(caught);
+            assistantContent = `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+          }
         }
       }
     }
@@ -2293,7 +2325,6 @@ export class IntuneChatService {
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
     const restriction = restrictPlannedResourcesForTenant(planned, tenant);
-    const accessBlockedMessage = restriction.blocked;
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2344,6 +2375,8 @@ export class IntuneChatService {
     const answerPlan = options.voice
       ? undefined
       : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
+    const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh);
+    let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
     const isCancelled = () => options.signal?.aborted === true;
     const finishCancelled = (): SendIntuneChatMessageResult => {
@@ -2568,6 +2601,7 @@ export class IntuneChatService {
     // still ends the answer.
     let lazyPack: ReturnType<typeof readPack> | undefined;
     const loadTenantData = once(async () => {
+      if (accessBlock.deferred) throw new TenantAccessBlockedError(accessBlock.deferred);
       await refreshPlanned().catch((error: unknown) => {
         if (isCancelled()) throw error;
       });
@@ -2880,11 +2914,18 @@ export class IntuneChatService {
             onEvent({ type: "cancelled", result });
             return result;
           }
-          assistantStatus = "failed";
-          assistantError = caught instanceof Error ? caught.message : String(caught);
-          assistantContent = assistantContent.trim()
-            ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
-            : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+          if (caught instanceof TenantAccessBlockedError) {
+            accessBlockedMessage = caught.message;
+            assistantContent = caught.message;
+            responseModel = undefined;
+            emitDelta(assistantContent);
+          } else {
+            assistantStatus = "failed";
+            assistantError = caught instanceof Error ? caught.message : String(caught);
+            assistantContent = assistantContent.trim()
+              ? `${assistantContent.trim()}\n\nThe selected LLM provider failed while answering this chat message. ${assistantError}`
+              : `The selected LLM provider failed while answering this chat message. ${assistantError}`;
+          }
         }
       }
     }
@@ -3090,7 +3131,7 @@ export class IntuneChatService {
     /** Why a docs label is not allowed, when it is not. */
     veto?: string;
     steps: ChatStepRecorder;
-  }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
+  }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
     // The first step shows at once; its detail follows when the kind and sources are known.
     const planStep = input.steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: ON_DEVICE });
     const installed = await this.mcpToolsFor(input.tenant, input.conversationId);
@@ -3110,7 +3151,9 @@ export class IntuneChatService {
     // The first step's time is local planning only; a model classification shows on the model step.
     if (!input.modelClassifies) settleKind();
     else kind.awaitModel();
-    return { mcp, mcpInstalled: Boolean(installed.mcp), get sources() { return kind.sources; }, kind, settleKind, tieInResources };
+    // An MCP server offered to the model or the local docs index can answer a docs question.
+    const docsSourceAvailable = servers.length > 0 || context.docsIndexAvailable;
+    return { mcp, mcpInstalled: Boolean(installed.mcp), docsSourceAvailable, get sources() { return kind.sources; }, kind, settleKind, tieInResources };
   }
 
   /**

@@ -900,4 +900,46 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       }
     });
   });
+
+  describe("access blocks and docs questions", () => {
+    const intuneOnly = requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name));
+    const blocked = "Defender is not connected for this tenant. Add it in Settings, Tenants.";
+    const ask = (store: AppStateStore, send: "sendIntuneChatMessage" | "streamIntuneChatMessage", content: string) =>
+      send === "sendIntuneChatMessage" ? store.sendIntuneChatMessage({ content }) : store.streamIntuneChatMessage({ content }, () => {});
+
+    it("answers a Defender docs question from Microsoft Learn on an Intune-only tenant, and still blocks a Defender tenant question", async () => {
+      for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+        await withHarness(async ({ store, graphPaths, script }) => {
+          script([
+            { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Microsoft Sentinel incident grouping" } },
+            { final: true, answer: "Microsoft Learn says Sentinel groups related alerts into incidents [1]." },
+          ]);
+          const docs = (await ask(store, send, "How does Microsoft Sentinel correlate alerts into incidents?")).assistantMessage;
+          assert.equal(docs.questionKind, "docs", send);
+          assert.match(docs.content, /^Microsoft Learn says Sentinel groups related alerts into incidents \[1\]\./, send);
+          assert.doesNotMatch(docs.content, /not connected/, send);
+          assert.deepEqual(graphPaths, [], send);
+
+          script([{ kind: "tenant", sources: [], final: true, answer: "You have 3 open incidents." }]);
+          const tenantAnswer = (await ask(store, send, "List our open security incidents")).assistantMessage;
+          assert.equal(tenantAnswer.questionKind, "tenant", send);
+          assert.equal(tenantAnswer.content, blocked, send);
+          assert.equal(tenantAnswer.status, "completed", send);
+          assert.equal(tenantAnswer.followUps, undefined, send);
+          assert.deepEqual(graphPaths, [], send);
+        }, { grantedScopes: intuneOnly });
+      }
+    });
+
+    it("keeps the access line for a docs question when no documentation source is installed", async () => {
+      await withHarness(async ({ store, prompts, script }) => {
+        await store.uninstallMcpServer("microsoft-learn");
+        await store.uninstallMcpServer("kql-search");
+        script([{ kind: "docs", sources: [], final: true, answer: "Sentinel groups alerts." }]);
+        const message = (await store.sendIntuneChatMessage({ content: "How does Microsoft Sentinel correlate alerts into incidents?" })).assistantMessage;
+        assert.equal(message.content, blocked);
+        assert.equal(prompts.length, 0, "no model call");
+      }, { grantedScopes: intuneOnly });
+    });
+  });
 });
