@@ -170,6 +170,10 @@ describe("Second-wave source routing", () => {
     assert.deepEqual(chosen("Is there a script on intuneautomation.com for our devices?", "tenant"), ["intuneautomation"]);
     assert.deepEqual(chosen("Look it up on www.kqlsearch.com/mcp for our tenant", "tenant"), ["kql-search"]);
     assert.deepEqual(chosen("Ask mcp.windowsforum.com about our devices", "tenant"), ["windowsforum"]);
+    // WindowsForum's own site domain names it too, but not as part of an email address or a longer domain.
+    assert.deepEqual(chosen("Ask windowsforum.com about our devices", "tenant"), ["windowsforum"]);
+    assert.deepEqual(chosen("Did admin@windowsforum.com sign in?", "tenant"), []);
+    assert.deepEqual(chosen("Is windowsforum.com.example a phishing domain on our devices?", "tenant"), []);
   });
 });
 

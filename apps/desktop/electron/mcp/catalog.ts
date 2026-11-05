@@ -232,7 +232,8 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
       "Knowledge Base articles for Windows 10, Windows 11 and Windows Server updates, looked up through the WindowsForum.com community server. Chat can find a KB article by topic, build or number and read its known issues. WindowsForum.com is independent and not affiliated with Microsoft.",
     pitch: "Windows update KB articles and known issues, by topic, build or KB number.",
     useFor: "Windows 10, Windows 11 and Windows Server update KB articles: release dates, OS builds, known issues and workarounds. Not for Intune or Entra documentation.",
-    aliases: ["windowsforum", "windows forum"],
+    // The server runs at mcp.windowsforum.com; the site's own domain names it too.
+    aliases: ["windowsforum", "windows forum", "windowsforum.com"],
     topics: ["kb", "cumulative update", "cumulative updates", "known issue", "known issues", "patch", "patches", "patch tuesday", "update history", "os build"],
     auth: "none",
     readOnly: true,
