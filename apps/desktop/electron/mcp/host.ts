@@ -12,6 +12,8 @@ export interface McpEndpoint {
   id: string;
   name: string;
   url: string;
+  /** The tool allowlist from the catalog. Other tools are never listed or called. */
+  tools?: readonly string[];
 }
 
 export interface McpToolInfo {
@@ -29,6 +31,8 @@ export interface McpConnectResult {
   serverName?: string;
   serverVersion?: string;
   tools: McpToolInfo[];
+  /** Allowlisted tools the server did not list. */
+  missingTools: string[];
 }
 
 export interface McpCallResult {
@@ -127,6 +131,12 @@ export function cleanMcpSchema(schema: unknown): Record<string, unknown> | undef
 interface Session {
   client: Client;
   tools: McpToolInfo[];
+  missingTools: string[];
+}
+
+/** Whether the catalog lets OpenAdminOS use this tool of the server. */
+export function isAllowedTool(endpoint: Pick<McpEndpoint, "tools">, name: string): boolean {
+  return !endpoint.tools || endpoint.tools.includes(name);
 }
 
 export class McpHost {
@@ -150,12 +160,13 @@ export class McpHost {
     const session = this.open(endpoint);
     this.sessions.set(endpoint.id, session);
     try {
-      const { client, tools } = await session;
+      const { client, tools, missingTools } = await session;
       const info = client.getServerVersion();
       return {
         ...(info?.name ? { serverName: info.name } : {}),
         ...(info?.version ? { serverVersion: info.version } : {}),
         tools,
+        missingTools,
       };
     } catch (error) {
       this.sessions.delete(endpoint.id);
@@ -197,6 +208,9 @@ export class McpHost {
     signal?: AbortSignal,
     generation?: number,
   ): Promise<McpCallResult> {
+    if (!isAllowedTool(endpoint, name)) {
+      throw new McpHostError("unknown-tool", `OpenAdminOS does not offer ${name} from ${endpoint.name}. Nothing was sent.`, false);
+    }
     await this.authorize(endpoint, generation);
     const session = await this.session(endpoint);
     if (!session.tools.some((tool) => tool.name === name && !tool.unavailable)) {
@@ -298,16 +312,20 @@ export class McpHost {
       for (let page = 0; page < 4 && tools.length < MCP_MAX_TOOLS_PER_SERVER; page += 1) {
         const listed = await client.listTools(cursor ? { cursor } : undefined, { timeout: this.connectTimeoutMs });
         for (const tool of listed.tools) {
+          // Tools outside the allowlist are never kept, so they never reach the Marketplace, Chat or a call.
+          if (!isAllowedTool(endpoint, tool.name)) continue;
           const info = sanitizeTool(tool);
           if (info && tools.length < MCP_MAX_TOOLS_PER_SERVER) tools.push(info);
         }
         cursor = listed.nextCursor;
         if (!cursor) break;
       }
-      if (tools.length === 0) {
+      const missingTools = (endpoint.tools ?? []).filter((name) => !tools.some((tool) => tool.name === name));
+      // With an allowlist, missing tools are a designed Marketplace state, so the listing is still recorded.
+      if (tools.length === 0 && !endpoint.tools) {
         throw new McpHostError("server-error", `${endpoint.name} connected but listed no usable tools.`);
       }
-      return { client, tools };
+      return { client, tools, missingTools };
     } catch (error) {
       await client.close().catch(() => undefined);
       throw describeError(error, endpoint, this.connectTimeoutMs);

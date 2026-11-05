@@ -142,6 +142,41 @@ describe("MCP host", () => {
     } finally { await host.closeAll(); }
   });
 
+  it("lists only allowlisted tools, names the missing ones and refuses other calls before sending", async () => {
+    let requests = 0;
+    const host = new McpHost({ clientVersion: "test", fetch: (url, init) => { requests += 1; return fetch(url, init); } });
+    const allowlisted = { ...endpoint, id: "allowlisted", tools: ["search_docs", "fails", "get_article"] };
+    try {
+      const connected = await host.connect(allowlisted);
+      assert.deepEqual(connected.tools.map((tool) => tool.name), ["search_docs", "fails"]);
+      assert.deepEqual(connected.missingTools, ["get_article"]);
+      const result = await host.callTool(allowlisted, "search_docs", { query: "allowed" });
+      assert.equal(result.text, "Result for allowed");
+      // "big" is listed by the server, but not allowlisted: refused, and no request leaves.
+      searchCalls.length = 0;
+      const before = requests;
+      await assert.rejects(host.callTool(allowlisted, "big", {}), (error: unknown) =>
+        error instanceof McpHostError && error.code === "unknown-tool" && error.sent === false &&
+        error.message === "OpenAdminOS does not offer big from Test Docs. Nothing was sent.");
+      // A fresh host with no session sends nothing either, not even a handshake.
+      const fresh = new McpHost({ clientVersion: "test", fetch: (url, init) => { requests += 1; return fetch(url, init); } });
+      await assert.rejects(fresh.callTool(allowlisted, "delete_everything", {}), (error: unknown) => error instanceof McpHostError && error.sent === false);
+      assert.equal(requests, before);
+      assert.deepEqual(searchCalls, []);
+      // Without an allowlist every listed tool is kept, as before.
+      assert.deepEqual((await host.connect(endpoint)).missingTools, []);
+    } finally { await host.closeAll(); }
+  });
+
+  it("records an allowlisted server that lists none of its tools, so the Marketplace can name them", async () => {
+    const host = new McpHost({ clientVersion: "test" });
+    try {
+      const connected = await host.connect({ ...endpoint, id: "none-listed", tools: ["get_article"] });
+      assert.deepEqual(connected.tools, []);
+      assert.deepEqual(connected.missingTools, ["get_article"]);
+    } finally { await host.closeAll(); }
+  });
+
   it("times out a slow tool with a designed message", async () => {
     const host = new McpHost({ clientVersion: "test", callTimeoutMs: 100 });
     try {

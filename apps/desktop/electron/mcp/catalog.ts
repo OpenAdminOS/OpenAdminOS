@@ -25,6 +25,13 @@ export interface McpCatalogEntry {
   topics: readonly string[];
   auth: McpServerAuth;
   readOnly: true;
+  /**
+   * The tools OpenAdminOS uses from this server. The host still lists tools
+   * live, but only these reach the Marketplace, Chat and the query writer,
+   * and a call to any other is refused before anything is sent. Without a
+   * list, every tool the server lists is offered.
+   */
+  tools?: readonly string[];
 }
 
 export const MCP_CATALOG: readonly McpCatalogEntry[] = [
