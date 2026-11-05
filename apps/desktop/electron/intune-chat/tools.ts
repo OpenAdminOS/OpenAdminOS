@@ -79,6 +79,8 @@ export interface McpChatTool {
   itemParams?: readonly string[];
   /** The server's results are community text, from the catalog. */
   communityText?: boolean;
+  /** Our own note on how to fill this tool's params, from the catalog. Given to the query writer only. */
+  queryHint?: string;
 }
 
 /** An installed, enabled MCP server whose tools are offered, as the catalog describes it. */

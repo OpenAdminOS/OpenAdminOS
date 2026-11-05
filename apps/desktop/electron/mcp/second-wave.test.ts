@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { planChatSources } from "../intune-chat/chat-steps.js";
-import { readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
+import { buildMcpQueryWriterPrompt } from "../intune-chat/mcp-query-writer.js";
+import { mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
 import { MCP_CATALOG, mcpCatalogEntry, mcpHost } from "./catalog.js";
 
 /** Trimmed live captures from 2026-11-05; see transports.test.ts. */
@@ -47,6 +48,26 @@ describe("Second-wave catalog entries", () => {
     assert.ok(wf.notes?.some((note) => /community text/.test(note)));
     assert.deepEqual(rc.itemParams, { get_m365_roadmap_by_id: ["id"], get_azure_update_by_id: ["id"] });
     assert.deepEqual(wf.itemParams, { get_kb_article: ["kb_id"] });
+  });
+});
+
+describe("Second-wave query hints", () => {
+  it("gives the query writer our own note on params the server schema cannot explain", () => {
+    const rc = mcpCatalogEntry("release-communications")!;
+    const hint = rc.queryHints!.get_recent_m365_roadmaps!;
+    const prompt = buildMcpQueryWriterPrompt({
+      question: "What is rolling out for Intune?",
+      tool: { name: mcpChatToolName(rc.id, "get_recent_m365_roadmaps"), serverId: rc.id, serverName: rc.name, host: mcpHost(rc.url), tool: "get_recent_m365_roadmaps",
+        description: "Retrieves M365 roadmap posts.", inputSchema: { type: "object", properties: { filter: { type: "string" }, search: { type: "string" } } }, queryHint: hint },
+      earlierResults: [],
+      sentQueries: [],
+    });
+    // The note is the app's own text, outside the third-party fence.
+    const fenceEnd = prompt.indexOf("</tenant_data>", prompt.indexOf("third-party:www.microsoft.com:tool"));
+    assert.ok(prompt.indexOf(`How to fill these params (from OpenAdminOS): ${hint}`) > fenceEnd);
+    assert.match(hint, /filter takes only an OData expression/);
+    assert.ok(mcpCatalogEntry("endoflife-ai")!.queryHints!.check_eol!.includes("windows-server"));
+    assert.ok(mcpCatalogEntry("windowsforum")!.queryHints!.get_kb_article!.includes("KB5058919"));
   });
 });
 

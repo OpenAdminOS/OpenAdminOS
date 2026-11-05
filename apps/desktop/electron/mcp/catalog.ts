@@ -75,6 +75,12 @@ export interface McpCatalogEntry {
    * answer, as links are.
    */
   itemParams?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * Our own note per tool on how to fill its params, for the query writer.
+   * Oversized schemas lose their descriptions, and some params take a
+   * syntax or slug the writer cannot guess.
+   */
+  queryHints?: Readonly<Record<string, string>>;
   /** How results are read into sources. Without it, items with a title or name and a link are read. */
   results?: McpResultFormat;
   /** Who runs the server, in one plain sentence, for the install review. Without it, the publisher is named. */
@@ -145,6 +151,10 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     readOnly: true,
     tools: ["get_recent_m365_roadmaps", "get_m365_roadmap_by_id", "get_recent_azure_updates", "get_azure_update_by_id"],
     itemParams: { get_m365_roadmap_by_id: ["id"], get_azure_update_by_id: ["id"] },
+    queryHints: {
+      get_recent_m365_roadmaps: "Put a few title words in search, for example Intune or Microsoft Teams. filter takes only an OData expression such as products/any(p: p eq 'Microsoft Intune') or status eq 'Rolling out'; leave it out otherwise.",
+      get_recent_azure_updates: "Put a few title words in search, for example Retirement or Azure Monitor. filter takes only an OData expression such as tags/any(t: t eq 'Retirements'); leave it out otherwise.",
+    },
     results: {
       items: [{
         title: [["title"]],
@@ -172,6 +182,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     // The server lists 29 tools, among them forum search and member lookups. Only the two KB tools are used.
     tools: ["search_kb", "get_kb_article"],
     itemParams: { get_kb_article: ["kb_id"] },
+    queryHints: { get_kb_article: "kb_id takes one KB number, for example KB5058919." },
     results: {
       items: [{ title: [["title"]], url: ["url"], text: ["content", "summary"], facts: ["kb_id", "release_date", "applies_to"], id: ["kb_id"] }],
     },
@@ -193,6 +204,15 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     topics: ["end of life", "end-of-life", "end of support", "end-of-support", "lifecycle", "life cycle", "eol", "support ends", "support end", "end of servicing"],
     auth: "none",
     readOnly: true,
+    queryHints: {
+      check_eol: "product takes a slug such as windows, windows-server or macos, and version a release cycle such as 2016, 10-22h2 or 11-24h2-e. When unsure of either, ask list_products or get_product_lifecycle first.",
+      get_risk_score: "product takes a slug such as windows or windows-server, and version a release cycle such as 2016 or 11-24h2-e.",
+      get_upgrade_path: "product takes a slug such as windows or windows-server, and version a release cycle such as 2016 or 10-22h2.",
+      get_product_lifecycle: "product takes a slug only, such as windows, windows-server or macos, never with a version in it.",
+      get_kev_exposure: "product takes a slug only, such as windows-server; version is optional and takes a release cycle such as 2016.",
+      get_upcoming_eol: "products takes slugs such as windows and windows-server, and days a number of days ahead.",
+      list_products: "query takes part of a product slug, such as windows or mac.",
+    },
     // scan_stack and check_sbom take whole software inventories, which would send a list of what runs in the estate.
     tools: ["check_eol", "get_risk_score", "list_products", "get_product_lifecycle", "get_kev_exposure", "get_upcoming_eol", "get_edge_device_status", "get_upgrade_path"],
     results: {

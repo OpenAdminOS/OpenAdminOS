@@ -65,6 +65,7 @@ export function buildMcpQueryWriterPrompt(input: Omit<McpQueryWriterInput, "llm"
   return [
     `The admin's question:\n${fenceTenantData(cut, "chat:admin-question")}`,
     `Tool: ${input.tool.tool} on ${input.tool.host}. Description and params schema from the server:\n${fenceTenantData({ description: cleanMcpDescription(input.tool.description), params: cleanMcpSchema(input.tool.inputSchema) ?? { type: "object" } }, `third-party:${input.tool.host}:tool`)}${items}`,
+    input.tool.queryHint ? `How to fill these params (from OpenAdminOS): ${input.tool.queryHint}` : "",
     results.length > 0 ? `Earlier results in this answer:\n${fenceTenantData(results, "third-party:mcp-results")}` : "",
     input.sentQueries.length > 0 ? `Queries already sent in this answer, so ask something else:\n${fenceTenantData(input.sentQueries, "chat:sent-queries")}` : "",
     "Params JSON:",

@@ -2183,6 +2183,7 @@ export class AppStateStore {
           ...(entry.results ? { resultFormat: entry.results } : {}),
           ...(entry.itemParams?.[tool.name] ? { itemParams: entry.itemParams[tool.name] } : {}),
           ...(entry.communityText ? { communityText: true } : {}),
+          ...(entry.queryHints?.[tool.name] ? { queryHint: entry.queryHints[tool.name] } : {}),
         });
       }
     }
