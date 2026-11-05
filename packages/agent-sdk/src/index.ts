@@ -1273,6 +1273,12 @@ export interface McpServerSummary {
    * any is missing, Chat does not use the server.
    */
   missingTools?: string[];
+  /** Who runs the server, in one plain sentence, for the install review. */
+  operator?: string;
+  /** The operator's terms or privacy page, where one exists. */
+  policy?: { label: string; url: string };
+  /** Further plain statements for the install review, for example that results are community text. */
+  notes?: string[];
 }
 
 /**

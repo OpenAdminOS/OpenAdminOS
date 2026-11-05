@@ -365,11 +365,14 @@ describe("MCP host connection paths", () => {
 });
 
 describe("MCP catalog", () => {
-  it("lists three public read-only servers over HTTPS without sign-in", () => {
+  it("lists six public read-only servers over HTTPS without sign-in", () => {
     assert.deepEqual(MCP_CATALOG.map((entry) => mcpHost(entry.url)), [
       "learn.microsoft.com",
       "www.kqlsearch.com",
       "www.intuneautomation.com",
+      "www.microsoft.com",
+      "mcp.windowsforum.com",
+      "mcp.endoflife.ai",
     ]);
     for (const entry of MCP_CATALOG) {
       assert.equal(new URL(entry.url).protocol, "https:");

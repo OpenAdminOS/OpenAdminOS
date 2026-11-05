@@ -2060,6 +2060,9 @@ export class AppStateStore {
           ...(tool.unavailable ? { unavailable: tool.unavailable } : {}),
         })),
         ...(entry.tools ? { offeredTools: [...entry.tools] } : {}),
+        ...(entry.operator ? { operator: entry.operator } : {}),
+        ...(entry.policy ? { policy: { ...entry.policy } } : {}),
+        ...(entry.notes?.length ? { notes: [...entry.notes] } : {}),
         ...(missingTools.length > 0 ? { missingTools } : {}),
       };
     });

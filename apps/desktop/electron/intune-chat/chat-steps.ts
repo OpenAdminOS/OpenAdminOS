@@ -109,9 +109,15 @@ export interface ChatSourcePlan {
 /** Servers the question names by name, alias or host. */
 export function namedServers(question: string, servers: readonly McpChatServer[]): McpChatServer[] {
   const lower = question.toLowerCase();
+  // A name counts only as a whole: "microsoft.com" inside "learn.microsoft.com" or an email address does not name the server at www.microsoft.com.
+  const names = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}-])`, "u").test(lower);
   return servers.filter((server) =>
-    [server.name.toLowerCase(), server.host, server.host.replace(/^www\./, ""), ...server.aliases].some((name) => name && lower.includes(name)),
+    [server.name.toLowerCase(), server.host, server.host.replace(/^www\./, ""), ...server.aliases].some((name) => name && names(name)),
   );
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -132,11 +138,12 @@ export function planChatSources(input: {
   /** Replaces the detail's first sentence, which names the kind. */
   lead?: string;
 }): ChatSourcePlan {
-  const lower = input.question.toLowerCase();
+  const lower = input.question.toLowerCase().replace(/[\u2018\u2019]/g, "'");
   const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
-      if (server.topics.some((topic) => new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower))) chosen.set(server.id, server);
+      // A topic also matches right before digits, so "KB5034441" chooses the server with the "kb" topic.
+      if (server.topics.some((topic) => new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`).test(lower))) chosen.set(server.id, server);
     }
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
     if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);
