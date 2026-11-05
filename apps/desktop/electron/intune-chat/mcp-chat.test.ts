@@ -12,6 +12,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { runAgenticChat } from "./agentic-loop.js";
+import { toolStepFinish } from "./chat-steps.js";
 import { isMcpQueryWriterRequest, parseMcpQueryParams } from "./mcp-query-writer.js";
 import { classifyChatQuestion, isGeneralKnowledgeQuestion } from "./planner.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
@@ -136,6 +137,13 @@ async function withStore(run: (store: IntelligenceSqliteStore) => Promise<void>)
   const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-chat-"));
   const store = new IntelligenceSqliteStore(join(dir, "openadminos.db"));
   try { await run(store); } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
+}
+
+/** The content of the first MCP observation in a prompt, as the model reads it once the JSON string is decoded. */
+function observedContent(prompt: string): string {
+  const encoded = /"content": ("(?:[^"\\]|\\.)*")/.exec(prompt)?.[1];
+  assert.ok(encoded, "the prompt holds an observation content");
+  return JSON.parse(encoded) as string;
 }
 
 const callDocs = (query: string) => JSON.stringify({ tool: docsTool.name, params: { query } });
@@ -998,6 +1006,72 @@ describe("The MCP query writer boundary", () => {
         ['{"filter":null,"search":"Intune","skip":null}']), context), questionKind: "docs" });
       assert.equal(result.toolTrace[0]!.error, undefined);
       assert.deepEqual(calls, [{ tool: "get_recent_m365_roadmaps", args: { search: "Intune" } }]);
+    });
+  });
+
+  it("says how many records a long MCP list holds when it lists only some, so the answer does not read as complete", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const roadmaps: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_m365_roadmaps"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_m365_roadmaps",
+        inputSchema: { type: "object", properties: { search: { type: "string" } } },
+        resultFormat: { items: [{ title: [["title"]], text: ["description"], facts: ["id"], id: ["id"] }] } };
+      const items = Array.from({ length: 11 }, (_, index) => ({ id: 100 + index, title: `Intune feature ${index + 1}`, description: `Feature ${index + 1} rolls out.` }));
+      const body = { items, totalCount: 11, limit: 50, offset: 0, hasMore: false, returnedCount: 11 };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [roadmaps], async call(tool, args) {
+        calls.push({ tool: tool.tool, args });
+        return { text: JSON.stringify(body), truncated: false };
+      } };
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([JSON.stringify({ tool: roadmaps.name, params: { search: "Intune" } }), '{"final":true,"answer":"Showing 10 of 11."}'], prompts), context), questionKind: "docs" });
+      assert.equal(result.ok, true);
+      const observation = observedContent(prompts[1]!.prompt);
+      assert.match(observation, /Microsoft Release Communications result counts: totalCount 11, limit 50, offset 0, hasMore false, returnedCount 11\./);
+      assert.match(observation, /OpenAdminOS lists 10 of the 11 records in this result below\. The other 1 was left out here and is not absent\./);
+      assert.match(observation, /The list below is not complete\. Say so in the answer: give how many are shown and how many exist, as in "Showing 10 of 11"\. This tool reads no further pages, so a narrower question is the way to reach the others\./);
+      assert.match(observation, /\[10\] Intune feature 10\n/);
+      assert.doesNotMatch(observation, /Intune feature 11/);
+      const trace = result.toolTrace[0]!;
+      assert.equal(trace.mcpSource?.results?.length, 10);
+      assert.equal(trace.mcpSource?.matched, 11);
+      assert.equal(trace.mcpSource?.more, undefined);
+      assert.equal(toolStepFinish(trace).detail, "get_recent_m365_roadmaps · 10 of 11 results");
+    });
+  });
+
+  it("carries a hasMore envelope to the model, the step and the query writer, so the next page can be asked for", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const updates: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_azure_updates"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_azure_updates",
+        inputSchema: { type: "object", properties: { search: { type: "string" }, skip: { type: "integer" } } },
+        resultFormat: { items: [{ title: [["title"]], text: ["description"], id: ["id"] }] } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [updates], async call(tool, args) {
+        calls.push({ tool: tool.tool, args });
+        const offset = typeof args.skip === "number" ? args.skip : 0;
+        const items = [1, 2, 3].map((n) => ({ id: String(466000 + offset + n), title: `Retirement: service ${offset + n}`, description: "Retires next year." }));
+        return { text: JSON.stringify({ items, totalCount: 515, limit: 3, offset, hasMore: true, returnedCount: 3 }), truncated: false };
+      } };
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([
+        JSON.stringify({ tool: updates.name, params: { search: "Retirement" } }),
+        JSON.stringify({ tool: updates.name, params: { search: "Retirement", skip: 3 } }),
+        '{"final":true,"answer":"Showing 6 of 515."}',
+      ], prompts, writerPrompts), context), questionKind: "docs" });
+      assert.equal(result.ok, true);
+      const observation = observedContent(prompts[1]!.prompt);
+      assert.match(observation, /Microsoft Release Communications result counts: totalCount 515, limit 3, offset 0, hasMore true, returnedCount 3\./);
+      assert.match(observation, /Microsoft Release Communications has more records than this result returned\./);
+      assert.match(observation, /The list below is not complete\. Say so in the answer: give how many are shown and how many exist, as in "Showing 3 of 515"\. To read further records, call the same tool again for the next page\./);
+      const trace = result.toolTrace[0]!;
+      assert.equal(trace.mcpSource?.more, true);
+      assert.equal(trace.mcpSource?.matched, undefined);
+      assert.equal(toolStepFinish(trace).detail, "get_recent_azure_updates · 3 results · the server has more");
+      // The writer of the second call sees what the first listed and the server's counts, outside the item rules.
+      assert.equal(writerPrompts.length, 2);
+      assert.doesNotMatch(writerPrompts[0]!, /Earlier calls of this tool/);
+      assert.match(writerPrompts[1]!, /Earlier calls of this tool in this answer, with how many records OpenAdminOS listed and the server's result counts\. When the question needs records past them, use the tool's paging param, if it has one, to skip the records already listed:/);
+      assert.match(writerPrompts[1]!, /"sent":\{"search":"Retirement"\},"listed":3,"counts":\{"totalCount":515,"limit":3,"offset":0,"hasMore":true,"returnedCount":3\}/);
+      assert.deepEqual(calls.map((call) => call.args), [{ search: "Retirement" }, { search: "Retirement", skip: 3 }]);
     });
   });
 

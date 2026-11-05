@@ -60,6 +60,20 @@ describe("MCP results read by a catalog format", () => {
     assert.deepEqual(readMcpResult(JSON.stringify({ returned: 0, products: [], source: { url: "https://example.com/p" } }), { format, tool: "list_products", args: { query: "nothing" } }), { items: [], empty: true });
   });
 
+  it("counts records past the ten it lists and keeps the list's top-level counts, for formatted and default reading", () => {
+    const records = Array.from({ length: 11 }, (_, index) => ({ id: index, title: `Item ${index}`, url: `https://example.com/${index}`, summary: "Text." }));
+    const formatted = readMcpResult(JSON.stringify({ items: records, totalCount: 33, offset: 0, hasMore: true, returnedCount: 11, query: "text is not a count", nested: { total: 5 } }), { format, tool: "list" });
+    assert.equal(formatted.items.length, 10);
+    assert.equal(formatted.matched, 11);
+    assert.deepEqual(formatted.counts, { totalCount: 33, offset: 0, hasMore: true, returnedCount: 11 });
+    const plain = readMcpResult(JSON.stringify({ results: records, nextOffset: 11 }), {});
+    assert.deepEqual([plain.items.length, plain.matched, plain.counts], [10, 11, { nextOffset: 11 }]);
+    // Ten or fewer records give no matched count; a single-record answer has no envelope.
+    assert.equal(readMcpResult(JSON.stringify({ items: records.slice(0, 10) }), { format }).matched, undefined);
+    const single = readMcpResult(JSON.stringify({ product: "windows-server", version: "2016", ends: "2027-01-12", days: 68, supported: true }), { format });
+    assert.deepEqual([single.items.length, single.counts], [1, undefined]);
+  });
+
   it("is empty for blank text, and for a structure with nothing to match when the format has no whole-result rule", () => {
     assert.deepEqual(readMcpResult("", {}), { items: [], empty: true });
     assert.deepEqual(readMcpResult("  ", { format }), { items: [], empty: true });

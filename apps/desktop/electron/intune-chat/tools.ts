@@ -224,6 +224,69 @@ export interface McpReadResult {
   items: McpResultItem[];
   /** The server answered, but with nothing: no text, or a structure with no matching record. */
   empty: boolean;
+  /** How many records the result holds, given only when that is more than the items listed. */
+  matched?: number;
+  /**
+   * The number and true or false fields at the top of a list result, such
+   * as totalCount, hasMore, offset or match_count, as the server gave them.
+   */
+  counts?: Record<string, number | boolean>;
+}
+
+/**
+ * The number and true or false fields of a result's top-level record: the
+ * envelope that says how complete a list is and how to ask for the next page.
+ */
+function envelopeCounts(data: unknown): Record<string, number | boolean> | undefined {
+  if (!data || typeof data !== "object" || Array.isArray(data)) return undefined;
+  const counts = Object.fromEntries(Object.entries(data as Record<string, unknown>).filter(([, value]) =>
+    typeof value === "boolean" || (typeof value === "number" && Number.isFinite(value)))) as Record<string, number | boolean>;
+  return Object.keys(counts).length > 0 ? counts : undefined;
+}
+
+/** Whether a tool's schema declares a param that reads a later page, such as skip, offset or cursor. */
+export function mcpToolPages(tool: Pick<McpChatTool, "inputSchema">): boolean {
+  const properties = tool.inputSchema.properties && typeof tool.inputSchema.properties === "object" ? Object.keys(tool.inputSchema.properties) : [];
+  return properties.some((key) => /^(?:skip|offset|start|page|page_?token|cursor|after|next_?(?:offset|start|cursor|page))$/i.test(key));
+}
+
+/** The result's own counts say the server has more records than it returned, as hasMore: true does. */
+export function mcpServerHasMore(counts: Readonly<Record<string, number | boolean>> | undefined): boolean {
+  return Object.entries(counts ?? {}).some(([key, value]) => value === true && /^(?:has_?more|has_?next(?:_?page)?|more_?available)$/i.test(key));
+}
+
+/** The items read, how many records matched, and the envelope counts, as one result. */
+function listResult(found: McpResultItem[], matched: number, counts: Record<string, number | boolean> | undefined): McpReadResult {
+  return {
+    items: found,
+    empty: found.length === 0,
+    ...(matched > found.length ? { matched } : {}),
+    ...(found.length > 0 && counts ? { counts } : {}),
+  };
+}
+
+/**
+ * What the model reads before a list of MCP results: the server's counts,
+ * how many records OpenAdminOS left out, and whether the server has more.
+ * A list that is not complete says so, with the words to use.
+ */
+export function mcpListingNote(serverName: string, read: { listed: number; matched?: number; counts?: Readonly<Record<string, number | boolean>>; pages?: boolean }): string {
+  const lines: string[] = [];
+  const counts = Object.entries(read.counts ?? {});
+  if (counts.length > 0) lines.push(`${serverName} result counts: ${counts.map(([key, value]) => `${key} ${String(value)}`).join(", ")}.`);
+  const matched = read.matched ?? read.listed;
+  const left = matched - read.listed;
+  if (left > 0) lines.push(`OpenAdminOS lists ${read.listed} of the ${matched} records in this result below. The other ${left} ${left === 1 ? "was" : "were"} left out here and ${left === 1 ? "is" : "are"} not absent.`);
+  const more = mcpServerHasMore(read.counts);
+  if (more) lines.push(`${serverName} has more records than this result returned.`);
+  if (left > 0 || more) {
+    const totals = counts.flatMap(([key, value]) => (typeof value === "number" && /total/i.test(key) ? [value] : []));
+    const total = Math.max(matched, ...totals);
+    const of = total > matched || !more ? String(total) : `more than ${matched}`;
+    const further = read.pages ? "To read further records, call the same tool again for the next page." : "This tool reads no further pages, so a narrower question is the way to reach the others.";
+    lines.push(`The list below is not complete. Say so in the answer: give how many are shown and how many exist, as in "Showing ${read.listed} of ${of}". ${further}`);
+  }
+  return lines.join("\n");
 }
 
 const FACT_CHARS = 1_500;
@@ -295,13 +358,18 @@ function shapeItem(record: Record<string, unknown>, shape: McpResultShape, clean
  * Results of a server with a catalog result format: each record that
  * matches a shape is one source, and a matched record is not searched
  * further. When none matches, the whole result is one source if the format
- * says so and no count key is zero; otherwise the result is empty.
+ * says so and no count key is zero; otherwise the result is empty. The
+ * first ten matches are listed and the rest counted, and a list keeps the
+ * number and true or false fields of its top-level record as its counts.
  */
 function readFormatted(data: unknown, text: string, format: McpResultFormat, call: { args?: Record<string, unknown>; tool?: string }, clean: (value: string) => string): McpReadResult {
   const found: McpResultItem[] = [];
+  // Records past the limit are counted, not listed, so the model can be told how many were left out.
+  let matched = 0;
+  let rootMatched = false;
   // `inherited` is the nearest enclosing record's link under the format's inheritUrl keys.
   const walk = (value: unknown, depth: number, inherited: string | undefined): void => {
-    if (depth > 6 || found.length >= MCP_RESULT_LIMIT || value === null || typeof value !== "object") return;
+    if (depth > 6 || value === null || typeof value !== "object") return;
     if (Array.isArray(value)) {
       for (const item of value) walk(item, depth + 1, inherited);
       return;
@@ -309,13 +377,18 @@ function readFormatted(data: unknown, text: string, format: McpResultFormat, cal
     const record = value as Record<string, unknown>;
     for (const shape of format.items) {
       const item = shapeItem(record, shape, clean);
-      if (item) { found.push(!item.url && inherited ? { ...item, url: inherited } : item); return; }
+      if (item) {
+        matched += 1;
+        if (depth === 0) rootMatched = true;
+        if (found.length < MCP_RESULT_LIMIT) found.push(!item.url && inherited ? { ...item, url: inherited } : item);
+        return;
+      }
     }
     const link = httpsLink(record, format.inheritUrl) ?? inherited;
     for (const child of Object.values(record)) walk(child, depth + 1, link);
   };
   walk(data, 0, undefined);
-  if (found.length > 0 || !format.whole || !data || typeof data !== "object" || Array.isArray(data)) return { items: found, empty: found.length === 0 };
+  if (found.length > 0 || !format.whole || !data || typeof data !== "object" || Array.isArray(data)) return listResult(found, matched, rootMatched ? undefined : envelopeCounts(data));
   const record = data as Record<string, unknown>;
   if (format.whole.emptyWhenZero?.some((key) => record[key] === 0)) return { items: [], empty: true };
   const params = Object.values(call.args ?? {}).flatMap((value) => (Array.isArray(value) ? value : [value])).map((value) => textOf(value)).filter(Boolean);
@@ -368,13 +441,15 @@ export function readMcpResult(text: string, call: { structured?: unknown; args?:
     }
     if (data !== undefined) return readFormatted(data, text, call.format, call, clean);
   }
-  return { items: readDefault(text, call, clean), empty: false };
+  return { ...readDefault(text, call, clean), empty: false };
 }
 
-function readDefault(text: string, call: { structured?: unknown; args?: Record<string, unknown>; host?: string }, clean: (value: string) => string): McpResultItem[] {
+function readDefault(text: string, call: { structured?: unknown; args?: Record<string, unknown>; host?: string }, clean: (value: string) => string): Omit<McpReadResult, "empty"> {
   const found: McpResultItem[] = [];
+  let matched = 0;
+  let rootMatched = false;
   const walk = (value: unknown, depth: number): void => {
-    if (depth > 6 || found.length >= MCP_RESULT_LIMIT || value === null || typeof value !== "object") return;
+    if (depth > 6 || value === null || typeof value !== "object") return;
     if (Array.isArray(value)) {
       for (const item of value) walk(item, depth + 1);
       return;
@@ -383,6 +458,9 @@ function readDefault(text: string, call: { structured?: unknown; args?: Record<s
     const title = typeof record.title === "string" ? record.title : typeof record.name === "string" ? record.name : undefined;
     const url = URL_KEYS.map((key) => record[key]).find((candidate): candidate is string => typeof candidate === "string" && /^https?:\/\//i.test(candidate));
     if (title && clean(title) && url) {
+      matched += 1;
+      if (depth === 0) rootMatched = true;
+      if (found.length >= MCP_RESULT_LIMIT) return;
       const excerpt = EXCERPT_KEYS.map((key) => record[key]).find((candidate): candidate is string => typeof candidate === "string" && candidate.trim().length > 0);
       found.push({ title: clean(title), url, ...(excerpt ? { excerpt: excerpt.trim() } : {}) });
       return;
@@ -399,20 +477,21 @@ function readDefault(text: string, call: { structured?: unknown; args?: Record<s
   }
   if (data !== undefined) {
     walk(data, 0);
-    return found;
+    const { empty: _empty, ...read } = listResult(found, matched, rootMatched ? undefined : envelopeCounts(data));
+    return read;
   }
   // The fetched URL comes from the model's request, so it only becomes a
   // card link when it points at the server's own host.
   const fetched = typeof call.args?.url === "string" && call.host && isUrlOnHost(call.args.url, call.host) ? call.args.url : undefined;
   const heading = /^#\s+(.+)$/m.exec(text)?.[1];
-  if (fetched && heading && clean(heading)) return [{ title: clean(heading), url: fetched, excerpt: text.trim() }];
+  if (fetched && heading && clean(heading)) return { items: [{ title: clean(heading), url: fetched, excerpt: text.trim() }] };
   const seen = new Set<string>();
   for (const match of text.matchAll(/\[([^\]\n]{1,200})\]\((https?:\/\/[^)\s]+)\)/g)) {
-    if (found.length >= MCP_RESULT_LIMIT || seen.has(match[2]!) || !clean(match[1]!)) continue;
+    if (seen.has(match[2]!) || !clean(match[1]!)) continue;
     seen.add(match[2]!);
-    found.push({ title: clean(match[1]!), url: match[2]! });
+    if (found.length < MCP_RESULT_LIMIT) found.push({ title: clean(match[1]!), url: match[2]! });
   }
-  return found;
+  return { items: found, ...(seen.size > found.length ? { matched: seen.size } : {}) };
 }
 
 /**
@@ -796,6 +875,8 @@ export async function executeIntuneChatTool(
         // Cards need titles and links only; excerpts reach the model, not the stored trace.
         results: ((result as { results?: McpResultItem[] }).results ?? []).map(({ title, url }) => ({ title, ...(url ? { url } : {}) })),
         ...((result as { empty?: boolean }).empty ? { empty: true } : {}),
+        ...(typeof (result as { matched?: unknown }).matched === "number" ? { matched: (result as { matched: number }).matched } : {}),
+        ...(mcpServerHasMore((result as { counts?: Record<string, number | boolean> }).counts) ? { more: true } : {}),
         sentToHost: true,
       } } : {}),
       ...(cacheSource ? { cacheSource } : {}),
@@ -1087,6 +1168,8 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     content: result.text,
     results: read.items,
     ...(read.empty ? { empty: true } : {}),
+    ...(read.matched !== undefined ? { matched: read.matched } : {}),
+    ...(read.counts ? { counts: read.counts } : {}),
   };
 }
 

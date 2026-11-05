@@ -9,7 +9,9 @@ import type { McpChatTool } from "./tools.js";
  * MCP call. Its prompt holds the admin's current question, the chosen
  * tool's description and schema, and the titles and links that earlier MCP
  * calls in this same answer returned (with item IDs where a result gives
- * one), with the queries this answer already sent. It never receives earlier messages of the conversation, results or
+ * one), with the queries this answer already sent and, for earlier calls
+ * of the same tool, how many records were listed and the server's result
+ * counts. It never receives earlier messages of the conversation, results or
  * queries of earlier answers, Graph results, cache rows, tenant values,
  * answers or the tenant name, so the model that read the tenant never
  * writes what leaves for a third-party host.
@@ -51,6 +53,12 @@ export interface McpQueryWriterInput {
   earlierResults: ReadonlyArray<{ serverName: string; title: string; url?: string; id?: string }>;
   /** Queries already sent in this answer, so a second call can ask something else. Never those of earlier answers. */
   sentQueries: readonly string[];
+  /**
+   * Earlier calls of this same tool in this answer: the params sent, how
+   * many records were listed and the server's own result counts, so a
+   * further call can ask for the next page. Public third-party content.
+   */
+  earlierCalls?: ReadonlyArray<{ sent: unknown; listed: number; matched?: number; counts?: Readonly<Record<string, number | boolean>> }>;
 }
 
 export class McpQueryWriterError extends Error {}
@@ -71,6 +79,9 @@ export function buildMcpQueryWriterPrompt(input: Omit<McpQueryWriterInput, "llm"
     input.tool.queryHint ? `How to fill these params (from OpenAdminOS): ${input.tool.queryHint}` : "",
     results.length > 0 ? `Earlier results in this answer:\n${fenceTenantData(results, "third-party:mcp-results")}` : "",
     input.sentQueries.length > 0 ? `Queries already sent in this answer, so ask something else:\n${fenceTenantData(input.sentQueries, "chat:sent-queries")}` : "",
+    input.earlierCalls && input.earlierCalls.length > 0
+      ? `Earlier calls of this tool in this answer, with how many records OpenAdminOS listed and the server's result counts. When the question needs records past them, use the tool's paging param, if it has one, to skip the records already listed:\n${fenceTenantData(input.earlierCalls, "third-party:mcp-result-counts")}`
+      : "",
     "Params JSON:",
   ].filter(Boolean).join("\n\n");
 }

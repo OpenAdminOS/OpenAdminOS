@@ -24,6 +24,8 @@ import {
   holdsTenantData,
   isMcpChatToolName,
   isTenantTool,
+  mcpListingNote,
+  mcpToolPages,
   mcpSourceLinesForPrompt,
   mcpToolDefinitionsForPrompt,
   summarizeToolCallForProgress,
@@ -310,6 +312,8 @@ export async function runAgenticChat(
   // Titles and links of MCP results in this answer, and the queries it sent: the query writer's only context besides the admin's current question. Nothing carries over from earlier answers.
   const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string; id?: string }> = [];
   const sentQueries: string[] = [];
+  // Per MCP call that answered: what was sent, how many records were listed and the server's counts, for paging.
+  const mcpCalls: Array<{ serverId: string; tool: string; sent: unknown; listed: number; matched?: number; counts?: Record<string, number | boolean> }> = [];
   const documentation: LoopPassage[] = [];
   const addDocumentation = (passages: readonly DocsIndexPassage[]) => {
     const numbers = citations.addPassages(passages);
@@ -600,6 +604,7 @@ export async function runAgenticChat(
         tool: entry,
         earlierResults: mcpResults,
         sentQueries,
+        earlierCalls: mcpCalls.filter((call) => call.serverId === entry.serverId && call.tool === entry.tool).map(({ sent, listed, matched, counts }) => ({ sent, listed, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) })),
       }),
       references: (serverId) => {
         const own = mcpResults.filter((item) => item.serverId === serverId);
@@ -630,11 +635,14 @@ export async function runAgenticChat(
       } else if (!execution.trace.error && !learnEmpty) {
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
-        const { results = [], content, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown } & Record<string, unknown>;
+        const { results = [], content, matched, counts, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown; matched?: number; counts?: Record<string, number | boolean> } & Record<string, unknown>;
         mcpResults.push(...results.map((item) => ({ serverId: mcpSource.serverId, serverName: mcpSource.serverName, title: item.title, ...(item.url ? { url: item.url } : {}), ...(item.id ? { id: item.id } : {}) })));
+        mcpCalls.push({ serverId: mcpSource.serverId, tool: mcpSource.tool, sent: execution.trace.params, listed: results.length, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) });
         const cites = citations.addMcpResults(results, mcpSource);
+        // The excerpts replace the raw result, so the counts and what was left out are said before them.
+        const note = mcpListingNote(mcpSource.serverName, { listed: results.length, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}), pages: mcpTool ? mcpToolPages(mcpTool) : false });
         observed = results.some((item) => item.excerpt)
-          ? { ...rest, content: numberedMcpResults(results, cites.map((entry) => entry.cite)) }
+          ? { ...rest, content: [note, numberedMcpResults(results, cites.map((entry) => entry.cite))].filter(Boolean).join("\n\n") }
           : { ...rest, content, citations: cites };
       } else if (mcpSource.serverId === LEARN_SERVER_ID && fallbackPending && !learnAnswered && input.documentationFallback) {
         // Learn is offline, the query was blocked or nothing matched: the local index takes over.

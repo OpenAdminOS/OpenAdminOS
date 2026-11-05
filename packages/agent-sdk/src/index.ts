@@ -1313,6 +1313,10 @@ export interface IntuneChatToolTraceEntry {
     empty?: boolean;
     /** The server answered with an error result, as opposed to not answering. */
     toolError?: boolean;
+    /** How many records the result held, given only when OpenAdminOS listed fewer of them. */
+    matched?: number;
+    /** The result's own counts say the server has more records than it returned, as hasMore: true does. */
+    more?: boolean;
   };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources

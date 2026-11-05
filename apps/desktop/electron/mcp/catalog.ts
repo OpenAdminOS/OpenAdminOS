@@ -209,8 +209,8 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
       get_recent_azure_updates: { filter: { param: "filter", fields: ["id", "baseId"], literal: "string" }, form: { kind: "slug" } },
     },
     queryHints: {
-      get_recent_m365_roadmaps: "Put a few title words in search, for example Intune or Microsoft Teams. filter takes only an OData expression such as products/any(p: p eq 'Microsoft Intune') or status eq 'Rolling out'; leave it out otherwise.",
-      get_recent_azure_updates: "Put a few title words in search, for example Retirement or Azure Monitor. filter takes only an OData expression such as tags/any(t: t eq 'Retirements'); leave it out otherwise.",
+      get_recent_m365_roadmaps: "Put a few title words in search, for example Intune or Microsoft Teams. filter takes only an OData expression such as products/any(p: p eq 'Microsoft Intune') or status eq 'Rolling out'; leave it out otherwise. To read past the records an earlier call listed, set skip to its offset plus the records it listed.",
+      get_recent_azure_updates: "Put a few title words in search, for example Retirement or Azure Monitor. filter takes only an OData expression such as tags/any(t: t eq 'Retirements'); leave it out otherwise. To read past the records an earlier call listed, set skip to its offset plus the records it listed.",
     },
     results: {
       items: [{

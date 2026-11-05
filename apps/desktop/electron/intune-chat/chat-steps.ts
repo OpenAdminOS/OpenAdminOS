@@ -404,7 +404,11 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneC
     if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs };
     if (entry.mcpSource.empty) return { status: "completed", title: `${serverName} found nothing`, detail: `${tool} · no results for this query`, durationMs };
     const count = results?.length ?? 0;
-    return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? `${count} ${count === 1 ? "result" : "results"}` : `answer from ${host}`}`, durationMs };
+    // A list OpenAdminOS shortened, or one the server says continues, never reads as complete.
+    const matched = entry.mcpSource.matched;
+    const shown = matched !== undefined && matched > count ? `${count} of ${matched} results` : `${count} ${count === 1 ? "result" : "results"}`;
+    const more = entry.mcpSource.more ? " · the server has more" : "";
+    return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? shown : `answer from ${host}`}${more}`, durationMs };
   }
   if (entry.tool === "web_search") return entry.error ? { status: "failed", title: "Web search failed", detail: entry.error, durationMs } : { status: "completed", title: "Searched the web", detail: entry.resultSummary, durationMs };
   const copy = TOOL_STEP[entry.tool];
