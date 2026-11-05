@@ -38,6 +38,10 @@ If a server stops listing an offered tool, its card says "Installed · tools mis
 
 A roadmap ID, an Azure update ID or a KB number is sent only when it appears in your question or in an earlier result from the same server in the same answer. Chat does not guess IDs. Links work the same way: a page link is sent only as an earlier result of that server listed it.
 
+Each ID must have its tool's form: roadmap IDs are digits, Azure update IDs are digits or an older post's lowercase name such as `2021regions`, and KB numbers are digits with an optional KB prefix. Your question is read as separate tokens, so "109560-109561" names two roadmap items and never 109560109561. "KB5034441" and "5034441" are the same article; no other spelling counts.
+
+The same rule covers filters. Release Communications' list tools take an OData filter such as `status eq 'Rolling out'`. Chat reads the filter before sending it: any comparison on `id` or `baseId` must name an ID from your question or an earlier result, and a filter Chat cannot read, such as plain words, is not sent. The Chat step says why.
+
 ## Who runs each server
 
 The install review names the operator, links its terms or privacy page where one exists, and lists the tools that will be offered.
@@ -48,7 +52,7 @@ The install review names the operator, links its terms or privacy page where one
 
 ## Which server Chat asks
 
-Naming a server in a question calls it, for example "Ask endoflife.ai about Windows Server 2016". For documentation questions, topic words choose a server:
+Naming a server in a question calls it, for example "Ask endoflife.ai about Windows Server 2016". A host counts as a name only when it belongs to that server: Release Communications runs on www.microsoft.com, which serves much more, so "microsoft.com" in a question does not call it. Its name, its aliases and its full address with the path still do. For documentation questions, topic words choose a server:
 
 - roadmap, retirement, what's new, rollout, Azure update: Microsoft Release Communications
 - KB, cumulative update, known issue, patch, update history: WindowsForum

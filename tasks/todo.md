@@ -1479,3 +1479,14 @@ Branch `marketplace/second-wave` off `main` (98ddfc3). The owner asked to add th
 7. [x] Disclosure: strip, composer, tooltip and hosted confirmation name the hosts; install review adds Who runs it and Tools Chat will be offered.
 8. [x] SPEC, CHANGELOG, new docs/gitbook/features/marketplace.md; docs:check passes.
 9. [ ] Tests under Node 22 pass (typecheck, electron 973, renderer 493, runtime, qa, test:scripts, docs:check, three smokes); renderer covers each card and install review; light and dark screenshots taken; separate Claude evaluator run (one finding, fixed). Open: GPT-6.1-Sol review, and a live check in the GUI app. The live check ran through the main-process Chat path with gpt-oss:20b: WindowsForum answered with results and a get_kb_article call on an ID from its own search; Release Communications sent a valid OData query and showed the empty state; endoflife.ai showed the error state. Answer quality from gpt-oss:20b was poor (tenant-evidence guard, protocol drift), unrelated to this branch.
+
+## Review round 1 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff against 98ddfc3. All six findings fixed, each with a test that fails before the fix:
+
+1. [x] Blocking: IDs in OData `filter` bypassed the item-ID rule. A catalog `itemIds.filter` entry names the filter param and its item fields (`id`, `baseId`); `electron/intune-chat/mcp-filter.ts` parses the filter before sending, checks every value compared with an item field, writes it as the server compares it (number for roadmaps, text for Azure updates, both checked live) and refuses a filter outside its grammar with a designed message.
+2. [x] Normalization collisions. Each tool declares an ID form (roadmap: digits; Azure update: digits or lowercase slug, as live IDs such as `2021regions` show; KB: digits with optional KB prefix). The question is split on characters the form cannot hold, only the KB prefix is an equivalent, and the canonical ID is sent.
+3. [x] KEV citations lost their URL. Result formats can name `inheritUrl` keys; CVE entries take the enclosing `source.url`.
+4. [x] www.microsoft.com named Release Communications. `sharedHost` entries are named by name, aliases or full URL with path; host matches refuse a following label.
+5. [x] Details said a skipped server receives the query text; it now says Chat sends nothing until the tools are back.
+6. [x] The query writer prompt contradicted itself on IDs; it now has one rule for item IDs.
