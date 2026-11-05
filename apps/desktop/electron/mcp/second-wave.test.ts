@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
 import { planChatSources } from "../intune-chat/chat-steps.js";
+import { canonicalMcpFilter } from "../intune-chat/mcp-filter.js";
 import { buildMcpQueryWriterPrompt } from "../intune-chat/mcp-query-writer.js";
 import { canonicalItemId, itemIdsInText, mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
 import { MCP_CATALOG, mcpCatalogEntry, mcpHost } from "./catalog.js";
@@ -49,7 +50,13 @@ describe("Second-wave catalog entries", () => {
     assert.deepEqual(rc.itemIds, {
       get_m365_roadmap_by_id: { params: ["id"], form: { kind: "number" } },
       get_azure_update_by_id: { params: ["id"], form: { kind: "slug" } },
+      get_recent_m365_roadmaps: { filter: { param: "filter", fields: ["id", "baseId"], literal: "number" }, form: { kind: "number" } },
+      get_recent_azure_updates: { filter: { param: "filter", fields: ["id", "baseId"], literal: "string" }, form: { kind: "slug" } },
     });
+    // Every tool with a free-text filter declares where IDs can stand in it.
+    for (const tool of FIXTURES["release-communications"]!.tools as Array<{ name: string; inputSchema?: { properties?: Record<string, unknown> } }>) {
+      if (tool.inputSchema?.properties?.filter) assert.equal(rc.itemIds?.[tool.name]?.filter?.param, "filter", tool.name);
+    }
     assert.deepEqual(wf.itemIds, { get_kb_article: { params: ["kb_id"], form: { kind: "number", prefix: "KB", sendPrefix: true } } });
   });
 });
@@ -66,6 +73,16 @@ describe("Second-wave item ID forms", () => {
     for (const id of ids("windowsforum", "search_kb")) assert.deepEqual(canonicalItemId(id, wf.itemIds!.get_kb_article!.form)?.send, id.toUpperCase());
     assert.equal(canonicalItemId("1.09560", rc.itemIds!.get_m365_roadmap_by_id!.form), undefined);
     assert.equal(canonicalItemId("2021Regions", rc.itemIds!.get_azure_update_by_id!.form), undefined);
+  });
+
+  it("reads the filter examples in the catalog hints, so the writer is shown filters that are sent", () => {
+    const rc = mcpCatalogEntry("release-communications")!;
+    for (const tool of ["get_recent_m365_roadmaps", "get_recent_azure_updates"]) {
+      const examples = [...rc.queryHints![tool]!.matchAll(/such as (.+?)(?: or (status eq .+?))?;/g)].flatMap((match) => [match[1]!, ...(match[2] ? [match[2]] : [])]);
+      assert.ok(examples.length > 0, tool);
+      const rule = rc.itemIds![tool]!.filter!;
+      for (const example of examples) assert.equal(canonicalMcpFilter(example, { ...rule, itemId: () => undefined }), example);
+    }
   });
 
   it("reads typed IDs as tokens split on characters an ID cannot hold", () => {

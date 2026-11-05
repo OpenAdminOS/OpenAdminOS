@@ -931,6 +931,63 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
+  it("applies the item-ID rule to IDs inside an OData filter, and refuses a filter it cannot read", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const list = (toolName: string, literal: "number" | "string", form: NonNullable<McpChatTool["itemIds"]>["form"]): McpChatTool => ({
+        ...docsTool, name: mcpChatToolName("release-communications", toolName), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: toolName,
+        inputSchema: { type: "object", properties: { filter: { type: "string" }, search: { type: "string" } } },
+        itemIds: { filter: { param: "filter", fields: ["id", "baseId"], literal }, form },
+        resultFormat: { items: [{ title: [["title"]], id: ["id"] }] },
+      });
+      const roadmaps = list("get_recent_m365_roadmaps", "number", { kind: "number" });
+      const updates = list("get_recent_azure_updates", "string", { kind: "slug" });
+      const context: McpChatContext = {
+        ...mcpContext(calls),
+        tools: [roadmaps, updates],
+        async call(tool, args) {
+          calls.push({ tool: tool.tool, args });
+          return { text: "", truncated: false, structured: { items: [{ id: 124890, title: "Microsoft Intune: new reports" }] } };
+        },
+      };
+      const final = '{"final":true,"answer":"Done."}';
+      const ask = async (tool: McpChatTool, question: string, written: Array<Record<string, unknown>>) => {
+        const before = calls.length;
+        const result = await runAgenticChat({ ...input(store, scriptedLlm([...written.map(() => JSON.stringify({ tool: tool.name, params: {} })), final], [], [], written.map((params) => JSON.stringify(params))), context), question, adminQuestion: question, questionKind: "docs" });
+        return { trace: result.toolTrace, sent: calls.slice(before).map((call) => call.args) };
+      };
+
+      // An ID nobody gave is refused inside a filter, before anything is sent.
+      const guessed = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "id eq 109560" }]);
+      assert.equal(guessed.trace[0]!.mcpSource?.blocked, true);
+      assert.match(guessed.trace[0]!.error!, /named an item in filter field id that is neither in your question nor in an earlier Microsoft Release Communications result in this answer\. Nothing was sent to www\.microsoft\.com\./);
+      assert.deepEqual(guessed.sent, []);
+      const hidden = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "products/any(p: p eq 'Microsoft Intune') and (status eq 'Rolling out' or baseId eq 109560)" }]);
+      assert.equal(hidden.trace[0]!.mcpSource?.blocked, true);
+      assert.deepEqual(hidden.sent, []);
+
+      // A plain word is not a filter: refused with a designed message, nothing sent.
+      const words = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "Intune" }]);
+      assert.equal(words.trace[0]!.mcpSource?.blocked, true);
+      assert.match(words.trace[0]!.error!, /query had a filter OpenAdminOS cannot check: "Intune" is not followed by a comparison such as eq\. Nothing was sent to www\.microsoft\.com\. A filter is sent only as OData comparisons, such as status eq 'Rolling out'\./);
+      assert.deepEqual(words.sent, []);
+
+      // Filters without an ID go out, rebuilt from what was read.
+      const plain = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "products/any(p: p eq 'Microsoft Intune')  AND status eq 'Rolling out'", search: "Intune" }]);
+      assert.equal(plain.trace[0]!.error, undefined);
+      assert.deepEqual(plain.sent, [{ filter: "products/any(p: p eq 'Microsoft Intune') and status eq 'Rolling out'", search: "Intune" }]);
+
+      // An ID the admin typed, or an earlier result of the same server gave, may be compared, as the server compares it.
+      const typed = await ask(roadmaps, "What is the status of roadmap 109560?", [{ filter: "id eq '109560'" }]);
+      assert.deepEqual(typed.sent, [{ filter: "id eq 109560" }]);
+      const listed = await ask(roadmaps, "What is rolling out for Intune?", [{ search: "Intune" }, { filter: "id eq 124890" }]);
+      assert.deepEqual(listed.trace.map((entry) => entry.error), [undefined, undefined]);
+      assert.deepEqual(listed.sent, [{ search: "Intune" }, { filter: "id eq 124890" }]);
+      const azure = await ask(updates, "Is Azure update 466774 a retirement?", [{ filter: "id eq 466774 and tags/any(t: t eq 'Retirements')" }]);
+      assert.deepEqual(azure.sent, [{ filter: "id eq '466774' and tags/any(t: t eq 'Retirements')" }]);
+    });
+  });
+
   it("leaves out params the writer set to null, as a schema default of null invites", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

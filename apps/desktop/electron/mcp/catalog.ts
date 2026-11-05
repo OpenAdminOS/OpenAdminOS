@@ -72,6 +72,15 @@ export interface McpItemIdForm {
 export interface McpItemIdRule {
   /** Params that take one item ID, such as a roadmap ID or a KB number. */
   params?: readonly string[];
+  /**
+   * A param that takes an OData filter, and the fields in it that name one
+   * item. The filter is read before sending (see mcp-filter.ts): every value
+   * compared with one of these fields must pass the same item-ID rule, and
+   * a filter that cannot be read is refused. `literal` is how the server
+   * compares the field: as a number (`id eq 109560`) or as text
+   * (`id eq '466774'`).
+   */
+  filter?: { param: string; fields: readonly string[]; literal: "number" | "string" };
   form: McpItemIdForm;
 }
 
@@ -179,9 +188,12 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     readOnly: true,
     tools: ["get_recent_m365_roadmaps", "get_m365_roadmap_by_id", "get_recent_azure_updates", "get_azure_update_by_id"],
     // Roadmap IDs are numbers. Azure update IDs are numbers in text, and older ones are slugs ("2021regions"); live check 2026-11-05.
+    // The list filters compare id as a number for roadmaps and as text for Azure updates; baseId also names one item.
     itemIds: {
       get_m365_roadmap_by_id: { params: ["id"], form: { kind: "number" } },
       get_azure_update_by_id: { params: ["id"], form: { kind: "slug" } },
+      get_recent_m365_roadmaps: { filter: { param: "filter", fields: ["id", "baseId"], literal: "number" }, form: { kind: "number" } },
+      get_recent_azure_updates: { filter: { param: "filter", fields: ["id", "baseId"], literal: "string" }, form: { kind: "slug" } },
     },
     queryHints: {
       get_recent_m365_roadmaps: "Put a few title words in search, for example Intune or Microsoft Teams. filter takes only an OData expression such as products/any(p: p eq 'Microsoft Intune') or status eq 'Rolling out'; leave it out otherwise.",

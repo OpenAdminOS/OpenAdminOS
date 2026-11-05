@@ -20,6 +20,7 @@ import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
 import type { McpItemIdForm, McpItemIdRule, McpResultFormat, McpResultShape } from "../mcp/catalog.js";
 import { cleanMcpDescription, cleanMcpSchema, McpHostError } from "../mcp/host.js";
 import { canonicalEgressText, egressResidue } from "./mcp-egress.js";
+import { canonicalMcpFilter, McpFilterItemError, McpFilterSyntaxError } from "./mcp-filter.js";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
 import { hasMixedScriptToken, isCommonWord, normalizeTokens } from "./mcp-stopwords.js";
 import { graphCacheRequestFromNextLink, resourceStalenessMs, unwrapGraphCollectionPage } from "../state-helpers.js";
@@ -950,15 +951,22 @@ function canonicalMcpArgs(entry: McpChatTool, args: Record<string, unknown>, ref
   const checked: string[] = [];
   const rule = entry.itemIds;
   const known = new Set(rule ? [...itemIdsInText(references.question, rule.form), ...references.itemIds.flatMap((id) => canonicalItemId(id, rule.form)?.key ?? [])] : []);
+  const unknownItem = (key: string) => new McpQueryBlockedError(`the ${entry.serverName} query named an item in ${key} that is neither in your question nor in an earlier ${entry.serverName} result in this answer. Nothing was sent to ${entry.host}. IDs are sent only as your question or a result gave them.`);
+  const allowedItemId = (value: string): string | undefined => {
+    const id = rule ? canonicalItemId(value, rule.form) : undefined;
+    return id && known.has(id.key) ? id.send : undefined;
+  };
   const canonical = (key: string, value: unknown): unknown => {
     // A param that names one item sends only an ID the admin typed or a result of this server gave, in its canonical form.
     if (rule?.params?.includes(key)) {
-      const id = typeof value === "string" || typeof value === "number" ? canonicalItemId(String(value), rule.form) : undefined;
-      if (!id || !known.has(id.key)) {
-        throw new McpQueryBlockedError(`the ${entry.serverName} query named an item in ${key} that is neither in your question nor in an earlier ${entry.serverName} result in this answer. Nothing was sent to ${entry.host}. IDs are sent only as your question or a result gave them.`);
-      }
-      checked.push(id.send);
-      return typeof value === "number" && !rule.form.sendPrefix ? Number(id.send) : id.send;
+      const send = typeof value === "string" || typeof value === "number" ? allowedItemId(String(value)) : undefined;
+      if (send === undefined) throw unknownItem(key);
+      checked.push(send);
+      return typeof value === "number" && !rule.form.sendPrefix ? Number(send) : send;
+    }
+    const filter = rule?.filter?.param === key ? rule.filter : undefined;
+    if (filter && typeof value !== "string") {
+      throw new McpQueryBlockedError(`the ${entry.serverName} query gave ${key} a value that is not filter text. Nothing was sent to ${entry.host}.`);
     }
     if (typeof value !== "string") {
       if (typeof value === "number") checked.push(String(value));
@@ -969,12 +977,30 @@ function canonicalMcpArgs(entry: McpChatTool, args: Record<string, unknown>, ref
       if (!references.links.includes(value)) {
         throw new McpQueryBlockedError(`the ${entry.serverName} query held a link that no earlier ${entry.serverName} result in this answer returned. Nothing was sent to ${entry.host}. Links are sent only as a result listed them.`);
       }
-      checked.push(text);
-      return value;
+      // A filter that holds a listed link is still read below.
+      if (!filter) {
+        checked.push(text);
+        return value;
+      }
     }
     const residue = egressResidue(text);
     if (residue) {
       throw new McpQueryBlockedError(`the ${entry.serverName} query held ${residue === "encoded" ? "encoded text" : "characters that do not print"} that could hide tenant data. Nothing was sent to ${entry.host}. Rephrase it as a plain public question.`);
+    }
+    if (filter) {
+      // A filter can name an item as well as an item param can: every ID in it passes the same rule, and the filter is sent as it was read.
+      let read: string;
+      try {
+        read = canonicalMcpFilter(text, { fields: filter.fields, literal: filter.literal, itemId: allowedItemId });
+      } catch (caught) {
+        if (caught instanceof McpFilterItemError) throw unknownItem(`${key} field ${caught.message}`);
+        if (caught instanceof McpFilterSyntaxError) {
+          throw new McpQueryBlockedError(`the ${entry.serverName} query had a ${key} OpenAdminOS cannot check: ${caught.message}. Nothing was sent to ${entry.host}. A ${key} is sent only as OData comparisons, such as status eq 'Rolling out'.`);
+        }
+        throw caught;
+      }
+      checked.push(read);
+      return read;
     }
     checked.push(text);
     return text;
