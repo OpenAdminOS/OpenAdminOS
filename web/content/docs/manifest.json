@@ -143,6 +143,13 @@
           "route": "features/office",
           "path": "features/office",
           "children": []
+        },
+        {
+          "title": "Marketplace",
+          "source": "features/marketplace.md",
+          "route": "features/marketplace",
+          "path": "features/marketplace",
+          "children": []
         }
       ]
     },

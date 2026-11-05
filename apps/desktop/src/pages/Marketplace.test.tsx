@@ -51,10 +51,11 @@ describe("Marketplace", () => {
     const kinds = screen.getByRole("group", { name: "Listing kind" });
     expect(within(kinds).getByRole("button", { name: "Discover" })).toHaveAttribute("aria-pressed", "true");
     expect(within(kinds).getByRole("button", { name: /Agents/ })).toHaveTextContent("2");
-    expect(within(kinds).getByRole("button", { name: /MCP tools/ })).toHaveTextContent("3");
+    expect(within(kinds).getByRole("button", { name: /MCP tools/ })).toHaveTextContent("6");
 
     const mcp = screen.getByRole("region", { name: "MCP tools" });
-    for (const [name, host] of [["Microsoft Learn", "learn.microsoft.com"], ["KQL Search", "www.kqlsearch.com"], ["IntuneAutomation", "www.intuneautomation.com"]]) {
+    for (const [name, host] of [["Microsoft Learn", "learn.microsoft.com"], ["KQL Search", "www.kqlsearch.com"], ["IntuneAutomation", "www.intuneautomation.com"],
+      ["Microsoft Release Communications", "www.microsoft.com"], ["WindowsForum", "mcp.windowsforum.com"], ["endoflife.ai", "mcp.endoflife.ai"]]) {
       const card = within(mcp).getByRole("button", { name: new RegExp(`^${name}, MCP tool`) });
       expect(card).toHaveTextContent(`Sends tool queries to ${host}`);
       expect(card).toHaveTextContent("No sign-in needed");
@@ -109,6 +110,83 @@ describe("Marketplace", () => {
     expect(await within(dialog).findByRole("status")).toHaveTextContent("Installed Microsoft Learn. Its tools are available to Chat.");
     expect(within(dialog).getByRole("switch", { name: /Available in Chat/ })).toHaveAttribute("aria-checked", "true");
     expect(within(dialog).getByText("search")).toBeInTheDocument();
+  });
+
+  it.each([
+    {
+      id: "release-communications", name: "Microsoft Release Communications", publisher: "Microsoft", host: "www.microsoft.com",
+      operator: "Microsoft runs this server at www.microsoft.com.", policy: ["Microsoft API Terms of Use", "https://learn.microsoft.com/en-us/legal/microsoft-apis/terms-of-use"],
+      tools: ["get_recent_m365_roadmaps", "get_m365_roadmap_by_id", "get_recent_azure_updates", "get_azure_update_by_id"], note: undefined,
+    },
+    {
+      id: "windowsforum", name: "WindowsForum", publisher: "WindowsForum.com", host: "mcp.windowsforum.com",
+      operator: "Fara Technologies LLC runs WindowsForum.com, an independent community, as the server itself states. It is not affiliated with Microsoft.",
+      policy: ["WindowsForum.com privacy policy", "https://windowsforum.com/help/privacy-policy/"], tools: ["search_kb", "get_kb_article"],
+      note: "Results come through a community server and are community text. Treat them as third-party reference that can be wrong or out of date.",
+    },
+    {
+      id: "endoflife-ai", name: "endoflife.ai", publisher: "EndofLife AI Inc.", host: "mcp.endoflife.ai",
+      operator: "EndofLife AI Inc., an Alberta (Canada) corporation, runs endoflife.ai, as its privacy policy and terms state.",
+      policy: ["endoflife.ai privacy policy", "https://endoflife.ai/privacy"],
+      tools: ["check_eol", "get_risk_score", "list_products", "get_product_lifecycle", "get_kev_exposure", "get_upcoming_eol", "get_edge_device_status", "get_upgrade_path"],
+      note: "Its terms cover using the data for your own IT estate. Reporting on other organisations needs a data licence from the operator.",
+    },
+  ])("shows the $name card and an install review with its operator, host, policy page and offered tools", async (server) => {
+    const user = userEvent.setup();
+    const bridge = render("/marketplace?kind=mcp");
+    const card = await screen.findByRole("button", { name: new RegExp(`^${server.name.replace(".", "\\.")}, MCP tool by ${server.publisher.replace(".", "\\.")}`) });
+    expect(card).toHaveTextContent(`Sends tool queries to ${server.host}`);
+    expect(card).toHaveTextContent(`Tool calls run at ${server.publisher}`);
+    await user.click(card);
+    const dialog = await screen.findByRole("dialog", { name: `${server.name} details` });
+    expect(within(dialog).getByText(new RegExp(`OpenAdminOS offers only these ${server.tools.length} tools from`))).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Install" }));
+
+    const review = within(dialog).getByText("Who runs it").parentElement!;
+    expect(review).toHaveTextContent(server.operator);
+    expect(within(dialog).getByText("Where queries go").parentElement!).toHaveTextContent(`Tool queries go to ${server.host}.`);
+    expect(within(review).getByRole("link", { name: server.policy[0] })).toHaveAttribute("href", server.policy[1]);
+    if (server.note) expect(review).toHaveTextContent(server.note);
+    const offered = within(dialog).getByText("Tools Chat will be offered").parentElement!;
+    for (const tool of server.tools) expect(within(offered).getByText(tool)).toBeInTheDocument();
+    expect(offered).toHaveTextContent(`Only these. Other tools ${server.name} lists are never shown or called.`);
+    expect(within(dialog).getByText(`No sign-in needed · queries go to ${server.host}`)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("checkbox", { name: `I understand that words from my question can be sent to ${server.host}.` }));
+    await user.click(within(dialog).getByRole("button", { name: "Install" }));
+    await waitFor(() => expect(bridge.installMcpServer).toHaveBeenCalledWith(server.id));
+    expect(document.body.textContent).not.toMatch(/USD|\$\d|per month|Starter|\bPro\b|paid key|price/i);
+  });
+
+  it("says every listed tool is offered when a server has no allowlist", async () => {
+    render("/marketplace?server=microsoft-learn&install=1");
+    const dialog = await screen.findByRole("dialog", { name: "Microsoft Learn details" });
+    expect(within(dialog).getByText("Tools Chat will be offered").parentElement!).toHaveTextContent("Every tool Microsoft Learn lists when it connects. They are shown in the details after install.");
+    expect(within(dialog).getByText("Who runs it").parentElement!).toHaveTextContent("Run by Microsoft.");
+  });
+
+  it("names offered tools a server stopped listing, on its card and in its details", async () => {
+    const user = userEvent.setup();
+    render("/marketplace?kind=mcp", {
+      mcpServers: createMockMcpServers({
+        "kql-search": { installed: true, enabled: true, offeredTools: ["search_kql_queries", "get_kql_query"], missingTools: ["get_kql_query"],
+          tools: [{ name: "search_kql_queries", description: "Search queries." }] },
+      }),
+    });
+    const card = await screen.findByRole("button", { name: /^KQL Search, MCP tool/ });
+    expect(card).toHaveTextContent("Installed · tools missing");
+    await user.click(card);
+    const dialog = await screen.findByRole("dialog", { name: "KQL Search details" });
+    const alert = within(dialog).getByRole("alert");
+    expect(alert).toHaveTextContent("KQL Search no longer lists a tool OpenAdminOS offers");
+    expect(alert).toHaveTextContent("Missing: get_kql_query. Chat does not use KQL Search until every offered tool is back. Check the connection again later.");
+    // Nothing in the dialog says queries still go to the host while Chat skips the server.
+    expect(within(dialog).getByText("Chat skips this server until its offered tools are back")).toBeInTheDocument();
+    expect(within(dialog).queryByText(/Tool queries go to www\.kqlsearch\.com/)).not.toBeInTheDocument();
+    expect(within(dialog).getByText("Chat calls none of these until every offered tool is back.")).toBeInTheDocument();
+    // "Where queries go" says the host receives nothing while the server is skipped.
+    const flow = within(dialog).getByText("Where queries go").parentElement!;
+    expect(flow).toHaveTextContent("Chat sends nothing to it until its offered tools are back");
+    expect(within(dialog).queryByText("Receives the query text")).not.toBeInTheDocument();
   });
 
   it("shows a designed error with retry when the server is unreachable", async () => {

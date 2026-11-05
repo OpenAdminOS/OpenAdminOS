@@ -122,6 +122,9 @@ const FIXED: Record<string, { ink: string; art: string }> = {
   "microsoft-learn": { ink: "ink", art: "layers" },
   "kql-search": { ink: "teal", art: "waves" },
   intuneautomation: { ink: "ochre", art: "keys" },
+  "release-communications": { ink: "slate", art: "rings" },
+  windowsforum: { ink: "plum", art: "graph" },
+  "endoflife-ai": { ink: "oxblood", art: "checks" },
 };
 
 function hash(value: string): number {

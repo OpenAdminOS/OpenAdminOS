@@ -142,6 +142,117 @@ describe("MCP host", () => {
     } finally { await host.closeAll(); }
   });
 
+  it("lists only allowlisted tools, names the missing ones and refuses other calls before sending", async () => {
+    let requests = 0;
+    const host = new McpHost({ clientVersion: "test", fetch: (url, init) => { requests += 1; return fetch(url, init); } });
+    const allowlisted = { ...endpoint, id: "allowlisted", tools: ["search_docs", "fails"] };
+    try {
+      const connected = await host.connect(allowlisted);
+      assert.deepEqual(connected.tools.map((tool) => tool.name), ["search_docs", "fails"]);
+      assert.deepEqual(connected.missingTools, []);
+      const result = await host.callTool(allowlisted, "search_docs", { query: "allowed" });
+      assert.equal(result.text, "Result for allowed");
+      // "big" is listed by the server, but not allowlisted: refused, and no request leaves.
+      searchCalls.length = 0;
+      const before = requests;
+      await assert.rejects(host.callTool(allowlisted, "big", {}), (error: unknown) =>
+        error instanceof McpHostError && error.code === "unknown-tool" && error.sent === false &&
+        error.message === "OpenAdminOS does not offer big from Test Docs. Nothing was sent.");
+      // A fresh host with no session sends nothing either, not even a handshake.
+      const fresh = new McpHost({ clientVersion: "test", fetch: (url, init) => { requests += 1; return fetch(url, init); } });
+      await assert.rejects(fresh.callTool(allowlisted, "delete_everything", {}), (error: unknown) => error instanceof McpHostError && error.sent === false);
+      assert.equal(requests, before);
+      assert.deepEqual(searchCalls, []);
+      // Without an allowlist every listed tool is kept, as before.
+      assert.deepEqual((await host.connect(endpoint)).missingTools, []);
+    } finally { await host.closeAll(); }
+  });
+
+  it("refuses every call to a server missing an offered tool, also in a session opened for the call", async () => {
+    let requests = 0;
+    const listings: Array<{ serverId: string; tools: string[] }> = [];
+    const host = new McpHost({
+      clientVersion: "test",
+      fetch: (url, init) => { requests += 1; return fetch(url, init); },
+      listed: (serverId, tools) => { listings.push({ serverId, tools: tools.map((tool) => tool.name) }); },
+    });
+    const incomplete = { ...endpoint, id: "incomplete", tools: ["search_docs", "get_article"] };
+    try {
+      searchCalls.length = 0;
+      // No connect first: the session opens for the call, as after an app restart.
+      await assert.rejects(host.callTool(incomplete, "search_docs", { query: "after restart" }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "tools-missing" && error.sent === false &&
+        error.message === "Test Docs no longer lists get_article, which OpenAdminOS offers from it, so Chat skips it. Nothing was sent. Check its connection in the Marketplace once the server lists it again.");
+      assert.deepEqual(searchCalls, []);
+      assert.deepEqual(listings, [{ serverId: "incomplete", tools: ["search_docs"] }]);
+      // The open session refuses too, and sends nothing more.
+      const before = requests;
+      await assert.rejects(host.callTool(incomplete, "search_docs", { query: "again" }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "tools-missing" && error.sent === false);
+      assert.equal(requests, before);
+      assert.deepEqual(searchCalls, []);
+    } finally { await host.closeAll(); }
+  });
+
+  it("closes a session while its listing is still being stored, so an uninstall never waits on the store", async () => {
+    let release: () => void = () => {};
+    let reported: () => void = () => {};
+    const reporting = new Promise<void>((resolve) => { reported = resolve; });
+    const host = new McpHost({
+      clientVersion: "test",
+      // Stands in for a store whose lock is held by the uninstall that closes this session.
+      listed: () => { reported(); return new Promise<void>((resolve) => { release = resolve; }); },
+    });
+    const incomplete = { ...endpoint, id: "held", tools: ["search_docs", "get_article"] };
+    try {
+      const call = host.callTool(incomplete, "search_docs", { query: "held" });
+      await reporting;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const closed = await Promise.race([
+        host.revoke("held", "uninstalled").then(() => true),
+        new Promise<boolean>((resolve) => { timer = setTimeout(() => resolve(false), 2_000); }),
+      ]).finally(() => clearTimeout(timer));
+      assert.equal(closed, true, "revoking waited on the listing report");
+      release();
+      await assert.rejects(call, (error: unknown) => error instanceof McpHostError && error.sent === false);
+    } finally { release(); await host.closeAll(); }
+  });
+
+  it("says when the listing could not be stored and stores it on the next call", async () => {
+    let failures = 1;
+    const stored: string[][] = [];
+    const host = new McpHost({
+      clientVersion: "test",
+      listed: (_serverId, tools) => {
+        if (failures-- > 0) throw new Error("disk full");
+        stored.push(tools.map((tool) => tool.name));
+      },
+    });
+    const incomplete = { ...endpoint, id: "unsaved", tools: ["search_docs", "get_article"] };
+    try {
+      const warn = console.warn;
+      console.warn = () => {};
+      try {
+        await assert.rejects(host.callTool(incomplete, "search_docs", { query: "first" }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "tools-missing" && error.sent === false &&
+        error.message === "Test Docs no longer lists get_article, which OpenAdminOS offers from it, so Chat skips it. Nothing was sent. The Marketplace could not record this and still shows the old tool list. Check its connection in the Marketplace once the server lists it again.");
+      } finally { console.warn = warn; }
+      assert.deepEqual(stored, []);
+      await assert.rejects(host.callTool(incomplete, "search_docs", { query: "second" }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "tools-missing" && !error.message.includes("could not record"));
+      assert.deepEqual(stored, [["search_docs"]]);
+    } finally { await host.closeAll(); }
+  });
+
+  it("records an allowlisted server that lists none of its tools, so the Marketplace can name them", async () => {
+    const host = new McpHost({ clientVersion: "test" });
+    try {
+      const connected = await host.connect({ ...endpoint, id: "none-listed", tools: ["get_article"] });
+      assert.deepEqual(connected.tools, []);
+      assert.deepEqual(connected.missingTools, ["get_article"]);
+    } finally { await host.closeAll(); }
+  });
+
   it("times out a slow tool with a designed message", async () => {
     const host = new McpHost({ clientVersion: "test", callTimeoutMs: 100 });
     try {
@@ -330,11 +441,14 @@ describe("MCP host connection paths", () => {
 });
 
 describe("MCP catalog", () => {
-  it("lists three public read-only servers over HTTPS without sign-in", () => {
+  it("lists six public read-only servers over HTTPS without sign-in", () => {
     assert.deepEqual(MCP_CATALOG.map((entry) => mcpHost(entry.url)), [
       "learn.microsoft.com",
       "www.kqlsearch.com",
       "www.intuneautomation.com",
+      "www.microsoft.com",
+      "mcp.windowsforum.com",
+      "mcp.endoflife.ai",
     ]);
     for (const entry of MCP_CATALOG) {
       assert.equal(new URL(entry.url).protocol, "https:");
@@ -381,6 +495,57 @@ describe("MCP installs in app state", () => {
       assert.equal(removed.find((entry) => entry.id === "test-docs")!.installed, false);
       assert.equal(await persisted(statePath), undefined);
     });
+  });
+
+  it("shows only allowlisted tools, names missing ones, and keeps Chat off the server until they are back", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-mcp-allowlist-"));
+    const tenant = { id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", addedAt: "2026-06-01T10:00:00.000Z" };
+    const make = (tools: string[]) => new AppStateStore({
+      filePath: join(dir, "state.json"), tokenStore: { read: async () => "", write: async () => undefined }, statsApiUrl: "",
+      mcpCatalog: [{ ...MCP_CATALOG[0]!, id: "test-docs", name: "Test Docs", url: endpoint.url, tools }],
+    });
+    const chatTools = async (store: AppStateStore) =>
+      (await (store as unknown as { mcpChatContext(tenant: unknown): Promise<{ tools: Array<{ tool: string }> } | undefined> }).mcpChatContext(tenant))?.tools.map((tool) => tool.tool);
+    const missing = make(["search_docs", "get_article"]);
+    try {
+      const summary = (await missing.installMcpServer("test-docs")).find((entry) => entry.id === "test-docs")!;
+      assert.deepEqual(summary.tools.map((tool) => tool.name), ["search_docs"]);
+      assert.deepEqual(summary.offeredTools, ["search_docs", "get_article"]);
+      assert.deepEqual(summary.missingTools, ["get_article"]);
+      assert.equal(await chatTools(missing), undefined);
+    } finally { missing.close(); }
+    // Under a catalog whose tools the server does list, the stored listing still lacks one until a check.
+    const listed = make(["search_docs", "fails"]);
+    try {
+      const summary = (await listed.listMcpServers()).find((entry) => entry.id === "test-docs")!;
+      assert.deepEqual(summary.missingTools, ["fails"]);
+      assert.equal(await chatTools(listed), undefined);
+      const checked = (await listed.checkMcpServer("test-docs")).find((entry) => entry.id === "test-docs")!;
+      assert.equal(checked.missingTools, undefined);
+      assert.deepEqual(checked.tools.map((tool) => tool.name), ["search_docs", "fails"]);
+      assert.deepEqual(await chatTools(listed), ["search_docs", "fails"]);
+    } finally { listed.close(); }
+    // A server that drops an offered tool after its last check: the stored listing still has it.
+    const statePath = join(dir, "state.json");
+    const stored = JSON.parse(await readFile(statePath, "utf8")) as { mcpServers: Record<string, { tools: Array<{ name: string }> }> };
+    const server = stored.mcpServers["test-docs"]!;
+    server.tools.push({ ...server.tools[0]!, name: "get_article" });
+    await writeFile(statePath, JSON.stringify(stored));
+    const dropped = make(["search_docs", "get_article"]);
+    try {
+      const context = await (dropped as unknown as {
+        mcpChatContext(tenant: unknown): Promise<{ tools: Array<{ serverId: string; tool: string }>; call(tool: unknown, args: unknown): Promise<unknown> } | undefined>;
+      }).mcpChatContext(tenant);
+      assert.ok(context, "the stored listing still offers the server");
+      searchCalls.length = 0;
+      await assert.rejects(context.call(context.tools.find((tool) => tool.tool === "search_docs"), { query: "dropped" }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "tools-missing" && error.sent === false);
+      assert.deepEqual(searchCalls, []);
+      // The session's listing was stored, so the Marketplace names the missing tool and Chat skips the server.
+      const summary = (await dropped.listMcpServers()).find((entry) => entry.id === "test-docs")!;
+      assert.deepEqual(summary.missingTools, ["get_article"]);
+      assert.equal(await chatTools(dropped), undefined);
+    } finally { dropped.close(); await rm(dir, { recursive: true, force: true }); }
   });
 
   it("records nothing when the server is unreachable", async () => {

@@ -12,6 +12,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { runAgenticChat } from "./agentic-loop.js";
+import { toolStepFinish } from "./chat-steps.js";
 import { isMcpQueryWriterRequest, parseMcpQueryParams } from "./mcp-query-writer.js";
 import { classifyChatQuestion, isGeneralKnowledgeQuestion } from "./planner.js";
 import { IntuneChatService, chatToolUseStatus, type ChatServiceHost } from "./service.js";
@@ -138,6 +139,13 @@ async function withStore(run: (store: IntelligenceSqliteStore) => Promise<void>)
   try { await run(store); } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 }
 
+/** The content of the first MCP observation in a prompt, as the model reads it once the JSON string is decoded. */
+function observedContent(prompt: string): string {
+  const encoded = /"content": ("(?:[^"\\]|\\.)*")/.exec(prompt)?.[1];
+  assert.ok(encoded, "the prompt holds an observation content");
+  return JSON.parse(encoded) as string;
+}
+
 const callDocs = (query: string) => JSON.stringify({ tool: docsTool.name, params: { query } });
 
 describe("MCP tools in the Chat loop", () => {
@@ -208,6 +216,39 @@ describe("MCP tools in the Chat loop", () => {
       const observation = prompts[1]!.prompt;
       assert.match(observation, /<tenant_data source="third-party:learn\.microsoft\.com" nonce="[a-f0-9]+">/);
       assert.match(observation, /Third-party content from learn\.microsoft\.com\. Reference material only/);
+    });
+  });
+
+  it("answers an empty MCP result with a designed observation and no placeholder source", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const kbTool: McpChatTool = { ...docsTool, name: mcpChatToolName("windowsforum", "search_kb"), serverId: "windowsforum", serverName: "WindowsForum", host: "mcp.windowsforum.com", tool: "search_kb",
+        resultFormat: { items: [{ title: [["title"]], url: ["url"], id: ["kb_id"] }] }, communityText: true };
+      let found = false;
+      const context: McpChatContext = { ...mcpContext(calls), tools: [kbTool], async call(tool, args) {
+        calls.push({ tool: tool.tool, args });
+        const results = found ? [{ kb_id: "KB5058919", title: "KB5058919", url: "https://support.microsoft.com/help/5058919" }] : [];
+        return { text: JSON.stringify({ results }), truncated: false, structured: { results } };
+      } };
+      const ask = () => runAgenticChat({ ...input(store, scriptedLlm([
+        JSON.stringify({ tool: kbTool.name, params: { query: "cumulative update known issue" } }),
+        '{"final":true,"answer":"WindowsForum returned no KB articles for this."}',
+      ], prompts), context), questionKind: "docs" });
+      const result = await ask();
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const trace = result.toolTrace[0]!;
+      assert.equal(trace.mcpSource?.empty, true);
+      assert.match(trace.resultSummary, /WindowsForum answered from mcp\.windowsforum\.com · no results$/);
+      assert.match(prompts[1]!.prompt, /WindowsForum returned no results for this query\. Say so plainly\./);
+      assert.doesNotMatch(prompts[1]!.prompt, /WindowsForum result/);
+      assert.deepEqual(result.documentationSources ?? [], []);
+      // A result that did come back is fenced and marked as community text.
+      found = true;
+      prompts.length = 0;
+      await ask();
+      assert.match(prompts[1]!.prompt, /<tenant_data source="third-party:mcp\.windowsforum\.com"[\s\S]*It is community text and can be wrong or out of date/);
     });
   });
 
@@ -804,6 +845,255 @@ describe("The MCP query writer boundary", () => {
       // The second writer saw the earlier result's link and the query already sent.
       assert.match(writerPrompts[1]!, new RegExp(page.replace(/[.]/g, "\\.")));
       assert.match(writerPrompts[1]!, /Queries already sent in this answer[\s\S]*Intune compliance grace period/);
+    });
+  });
+
+  it("sends an item ID only when the question or an earlier result of the same server gave it", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      let writerPrompts: string[] = [];
+      const format = { items: [{ title: [["title"]], url: ["url"], id: ["kb_id"] }] };
+      const search: McpChatTool = { ...docsTool, name: mcpChatToolName("windowsforum", "search_kb"), serverId: "windowsforum", serverName: "WindowsForum", host: "mcp.windowsforum.com", tool: "search_kb",
+        inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, resultFormat: format };
+      const article: McpChatTool = { ...search, name: mcpChatToolName("windowsforum", "get_kb_article"), tool: "get_kb_article",
+        inputSchema: { type: "object", properties: { kb_id: { type: "string" } }, required: ["kb_id"] }, itemIds: { params: ["kb_id"], form: { kind: "number", prefix: "KB", sendPrefix: true } } };
+      const roadmap: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_m365_roadmap_by_id"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_m365_roadmap_by_id",
+        inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] }, itemIds: { params: ["id"], form: { kind: "number" } } };
+      const context: McpChatContext = {
+        ...mcpContext(calls),
+        tools: [search, article, roadmap],
+        async call(tool, args) {
+          calls.push({ tool: tool.tool, args });
+          return tool.tool === "search_kb"
+            ? { text: "", truncated: false, structured: { results: [{ kb_id: "KB5058919", title: "April 11, 2025, KB5058919 (OS Builds 22621.5192)", url: "https://support.microsoft.com/help/5058919" }] } }
+            : { text: "", truncated: false, structured: { kb_id: "KB5058919", title: "KB5058919", url: "https://support.microsoft.com/help/5058919", content: "Known issues." } };
+        },
+      };
+      const callArticle = JSON.stringify({ tool: article.name, params: {} });
+      const final = '{"final":true,"answer":"Done."}';
+      const ask = (question: string, replies: string[], writer: string[]) => {
+        writerPrompts = [];
+        return runAgenticChat({ ...input(store, scriptedLlm([...replies, final], [], writerPrompts, writer), context), question, adminQuestion: question, questionKind: "docs" });
+      };
+
+      // An ID nobody gave is refused before sending.
+      const guessed = await ask("What are the known issues in the latest cumulative update?", [callArticle], ['{"kb_id":"KB5034441"}']);
+      assert.equal(guessed.toolTrace[0]!.mcpSource?.blocked, true);
+      assert.match(guessed.toolTrace[0]!.error!, /named an item in kb_id that is neither in your question nor in an earlier WindowsForum result in this answer\. Nothing was sent to mcp\.windowsforum\.com\./);
+      assert.equal(calls.length, 0);
+
+      // The admin typed it, with or without the KB prefix.
+      const typed = await ask("What does kb 5034441 fix?", [callArticle], ['{"kb_id":"KB5034441"}']);
+      assert.equal(typed.toolTrace[0]!.error, undefined);
+      assert.deepEqual(calls.at(-1), { tool: "get_kb_article", args: { kb_id: "KB5034441" } });
+
+      // An earlier result of the same server listed it; the writer saw that ID.
+      const listed = await ask("Which recent cumulative update has known issues?", [JSON.stringify({ tool: search.name, params: {} }), callArticle], ['{"query":"cumulative update known issues"}', '{"kb_id":"KB5058919"}']);
+      assert.deepEqual(listed.toolTrace.map((entry) => entry.error), [undefined, undefined]);
+      assert.match(writerPrompts.at(-1)!, /"id":"KB5058919"/);
+      assert.match(writerPrompts.at(-1)!, /Params that name one item[^\n]*: kb_id\./);
+
+      // An ID from another server's result does not count.
+      const crossed = await ask("Which recent cumulative update has known issues?", [JSON.stringify({ tool: search.name, params: {} }), JSON.stringify({ tool: roadmap.name, params: {} })], ['{"query":"cumulative update"}', '{"id":"5058919"}']);
+      assert.equal(crossed.toolTrace[1]!.mcpSource?.blocked, true);
+      assert.equal(calls.filter((call) => call.tool === "get_m365_roadmap_by_id").length, 0);
+    });
+  });
+
+  it("compares item IDs in each tool's ID form and sends the canonical ID, so no separator or other script makes a new one", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const byId = (serverId: string, serverName: string, host: string, toolName: string, param: string, form: NonNullable<McpChatTool["itemIds"]>["form"]): McpChatTool => ({
+        ...docsTool, name: mcpChatToolName(serverId, toolName), serverId, serverName, host, tool: toolName,
+        inputSchema: { type: "object", properties: { [param]: { type: "string" } }, required: [param] }, itemIds: { params: [param], form },
+      });
+      const roadmap = byId("release-communications", "Microsoft Release Communications", "www.microsoft.com", "get_m365_roadmap_by_id", "id", { kind: "number" });
+      const azure = byId("release-communications", "Microsoft Release Communications", "www.microsoft.com", "get_azure_update_by_id", "id", { kind: "slug" });
+      const article = byId("windowsforum", "WindowsForum", "mcp.windowsforum.com", "get_kb_article", "kb_id", { kind: "number", prefix: "KB", sendPrefix: true });
+      const context: McpChatContext = { ...mcpContext(calls), tools: [roadmap, azure, article] };
+      const ask = async (tool: McpChatTool, question: string, written: Record<string, unknown>) => {
+        const before = calls.length;
+        const result = await runAgenticChat({ ...input(store, scriptedLlm([JSON.stringify({ tool: tool.name, params: {} }), '{"final":true,"answer":"Done."}'], [], [], [JSON.stringify(written)]), context), question, adminQuestion: question, questionKind: "docs" });
+        return { blocked: result.toolTrace[0]!.mcpSource?.blocked === true, sent: calls.length > before ? calls.at(-1)!.args : undefined };
+      };
+
+      // "109560-109561" is two roadmap IDs, never their concatenation.
+      assert.deepEqual(await ask(roadmap, "Compare roadmap 109560-109561", { id: "109560109561" }), { blocked: true, sent: undefined });
+      assert.deepEqual(await ask(roadmap, "Compare roadmap 109560-109561", { id: "109561" }), { blocked: false, sent: { id: "109561" } });
+      // A typed ID does not let punctuation through, and the canonical value is what is sent.
+      assert.deepEqual(await ask(roadmap, "What is roadmap 109560?", { id: "1.09560" }), { blocked: true, sent: undefined });
+      assert.deepEqual(await ask(roadmap, "What is roadmap 109560?", { id: " 109560 " }), { blocked: false, sent: { id: "109560" } });
+      assert.deepEqual(await ask(roadmap, "What is roadmap 0109560?", { id: "109560" }), { blocked: true, sent: undefined });
+      // A letter outside ASCII splits the number instead of being dropped.
+      assert.deepEqual(await ask(article, "What does 50344\u00e941 fix?", { kb_id: "KB5034441" }), { blocked: true, sent: undefined });
+      // KB5034441 and 5034441 are the documented equivalents; the server gets the prefixed form.
+      assert.deepEqual(await ask(article, "What does kb5034441 fix?", { kb_id: "5034441" }), { blocked: false, sent: { kb_id: "KB5034441" } });
+      assert.deepEqual(await ask(article, "What does 5034441 fix?", { kb_id: "kb5034441" }), { blocked: false, sent: { kb_id: "KB5034441" } });
+      assert.deepEqual(await ask(article, "What does KB5034441 fix?", { kb_id: "KB-5034441" }), { blocked: true, sent: undefined });
+      // Azure update IDs are numbers or older slugs, compared exactly.
+      assert.deepEqual(await ask(azure, "Is update 2021regions still current?", { id: "2021regions" }), { blocked: false, sent: { id: "2021regions" } });
+      assert.deepEqual(await ask(azure, "Is update 2021regions still current?", { id: "2021-regions" }), { blocked: true, sent: undefined });
+      assert.deepEqual(await ask(azure, "Compare Azure updates 466774-466779", { id: "466779" }), { blocked: false, sent: { id: "466779" } });
+      // A value that is not text or a number is never sent as an ID.
+      assert.equal((await ask(roadmap, "What is roadmap 109560?", { id: { value: "109560" } })).sent, undefined);
+    });
+  });
+
+  it("applies the item-ID rule to IDs inside an OData filter, and refuses a filter it cannot read", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const list = (toolName: string, literal: "number" | "string", form: NonNullable<McpChatTool["itemIds"]>["form"]): McpChatTool => ({
+        ...docsTool, name: mcpChatToolName("release-communications", toolName), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: toolName,
+        inputSchema: { type: "object", properties: { filter: { type: "string" }, search: { type: "string" } } },
+        itemIds: { filter: { param: "filter", fields: ["id", "baseId"], literal }, form },
+        resultFormat: { items: [{ title: [["title"]], id: ["id"] }] },
+      });
+      const roadmaps = list("get_recent_m365_roadmaps", "number", { kind: "number" });
+      const updates = list("get_recent_azure_updates", "string", { kind: "slug" });
+      const context: McpChatContext = {
+        ...mcpContext(calls),
+        tools: [roadmaps, updates],
+        async call(tool, args) {
+          calls.push({ tool: tool.tool, args });
+          return { text: "", truncated: false, structured: { items: [{ id: 124890, title: "Microsoft Intune: new reports" }] } };
+        },
+      };
+      const final = '{"final":true,"answer":"Done."}';
+      const ask = async (tool: McpChatTool, question: string, written: Array<Record<string, unknown>>) => {
+        const before = calls.length;
+        const result = await runAgenticChat({ ...input(store, scriptedLlm([...written.map(() => JSON.stringify({ tool: tool.name, params: {} })), final], [], [], written.map((params) => JSON.stringify(params))), context), question, adminQuestion: question, questionKind: "docs" });
+        return { trace: result.toolTrace, sent: calls.slice(before).map((call) => call.args) };
+      };
+
+      // An ID nobody gave is refused inside a filter, before anything is sent.
+      const guessed = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "id eq 109560" }]);
+      assert.equal(guessed.trace[0]!.mcpSource?.blocked, true);
+      assert.match(guessed.trace[0]!.error!, /named an item in filter field id that is neither in your question nor in an earlier Microsoft Release Communications result in this answer\. Nothing was sent to www\.microsoft\.com\./);
+      assert.deepEqual(guessed.sent, []);
+      const hidden = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "products/any(p: p eq 'Microsoft Intune') and (status eq 'Rolling out' or baseId eq 109560)" }]);
+      assert.equal(hidden.trace[0]!.mcpSource?.blocked, true);
+      assert.deepEqual(hidden.sent, []);
+
+      // A plain word is not a filter: refused with a designed message, nothing sent.
+      const words = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "Intune" }]);
+      assert.equal(words.trace[0]!.mcpSource?.blocked, true);
+      assert.match(words.trace[0]!.error!, /query had a filter OpenAdminOS cannot check: "Intune" is not followed by a comparison such as eq\. Nothing was sent to www\.microsoft\.com\. A filter is sent only as OData comparisons, such as status eq 'Rolling out'\./);
+      assert.deepEqual(words.sent, []);
+
+      // Filters without an ID go out, rebuilt from what was read.
+      const plain = await ask(roadmaps, "What is rolling out for Intune?", [{ filter: "products/any(p: p eq 'Microsoft Intune')  AND status eq 'Rolling out'", search: "Intune" }]);
+      assert.equal(plain.trace[0]!.error, undefined);
+      assert.deepEqual(plain.sent, [{ filter: "products/any(p: p eq 'Microsoft Intune') and status eq 'Rolling out'", search: "Intune" }]);
+
+      // An ID the admin typed, or an earlier result of the same server gave, may be compared, as the server compares it.
+      const typed = await ask(roadmaps, "What is the status of roadmap 109560?", [{ filter: "id eq '109560'" }]);
+      assert.deepEqual(typed.sent, [{ filter: "id eq 109560" }]);
+      const listed = await ask(roadmaps, "What is rolling out for Intune?", [{ search: "Intune" }, { filter: "id eq 124890" }]);
+      assert.deepEqual(listed.trace.map((entry) => entry.error), [undefined, undefined]);
+      assert.deepEqual(listed.sent, [{ search: "Intune" }, { filter: "id eq 124890" }]);
+      const azure = await ask(updates, "Is Azure update 466774 a retirement?", [{ filter: "id eq 466774 and tags/any(t: t eq 'Retirements')" }]);
+      assert.deepEqual(azure.sent, [{ filter: "id eq '466774' and tags/any(t: t eq 'Retirements')" }]);
+    });
+  });
+
+  it("leaves out params the writer set to null, as a schema default of null invites", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const roadmaps: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_m365_roadmaps"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_m365_roadmaps",
+        inputSchema: { type: "object", properties: { filter: { type: "string", default: null }, search: { type: "string", default: null }, skip: { type: ["integer", "null"], default: null } } } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [roadmaps] };
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([JSON.stringify({ tool: roadmaps.name, params: {} }), '{"final":true,"answer":"Done."}'], [], [],
+        ['{"filter":null,"search":"Intune","skip":null}']), context), questionKind: "docs" });
+      assert.equal(result.toolTrace[0]!.error, undefined);
+      assert.deepEqual(calls, [{ tool: "get_recent_m365_roadmaps", args: { search: "Intune" } }]);
+    });
+  });
+
+  it("says how many records a long MCP list holds when it lists only some, so the answer does not read as complete", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const roadmaps: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_m365_roadmaps"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_m365_roadmaps",
+        inputSchema: { type: "object", properties: { search: { type: "string" } } },
+        resultFormat: { items: [{ title: [["title"]], text: ["description"], facts: ["id"], id: ["id"] }] } };
+      const items = Array.from({ length: 11 }, (_, index) => ({ id: 100 + index, title: `Intune feature ${index + 1}`, description: `Feature ${index + 1} rolls out.` }));
+      const body = { items, totalCount: 11, limit: 50, offset: 0, hasMore: false, returnedCount: 11 };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [roadmaps], async call(tool, args) {
+        calls.push({ tool: tool.tool, args });
+        return { text: JSON.stringify(body), truncated: false };
+      } };
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([JSON.stringify({ tool: roadmaps.name, params: { search: "Intune" } }), '{"final":true,"answer":"Showing 10 of 11."}'], prompts), context), questionKind: "docs" });
+      assert.equal(result.ok, true);
+      const observation = observedContent(prompts[1]!.prompt);
+      assert.match(observation, /Microsoft Release Communications result counts: totalCount 11, limit 50, offset 0, hasMore false, returnedCount 11\./);
+      assert.match(observation, /OpenAdminOS lists 10 of the 11 records in this result below\. The other 1 was left out here and is not absent\./);
+      assert.match(observation, /The list below is not complete\. Say so in the answer: give how many are shown and how many exist, as in "Showing 10 of 11"\. This tool reads no further pages, so a narrower question is the way to reach the others\./);
+      assert.match(observation, /\[10\] Intune feature 10\n/);
+      assert.doesNotMatch(observation, /Intune feature 11/);
+      const trace = result.toolTrace[0]!;
+      assert.equal(trace.mcpSource?.results?.length, 10);
+      assert.equal(trace.mcpSource?.matched, 11);
+      assert.equal(trace.mcpSource?.more, undefined);
+      assert.equal(toolStepFinish(trace).detail, "get_recent_m365_roadmaps · 10 of 11 results");
+    });
+  });
+
+  it("carries a hasMore envelope to the model, the step and the query writer, so the next page can be asked for", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const writerPrompts: string[] = [];
+      const updates: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_azure_updates"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_azure_updates",
+        inputSchema: { type: "object", properties: { search: { type: "string" }, skip: { type: "integer" } } },
+        resultFormat: { items: [{ title: [["title"]], text: ["description"], id: ["id"] }] } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [updates], async call(tool, args) {
+        calls.push({ tool: tool.tool, args });
+        const offset = typeof args.skip === "number" ? args.skip : 0;
+        const items = [1, 2, 3].map((n) => ({ id: String(466000 + offset + n), title: `Retirement: service ${offset + n}`, description: "Retires next year." }));
+        return { text: JSON.stringify({ items, totalCount: 515, limit: 3, offset, hasMore: true, returnedCount: 3 }), truncated: false };
+      } };
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([
+        JSON.stringify({ tool: updates.name, params: { search: "Retirement" } }),
+        JSON.stringify({ tool: updates.name, params: { search: "Retirement", skip: 3 } }),
+        '{"final":true,"answer":"Showing 6 of 515."}',
+      ], prompts, writerPrompts), context), questionKind: "docs" });
+      assert.equal(result.ok, true);
+      const observation = observedContent(prompts[1]!.prompt);
+      assert.match(observation, /Microsoft Release Communications result counts: totalCount 515, limit 3, offset 0, hasMore true, returnedCount 3\./);
+      assert.match(observation, /Microsoft Release Communications has more records than this result returned\./);
+      assert.match(observation, /The list below is not complete\. Say so in the answer: give how many are shown and how many exist, as in "Showing 3 of 515"\. To read further records, call the same tool again for the next page\./);
+      const trace = result.toolTrace[0]!;
+      assert.equal(trace.mcpSource?.more, true);
+      assert.equal(trace.mcpSource?.matched, undefined);
+      assert.equal(toolStepFinish(trace).detail, "get_recent_azure_updates · 3 results · the server has more");
+      // The writer of the second call sees what the first listed and the server's counts, outside the item rules.
+      assert.equal(writerPrompts.length, 2);
+      assert.doesNotMatch(writerPrompts[0]!, /Earlier calls of this tool/);
+      assert.match(writerPrompts[1]!, /Earlier calls of this tool in this answer, with how many records OpenAdminOS listed and the server's result counts\. When the question needs records past them, use the tool's paging param, if it has one, to skip the records already listed:/);
+      assert.match(writerPrompts[1]!, /"sent":\{"search":"Retirement"\},"listed":3,"counts":\{"totalCount":515,"limit":3,"offset":0,"hasMore":true,"returnedCount":3\}/);
+      assert.deepEqual(calls.map((call) => call.args), [{ search: "Retirement" }, { search: "Retirement", skip: 3 }]);
+    });
+  });
+
+  it("leaves out optional params the writer left empty, and refuses an empty required param", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const roadmaps: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_recent_m365_roadmaps"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_recent_m365_roadmaps",
+        inputSchema: { type: "object", properties: { filter: { type: "string" }, search: { type: "string" } } },
+        itemIds: { filter: { param: "filter", fields: ["id"], literal: "number" }, form: { kind: "number" } } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [roadmaps, docsTool] };
+      const ask = (tool: McpChatTool, writer: string) => runAgenticChat({ ...input(store, scriptedLlm([JSON.stringify({ tool: tool.name, params: {} }), '{"final":true,"answer":"Done."}'], [], [], [writer]), context), questionKind: "docs" });
+      for (const filter of ["", "   ", "\n\t"]) {
+        const result = await ask(roadmaps, JSON.stringify({ filter, search: "Intune" }));
+        assert.equal(result.toolTrace[0]!.error, undefined, JSON.stringify(filter));
+      }
+      assert.deepEqual(calls, [0, 1, 2].map(() => ({ tool: "get_recent_m365_roadmaps", args: { search: "Intune" } })));
+      calls.length = 0;
+      // A required param left empty is refused before sending, with what to do.
+      const empty = await ask(docsTool, '{"query":"  "}');
+      assert.equal(empty.toolTrace[0]!.mcpSource?.sentToHost, false);
+      assert.equal(empty.toolTrace[0]!.error, "the Microsoft Learn query left the query param empty, and microsoft_docs_search needs it. Nothing was sent to learn.microsoft.com.");
+      assert.deepEqual(calls, []);
     });
   });
 

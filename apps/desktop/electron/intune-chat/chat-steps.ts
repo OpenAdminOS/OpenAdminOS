@@ -106,12 +106,36 @@ export interface ChatSourcePlan {
   detail: string;
 }
 
+/**
+ * What names a server in a question: its name, its aliases, and its host
+ * with and without "www.". A host the server shares with other sites
+ * (www.microsoft.com) is no name of its own; there only the server URL
+ * with its path names it.
+ */
+function serverNames(server: McpChatServer): string[] {
+  const names = [server.name.toLowerCase(), ...server.aliases];
+  if (!server.sharedHost) {
+    names.push(server.host, server.host.replace(/^www\./, ""));
+  } else if (server.url) {
+    const url = new URL(server.url);
+    const path = url.pathname.replace(/\/+$/, "").toLowerCase();
+    if (path) names.push(`${url.hostname}${path}`, `${url.hostname.replace(/^www\./, "")}${path}`);
+  }
+  return names.filter(Boolean);
+}
+
 /** Servers the question names by name, alias or host. */
 export function namedServers(question: string, servers: readonly McpChatServer[]): McpChatServer[] {
   const lower = question.toLowerCase();
-  return servers.filter((server) =>
-    [server.name.toLowerCase(), server.host, server.host.replace(/^www\./, ""), ...server.aliases].some((name) => name && lower.includes(name)),
-  );
+  // A name counts only as a whole: no letter, digit, dot, hyphen or @ may continue it on the left, and no letter, digit, hyphen,
+  // underscore, @ or dot followed by another label on the right. So "learn.microsoft.com", "admin@kqlsearch.com" and
+  // "kqlsearch.com.example" do not name a server, and a sentence ending in "kqlsearch.com." does.
+  const names = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "u").test(lower);
+  return servers.filter((server) => serverNames(server).some(names));
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 /**
@@ -132,11 +156,12 @@ export function planChatSources(input: {
   /** Replaces the detail's first sentence, which names the kind. */
   lead?: string;
 }): ChatSourcePlan {
-  const lower = input.question.toLowerCase();
+  const lower = input.question.toLowerCase().replace(/[\u2018\u2019]/g, "'");
   const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
-      if (server.topics.some((topic) => new RegExp(`\\b${topic.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`).test(lower))) chosen.set(server.id, server);
+      // A topic also matches right before digits, so "KB5034441" chooses the server with the "kb" topic.
+      if (server.topics.some((topic) => new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`).test(lower))) chosen.set(server.id, server);
     }
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
     if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);
@@ -375,9 +400,15 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneC
     }
     // A call that stopped before sending (bad params, the query writer, the cache index, a server turned off) sent nothing.
     if (entry.error && !entry.mcpSource.sentToHost) return { status: "failed", title: `Did not send a ${serverName} query`, detail: `${tool} · ${entry.error}`, sent: undefined, durationMs };
+    if (entry.error && entry.mcpSource.toolError) return { status: "failed", title: `${serverName} returned an error`, detail: `${tool} · ${entry.error}`, durationMs };
     if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs };
+    if (entry.mcpSource.empty) return { status: "completed", title: `${serverName} found nothing`, detail: `${tool} · no results for this query`, durationMs };
     const count = results?.length ?? 0;
-    return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? `${count} ${count === 1 ? "result" : "results"}` : `answer from ${host}`}`, durationMs };
+    // A list OpenAdminOS shortened, or one the server says continues, never reads as complete.
+    const matched = entry.mcpSource.matched;
+    const shown = matched !== undefined && matched > count ? `${count} of ${matched} results` : `${count} ${count === 1 ? "result" : "results"}`;
+    const more = entry.mcpSource.more ? " · the server has more" : "";
+    return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? shown : `answer from ${host}`}${more}`, durationMs };
   }
   if (entry.tool === "web_search") return entry.error ? { status: "failed", title: "Web search failed", detail: entry.error, durationMs } : { status: "completed", title: "Searched the web", detail: entry.resultSummary, durationMs };
   const copy = TOOL_STEP[entry.tool];

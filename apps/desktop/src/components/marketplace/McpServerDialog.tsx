@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 
 import type { ChatToolUseStatus, McpServerSummary } from "../../shared/openAdminOS";
 import { useAppState } from "../../state";
-import { IconCheck, IconClose, IconCloud, IconHardDrive, IconLock, IconRefresh, IconShield, IconWarning } from "../icons";
+import { IconCheck, IconClose, IconCloud, IconExternal, IconHardDrive, IconLayers, IconLock, IconRefresh, IconShield, IconUsers, IconWarning } from "../icons";
 import { Modal } from "../Modal";
 import { Button, Switch } from "../ui";
 import { CoverArt, inkFor } from "./CoverArt";
@@ -36,16 +36,16 @@ export function McpServerDialog({
   const [notice, setNotice] = useState<string | null>(null);
 
   const api = window.openAdminOS;
-  const run = async (action: Action, task: () => Promise<unknown> | undefined, success: string, failed: string) => {
+  const run = async (action: Action, task: () => Promise<unknown> | undefined, success: string | ((servers: unknown) => string), failed: string) => {
     setBusy(action);
     setFailure(null);
     setNotice(null);
     try {
       const pending = task();
       if (!pending) throw new Error("This build of OpenAdminOS cannot manage MCP servers. Update the app, then try again.");
-      await pending;
+      const servers = await pending;
       await refresh();
-      setNotice(success);
+      setNotice(typeof success === "string" ? success : success(servers));
       if (action === "install") setView("details");
     } catch (error) {
       setFailure({ action, title: failed, message: ipcErrorMessage(error) });
@@ -53,8 +53,14 @@ export function McpServerDialog({
       setBusy(null);
     }
   };
-  const install = () => void run("install", () => api?.installMcpServer?.(server.id), `Installed ${server.name}. Its tools are available to Chat.`, `${server.name} could not be installed`);
-  const check = () => void run("check", () => api?.checkMcpServer?.(server.id), `${server.name} answered. The tool list is up to date.`, `${server.name} did not respond`);
+  // A server that answered without an offered tool is recorded, but Chat does not use it.
+  const missingAfter = (servers: unknown) => (Array.isArray(servers) ? (servers as McpServerSummary[]) : []).find((entry) => entry.id === server.id)?.missingTools ?? [];
+  const install = () => void run("install", () => api?.installMcpServer?.(server.id), (servers) => missingAfter(servers).length > 0
+    ? `Installed ${server.name}, but it does not list ${missingAfter(servers).join(", ")}. Chat does not use it until it does.`
+    : `Installed ${server.name}. Its tools are available to Chat.`, `${server.name} could not be installed`);
+  const check = () => void run("check", () => api?.checkMcpServer?.(server.id), (servers) => missingAfter(servers).length > 0
+    ? `${server.name} answered, but it does not list ${missingAfter(servers).join(", ")}. Chat does not use it until it does.`
+    : `${server.name} answered. The tool list is up to date.`, `${server.name} did not respond`);
   const uninstall = () => void run("uninstall", () => api?.uninstallMcpServer?.(server.id), `Removed ${server.name}. Chat no longer offers its tools.`, `Could not uninstall ${server.name}`);
   const toggle = (enabled: boolean) => void run("toggle", () => api?.setMcpServerEnabled?.(server.id, enabled),
     enabled ? `${server.name} is available to Chat.` : `${server.name} is off. Chat does not offer its tools.`,
@@ -119,7 +125,7 @@ export function McpServerDialog({
                 disabled={busy !== null}
                 onCheckedChange={toggle}
                 label="Available in Chat"
-                description={server.enabled ? `Tool queries go to ${server.host}` : "Chat does not offer these tools"}
+                description={!server.enabled ? "Chat does not offer these tools" : server.missingTools?.length ? "Chat skips this server until its offered tools are back" : `Tool queries go to ${server.host}`}
               />
             </div>
             <div className="flex gap-2">
@@ -152,17 +158,28 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
           <span className="font-medium text-[var(--color-text-soft)]">Chat uses it for</span> {server.useFor.charAt(0).toLowerCase() + server.useFor.slice(1)}
         </p>
       ) : null}
+      <Operator server={server} className="max-w-[62ch] text-sm text-[var(--color-text-muted)]" />
       {toolUse?.available === false && toolUse.notice ? <ToolUseNotice notice={toolUse.notice} /> : null}
+      {server.missingTools?.length ? <MissingTools server={server} missing={server.missingTools} /> : null}
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Where queries go</h3>
-        <QueryFlow host={server.host} />
+        <QueryFlow host={server.host} skipped={Boolean(server.missingTools?.length)} />
       </section>
       <div className="grid grid-cols-[22px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3.5 text-sm text-[var(--color-text-soft)]">
         <IconShield size={20} className="text-[var(--color-text)]" />
         <span>Read only. This server never connects to your tenant and cannot propose changes.</span>
       </div>
+      {server.notes?.map((note) => (
+        <div key={note} className="grid grid-cols-[22px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3.5 text-sm text-[var(--color-text-soft)]">
+          <IconUsers size={20} className="text-[var(--color-text)]" />
+          <span>{note}</span>
+        </div>
+      ))}
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Tools Chat can call</h3>
+        {server.missingTools?.length ? (
+          <p className="mb-3 text-sm text-[var(--color-warning)]">Chat calls none of these until every offered tool is back.</p>
+        ) : null}
         {server.tools.length > 0 ? (
           <div className="grid gap-px overflow-hidden rounded-xl ring-1 ring-[var(--color-border-soft)]">
             {server.tools.map((tool) => (
@@ -179,13 +196,19 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
             ))}
           </div>
         ) : (
-          <p className="text-sm text-[var(--color-text-muted)]">The server lists its tools when you install it. OpenAdminOS shows them here and offers them to Chat.</p>
+          <p className="text-sm text-[var(--color-text-muted)]">{server.installed
+            ? `${server.name} listed none of the tools OpenAdminOS offers at its last connection.`
+            : "The server lists its tools when you install it. OpenAdminOS shows them here and offers them to Chat."}</p>
         )}
+        {server.offeredTools ? (
+          <p className="mt-2 text-sm text-[var(--color-text-muted)]">OpenAdminOS offers only {server.offeredTools.length === 1 ? "this tool" : `these ${server.offeredTools.length} tools`} from {server.name}. Other tools the server lists are never shown or called.</p>
+        ) : null}
       </section>
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Details</h3>
         <dl className="grid grid-cols-[repeat(auto-fill,minmax(190px,1fr))] gap-x-6 gap-y-4 text-sm">
           <Fact label="Publisher" value={server.publisher} />
+          {server.policy ? <Fact label="Terms and privacy" value={<PolicyLink policy={server.policy} />} /> : null}
           <Fact label="Sign-in" value="No sign-in needed" />
           <Fact label="Endpoint" value={<code className="font-mono text-xs">{server.url}</code>} />
           <Fact label="Protocol" value="MCP, streamable HTTP" />
@@ -228,6 +251,22 @@ function InstallReview({
         <Step icon={<IconHardDrive size={16} />} title="Tenant access">
           None. The server cannot read or change your tenant.
         </Step>
+        <Step icon={<IconExternal size={16} />} title="Who runs it">
+          <Operator server={server} />
+          {server.notes?.map((note) => <span key={note} className="mt-1 block">{note}</span>)}
+        </Step>
+        <Step icon={<IconLayers size={16} />} title="Tools Chat will be offered">
+          {server.offeredTools ? (
+            <>
+              <span className="mt-1 flex flex-wrap gap-1.5">
+                {server.offeredTools.map((name) => <code key={name} className="rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text)]">{name}</code>)}
+              </span>
+              <span className="mt-1 block">Only these. Other tools {server.name} lists are never shown or called.</span>
+            </>
+          ) : (
+            <>Every tool {server.name} lists when it connects. They are shown in the details after install.</>
+          )}
+        </Step>
       </ol>
       {toolUse?.available === false && toolUse.notice ? <ToolUseNotice notice={toolUse.notice} /> : null}
       <label className="flex cursor-pointer items-start gap-2.5 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 text-sm text-[var(--color-text-soft)]">
@@ -242,7 +281,26 @@ function InstallReview({
   );
 }
 
-function QueryFlow({ host }: { host: string }) {
+/** Who runs the server, and its terms or privacy page where one exists. The host is named in Where queries go. */
+function Operator({ server, className }: { server: McpServerSummary; className?: string }) {
+  return (
+    <span className={`block ${className ?? ""}`}>
+      {server.operator ?? `Run by ${server.publisher}.`}
+      {server.policy ? <> <PolicyLink policy={server.policy} /></> : null}
+    </span>
+  );
+}
+
+function PolicyLink({ policy }: { policy: { label: string; url: string } }) {
+  return (
+    <a href={policy.url} target="_blank" rel="noopener noreferrer" className="text-[var(--color-accent)] underline underline-offset-2 hover:opacity-80">
+      {policy.label}
+    </a>
+  );
+}
+
+/** Where a Chat query goes. A server Chat skips because offered tools are missing receives nothing, and says so. */
+function QueryFlow({ host, skipped = false }: { host: string; skipped?: boolean }) {
   const node = "grid content-start gap-1 rounded-xl bg-[var(--color-bg-raised)] p-3.5 ring-1 ring-[var(--color-border-soft)]";
   const edge = "hidden items-center justify-center text-[var(--color-text-muted)] md:flex";
   return (
@@ -259,7 +317,7 @@ function QueryFlow({ host }: { host: string }) {
       <div className={`${edge} text-[var(--color-warning)]`} aria-hidden="true">→</div>
       <div className={`${node} bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/35`}>
         <b className="break-all text-sm font-medium text-[var(--color-text)]">{host}</b>
-        <span className="text-xs text-[var(--color-text-muted)]">Receives the query text</span>
+        <span className="text-xs text-[var(--color-text-muted)]">{skipped ? "Chat sends nothing to it until its offered tools are back" : "Receives the query text"}</span>
       </div>
     </div>
   );
@@ -274,6 +332,22 @@ function Step({ icon, title, warning = false, children }: { icon: ReactNode; tit
         {children}
       </span>
     </li>
+  );
+}
+
+/** An offered tool the server stopped listing: Chat leaves the server alone until a check finds it again. */
+function MissingTools({ server, missing }: { server: McpServerSummary; missing: string[] }) {
+  const names = missing.map((name, index) => (
+    <span key={name}>{index > 0 ? (index === missing.length - 1 ? " and " : ", ") : null}<code className="font-mono text-xs">{name}</code></span>
+  ));
+  return (
+    <div role="alert" className="flex gap-2.5 rounded-xl bg-[var(--color-warning-soft)] px-4 py-3 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+      <IconWarning size={16} className="mt-0.5 shrink-0" />
+      <span>
+        <span className="block font-medium">{server.name} no longer lists {missing.length === 1 ? "a tool" : "tools"} OpenAdminOS offers</span>
+        Missing: {names}. Chat does not use {server.name} until every offered tool is back. Check the connection again later.
+      </span>
+    </div>
   );
 }
 

@@ -24,6 +24,8 @@ import {
   holdsTenantData,
   isMcpChatToolName,
   isTenantTool,
+  mcpListingNote,
+  mcpToolPages,
   mcpSourceLinesForPrompt,
   mcpToolDefinitionsForPrompt,
   summarizeToolCallForProgress,
@@ -308,8 +310,10 @@ export async function runAgenticChat(
   // Sources numbered up to here reached a model request; only they are returned as consulted and citable.
   let consultedSources = 0;
   // Titles and links of MCP results in this answer, and the queries it sent: the query writer's only context besides the admin's current question. Nothing carries over from earlier answers.
-  const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string }> = [];
+  const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string; id?: string }> = [];
   const sentQueries: string[] = [];
+  // Per MCP call that answered: what was sent, how many records were listed and the server's counts, for paging.
+  const mcpCalls: Array<{ serverId: string; tool: string; sent: unknown; listed: number; matched?: number; counts?: Record<string, number | boolean> }> = [];
   const documentation: LoopPassage[] = [];
   const addDocumentation = (passages: readonly DocsIndexPassage[]) => {
     const numbers = citations.addPassages(passages);
@@ -600,8 +604,16 @@ export async function runAgenticChat(
         tool: entry,
         earlierResults: mcpResults,
         sentQueries,
+        earlierCalls: mcpCalls.filter((call) => call.serverId === entry.serverId && call.tool === entry.tool).map(({ sent, listed, matched, counts }) => ({ sent, listed, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) })),
       }),
-      resultUrls: (serverId) => mcpResults.filter((item) => item.serverId === serverId && item.url).map((item) => item.url!),
+      references: (serverId) => {
+        const own = mcpResults.filter((item) => item.serverId === serverId);
+        return {
+          links: own.flatMap((item) => (item.url ? [item.url] : [])),
+          question: input.adminQuestion ?? "",
+          itemIds: own.flatMap((item) => (item.id ? [item.id] : [])),
+        };
+      },
       onSend: (params) => {
         sentQueries.push(mcpSentText(params));
         input.onToolSending?.({ tool, params });
@@ -615,14 +627,22 @@ export async function runAgenticChat(
     if (mcpSource) {
       attemptedServers.add(mcpSource.serverId);
       const learnEmpty = mcpSource.serverId === LEARN_SERVER_ID && !execution.trace.error && (mcpSource.results?.length ?? 0) === 0;
-      if (!execution.trace.error && !learnEmpty) {
+      // Any server that answered with nothing gets a designed empty observation, never a placeholder source.
+      const answeredEmpty = !execution.trace.error && mcpSource.empty === true;
+      if (answeredEmpty && !(learnEmpty && fallbackPending && !learnAnswered && input.documentationFallback)) {
+        const { results: _none, content: _empty, ...rest } = execution.result as { results?: unknown; content?: unknown } & Record<string, unknown>;
+        observed = { ...rest, content: `${mcpSource.serverName} returned no results for this query. Say so plainly. Do not present other text as ${mcpSource.serverName} content.` };
+      } else if (!execution.trace.error && !learnEmpty) {
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
-        const { results = [], content, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown } & Record<string, unknown>;
-        mcpResults.push(...results.map((item) => ({ serverId: mcpSource.serverId, serverName: mcpSource.serverName, title: item.title, ...(item.url ? { url: item.url } : {}) })));
+        const { results = [], content, matched, counts, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown; matched?: number; counts?: Record<string, number | boolean> } & Record<string, unknown>;
+        mcpResults.push(...results.map((item) => ({ serverId: mcpSource.serverId, serverName: mcpSource.serverName, title: item.title, ...(item.url ? { url: item.url } : {}), ...(item.id ? { id: item.id } : {}) })));
+        mcpCalls.push({ serverId: mcpSource.serverId, tool: mcpSource.tool, sent: execution.trace.params, listed: results.length, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}) });
         const cites = citations.addMcpResults(results, mcpSource);
+        // The excerpts replace the raw result, so the counts and what was left out are said before them.
+        const note = mcpListingNote(mcpSource.serverName, { listed: results.length, ...(matched !== undefined ? { matched } : {}), ...(counts ? { counts } : {}), pages: mcpTool ? mcpToolPages(mcpTool) : false });
         observed = results.some((item) => item.excerpt)
-          ? { ...rest, content: numberedMcpResults(results, cites.map((entry) => entry.cite)) }
+          ? { ...rest, content: [note, numberedMcpResults(results, cites.map((entry) => entry.cite))].filter(Boolean).join("\n\n") }
           : { ...rest, content, citations: cites };
       } else if (mcpSource.serverId === LEARN_SERVER_ID && fallbackPending && !learnAnswered && input.documentationFallback) {
         // Learn is offline, the query was blocked or nothing matched: the local index takes over.
@@ -748,15 +768,19 @@ const MCP_EXCERPT_CHARS = 12_000;
 /**
  * MCP results as the model reads them: "[n] Title, URL" before each
  * excerpt, with the numbers the source cards use. Excerpts of one page
- * share its number. The excerpts share one budget.
+ * share its number; an item under a number whose title differs from the
+ * first one's starts with its own title, so items that cite one page (the
+ * CVEs of a KEV answer) keep their identity. The excerpts share one budget.
  */
 export function numberedMcpResults(results: readonly McpResultItem[], cites: readonly string[]): string {
   const each = Math.max(400, Math.floor(MCP_EXCERPT_CHARS / Math.max(1, results.length)));
-  const groups = new Map<string, { head: string; excerpts: string[] }>();
+  const groups = new Map<string, { title: string; head: string; excerpts: string[] }>();
   results.forEach((item, index) => {
     const cite = cites[index]!;
-    const group = groups.get(cite) ?? { head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
-    if (item.excerpt) group.excerpts.push(item.excerpt.length > each ? `${item.excerpt.slice(0, each).trimEnd()} [...]` : item.excerpt);
+    const group = groups.get(cite) ?? { title: item.title, head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
+    const excerpt = item.excerpt && item.excerpt.length > each ? `${item.excerpt.slice(0, each).trimEnd()} [...]` : item.excerpt;
+    const own = item.title !== group.title ? item.title : undefined;
+    if (own || excerpt) group.excerpts.push([own, excerpt].filter(Boolean).join("\n"));
     groups.set(cite, group);
   });
   return [...groups.values()].map((group) => [group.head, ...group.excerpts].join("\n")).join("\n\n");

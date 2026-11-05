@@ -1263,6 +1263,22 @@ export interface McpServerSummary {
   lastConnectedAt?: string;
   /** Tools from the last successful live listing. Empty until installed. */
   tools: McpServerToolSummary[];
+  /**
+   * The tools OpenAdminOS uses from this server, when the catalog limits
+   * them. Other tools the server lists are never shown or offered.
+   */
+  offeredTools?: string[];
+  /**
+   * Offered tools the server did not list at its last connection. While
+   * any is missing, Chat does not use the server.
+   */
+  missingTools?: string[];
+  /** Who runs the server, in one plain sentence, for the install review. */
+  operator?: string;
+  /** The operator's terms or privacy page, where one exists. */
+  policy?: { label: string; url: string };
+  /** Further plain statements for the install review, for example that results are community text. */
+  notes?: string[];
 }
 
 /**
@@ -1293,6 +1309,14 @@ export interface IntuneChatToolTraceEntry {
     results?: Array<{ title: string; url?: string }>;
     /** The query reached the host. False when it was refused or failed before sending. */
     sentToHost?: boolean;
+    /** The server answered with nothing: no text, or no record that matches its result format. */
+    empty?: boolean;
+    /** The server answered with an error result, as opposed to not answering. */
+    toolError?: boolean;
+    /** How many records the result held, given only when OpenAdminOS listed fewer of them. */
+    matched?: number;
+    /** The result's own counts say the server has more records than it returned, as hasMore: true does. */
+    more?: boolean;
   };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources

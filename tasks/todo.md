@@ -1416,3 +1416,105 @@ Verification: typecheck, electron 774 pass, renderer (Node 22) 398 pass in 53 fi
 | 2 | Should fix | The Changes permission filter only affected status rows; the timeline and comparisons still read snapshots of a service that is no longer connected as current. | Timeline, baseline drift, new baselines, time, bundle and cross-tenant compare, rollback plans and fleet counts apply the part-level `availableScopeSet` rule and return `omittedResources`. Changes and Fleet name the service ("Intune is not connected. Its earlier snapshots are not compared."), and entry detail from those snapshots is labelled "Historical snapshot, no longer refreshed." Tests: an Entra-only fixture requesting deviceConfigurations gets no current comparison and a visible omission; renderer tests for the timeline notice, the compare notice and the historical label. | `7d8a3ee`, `fa4b7fe` |
 
 Verification on Node 22: electron 796 pass, renderer 407 pass in 53 files, runtime 255 pass and 2 skipped, test:scripts 18 pass, `npm run qa` 197 pass, 4 warn, 0 fail, typecheck and docs:check clean.
+
+# Marketplace MCP servers, second wave (2026-11-05)
+
+Branch `marketplace/second-wave` off `main` (98ddfc3). The owner asked to add three servers that need no sign-in. Each was probed live on 2026-11-05 with initialize, notifications/initialized and tools/list: no 401 and no OAuth metadata.
+
+| Server | Endpoint | Operator | Transport seen | Tools listed |
+| --- | --- | --- | --- | --- |
+| Microsoft Release Communications | `https://www.microsoft.com/releasecommunications/mcp` | Microsoft (Microsoft API Terms of Use) | SSE, no session id, protocol 2025-06-18 | `get_recent_m365_roadmaps`, `get_m365_roadmap_by_id`, `get_recent_azure_updates`, `get_azure_update_by_id` |
+| WindowsForum | `https://mcp.windowsforum.com/` | WindowsForum.com staff | SSE | 29 readOnly tools, among them `search_kb`, `get_kb_article`, forum search and member lookups |
+| endoflife.ai | `https://mcp.endoflife.ai/mcp` | Not named on the site (built on endoflife.date data) | plain JSON | `check_eol`, `get_product_lifecycle`, `get_upcoming_eol`, `get_kev_exposure`, `get_risk_score`, `get_upgrade_path`, `scan_stack`, `check_sbom`, `list_products`, `get_edge_device_status` |
+
+## Acceptance criteria
+
+1. The catalog in `apps/desktop/electron/mcp/catalog.ts` lists the three servers. Each has its name, publisher, URL, description, pitch, `useFor` line, aliases and topics. Where the operator is not named, the publisher says so plainly ("Operator not named"). Nothing implies Microsoft runs a server it does not run.
+2. **Tool allowlist.**
+   - A catalog entry can list the tool names it exposes. The host still lists tools live, but Chat, the Marketplace tool list and the query writer only ever see allowlisted tools.
+   - A call to any other tool is refused before anything is sent.
+   - If an allowlisted tool is missing from the server, the Marketplace shows a designed state naming the missing tools, and Chat skips that server.
+   - Allowlists:
+     - WindowsForum: `search_kb` and `get_kb_article` only.
+     - endoflife.ai: everything except `scan_stack` and `check_sbom`, which take bulk software inventories.
+     - Release Communications: all four tools, by their live names.
+   - Existing servers stay as they are (no allowlist means every tool the server lists).
+3. **Transports.** The MCP host works with SSE replies that carry no session id (Release Communications), with plain JSON replies (endoflife.ai) and with SSE plus a session (WindowsForum). Unit tests cover each shape with fixtures. A live probe test runs the handshake, tools/list and the allowlist check against all three; it is skipped when offline or in CI, like the existing live test.
+4. **Query writer.**
+   - It writes these servers' arguments from the current question only, as for the first wave.
+   - An argument that names a specific item (a roadmap ID, an Azure update ID, a KB article number) is sent only when it appears in the current question or in an earlier result from the same server in the same answer. This follows the existing rule for Learn fetch URLs.
+   - The egress filter applies unchanged.
+5. **Results.**
+   - Results are parsed by structure into sources: title, URL where the server gives one, and a short excerpt.
+   - Results are numbered and cited like Learn results and fenced as third-party content.
+   - Forum and KB text is treated as untrusted.
+   - A server that answers with an error or an empty result shows a designed state and never fails silently.
+6. **Routing.** Naming a server or its alias calls it. Topic words choose it for docs questions:
+   - roadmap, retirement, "what's new", rollout, Azure update: Release Communications;
+   - KB, cumulative update, known issue, patch, update history: WindowsForum;
+   - end of life, end of support, lifecycle, EOL, support ends: endoflife.ai.
+
+   Learn stays the default docs source.
+7. **Disclosure.**
+   - The status strip, composer, tooltips and hosted send confirmation name the new hosts when the servers are enabled.
+   - The install review shows the operator, the host, a terms or privacy link where one exists, and the tools that will be offered.
+   - For endoflife.ai it says the operator is not named and no privacy page was found.
+   - For WindowsForum it says forum content is community text.
+8. **Docs.** SPEC, CHANGELOG `[Unreleased]` and the Marketplace page in `docs/gitbook` describe the three servers, the allowlists and the reasons for them. `docs:check` passes.
+9. **Tests and reviews.**
+   - All suites pass under Node 22, as CI runs them.
+   - The renderer covers the Marketplace cards and install review for each server.
+   - Light and dark screenshots of the cards and install reviews.
+   - A separate Claude evaluator and GPT-6.1-Sol review the whole diff with no open blocking findings.
+   - A live check in the running app asks one question per server.
+
+## Status (2026-11-05)
+
+1. [x] Catalog: three entries with name, publisher, URL, description, pitch, useFor, aliases, topics. Deviation: endoflife.ai does name its operator (EndofLife AI Inc., Alberta) and has a privacy page (https://endoflife.ai/privacy), so the catalog says so instead of "Operator not named". WindowsForum's own server text names Fara Technologies LLC.
+2. [x] Tool allowlist in catalog, host (listing and calls, nothing sent), state (summaries, Chat skip) and renderer (missing tools state, status strip).
+3. [x] Transports: replay tests for SSE without session, plain JSON, SSE with session and log notifications; live probe test, skipped in CI, with OPENADMINOS_SKIP_LIVE and offline. WindowsForum issued no session id on 2026-11-05.
+4. [x] Query writer: item params (roadmap id, Azure update id, kb_id) only from the question or an earlier same-server result; generalizes the Learn link rule. Live check added null-param dropping and catalog query hints.
+5. [x] Results parsed by catalog formats into numbered, cited sources; designed empty ("found nothing") and error ("returned an error") states; WindowsForum results marked community text.
+6. [x] Routing topics and aliases as listed; topics match before digits; names match only as whole words; Learn stays default.
+7. [x] Disclosure: strip, composer, tooltip and hosted confirmation name the hosts; install review adds Who runs it and Tools Chat will be offered.
+8. [x] SPEC, CHANGELOG, new docs/gitbook/features/marketplace.md; docs:check passes.
+9. [ ] Tests under Node 22 pass (typecheck, electron 973, renderer 493, runtime, qa, test:scripts, docs:check, three smokes); renderer covers each card and install review; light and dark screenshots taken; separate Claude evaluator run (one finding, fixed). GPT-6.1-Sol reviewed the whole diff in five rounds; round 5 at 47a4648 found nothing. Open: a live check in the GUI app. The live check ran through the main-process Chat path with gpt-oss:20b: WindowsForum answered with results and a get_kb_article call on an ID from its own search; Release Communications sent a valid OData query and showed the empty state; endoflife.ai showed the error state. Answer quality from gpt-oss:20b was poor (tenant-evidence guard, protocol drift), unrelated to this branch.
+
+## Review round 1 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff against 98ddfc3. All six findings fixed, each with a test that fails before the fix:
+
+1. [x] Blocking: IDs in OData `filter` bypassed the item-ID rule. A catalog `itemIds.filter` entry names the filter param and its item fields (`id`, `baseId`); `electron/intune-chat/mcp-filter.ts` parses the filter before sending, checks every value compared with an item field, writes it as the server compares it (number for roadmaps, text for Azure updates, both checked live) and refuses a filter outside its grammar with a designed message.
+2. [x] Normalization collisions. Each tool declares an ID form (roadmap: digits; Azure update: digits or lowercase slug, as live IDs such as `2021regions` show; KB: digits with optional KB prefix). The question is split on characters the form cannot hold, only the KB prefix is an equivalent, and the canonical ID is sent.
+3. [x] KEV citations lost their URL. Result formats can name `inheritUrl` keys; CVE entries take the enclosing `source.url`.
+4. [x] www.microsoft.com named Release Communications. `sharedHost` entries are named by name, aliases or full URL with path; host matches refuse a following label.
+5. [x] Details said a skipped server receives the query text; it now says Chat sends nothing until the tools are back.
+6. [x] The query writer prompt contradicted itself on IDs; it now has one rule for item IDs.
+
+## Review round 2 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff against 98ddfc3. Four findings, all fixed, each with a test that fails before the fix:
+
+1. [x] Important: KEV entries that share one citation lost later CVE identities. In the numbered excerpts, an item whose title differs from its group's first title now starts with its own title, for every server.
+2. [x] Important: formatted lists lost completeness and paging. The reader counts every matching record past the ten it lists and keeps the number and true or false fields of the list's top-level record. The model reads those counts, how many records were left out and whether the server has more (a hasMore flag, or a record total above offset plus records), with the words to use ("Showing 10 of 33"). The step reads "10 of 33 results" and "the server has more". The query writer of a further call to the same tool sees what earlier calls sent, listed and counted, so it can set skip; checked live (skip 50 gives offset 50, hasMore true).
+3. [x] Minor: an empty or blank optional param, such as `"filter": ""`, is left out like null; a required one left empty is refused before sending with a designed message.
+4. [x] Minor: `windowsforum.com` is an alias of WindowsForum; an email address or longer domain still names nothing, and sharedHost is unchanged.
+
+A separate Claude evaluator found no blocking issue; its below-threshold notes (a count above the records returned without a hasMore flag, totalPages read as a total) were fixed too.
+
+## Review round 3 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff against 98ddfc3. No blocking finding; one important finding, fixed with tests that fail before the fix:
+
+1. [x] Important: missing-tool gating was bypassed on automatic reconnect. After a restart, the stored listing still offered the server, and a session opened for a call found a tool missing but still dispatched the others. The host now refuses every call while the session lacks an offered tool (`tools-missing`, nothing sent, the message names the tool and Check connection), and a session opened for a call stores its listing so the Marketplace shows "Installed · tools missing" and Chat skips the server.
+
+## Review round 4 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff at 6aa2c13. No blocking finding.
+
+1. [x] Important: the session promise awaited the listing report, which takes the store lock, while uninstall and disable hold that lock and wait on the session. Fixed in e0176a3 (also flagged by the automated security review): the report runs in the call after the session opens; a test closes a session while its report is held.
+2. [x] Minor: a failed listing save was dropped and never retried. The next call on the session retries, the refusal says the Marketplace still shows the old tool list, and the error detail goes to the local log only, since the message reaches the model.
+
+## Review round 5 (2026-11-05)
+
+GPT-6.1-Sol review of the whole diff at 47a4648: no blocking, important or minor findings. Both round 4 fixes held, including Check connection racing a call that opens a session.

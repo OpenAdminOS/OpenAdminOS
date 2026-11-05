@@ -1,0 +1,1358 @@
+{
+ "release-communications": {
+  "probedAt": "2026-11-05",
+  "transport": "sse-no-session",
+  "tools": [
+   {
+    "name": "get_m365_roadmap_by_id",
+    "description": "Retrieves a specific M365 roadmap post from Microsoft Release Communications by its unique identifier. Returns full details including the complete untruncated description, products, and availability dates. Use this after listing to get full information about a specific post.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "description": "Unique numeric identifier of the M365 roadmap post (e.g., '123456')",
+       "type": "string"
+      }
+     },
+     "required": [
+      "id"
+     ]
+    },
+    "execution": {
+     "taskSupport": "optional"
+    }
+   },
+   {
+    "name": "get_azure_update_by_id",
+    "description": "Retrieves a specific Azure update post from Microsoft Release Communications by its unique identifier. Returns full details including the complete untruncated description, products, tags, and availability dates. Use this after listing to get full information about a specific post.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "id": {
+       "description": "Unique identifier of the Azure update post (e.g., '467931')",
+       "type": "string"
+      }
+     },
+     "required": [
+      "id"
+     ]
+    },
+    "execution": {
+     "taskSupport": "optional"
+    }
+   },
+   {
+    "name": "get_recent_m365_roadmaps",
+    "description": "Retrieves M365 roadmap posts from Microsoft Release Communications with optional filtering and search capabilities.\r\nReturns up to 50 roadmap items per request with truncated descriptions to manage AI context window.\r\nUse GetM365RoadmapByIdAsync to get full details (including complete description) for specific items.\r\nIf results are empty or insufficient, ask user for more specific filter criteria.\r\n\r\nRESULT EXPLANATION REQUIREMENT:\r\nWhen returning filtered results:\r\n- Order results from most recent to oldest based on the relevant date field used for filtering.\r\n- Briefly state which date field was used:\r\n- Availability dates (GA/preview): 'Filtered by feature release timing (when features become available to customers)'\r\n- Publication dates (created/modified): 'Filtered by post publication date (when posts were published to roadmap)'\r\nExample: 'Here are M365 features with GA in February 2026 (filtered by general availability date)...'",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "filter": {
+       "description": "OData filter expression for precise querying.\r\n\r\nBASIC FILTERS:\r\n• Products: products/any(p: p eq 'Microsoft Teams') or products/any(p: p eq 'SharePoint')\r\n• Status: status eq 'Launched' | 'Rolling out' | 'In development' | null\r\n• Release Rings (also called Release phases): \r\n  releaseRings/any(r: r eq 'Current Channel') or releaseRings/any(r: r eq 'General Availability') or \r\n  releaseRings/any(r: r eq 'Preview') or releaseRings/any(r: r eq 'Targeted Release') or \r\n  releaseRings/any(r: r eq 'Targeted Release (Entire Organization)') or releaseRings/any(r: r eq 'Targeted Release (Select People)')\r\n• Platforms: \r\n  platforms/any(pl: pl eq 'Android') or platforms/any(pl: pl eq 'Desktop') or platforms/any(pl: pl eq 'Developer') or \r\n  platforms/any(pl: pl eq 'Education') or platforms/any(pl: pl eq 'iOS') or platforms/any(pl: pl eq 'Linux') or \r\n  platforms/any(pl: pl eq 'Mac') or platforms/any(pl: pl eq 'Mobile') or platforms/any(pl: pl eq 'Teams and Surface Devices') or \r\n  platforms/any(pl: pl eq 'Web')\r\n• Cloud Instances: \r\n  cloudInstances/any(ci: ci eq 'DoD') or cloudInstances/any(ci: ci eq 'GCC') or \r\n  cloudInstances/any(ci: ci eq 'GCC High') or cloudInstances/any(ci: ci eq 'Worldwide (Standard Multi-Tenant)')\r\n• Availabilities (nested complex type with ring, year, month):\r\n  availabilities/any(a: a/ring eq 'General Availability' and a/year eq 2026)\r\n  availabilities/any(a: a/ring eq 'General Availability' and a/month eq 'February' and a/year eq 2026)\r\n  availabilities/any(a: a/ring eq 'Preview' and a/year ge 2025)\r\n  Ring values: 'General Availability', 'Preview'\r\n  Month values: 'January', 'February', ..., 'December'\r\n• Title: Use the 'search' parameter instead of filter for title text matching\r\n\r\n\r\nDATE FILTERING (choose based on user intent):\r\n\r\n1. FEATURE AVAILABILITY DATES (DEFAULT - use when user asks about RELEASE TIMING):\r\n   USE THIS FILTER WHEN user query contains words like: 'coming', 'rolling out', 'launching', 'released', 'upcoming', 'planned', 'available', 'GA dates', 'preview dates', 'release dates'\r\n   Format: YYYY-MM (e.g., '2026-01' for January 2026)\r\n   Meaning: WHEN THE FEATURE BECOMES AVAILABLE to customers (release timing)\r\n   \r\n   Examples:\r\n   - generalAvailabilityDate eq '2026-02' (features with GA in February 2026)\r\n   - previewAvailabilityDate ge '2026-01' (previews available in or after January 2026)\r\n   - generalAvailabilityDate le '2026-06' (GA on or before June 2026)\r\n   - (generalAvailabilityDate eq '2026-02' or previewAvailabilityDate eq '2026-02') (GA OR preview in February 2026)\r\n\r\n2. ANNOUNCEMENT/PUBLICATION DATES (use ONLY when user explicitly asks about when a post was published or modified):\r\n   USE THIS FILTER WHEN user query contains words like: 'published', 'updated', 'created', 'added', 'last week', 'modified', 'announcement date', 'post creation date', 'when was this posted', 'newly added', 'recently updated'\r\n   Format: ISO 8601 DateTime (e.g., 2026-02-01T00:00:00Z)\r\n   Meaning: WHEN THE POST WAS PUBLISHED to M365 Roadmap (not when feature becomes available)\r\n   \r\n   Examples:\r\n   - created ge 2026-02-01T00:00:00Z and created le 2026-02-28T23:59:59Z (posts published to roadmap in February 2026)\r\n   - created ge 2026-01-01T00:00:00Z (posts published on or after Jan 1, 2026)\r\n   - modified le 2026-12-31T23:59:59Z (posts last updated on or before Dec 31, 2026)\r\n   - created ge 2025-12-01T00:00:00Z and created le 2025-12-31T23:59:59Z (posts published in December 2025)\r\n\r\nCOMBINING FILTERS:\r\n• Multiple criteria: products/any(p: p eq 'Microsoft Teams') and status eq 'Launched'\r\n• Product + Status + Platform: products/any(p: p eq 'Microsoft Purview') and status eq 'In development' and platforms/any(pl: pl eq 'Web')\r\n• Product + Availability date: products/any(p: p eq 'Microsoft Copilot (Microsoft 365)') and (generalAvailabilityDate eq '2026-02' or previewAvailabilityDate eq '2026-02')\r\n• Product + Announcement date: products/any(p: p eq 'Microsoft Teams') and created ge 2026-02-01T00:00:00Z and created le 2026-02-28T23:59:59Z\r\n• Cloud + Status: cloudInstances/any(ci: ci eq 'GCC High') and status eq 'Launched'\r\n• Release Ring + Availability: releaseRings/any(r: r eq 'Preview') and previewAvailabilityDate ge '2025-01'\r\n• Product + Availabilities: products/any(p: p eq 'Microsoft Teams') and availabilities/any(a: a/ring eq 'General Availability' and a/month eq 'March' and a/year eq 2026)\r\n\r\nAVAILABLE FIELDS:\r\nid, baseId, status, created, modified, generalAvailabilityDate, previewAvailabilityDate, products, platforms, releaseRings, cloudInstances, availabilities (nested: ring, year, month)\r\n\r\nOUTPUT-ONLY FIELDS (not filterable, included in response):\r\ntitle, description, moreInfoUrls",
+       "type": "string",
+       "default": null
+      },
+      "search": {
+       "description": "Text search within post titles only. Use for finding posts containing specific keywords or phrases.",
+       "type": "string",
+       "default": null
+      },
+      "skip": {
+       "description": "Number of items to skip for pagination. Each request returns up to 50 items. For page 1: skip=0 (default). For page 2: skip=50. For page 3: skip=100. The response includes Offset, Limit, TotalCount, and HasMore to help determine next page.",
+       "type": [
+        "integer",
+        "null"
+       ],
+       "default": null
+      },
+      "include_facets": {
+       "description": "When true, includes facet taxonomy counts in the response showing distribution of Products, Platforms, ReleaseRings, and CloudInstances. Useful for discovering available filter values or understanding data distribution.",
+       "type": "boolean",
+       "default": false
+      }
+     }
+    },
+    "execution": {
+     "taskSupport": "optional"
+    }
+   },
+   {
+    "name": "get_recent_azure_updates",
+    "description": "Retrieves Azure update posts from Microsoft Release Communications with optional filtering and search capabilities.\r\nReturns up to 50 Azure updates per request with truncated descriptions to manage AI context window.\r\nUse GetAzureUpdateByIdAsync to get full details (including complete description) for specific items.\r\nIf results are empty or insufficient, ask user for more specific filter criteria.\r\n\r\nRETIREMENT QUERIES:\r\nWhen user asks about retirements, retiring services, or end-of-life:\r\n- Filter by tag: tags/any(t: t eq 'Retirements')\r\n- To filter by retirement date, use the availabilities collection: availabilities/any(a: a/ring eq 'Retirement' and a/month eq 'February' and a/year eq 2026)\r\n- You can combine both: tags/any(t: t eq 'Retirements') and availabilities/any(a: a/ring eq 'Retirement' and a/month eq 'February' and a/year eq 2026)\r\n- Example: 'Azure retirements in Feb 2026' → tags/any(t: t eq 'Retirements') and availabilities/any(a: a/ring eq 'Retirement' and a/month eq 'February' and a/year eq 2026)\r\n- Present retirement timing from the availabilities array: look for entries where ring='Retirement' and show the year and month.\r\n\r\nRESULT EXPLANATION REQUIREMENT:\r\nWhen returning filtered results:\r\n- Order results from most recent to oldest based on the relevant date field used for filtering.\r\n- Briefly state which date field was used:\r\n- Availability dates (GA/preview): 'Filtered by feature release timing (when features become available to customers)'\r\n- Retirement dates: 'Filtered by retirement tag. Retirement dates shown from the availabilities array (ring, year, month).'\r\n- Publication dates (created/modified): 'Filtered by post publication date (when posts were published to Azure Updates)'\r\nExample: 'Here are Azure features with GA in February 2026 (filtered by general availability date)...'",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "filter": {
+       "description": "OData filter expression for precise querying.\r\n\r\nBASIC FILTERS:\r\n• Tags: tags/any(t: t eq 'Features') or tags/any(t: t eq 'Retirements') or tags/any(t: t eq 'Compliance') or tags/any(t: t eq 'Management') or tags/any(t: t eq 'Microsoft Ignite') or tags/any(t: t eq 'Open Source') or tags/any(t: t eq 'Pricing & Offerings') or tags/any(t: t eq 'Regions & Datacenters') or tags/any(t: t eq 'Security') or tags/any(t: t eq 'Services')\r\n• Products: products/any(p: p eq 'Azure Storage') or products/any(p: p eq 'Azure Machine Learning')\r\n• Product Categories: productCategories/any(pc: pc eq 'Compute') or productCategories/any(pc: pc eq 'Databases') or productCategories/any(pc: pc eq 'Networking') or productCategories/any(pc: pc eq 'Security') or productCategories/any(pc: pc eq 'Storage') or productCategories/any(pc: pc eq 'Analytics') or productCategories/any(pc: pc eq 'Containers') or productCategories/any(pc: pc eq 'DevOps') or productCategories/any(pc: pc eq 'Management and governance') or productCategories/any(pc: pc eq 'Web')\r\n• Status: status eq 'Launched' | 'In preview' | 'In development' | null\r\n• Title: Use the 'search' parameter instead of filter for title text matching\r\n\r\nDATE FILTERING (choose based on user intent):\r\n\r\n1. FEATURE AVAILABILITY DATES (DEFAULT - use when user asks about RELEASE TIMING):\r\n   USE THIS FILTER WHEN user query contains words like: 'coming', 'rolling out', 'launching', 'released', 'upcoming', 'planned', 'available', 'GA dates', 'preview dates', 'release dates'\r\n   Format: YYYY-MM (e.g., '2026-01' for January 2026)\r\n   Meaning: WHEN THE FEATURE BECOMES AVAILABLE to customers (release timing)\r\n   \r\n   Examples:\r\n   - generalAvailabilityDate eq '2026-02' (features with GA in February 2026)\r\n   - previewAvailabilityDate ge '2026-01' (previews available in or after January 2026)\r\n   - privatePreviewAvailabilityDate le '2026-06' (private previews on or before June 2026)\r\n   - (generalAvailabilityDate eq '2026-02' or previewAvailabilityDate eq '2026-02') (GA OR preview in February 2026)\r\n\r\n2. ANNOUNCEMENT/PUBLICATION DATES (use ONLY when user explicitly asks about when a post was published or modified):\r\n   USE THIS FILTER WHEN user query contains words like: 'published', 'updated', 'created', 'added', 'last week', 'modified', 'announcement date', 'post creation date', 'when was this posted', 'newly added', 'recently updated'\r\n   Format: ISO 8601 DateTime (e.g., 2026-02-01T00:00:00Z)\r\n   Meaning: WHEN THE POST WAS PUBLISHED to Azure Updates website (not when feature becomes available)\r\n   \r\n   Examples:\r\n   - created ge 2026-02-01T00:00:00Z and created le 2026-02-28T23:59:59Z (posts published in February 2026)\r\n   - created ge 2026-01-01T00:00:00Z (posts published on or after Jan 1, 2026)\r\n   - modified le 2026-12-31T23:59:59Z (posts last updated on or before Dec 31, 2026)\r\n   - created ge 2025-12-01T00:00:00Z and created le 2025-12-31T23:59:59Z (posts published in December 2025)\r\n\r\nCOMBINING FILTERS:\r\n• Multiple criteria: tags/any(t: t eq 'Features') and status eq 'Launched'\r\n• Product + Availability date: products/any(p: p eq 'Azure Storage') and (generalAvailabilityDate eq '2026-02' or previewAvailabilityDate eq '2026-02')\r\n• Product + Announcement date: products/any(p: p eq 'Azure Storage') and created ge 2026-02-01T00:00:00Z and created le 2026-02-28T23:59:59Z\r\n• Retirements in a specific month: tags/any(t: t eq 'Retirements') and availabilities/any(a: a/ring eq 'Retirement' and a/month eq 'February' and a/year eq 2026)\r\n• Product Category + Status: productCategories/any(pc: pc eq 'Databases') and status eq 'Launched'\r\n• Product + Tag + Availabilities: products/any(p: p eq 'Automation') and tags/any(t: t eq 'Retirements') and availabilities/any(a: a/ring eq 'Retirement' and a/month eq 'March' and a/year eq 2025)\r\n\r\nAVAILABLE FIELDS:\r\nid, baseId, status, created, modified, privatePreviewAvailabilityDate, previewAvailabilityDate, generalAvailabilityDate, tags, products, productCategories, availabilities (nested: ring, year, month)\r\n\r\nOUTPUT-ONLY FIELDS (not filterable, included in response):\r\ntitle, description",
+       "type": "string",
+       "default": null
+      },
+      "search": {
+       "description": "Text search within post titles only. Use for finding posts containing specific keywords or phrases.",
+       "type": "string",
+       "default": null
+      },
+      "skip": {
+       "description": "Number of items to skip for pagination. Each request returns up to 50 items. For page 1: skip=0 (default). For page 2: skip=50. For page 3: skip=100. The response includes Offset, Limit, TotalCount, and HasMore to help determine next page.",
+       "type": [
+        "integer",
+        "null"
+       ],
+       "default": null
+      },
+      "include_facets": {
+       "description": "When true, includes facet taxonomy counts in the response showing distribution of ProductCategories, Products, and Tags. Useful for discovering available filter values or understanding data distribution.",
+       "type": "boolean",
+       "default": false
+      }
+     }
+    },
+    "execution": {
+     "taskSupport": "optional"
+    }
+   }
+  ],
+  "calls": {
+   "get_recent_m365_roadmaps": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"items\":[{\"id\":109560,\"title\":\"Microsoft Intune: iOS app multiple managed accounts\",\"description\":\"Allows people to use a single device with multiple managed accounts to access company information through Teams iOS app, with Outlook to follow.\",\"cloudInstances\":[\"Worldwide (Standard Multi-Tenant)\"],\"platforms\":[\"iOS\"],\"releaseRings\":[\"General Availability\"],\"moreInfoUrls\":[],\"products\":[\"Microsoft Intune\"],\"availabilities\":[{\"ring\":\"General Availability\",\"year\":2026,\"month\":\"March\"},{\"ring\":\"Preview\",\"year\":2025,\"month\":\"November\"}],\"generalAvailabilityDate\":\"2026-03\",\"previewAvailabilityDate\":\"2025-11\",\"created\":\"2023-02-10T00:18:34.287Z\",\"baseId\":109560,\"status\":\"In development\",\"modified\":\"2025-07-23T23:00:18.802805Z\"},{\"id\":124890,\"title\":\"Microsoft Intune: On demand remediations - single device\",\"description\":\"Remediations are script packages that can detect and fix common support issues on a user's device before they even realize there's a problem. These remediations can help reduce support calls. On deman...\",\"cloudInstances\":[\"Worldwide (Standard Multi-Tenant)\",\"GCC\",\"GCC High\"],\"platforms\":[\"Desktop\"],\"releaseRings\":[\"General Availability\",\"Preview\"],\"moreInfoUrls\":[],\"products\":[\"Microsoft Intune\"],\"availabilities\":[{\"ring\":\"General Availability\",\"year\":2025,\"month\":\"December\"},{\"ring\":\"Preview\",\"year\":2023,\"month\":\"June\"}],\"generalAvailabilityDate\":\"2025-12\",\"previewAvailabilityDate\":\"2023-06\",\"created\":\"2023-08-04T22:05:15.687Z\",\"baseId\":124890,\"status\":\"In development\",\"modified\":\"2025-06-11T23:00:02.2473249Z\"},{\"id\":378649,\"title\":\"Microsoft Intune: Windows enrollment attestation \",\"description\":\"Physical Windows devices will be attested at enrollment that enrollment credentials are stored in the hardware of the device. Administrators can view device attestations in the new Device attestation ...\",\"cloudInstances\":[\"Worldwide (Standard Multi-Tenant)\"],\"platforms\":[\"Desktop\"],\"releaseRings\":[\"General Availability\",\"Preview\"],\"moreInfoUrls\":[],\"products\":[\"Microsoft Intune\"],\"availabilities\":[{\"ring\":\"General Availability\",\"year\":2026,\"month\":\"March\"},{\"ring\":\"Preview\",\"year\":2024,\"month\":\"April\"}],\"generalAvailabilityDate\":\"2026-03\",\"previewAvailabilityDate\":\"2024-04\",\"created\":\"2024-01-19T00:15:45Z\",\"baseId\":378649,\"status\":\"In development\",\"modified\":\"2025-09-09T23:15:14.7186978Z\"}],\"totalCount\":33,\"limit\":50,\"offset\":0,\"hasMore\":false,\"returnedCount\":3}"
+     }
+    ]
+   },
+   "get_recent_azure_updates": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"items\":[{\"id\":\"466774\",\"productCategories\":[\"Analytics\",\"Internet of Things\"],\"tags\":[\"Retirements\"],\"products\":[\"Azure Stream Analytics\"],\"availabilities\":[{\"ring\":\"Retirement\",\"year\":2027,\"month\":\"October\"}],\"baseId\":\"466774\",\"title\":\"Retirement: Azure Stream Analytics PowerBI output connector\",\"description\":\"Azure stream analytics PowerBI output connector will be retired on Oct 31, 2027.What is changing for Azure Stream Analytics Power BI output connector?DateWhat happensBeginning October 31st, 2024New cu...\",\"created\":\"2024-11-01T00:30:29.7960776Z\",\"modified\":\"2024-11-01T00:30:29.7960776Z\"},{\"id\":\"466779\",\"productCategories\":[],\"tags\":[\"Retirements\"],\"products\":[],\"availabilities\":[{\"ring\":\"Retirement\",\"year\":2025,\"month\":\"October\"}],\"baseId\":\"466779\",\"title\":\"Retirement: Azure Health Data Services will be retired on October 31, 2025 in the Qatar Central region\",\"description\":\"Because we're consolidating resources and there is low usage in the region, we'll be retiring Azure Health Data Services the Qatar Central region on October 31, 2025. Please ensure that you migrate to...\",\"created\":\"2024-11-01T00:30:29Z\",\"modified\":\"2024-11-13T14:15:57.4936711Z\"}],\"totalCount\":515,\"limit\":50,\"offset\":0,\"hasMore\":true,\"returnedCount\":2}"
+     }
+    ]
+   },
+   "get_m365_roadmap_by_id": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"id\":109560,\"title\":\"Microsoft Intune: iOS app multiple managed accounts\",\"description\":\"Allows people to use a single device with multiple managed accounts to access company information through Teams iOS app, with Outlook to follow.\",\"cloudInstances\":[\"Worldwide (Standard Multi-Tenant)\"],\"platforms\":[\"iOS\"],\"releaseRings\":[\"General Availability\"],\"moreInfoUrls\":[],\"products\":[\"Microsoft Intune\"],\"availabilities\":[{\"ring\":\"General Availability\",\"year\":2026,\"month\":\"March\"},{\"ring\":\"Preview\",\"year\":2025,\"month\":\"November\"}],\"generalAvailabilityDate\":\"2026-03\",\"previewAvailabilityDate\":\"2025-11\",\"created\":\"2023-02-10T00:18:34.287Z\",\"baseId\":109560,\"status\":\"In development\",\"modified\":\"2025-07-23T23:00:18.802805Z\"}"
+     }
+    ]
+   },
+   "get_azure_update_by_id": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"id\":\"466774\",\"productCategories\":[\"Analytics\",\"Internet of Things\"],\"tags\":[\"Retirements\"],\"products\":[\"Azure Stream Analytics\"],\"availabilities\":[{\"ring\":\"Retirement\",\"year\":2027,\"month\":\"October\"}],\"baseId\":\"466774\",\"title\":\"Retirement: Azure Stream Analytics PowerBI output connector\",\"description\":\"Azure stream analytics PowerBI output connector will be retired on Oct 31, 2027.What is changing for Azure Stream Analytics Power BI output connector?DateWhat happensBeginning October 31st, 2024New customers will not be able to create new Azure Stream Analytics jobs with Power BI as output connectorBeginning Oct 31 31st, 2027Existing customers will not be able to create new Azure Stream Analytics jobs with Power BI as output connectorBeginning Oct 31 31st, 2027Existing Azure Stream Analytic jobs with Power BI output connector will be stoppedReason for retirement: Power BI has announced retirement of real time streaming. Find out more details about Power BI Streaming Datasets retirement: real time streaming in Power BI.We encourage you to transition to Fabric real time intelligence prior to the retirement date to experience the new capabilities of Fabric Real Time Intelligence including:      Eventstream       KQL Database       DataActivator       Real Time DashboardsFrom now to 10/31/2027 existing customers can continue to use Azure stream analytics PowerBI output connector without disruption. On 10/31/2027 stream analytics jobs running with PowerBI output connector will be stopped. Resources to aid in your migration can be found below.Required actionTo avoid service disruptions, please follow these instructions to migrate to real time intelligence by 10/31/2027.Learn more.\",\"created\":\"2024-11-01T00:30:29.7960776Z\",\"modified\":\"2024-11-01T00:30:29.7960776Z\"}"
+     }
+    ]
+   },
+   "empty_search": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"items\":[],\"totalCount\":0,\"limit\":50,\"offset\":0,\"hasMore\":false,\"returnedCount\":0}"
+     }
+    ]
+   },
+   "unknown_id": {
+    "content": []
+   }
+  }
+ },
+ "windowsforum": {
+  "probedAt": "2026-11-05",
+  "transport": "sse-with-notifications",
+  "tools": [
+   {
+    "_meta": {
+     "fastmcp": {
+      "tags": [
+       "search"
+      ]
+     }
+    },
+    "annotations": {
+     "destructiveHint": false,
+     "openWorldHint": false,
+     "readOnlyHint": true,
+     "title": "Search WindowsForum"
+    },
+    "description": "Search all WindowsForum content (community threads, Windows news, tutorials) with combined keyword and semantic ranking — the best first call for any question or topic. Keep section 'all' unless the user asks for one kind of content. For the latest/newest items set sort='newest' (a query with no topic, such as 'latest tutorials', returns the newest items). Pass the result ids to render_search_results to show them as a card.\n\nReturns a list of search results with basic information. Use the fetch tool\nfor document content and continuation details for long threads.",
+    "inputSchema": {
+     "properties": {
+      "query": {
+       "type": "string",
+       "description": "Search query string. Natural language queries work best for semantic search."
+      },
+      "source": {
+       "default": "auto",
+       "type": "string",
+       "description": "Search mode — \"auto\" (BM25 + semantic, best results), \"windowsforum\" (BM25 only), or \"semantic\" (vector only)"
+      },
+      "limit": {
+       "default": 10,
+       "type": "integer",
+       "description": "Maximum number of results to return (default: 10)"
+      },
+      "section": {
+       "default": "all",
+       "description": "Part of the site to cover. Keep the default 'all' for questions and troubleshooting, so threads, news and tutorials all come back. Use 'threads', 'news' or 'tutorials' only when the user asks for that one kind of content, e.g. 'tutorials' for 'show tutorials'.",
+       "enum": [
+        "all",
+        "threads",
+        "news",
+        "tutorials"
+       ],
+       "type": "string"
+      },
+      "sort": {
+       "default": "relevance",
+       "description": "'relevance' (default) ranks by match. Use 'newest' when the user asks for the latest, newest or most recent items; queries containing those words sort newest automatically.",
+       "enum": [
+        "relevance",
+        "newest"
+       ],
+       "type": "string"
+      }
+     },
+     "required": [
+      "query"
+     ],
+     "type": "object",
+     "additionalProperties": false
+    },
+    "name": "search",
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "title": "Search WindowsForum"
+   },
+   {
+    "_meta": {
+     "fastmcp": {
+      "tags": [
+       "kb",
+       "microsoft"
+      ]
+     }
+    },
+    "annotations": {
+     "destructiveHint": false,
+     "openWorldHint": true,
+     "readOnlyHint": true,
+     "title": "Get Microsoft KB article"
+    },
+    "description": "Retrieve an official Microsoft Knowledge Base article from support.microsoft.com by KB number (e.g. KB5063878) — returns the update's title, summary, and affected builds.\nUse this tool when a user asks about a specific KB number.\nFetches the full article content including title, summary, known issues,\nand resolution steps.",
+    "inputSchema": {
+     "properties": {
+      "kb_id": {
+       "description": "The KB article number, e.g. '5034441' or 'KB5034441'",
+       "type": "string"
+      }
+     },
+     "required": [
+      "kb_id"
+     ],
+     "type": "object",
+     "additionalProperties": false
+    },
+    "name": "get_kb_article",
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "title": "Get Microsoft KB article"
+   },
+   {
+    "_meta": {
+     "fastmcp": {
+      "tags": [
+       "kb",
+       "microsoft"
+      ]
+     }
+    },
+    "annotations": {
+     "destructiveHint": false,
+     "openWorldHint": true,
+     "readOnlyHint": true,
+     "title": "Search Microsoft KB"
+    },
+    "description": "Search official Microsoft Knowledge Base articles for Windows 10, Windows 11, and Windows Server updates by topic, keyword, build, or KB number — use for Windows update, patch, and known-issue lookups when you lack a KB number.\nReturns matching KB article titles, release dates, and support.microsoft.com\nURLs, newest first. Use get_kb_article to fetch the full content of a specific article.",
+    "inputSchema": {
+     "properties": {
+      "query": {
+       "description": "Search query, e.g. 'blue screen 24H2' or 'KB5034441'",
+       "type": "string"
+      },
+      "limit": {
+       "default": 5,
+       "description": "Maximum number of results (default: 5, max: 10)",
+       "type": "integer"
+      }
+     },
+     "required": [
+      "query"
+     ],
+     "type": "object",
+     "additionalProperties": false
+    },
+    "name": "search_kb",
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": {
+      "items": {
+       "additionalProperties": true,
+       "type": "object"
+      },
+      "type": "array"
+     }
+    },
+    "title": "Search Microsoft KB"
+   },
+   {
+    "_meta": {
+     "fastmcp": {
+      "tags": [
+       "entity"
+      ]
+     }
+    },
+    "annotations": {
+     "destructiveHint": false,
+     "openWorldHint": false,
+     "readOnlyHint": true,
+     "title": "Get user profile"
+    },
+    "description": "Look up a WindowsForum member's public profile by username or user id — registration date, message count, reaction score, last seen, and profile URL.\n\nOnly what a signed-out visitor could see on the member's profile page is\nreturned: members who limit their profile get a username-only result,\nand last seen is omitted for members who hide their online status.",
+    "inputSchema": {
+     "properties": {
+      "identifier": {
+       "type": "string",
+       "description": "Username or user ID"
+      }
+     },
+     "required": [
+      "identifier"
+     ],
+     "type": "object",
+     "additionalProperties": false
+    },
+    "name": "get_user",
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "title": "Get user profile"
+   },
+   {
+    "_meta": {
+     "fastmcp": {
+      "tags": [
+       "activity"
+      ]
+     }
+    },
+    "annotations": {
+     "destructiveHint": false,
+     "openWorldHint": false,
+     "readOnlyHint": true,
+     "title": "Who's online"
+    },
+    "description": "See who is on WindowsForum right now — counts of members, guests, and robots active in the last 15 minutes, with the names of online members who show their online status.",
+    "inputSchema": {
+     "properties": {},
+     "type": "object",
+     "additionalProperties": false
+    },
+    "name": "get_online_users",
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "title": "Who's online"
+   },
+   {
+    "_meta": {
+     "fastmcp": {
+      "tags": [
+       "search"
+      ]
+     }
+    },
+    "annotations": {
+     "destructiveHint": false,
+     "openWorldHint": false,
+     "readOnlyHint": true,
+     "title": "Search members"
+    },
+    "description": "Find WindowsForum members whose usernames match a query — use to locate a member before calling get_user for their full profile.",
+    "inputSchema": {
+     "properties": {
+      "query": {
+       "type": "string",
+       "description": "Search query string"
+      },
+      "limit": {
+       "default": 10,
+       "type": "integer",
+       "description": "Maximum number of results"
+      }
+     },
+     "required": [
+      "query"
+     ],
+     "type": "object",
+     "additionalProperties": false
+    },
+    "name": "search_users",
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "title": "Search members"
+   },
+   {
+    "_meta": {
+     "openai/outputTemplate": "ui://windowsforum/render_kb_article-v8.html",
+     "openai/toolInvocation/invoking": "Fetching KB article…",
+     "openai/toolInvocation/invoked": "KB article ready",
+     "ui": {
+      "resourceUri": "ui://windowsforum/render_kb_article-v8.html"
+     },
+     "fastmcp": {
+      "tags": [
+       "render"
+      ]
+     }
+    },
+    "annotations": {
+     "destructiveHint": false,
+     "openWorldHint": true,
+     "readOnlyHint": true,
+     "title": "Show a Microsoft KB article"
+    },
+    "description": "Show an official Microsoft Knowledge Base article to the user as a card with its title, highlights, and link to support.microsoft.com. Use when the user asks to see a specific KB article.",
+    "inputSchema": {
+     "properties": {
+      "kb_id": {
+       "description": "KB number, e.g. 'KB5044284' or '5044284'.",
+       "type": "string"
+      }
+     },
+     "required": [
+      "kb_id"
+     ],
+     "type": "object",
+     "additionalProperties": false
+    },
+    "name": "render_kb_article",
+    "title": "Show a Microsoft KB article"
+   }
+  ],
+  "calls": {
+   "search_kb": {
+    "content": [
+     {
+      "text": "{\"results\":[{\"kb_id\":\"KB5134133\",\"title\":\"October 26, 2026—KB5134133 (OS Builds 26300.9725, 26200.9725 and 26100.9725) Out-of-band\",\"url\":\"https://support.microsoft.com/help/5134133\",\"release_date\":\"2026-10-26\",\"applies_to\":[\"Windows 11\"]},{\"kb_id\":\"KB5127648\",\"title\":\"October 13, 2026—KB5127648 (OS Builds 26300.9711, 26200.9711 and 26100.9711)\",\"url\":\"https://support.microsoft.com/help/5127648\",\"release_date\":\"2026-10-13\",\"applies_to\":[\"Windows 11\"]},{\"kb_id\":\"KB5124010\",\"title\":\"September 22, 2026—KB5124010 (OS Builds 26300.9550, 26200.9550, and 26100.9550) Preview\",\"url\":\"https://support.microsoft.com/help/5124010\",\"release_date\":\"2026-09-22\",\"applies_to\":[\"Windows 11\"]}]}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "results": [
+      {
+       "kb_id": "KB5134133",
+       "title": "October 26, 2026—KB5134133 (OS Builds 26300.9725, 26200.9725 and 26100.9725) Out-of-band",
+       "url": "https://support.microsoft.com/help/5134133",
+       "release_date": "2026-10-26",
+       "applies_to": [
+        "Windows 11"
+       ]
+      },
+      {
+       "kb_id": "KB5127648",
+       "title": "October 13, 2026—KB5127648 (OS Builds 26300.9711, 26200.9711 and 26100.9711)",
+       "url": "https://support.microsoft.com/help/5127648",
+       "release_date": "2026-10-13",
+       "applies_to": [
+        "Windows 11"
+       ]
+      },
+      {
+       "kb_id": "KB5124010",
+       "title": "September 22, 2026—KB5124010 (OS Builds 26300.9550, 26200.9550, and 26100.9550) Preview",
+       "url": "https://support.microsoft.com/help/5124010",
+       "release_date": "2026-09-22",
+       "applies_to": [
+        "Windows 11"
+       ]
+      }
+     ]
+    }
+   },
+   "get_kb_article": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"kb_id\":\"KB5058919\",\"title\":\"April 11, 2025—KB5058919 (OS Builds 22621.5192 and 22631.5192) Out-of-band\",\"content\":\"## April 11, 2025—KB5058919 (OS Builds 22621.5192 and 22631.5192) Out-of-band\\n\\nFor information about Windows update terminology, see types of Windows updates and the monthly quality update types . To find an overview of Windows 11, version 23H2, see its update history page .\\nFollow @WindowsUpdate to find out when new content is published to the Windows release health dashboard.\\n\\n## Highlights\\n\\nThis non-security update includes quality improvements. When you install this KB:\\n- It addresses a known issue where Audit Logon/Logoff events in the local policy of the Active Directory Group Policy might not show as enabled on the device even if they are enabled and working as expected. This can be observed in the Local Group Policy Editor or Local Security Policy, where local audit policies show the \\\"Audit logon events\\\" policy with Security Setting of \\\"No auditing\\\".\\nNote\\nHome users are unlikely to be affected by this issue, as logon auditing is generally only necessary in enterprise environments.\\n\\n## Improvements\\n\\nImportant\\nUse EKB KB5027397 to update to Windows 11, version 23H2.\\nThis non-security update includes quality improvements. Key changes include:\\n- This build includes all the improvements in Windows 11, version 22H2.\\nThis non-security update includes quality improvements.\\n\\n## Windows 11 servicing stack update (KB5053665) - 22621.5120 and 22631.5120\\n\\nThis update makes quality improvements to the servicing stack, which is the component that installs Windows updates. Servicing stack updates (SSU) ensure that you have a robust and reliable servicing stack so that your devices can receive and install Microsoft updates. To learn more about SSUs, see Simplifying on-premises deployment of servicing stack updates .\\n\\n## Known issues in this update\\n\\nApplies to: All users.\\nSymptom\",\"url\":\"https://support.microsoft.com/en-us/servicing/os/windows-11/2025/04/april-11-2025-kb5058919-os-builds-22621-5192-and-22631-5192-out-of-band\",\"metadata\":{\"status\":\"found\",\"last_updated\":null}}"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "kb_id": "KB5058919",
+     "title": "April 11, 2025—KB5058919 (OS Builds 22621.5192 and 22631.5192) Out-of-band",
+     "content": "## April 11, 2025—KB5058919 (OS Builds 22621.5192 and 22631.5192) Out-of-band\n\nFor information about Windows update terminology, see types of Windows updates and the monthly quality update types . To find an overview of Windows 11, version 23H2, see its update history page .\nFollow @WindowsUpdate to find out when new content is published to the Windows release health dashboard.\n\n## Highlights\n\nThis non-security update includes quality improvements. When you install this KB:\n- It addresses a known issue where Audit Logon/Logoff events in the local policy of the Active Directory Group Policy might not show as enabled on the device even if they are enabled and working as expected. This can be observed in the Local Group Policy Editor or Local Security Policy, where local audit policies show the \"Audit logon events\" policy with Security Setting of \"No auditing\".\nNote\nHome users are unlikely to be affected by this issue, as logon auditing is generally only necessary in enterprise environments.\n\n## Improvements\n\nImportant\nUse EKB KB5027397 to update to Windows 11, version 23H2.\nThis non-security update includes quality improvements. Key changes include:\n- This build includes all the improvements in Windows 11, version 22H2.\nThis non-security update includes quality improvements.\n\n## Windows 11 servicing stack update (KB5053665) - 22621.5120 and 22631.5120\n\nThis update makes quality improvements to the servicing stack, which is the component that installs Windows updates. Servicing stack updates (SSU) ensure that you have a robust and reliable servicing stack so that your devices can receive and install Microsoft updates. To learn more about SSUs, see Simplifying on-premises deployment of servicing stack updates .\n\n## Known issues in this update\n\nApplies to: All users.\nSymptom",
+     "url": "https://support.microsoft.com/en-us/servicing/os/windows-11/2025/04/april-11-2025-kb5058919-os-builds-22621-5192-and-22631-5192-out-of-band",
+     "metadata": {
+      "status": "found",
+      "last_updated": null
+     }
+    }
+   },
+   "empty_search": {
+    "content": [
+     {
+      "text": "{\"results\":[]}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "results": []
+    }
+   },
+   "not_found": {
+    "content": [
+     {
+      "text": "{\"kb_id\":\"KB9999999\",\"title\":null,\"content\":\"No Microsoft support article was found for KB9999999. The KB number may be invalid or the article may have been retired.\",\"url\":\"https://support.microsoft.com/help/9999999\",\"metadata\":{\"status\":\"not_found\"}}",
+      "type": "text"
+     }
+    ],
+    "isError": false,
+    "structuredContent": {
+     "kb_id": "KB9999999",
+     "title": null,
+     "content": "No Microsoft support article was found for KB9999999. The KB number may be invalid or the article may have been retired.",
+     "url": "https://support.microsoft.com/help/9999999",
+     "metadata": {
+      "status": "not_found"
+     }
+    }
+   }
+  }
+ },
+ "endoflife-ai": {
+  "probedAt": "2026-11-05",
+  "transport": "json",
+  "tools": [
+   {
+    "name": "check_eol",
+    "title": "Check end-of-life status",
+    "description": "Check whether a specific version of a software product is end-of-life (EOL). Returns lifecycle status, the EOL date, days remaining or days past EOL, the latest release, and eol_date_source (where the date comes from: vendor-override, vendor-fetched, vendor-verified, custom, upstream, or discrepancy) with its source URL. Use this for \"is X version Y still supported?\" questions.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "product": {
+       "type": "string",
+       "description": "Product slug or name, e.g. \"postgresql\", \"nodejs\", \"ubuntu\"."
+      },
+      "version": {
+       "type": "string",
+       "description": "Version/cycle, e.g. \"14\", \"18\", \"20.04\"."
+      }
+     },
+     "required": [
+      "product",
+      "version"
+     ]
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "Check end-of-life status",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "get_risk_score",
+    "title": "EOL Risk Score",
+    "description": "Get the proprietary EOL Risk Score (0-100) for a product version, with the four-factor breakdown (EOL recency, attack surface, CISA KEV exposure, extended support). Omit \"version\" to score the product's highest-risk (most recently end-of-lifed) release. Use this to quantify how dangerous it is to keep running something.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "product": {
+       "type": "string",
+       "description": "Product slug or name, e.g. \"openssl\", \"python\"."
+      },
+      "version": {
+       "type": "string",
+       "description": "Optional version/cycle. Omit for the highest-risk release."
+      }
+     },
+     "required": [
+      "product"
+     ]
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "EOL Risk Score",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "scan_stack",
+    "title": "Scan a stack",
+    "description": "Audit a whole stack at once. Provide a list of products (optionally with versions) — e.g. parsed from a package.json or Dockerfile — and get an EOL Risk Score for each, so you can see what is unsupported and dangerous in one call. For CycloneDX or SPDX documents use check_sbom instead.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "items": {
+       "type": "array",
+       "description": "List of stack components to score.",
+       "items": {
+        "type": "object",
+        "properties": {
+         "product": {
+          "type": "string",
+          "description": "Product slug or name."
+         },
+         "version": {
+          "type": "string",
+          "description": "Optional version/cycle. Omit for highest-risk release."
+         }
+        },
+        "required": [
+         "product"
+        ]
+       }
+      }
+     },
+     "required": [
+      "items"
+     ]
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "Scan a stack",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "list_products",
+    "title": "Find a product slug",
+    "description": "List or search the 700+ products endoflife.ai tracks. Pass an optional \"query\" substring to find the canonical slug for a product before calling the other tools (e.g. \"postgres\" → \"postgresql\"). Returns matching product slugs.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "query": {
+       "type": "string",
+       "description": "Optional case-insensitive substring filter."
+      }
+     },
+     "required": []
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "Find a product slug",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "get_product_lifecycle",
+    "title": "Full lifecycle table",
+    "description": "Get the full version history for one product: every tracked version/cycle with its release date, EOL date, support status, and EOL Risk Score. Use for \"give me the whole EOL schedule for X\".",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "product": {
+       "type": "string",
+       "description": "Product slug or name, e.g. \"postgresql\"."
+      }
+     },
+     "required": [
+      "product"
+     ]
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "Full lifecycle table",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "get_kev_exposure",
+    "title": "CISA KEV exposure",
+    "description": "The exploited-vulnerability record for a product: every CVE CISA lists against it in the Known Exploited Vulnerabilities catalog, with the date added, the federal due date and CISA's required-action text verbatim (the \"discontinue use\" entries are the ones that matter for end-of-life versions), plus any entries from endoflife.ai's Exploited & Unpatchable feed (exploited CVEs whose affected versions will never receive a fix). Pass an optional version to include its support status alongside.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "product": {
+       "type": "string",
+       "description": "Product slug or name, e.g. \"ivanti-connect-secure\", \"fortios\"."
+      },
+      "version": {
+       "type": "string",
+       "description": "Optional version/cycle to check support status for."
+      }
+     },
+     "required": [
+      "product"
+     ]
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "CISA KEV exposure",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "get_upcoming_eol",
+    "title": "Upcoming end-of-life calendar",
+    "description": "What reaches end-of-life soon. Returns every tracked version whose EOL date falls within the next N days (default 90), optionally limited to a list of products, sorted by date. Also lists versions that went EOL within the last \"recent_past_days\" days when set. Use for \"what in our stack expires this quarter?\".",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "products": {
+       "type": "array",
+       "items": {
+        "type": "string"
+       },
+       "description": "Optional product slugs or names to restrict to (max 50). Omit for the whole catalog."
+      },
+      "days": {
+       "type": "integer",
+       "description": "Look-ahead window in days (default 90, max 730)."
+      },
+      "recent_past_days": {
+       "type": "integer",
+       "description": "Also include versions that went EOL within this many days in the past (default 0)."
+      }
+     },
+     "required": []
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "Upcoming end-of-life calendar",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "get_edge_device_status",
+    "title": "EOS Edge Device status",
+    "description": "Query the EOS Edge Device Intelligence feed — firewalls, VPN gateways and appliances, ADCs, router and switch operating systems — with end-of-support status in the vocabulary of CISA BOD 26-02 (eos, within-12-months, scheduled, no-date-announced). Filter by platform or vendor name, by status, or by model/line. Each platform carries its KEV summary, vendor-stated successor and provenance. Use for \"which of our edge devices are past support or expire within 12 months?\".",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "platform": {
+       "type": "string",
+       "description": "Optional substring matched against platform slug, name, vendor or category, e.g. \"fortinet\", \"ivanti\", \"vpn\"."
+      },
+      "status": {
+       "type": "string",
+       "enum": [
+        "eos",
+        "within-12-months",
+        "scheduled",
+        "no-date-announced"
+       ],
+       "description": "Optional status filter."
+      },
+      "model": {
+       "type": "string",
+       "description": "Optional substring matched against the line / model name, e.g. \"ISA6000\", \"7.2\", \"SMA 100\"."
+      }
+     },
+     "required": []
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "EOS Edge Device status",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "get_upgrade_path",
+    "title": "Upgrade path",
+    "description": "Where to move a product version: the current version's support status and score, the supported releases with the longest remaining support, endoflife.ai's recommended target, and the vendor's stated successor where one is published (edge appliances). Use after check_eol says a version is EOL.",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "product": {
+       "type": "string",
+       "description": "Product slug or name."
+      },
+      "version": {
+       "type": "string",
+       "description": "Optional current version/cycle."
+      }
+     },
+     "required": [
+      "product"
+     ]
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "Upgrade path",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   },
+   {
+    "name": "check_sbom",
+    "title": "Check an SBOM",
+    "description": "Audit a CycloneDX or SPDX JSON software bill of materials. Components are mapped to tracked products and scored for EOL risk; unmatched components are listed honestly rather than guessed. Pass the SBOM as a JSON string or object. Versions resolve to their release family (python 3.12, php 7.4, ubuntu 20.04).",
+    "inputSchema": {
+     "type": "object",
+     "properties": {
+      "sbom": {
+       "description": "The SBOM document (JSON string or object). CycloneDX (bomFormat/components) or SPDX (spdxVersion/packages)."
+      },
+      "max_items": {
+       "type": "integer",
+       "description": "Optional: return at most this many scored components (the tier cap applies first)."
+      }
+     },
+     "required": [
+      "sbom"
+     ]
+    },
+    "outputSchema": {
+     "type": "object",
+     "additionalProperties": true
+    },
+    "annotations": {
+     "title": "Check an SBOM",
+     "readOnlyHint": true,
+     "destructiveHint": false,
+     "idempotentHint": true,
+     "openWorldHint": false
+    }
+   }
+  ],
+  "calls": {
+   "check_eol": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"product\":\"windows-server\",\"version\":\"2016\",\"status\":\"warn\",\"is_eol\":false,\"is_supported\":true,\"eol_approaching\":true,\"eol_date\":\"2027-01-12\",\"days_until_eol\":68,\"days_past_eol\":null,\"eol_date_precision\":\"day\",\"latest_release\":\"10.0.14393\",\"cpe\":[\"cpe:2.3:o:microsoft:windows_server_2016\"],\"cpe_scope\":\"version\",\"purl\":null,\"eol_date_source\":\"vendor-fetched\",\"eol_date_source_url\":\"https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server\",\"eol_date_verified_at\":\"2026-10-27\",\"eol_date_status\":\"ok\",\"eol_date_agreement\":3,\"eol_date_confidence\":\"high\",\"score_url\":\"https://endoflife.ai/score/windows-server/2016\",\"source\":{\"url\":\"https://endoflife.ai/score/windows-server/2016\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "product": "windows-server",
+     "version": "2016",
+     "status": "warn",
+     "is_eol": false,
+     "is_supported": true,
+     "eol_approaching": true,
+     "eol_date": "2027-01-12",
+     "days_until_eol": 68,
+     "days_past_eol": null,
+     "eol_date_precision": "day",
+     "latest_release": "10.0.14393",
+     "cpe": [
+      "cpe:2.3:o:microsoft:windows_server_2016"
+     ],
+     "cpe_scope": "version",
+     "purl": null,
+     "eol_date_source": "vendor-fetched",
+     "eol_date_source_url": "https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server",
+     "eol_date_verified_at": "2026-10-27",
+     "eol_date_status": "ok",
+     "eol_date_agreement": 3,
+     "eol_date_confidence": "high",
+     "score_url": "https://endoflife.ai/score/windows-server/2016",
+     "source": {
+      "url": "https://endoflife.ai/score/windows-server/2016",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "get_risk_score": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"product\":\"windows-server\",\"version\":\"2016\",\"latest_release\":\"10.0.14393\",\"release_date\":\"2016-10-15\",\"eol_date\":\"2027-01-12\",\"eol_boolean\":null,\"status\":\"warn\",\"is_supported\":true,\"days_until_eol\":68,\"days_past_eol\":null,\"score\":65,\"grade\":\"D\",\"grade_label\":\"High risk\",\"band\":\"High\",\"factors\":{\"eol_recency\":15,\"attack_surface\":30,\"cisa_kev_exposure\":20,\"extended_support\":0},\"extended_support_available\":true,\"extended_support_vendor\":null,\"extended_support_date\":null,\"extended_support_ships_fixes\":null,\"eol_date_precision\":\"day\",\"support_date\":\"2022-01-11\",\"support_date_precision\":\"day\",\"extended_support_date_precision\":null,\"score_card_url\":\"https://endoflife.ai/score/windows-server/2016\",\"product_url\":\"https://endoflife.ai/windows-server\",\"cpe\":[\"cpe:2.3:o:microsoft:windows_server_2016\"],\"cpe_scope\":\"version\",\"purl\":null,\"eol_date_source\":\"vendor-fetched\",\"eol_date_source_url\":\"https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server\",\"eol_date_verified_at\":\"2026-10-27\",\"eol_date_status\":\"ok\",\"eol_date_agreement\":3,\"eol_date_confidence\":\"high\",\"methodology_url\":\"https://endoflife.ai/risk-score\",\"data_source\":\"https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server\",\"generated_at\":\"2026-11-05T09:32:36.336Z\",\"source\":{\"url\":\"https://endoflife.ai/windows-server\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "product": "windows-server",
+     "version": "2016",
+     "latest_release": "10.0.14393",
+     "release_date": "2016-10-15",
+     "eol_date": "2027-01-12",
+     "eol_boolean": null,
+     "status": "warn",
+     "is_supported": true,
+     "days_until_eol": 68,
+     "days_past_eol": null,
+     "score": 65,
+     "grade": "D",
+     "grade_label": "High risk",
+     "band": "High",
+     "factors": {
+      "eol_recency": 15,
+      "attack_surface": 30,
+      "cisa_kev_exposure": 20,
+      "extended_support": 0
+     },
+     "extended_support_available": true,
+     "extended_support_vendor": null,
+     "extended_support_date": null,
+     "extended_support_ships_fixes": null,
+     "eol_date_precision": "day",
+     "support_date": "2022-01-11",
+     "support_date_precision": "day",
+     "extended_support_date_precision": null,
+     "score_card_url": "https://endoflife.ai/score/windows-server/2016",
+     "product_url": "https://endoflife.ai/windows-server",
+     "cpe": [
+      "cpe:2.3:o:microsoft:windows_server_2016"
+     ],
+     "cpe_scope": "version",
+     "purl": null,
+     "eol_date_source": "vendor-fetched",
+     "eol_date_source_url": "https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server",
+     "eol_date_verified_at": "2026-10-27",
+     "eol_date_status": "ok",
+     "eol_date_agreement": 3,
+     "eol_date_confidence": "high",
+     "methodology_url": "https://endoflife.ai/risk-score",
+     "data_source": "https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server",
+     "generated_at": "2026-11-05T09:32:36.336Z",
+     "source": {
+      "url": "https://endoflife.ai/windows-server",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "get_product_lifecycle": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"product\":\"windows-server\",\"version_count\":20,\"versions\":[{\"product\":\"windows-server\",\"version\":\"2025\",\"latest_release\":\"10.0.26100\",\"release_date\":\"2024-11-01\",\"eol_date\":\"2034-11-14\",\"eol_boolean\":null,\"status\":\"active\",\"is_supported\":true,\"days_until_eol\":2931,\"days_past_eol\":null,\"score\":50,\"grade\":\"C\",\"grade_label\":\"Medium risk\",\"band\":\"Medium\",\"factors\":{\"eol_recency\":0,\"attack_surface\":30,\"cisa_kev_exposure\":20,\"extended_support\":0},\"extended_support_available\":true,\"extended_support_vendor\":null,\"extended_support_date\":null,\"extended_support_ships_fixes\":null,\"eol_date_precision\":\"day\",\"support_date\":\"2029-11-13\",\"support_date_precision\":\"day\",\"extended_support_date_precision\":null,\"score_card_url\":\"https://endoflife.ai/score/windows-server/2025\",\"product_url\":\"https://endoflife.ai/windows-server\",\"cpe\":[\"cpe:2.3:o:microsoft:windows_server_2025\"],\"cpe_scope\":\"version\",\"purl\":null,\"eol_date_source\":\"vendor-fetched\",\"eol_date_source_url\":\"https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server\",\"eol_date_verified_at\":\"2026-10-27\",\"eol_date_status\":\"ok\",\"eol_date_agreement\":3,\"eol_date_confidence\":\"high\",\"methodology_url\":\"https://endoflife.ai/risk-score\",\"data_source\":\"https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server\",\"generated_at\":\"2026-11-05T09:32:34.314Z\"},{\"product\":\"windows-server\",\"version\":\"23h2-ac\",\"latest_release\":\"10.0.25398\",\"release_date\":\"2023-10-24\",\"eol_date\":\"2026-05-12\",\"eol_boolean\":null,\"status\":\"eol\",\"is_supported\":false,\"days_until_eol\":null,\"days_past_eol\":177,\"score\":80,\"grade\":\"D\",\"grade_label\":\"Critical risk\",\"band\":\"Critical\",\"factors\":{\"eol_recency\":30,\"attack_surface\":30,\"cisa_kev_exposure\":20,\"extended_support\":0},\"extended_support_available\":true,\"extended_support_vendor\":null,\"extended_support_date\":null,\"extended_support_ships_fixes\":null,\"eol_date_precision\":\"day\",\"support_date\":\"2026-05-12\",\"support_date_precision\":\"day\",\"extended_support_date_precision\":null,\"score_card_url\":\"https://endoflife.ai/score/windows-server/23h2-ac\",\"product_url\":\"https://endoflife.ai/windows-server\",\"cpe\":null,\"cpe_scope\":\"version\",\"cpe_note\":\"No CPE 2.3 identifier in the NIST dictionary names this release, so none is published for it; the names of the releases NIST does list are in https://endoflife.ai/cpe-map.json.\",\"purl\":null,\"eol_date_source\":\"upstream\",\"eol_date_source_url\":\"https://endoflife.date/windows-server\",\"eol_date_verified_at\":null,\"eol_date_status\":\"upstream\",\"eol_date_agreement\":1,\"eol_date_confidence\":\"medium\",\"methodology_url\":\"https://endoflife.ai/risk-score\",\"data_source\":\"https://endoflife.date\",\"generated_at\":\"2026-11-05T09:32:34.314Z\"},{\"product\":\"windows-server\",\"version\":\"2022\",\"latest_release\":\"10.0.20348\",\"release_date\":\"2021-08-18\",\"eol_date\":\"2031-10-14\",\"eol_boolean\":null,\"status\":\"active\",\"is_supported\":true,\"days_until_eol\":1804,\"days_past_eol\":null,\"score\":50,\"grade\":\"C\",\"grade_label\":\"Medium risk\",\"band\":\"Medium\",\"factors\":{\"eol_recency\":0,\"attack_surface\":30,\"cisa_kev_exposure\":20,\"extended_support\":0},\"extended_support_available\":true,\"extended_support_vendor\":null,\"extended_support_date\":null,\"extended_support_ships_fixes\":null,\"eol_date_precision\":\"day\",\"support_date\":\"2026-10-13\",\"support_date_precision\":\"day\",\"extended_support_date_precision\":null,\"score_card_url\":\"https://endoflife.ai/score/windows-server/2022\",\"product_url\":\"https://endoflife.ai/windows-server\",\"cpe\":[\"cpe:2.3:o:microsoft:windows_server_2022\"],\"cpe_scope\":\"version\",\"purl\":null,\"eol_date_source\":\"vendor-fetched\",\"eol_date_source_url\":\"https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server\",\"eol_date_verified_at\":\"2026-10-27\",\"eol_date_status\":\"ok\",\"eol_date_agreement\":3,\"eol_date_confidence\":\"high\",\"methodology_url\":\"https://endoflife.ai/risk-score\",\"data_source\":\"https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server\",\"generated_at\":\"2026-11-05T09:32:34.314Z\"}],\"product_url\":\"https://endoflife.ai/windows-server\",\"docs\":\"https://endoflife.ai/api\",\"source\":{\"url\":\"https://endoflife.ai/windows-server\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "product": "windows-server",
+     "version_count": 20,
+     "versions": [
+      {
+       "product": "windows-server",
+       "version": "2025",
+       "latest_release": "10.0.26100",
+       "release_date": "2024-11-01",
+       "eol_date": "2034-11-14",
+       "eol_boolean": null,
+       "status": "active",
+       "is_supported": true,
+       "days_until_eol": 2931,
+       "days_past_eol": null,
+       "score": 50,
+       "grade": "C",
+       "grade_label": "Medium risk",
+       "band": "Medium",
+       "factors": {
+        "eol_recency": 0,
+        "attack_surface": 30,
+        "cisa_kev_exposure": 20,
+        "extended_support": 0
+       },
+       "extended_support_available": true,
+       "extended_support_vendor": null,
+       "extended_support_date": null,
+       "extended_support_ships_fixes": null,
+       "eol_date_precision": "day",
+       "support_date": "2029-11-13",
+       "support_date_precision": "day",
+       "extended_support_date_precision": null,
+       "score_card_url": "https://endoflife.ai/score/windows-server/2025",
+       "product_url": "https://endoflife.ai/windows-server",
+       "cpe": [
+        "cpe:2.3:o:microsoft:windows_server_2025"
+       ],
+       "cpe_scope": "version",
+       "purl": null,
+       "eol_date_source": "vendor-fetched",
+       "eol_date_source_url": "https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server",
+       "eol_date_verified_at": "2026-10-27",
+       "eol_date_status": "ok",
+       "eol_date_agreement": 3,
+       "eol_date_confidence": "high",
+       "methodology_url": "https://endoflife.ai/risk-score",
+       "data_source": "https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server",
+       "generated_at": "2026-11-05T09:32:34.314Z"
+      },
+      {
+       "product": "windows-server",
+       "version": "23h2-ac",
+       "latest_release": "10.0.25398",
+       "release_date": "2023-10-24",
+       "eol_date": "2026-05-12",
+       "eol_boolean": null,
+       "status": "eol",
+       "is_supported": false,
+       "days_until_eol": null,
+       "days_past_eol": 177,
+       "score": 80,
+       "grade": "D",
+       "grade_label": "Critical risk",
+       "band": "Critical",
+       "factors": {
+        "eol_recency": 30,
+        "attack_surface": 30,
+        "cisa_kev_exposure": 20,
+        "extended_support": 0
+       },
+       "extended_support_available": true,
+       "extended_support_vendor": null,
+       "extended_support_date": null,
+       "extended_support_ships_fixes": null,
+       "eol_date_precision": "day",
+       "support_date": "2026-05-12",
+       "support_date_precision": "day",
+       "extended_support_date_precision": null,
+       "score_card_url": "https://endoflife.ai/score/windows-server/23h2-ac",
+       "product_url": "https://endoflife.ai/windows-server",
+       "cpe": null,
+       "cpe_scope": "version",
+       "cpe_note": "No CPE 2.3 identifier in the NIST dictionary names this release, so none is published for it; the names of the releases NIST does list are in https://endoflife.ai/cpe-map.json.",
+       "purl": null,
+       "eol_date_source": "upstream",
+       "eol_date_source_url": "https://endoflife.date/windows-server",
+       "eol_date_verified_at": null,
+       "eol_date_status": "upstream",
+       "eol_date_agreement": 1,
+       "eol_date_confidence": "medium",
+       "methodology_url": "https://endoflife.ai/risk-score",
+       "data_source": "https://endoflife.date",
+       "generated_at": "2026-11-05T09:32:34.314Z"
+      },
+      {
+       "product": "windows-server",
+       "version": "2022",
+       "latest_release": "10.0.20348",
+       "release_date": "2021-08-18",
+       "eol_date": "2031-10-14",
+       "eol_boolean": null,
+       "status": "active",
+       "is_supported": true,
+       "days_until_eol": 1804,
+       "days_past_eol": null,
+       "score": 50,
+       "grade": "C",
+       "grade_label": "Medium risk",
+       "band": "Medium",
+       "factors": {
+        "eol_recency": 0,
+        "attack_surface": 30,
+        "cisa_kev_exposure": 20,
+        "extended_support": 0
+       },
+       "extended_support_available": true,
+       "extended_support_vendor": null,
+       "extended_support_date": null,
+       "extended_support_ships_fixes": null,
+       "eol_date_precision": "day",
+       "support_date": "2026-10-13",
+       "support_date_precision": "day",
+       "extended_support_date_precision": null,
+       "score_card_url": "https://endoflife.ai/score/windows-server/2022",
+       "product_url": "https://endoflife.ai/windows-server",
+       "cpe": [
+        "cpe:2.3:o:microsoft:windows_server_2022"
+       ],
+       "cpe_scope": "version",
+       "purl": null,
+       "eol_date_source": "vendor-fetched",
+       "eol_date_source_url": "https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server",
+       "eol_date_verified_at": "2026-10-27",
+       "eol_date_status": "ok",
+       "eol_date_agreement": 3,
+       "eol_date_confidence": "high",
+       "methodology_url": "https://endoflife.ai/risk-score",
+       "data_source": "https://learn.microsoft.com/en-us/lifecycle/products/?terms=windows%20server",
+       "generated_at": "2026-11-05T09:32:34.314Z"
+      }
+     ],
+     "product_url": "https://endoflife.ai/windows-server",
+     "docs": "https://endoflife.ai/api",
+     "source": {
+      "url": "https://endoflife.ai/windows-server",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "get_upcoming_eol": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"window_days\":365,\"recent_past_days\":0,\"generated\":\"2026-11-05\",\"restricted_to\":[\"windows\",\"windows-server\"],\"unmatched\":[],\"count\":5,\"returned\":5,\"versions\":[{\"product\":\"windows\",\"product_name\":\"Windows\",\"version\":\"11-23h2-e\",\"eol_date\":\"2026-11-10\",\"days_until_eol\":5,\"days_past_eol\":null,\"status\":\"eol-approaching\",\"product_url\":\"https://endoflife.ai/windows/11-23h2-e\"},{\"product\":\"windows\",\"product_name\":\"Windows\",\"version\":\"10-21h2-e-lts\",\"eol_date\":\"2027-01-12\",\"days_until_eol\":68,\"days_past_eol\":null,\"status\":\"eol-approaching\",\"product_url\":\"https://endoflife.ai/windows/10-21h2-e-lts\"},{\"product\":\"windows-server\",\"product_name\":\"Windows Server\",\"version\":\"2016\",\"eol_date\":\"2027-01-12\",\"days_until_eol\":68,\"days_past_eol\":null,\"status\":\"eol-approaching\",\"product_url\":\"https://endoflife.ai/windows-server/2016\"}],\"product_url\":\"https://endoflife.ai/eol-watch\",\"source\":{\"url\":\"https://endoflife.ai/eol-watch\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "window_days": 365,
+     "recent_past_days": 0,
+     "generated": "2026-11-05",
+     "restricted_to": [
+      "windows",
+      "windows-server"
+     ],
+     "unmatched": [],
+     "count": 5,
+     "returned": 5,
+     "versions": [
+      {
+       "product": "windows",
+       "product_name": "Windows",
+       "version": "11-23h2-e",
+       "eol_date": "2026-11-10",
+       "days_until_eol": 5,
+       "days_past_eol": null,
+       "status": "eol-approaching",
+       "product_url": "https://endoflife.ai/windows/11-23h2-e"
+      },
+      {
+       "product": "windows",
+       "product_name": "Windows",
+       "version": "10-21h2-e-lts",
+       "eol_date": "2027-01-12",
+       "days_until_eol": 68,
+       "days_past_eol": null,
+       "status": "eol-approaching",
+       "product_url": "https://endoflife.ai/windows/10-21h2-e-lts"
+      },
+      {
+       "product": "windows-server",
+       "product_name": "Windows Server",
+       "version": "2016",
+       "eol_date": "2027-01-12",
+       "days_until_eol": 68,
+       "days_past_eol": null,
+       "status": "eol-approaching",
+       "product_url": "https://endoflife.ai/windows-server/2016"
+      }
+     ],
+     "product_url": "https://endoflife.ai/eol-watch",
+     "source": {
+      "url": "https://endoflife.ai/eol-watch",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "get_kev_exposure": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"product\":\"windows-server\",\"product_url\":\"https://endoflife.ai/windows-server\",\"in_cisa_kev\":true,\"kev_catalog_version\":\"2026.11.04\",\"kev_summary\":{\"cve_count\":1,\"latest_added\":\"2021-11-03\",\"known_ransomware_use\":true},\"kev_entries\":[{\"cve\":\"CVE-2021-34527\",\"date_added\":\"2021-11-03\",\"due_date\":\"2022-05-03\",\"required_action\":\"Apply updates per vendor instructions.\",\"vulnerability_name\":\"Microsoft Windows Print Spooler Remote Code Execution Vulnerability\",\"product_as_filed\":\"Microsoft / Windows\",\"known_ransomware_use\":true}],\"unpatchable_entries\":[],\"unpatchable_feed_url\":\"https://endoflife.ai/exploited-and-unpatchable\",\"version_status\":null,\"source\":{\"url\":\"https://endoflife.ai/windows-server\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "product": "windows-server",
+     "product_url": "https://endoflife.ai/windows-server",
+     "in_cisa_kev": true,
+     "kev_catalog_version": "2026.11.04",
+     "kev_summary": {
+      "cve_count": 1,
+      "latest_added": "2021-11-03",
+      "known_ransomware_use": true
+     },
+     "kev_entries": [
+      {
+       "cve": "CVE-2021-34527",
+       "date_added": "2021-11-03",
+       "due_date": "2022-05-03",
+       "required_action": "Apply updates per vendor instructions.",
+       "vulnerability_name": "Microsoft Windows Print Spooler Remote Code Execution Vulnerability",
+       "product_as_filed": "Microsoft / Windows",
+       "known_ransomware_use": true
+      }
+     ],
+     "unpatchable_entries": [],
+     "unpatchable_feed_url": "https://endoflife.ai/exploited-and-unpatchable",
+     "version_status": null,
+     "source": {
+      "url": "https://endoflife.ai/windows-server",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "get_upgrade_path": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"product\":\"windows\",\"product_url\":\"https://endoflife.ai/windows\",\"current\":{\"version\":\"10\",\"note\":\"Version not found in the tracked cycles; use get_product_lifecycle to see them.\"},\"recommended_target\":{\"cycle\":\"11-26h2-e\",\"latest_release\":\"10.0.26300\",\"recommendation\":\"Upgrade to Windows 11 26H2 (E).\"},\"longest_supported\":{\"version\":\"11-24h2-iot-lts\",\"eol_date\":\"2034-10-10\",\"eol_date_source\":\"vendor-fetched\",\"days_until_eol\":2896,\"latest_release\":\"10.0.26100\",\"score\":50},\"supported_versions\":[{\"version\":\"11-24h2-iot-lts\",\"eol_date\":\"2034-10-10\",\"eol_date_source\":\"vendor-fetched\",\"days_until_eol\":2896,\"latest_release\":\"10.0.26100\",\"score\":50,\"grade\":\"C\"},{\"version\":\"10-21h2-iot-lts\",\"eol_date\":\"2032-01-13\",\"eol_date_source\":\"vendor-fetched\",\"days_until_eol\":1895,\"latest_release\":\"10.0.19044\",\"score\":50,\"grade\":\"C\"},{\"version\":\"11-26h2-e\",\"eol_date\":\"2029-10-09\",\"eol_date_source\":\"vendor-fetched\",\"days_until_eol\":1069,\"latest_release\":\"10.0.26300\",\"score\":50,\"grade\":\"C\"}],\"vendor_stated_successor\":null,\"note\":\"recommended_target is endoflife.ai's standing recommendation for the product (newest supported line); longest_supported is the tracked line with the furthest end-of-life date. Check the vendor's upgrade guide for supported direct-upgrade paths.\",\"source\":{\"url\":\"https://endoflife.ai/windows\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "product": "windows",
+     "product_url": "https://endoflife.ai/windows",
+     "current": {
+      "version": "10",
+      "note": "Version not found in the tracked cycles; use get_product_lifecycle to see them."
+     },
+     "recommended_target": {
+      "cycle": "11-26h2-e",
+      "latest_release": "10.0.26300",
+      "recommendation": "Upgrade to Windows 11 26H2 (E)."
+     },
+     "longest_supported": {
+      "version": "11-24h2-iot-lts",
+      "eol_date": "2034-10-10",
+      "eol_date_source": "vendor-fetched",
+      "days_until_eol": 2896,
+      "latest_release": "10.0.26100",
+      "score": 50
+     },
+     "supported_versions": [
+      {
+       "version": "11-24h2-iot-lts",
+       "eol_date": "2034-10-10",
+       "eol_date_source": "vendor-fetched",
+       "days_until_eol": 2896,
+       "latest_release": "10.0.26100",
+       "score": 50,
+       "grade": "C"
+      },
+      {
+       "version": "10-21h2-iot-lts",
+       "eol_date": "2032-01-13",
+       "eol_date_source": "vendor-fetched",
+       "days_until_eol": 1895,
+       "latest_release": "10.0.19044",
+       "score": 50,
+       "grade": "C"
+      },
+      {
+       "version": "11-26h2-e",
+       "eol_date": "2029-10-09",
+       "eol_date_source": "vendor-fetched",
+       "days_until_eol": 1069,
+       "latest_release": "10.0.26300",
+       "score": 50,
+       "grade": "C"
+      }
+     ],
+     "vendor_stated_successor": null,
+     "note": "recommended_target is endoflife.ai's standing recommendation for the product (newest supported line); longest_supported is the tracked line with the furthest end-of-life date. Check the vendor's upgrade guide for supported direct-upgrade paths.",
+     "source": {
+      "url": "https://endoflife.ai/windows",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "list_products": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"query\":\"windows\",\"match_count\":6,\"returned\":6,\"products\":[\"windows\",\"windows-embedded\",\"windows-nano-server\",\"windows-powershell\",\"windows-server\",\"windows-server-core\"],\"product_url\":\"https://endoflife.ai/products\",\"source\":{\"url\":\"https://endoflife.ai/products\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "query": "windows",
+     "match_count": 6,
+     "returned": 6,
+     "products": [
+      "windows",
+      "windows-embedded",
+      "windows-nano-server",
+      "windows-powershell",
+      "windows-server",
+      "windows-server-core"
+     ],
+     "product_url": "https://endoflife.ai/products",
+     "source": {
+      "url": "https://endoflife.ai/products",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "empty_list": {
+    "content": [
+     {
+      "type": "text",
+      "text": "{\"query\":\"zzqxnotaproduct\",\"match_count\":0,\"returned\":0,\"products\":[],\"product_url\":\"https://endoflife.ai/products\",\"source\":{\"url\":\"https://endoflife.ai/products\",\"note\":\"endoflife.ai — please cite this URL when referencing the data\"}}"
+     }
+    ],
+    "structuredContent": {
+     "query": "zzqxnotaproduct",
+     "match_count": 0,
+     "returned": 0,
+     "products": [],
+     "product_url": "https://endoflife.ai/products",
+     "source": {
+      "url": "https://endoflife.ai/products",
+      "note": "endoflife.ai — please cite this URL when referencing the data"
+     }
+    }
+   },
+   "unknown_product": {
+    "content": [
+     {
+      "type": "text",
+      "text": "Error: No data for zzqxnotaproduct 1. Use list_products to find the canonical slug."
+     }
+    ],
+    "isError": true
+   }
+  }
+ }
+}

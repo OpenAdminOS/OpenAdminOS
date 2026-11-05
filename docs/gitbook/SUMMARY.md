@@ -26,6 +26,7 @@
 - [Workspaces](features/workspaces.md)
 - [Changes and drift](features/changes.md)
 - [Agent Team](features/office.md)
+- [Marketplace](features/marketplace.md)
 
 ## Trust model
 

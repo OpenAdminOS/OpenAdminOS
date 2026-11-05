@@ -228,7 +228,7 @@ import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } fr
 import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
-import { McpHost, type McpToolInfo } from "./mcp/host.js";
+import { isAllowedTool, McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
 import { GatewayService } from "./gateway/service.js";
@@ -484,6 +484,11 @@ type WhatsAppWebClientLike = Pick<
   | "sendMessage"
   | "dispose"
 >;
+
+/** Allowlisted tools of a catalog server that its last listing did not include. */
+function missingMcpTools(entry: McpCatalogEntry, tools: readonly McpToolInfo[]): string[] {
+  return (entry.tools ?? []).filter((name) => !tools.some((tool) => tool.name === name));
+}
 
 /** Keeps only catalog servers with a well-formed tool list. */
 function sanitizeMcpServers(
@@ -1717,6 +1722,8 @@ export class AppStateStore {
         const installed = (await this.read()).mcpServers?.[serverId];
         return !installed ? "uninstalled" : installed.enabled ? undefined : "disabled";
       },
+      // A session opened for a Chat call relists the tools; a changed listing is stored, so the Marketplace shows it.
+      listed: (serverId, tools) => this.recordMcpListing(serverId, tools),
     });
     const host = this;
     this.chatService = new IntuneChatService({
@@ -2033,6 +2040,7 @@ export class AppStateStore {
   private mcpServerSummaries(persisted: PersistedState): McpServerSummary[] {
     return this.mcpCatalog.map((entry) => {
       const installed = persisted.mcpServers?.[entry.id];
+      const missingTools = installed ? missingMcpTools(entry, installed.tools) : [];
       return {
         id: entry.id,
         name: entry.name,
@@ -2048,11 +2056,16 @@ export class AppStateStore {
         enabled: installed?.enabled === true,
         ...(installed ? { installedAt: installed.installedAt } : {}),
         ...(installed?.lastConnectedAt ? { lastConnectedAt: installed.lastConnectedAt } : {}),
-        tools: (installed?.tools ?? []).map((tool) => ({
+        tools: (installed?.tools ?? []).filter((tool) => isAllowedTool(entry, tool.name)).map((tool) => ({
           name: tool.name,
           description: tool.description,
           ...(tool.unavailable ? { unavailable: tool.unavailable } : {}),
         })),
+        ...(entry.tools ? { offeredTools: [...entry.tools] } : {}),
+        ...(entry.operator ? { operator: entry.operator } : {}),
+        ...(entry.policy ? { policy: { ...entry.policy } } : {}),
+        ...(entry.notes?.length ? { notes: [...entry.notes] } : {}),
+        ...(missingTools.length > 0 ? { missingTools } : {}),
       };
     });
   }
@@ -2070,6 +2083,21 @@ export class AppStateStore {
   }
 
   /** Reconnects an installed server and refreshes its tool list. */
+  private async recordMcpListing(serverId: string, tools: McpToolInfo[]): Promise<void> {
+    const changed = await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.mcpServers?.[serverId];
+      // Only an installed server is refreshed; a listing never installs one.
+      if (!existing || JSON.stringify(existing.tools) === JSON.stringify(tools)) return false;
+      await this.write({
+        ...current,
+        mcpServers: { ...(current.mcpServers ?? {}), [serverId]: { ...existing, lastConnectedAt: this.clock().toISOString(), tools } },
+      });
+      return true;
+    });
+    if (changed) this.emitStateChanged("mcp-servers-changed");
+  }
+
   async checkMcpServer(serverId: string): Promise<McpServerSummary[]> {
     return this.connectMcpServer(serverId, true);
   }
@@ -2155,10 +2183,12 @@ export class AppStateStore {
     for (const entry of this.mcpCatalog) {
       const installed = persisted.mcpServers?.[entry.id];
       if (!installed?.enabled) continue;
+      // A server without one of its allowlisted tools is skipped until a check finds it again.
+      if (missingMcpTools(entry, installed.tools).length > 0) continue;
       generations.set(entry.id, this.mcpHost.generation(entry.id));
-      servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics });
+      servers.push({ id: entry.id, name: entry.name, host: mcpHost(entry.url), url: entry.url, useFor: entry.useFor, aliases: entry.aliases, topics: entry.topics, ...(entry.sharedHost ? { sharedHost: true } : {}) });
       for (const tool of installed.tools) {
-        if (tool.unavailable) continue;
+        if (tool.unavailable || !isAllowedTool(entry, tool.name)) continue;
         tools.push({
           name: mcpChatToolName(entry.id, tool.name),
           serverId: entry.id,
@@ -2167,6 +2197,10 @@ export class AppStateStore {
           tool: tool.name,
           description: tool.description,
           inputSchema: tool.inputSchema,
+          ...(entry.results ? { resultFormat: entry.results } : {}),
+          ...(entry.itemIds?.[tool.name] ? { itemIds: entry.itemIds[tool.name] } : {}),
+          ...(entry.communityText ? { communityText: true } : {}),
+          ...(entry.queryHints?.[tool.name] ? { queryHint: entry.queryHints[tool.name] } : {}),
         });
       }
     }
