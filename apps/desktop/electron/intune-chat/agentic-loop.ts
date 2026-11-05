@@ -760,15 +760,19 @@ const MCP_EXCERPT_CHARS = 12_000;
 /**
  * MCP results as the model reads them: "[n] Title, URL" before each
  * excerpt, with the numbers the source cards use. Excerpts of one page
- * share its number. The excerpts share one budget.
+ * share its number; an item under a number whose title differs from the
+ * first one's starts with its own title, so items that cite one page (the
+ * CVEs of a KEV answer) keep their identity. The excerpts share one budget.
  */
 export function numberedMcpResults(results: readonly McpResultItem[], cites: readonly string[]): string {
   const each = Math.max(400, Math.floor(MCP_EXCERPT_CHARS / Math.max(1, results.length)));
-  const groups = new Map<string, { head: string; excerpts: string[] }>();
+  const groups = new Map<string, { title: string; head: string; excerpts: string[] }>();
   results.forEach((item, index) => {
     const cite = cites[index]!;
-    const group = groups.get(cite) ?? { head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
-    if (item.excerpt) group.excerpts.push(item.excerpt.length > each ? `${item.excerpt.slice(0, each).trimEnd()} [...]` : item.excerpt);
+    const group = groups.get(cite) ?? { title: item.title, head: `${cite} ${item.title}${item.url ? `, ${item.url}` : ""}`, excerpts: [] };
+    const excerpt = item.excerpt && item.excerpt.length > each ? `${item.excerpt.slice(0, each).trimEnd()} [...]` : item.excerpt;
+    const own = item.title !== group.title ? item.title : undefined;
+    if (own || excerpt) group.excerpts.push([own, excerpt].filter(Boolean).join("\n"));
     groups.set(cite, group);
   });
   return [...groups.values()].map((group) => [group.head, ...group.excerpts].join("\n")).join("\n\n");

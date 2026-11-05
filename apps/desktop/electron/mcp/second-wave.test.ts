@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { planChatSources } from "../intune-chat/chat-steps.js";
+import { numberedMcpResults } from "../intune-chat/agentic-loop.js";
+import { CitationRegistry, planChatSources } from "../intune-chat/chat-steps.js";
 import { canonicalMcpFilter } from "../intune-chat/mcp-filter.js";
 import { buildMcpQueryWriterPrompt, MCP_QUERY_WRITER_SYSTEM } from "../intune-chat/mcp-query-writer.js";
 import { canonicalItemId, itemIdsInText, mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
@@ -212,5 +213,22 @@ describe("Second-wave results read by structure", () => {
     assert.match(upgrade.items[0]!.excerpt!, /recommended_target/);
     assert.equal(read("endoflife-ai", "list_products", "list_products", { query: "windows" }).items[0]!.title, "list_products: windows");
     assert.deepEqual(read("endoflife-ai", "empty_list", "list_products", { query: "nothing" }), { items: [], empty: true });
+  });
+
+  it("keeps the identity of every KEV entry that shares one product page citation", () => {
+    const entry = mcpCatalogEntry("endoflife-ai")!;
+    const kev = FIXTURES["endoflife-ai"]!.calls.get_kev_exposure!;
+    const structured = structuredClone(kev.structuredContent) as { kev_entries: Array<Record<string, unknown>> };
+    structured.kev_entries.push({ cve: "CVE-2022-21907", date_added: "2022-01-11", due_date: "2022-07-11", required_action: "Apply updates per vendor instructions.", vulnerability_name: "Microsoft HTTP Protocol Stack Remote Code Execution Vulnerability", known_ransomware_use: false });
+    const items = readMcpResult(JSON.stringify(structured), { tool: "get_kev_exposure", args: { product: "windows-server" }, host: mcpHost(entry.url), format: entry.results!, structured }).items;
+    assert.equal(items.length, 2);
+    const registry = new CitationRegistry();
+    const cites = registry.addMcpResults(items, { serverName: entry.name, host: mcpHost(entry.url) }).map((cite) => cite.cite);
+    // Both entries cite the one product page.
+    assert.deepEqual(cites, ["[1]", "[1]"]);
+    const observation = numberedMcpResults(items, cites);
+    assert.match(observation, /^\[1\] CVE-2021-34527 Microsoft Windows Print Spooler Remote Code Execution Vulnerability, https:\/\/endoflife\.ai\/windows-server\n/);
+    // The second entry's dates and action stand under its own CVE and name, not under the first one's.
+    assert.match(observation, /\nCVE-2022-21907 Microsoft HTTP Protocol Stack Remote Code Execution Vulnerability\ndate_added: 2022-01-11\ndue_date: 2022-07-11/);
   });
 });
