@@ -764,6 +764,11 @@ describe("Intune Chat planner", () => {
       "Create a remediation script and schedule the script to run hourly on all Windows devices",
       "Create a script. Upload the script to all Windows devices.",
       "Create a KQL query and save the query as a custom detection",
+      "Create a remediation script and upload a copy to all Windows devices",
+      "Create a remediation script and upload remediation.ps1 to all Windows devices",
+      "Create a script and run remediation.ps1 on all devices",
+      "Create a remediation script in Microsoft Intune",
+      "Create a remediation script and roll the fix out to all devices",
     ];
     for (const question of writeQuestions) {
       assert.equal(
