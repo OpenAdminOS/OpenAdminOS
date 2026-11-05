@@ -829,6 +829,58 @@ describe("The MCP query writer boundary", () => {
     });
   });
 
+  it("sends an item ID only when the question or an earlier result of the same server gave it", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      let writerPrompts: string[] = [];
+      const format = { items: [{ title: [["title"]], url: ["url"], id: ["kb_id"] }] };
+      const search: McpChatTool = { ...docsTool, name: mcpChatToolName("windowsforum", "search_kb"), serverId: "windowsforum", serverName: "WindowsForum", host: "mcp.windowsforum.com", tool: "search_kb",
+        inputSchema: { type: "object", properties: { query: { type: "string" } }, required: ["query"] }, resultFormat: format };
+      const article: McpChatTool = { ...search, name: mcpChatToolName("windowsforum", "get_kb_article"), tool: "get_kb_article",
+        inputSchema: { type: "object", properties: { kb_id: { type: "string" } }, required: ["kb_id"] }, itemParams: ["kb_id"] };
+      const roadmap: McpChatTool = { ...docsTool, name: mcpChatToolName("release-communications", "get_m365_roadmap_by_id"), serverId: "release-communications", serverName: "Microsoft Release Communications", host: "www.microsoft.com", tool: "get_m365_roadmap_by_id",
+        inputSchema: { type: "object", properties: { id: { type: "string" } }, required: ["id"] }, itemParams: ["id"] };
+      const context: McpChatContext = {
+        ...mcpContext(calls),
+        tools: [search, article, roadmap],
+        async call(tool, args) {
+          calls.push({ tool: tool.tool, args });
+          return tool.tool === "search_kb"
+            ? { text: "", truncated: false, structured: { results: [{ kb_id: "KB5058919", title: "April 11, 2025, KB5058919 (OS Builds 22621.5192)", url: "https://support.microsoft.com/help/5058919" }] } }
+            : { text: "", truncated: false, structured: { kb_id: "KB5058919", title: "KB5058919", url: "https://support.microsoft.com/help/5058919", content: "Known issues." } };
+        },
+      };
+      const callArticle = JSON.stringify({ tool: article.name, params: {} });
+      const final = '{"final":true,"answer":"Done."}';
+      const ask = (question: string, replies: string[], writer: string[]) => {
+        writerPrompts = [];
+        return runAgenticChat({ ...input(store, scriptedLlm([...replies, final], [], writerPrompts, writer), context), question, adminQuestion: question, questionKind: "docs" });
+      };
+
+      // An ID nobody gave is refused before sending.
+      const guessed = await ask("What are the known issues in the latest cumulative update?", [callArticle], ['{"kb_id":"KB5034441"}']);
+      assert.equal(guessed.toolTrace[0]!.mcpSource?.blocked, true);
+      assert.match(guessed.toolTrace[0]!.error!, /named an item in kb_id that is neither in your question nor in an earlier WindowsForum result in this answer\. Nothing was sent to mcp\.windowsforum\.com\./);
+      assert.equal(calls.length, 0);
+
+      // The admin typed it, with or without the KB prefix.
+      const typed = await ask("What does kb 5034441 fix?", [callArticle], ['{"kb_id":"KB5034441"}']);
+      assert.equal(typed.toolTrace[0]!.error, undefined);
+      assert.deepEqual(calls.at(-1), { tool: "get_kb_article", args: { kb_id: "KB5034441" } });
+
+      // An earlier result of the same server listed it; the writer saw that ID.
+      const listed = await ask("Which recent cumulative update has known issues?", [JSON.stringify({ tool: search.name, params: {} }), callArticle], ['{"query":"cumulative update known issues"}', '{"kb_id":"KB5058919"}']);
+      assert.deepEqual(listed.toolTrace.map((entry) => entry.error), [undefined, undefined]);
+      assert.match(writerPrompts.at(-1)!, /"id":"KB5058919"/);
+      assert.match(writerPrompts.at(-1)!, /Params that name one item[^\n]*: kb_id\./);
+
+      // An ID from another server's result does not count.
+      const crossed = await ask("Which recent cumulative update has known issues?", [JSON.stringify({ tool: search.name, params: {} }), JSON.stringify({ tool: roadmap.name, params: {} })], ['{"query":"cumulative update"}', '{"id":"5058919"}']);
+      assert.equal(crossed.toolTrace[1]!.mcpSource?.blocked, true);
+      assert.equal(calls.filter((call) => call.tool === "get_m365_roadmap_by_id").length, 0);
+    });
+  });
+
   it("sends nothing when the query writer fails or no admin question was given", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

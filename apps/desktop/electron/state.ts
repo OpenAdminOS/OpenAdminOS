@@ -2178,6 +2178,7 @@ export class AppStateStore {
           description: tool.description,
           inputSchema: tool.inputSchema,
           ...(entry.results ? { resultFormat: entry.results } : {}),
+          ...(entry.itemParams?.[tool.name] ? { itemParams: entry.itemParams[tool.name] } : {}),
         });
       }
     }

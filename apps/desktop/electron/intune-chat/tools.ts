@@ -75,6 +75,8 @@ export interface McpChatTool {
   inputSchema: Record<string, unknown>;
   /** How the server's results are read into sources, from the catalog. */
   resultFormat?: McpResultFormat;
+  /** Params of this tool that name one specific item, from the catalog. */
+  itemParams?: readonly string[];
 }
 
 /** An installed, enabled MCP server whose tools are offered, as the catalog describes it. */
@@ -130,10 +132,37 @@ export class McpQueryBlockedError extends Error {}
 export interface McpCallHooks {
   /** Writes the call's params from the admin's current question, the tool schema and earlier MCP results of this answer. */
   writeQuery(tool: McpChatTool): Promise<unknown>;
-  /** Links earlier MCP results of each server in this answer returned. A link param must be one of these, verbatim. */
-  resultUrls(serverId: string): readonly string[];
+  /**
+   * What a param may name. A link must be, verbatim, one that an earlier
+   * result of the same server in this answer returned. An item ID must be
+   * one of `itemIds`: the words of the admin's current question and the IDs
+   * earlier results of the same server in this answer gave.
+   */
+  references(serverId: string): McpReferences;
   /** The params passed every check and are about to be sent. */
   onSend?(args: Record<string, unknown>): void;
+}
+
+/** Links and item IDs a param may name; see `McpCallHooks.references`. */
+export interface McpReferences {
+  links: readonly string[];
+  itemIds: readonly string[];
+}
+
+/**
+ * An item ID as compared: lowercase letters and digits only, and a KB
+ * number without its prefix, so "KB5034441", "kb 5034441" and "5034441"
+ * are the same item.
+ */
+export function normalizeItemId(value: string): string {
+  const flat = value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return /^kb\d+$/.test(flat) ? flat.slice(2) : flat;
+}
+
+/** The words of a question as item IDs, so an ID the admin typed can be sent. */
+export function itemIdsInText(text: string): string[] {
+  const words = text.normalize("NFKC").split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
+  return [...new Set(words.flatMap((word) => [word, ...word.split("-")]).map(normalizeItemId).filter(Boolean))];
 }
 
 /** An MCP call failed after its query was sent to the host. */
@@ -898,16 +927,24 @@ const LINK = /\bhttps?:\/\//i;
  * earlier result of the same server returned in this answer, and is sent
  * verbatim; a link the model wrote could carry tenant data in its path.
  */
-function canonicalMcpArgs(entry: McpChatTool, args: Record<string, unknown>, resultUrls: readonly string[]): { args: Record<string, unknown>; checked: string[] } {
+function canonicalMcpArgs(entry: McpChatTool, args: Record<string, unknown>, references: McpReferences): { args: Record<string, unknown>; checked: string[] } {
   const checked: string[] = [];
+  const known = new Set(references.itemIds.map(normalizeItemId));
   const canonical = (key: string, value: unknown): unknown => {
+    // A param that names one item sends only an ID the admin typed or a result of this server gave.
+    if (entry.itemParams?.includes(key) && (typeof value === "string" || typeof value === "number")) {
+      const id = normalizeItemId(canonicalEgressText(String(value)));
+      if (!id || !known.has(id)) {
+        throw new McpQueryBlockedError(`the ${entry.serverName} query named an item in ${key} that is neither in your question nor in an earlier ${entry.serverName} result in this answer. Nothing was sent to ${entry.host}. IDs are sent only as your question or a result gave them.`);
+      }
+    }
     if (typeof value !== "string") {
       if (typeof value === "number") checked.push(String(value));
       return value;
     }
     const text = canonicalEgressText(value);
     if (LINK.test(text) || /^(?:url|uri|link|href)$/i.test(key)) {
-      if (!resultUrls.includes(value)) {
+      if (!references.links.includes(value)) {
         throw new McpQueryBlockedError(`the ${entry.serverName} query held a link that no earlier ${entry.serverName} result in this answer returned. Nothing was sent to ${entry.host}. Links are sent only as a result listed them.`);
       }
       checked.push(text);
@@ -936,7 +973,7 @@ async function executeMcpTool(ctx: IntuneChatToolContext, tool: McpChatToolName,
     ctx.signal?.throwIfAborted();
     throw new Error(`the ${entry.serverName} query could not be written: ${caught instanceof Error ? caught.message : String(caught)}. Nothing was sent to ${entry.host}.`);
   }
-  const { args, checked } = canonicalMcpArgs(entry, validateMcpArgs(entry, proposed), hooks.resultUrls(entry.serverId));
+  const { args, checked } = canonicalMcpArgs(entry, validateMcpArgs(entry, proposed), hooks.references(entry.serverId));
   written.args = args;
   // Each value is checked as plain canonical text. Checking serialized
   // JSON would compare tenant values against escaped quotes and backslashes.

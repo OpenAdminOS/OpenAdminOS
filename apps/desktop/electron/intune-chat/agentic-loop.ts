@@ -24,6 +24,7 @@ import {
   holdsTenantData,
   isMcpChatToolName,
   isTenantTool,
+  itemIdsInText,
   mcpSourceLinesForPrompt,
   mcpToolDefinitionsForPrompt,
   summarizeToolCallForProgress,
@@ -308,7 +309,7 @@ export async function runAgenticChat(
   // Sources numbered up to here reached a model request; only they are returned as consulted and citable.
   let consultedSources = 0;
   // Titles and links of MCP results in this answer, and the queries it sent: the query writer's only context besides the admin's current question. Nothing carries over from earlier answers.
-  const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string }> = [];
+  const mcpResults: Array<{ serverId: string; serverName: string; title: string; url?: string; id?: string }> = [];
   const sentQueries: string[] = [];
   const documentation: LoopPassage[] = [];
   const addDocumentation = (passages: readonly DocsIndexPassage[]) => {
@@ -601,7 +602,13 @@ export async function runAgenticChat(
         earlierResults: mcpResults,
         sentQueries,
       }),
-      resultUrls: (serverId) => mcpResults.filter((item) => item.serverId === serverId && item.url).map((item) => item.url!),
+      references: (serverId) => {
+        const own = mcpResults.filter((item) => item.serverId === serverId);
+        return {
+          links: own.flatMap((item) => (item.url ? [item.url] : [])),
+          itemIds: [...itemIdsInText(input.adminQuestion ?? ""), ...own.flatMap((item) => (item.id ? [item.id] : []))],
+        };
+      },
       onSend: (params) => {
         sentQueries.push(mcpSentText(params));
         input.onToolSending?.({ tool, params });
@@ -624,7 +631,7 @@ export async function runAgenticChat(
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
         const { results = [], content, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown } & Record<string, unknown>;
-        mcpResults.push(...results.map((item) => ({ serverId: mcpSource.serverId, serverName: mcpSource.serverName, title: item.title, ...(item.url ? { url: item.url } : {}) })));
+        mcpResults.push(...results.map((item) => ({ serverId: mcpSource.serverId, serverName: mcpSource.serverName, title: item.title, ...(item.url ? { url: item.url } : {}), ...(item.id ? { id: item.id } : {}) })));
         const cites = citations.addMcpResults(results, mcpSource);
         observed = results.some((item) => item.excerpt)
           ? { ...rest, content: numberedMcpResults(results, cites.map((entry) => entry.cite)) }

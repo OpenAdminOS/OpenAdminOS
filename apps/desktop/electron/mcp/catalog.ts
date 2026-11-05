@@ -67,6 +67,13 @@ export interface McpCatalogEntry {
    * list, every tool the server lists is offered.
    */
   tools?: readonly string[];
+  /**
+   * Params, per tool, that name one specific item, such as a roadmap ID or
+   * a KB number. Such a value is sent only when it appears in the admin's
+   * current question or in an earlier result of the same server in this
+   * answer, as links are.
+   */
+  itemParams?: Readonly<Record<string, readonly string[]>>;
   /** How results are read into sources. Without it, items with a title or name and a link are read. */
   results?: McpResultFormat;
 }
