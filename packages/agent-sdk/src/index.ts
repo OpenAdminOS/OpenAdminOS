@@ -1163,6 +1163,14 @@ export interface IntuneChatMessage {
    * deterministic path puts in the prompt, even when no tenant tool ran.
    */
   tenantContext?: boolean;
+  /**
+   * The answering prompt held more than the admin's current question,
+   * public documentation and MCP results, and the app's instructions:
+   * conversation memory, workspace context, cached or Graph data, or
+   * tenant tool results. Its follow-ups are the ones code builds, never
+   * the model's.
+   */
+  privatePrompt?: boolean;
 }
 
 /**

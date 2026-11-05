@@ -827,4 +827,77 @@ describe("Chat steps, sources and follow-ups end to end", () => {
       assert.deepEqual(second.assistantMessage.toolTrace?.find((entry) => entry.tool === learnTool)?.params, { query: offered });
     }, { writer: echoQuestion, graphResponses: { "/users": { value: [{ id: "user-1", displayName: "Ana Diaz", streetAddress: "420 Cedar Avenue" }] } } });
   });
+  describe("follow-up provenance", () => {
+    const ADDRESS_FOLLOW_UP = "Explain support at 420 Cedar Avenue";
+    const docsReplies = [
+      { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Intune macOS enrollment" } },
+      { final: true, answer: "Microsoft Learn describes macOS enrollment [1].", next: [ADDRESS_FOLLOW_UP, "Explain the system extension profile"] },
+    ];
+    const ask = (store: AppStateStore, send: "sendIntuneChatMessage" | "streamIntuneChatMessage", input: Parameters<AppStateStore["sendIntuneChatMessage"]>[0]) =>
+      send === "sendIntuneChatMessage" ? store.sendIntuneChatMessage(input) : store.streamIntuneChatMessage(input, () => {});
+
+    it("drops model follow-ups after a legacy tenant answer in the conversation memory, and the flag survives a reload", async () => {
+      for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+        await withHarness(async ({ store, cache, prompts, script }) => {
+          // An answer stored before steps and tenant markers existed: only its source rows say it read the tenant.
+          const conversationId = `chat_legacy_${send}`;
+          const at = "2026-06-02T10:00:00.000Z";
+          cache.createConversation({ id: conversationId, title: "Legacy", tenantId: tenant.id, now: at });
+          cache.insertMessage({ id: `${conversationId}_u`, conversationId, role: "user", content: "Where is Ana Diaz based?", status: "completed", createdAt: at });
+          cache.insertMessage({
+            id: `${conversationId}_a`, conversationId, role: "assistant", status: "completed", createdAt: "2026-06-02T10:00:01.000Z",
+            content: "Ana Diaz has streetAddress: 420 Cedar Avenue.",
+            sources: [{ resource: "users", label: "Users", rows: 1, source: "cache" }],
+          });
+          script(docsReplies);
+          const message = (await ask(store, send, { content: "How do I enroll macOS devices?", conversationId })).assistantMessage;
+          assert.equal(message.questionKind, "docs", send);
+          assert.ok(prompts.some((entry) => /420 Cedar Avenue/.test(entry.prompt)), `${send}: the answering model read the legacy answer`);
+          assert.equal(message.privatePrompt, true, send);
+          for (const text of message.followUps ?? []) assert.doesNotMatch(text, /420 Cedar|system extension/, send);
+          const reloaded = (await store.getIntuneChatMessages(conversationId)).at(-1)!;
+          assert.equal(reloaded.privatePrompt, true, send);
+          assert.deepEqual(reloaded.followUps, message.followUps, send);
+        });
+      }
+    });
+
+    it("drops model follow-ups when workspace evidence, notes or instructions were attached", async () => {
+      for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+        for (const attached of ["evidence", "note", "instructions"] as const) {
+          await withHarness(async ({ store, prompts, script }) => {
+            const workspace = await store.createWorkspace({ title: "Support review", tenantId: tenant.id, ...(attached === "instructions" ? { instructions: "Support sits at 420 Cedar Avenue." } : {}) });
+            const note = attached === "note" ? await store.addWorkspaceNote(workspace.id, "Support sits at 420 Cedar Avenue.") : undefined;
+            const evidence = attached === "evidence"
+              ? await store.pinWorkspaceEvidence({ workspaceId: workspace.id, tenantId: tenant.id, title: "Support desk", sourceType: "manual", content: { streetAddress: "420 Cedar Avenue" } })
+              : undefined;
+            script(docsReplies);
+            const message = (await ask(store, send, {
+              content: "How do I enroll macOS devices?",
+              workspaceContext: { workspaceId: workspace.id, evidenceIds: evidence ? [evidence.id] : [], noteIds: note ? [note.id] : [], includeInstructions: attached === "instructions" },
+            })).assistantMessage;
+            const label = `${send} with ${attached}`;
+            assert.equal(message.questionKind, "docs", label);
+            assert.ok(prompts.some((entry) => /420 Cedar Avenue/.test(entry.prompt)), `${label}: the answering model read the workspace context`);
+            assert.equal(message.privatePrompt, true, label);
+            for (const text of message.followUps ?? []) assert.doesNotMatch(text, /420 Cedar|system extension/, label);
+          });
+        }
+      }
+    });
+
+    it("keeps the model's follow-ups for a fresh docs question with no history or context", async () => {
+      for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+        await withHarness(async ({ store, script }) => {
+          script([docsReplies[0], { final: true, answer: "Microsoft Learn describes macOS enrollment [1].", next: ["Explain the system extension profile"] }]);
+          const result = await ask(store, send, { content: "How do I enroll macOS devices?" });
+          const message = result.assistantMessage;
+          assert.equal(message.questionKind, "docs", send);
+          assert.equal(message.privatePrompt, undefined, send);
+          assert.ok(message.followUps?.includes("Explain the system extension profile"), send);
+          assert.equal((await store.getIntuneChatMessages(result.conversation.id)).at(-1)!.privatePrompt, undefined, send);
+        });
+      }
+    });
+  });
 });

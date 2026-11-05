@@ -188,6 +188,33 @@ function restrictPlannedResourcesForTenant(
   return { omitted: `Not included in this answer: ${formatServiceList(labels)}. ${reason}` };
 }
 
+/**
+ * What the answering prompt held besides the admin's current question,
+ * public documentation and MCP results, and the app's own instructions.
+ * Any other part makes the prompt private: the model writes its `next`
+ * after reading it, and a follow-up the admin sends becomes the next
+ * question. Recorded where the prompt is built, on the send and stream
+ * paths alike.
+ */
+class PromptProvenance {
+  private readonly parts = new Set<"memory" | "workspace" | "answer-pack" | "tenant-data">();
+
+  /**
+   * `memory`: conversation memory, which holds earlier answers, legacy
+   * tenant answers among them; `workspace`: workspace evidence, notes or
+   * instructions; `answer-pack`: the deterministic pack with cache status
+   * and rows; `tenant-data`: a tenant or mixed kind, a Graph refresh or a
+   * tenant tool result.
+   */
+  add(part: "memory" | "workspace" | "answer-pack" | "tenant-data", when = true): void {
+    if (when) this.parts.add(part);
+  }
+
+  get isPrivate(): boolean {
+    return this.parts.size > 0;
+  }
+}
+
 interface UnavailableTenantResources {
   resources: GraphCacheResourceKind[];
   /** Scopes the tenant still has to grant, for the readiness row. */
@@ -1860,6 +1887,7 @@ export class IntuneChatService {
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
     const veto = docsVeto(content, history);
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
+    const provenance = new PromptProvenance();
 
     let refreshResult: GraphCacheRefreshResult | undefined;
     // A write prompt is answered by the deterministic block below.
@@ -1981,12 +2009,15 @@ export class IntuneChatService {
       const modelQuestion = workspaceContext
         ? `${withMemory}\n\n${workspaceContext.promptBlock}`
         : withMemory;
+      provenance.add("memory", Boolean(conversationMemory));
+      provenance.add("workspace", Boolean(workspaceContext));
       const buildDeterministicAnswer = async (
         notice?: string,
       ): Promise<{ content: string; model?: string }> => {
         await prepareDeterministic();
         usedDeterministic = true;
         engineNotice = notice;
+        provenance.add("answer-pack");
         const answerPack = buildAnswerPack({
           question: modelQuestion,
           tenant,
@@ -2099,8 +2130,10 @@ export class IntuneChatService {
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
+    const tenantDataRead = readTenantData(answerPlan.sources.kind, refreshResult, toolTrace);
+    provenance.add("tenant-data", tenantDataRead);
     const { followUps, tenantFollowUps } = answered
-      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: readTenantData(answerPlan.sources.kind, refreshResult, toolTrace) })
+      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: tenantDataRead, privatePrompt: provenance.isPrivate })
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
@@ -2120,6 +2153,7 @@ export class IntuneChatService {
       ...(followUps.length > 0 ? { followUps } : {}),
       ...(tenantFollowUps.length > 0 ? { tenantFollowUps } : {}),
       ...(tenantContext ? { tenantContext: true } : {}),
+      ...(answered && provenance.isPrivate ? { privatePrompt: true } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
           ? packCacheStatus
@@ -2310,6 +2344,7 @@ export class IntuneChatService {
     const answerPlan = options.voice
       ? undefined
       : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
+    const provenance = new PromptProvenance();
     const isCancelled = () => options.signal?.aborted === true;
     const finishCancelled = (): SendIntuneChatMessageResult => {
       const cancelledAt = new Date().toISOString();
@@ -2609,10 +2644,13 @@ export class IntuneChatService {
       const modelQuestion = workspaceContext
         ? `${contextualQuestion}\n\n${workspaceContext.promptBlock}`
         : contextualQuestion;
+      provenance.add("memory", Boolean(voiceContext?.history ?? conversationMemory));
+      provenance.add("workspace", Boolean(workspaceContext));
       const streamDeterministicAnswer = async (notice?: string) => {
         await prepareDeterministic();
         usedDeterministic = true;
         engineNotice = notice;
+        provenance.add("answer-pack");
         let answerPack = buildAnswerPack({
           question: modelQuestion,
           tenant,
@@ -2890,8 +2928,10 @@ export class IntuneChatService {
     steps.settle(assistantStatus === "failed" ? "failed" : "completed");
     const refreshedResources = refreshedResourceSet(refreshResult);
     const answered = assistantStatus === "completed" && !namedAgent && !planned.hasWriteIntent && !accessBlockedMessage;
+    const tenantDataRead = readTenantData(answerPlan?.sources.kind ?? "tenant", refreshResult, toolTrace);
+    provenance.add("tenant-data", tenantDataRead);
     const { followUps, tenantFollowUps } = answerPlan && answered
-      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: readTenantData(answerPlan.sources.kind, refreshResult, toolTrace) })
+      ? this.answerFollowUps({ content, sources: answerPlan.sources, tieInResources: answerPlan.tieInResources, tenantId: tenant.id, cacheStatus, modelFollowUps, readTenantData: tenantDataRead, privatePrompt: provenance.isPrivate })
       : { followUps: [], tenantFollowUps: [] };
     // Planned resources reach the answer as tenant rows or tool evidence; docs questions have none.
     const tenantContext = answered && planned.resources.length > 0;
@@ -2911,6 +2951,7 @@ export class IntuneChatService {
       ...(followUps.length > 0 ? { followUps } : {}),
       ...(tenantFollowUps.length > 0 ? { tenantFollowUps } : {}),
       ...(tenantContext ? { tenantContext: true } : {}),
+      ...(answered && provenance.isPrivate ? { privatePrompt: true } : {}),
       sources: buildIntuneChatSources({
         cacheStatus: usedDeterministic
           ? packCacheStatus
@@ -3131,11 +3172,15 @@ export class IntuneChatService {
   }
 
   /**
-   * Follow-ups for an answer. A docs answer that read no tenant data gets
-   * the tenant tie-in first, then the model's. An answer that read tenant
-   * data (a tenant or mixed kind, a Graph refresh or a tenant tool) gets
-   * only the follow-up code builds: the model wrote its `next` after
-   * reading tenant rows, and a suggestion becomes the next question.
+   * Follow-ups for an answer, the one place the stored message, the chip
+   * and the composer ghost text get them from. A docs answer that read no
+   * tenant data gets the tenant tie-in first. The model's own follow-ups
+   * follow only when its prompt was public: the current question, public
+   * documentation and MCP results, and the app's instructions. After a
+   * private prompt (conversation memory, workspace context, the answer
+   * pack or tenant data, see {@link PromptProvenance}) only the follow-up
+   * code builds is offered: the model wrote its `next` after reading that
+   * content, and a suggestion becomes the next question.
    */
   private answerFollowUps(input: {
     content: string;
@@ -3145,6 +3190,8 @@ export class IntuneChatService {
     cacheStatus: readonly GraphCacheResourceStatus[];
     modelFollowUps?: readonly string[];
     readTenantData: boolean;
+    /** The answering prompt held more than public-only inputs. */
+    privatePrompt: boolean;
   }): { followUps: string[]; tenantFollowUps: string[] } {
     const store = this.host.requireIntelligenceStore();
     const devices = input.cacheStatus.find((status) => status.resource === "managedDevices");
@@ -3154,7 +3201,7 @@ export class IntuneChatService {
     const tieIn = input.readTenantData
       ? tenantAnswerFollowUp({ question: input.content, resources: input.tieInResources, ...deviceCounts })
       : tenantTieInFollowUp({ question: input.content, kind: input.sources.kind, tieInResources: input.tieInResources, ...deviceCounts });
-    const followUps = mergeFollowUps([tieIn], input.readTenantData ? [] : input.modelFollowUps ?? []);
+    const followUps = mergeFollowUps([tieIn], input.privatePrompt || input.readTenantData ? [] : input.modelFollowUps ?? []);
     // The chip of a docs answer says when its follow-up would read tenant data.
     return { followUps, tenantFollowUps: followUps.filter((text) => text === tieIn || hasTenantReference(text)) };
   }
