@@ -47,7 +47,7 @@ export interface McpCallResult {
   structured?: unknown;
 }
 
-export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "redirect" | "revoked";
+export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "tools-missing" | "redirect" | "revoked";
 
 export class McpHostError extends Error {
   /**
@@ -77,6 +77,12 @@ export interface McpHostOptions {
    * call is dispatched. A reason refuses the call and nothing is sent.
    */
   revocation?: (serverId: string) => McpRevocation | undefined | Promise<McpRevocation | undefined>;
+  /**
+   * Receives the tools a session opened for a call listed, so the stored
+   * listing and the Marketplace follow a server that changed its tools
+   * since it was installed or last checked.
+   */
+  listed?: (serverId: string, tools: McpToolInfo[]) => void | Promise<void>;
 }
 
 interface Authorization {
@@ -213,6 +219,15 @@ export class McpHost {
     }
     await this.authorize(endpoint, generation);
     const session = await this.session(endpoint);
+    // A server missing any offered tool is skipped whole, also when a session opened for a call finds this.
+    if (session.missingTools.length > 0) {
+      const missing = session.missingTools.join(", ");
+      throw new McpHostError(
+        "tools-missing",
+        `${endpoint.name} no longer lists ${missing}, which OpenAdminOS offers from it, so Chat skips it. Nothing was sent. Check its connection in the Marketplace once the server lists ${session.missingTools.length === 1 ? "it" : "them"} again.`,
+        false,
+      );
+    }
     if (!session.tools.some((tool) => tool.name === name && !tool.unavailable)) {
       throw new McpHostError("unknown-tool", `${endpoint.name} does not list a tool named ${name}.`);
     }
@@ -283,7 +298,11 @@ export class McpHost {
   private session(endpoint: McpEndpoint): Promise<Session> {
     const existing = this.sessions.get(endpoint.id);
     if (existing) return existing;
-    const session = this.open(endpoint);
+    const session = this.open(endpoint).then(async (opened) => {
+      // Keeping the stored listing current is best effort: the call itself is decided by this session.
+      await Promise.resolve(this.options.listed?.(endpoint.id, opened.tools)).catch(() => undefined);
+      return opened;
+    });
     this.sessions.set(endpoint.id, session);
     session.catch(() => {
       if (this.sessions.get(endpoint.id) === session) this.sessions.delete(endpoint.id);

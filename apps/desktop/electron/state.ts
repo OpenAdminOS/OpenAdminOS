@@ -1722,6 +1722,8 @@ export class AppStateStore {
         const installed = (await this.read()).mcpServers?.[serverId];
         return !installed ? "uninstalled" : installed.enabled ? undefined : "disabled";
       },
+      // A session opened for a Chat call relists the tools; a changed listing is stored, so the Marketplace shows it.
+      listed: (serverId, tools) => this.recordMcpListing(serverId, tools),
     });
     const host = this;
     this.chatService = new IntuneChatService({
@@ -2081,6 +2083,21 @@ export class AppStateStore {
   }
 
   /** Reconnects an installed server and refreshes its tool list. */
+  private async recordMcpListing(serverId: string, tools: McpToolInfo[]): Promise<void> {
+    const changed = await this.serialize(async () => {
+      const current = await this.read();
+      const existing = current.mcpServers?.[serverId];
+      // Only an installed server is refreshed; a listing never installs one.
+      if (!existing || JSON.stringify(existing.tools) === JSON.stringify(tools)) return false;
+      await this.write({
+        ...current,
+        mcpServers: { ...(current.mcpServers ?? {}), [serverId]: { ...existing, lastConnectedAt: this.clock().toISOString(), tools } },
+      });
+      return true;
+    });
+    if (changed) this.emitStateChanged("mcp-servers-changed");
+  }
+
   async checkMcpServer(serverId: string): Promise<McpServerSummary[]> {
     return this.connectMcpServer(serverId, true);
   }
