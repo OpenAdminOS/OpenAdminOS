@@ -183,6 +183,10 @@ describe("Marketplace", () => {
     expect(within(dialog).getByText("Chat skips this server until its offered tools are back")).toBeInTheDocument();
     expect(within(dialog).queryByText(/Tool queries go to www\.kqlsearch\.com/)).not.toBeInTheDocument();
     expect(within(dialog).getByText("Chat calls none of these until every offered tool is back.")).toBeInTheDocument();
+    // "Where queries go" says the host receives nothing while the server is skipped.
+    const flow = within(dialog).getByText("Where queries go").parentElement!;
+    expect(flow).toHaveTextContent("Chat sends nothing to it until its offered tools are back");
+    expect(within(dialog).queryByText("Receives the query text")).not.toBeInTheDocument();
   });
 
   it("shows a designed error with retry when the server is unreachable", async () => {

@@ -163,7 +163,7 @@ function Details({ server, toolUse }: { server: McpServerSummary; toolUse: ChatT
       {server.missingTools?.length ? <MissingTools server={server} missing={server.missingTools} /> : null}
       <section>
         <h3 className="mb-3 font-serif text-xl font-normal text-[var(--color-text)]">Where queries go</h3>
-        <QueryFlow host={server.host} />
+        <QueryFlow host={server.host} skipped={Boolean(server.missingTools?.length)} />
       </section>
       <div className="grid grid-cols-[22px_minmax(0,1fr)] gap-3 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3.5 text-sm text-[var(--color-text-soft)]">
         <IconShield size={20} className="text-[var(--color-text)]" />
@@ -299,7 +299,8 @@ function PolicyLink({ policy }: { policy: { label: string; url: string } }) {
   );
 }
 
-function QueryFlow({ host }: { host: string }) {
+/** Where a Chat query goes. A server Chat skips because offered tools are missing receives nothing, and says so. */
+function QueryFlow({ host, skipped = false }: { host: string; skipped?: boolean }) {
   const node = "grid content-start gap-1 rounded-xl bg-[var(--color-bg-raised)] p-3.5 ring-1 ring-[var(--color-border-soft)]";
   const edge = "hidden items-center justify-center text-[var(--color-text-muted)] md:flex";
   return (
@@ -316,7 +317,7 @@ function QueryFlow({ host }: { host: string }) {
       <div className={`${edge} text-[var(--color-warning)]`} aria-hidden="true">→</div>
       <div className={`${node} bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/35`}>
         <b className="break-all text-sm font-medium text-[var(--color-text)]">{host}</b>
-        <span className="text-xs text-[var(--color-text-muted)]">Receives the query text</span>
+        <span className="text-xs text-[var(--color-text-muted)]">{skipped ? "Chat sends nothing to it until its offered tools are back" : "Receives the query text"}</span>
       </div>
     </div>
   );
