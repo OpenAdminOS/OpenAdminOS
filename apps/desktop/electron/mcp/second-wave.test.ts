@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 
 import { planChatSources } from "../intune-chat/chat-steps.js";
 import { canonicalMcpFilter } from "../intune-chat/mcp-filter.js";
-import { buildMcpQueryWriterPrompt } from "../intune-chat/mcp-query-writer.js";
+import { buildMcpQueryWriterPrompt, MCP_QUERY_WRITER_SYSTEM } from "../intune-chat/mcp-query-writer.js";
 import { canonicalItemId, itemIdsInText, mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
 import { MCP_CATALOG, mcpCatalogEntry, mcpHost } from "./catalog.js";
 
@@ -89,6 +89,21 @@ describe("Second-wave item ID forms", () => {
     assert.deepEqual(itemIdsInText("Compare roadmap 109560-109561, and #124890.", { kind: "number" }), ["109560", "109561", "124890"]);
     assert.deepEqual(itemIdsInText("What does 50344\u00e941 fix, and KB5058919?", { kind: "number", prefix: "KB" }), ["50344", "41", "5058919"]);
     assert.deepEqual(itemIdsInText("Updates 466774-466779 and 2021regions", { kind: "slug" }), ["466774-466779", "466774", "466779", "and", "2021regions"]);
+  });
+});
+
+describe("Second-wave query writer prompt", () => {
+  it("puts item IDs from the question in item params and filter fields only, and keeps every other identifying value out", () => {
+    // One rule for IDs: no line tells the writer to leave out IDs the admin typed while another tells it to copy them.
+    assert.doesNotMatch(MCP_QUERY_WRITER_SYSTEM, /email addresses, IDs,/);
+    assert.match(MCP_QUERY_WRITER_SYSTEM, /any other identifying value, even when the admin typed them\. The one exception is an item ID, below\./);
+    assert.match(MCP_QUERY_WRITER_SYSTEM, /An item ID, such as a roadmap ID or a KB number, goes only where the prompt lists a param or filter field that names one item\. Copy it exactly from the admin's question or from an earlier result of the same server; never guess one, and put no ID anywhere else\./);
+    const rc = mcpCatalogEntry("release-communications")!;
+    const tool = (name: string) => ({ name: mcpChatToolName(rc.id, name), serverId: rc.id, serverName: rc.name, host: mcpHost(rc.url), tool: name, description: "", inputSchema: { type: "object" }, itemIds: rc.itemIds![name]! });
+    const prompt = (name: string) => buildMcpQueryWriterPrompt({ question: "What is roadmap 109560?", tool: tool(name), earlierResults: [], sentQueries: [] });
+    assert.match(prompt("get_m365_roadmap_by_id"), /Params that name one item \(copy one ID from the admin's question or an earlier result of the same server; never guess one\): id\./);
+    assert.match(prompt("get_recent_m365_roadmaps"), /In filter, the fields id and baseId name one item: compare them only with an ID from the admin's question or an earlier result of the same server\./);
+    assert.doesNotMatch(prompt("get_recent_m365_roadmaps"), /Params that name one item/);
   });
 });
 
