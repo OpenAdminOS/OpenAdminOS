@@ -218,6 +218,32 @@ describe("MCP host", () => {
     } finally { release(); await host.closeAll(); }
   });
 
+  it("says when the listing could not be stored and stores it on the next call", async () => {
+    let failures = 1;
+    const stored: string[][] = [];
+    const host = new McpHost({
+      clientVersion: "test",
+      listed: (_serverId, tools) => {
+        if (failures-- > 0) throw new Error("disk full");
+        stored.push(tools.map((tool) => tool.name));
+      },
+    });
+    const incomplete = { ...endpoint, id: "unsaved", tools: ["search_docs", "get_article"] };
+    try {
+      const warn = console.warn;
+      console.warn = () => {};
+      try {
+        await assert.rejects(host.callTool(incomplete, "search_docs", { query: "first" }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "tools-missing" && error.sent === false &&
+        error.message === "Test Docs no longer lists get_article, which OpenAdminOS offers from it, so Chat skips it. Nothing was sent. The Marketplace could not record this and still shows the old tool list. Check its connection in the Marketplace once the server lists it again.");
+      } finally { console.warn = warn; }
+      assert.deepEqual(stored, []);
+      await assert.rejects(host.callTool(incomplete, "search_docs", { query: "second" }), (error: unknown) =>
+        error instanceof McpHostError && error.code === "tools-missing" && !error.message.includes("could not record"));
+      assert.deepEqual(stored, [["search_docs"]]);
+    } finally { await host.closeAll(); }
+  });
+
   it("records an allowlisted server that lists none of its tools, so the Marketplace can name them", async () => {
     const host = new McpHost({ clientVersion: "test" });
     try {

@@ -225,16 +225,28 @@ export class McpHost {
     }
     await this.authorize(endpoint, generation);
     const session = await this.session(endpoint);
+    let unsaved = false;
     if (this.unreported.delete(session)) {
-      // Keeping the stored listing current is best effort: the call itself is decided by this session.
-      await Promise.resolve(this.options.listed?.(endpoint.id, session.tools)).catch(() => undefined);
+      try {
+        await this.options.listed?.(endpoint.id, session.tools);
+      } catch (error) {
+        // The next call on this session tries again; the call itself is decided by the session below.
+        this.unreported.add(session);
+        unsaved = true;
+        // The detail stays in the local log: this message reaches the model, and a file error can name local paths.
+        console.warn(`OpenAdminOS could not store the tool list of ${endpoint.name}:`, error);
+      }
     }
     // A server missing any offered tool is skipped whole, also when a session opened for a call finds this.
     if (session.missingTools.length > 0) {
       const missing = session.missingTools.join(", ");
+      const them = session.missingTools.length === 1 ? "it" : "them";
+      const notSaved = unsaved
+        ? "The Marketplace could not record this and still shows the old tool list. "
+        : "";
       throw new McpHostError(
         "tools-missing",
-        `${endpoint.name} no longer lists ${missing}, which OpenAdminOS offers from it, so Chat skips it. Nothing was sent. Check its connection in the Marketplace once the server lists ${session.missingTools.length === 1 ? "it" : "them"} again.`,
+        `${endpoint.name} no longer lists ${missing}, which OpenAdminOS offers from it, so Chat skips it. Nothing was sent. ${notSaved}Check its connection in the Marketplace once the server lists ${them} again.`,
         false,
       );
     }
