@@ -1467,3 +1467,15 @@ Branch `marketplace/second-wave` off `main` (98ddfc3). The owner asked to add th
    - Light and dark screenshots of the cards and install reviews.
    - A separate Claude evaluator and GPT-6.1-Sol review the whole diff with no open blocking findings.
    - A live check in the running app asks one question per server.
+
+## Status (2026-11-05)
+
+1. [x] Catalog: three entries with name, publisher, URL, description, pitch, useFor, aliases, topics. Deviation: endoflife.ai does name its operator (EndofLife AI Inc., Alberta) and has a privacy page (https://endoflife.ai/privacy), so the catalog says so instead of "Operator not named". WindowsForum's own server text names Fara Technologies LLC.
+2. [x] Tool allowlist in catalog, host (listing and calls, nothing sent), state (summaries, Chat skip) and renderer (missing tools state, status strip).
+3. [x] Transports: replay tests for SSE without session, plain JSON, SSE with session and log notifications; live probe test, skipped in CI, with OPENADMINOS_SKIP_LIVE and offline. WindowsForum issued no session id on 2026-11-05.
+4. [x] Query writer: item params (roadmap id, Azure update id, kb_id) only from the question or an earlier same-server result; generalizes the Learn link rule. Live check added null-param dropping and catalog query hints.
+5. [x] Results parsed by catalog formats into numbered, cited sources; designed empty ("found nothing") and error ("returned an error") states; WindowsForum results marked community text.
+6. [x] Routing topics and aliases as listed; topics match before digits; names match only as whole words; Learn stays default.
+7. [x] Disclosure: strip, composer, tooltip and hosted confirmation name the hosts; install review adds Who runs it and Tools Chat will be offered.
+8. [x] SPEC, CHANGELOG, new docs/gitbook/features/marketplace.md; docs:check passes.
+9. [ ] Tests under Node 22 pass (typecheck, electron 973, renderer 493, runtime, qa, test:scripts, docs:check, three smokes); renderer covers each card and install review; light and dark screenshots taken; separate Claude evaluator run (one finding, fixed). Open: GPT-6.1-Sol review, and a live check in the GUI app. The live check ran through the main-process Chat path with gpt-oss:20b: WindowsForum answered with results and a get_kb_article call on an ID from its own search; Release Communications sent a valid OData query and showed the empty state; endoflife.ai showed the error state. Answer quality from gpt-oss:20b was poor (tenant-evidence guard, protocol drift), unrelated to this branch.
