@@ -59,8 +59,9 @@ export function buildMcpQueryWriterPrompt(input: Omit<McpQueryWriterInput, "llm"
   const question = input.question.trim();
   const cut = question.length > QUESTION_CHARS ? `${question.slice(0, QUESTION_CHARS)} [...]` : question;
   const results = input.earlierResults.slice(0, EARLIER_RESULT_LIMIT).map((item) => ({ server: item.serverName, title: item.title, ...(item.url ? { url: item.url } : {}), ...(item.id ? { id: item.id } : {}) }));
-  const items = input.tool.itemParams?.length
-    ? `\nParams that name one item (copy the value from the admin's question or an earlier result; never guess one): ${input.tool.itemParams.join(", ")}.`
+  const itemParams = input.tool.itemIds?.params ?? [];
+  const items = itemParams.length
+    ? `\nParams that name one item (copy the value from the admin's question or an earlier result; never guess one): ${itemParams.join(", ")}.`
     : "";
   return [
     `The admin's question:\n${fenceTenantData(cut, "chat:admin-question")}`,

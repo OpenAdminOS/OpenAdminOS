@@ -42,6 +42,39 @@ export interface McpResultFormat {
   whole?: { url: readonly string[]; emptyWhenZero?: readonly string[] };
 }
 
+/**
+ * The form of one tool's item IDs. Only a value of this form is sent, as
+ * its canonical text, and only when the same ID is a token of the admin's
+ * question or an earlier result of the same server in this answer gave it.
+ */
+export interface McpItemIdForm {
+  /**
+   * "number": ASCII digits only. "slug": ASCII digits, or lowercase ASCII
+   * letters and digits in words joined by single hyphens, as older Azure
+   * update IDs are ("2021regions", "3-years-reserved-capacity-now-available").
+   */
+  kind: "number" | "slug";
+  /**
+   * A prefix that may stand before a number, matched in any case, for
+   * example "KB". "KB5034441", "kb5034441" and "5034441" name the same item.
+   */
+  prefix?: string;
+  /** The server takes the ID with its prefix, in upper case ("KB5034441"). Otherwise the number alone is sent. */
+  sendPrefix?: true;
+}
+
+/**
+ * Where one tool's params name a specific item, and the form of its IDs.
+ * Such a value is sent only when it appears in the admin's current
+ * question or in an earlier result of the same server in this answer, as
+ * links are.
+ */
+export interface McpItemIdRule {
+  /** Params that take one item ID, such as a roadmap ID or a KB number. */
+  params?: readonly string[];
+  form: McpItemIdForm;
+}
+
 export interface McpCatalogEntry {
   id: string;
   name: string;
@@ -68,13 +101,8 @@ export interface McpCatalogEntry {
    * list, every tool the server lists is offered.
    */
   tools?: readonly string[];
-  /**
-   * Params, per tool, that name one specific item, such as a roadmap ID or
-   * a KB number. Such a value is sent only when it appears in the admin's
-   * current question or in an earlier result of the same server in this
-   * answer, as links are.
-   */
-  itemParams?: Readonly<Record<string, readonly string[]>>;
+  /** Per tool, the params that name one specific item and the form of its IDs; see `McpItemIdRule`. */
+  itemIds?: Readonly<Record<string, McpItemIdRule>>;
   /**
    * Our own note per tool on how to fill its params, for the query writer.
    * Oversized schemas lose their descriptions, and some params take a
@@ -150,7 +178,11 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     auth: "none",
     readOnly: true,
     tools: ["get_recent_m365_roadmaps", "get_m365_roadmap_by_id", "get_recent_azure_updates", "get_azure_update_by_id"],
-    itemParams: { get_m365_roadmap_by_id: ["id"], get_azure_update_by_id: ["id"] },
+    // Roadmap IDs are numbers. Azure update IDs are numbers in text, and older ones are slugs ("2021regions"); live check 2026-11-05.
+    itemIds: {
+      get_m365_roadmap_by_id: { params: ["id"], form: { kind: "number" } },
+      get_azure_update_by_id: { params: ["id"], form: { kind: "slug" } },
+    },
     queryHints: {
       get_recent_m365_roadmaps: "Put a few title words in search, for example Intune or Microsoft Teams. filter takes only an OData expression such as products/any(p: p eq 'Microsoft Intune') or status eq 'Rolling out'; leave it out otherwise.",
       get_recent_azure_updates: "Put a few title words in search, for example Retirement or Azure Monitor. filter takes only an OData expression such as tags/any(t: t eq 'Retirements'); leave it out otherwise.",
@@ -181,7 +213,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     readOnly: true,
     // The server lists 29 tools, among them forum search and member lookups. Only the two KB tools are used.
     tools: ["search_kb", "get_kb_article"],
-    itemParams: { get_kb_article: ["kb_id"] },
+    itemIds: { get_kb_article: { params: ["kb_id"], form: { kind: "number", prefix: "KB", sendPrefix: true } } },
     queryHints: { get_kb_article: "kb_id takes one KB number, for example KB5058919." },
     results: {
       items: [{ title: [["title"]], url: ["url"], text: ["content", "summary"], facts: ["kb_id", "release_date", "applies_to"], id: ["kb_id"] }],

@@ -24,7 +24,6 @@ import {
   holdsTenantData,
   isMcpChatToolName,
   isTenantTool,
-  itemIdsInText,
   mcpSourceLinesForPrompt,
   mcpToolDefinitionsForPrompt,
   summarizeToolCallForProgress,
@@ -606,7 +605,8 @@ export async function runAgenticChat(
         const own = mcpResults.filter((item) => item.serverId === serverId);
         return {
           links: own.flatMap((item) => (item.url ? [item.url] : [])),
-          itemIds: [...itemIdsInText(input.adminQuestion ?? ""), ...own.flatMap((item) => (item.id ? [item.id] : []))],
+          question: input.adminQuestion ?? "",
+          itemIds: own.flatMap((item) => (item.id ? [item.id] : [])),
         };
       },
       onSend: (params) => {

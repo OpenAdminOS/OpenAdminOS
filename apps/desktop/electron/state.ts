@@ -2181,7 +2181,7 @@ export class AppStateStore {
           description: tool.description,
           inputSchema: tool.inputSchema,
           ...(entry.results ? { resultFormat: entry.results } : {}),
-          ...(entry.itemParams?.[tool.name] ? { itemParams: entry.itemParams[tool.name] } : {}),
+          ...(entry.itemIds?.[tool.name] ? { itemIds: entry.itemIds[tool.name] } : {}),
           ...(entry.communityText ? { communityText: true } : {}),
           ...(entry.queryHints?.[tool.name] ? { queryHint: entry.queryHints[tool.name] } : {}),
         });

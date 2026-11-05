@@ -17,7 +17,7 @@ import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy, 
 import { fenceTenantData } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import type { McpResultFormat, McpResultShape } from "../mcp/catalog.js";
+import type { McpItemIdForm, McpItemIdRule, McpResultFormat, McpResultShape } from "../mcp/catalog.js";
 import { cleanMcpDescription, cleanMcpSchema, McpHostError } from "../mcp/host.js";
 import { canonicalEgressText, egressResidue } from "./mcp-egress.js";
 import { collectTenantValues, TenantValueIndex } from "./tenant-values.js";
@@ -75,8 +75,8 @@ export interface McpChatTool {
   inputSchema: Record<string, unknown>;
   /** How the server's results are read into sources, from the catalog. */
   resultFormat?: McpResultFormat;
-  /** Params of this tool that name one specific item, from the catalog. */
-  itemParams?: readonly string[];
+  /** The params of this tool that name one specific item, and the form of its IDs, from the catalog. */
+  itemIds?: McpItemIdRule;
   /** The server's results are community text, from the catalog. */
   communityText?: boolean;
   /** Our own note on how to fill this tool's params, from the catalog. Given to the query writer only. */
@@ -139,8 +139,8 @@ export interface McpCallHooks {
   /**
    * What a param may name. A link must be, verbatim, one that an earlier
    * result of the same server in this answer returned. An item ID must be
-   * one of `itemIds`: the words of the admin's current question and the IDs
-   * earlier results of the same server in this answer gave.
+   * a token of the admin's current question or an ID an earlier result of
+   * the same server in this answer gave, compared in the tool's ID form.
    */
   references(serverId: string): McpReferences;
   /** The params passed every check and are about to be sent. */
@@ -150,23 +150,37 @@ export interface McpCallHooks {
 /** Links and item IDs a param may name; see `McpCallHooks.references`. */
 export interface McpReferences {
   links: readonly string[];
+  /** The admin's current question. Its tokens are the IDs the admin typed. */
+  question: string;
+  /** IDs that earlier results of the same server in this answer gave, as they gave them. */
   itemIds: readonly string[];
 }
 
 /**
- * An item ID as compared: lowercase letters and digits only, and a KB
- * number without its prefix, so "KB5034441", "kb 5034441" and "5034441"
- * are the same item.
+ * An item ID in its form, or undefined when the value does not have that
+ * form. `key` is what two IDs are compared by and `send` is what is sent:
+ * "KB5034441" and "5034441" share the key "5034441". Nothing else is an
+ * equivalent: no character is dropped, so "1.09560" is not "109560".
  */
-export function normalizeItemId(value: string): string {
-  const flat = value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9]/g, "");
-  return /^kb\d+$/.test(flat) ? flat.slice(2) : flat;
+export function canonicalItemId(value: string, form: McpItemIdForm): { key: string; send: string } | undefined {
+  const text = value.trim();
+  if (form.kind === "slug") return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(text) ? { key: text, send: text } : undefined;
+  const prefixed = form.prefix !== undefined && form.prefix.length > 0 && text.slice(0, form.prefix.length).toLowerCase() === form.prefix.toLowerCase();
+  const digits = prefixed ? text.slice(form.prefix!.length) : text;
+  if (!/^[0-9]+$/.test(digits)) return undefined;
+  return { key: digits, send: form.sendPrefix && form.prefix ? `${form.prefix.toUpperCase()}${digits}` : digits };
 }
 
-/** The words of a question as item IDs, so an ID the admin typed can be sent. */
-export function itemIdsInText(text: string): string[] {
-  const words = text.normalize("NFKC").split(/[^\p{L}\p{N}-]+/u).filter(Boolean);
-  return [...new Set(words.flatMap((word) => [word, ...word.split("-")]).map(normalizeItemId).filter(Boolean))];
+/**
+ * The item IDs of a form in a text, as keys. The text is split on every
+ * character an ID of the form cannot hold, so "109560-109561" gives two
+ * numbers and "50344é41" gives none of "5034441". A slug keeps its
+ * hyphens and also gives its parts, so "466774-466779" names both updates.
+ */
+export function itemIdsInText(text: string, form: McpItemIdForm): string[] {
+  const runs = text.split(form.kind === "slug" ? /[^A-Za-z0-9-]+/ : /[^A-Za-z0-9]+/).filter(Boolean);
+  const tokens = form.kind === "slug" ? runs.flatMap((run) => [run, ...run.split("-")]) : runs;
+  return [...new Set(tokens.flatMap((token) => canonicalItemId(token, form)?.key ?? []))];
 }
 
 /** An MCP call failed after its query was sent to the host. */
@@ -934,14 +948,17 @@ const LINK = /\bhttps?:\/\//i;
  */
 function canonicalMcpArgs(entry: McpChatTool, args: Record<string, unknown>, references: McpReferences): { args: Record<string, unknown>; checked: string[] } {
   const checked: string[] = [];
-  const known = new Set(references.itemIds.map(normalizeItemId));
+  const rule = entry.itemIds;
+  const known = new Set(rule ? [...itemIdsInText(references.question, rule.form), ...references.itemIds.flatMap((id) => canonicalItemId(id, rule.form)?.key ?? [])] : []);
   const canonical = (key: string, value: unknown): unknown => {
-    // A param that names one item sends only an ID the admin typed or a result of this server gave.
-    if (entry.itemParams?.includes(key) && (typeof value === "string" || typeof value === "number")) {
-      const id = normalizeItemId(canonicalEgressText(String(value)));
-      if (!id || !known.has(id)) {
+    // A param that names one item sends only an ID the admin typed or a result of this server gave, in its canonical form.
+    if (rule?.params?.includes(key)) {
+      const id = typeof value === "string" || typeof value === "number" ? canonicalItemId(String(value), rule.form) : undefined;
+      if (!id || !known.has(id.key)) {
         throw new McpQueryBlockedError(`the ${entry.serverName} query named an item in ${key} that is neither in your question nor in an earlier ${entry.serverName} result in this answer. Nothing was sent to ${entry.host}. IDs are sent only as your question or a result gave them.`);
       }
+      checked.push(id.send);
+      return typeof value === "number" && !rule.form.sendPrefix ? Number(id.send) : id.send;
     }
     if (typeof value !== "string") {
       if (typeof value === "number") checked.push(String(value));

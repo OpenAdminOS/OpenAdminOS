@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 
 import { planChatSources } from "../intune-chat/chat-steps.js";
 import { buildMcpQueryWriterPrompt } from "../intune-chat/mcp-query-writer.js";
-import { mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
+import { canonicalItemId, itemIdsInText, mcpChatToolName, readMcpResult, type McpChatServer } from "../intune-chat/tools.js";
 import { MCP_CATALOG, mcpCatalogEntry, mcpHost } from "./catalog.js";
 
 /** Trimmed live captures from 2026-11-05; see transports.test.ts. */
@@ -46,8 +46,32 @@ describe("Second-wave catalog entries", () => {
     assert.match(wf.operator!, /not affiliated with Microsoft/);
     assert.equal(eol.publisher, "EndofLife AI Inc.");
     assert.ok(wf.notes?.some((note) => /community text/.test(note)));
-    assert.deepEqual(rc.itemParams, { get_m365_roadmap_by_id: ["id"], get_azure_update_by_id: ["id"] });
-    assert.deepEqual(wf.itemParams, { get_kb_article: ["kb_id"] });
+    assert.deepEqual(rc.itemIds, {
+      get_m365_roadmap_by_id: { params: ["id"], form: { kind: "number" } },
+      get_azure_update_by_id: { params: ["id"], form: { kind: "slug" } },
+    });
+    assert.deepEqual(wf.itemIds, { get_kb_article: { params: ["kb_id"], form: { kind: "number", prefix: "KB", sendPrefix: true } } });
+  });
+});
+
+describe("Second-wave item ID forms", () => {
+  it("fits every ID the live servers returned to its tool's form", () => {
+    const rc = mcpCatalogEntry("release-communications")!;
+    const wf = mcpCatalogEntry("windowsforum")!;
+    const text = (serverId: string, call: string) => (FIXTURES[serverId]!.calls[call]!.content ?? []).map((part) => part.text ?? "").join("");
+    const ids = (serverId: string, call: string) => [...text(serverId, call).matchAll(/"(?:id|kb_id)":"?([^",}]+)/g)].map((match) => match[1]!);
+    for (const id of ids("release-communications", "get_recent_m365_roadmaps")) assert.ok(canonicalItemId(id, rc.itemIds!.get_m365_roadmap_by_id!.form), id);
+    for (const id of [...ids("release-communications", "get_recent_azure_updates"), "2021regions", "3-years-reserved-capacity-now-available"]) assert.ok(canonicalItemId(id, rc.itemIds!.get_azure_update_by_id!.form), id);
+    assert.ok(ids("windowsforum", "search_kb").length > 0);
+    for (const id of ids("windowsforum", "search_kb")) assert.deepEqual(canonicalItemId(id, wf.itemIds!.get_kb_article!.form)?.send, id.toUpperCase());
+    assert.equal(canonicalItemId("1.09560", rc.itemIds!.get_m365_roadmap_by_id!.form), undefined);
+    assert.equal(canonicalItemId("2021Regions", rc.itemIds!.get_azure_update_by_id!.form), undefined);
+  });
+
+  it("reads typed IDs as tokens split on characters an ID cannot hold", () => {
+    assert.deepEqual(itemIdsInText("Compare roadmap 109560-109561, and #124890.", { kind: "number" }), ["109560", "109561", "124890"]);
+    assert.deepEqual(itemIdsInText("What does 50344\u00e941 fix, and KB5058919?", { kind: "number", prefix: "KB" }), ["50344", "41", "5058919"]);
+    assert.deepEqual(itemIdsInText("Updates 466774-466779 and 2021regions", { kind: "slug" }), ["466774-466779", "466774", "466779", "and", "2021regions"]);
   });
 });
 
