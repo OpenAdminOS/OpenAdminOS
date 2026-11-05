@@ -375,7 +375,9 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneC
     }
     // A call that stopped before sending (bad params, the query writer, the cache index, a server turned off) sent nothing.
     if (entry.error && !entry.mcpSource.sentToHost) return { status: "failed", title: `Did not send a ${serverName} query`, detail: `${tool} · ${entry.error}`, sent: undefined, durationMs };
+    if (entry.error && entry.mcpSource.toolError) return { status: "failed", title: `${serverName} returned an error`, detail: `${tool} · ${entry.error}`, durationMs };
     if (entry.error) return { status: "failed", title: `Could not reach ${serverName}`, detail: `${tool} · ${entry.error}`, durationMs };
+    if (entry.mcpSource.empty) return { status: "completed", title: `${serverName} found nothing`, detail: `${tool} · no results for this query`, durationMs };
     const count = results?.length ?? 0;
     return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? `${count} ${count === 1 ? "result" : "results"}` : `answer from ${host}`}`, durationMs };
   }

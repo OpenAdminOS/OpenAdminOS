@@ -615,7 +615,12 @@ export async function runAgenticChat(
     if (mcpSource) {
       attemptedServers.add(mcpSource.serverId);
       const learnEmpty = mcpSource.serverId === LEARN_SERVER_ID && !execution.trace.error && (mcpSource.results?.length ?? 0) === 0;
-      if (!execution.trace.error && !learnEmpty) {
+      // Any server that answered with nothing gets a designed empty observation, never a placeholder source.
+      const answeredEmpty = !execution.trace.error && mcpSource.empty === true;
+      if (answeredEmpty && !(learnEmpty && fallbackPending && !learnAnswered && input.documentationFallback)) {
+        const { results: _none, content: _empty, ...rest } = execution.result as { results?: unknown; content?: unknown } & Record<string, unknown>;
+        observed = { ...rest, content: `${mcpSource.serverName} returned no results for this query. Say so plainly. Do not present other text as ${mcpSource.serverName} content.` };
+      } else if (!execution.trace.error && !learnEmpty) {
         if (mcpSource.serverId === LEARN_SERVER_ID) learnAnswered = true;
         // The model cites MCP results with the numbers listed here, after the local passages.
         const { results = [], content, ...rest } = execution.result as { results?: McpResultItem[]; content?: unknown } & Record<string, unknown>;

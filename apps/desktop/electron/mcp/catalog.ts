@@ -6,6 +6,41 @@ import type { McpServerAuth } from "@openadminos/agent-sdk";
  * sign-in and never touches the tenant. Tool schemas are not stored here:
  * the host lists them live from the server after it connects.
  */
+/**
+ * One kind of record in a server's results that becomes one numbered
+ * source. Keys name fields of the record; a dot reaches a nested field
+ * ("source.url").
+ */
+export interface McpResultShape {
+  /** Title parts, each the first of its keys that holds text. Every part must have text for the record to match. */
+  title: ReadonlyArray<readonly string[]>;
+  /** Keys that must hold a value for the record to match. */
+  requires?: readonly string[];
+  /** Link keys; the first https link is the source's URL. */
+  url?: readonly string[];
+  /** Text keys; the first that holds text starts the excerpt. */
+  text?: readonly string[];
+  /** Short fields listed after the text as "key: value" lines. */
+  facts?: readonly string[];
+  /** Keys that hold the item's own ID, for the item-ID rule. */
+  id?: readonly string[];
+}
+
+/**
+ * How a server's results are read into sources, by their structure. A
+ * record that matches a shape is not searched further. When none matches,
+ * the result is empty, unless `whole` makes the whole result one source.
+ */
+export interface McpResultFormat {
+  items: readonly McpResultShape[];
+  /**
+   * For servers that answer one record per call: the result becomes one
+   * source titled by the tool and its params, unless one of the count keys
+   * is zero, which means nothing was found.
+   */
+  whole?: { url: readonly string[]; emptyWhenZero?: readonly string[] };
+}
+
 export interface McpCatalogEntry {
   id: string;
   name: string;
@@ -32,6 +67,8 @@ export interface McpCatalogEntry {
    * list, every tool the server lists is offered.
    */
   tools?: readonly string[];
+  /** How results are read into sources. Without it, items with a title or name and a link are read. */
+  results?: McpResultFormat;
 }
 
 export const MCP_CATALOG: readonly McpCatalogEntry[] = [

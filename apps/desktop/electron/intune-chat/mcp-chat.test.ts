@@ -211,6 +211,28 @@ describe("MCP tools in the Chat loop", () => {
     });
   });
 
+  it("answers an empty MCP result with a designed observation and no placeholder source", async () => {
+    await withStore(async (store) => {
+      const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];
+      const prompts: Array<{ system?: string; prompt: string }> = [];
+      const kbTool: McpChatTool = { ...docsTool, name: mcpChatToolName("windowsforum", "search_kb"), serverId: "windowsforum", serverName: "WindowsForum", host: "mcp.windowsforum.com", tool: "search_kb",
+        resultFormat: { items: [{ title: [["title"]], url: ["url"], id: ["kb_id"] }] } };
+      const context: McpChatContext = { ...mcpContext(calls), tools: [kbTool], async call(tool, args) { calls.push({ tool: tool.tool, args }); return { text: '{"results":[]}', truncated: false, structured: { results: [] } }; } };
+      const result = await runAgenticChat({ ...input(store, scriptedLlm([
+        JSON.stringify({ tool: kbTool.name, params: { query: "cumulative update known issue" } }),
+        '{"final":true,"answer":"WindowsForum returned no KB articles for this."}',
+      ], prompts), context), questionKind: "docs" });
+      assert.equal(result.ok, true);
+      if (!result.ok) return;
+      const trace = result.toolTrace[0]!;
+      assert.equal(trace.mcpSource?.empty, true);
+      assert.match(trace.resultSummary, /WindowsForum answered from mcp\.windowsforum\.com · no results$/);
+      assert.match(prompts[1]!.prompt, /WindowsForum returned no results for this query\. Say so plainly\./);
+      assert.doesNotMatch(prompts[1]!.prompt, /WindowsForum result/);
+      assert.deepEqual(result.documentationSources ?? [], []);
+    });
+  });
+
   it("keeps the evidence guard for a tenant question answered after an MCP call", async () => {
     await withStore(async (store) => {
       const calls: Array<{ tool: string; args: Record<string, unknown> }> = [];

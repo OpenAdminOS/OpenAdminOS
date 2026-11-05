@@ -1303,6 +1303,10 @@ export interface IntuneChatToolTraceEntry {
     results?: Array<{ title: string; url?: string }>;
     /** The query reached the host. False when it was refused or failed before sending. */
     sentToHost?: boolean;
+    /** The server answered with nothing: no text, or no record that matches its result format. */
+    empty?: boolean;
+    /** The server answered with an error result, as opposed to not answering. */
+    toolError?: boolean;
   };
   /**
    * Execution-time provenance for a live `graph_get`, so answer sources
