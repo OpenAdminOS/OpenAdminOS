@@ -4033,11 +4033,24 @@ function validateHostedProviderConsent(
       includesInstructions: value.workspaceContext.includesInstructions,
     };
   }
+  const providerId = validateProviderId(value.providerId, "hostedProviderConsent.providerId");
+  const remember = typeof value.remember === "boolean" ? { remember: value.remember } : {};
+  // Bound to no tenant or to one tenant, never both: a no-tenant
+  // acknowledgement covers no tenant context and no workspace.
+  if (value.noTenant !== undefined) {
+    if (value.noTenant !== true) {
+      throw new Error("hostedProviderConsent.noTenant must be true when present.");
+    }
+    if (value.tenantId !== undefined || workspaceContext) {
+      throw new Error("hostedProviderConsent.noTenant cannot be combined with a tenant or workspace context.");
+    }
+    return { noTenant: true, providerId, acknowledgedAt, ...remember };
+  }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
-    providerId: validateProviderId(value.providerId, "hostedProviderConsent.providerId"),
+    providerId,
     acknowledgedAt,
-    ...(typeof value.remember === "boolean" ? { remember: value.remember } : {}),
+    ...remember,
     ...(workspaceContext ? { workspaceContext } : {}),
   };
 }

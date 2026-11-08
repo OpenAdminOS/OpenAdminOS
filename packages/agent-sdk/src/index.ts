@@ -1171,6 +1171,30 @@ export interface IntuneChatMessage {
    * the model's.
    */
   privatePrompt?: boolean;
+  /**
+   * The question needs a service that is not connected, so it was not
+   * answered and no Graph call was made. The renderer shows the
+   * not-connected card from the service registry.
+   */
+  notConnected?: IntuneChatNotConnected;
+}
+
+/**
+ * What a tenant or mixed question needs that is not connected.
+ * `no-tenant`: no tenant is connected at all. `service-missing` and
+ * `part-missing`: the active tenant has not connected the service, or one
+ * of its parts.
+ */
+export interface IntuneChatNotConnected {
+  reason: "no-tenant" | "service-missing" | "part-missing";
+  /**
+   * The service parts the question needs, in registry order. Empty when
+   * the question names no part the registry knows; the card then asks for
+   * a tenant without preselecting a service.
+   */
+  partIds: string[];
+  /** The tenant the service is missing in. Absent with `no-tenant`. */
+  tenantId?: string;
 }
 
 /**
@@ -2013,13 +2037,30 @@ export interface LocalDataSummary {
   lastDriftHistoryPrune?: DriftHistoryPruneResult;
 }
 
-export interface HostedProviderChatConsent {
-  tenantId: string;
-  providerId: ProviderId;
-  acknowledgedAt: string;
-  remember?: boolean;
-  workspaceContext?: HostedProviderWorkspaceContextConsent;
-}
+/**
+ * A fresh acknowledgement for one hosted-provider Chat send. It is bound
+ * either to the active tenant (`tenantId`) or to a send with no tenant
+ * connected (`noTenant`), and always to the provider. The host refuses a
+ * no-tenant acknowledgement for any send that includes tenant context.
+ */
+export type HostedProviderChatConsent =
+  | {
+      tenantId: string;
+      noTenant?: undefined;
+      providerId: ProviderId;
+      acknowledgedAt: string;
+      remember?: boolean;
+      workspaceContext?: HostedProviderWorkspaceContextConsent;
+    }
+  | {
+      tenantId?: undefined;
+      /** The question, the conversation and reference results leave the device; no tenant data does. */
+      noTenant: true;
+      providerId: ProviderId;
+      acknowledgedAt: string;
+      remember?: boolean;
+      workspaceContext?: undefined;
+    };
 
 export type TenantScope =
   | { kind: "active" }

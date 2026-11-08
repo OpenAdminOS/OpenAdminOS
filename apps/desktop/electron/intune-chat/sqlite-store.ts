@@ -71,7 +71,7 @@ interface MessageRow {
 }
 
 /** Answer fields stored together: the question kind, steps, citation targets, follow-ups and prompt provenance. */
-type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt">;
+type AnswerMeta = Pick<IntuneChatMessage, "questionKind" | "steps" | "documentationSources" | "followUps" | "tenantFollowUps" | "tenantContext" | "privatePrompt" | "notConnected">;
 
 interface ResourceStatusRow {
   resource: GraphCacheResourceKind;
@@ -482,7 +482,8 @@ export class IntelligenceSqliteStore {
   createConversation(input: {
     id: string;
     title: string;
-    tenantId: string;
+    /** Null for a conversation started while no tenant is connected. */
+    tenantId: string | null;
     now: string;
     scopeKind?: IntuneChatConversation["scopeKind"];
     tenantScope?: TenantScope;
@@ -509,7 +510,7 @@ export class IntelligenceSqliteStore {
     return {
       id: input.id,
       title: input.title,
-      tenantId: input.tenantId,
+      ...(input.tenantId ? { tenantId: input.tenantId } : {}),
       scopeKind: input.scopeKind ?? "single-tenant",
       ...(input.tenantScope ? { tenantScope: input.tenantScope } : {}),
       ...(input.multiTenantJobId ? { multiTenantJobId: input.multiTenantJobId } : {}),
@@ -569,6 +570,21 @@ export class IntelligenceSqliteStore {
 
   clearChatHistory(): void {
     this.db.prepare(`DELETE FROM chat_conversations`).run();
+  }
+
+  /**
+   * Binds a conversation started without a tenant to the tenant its next
+   * answer reads, so it is listed, continued and removed with that tenant
+   * from then on. A conversation that already has a tenant is unchanged.
+   */
+  bindConversationTenant(id: string, tenantId: string): void {
+    this.db
+      .prepare(
+        `UPDATE chat_conversations
+         SET tenant_id = ?
+         WHERE id = ? AND tenant_id IS NULL AND scope_kind = 'single-tenant'`,
+      )
+      .run(tenantId, id);
   }
 
   touchConversation(id: string, title: string | undefined, now: string): void {
@@ -4042,6 +4058,7 @@ function answerMetaJson(message: IntuneChatMessage): string | null {
     ...(message.tenantFollowUps?.length ? { tenantFollowUps: message.tenantFollowUps } : {}),
     ...(message.tenantContext ? { tenantContext: true } : {}),
     ...(message.privatePrompt ? { privatePrompt: true } : {}),
+    ...(message.notConnected ? { notConnected: message.notConnected } : {}),
   };
   return Object.keys(meta).length > 0 ? JSON.stringify(meta) : null;
 }

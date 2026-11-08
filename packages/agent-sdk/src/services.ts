@@ -816,6 +816,77 @@ export function missingServiceCopy(
 }
 
 /**
+ * The parts a set of scopes needs that are not available, in registry
+ * order. With no tenant every part scope is missing. Scopes that belong
+ * to no part (agent-only and sign-in scopes) are ignored.
+ */
+export function partsNeededForScopes(
+  scopes: readonly string[],
+  tenant: GrantSource | undefined,
+): ServicePart[] {
+  return missingPartsForScopes(scopes, tenant ? availableScopeSet(tenant) : new Set());
+}
+
+/** Services of the given parts, in registry order. */
+export function servicesOfParts(partIds: readonly string[]): ServiceDefinition[] {
+  const ids = new Set(partIds.map((id) => servicePartById(id)?.service).filter(Boolean));
+  return AVAILABLE_SERVICES.filter((service) => ids.has(service.id));
+}
+
+/**
+ * The answer text stored with a not-connected result, so history,
+ * exports and conversation memory say plainly what happened. The
+ * renderer shows the card built from the same registry entries.
+ */
+export function notConnectedAnswerText(input: {
+  reason: "no-tenant" | "service-missing" | "part-missing";
+  partIds: readonly string[];
+  tenantName?: string;
+}): string {
+  const services = servicesOfParts(input.partIds).map((service) => service.title);
+  const needs = services.length > 0 ? formatServiceList(services) : "a connected Microsoft 365 tenant";
+  if (input.reason === "no-tenant") {
+    return `This needs ${needs}. Nothing is connected, so no tenant data was read. ${
+      services.length > 0 ? `Connect ${formatServiceList(services)} to answer it.` : "Connect a tenant to answer it."
+    } Your question is kept.`;
+  }
+  const tenant = input.tenantName ?? "this tenant";
+  if (input.reason === "service-missing") {
+    return `${formatServiceList(services)} ${services.length === 1 ? "is" : "are"} not connected for ${tenant}. Add ${services.length === 1 ? "it" : "them"} to answer this. Your question is kept.`;
+  }
+  const parts = input.partIds.flatMap((id) => {
+    const part = servicePartById(id);
+    return part ? [partLabel(part)] : [];
+  });
+  return `This needs ${formatServiceList(parts)}, which ${parts.length === 1 ? "is" : "are"} not granted for ${tenant}. Add ${parts.length === 1 ? "it" : "them"} to answer this. Your question is kept.`;
+}
+
+/**
+ * The Microsoft identity platform admin consent link for delegated
+ * scopes (https://learn.microsoft.com/entra/identity-platform/v2-admin-consent).
+ * `tenant` is a tenant ID or verified domain; without one, `organizations`
+ * lets the approving admin sign in to their own tenant. The redirect URI
+ * must be one the app registers; the OpenAdminOS app registers the
+ * `http://localhost` loopback redirect.
+ */
+export function adminConsentUrl(input: {
+  clientId: string;
+  partIds: readonly string[];
+  tenant?: string;
+  redirectUri?: string;
+}): string {
+  const scopes = requestedScopes(input.partIds).map((scope) =>
+    OIDC_SCOPES.has(scope.name) ? scope.name : `${GRAPH_RESOURCE_PREFIX}${scope.name}`,
+  );
+  const params = new URLSearchParams({
+    client_id: input.clientId,
+    scope: scopes.join(" "),
+    redirect_uri: input.redirectUri ?? "http://localhost",
+  });
+  return `https://login.microsoftonline.com/${encodeURIComponent(input.tenant ?? "organizations")}/v2.0/adminconsent?${params.toString()}`;
+}
+
+/**
  * Services an agent needs: its declaration, or derived from its scopes.
  * An empty declaration means the agent reads no Graph data.
  */
