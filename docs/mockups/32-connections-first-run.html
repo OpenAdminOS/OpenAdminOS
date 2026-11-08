@@ -453,7 +453,7 @@
         </div>
       </div>
       <ul class="notes">
-        <li>With no organization, the tenant egress filter has no tenant names to block, so the query writer boundary is what keeps private detail out. The install review copy stays as shipped.</li>
+        <li>With no organization, the tenant egress filter has no tenant names to block. The query writer still sees only the current question, so anything private the admin types into it can reach the reference host; the shipped disclosure under the composer says so. The install review copy stays as shipped.</li>
         <li>Running the query against a workspace is a later service (Log Analytics). Today the answer stops at the query text.</li>
       </ul>
     </section>
@@ -507,7 +507,7 @@
     <!-- E -->
     <section class="section" id="e">
       <h2>E. Connections page with the reach map</h2>
-      <p class="lede">One page per organization lists what Chat and agents can read, and where question words go. The map at the top is the trust story in one picture: services feed data in, this device does the work, and public references receive only words from questions.</p>
+      <p class="lede">One page per organization lists what Chat and agents can read, and where question words go. The map at the top is the trust story in one picture: services feed data in, this device does the work, and everything that leaves it is named: words from questions, run reports, and prompts when the model is hosted.</p>
       <div class="frame">
         <div class="app" style="min-height: 820px;">
           <aside class="side">
@@ -520,7 +520,7 @@
             <div class="topline"><span class="title">Woodgrove connections</span><span class="grow"></span><span class="boundary out"><span class="dot"></span>local model · tool queries to www.kqlsearch.com +1</span></div>
 
             <figure class="reach" style="margin: 0;" aria-describedby="reach-desc">
-              <figcaption id="reach-desc" class="sr">Woodgrove reads from Intune, connected, and Entra, 5 of 6 parts, into this device. Defender is not connected. The model runs on this device. Words from questions go to www.kqlsearch.com and learn.microsoft.com. Reports you approve go to Microsoft Teams.</figcaption>
+              <figcaption id="reach-desc" class="sr">Woodgrove reads from Intune, connected, and Entra, 5 of 6 parts, into this device. Defender is not connected. The model runs on this device. Words from questions go to www.kqlsearch.com and learn.microsoft.com. Run reports go to Microsoft Teams under saved delivery rules.</figcaption>
               <div class="zone">
                 <h5>Read from your services</h5>
                 <div class="items">
@@ -542,7 +542,7 @@
                   <div class="item"><span class="svc ref">KQ</span>www.kqlsearch.com</div>
                   <div class="item"><span class="svc ref">ML</span>learn.microsoft.com</div>
                 </div>
-                <h6>Reports you approve</h6>
+                <h6>Run reports, by delivery rule</h6>
                 <div class="items"><div class="item"><span class="svc ref">T</span>Microsoft Teams</div></div>
                 <h6>Prompts and tenant data</h6>
                 <div class="items"><div class="item off"><span class="svc off"></span>Nowhere, the model is local</div></div>
@@ -571,7 +571,7 @@
               </div>
 
               <h4>Results go to</h4>
-              <p class="lede">Where agents can send finished reports. Each send shows a preview first.</p>
+              <p class="lede">Where agents send finished run reports. Saved delivery rules post automatically, including for scheduled runs; agent steps that send a message show a preview first.</p>
               <div class="rows">
                 <div class="r"><span class="svc lg ref">T</span><div><div class="t">Microsoft Teams</div><div class="d">IT Ops, Device alerts channel</div></div><span class="state ok">Connected</span><button class="btn small ghost">Manage</button></div>
               </div>
@@ -581,7 +581,7 @@
       </div>
       <ul class="notes">
         <li>Connections is its own sidebar item after Marketplace (decided 2026-11-08) at <code>/connections</code>, and the organization chip opens it too. It replaces Settings, Tenants (per service) and Settings, Connectors (results), which redirect here.</li>
-        <li>Public references stay global, not per organization, because they never receive tenant data. Vendor services with credentials are per organization, as decided for vendor MCP authentication.</li>
+        <li>Public references stay global, not per organization, because they receive no Graph or cache data. Private details typed into a question can still reach them, as the composer disclosure states. Vendor services with credentials are per organization, as decided for vendor MCP authentication.</li>
         <li>Planned services are not listed here, per the 2026-11-04 decision that planned services appear only in the docs.</li>
         <li>The map is generated from the same lists as the status strip and the result connectors, so they cannot disagree. With a hosted model the device box names the provider model and "Prompts and tenant data" shows the provider with its region, for example Anthropic API · US.</li>
       </ul>

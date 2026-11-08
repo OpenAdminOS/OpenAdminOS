@@ -36,11 +36,13 @@ The service registry already records the audience of every scope. Today every sc
 
 ## What Stays The Same
 
-When a planned service ships, it follows the same rules as the available ones:
+When a planned Microsoft 365 service ships, it follows the same rules as the available ones:
 
 - It is opt in, per tenant. Connecting one service never requests another service's permissions.
 - Its permissions are delegated and read-only by default. Write agents request their write scopes when they run, and every write pauses for diff confirmation.
 - With your own app registration, you add its permissions to the registration, grant admin consent, and choose **Check again**.
+
+Jamf Pro does not use Microsoft sign-in or app registrations. It would be connected with a Jamf Pro API client, as described above, and its access would come from the privileges of that client's API role. Read-only by default and diff confirmation for every write apply to it as well.
 
 ## Related
 
