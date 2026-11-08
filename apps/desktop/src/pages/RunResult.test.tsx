@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { Routes, Route, useLocation } from "react-router";
 
 import RunResult from "./RunResult";
+import Agents from "./Agents";
 import {
   createAwaitingConfirmationRun,
   createMockAgent,
@@ -465,14 +466,6 @@ it('routes hosted Team retries to the owning assignment for review', async () =>
   expect(bridge.startRun).not.toHaveBeenCalled();
 });
 
-it('shows a failed rerun reason instead of silently leaving the result unchanged', async () => {
-  const user = userEvent.setup();
-  const run = createAwaitingConfirmationRun({ status: 'failed', plan: undefined });
-  const bridge = makeMockBridge({ startRun: vi.fn(async () => { throw new Error('Ollama is unavailable. Start Ollama and try again.'); }) }, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: 'read' })], runs: [run] }));
-  renderRoute(<RunResult />, { path: '/runs/:id', route: `/runs/${run.id}`, bridge });
-  await user.click(await screen.findByRole('button', { name: 'Run again' }));
-  expect(await screen.findByText('Ollama is unavailable. Start Ollama and try again.')).toBeInTheDocument();
-});
 
 
 it("shows the complete dry-run plan without Apply and starts a fresh normal run", async () => {
@@ -574,7 +567,34 @@ it("opens run details on the Logs tab when a failed run has no error playbook", 
   expect(screen.getByRole("region", { name: "Run status" })).toHaveTextContent("Open Run details below for the logs.");
 });
 
-it("runs a service-free run again without an organization and keeps setup closed", async () => {
+function renderWithPreflight(runId: string, bridge: ReturnType<typeof makeMockBridge>) {
+  return renderWithAppState(
+    <Routes>
+      <Route path="/runs/:id" element={<RunResult />} />
+      <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
+    </Routes>,
+    { route: `/runs/${runId}`, bridge },
+  );
+}
+
+it("opens the preflight for Run again on a tenant-bound run, keeps its provider and model, and shows a failed start", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, providerId: "openai", model: "gpt-5", tenantId: "tenant-1" });
+  const startRun = vi.fn(async () => { throw new Error("OpenAI Codex isn't ready. Open Settings to check the connection."); });
+  const bridge = makeMockBridge({ startRun }, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+  renderWithPreflight(run.id, bridge);
+  await user.click(await screen.findByRole("button", { name: "Run again" }));
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(within(dialog).getByText("Contoso IT")).toBeInTheDocument();
+  expect(within(dialog).getByText(/OpenAI.* · hosted/)).toBeInTheDocument();
+  expect(within(dialog).getByText("gpt-5")).toBeInTheDocument();
+  expect(startRun).not.toHaveBeenCalled();
+  await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+  await waitFor(() => expect(startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ providerId: "openai", model: "gpt-5" })));
+  expect(await screen.findByText(/OpenAI Codex isn't ready/)).toBeInTheDocument();
+});
+
+it("opens the preflight for Run again on a run with no organization and starts it without a tenant", async () => {
   const user = userEvent.setup();
   const run = { ...createAwaitingConfirmationRun({ status: "completed", plan: undefined }), tenantId: undefined };
   const { activeTenantId: _none, ...state } = createMockAppState({
@@ -582,9 +602,12 @@ it("runs a service-free run again without an organization and keeps setup closed
     runs: [run],
   });
   const bridge = makeMockBridge({}, { ...state, tenants: [] });
-  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+  renderWithPreflight(run.id, bridge);
   await user.click(await screen.findByRole("button", { name: "Run again" }));
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(within(dialog).getByRole("status")).toHaveTextContent("No organization needed.");
+  expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
+  await user.click(within(dialog).getByRole("button", { name: "Start run" }));
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
   expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]).not.toHaveProperty("tenantId");
-  expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
 });

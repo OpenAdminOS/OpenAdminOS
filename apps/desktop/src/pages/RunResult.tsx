@@ -54,6 +54,7 @@ import {
   runReportPlaintext,
 } from "../shared/runReport";
 import { useAppState } from "../state";
+import type { RerunChoice } from "./AgentDetail";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   agentNameForRun,
@@ -110,6 +111,10 @@ export default function RunResult() {
     run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
   );
 
+  const openRerunPreflight = (slug: string, runChoice: RerunChoice) => {
+    navigate(`/agents/${encodeURIComponent(slug)}/confirm`, { state: { runChoice } });
+  };
+
   const reRun = () => {
     if (requiresTeamReview) {
       navigate(
@@ -119,11 +124,18 @@ export default function RunResult() {
       );
       return;
     }
-    // A run that had no organization (an agent that calls no service API)
-    // runs again without one; the host refuses it if the agent changed.
-    const runWithoutOrganization = !run.tenantId && !state.activeTenantId && !run.officeContext && run.status !== "planned";
+    // An ordinary rerun opens the agent's preflight with the same provider
+    // and model, so it names the organization and services it will use,
+    // whether or not the original run had an organization. Run for real
+    // and Team retries keep their own flows.
+    if (run.status !== "planned" && !run.officeContext) {
+      openRerunPreflight(run.agentSlug, {
+        ...(run.providerId ? { providerId: run.providerId } : {}),
+        ...(run.model ? { model: run.model } : {}),
+      });
+      return;
+    }
     if (
-      !runWithoutOrganization &&
       !requireTenantAndProvider(
         createPendingIntent({
           kind: "agent-run",
@@ -193,6 +205,10 @@ export default function RunResult() {
       onRerun={reRun}
       onCancel={() => cancelRun(run.id)}
       onRetargetCurrent={() => {
+        if (!run.officeContext) {
+          openRerunPreflight(run.agentSlug, {});
+          return;
+        }
         if (
           !requireTenantAndProvider(
             createPendingIntent({

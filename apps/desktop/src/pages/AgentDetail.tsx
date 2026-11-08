@@ -271,7 +271,14 @@ export default function AgentDetail({
   useEffect(() => {
     if (!startRunOnOpen || consumedStartRunOnOpen.current || !agent) return;
     consumedStartRunOnOpen.current = true;
-    queueRunPreflight();
+    // Run again passes the original run's provider and model.
+    const runChoice = (location.state as { runChoice?: RerunChoice } | null)?.runChoice;
+    queueRunPreflight({
+      ...(runChoice?.providerId ? { providerId: runChoice.providerId } : {}),
+      ...(typeof runChoice?.model === "string" ? { model: runChoice.model } : {}),
+    });
+    // Only the first open reads the route state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent, queueRunPreflight, startRunOnOpen]);
 
   useEffect(() => {
@@ -2663,6 +2670,12 @@ function ChoiceButton({
       <div className="mt-0.5 truncate text-xs opacity-75">{detail}</div>
     </button>
   );
+}
+
+/** What Run again keeps from the original run when it opens the preflight. */
+export interface RerunChoice {
+  providerId?: ProviderId;
+  model?: string;
 }
 
 function RunPreflightModal({
