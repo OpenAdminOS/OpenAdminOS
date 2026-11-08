@@ -288,6 +288,10 @@ export class RunService {
       ) {
         throw new Error(OTHER_ORGANIZATION_RUN_COPY);
       }
+      // Pilot mode refuses schedules with its own production message first.
+      if (pilotRun && options.trigger === "schedule") {
+        throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
+      }
       if (options.trigger === "schedule") {
         const active = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
         if (!agent.schedule?.organizationId) {
