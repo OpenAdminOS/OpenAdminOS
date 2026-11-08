@@ -4753,14 +4753,16 @@ export class AppStateStore {
           schedule.enabled && existing.schedule?.enabled !== true
             ? updatedAt
             : undefined;
-        // A schedule keeps its organization. A new one belongs to the
-        // active organization; with none active it waits unassigned.
-        // The renderer never sets this field here.
-        const organizationId =
-          existing.schedule?.organizationId ??
-          (activeTenant && activeTenant.kind !== "sample"
+        // Ownership is decided once, when the schedule is created: it
+        // belongs to the active organization, or waits unassigned with
+        // none active. An edit keeps it, including unassigned, so changing
+        // an interval never activates a paused schedule. Only Assign
+        // (`assignAgentSchedule`) assigns. The renderer never sets it here.
+        const organizationId = existing.schedule
+          ? existing.schedule.organizationId
+          : activeTenant && activeTenant.kind !== "sample"
             ? organizationForTenant(persisted.organizations ?? [], activeTenant.id)?.id
-            : undefined);
+            : undefined;
         next[idx] = {
           ...existing,
           schedule: {

@@ -526,3 +526,39 @@ describe("agents without an organization", () => {
     assert.equal(h.state().runs.length, 0);
   });
 });
+
+describe("schedule edits (review round 1)", () => {
+  it("keeps an unassigned schedule unassigned when its interval or notifications change", async () => {
+    const { activeTenantId: _none, ...state } = currentVersionState();
+    const fixture = await makeStore(state);
+    try {
+      await fixture.store.setActiveTenant(woodgrove.id);
+      await fixture.store.updateAgentSchedule("find-inactive-devices", {
+        enabled: true,
+        intervalSeconds: 7200,
+        notifyOnSuccess: false,
+      });
+      const edited = await fixture.store.getAgentSchedule("find-inactive-devices");
+      assert.equal(edited?.organizationId, undefined);
+      assert.equal(edited?.intervalSeconds, 7200);
+      let starts = 0;
+      (fixture.store as unknown as { startRun: () => Promise<never> }).startRun = async () => {
+        starts += 1;
+        throw new Error("unexpected start");
+      };
+      const info = console.info;
+      console.info = () => undefined;
+      try {
+        await fixture.store.fireDueSchedules();
+      } finally {
+        console.info = info;
+      }
+      assert.equal(starts, 0);
+      // Assign is the only way in.
+      const assigned = await fixture.store.assignAgentSchedule("find-inactive-devices", `org-${woodgrove.id}`);
+      assert.equal(scheduleOf(assigned.installedAgents, "find-inactive-devices")?.organizationId, `org-${woodgrove.id}`);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
