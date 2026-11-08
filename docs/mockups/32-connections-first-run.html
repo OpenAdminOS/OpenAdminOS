@@ -299,6 +299,34 @@
       .lane span { left: calc(50% + 12px); right: auto; bottom: auto; top: 50%; transform: translateY(-50%); text-align: left; white-space: nowrap; }
       .lane.out::before { border-top: 0; border-left: 1.5px dashed var(--text-3); }
     }
+    .scan { padding: 18px 26px 28px; background: var(--bg); min-height: 620px; }
+    .scan-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-small); }
+    .scan-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; margin-top: 34px; }
+    .scan-title { font: 500 34px/1.1 var(--font-serif); letter-spacing: -0.02em; margin: 0; }
+    .scan-sub { color: var(--text-3); margin: 12px 0 0; max-width: 46ch; }
+    .scan-outcome { border-top: 1px solid var(--line); margin-top: 26px; padding-top: 18px; max-width: 46ch; }
+    .scan-outcome h4 { margin: 0; font-weight: 500; font-size: 18px; }
+    .scan-outcome > p { color: var(--text-2); margin: 6px 0 12px; }
+    .pick { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 6px 0; }
+    .pick .t { font-weight: 500; }
+    .pick .where { color: var(--warn); font-size: var(--fs-small); }
+    .scan .small { color: var(--text-3); font-size: var(--fs-small); margin: 12px 0 0; }
+    .scan-head { display: flex; justify-content: space-between; color: var(--text-2); font-size: var(--fs-small); padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+    .ledger { list-style: none; margin: 0; padding: 0; }
+    .ledger li { display: grid; grid-template-columns: 22px 160px minmax(0, 1fr); gap: 10px; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
+    .ledger .n { font-weight: 500; }
+    .ledger .r small { display: block; color: var(--text-3); font-size: var(--fs-small); margin-top: 2px; }
+    .ledger .r code { font-family: var(--font-code); font-size: 12.5px; color: var(--text-3); }
+    .ledger .r .btn { margin-top: 8px; }
+    .ledger .m { width: 14px; height: 14px; border-radius: 99px; margin-top: 3px; display: block; }
+    .ledger [data-tone="ready"] .m { background: var(--ok); }
+    .ledger [data-tone="found"] .m { border: 1.5px solid var(--ok); }
+    .ledger [data-tone="warn"] .m { border: 1.5px solid var(--warn); }
+    .ledger [data-tone="warn"] .r { color: var(--warn); }
+    .ledger [data-tone="muted"] .m { height: 1.5px; width: 10px; margin: 9px 0 0 2px; background: var(--text-3); }
+    .ledger [data-tone="muted"] .r { color: var(--text-3); }
+    .ledger [data-tone="checking"] .m { border: 1.5px solid var(--line); border-top-color: var(--text); }
+    @media (max-width: 900px) { .scan-grid { grid-template-columns: minmax(0, 1fr); gap: 28px; } .ledger li { grid-template-columns: 22px minmax(0, 1fr); } .ledger .r { grid-column: 2; } }
     @media (max-width: 900px) {
       .grid2 { grid-template-columns: 1fr; }
       .app { grid-template-columns: minmax(0, 1fr); }
@@ -379,37 +407,48 @@
 
     <!-- B -->
     <section class="section" id="b">
-      <h2>B. First launch with no model</h2>
-      <p class="lede">The model is the only thing Chat cannot work without, so it is the only setup shown up front. A signed-in Claude Code is detected but needs a click, because it sends prompts off the device. Sample data is the escape hatch: it is the one path that needs no model.</p>
+      <h2>B. First launch: the model scan</h2>
+      <p class="lede">A fresh install opens one full-window screen before anything else. It checks this device for model runtimes and AI tools the admin is already signed in to, every check in parallel, and shows each one resolve. The model is the only thing Chat cannot work without, so it is the only setup shown up front. Here Ollama and LM Studio are installed but not running, and Claude Code and Codex are signed in.</p>
       <div class="frame">
-        <div class="app" style="min-height: 600px;">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile none">+</span><div><div class="name">No organization</div><div class="sub">Nothing connected</div></div></div>
-          </aside>
-          <div class="main">
-            <div class="topline"><span class="title">New chat</span><span class="grow"></span><span class="boundary none"><span class="dot"></span>No model selected</span></div>
-            <div class="col center">
-              <div class="model-setup">
-                <h4>Choose a model to answer with</h4>
-                <p>OpenAdminOS runs the conversation; the model writes the answers. You can change it at any time.</p>
-                <div class="option"><div><div class="t">OpenAdmin 8B on this device</div><div class="d">Installs Ollama and OpenAdmin 8B, a model trained for Intune and Entra work.</div><div class="where">Nothing leaves this device</div></div><button class="btn primary">Install</button></div>
-                <div class="option"><div><div class="t">Claude Code, signed in as admin@woodgrove.com</div><div class="d">Uses your existing Claude Code sign-in. No API key is stored.</div><div class="where">Prompts go to Anthropic API · US</div></div><button class="btn">Use Claude Code</button></div>
-                <div class="option"><div><div class="t">Another provider</div><div class="d">LM Studio, Codex, Azure OpenAI and others.</div></div><button class="btn ghost">Show all</button></div>
+        <div class="scan">
+          <div class="scan-brand"><span class="mark">oa</span> OpenAdminOS</div>
+          <div class="scan-grid">
+            <div>
+              <h3 class="scan-title">What this device can answer with</h3>
+              <p class="scan-sub">OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and ports only, and sends nothing.</p>
+              <div class="scan-outcome">
+                <h4>A signed-in AI tool was found</h4>
+                <p>It is not selected for you, because prompts would leave this device. Choose it to answer with it, or keep everything local.</p>
+                <div class="pick"><div><div class="t">Claude Code</div><div class="where">Prompts go to Anthropic API · US</div></div><button class="btn primary">Use Claude Code</button></div>
+                <div class="pick"><div><div class="t">Codex</div><div class="where">Prompts go to OpenAI API · US</div></div><button class="btn">Use Codex</button></div>
+                <p class="small">To keep everything on this device, <a class="link" href="#">set up OpenAdmin 8B</a>.</p>
+                <p class="small"><a class="link" href="#">Continue to Chat without a model</a></p>
               </div>
-              <p class="escape">Not ready to set up a model? <a class="link" href="#">Preview with sample data</a> from a fictional company.</p>
+              <p class="small">Not ready to set up a model? <a class="link" href="#">Preview with sample data</a> from a fictional company.</p>
             </div>
-            <div class="composer"><div class="ph">Choose a model to start asking</div><div class="row"><span>No model</span><span class="grow"></span></div></div>
-            <p class="trust">Read-only by default. Write actions always ask for your confirmation.</p>
+            <div>
+              <div class="scan-head"><span>On this device</span><span>8 of 8 checked</span></div>
+              <ul class="ledger">
+                <li data-tone="found"><span class="m"></span><span class="n">Ollama</span><span class="r">Installed, not running<small>Start it with <code>ollama serve</code>, then scan again.</small></span></li>
+                <li data-tone="muted"><span class="m"></span><span class="n">Apple Intelligence</span><span class="r">Not available</span></li>
+                <li data-tone="found"><span class="m"></span><span class="n">LM Studio</span><span class="r">Installed, not running<small>Start the LM Studio server, then scan again.</small></span></li>
+                <li data-tone="ready"><span class="m"></span><span class="n">Claude Code</span><span class="r">Signed in<small>Version 2.1.319</small></span></li>
+                <li data-tone="ready"><span class="m"></span><span class="n">Codex</span><span class="r">Signed in<small>Version 0.166.0</small></span></li>
+                <li data-tone="checking"><span class="m"></span><span class="n">GitHub Copilot CLI</span><span class="r"><code>copilot sign-in status</code></span></li>
+                <li data-tone="warn"><span class="m"></span><span class="n">Gemini CLI</span><span class="r">Could not check<small>Gemini CLI did not answer within 2.5 seconds. Retry to check again.</small><button class="btn small">Retry</button></span></li>
+                <li data-tone="muted"><span class="m"></span><span class="n">Azure OpenAI</span><span class="r">Not configured</span></li>
+              </ul>
+              <p class="small">Checked here: localhost:11434, Apple Foundation helper, localhost:1234, claude auth status, codex login status, copilot sign-in status, gemini --version, saved Azure settings. Nothing was sent to a model or a provider.</p>
+            </div>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>Provider detection is unchanged: a ready local model is selected automatically; a hosted one is preselected and needs one click.</li>
-        <li>The install row opens the model explorer (#102) with OpenAdmin 8B preselected.</li>
-        <li>Sample data keeps today's pilot behavior: prepared prompts, three agents, a banner on every screen. It becomes a sample organization in the switcher instead of a first-launch choice.</li>
+        <li>Every check starts at once and has a 2.5 second timeout; the whole scan reads as one sequence of about two seconds. A check that does not answer shows Could not check with Retry (one row here shows it mid-scan, one timed out), never a gap.</li>
+        <li>While a check runs, its row shows the local target it touches in the code face and a hairline sweeps under it; when it resolves, the hairline draws once in the state colour. With reduced motion the same text appears without movement, and each result is announced to screen readers.</li>
+        <li>Local only: loopback ports, local files and each CLI's own version and sign-in status. An Ollama or LM Studio endpoint off the device is not contacted, and no prompt is sent.</li>
+        <li>Outcomes follow the provider rules. A ready local model is selected and named ("OpenAdmin 8B is ready on this device", Open Chat, Nothing leaves this device). A signed-in hosted tool is offered with its residency line and needs one click, as here. With nothing found, the screen offers OpenAdmin 8B (<code>ollama run openadminos/openadmin-8b</code>), all providers, and Scan again. The model explorer (#102) replaces the provider setup link when it ships.</li>
+        <li>The scan runs once, on the first launch. Settings, Providers has Scan again. Continue to Chat without a model leads to the inline model choice in Chat.</li>
       </ul>
     </section>
 
