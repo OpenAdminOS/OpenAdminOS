@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-11-08T18:00:48.166Z",
+  "updatedAt": "2026-11-08T20:00:47.651Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 35,
@@ -14,32 +14,32 @@
       "installs7d": 1
     },
     "compliance-overview": {
-      "installs": 50,
-      "installs7d": 6
+      "installs": 51,
+      "installs7d": 7
     },
     "os-update-posture": {
       "installs": 25,
       "installs7d": 3
     },
     "tenant-health-report": {
-      "installs": 36,
-      "installs7d": 4
+      "installs": 37,
+      "installs7d": 5
     },
     "user-license-overview": {
-      "installs": 33,
-      "installs7d": 3
+      "installs": 34,
+      "installs7d": 4
     },
     "conditional-access-explainer": {
-      "installs": 56,
-      "installs7d": 7
+      "installs": 57,
+      "installs7d": 8
     },
     "dormant-app-registrations": {
-      "installs": 39,
-      "installs7d": 4
+      "installs": 40,
+      "installs7d": 5
     },
     "risky-sign-in-triage": {
-      "installs": 23,
-      "installs7d": 4
+      "installs": 24,
+      "installs7d": 5
     },
     "secure-score-prioritizer": {
       "installs": 26,
@@ -58,12 +58,12 @@
       "installs7d": 2
     },
     "team-evidence-review": {
-      "installs": 14,
-      "installs7d": 2
+      "installs": 15,
+      "installs7d": 3
     },
     "team-script-draft": {
-      "installs": 12,
-      "installs7d": 1
+      "installs": 13,
+      "installs7d": 2
     }
   }
 }
