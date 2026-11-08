@@ -18,7 +18,7 @@ const outDir = resolve(
     join(homedir(), ".cache", "oaos-pilot", "shots"),
 );
 const names = [
-  "welcome",
+  "first-run-scan",
   "connect-permissions",
   "own-registration",
   "pilot-chat",

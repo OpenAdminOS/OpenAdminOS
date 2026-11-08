@@ -6,7 +6,8 @@ export const FIRST_RUN_CAPTURE_WIDTH = 1280;
 export const FIRST_RUN_CAPTURE_HEIGHT = 800;
 
 type FirstRunCaptureAction =
-  | "wait-welcome"
+  | "wait-first-run-scan"
+  | "leave-scan"
   | "open-connect-permissions"
   | "open-own-registration"
   | "close-setup"
@@ -18,7 +19,7 @@ type FirstRunCaptureAction =
   | "open-paused-schedules";
 
 export const FIRST_RUN_CAPTURE_SHOTS = [
-  "welcome",
+  "first-run-scan",
   "connect-permissions",
   "own-registration",
   "pilot-chat",
@@ -42,8 +43,9 @@ export async function captureFirstRunShots(
   window.webContents.setBackgroundThrottling(false);
   await waitForViewport(window);
 
-  await runStep(window, "wait-welcome");
-  await captureReloadedWelcomeThemes(window, outDir);
+  await runStep(window, "wait-first-run-scan");
+  await captureThemes(window, outDir, "first-run-scan");
+  await runStep(window, "leave-scan");
 
   await runStep(window, "open-connect-permissions");
   await captureThemes(window, outDir, "connect-permissions");
@@ -90,24 +92,6 @@ async function captureThemes(
   for (const theme of ["light", "dark"] as const) {
     await setCaptureTheme(window, theme);
     await writeCapture(window, outDir, name, theme);
-  }
-}
-
-async function captureReloadedWelcomeThemes(
-  window: BrowserWindow,
-  outDir: string,
-): Promise<void> {
-  for (const theme of ["light", "dark"] as const) {
-    await setCaptureTheme(window, theme);
-    const loaded = new Promise<void>((resolve) =>
-      window.webContents.once("did-finish-load", () => resolve()),
-    );
-    window.webContents.reload();
-    await loaded;
-    await waitForViewport(window);
-    await runStep(window, "wait-welcome");
-    await prepareCaptureSurface(window);
-    await writeCapture(window, outDir, "welcome", theme);
   }
 }
 
@@ -235,18 +219,24 @@ async function firstRunCaptureStepScript(
     await delay(250);
   };
 
-  if (action === "wait-welcome") {
+  if (action === "wait-first-run-scan") {
     await waitFor(
       () =>
-        bodyText().includes("Welcome to OpenAdminOS") &&
-        bodyText().includes("Start pilot mode") &&
-        bodyText().includes("Use your own app registration."),
-      "welcome view",
+        bodyText().includes("What this device can answer with") &&
+        bodyText().includes("Preview with sample data"),
+      "first-run model scan",
     );
     return;
   }
 
+  if (action === "leave-scan") {
+    await clickButton("Continue to Chat without a model");
+    await waitFor(() => bodyText().includes("Choose a model to answer with"), "Chat with no model");
+    return;
+  }
+
   if (action === "open-connect-permissions") {
+    await clickButton("Connect a tenant");
     await clickButton("Connect tenant");
     await waitFor(
       () =>
@@ -263,7 +253,12 @@ async function firstRunCaptureStepScript(
   }
 
   if (action === "open-own-registration") {
-    await clickButton("Your organization blocks third-party apps? Use your own app registration.");
+    await clickButton("Connect a tenant");
+    await clickButton("Connect tenant");
+    const own = document.querySelector<HTMLInputElement>('input[type="radio"][value="own"]') ??
+      Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]')).find((input) => input.closest("label")?.textContent?.includes("Your own app registration"));
+    if (!own) throw new Error("Own registration choice was not found.");
+    own.click();
     await waitFor(
       () =>
         Boolean(document.querySelector('input[name="tenant-client-id"]')) &&
@@ -287,10 +282,9 @@ async function firstRunCaptureStepScript(
   }
 
   if (action === "start-pilot-chat") {
-    await clickButton("Start pilot mode");
+    await clickButton("Preview with sample data");
     await waitFor(
       () =>
-        !bodyText().includes("Welcome to OpenAdminOS") &&
         Boolean(document.querySelector('[role="group"][aria-label="Prepared prompts"]')),
       "pilot Chat",
     );

@@ -727,6 +727,8 @@ function seedFirstRunCaptureState(userDataDir: string): void {
       runs: [],
       tenants: [],
       registryInstallCountsEnabled: false,
+      // A fresh install: the first-launch model scan shows first.
+      firstRunScan: "pending",
     }, null, 2)}\n`,
     "utf8",
   );
