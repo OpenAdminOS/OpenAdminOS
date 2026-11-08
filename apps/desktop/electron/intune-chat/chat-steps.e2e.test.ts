@@ -16,6 +16,7 @@ import { AppStateStore } from "../state.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
+import { FIRST_RUN_CHAT_COPY } from "../../src/copy/chat.js";
 
 /**
  * Drives Chat end to end through the app store: question planning, the
@@ -964,7 +965,7 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
 
   it("answers a docs question from Microsoft Learn with no Graph call and no tenant on the conversation", async () => {
     for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
-      await withHarness(async ({ store, graphPaths, graphBuilds, script }) => {
+      await withHarness(async ({ store, graphPaths, graphBuilds, prompts, script }) => {
         script([
           { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
           { final: true, answer: "Defender on macOS needs full disk access [1]." },
@@ -974,6 +975,10 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
         assert.equal(result.assistantMessage.status, "completed", send);
         assert.match(result.assistantMessage.content, /full disk access/, send);
         assert.equal(result.assistantMessage.notConnected, undefined, send);
+        // The model is told plainly that nothing is connected, so it classifies against that.
+        assert.match(prompts[0]!.system, /No tenant is connected, so there is no tenant data to read\./, send);
+        assert.match(prompts[0]!.system, /Tenant: none connected/, send);
+        assert.doesNotMatch(prompts[0]!.system, /You can investigate read-only tenant data/, send);
         assert.equal(result.conversation.tenantId, undefined, send);
         assert.equal(result.cacheStatus.tenantId, undefined, send);
         assert.deepEqual(graphPaths, [], send);
@@ -1034,6 +1039,23 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
     }, { noTenant: true });
   });
 
+  it("keeps an explicit request to write a query as docs, and still blocks it when the model reaches for tenant data", async () => {
+    await withHarness(async ({ store, prompts, graphBuilds, script }) => {
+      script([{ final: true, answer: "SigninLogs | where ResultType != \"0\" | summarize count() by UserPrincipalName" }]);
+      const docs = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
+      assert.equal(docs.questionKind, "docs");
+      assert.equal(docs.notConnected, undefined);
+      assert.match(docs.content, /SigninLogs/);
+      // The model was not asked to classify it.
+      assert.doesNotMatch(prompts[0]!.system, /Your first reply must also give the question kind/);
+
+      script([{ tool: "query_cache", params: { resource: "signIns" } }]);
+      const upgraded = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
+      assert.equal(upgraded.notConnected?.reason, "no-tenant");
+      assert.deepEqual(graphBuilds, []);
+    }, { noTenant: true });
+  });
+
   it("blocks a tenant question with no model call on deterministic retrieval, and answers a docs question there", async () => {
     await withHarness(async ({ store, prompts, graphBuilds, script }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -1048,6 +1070,12 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
       assert.equal(docs.questionKind, "docs");
       assert.equal(docs.notConnected, undefined);
       assert.match(docs.content, /SigninLogs/);
+      // The Works now starters answer with nothing connected, also without the model's classification.
+      for (const starter of FIRST_RUN_CHAT_COPY.worksNowStarters) {
+        const answer = (await store.sendIntuneChatMessage({ content: starter })).assistantMessage;
+        assert.equal(answer.questionKind, "docs", starter);
+        assert.equal(answer.notConnected, undefined, starter);
+      }
       assert.deepEqual(graphBuilds, []);
     }, { noTenant: true });
   });

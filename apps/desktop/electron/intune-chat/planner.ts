@@ -584,6 +584,17 @@ export function resolveQuestionKind(
  * which still requires tenant evidence. When in doubt the label is mixed
  * or tenant, never docs.
  */
+/**
+ * A request to write a query or script, or one that names documentation,
+ * with no reference to the admin's tenant. With nothing connected such a
+ * request stays docs without the model's classification: there is no
+ * tenant to read, and a model tuned for tenant work labels it tenant.
+ */
+export function isExplicitDocsRequest(question: string): boolean {
+  const lower = question.trim().toLowerCase();
+  return (DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower)) && !hasTenantReference(question);
+}
+
 export function classifyChatQuestion(
   question: string,
   input: { plannedResources: readonly GraphCacheResourceKind[]; namesSource: boolean },

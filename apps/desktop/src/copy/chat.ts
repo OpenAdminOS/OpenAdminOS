@@ -26,10 +26,14 @@ export const FIRST_RUN_CHAT_COPY = {
   startersLabel: "Starter questions",
   worksNow: "Works now",
   needs: (service: string) => `Needs ${service}`,
-  /** Fixed until the reference catalog carries its own examples. */
+  /**
+   * Fixed until the reference catalog carries its own examples. Each is a
+   * request the keyword rules route as docs, so it works with nothing
+   * connected also on deterministic retrieval.
+   */
   worksNowStarters: [
     "Write a KQL query for failed sign-ins in the last 24 hours",
-    "Explain Windows Autopatch rings and how they differ from update rings",
+    "Write a PowerShell script that exports Intune compliance policies with Microsoft Graph",
   ],
   referencesTitle: "Ground answers in public references",
   referencesHint: "No sign-in. Each one receives words from your questions.",

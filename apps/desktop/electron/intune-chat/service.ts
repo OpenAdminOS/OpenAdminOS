@@ -124,6 +124,7 @@ import {
   buildAnswerPack,
   chatTitleForPrompt,
   classifyChatQuestion,
+  isExplicitDocsRequest,
   definitionForResource,
   hasTenantReference,
   isSmallTalk,
@@ -256,10 +257,9 @@ function accessBlockTiming(
   if (!blocked) return {};
   // With no tenant a docs question is answered from the model alone when
   // no documentation source is installed: it needs no tenant data.
-  if (noTenant) {
-    if (modelClassifies) return { deferred: blocked };
-    return plan?.sources.kind === "docs" ? {} : { now: blocked };
-  }
+  // A docs kind can still become mixed when the model calls a tenant tool;
+  // the deferred block then answers before any tenant data is loaded.
+  if (noTenant) return !modelClassifies && plan?.sources.kind !== "docs" ? { now: blocked } : { deferred: blocked };
   if (!plan?.docsSourceAvailable) return { now: blocked };
   if (modelClassifies) return { deferred: blocked };
   return plan.sources.kind === "docs" ? {} : { now: blocked };
@@ -1998,7 +1998,9 @@ export class IntuneChatService {
     // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
     // directResources is set exactly when a direct answer can apply; direct answers read the cache
     // before any model call, so those questions keep the refresh before the answer.
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
+    // With nothing connected, an explicit docs request is not left to the model's classification.
+    const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
     const veto = docsVeto(content, history);
     const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
     const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
@@ -2196,8 +2198,9 @@ export class IntuneChatService {
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               questionKind: answerPlan.sources.kind,
               requiredServerIds: answerPlan.sources.requiredServerIds,
-              ...(lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
+              ...(lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : noTenant ? noTenantUpgrade(answerPlan.kind, loadTenantData) : {}),
               tenant,
+              ...(noTenant ? { noTenant: true } : {}),
               providerId,
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
@@ -2476,7 +2479,9 @@ export class IntuneChatService {
     // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
     // directResources is set exactly when a direct answer can apply; direct answers read the cache
     // before any model call, so those questions keep the refresh before the answer.
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
+    // With nothing connected, an explicit docs request is not left to the model's classification.
+    const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
     const veto = docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
@@ -2879,8 +2884,9 @@ export class IntuneChatService {
               documentation,
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
-              ...(answerPlan && lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
+              ...(answerPlan && lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : answerPlan && noTenant ? noTenantUpgrade(answerPlan.kind, loadTenantData) : {}),
               tenant,
+              ...(noTenant ? { noTenant: true } : {}),
               providerId,
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
@@ -3747,6 +3753,17 @@ function modelClassification(
     onUpgrade: () => { kind.upgrade(); },
     ensureTenantData: loadTenantData,
   };
+}
+
+/**
+ * With nothing connected and the kind already decided, a tenant tool call
+ * still upgrades the kind and meets the access block before it runs.
+ */
+function noTenantUpgrade(
+  kind: QuestionKindTracker,
+  loadTenantData: () => Promise<void>,
+): Pick<RunAgenticChatInput, "onUpgrade" | "ensureTenantData"> {
+  return { onUpgrade: () => { kind.upgrade(); }, ensureTenantData: loadTenantData };
 }
 
 /** Whether an answer read tenant data: a tenant or mixed kind, a Graph refresh, or a tenant tool call. */

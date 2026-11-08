@@ -196,6 +196,12 @@ export interface RunAgenticChatInput {
    */
   documentationFallback?: (reason?: string) => Promise<DocsIndexPassage[]>;
   tenant: TenantRecord;
+  /**
+   * No tenant is connected. The prompt says so, so the model classifies
+   * a request to write a query or script as docs; tenant tools are still
+   * refused by the host before any Graph request.
+   */
+  noTenant?: boolean;
   providerId: ProviderId;
   providerIsLocal: boolean;
   model?: string;
@@ -806,10 +812,12 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     buildIntuneChatSystemPrompt(input.providerIsLocal, Boolean(input.tools.webSearch), Boolean(input.voice)),
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
-    docsOnly
-      ? "This is a documentation question. Do not check the tenant. Answer from documentation sources."
-      : "You can investigate read-only tenant data by asking the host to run tools.",
-    ...(docsOnly ? [] : input.plannedResources).slice(0, 6).map(resource => {
+    input.noTenant
+      ? "No tenant is connected, so there is no tenant data to read. A request to explain a product, or to write a query or script the admin runs themselves, is docs. Choose tenant or mixed only when the answer needs facts about the admin's own tenant."
+      : docsOnly
+        ? "This is a documentation question. Do not check the tenant. Answer from documentation sources."
+        : "You can investigate read-only tenant data by asking the host to run tools.",
+    ...(docsOnly || input.noTenant ? [] : input.plannedResources).slice(0, 6).map(resource => {
       const fields = [...new Set([...(pathForResource(resource).select ?? []), ...input.tools.store.graphCacheFields(input.tenant.id, resource)])];
       return `${resource} (${GRAPH_CACHE_RESOURCES.find(entry => entry.resource === resource)?.label ?? resource}), Graph ${pathForResource(resource).path}, fields: ${fenceTenantData(fields.slice(0, 24), "cache:fields")}.`;
     }),
@@ -826,7 +834,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     "STRICT READ-ONLY: never request writes, deletes, creates, updates, retirements, wipes, assignments, or connector sends.",
     "If the admin asks for a change, say chat cannot perform changes and point them to installed write agents.",
     "",
-    `Tenant: ${fenceTenantData(tenantName, "tenant:displayName")}`,
+    input.noTenant ? "Tenant: none connected" : `Tenant: ${fenceTenantData(tenantName, "tenant:displayName")}`,
     `Provider: ${input.providerId}${input.model ? ` · ${input.model}` : ""}`,
     `Generated at: ${input.generatedAt}`,
     `Planner prefetch hints: ${(docsOnly ? [] : input.plannedResources).join(", ") || "none"}`,
