@@ -24,7 +24,7 @@ What you can do in pilot mode:
 
 Pilot answers and agent reports use prepared text built from the sample data. No AI model is used, so pilot mode works the same on every machine. Agent Team, Changes, Workspaces, Connectors, and schedules are available in production only.
 
-When you connect your tenant, the pilot data is removed and the app switches to production. You can open pilot mode again from the tenant switcher or Settings.
+When you connect your tenant, the pilot data is removed and the app switches to production. You can open pilot mode again from the organization menu with **Preview with sample data**.
 
 ## Connecting Your Tenant
 
@@ -35,7 +35,7 @@ When you connect, or try a tenant-backed action without an active tenant:
 3. Pick or repair an LLM provider if the action needs one.
 4. Review and explicitly resume the original action.
 
-After sign-in, OpenAdminOS shows which enterprise application was added to your tenant and how many delegated permissions it holds. Canceling keeps a Chat draft but discards the pending action. OpenAdminOS never sends a question or starts an agent automatically after sign-in, and agents cannot start without an active tenant.
+After sign-in, OpenAdminOS shows which enterprise application was added to your tenant and how many delegated permissions it holds. Canceling keeps a Chat draft but discards the pending action. OpenAdminOS never sends a question or starts an agent automatically after sign-in, and an agent that reads a service cannot start until that service is connected in the active organization.
 
 ## Provider Choice
 

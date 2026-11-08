@@ -29,11 +29,11 @@ Other messages you may see:
 - **Sign-in was cancelled.** Nothing was connected. Start again when ready.
 - **Microsoft sign-in timed out after five minutes.** The browser sign-in was not completed. Start again.
 - **Couldn't reach Microsoft's sign-in endpoint.** Check the network, proxy, VPN or DNS.
-- **The previous sign-in session expired.** Reconnect from Settings, Tenants and complete the consent prompt.
+- **The previous sign-in session expired.** Reconnect from Connections and complete the consent prompt.
 
 ## A Service Shows Not Connected
 
-Settings, Tenants shows a service as **Not connected** when none of its parts is granted, and **Partial** when some are. A part counts as granted only when every one of its scopes is.
+Connections shows a service as **Not connected** when none of its parts is granted, and **Partial** when some are. A part counts as granted only when every one of its scopes is.
 
 With the OpenAdminOS app:
 
@@ -55,7 +55,7 @@ After fixing it, choose **Check again**.
 - Wait a minute and choose **Check again** once more. New consent can take a short time to appear in tokens.
 - In the Entra admin center, open the registration, then **API permissions**, and confirm the permissions show as granted for the tenant. A permission that is listed but not granted is not in the token.
 - Confirm the permissions are delegated Microsoft Graph permissions, not application permissions. OpenAdminOS uses delegated permissions only.
-- Confirm you added them to the registration whose client ID the tenant was connected with. Settings, Tenants shows it.
+- Confirm you added them to the registration whose client ID the tenant was connected with. Connections shows it.
 
 ## Related
 

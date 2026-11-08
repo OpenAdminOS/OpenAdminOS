@@ -32,7 +32,7 @@ An Intune administrator whose role is limited by scope tags sees the same limite
 
 ## Which Application Signs In
 
-There are two options, offered as equal choices at the top of the connect dialog. Neither is preselected, and the admin must choose one before Approve is enabled. Settings, Tenants and the tenant menu show which one each tenant uses.
+There are two options, offered as equal choices at the top of the connect dialog. Neither is preselected, and the admin must choose one before Approve is enabled. Connections and the organization menu show which one each tenant uses.
 
 ### The OpenAdminOS application (default)
 
@@ -44,13 +44,13 @@ After consent, the tenant contains an **enterprise application** (service princi
 
 Organizations that do not allow third-party multi-tenant applications can create their own registration and enter its client ID in the connect dialog. It must be a public client with the platform **Mobile and desktop applications**, the redirect URI `http://localhost`, and **Allow public client flows** set to **Yes**. For a single-tenant registration, the directory (tenant) ID is entered too, so sign-in goes to that directory.
 
-With an own registration, sign-in requests `https://graph.microsoft.com/.default` and `offline_access`. The token carries the delegated Microsoft Graph permissions the registration has been granted, and OpenAdminOS records those. If Microsoft lists only `.default` with the token, OpenAdminOS reads the permissions from the access token's `scp` claim; the token is decoded locally for that purpose only. **Check again** in Settings, Tenants gets a new token after an administrator has added permissions.
+With an own registration, sign-in requests `https://graph.microsoft.com/.default` and `offline_access`. The token carries the delegated Microsoft Graph permissions the registration has been granted, and OpenAdminOS records those. If Microsoft lists only `.default` with the token, OpenAdminOS reads the permissions from the access token's `scp` claim; the token is decoded locally for that purpose only. **Check again** in Connections gets a new token after an administrator has added permissions.
 
 OpenAdminOS cannot change the registration. For a missing service it shows the exact permissions, a PowerShell script that adds them to the existing app and extends its tenant-wide grant without removing anything, and a `requiredResourceAccess` JSON snippet to merge into the manifest. A separate script can create a new single-tenant registration for the selected services; it creates no secret and deletes the registration again if consent fails. [Own app registration](../getting-started/own-app-registration.md) describes both scripts step by step.
 
 Do not create a client secret. OpenAdminOS signs in as a public client, so there is no secret to store on the device. Each custom registration gets its own token cache, separate from the default application's. Token refresh and scheduled Teams and Outlook delivery always use the registration the tenant was connected with.
 
-After a successful connect, the client ID, directory ID, and an optional label are remembered in the local app state so the connect dialog can offer the registration again. These are public identifiers. They can be removed in Settings, Tenants without affecting connected tenants.
+After a successful connect, the client ID, directory ID, and an optional label are remembered in the local app state so the connect dialog can offer the registration again. These are public identifiers. They can be removed in Connections without affecting connected tenants.
 
 ## Services And Parts
 
@@ -60,7 +60,7 @@ With the OpenAdminOS app, the connect dialog requires at least one service and n
 
 OpenAdminOS records the scopes Microsoft returned in a token for each tenant, qualified with their audience (for example `graph:User.Read.All`), and nothing else. A part is on only when all of its scopes are granted. A service is connected when all its parts are on, partial when some are, and not connected when none are.
 
-Chat and the cache only read from granted parts. A question that needs a service that is not connected is answered with its name, for example "Defender is not connected for this tenant. Add it in Settings, Tenants.", without calling Microsoft Graph and without a consent prompt. Cache refreshes skip resources of services that are not connected. An agent cannot run while a service it declares is not connected. When a service is connected but a part or a run-time scope an agent needs is missing, starting the agent asks Microsoft for consent, and its run review says so first. Scheduled runs never open a sign-in. To add a service later, use **Add access** (OpenAdminOS app) or **Add permissions** and **Check again** (own registration) in Settings, Tenants.
+Chat and the cache only read from granted parts. A question that needs a service that is not connected is answered with its name, for example "Defender is not connected for this tenant. Add it in Connections.", without calling Microsoft Graph and without a consent prompt. Cache refreshes skip resources of services that are not connected. An agent cannot run while a service it declares is not connected. When a service is connected but a part or a run-time scope an agent needs is missing, starting the agent asks Microsoft for consent, and its run review says so first. Scheduled runs never open a sign-in. To add a service later, use **Add access** (OpenAdminOS app) or **Add permissions** and **Check again** (own registration) in Connections.
 
 Chat and cache refreshes may ask you to sign in again when a session has expired, but only for scopes already granted.
 

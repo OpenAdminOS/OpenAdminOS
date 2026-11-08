@@ -29,7 +29,7 @@ Microsoft documents the desktop platform settings in [Desktop app that calls web
 4. Optionally add a label so you recognise the registration later.
 5. Choose **Sign in with your app registration**.
 
-After a successful connect, OpenAdminOS remembers the registration on this device: client ID, directory ID and label, never a secret. The next time you choose **Your own app registration**, the most recently used one is selected. Remove saved registrations in Settings, Tenants; tenants already connected with one are not affected.
+After a successful connect, OpenAdminOS remembers the registration on this device: client ID, directory ID and label, never a secret. The next time you choose **Your own app registration**, the most recently used one is selected. Remove saved registrations in Connections; tenants already connected with one are not affected.
 
 ## Permissions By Service
 
@@ -95,7 +95,7 @@ The script uses the Microsoft Graph PowerShell SDK. It:
 
 ## Add A Service To An Existing Registration
 
-Settings, Tenants lists each service for the tenant as **Connected**, **Partial** or **Not connected**, with the parts that are on and the exact permissions that are missing. For a service that is not fully granted, choose **Add permissions**. The dialog lets you pick the missing parts and offers three actions: **Copy script**, **Copy JSON snippet** and **Check again**. The same dialog opens from the "not connected" notices on agent pages, in run reviews and on pages that need a service.
+Connections lists each service for the tenant as **Connected**, **Partial** or **Not connected**, with the parts that are on and the exact permissions that are missing. For a service that is not fully granted, choose **Add permissions**. The dialog lets you pick the missing parts and offers three actions: **Copy script**, **Copy JSON snippet** and **Check again**. The same dialog opens from the "not connected" notices on agent pages, in run reviews and on pages that need a service.
 
 OpenAdminOS cannot change your registration itself. Use one of these:
 
@@ -142,11 +142,11 @@ With your own registration, sign-in requests `https://graph.microsoft.com/.defau
 
 OpenAdminOS records the Microsoft Graph permissions listed with the token. If Microsoft lists only `.default`, it reads the permissions from the access token's `scp` claim instead. The token is only decoded to read your own grants; it is not sent anywhere. Sign-in scopes and `.default` itself are never recorded as permissions.
 
-A part is on when every one of its permissions was granted. A service is **Connected** when all of its parts are on, **Partial** when some are, and **Not connected** when none are. Chat, the cache and agents use only connected parts: a question or agent that needs a missing service names it and points to Settings, Tenants instead of failing.
+A part is on when every one of its permissions was granted. A service is **Connected** when all of its parts are on, **Partial** when some are, and **Not connected** when none are. Chat, the cache and agents use only connected parts: a question or agent that needs a missing service names it and points to Connections instead of failing.
 
 ## Check Again
 
-After an administrator adds permissions and grants admin consent, choose **Check again** in Settings, Tenants or in the **Add permissions** dialog. OpenAdminOS asks Microsoft for a new token instead of using a cached one, and replaces the recorded permissions with what the new token carries. If the stored session cannot be used, it opens a browser sign-in.
+After an administrator adds permissions and grants admin consent, choose **Check again** in Connections or in the **Add permissions** dialog. OpenAdminOS asks Microsoft for a new token instead of using a cached one, and replaces the recorded permissions with what the new token carries. If the stored session cannot be used, it opens a browser sign-in.
 
 If nothing changed, OpenAdminOS says "Microsoft returned no new permissions. Admin consent can take a minute to appear." Wait a minute and try again. If it still finds nothing, see [Consent and sign-in errors](../troubleshooting/consent-errors.md).
 
