@@ -1569,7 +1569,14 @@ Data model: `TenantRecord` stays the Microsoft 365 connection. `OrganizationReco
 - [x] Renderer: agent service needs and named actions, preflight without an organization, schedules surfaces for unassigned schedules
 - [x] Gates: review every `requireTenant` and `requireTenantAndProvider` call against hard constraint 3, with tests. Agent runs (Agents list, agent drawer, command palette, Run again) no longer gate on a tenant: they open the preflight, which names the services. Cache refresh, Changes, schedules (Run due now, Schedules page) and Chat keep the gate, because they always read a service. Chat is part A.
 - [x] Docs: `CLAUDE.md`, `AGENTS.md`, SPEC, CHANGELOG, GitBook pages, `docs:generate`
-- [ ] Verification under Node 22, app launch on a migrated state file, screenshots light and dark
+- [x] Verification under Node 22, app launch on a migrated state file, screenshots light and dark
+
+### Part B review (2026-11-09)
+
+- Node 22: typecheck clean; electron `node --test` 1011 pass, 0 fail; runtime 256 pass; scripts 18 pass; renderer 518 pass in 60 files; `npm run qa` 197 pass, 4 warn, 0 fail; `npm run docs:check` clean.
+- Live check: the dev Electron build on a state file in the current-version shape (two tenants, Woodgrove Bank active, two schedules, three runs, a saved custom registration, two references, a Teams delivery rule) with Anthropic through the Claude Code CLI, model `claude-sonnet-5`. Read gave two organizations named after the tenants, both schedules on Woodgrove Bank with the notice, runs on their tenants, and an untouched file; the first write saved it. With No organization, Find inactive devices was refused with the designed message, and Team PowerShell draft completed on `claude-sonnet-5` with no tenant. Screenshots in `docs/screenshots/organizations/`.
+- Not verified here: a real Microsoft sign-in and Graph calls (no tenant tokens on the test profile), and Agent Team persona schedules, which keep their own tenant binding.
+- Open: hosted provider region source for the reach map (`TODO(ugur)` in `apps/desktop/src/copy/connections.ts`).
 
 ## Design review (2026-11-08)
 
