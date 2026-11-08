@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { useLocation, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { SETUP_COPY } from "../copy";
 import { useToast } from "../components/Toast";
 import { isProviderImplemented } from "../shared/providers";
@@ -34,20 +34,22 @@ interface SetupFlowValue {
   requireTenantAndProvider(intent?: PendingIntent): boolean;
   /** Opens tenant setup on the sign-in choice with neither app chosen. */
   openSetup(): void;
+  /**
+   * Opens tenant setup with the service parts an entry point names
+   * preselected, such as the not-connected card in Chat. The app choice
+   * stays open.
+   */
+  openSetupForParts(partIds: readonly string[]): void;
   /** Opens tenant setup with "Your own app registration" chosen. */
   openOwnRegistration(): void;
   /** Adds or reopens the pilot tenant and makes it active. */
   startPilot(): Promise<void>;
-  /** True while the first-launch welcome view replaces the shell. */
-  welcomeOpen: boolean;
-  dismissWelcome(): void;
 }
 
 const SetupFlowContext = createContext<SetupFlowValue | null>(null);
 
 export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const navigate = useNavigate();
-  const location = useLocation();
   const toast = useToast();
   const {
     state,
@@ -67,11 +69,11 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const [error, setError] = useState<string | null>(null);
   const [connectedTenant, setConnectedTenant] = useState<TenantRecord | undefined>();
   const [pilotRemoved, setPilotRemoved] = useState(false);
-  const [welcomeOpen, setWelcomeOpen] = useState(false);
   // Options of the last sign-in attempt, so "Try again" and "Change
   // sign-in options" never switch the admin to a different app.
   const lastOptionsRef = useRef<ConnectTenantOptions | undefined>(undefined);
   const [editOptions, setEditOptions] = useState<ConnectTenantOptions | undefined>();
+  const [presetPartIds, setPresetPartIds] = useState<readonly string[] | undefined>();
   const attemptIdRef = useRef(0);
   const restoredRef = useRef(false);
 
@@ -131,12 +133,13 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   }, [getRequestedScopes]);
 
   const beginFlow = useCallback(
-    (nextIntent: PendingIntent | null, requestedStage?: SetupStage) => {
+    (nextIntent: PendingIntent | null, requestedStage?: SetupStage, partIds?: readonly string[]) => {
       attemptIdRef.current += 1;
       setIntent(nextIntent);
       setError(null);
       setPilotRemoved(false);
       setEditOptions(undefined);
+      setPresetPartIds(partIds && partIds.length > 0 ? partIds : undefined);
       lastOptionsRef.current = undefined;
       setConnectedTenant(activeTenant);
       if (nextIntent) writePendingIntent(nextIntent);
@@ -163,26 +166,11 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (loading || restoredRef.current) return;
     restoredRef.current = true;
+    // A restored pending intent reopens its setup. Nothing else opens on
+    // its own: a fresh install starts in Chat, which needs only a model.
     const restored = readPendingIntent();
-    if (restored) {
-      beginFlow(restored);
-      return;
-    }
-    // First launch: a full-window welcome offers pilot mode or production
-    // before any Microsoft sign-in. It appears at most once per renderer
-    // launch and "Skip for now" leaves the guest shell.
-    if (
-      window.openAdminOS &&
-      state.tenants.length === 0 &&
-      !location.pathname.startsWith("/companion")
-    ) {
-      setWelcomeOpen(true);
-    }
-  }, [beginFlow, loading, location.pathname, state.tenants.length]);
-
-  useEffect(() => {
-    if (state.tenants.length > 0) setWelcomeOpen(false);
-  }, [state.tenants.length]);
+    if (restored) beginFlow(restored);
+  }, [beginFlow, loading]);
 
   useEffect(() => {
     if (!open || stage !== "waiting") return;
@@ -221,11 +209,14 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   );
 
   const openSetup = useCallback(() => beginFlow(null, "permissions"), [beginFlow]);
+  const openSetupForParts = useCallback(
+    (partIds: readonly string[]) => beginFlow(null, "permissions", partIds),
+    [beginFlow],
+  );
   const openOwnRegistration = useCallback(
     () => beginFlow(null, "own-registration"),
     [beginFlow],
   );
-  const dismissWelcome = useCallback(() => setWelcomeOpen(false), []);
 
   const closeFlow = useCallback(() => {
     const wasWaiting = stage === "waiting" || stage === "timeout";
@@ -278,7 +269,6 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     setOpen(false);
     setError(null);
     clearPendingIntent();
-    setWelcomeOpen(false);
     navigate("/chat");
   }, [addSampleTenant, navigate]);
 
@@ -351,12 +341,11 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       requireTenant,
       requireTenantAndProvider,
       openSetup,
+      openSetupForParts,
       openOwnRegistration,
       startPilot,
-      welcomeOpen,
-      dismissWelcome,
     }),
-    [dismissWelcome, openOwnRegistration, openSetup, requireTenant, requireTenantAndProvider, startPilot, welcomeOpen],
+    [openOwnRegistration, openSetup, openSetupForParts, requireTenant, requireTenantAndProvider, startPilot],
   );
 
   return (
@@ -375,6 +364,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         activeProviderId={state.activeProviderId}
         savedRegistrations={state.savedAppRegistrations ?? []}
         {...(editOptions ? { editOptions } : {})}
+        {...(presetPartIds ? { presetPartIds } : {})}
         onClose={closeFlow}
         onConnect={(options) => void startConnect(options)}
         pilotRemoved={pilotRemoved}

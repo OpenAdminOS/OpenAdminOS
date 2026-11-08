@@ -76,6 +76,7 @@ export function TenantSetupDialog({
   activeProviderId,
   savedRegistrations = [],
   editOptions,
+  presetPartIds,
   onClose,
   onConnect,
   pilotRemoved = false,
@@ -100,6 +101,8 @@ export function TenantSetupDialog({
   savedRegistrations?: SavedAppRegistration[];
   /** Options of the attempt the admin returned to edit after an error. */
   editOptions?: ConnectTenantOptions;
+  /** Service parts an entry point named; preselected, the app choice stays open. */
+  presetPartIds?: readonly string[];
   onClose: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
   /** True after a connect that ended pilot mode and removed its data. */
@@ -136,6 +139,7 @@ export function TenantSetupDialog({
           onConnect={onConnect}
           {...(stage === "own-registration" ? { initialChoice: "own" as const } : {})}
           {...(editOptions ? { initialOptions: editOptions } : {})}
+          {...(presetPartIds ? { presetPartIds } : {})}
         />
       )}
       {stage === "waiting" && <WaitingStep onCancel={onClose} />}
@@ -208,6 +212,7 @@ function PermissionsStep({
   onConnect,
   initialChoice,
   initialOptions,
+  presetPartIds,
 }: {
   intent: PendingIntent | null;
   agentName?: string;
@@ -220,6 +225,12 @@ function PermissionsStep({
   initialChoice?: SignInChoice;
   /** The options of an attempt the admin returns to after an error. */
   initialOptions?: ConnectTenantOptions;
+  /**
+   * Parts an entry point named, such as Intune devices from Chat's
+   * not-connected card. They are preselected; the app choice is not, so
+   * this is the one exception to "no service is preselected" (SPEC.md 4a).
+   */
+  presetPartIds?: readonly string[];
 }) {
   const groups = useMemo(() => groupRequestedScopes(scopes ?? []), [scopes]);
   const initialRegistration = initialOptions?.appRegistration;
@@ -246,7 +257,7 @@ function PermissionsStep({
   const [selectedPartIds, setSelectedPartIds] = useState<Set<string>>(
     () =>
       new Set(
-        (initialOptions?.partIds ?? []).filter((partId) => {
+        (initialOptions?.partIds ?? presetPartIds ?? []).filter((partId) => {
           const part = servicePartById(partId);
           return Boolean(part && !part.planned);
         }),
