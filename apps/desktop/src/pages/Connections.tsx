@@ -782,7 +782,7 @@ export default function Connections() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const { state, removeSavedAppRegistration } = useAppState();
+  const { state, loading, removeSavedAppRegistration } = useAppState();
   const { openSetup } = useSetupFlow();
   const reach = useMemo(() => buildReachModel(state), [state]);
   const organization = activeOrganizationOf(state);
@@ -811,6 +811,11 @@ export default function Connections() {
         }
       />
       <PageBody>
+        {loading ? (
+          <div role="status" className="calm-page-column-wide py-10 text-sm text-[var(--color-text-muted)]">
+            Loading connections
+          </div>
+        ) : (
         <div className="calm-page-column-wide pb-16">
           {!organization ? (
             <div role="status" className="mb-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
@@ -887,6 +892,7 @@ export default function Connections() {
             <SavedRegistrationsList registrations={savedRegistrations} onRemove={removeSavedAppRegistration} />
           ) : null}
         </div>
+        )}
       </PageBody>
     </>
   );
