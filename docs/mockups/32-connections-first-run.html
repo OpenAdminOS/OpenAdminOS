@@ -436,7 +436,7 @@
                   <div>Searched KQL Search for "failed sign-ins by user and result type" <span class="host">www.kqlsearch.com</span></div>
                   <div>Read SigninLogs schema on Microsoft Learn <span class="host">learn.microsoft.com</span></div>
                 </div>
-                <p>Failed sign-ins are rows in <code>SigninLogs</code> with a non-zero <code>ResultType</code>. This groups them per user and error, newest first:</p>
+                <p>Failed sign-ins are rows in <code>SigninLogs</code> with a non-zero <code>ResultType</code>. This groups them per user and error, largest groups first:</p>
 <pre>SigninLogs
 | where TimeGenerated > ago(24h)
 | where ResultType != "0"
