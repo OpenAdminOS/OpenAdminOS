@@ -1518,3 +1518,69 @@ GPT-6.1-Sol review of the whole diff at 6aa2c13. No blocking finding.
 ## Review round 5 (2026-11-05)
 
 GPT-6.1-Sol review of the whole diff at 47a4648: no blocking, important or minor findings. Both round 4 fixes held, including Check connection racing a call that opens a session.
+
+# Model first, services as connections (2026-11-08)
+
+Direction approved 2026-11-08 (SPEC §4a, "Decided 2026-11-08"). Design: `docs/mockups/32-connections-first-run.html`. Branch `design/connections-first-run` holds the design only; implementation gets its own branch off `main`.
+
+## Decisions (2026-11-08)
+
+- The shell scope is an organization that holds one Microsoft 365 tenant and one instance per other vendor service.
+- No-sign-in MCP servers are suggested on the empty Chat, never preinstalled.
+- Order: mockup, SPEC and public issue first, then implementation.
+
+## Acceptance criteria for the implementation
+
+1. A fresh install with a ready model opens Chat with no welcome screen and no setup dialog; with no ready model, Chat shows the inline model choice and a "Preview with sample data" link. Nothing else is required to send a message.
+2. With no organization, a docs question sends and is answered from the model, the local docs index and enabled public references; no Graph call and no sign-in prompt happen.
+3. A tenant or mixed question with no organization, or with the needed service not connected, returns the not-connected card naming the service, part and permissions, with Connect, own registration and send-to-admin actions. The draft is kept; after a connect the admin resumes explicitly.
+4. The empty Chat suggests public references with their hosts and none are installed by default. With a local model and no reference, the status strip says nothing leaves the device. With a hosted model, the strip and composer name the provider and its region before any reference is added, and add every reference host once one is.
+5. Organizations: created by the first connection, renamable, at most one Microsoft 365 tenant each; existing tenants migrate to one organization each with no loss of runs, conversations, cache, schedules, drift or registrations; the sample tenant becomes a labeled sample organization.
+6. The Connections page shows the reach map and per-service rows, merges Settings, Tenants and Settings, Connectors, and its lists match the status strip.
+7. Agents show their services and the action names what is missing. Only an agent that calls no service API (no Graph or vendor scopes, not even the sign-in scopes) runs without an organization; a test proves that an agent with `services: []` and only baseline scopes such as `User.Read` still needs an organization.
+8. Hard constraint 3 wording is updated in `CLAUDE.md` and `AGENTS.md`, and every `requireTenant` gate is reviewed against it with tests.
+9. Unit and renderer tests for each criterion, Playwright screenshots in light and dark, and a live check in the running app from a fresh profile.
+10. SPEC and CHANGELOG updated, separate evaluator and GPT-6.1-Sol review before merge.
+11. Each schedule belongs to one organization; migration moves existing schedules to the organization of the real tenant active at migration and says so; with no real tenant active (none, or pilot mode alongside real tenants) they stay paused and unassigned until the admin assigns them, never to the sample organization. Migration tests cover all three starting states, and a test proves a schedule never runs while another organization is active.
+12. The first hosted send without an organization asks for confirmation naming provider, model, region and what leaves; a test proves that acknowledgement is refused for a send with tenant context, and the first send in an organization asks again.
+13. A manual run without an organization opens the preflight, which names the services the agent needs; tests cover the Chat gate, hosted acknowledgement and preflight changes named in the SPEC block.
+
+## Out of scope
+
+Jamf Pro and Google Workspace connectors (separate issues; the mockup fixes the pattern only), MCP tools in agents, public catalog file.
+
+## Steps
+
+- [x] Mockup `32-connections-first-run.html`, checked at desktop and phone widths in light and dark
+- [x] SPEC §4a decision block, mockup table row, CHANGELOG line
+- [x] Public issue #171
+- [ ] Implementation plan with the `TenantRecord` to organization migration
+
+## Design review (2026-11-08)
+
+A separate design reviewer checked the mockup and SPEC block. Fixed: the reach map now lists every destination (references, result connectors, hosted provider) with a text alternative; strip strings and the MCP composer line match `apps/desktop/src/copy/trust.ts`; agents run without an organization only when they call no service API (`services: []` still allows sign-in scopes); the SPEC block names the rules it overrides; one primary action per view; starters use the registry's `chatExamples`; the admin request uses an admin consent link, and the consent role is Cloud Application Administrator (checked on Microsoft Learn); host text uses the higher-contrast token; the reach map collapses below 1180px; the real organization is no longer named like the pilot tenant; Jamf secret and partial states corrected.
+
+Open states for the implementation plan: connecting a tenant that already belongs to another organization; adding Microsoft 365 to a Jamf-only organization; hosted provider with no organization (shipped copy says "tenant context sent"); wording that says "tenant" today; model install progress and failure; a model too small for tool use while references are suggested; a reference offline or failing to install; pilot Chat once a model is ready; schedules while "No organization" is active; renaming and deleting an organization.
+
+## PR #173 review round 1 (GPT-6.1-Sol, 2026-11-08)
+
+1. [x] Blocking: criterion 4 said the strip reports nothing leaves until a reference is added, which is false with a hosted model. It now applies to local models only and requires the provider and region with a hosted model before and after references.
+2. [x] Criterion 7 kept the "declares no service" ambiguity. It now uses the SPEC condition and requires a test that `services: []` with baseline scopes still needs an organization.
+3. [x] The Connections page said every report send shows a preview, but saved delivery rules post automatically. The page, the reach map label and the SPEC block now say reports go out under saved delivery rules.
+4. [x] "References never receive tenant data" overstated the boundary. SPEC and mockup now say they receive no Graph or cache data, and private details typed into a question can reach them.
+5. [x] planned.md applied Microsoft-only rules to Jamf. Those rules are now scoped to Microsoft 365 services, with a Jamf paragraph on API client access; the website copy is regenerated.
+
+## PR #173 review round 2 (GPT-6.1-Sol, 2026-11-08)
+
+Round 1 fixes confirmed. No blocking findings.
+
+1. [x] SPEC and mockup said schedules are per tenant today; they belong to the agent and run against the active tenant (`state.ts` `fireDueSchedules`). Corrected, with schedule ownership, migration and isolation in the SPEC and criterion 11.
+2. [x] The SPEC block did not name the Chat tenant gate, the tenant-bound hosted-send acknowledgement or the manual-run preflight. Named; consent for a hosted send without an organization is defined, with criteria 12 and 13.
+3. [x] Jamf is OAuth client credentials (secret exchanged for an access token), not an API key. SPEC, mockup and planned.md corrected.
+
+## PR #173 review round 3 (GPT-6.1-Sol, 2026-11-08)
+
+Round 2 fixes confirmed. No blocking findings.
+
+1. [x] Schedule migration had no destination when no real tenant is active or pilot mode is active. Such schedules now stay paused and unassigned until the admin assigns them, never to the sample organization; criterion 11 requires migration tests for all three states.
+2. [x] The KQL example said "newest first" but sorts by failure count. Copy now says "largest groups first".
