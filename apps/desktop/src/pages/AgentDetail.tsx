@@ -2788,8 +2788,9 @@ function RunPreflightModal({
         ) : null}
         {!providerIsLocal && (
           <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-            Hosted provider selected. Tenant prompts and agent context are sent
-            through {providerName}'s local CLI and leave this device.
+            {activeTenant
+              ? `Hosted provider selected. Tenant prompts and agent context are sent through ${providerName}'s local CLI and leave this device.`
+              : `Hosted provider selected. Prompts and agent context are sent through ${providerName}'s local CLI and leave this device. No organization is active, so no tenant data is included.`}
           </div>
         )}
         {scopeBlockCopy && (

@@ -348,4 +348,22 @@ describe("preflight without an organization (review round 1)", () => {
     expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("No saved delivery rule sends its report.");
   });
 
+  it("uses no-organization wording for a hosted provider", async () => {
+    const draft = createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] });
+    const state = { ...noOrganizationState([draft]), activeProviderId: "openai" as const };
+    renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge: makeMockBridge({}, state) });
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(dialog).toHaveTextContent(/Prompts and agent context are sent through OpenAI.*No organization is active, so no tenant data is included\./);
+    expect(dialog).not.toHaveTextContent("Tenant prompts");
+  });
+
+  it("keeps the tenant wording for a hosted provider in an organization", async () => {
+    const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+    renderRoute(<Agents startRunOnOpen />, {
+      path: "/agents/:slug/confirm",
+      route: "/agents/devices/confirm",
+      bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "openai", installedAgents: [agent] })),
+    });
+    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Tenant prompts and agent context are sent through");
+  });
 });
