@@ -1584,3 +1584,16 @@ Round 2 fixes confirmed. No blocking findings.
 
 1. [x] Schedule migration had no destination when no real tenant is active or pilot mode is active. Such schedules now stay paused and unassigned until the admin assigns them, never to the sample organization; criterion 11 requires migration tests for all three states.
 2. [x] The KQL example said "newest first" but sorts by failure count. Copy now says "largest groups first".
+
+## Part A implementation: Chat without sign-in (2026-11-08)
+
+Branch `first-run/without-sign-in`. Criteria 1, 2, 3, 4 and 12 above; part B (organizations, Connections, agents, schedules, hard constraint 3, preflight) is a separate branch. The scope is still a tenant in this part.
+
+- [x] Remove the first-launch welcome; Chat opens with nothing configured and no dialog opens on its own (criterion 1)
+- [x] Inline model choice in Chat when no model is ready, with "Preview with sample data" (criterion 1)
+- [x] Chat sends with a model and no tenant; docs questions answer with no Graph call (criterion 2)
+- [x] Not-connected card in the transcript for tenant and mixed questions with no tenant or with the service not connected; Connect preselects the service part, own registration, ask an admin (criterion 3)
+- [x] Empty Chat starters labeled Works now or Needs a service, reference suggestions with hosts, strip and composer name the provider and region (criterion 4)
+- [x] Hosted send without a tenant asks for its own confirmation, bound in main to no tenant plus provider and refused with tenant context (criterion 12)
+- [x] First-launch model scan screen (scope change from the maintainer, 2026-11-09): parallel local-only checks with timeouts and Retry, outcome under the provider rules, Scan again in Settings, Providers; mockup 32 section B updated
+- [x] Renderer and main tests per criterion, screenshots light and dark, SPEC, CHANGELOG, docs

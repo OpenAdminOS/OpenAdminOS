@@ -1,16 +1,39 @@
 ---
 title: "First run"
-description: "What happens the first time OpenAdminOS starts: pilot mode or production."
+description: "What happens the first time OpenAdminOS starts: a scan for models on this device, then Chat."
 ---
 
 # First Run
 
-The first time OpenAdminOS starts, it offers two ways in:
+The first time OpenAdminOS starts, it checks this device for AI models before anything else. There is no sign-in to start with: Chat only needs a model.
 
-- **Start in pilot mode**: explore a fictional company's tenant right away. No Microsoft sign-in and no AI setup.
-- **Connect your tenant**: production. Sign in with Microsoft and approve read access once, then ask anything about your own tenant and use every agent.
+## The Model Scan
 
-If your organization blocks third-party applications, use the link under Connect to sign in with your own app registration. See [Authentication and permissions](../trust/authentication.md).
+One screen checks, all at once:
+
+- **Ollama**: installed, running, which models, and whether OpenAdmin 8B is pulled.
+- **LM Studio**: installed, server running, loaded models.
+- **Apple Intelligence** on a compatible Mac.
+- **Claude Code** and **Codex**: installed and signed in.
+- **GitHub Copilot CLI**, **Gemini CLI**, and a saved **Azure OpenAI** deployment.
+
+Each row shows what it checks (for example `localhost:11434` or `claude auth status`) and resolves to found, not found, or could not check. A check that does not answer within 2.5 seconds shows **Retry**. The scan reads local files and loopback ports and runs each CLI's own version and sign-in status command. It sends no prompt to any provider, and an Ollama or LM Studio endpoint on another machine is not contacted.
+
+What happens next follows the provider rules:
+
+- A ready local model is selected for you, OpenAdmin 8B when it is pulled. Nothing leaves your device.
+- A signed-in hosted tool, such as Claude Code, is offered with where prompts go (for example "Anthropic API · US"). It is never selected for you; choose it with one click.
+- With nothing found, the screen offers OpenAdmin 8B (`ollama run openadminos/openadmin-8b`) and all providers.
+
+**Preview with sample data** opens pilot mode instead. You can run the scan again from **Settings, Providers**.
+
+## Chat Without a Tenant
+
+Chat then opens with nothing connected. Questions about products, KQL, PowerShell and documentation are answered from the model, the local docs index and any public references you add. A question about your own devices or users answers with a card that names the service it needs (for example Intune), the exact read permissions, and three ways forward: **Connect**, **Use our own app registration**, or **Ask an admin to approve**, which copies a message with the admin consent link. No tenant data is read, your question is kept, and after connecting you choose **Ask again**.
+
+The empty Chat suggests public references such as Microsoft Learn, each with the host it sends question words to. None is added until you add it through the Marketplace install review.
+
+With a hosted model and nothing connected, the first question asks you to confirm: it names the provider, model and region, and says that the question, the conversation and reference results leave the device, with no tenant data. The first question after you connect a tenant asks again with the tenant-bound confirmation.
 
 ## Pilot Mode
 
@@ -28,9 +51,9 @@ When you connect your tenant, the pilot data is removed and the app switches to 
 
 ## Connecting Your Tenant
 
-When you connect, or try a tenant-backed action without an active tenant:
+When you connect from Chat's card, the tenant switcher or Settings, or start an agent without an active tenant:
 
-1. Review the read-only Microsoft Graph permissions, grouped by area.
+1. Choose the app that signs in (the OpenAdminOS app or your own app registration), then review the read-only Microsoft Graph permissions by service. See [Authentication and permissions](../trust/authentication.md).
 2. Complete Microsoft sign-in in your system browser.
 3. Pick or repair an LLM provider if the action needs one.
 4. Review and explicitly resume the original action.

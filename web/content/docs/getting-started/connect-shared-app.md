@@ -9,7 +9,7 @@ The OpenAdminOS app is a published multi-tenant app registration with client ID 
 
 ## Choose Services
 
-1. Start connecting a tenant from the welcome screen, the tenant menu, Settings, Tenants, the pilot mode banner, or any action that needs a tenant. They all open the same dialog.
+1. Start connecting a tenant from Chat's not-connected card, the tenant menu, Settings, Tenants, the pilot mode banner, or any action that needs a tenant. They all open the same dialog.
 2. Choose **OpenAdminOS app**.
 3. Under **Services**, select at least one of Intune, Entra and Defender. Nothing is preselected.
 4. Expand a service to review its parts, each exact Microsoft Graph scope, and why it is needed. Clear the parts your team should not read. A service checkbox shows a mixed state when only some of its parts are selected.
