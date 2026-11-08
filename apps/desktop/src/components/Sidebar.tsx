@@ -19,7 +19,8 @@ import { isNightlyVersion } from "../shared/update-channel";
 import { SHORTCUTS, shortcutLabel } from "../shared/shortcuts";
 import { openNovaPanel } from "../shared/nova-panel";
 import { PILOT_COPY } from "../shared/pilot-mode";
-import { userFacingErrorReason } from "../copy";
+import { ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
+import { resolveOrganizations } from "../shared/openAdminOS";
 import {
   IconActivity,
   IconAgentTeam,
@@ -30,6 +31,7 @@ import {
   IconChevronDown,
   IconChevronRight,
   IconCommand,
+  IconConnectors,
   IconDownload,
   IconHardDrive,
   IconLogo,
@@ -191,7 +193,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     controls[next]?.focus();
   };
 
-  // Pilot mode is a guided tour: Chat, Agents, Marketplace, Runs, and Settings only.
+  // Pilot mode is a guided tour: Chat, Agents, Marketplace, Connections, Runs, and Settings only.
   const pilot = activeTenant?.kind === "sample";
   const nav: NavItem[] = [
     ...(pilot
@@ -207,6 +209,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
         }]),
     { to: "/agents", label: "Agents", icon: <IconAgents size={14} /> },
     { to: "/marketplace", label: "Marketplace", icon: <IconMarketplace size={14} /> },
+    { to: "/connections", label: "Connections", icon: <IconConnectors size={14} /> },
     { to: "/runs", label: "Runs", icon: <IconActivity size={14} />, count: reviewCount || undefined },
     ...(pilot ? [] : [{ to: "/changes", label: "Changes", icon: <IconChanges size={14} /> }]),
   ];
@@ -397,7 +400,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
               <button type="button" onClick={() => void retry()} className="mt-1 inline-flex items-center gap-1 rounded-[4px] font-medium hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)]"><IconRefresh size={10} /> Retry</button>
             </div>
           ) : null}
-          <AccountRow activeTenant={activeTenant} tenantCount={state.tenants.length} nightly={isNightlyVersion(state.appVersion)} />
+          <AccountRow activeTenant={activeTenant} organizationCount={resolveOrganizations(state).length} nightly={isNightlyVersion(state.appVersion)} />
         </div>
       </div>
     </aside>
@@ -560,11 +563,11 @@ function ConversationRow({
 
 function AccountRow({
   activeTenant,
-  tenantCount,
+  organizationCount,
   nightly,
 }: {
   activeTenant: ReturnType<typeof useAppState>["state"]["tenants"][number] | undefined;
-  tenantCount: number;
+  organizationCount: number;
   nightly: boolean;
 }) {
   const navigate = useNavigate();
@@ -588,11 +591,11 @@ function AccountRow({
           <button type="button" className="flex min-h-11 w-full items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 text-left hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]">
             <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-raised)] text-xs font-semibold text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">{initials}</span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-medium text-[var(--color-text)]">{activeTenant?.username ?? "No tenant"}</span>
+              <span className="block truncate text-sm font-medium text-[var(--color-text)]">{activeTenant?.username ?? ORGANIZATION_COPY.noOrganization}</span>
               <span className="block text-xs text-[var(--color-text-muted)]">
                 {activeTenant?.kind === "sample"
                   ? PILOT_COPY.modeName
-                  : `${tenantCount} tenant${tenantCount === 1 ? "" : "s"}`}
+                  : `${organizationCount} organization${organizationCount === 1 ? "" : "s"}`}
               </span>
             </span>
             <IconChevronRight size={11} className="text-[var(--color-text-muted)]" />
@@ -600,7 +603,7 @@ function AccountRow({
         }
         items={[
           { id: "settings", label: `Settings (${shortcutLabel("settings")})`, icon: <IconSettings size={12} />, onSelect: () => navigate("/settings") },
-          { id: "tenants", label: "Tenants", onSelect: () => navigate("/settings/tenants") },
+          { id: "connections", label: "Connections", onSelect: () => navigate("/connections") },
           { id: "voice", label: "Voice (Alt+V)", icon: <IconSparkle size={12} />, onSelect: openNovaPanel },
           { id: "shortcuts", label: "Keyboard shortcuts", onSelect: () => setShortcutsOpen(true) },
           { type: "separator", id: "about-separator" },

@@ -2,7 +2,7 @@ import { useNavigate } from "react-router";
 
 import { useDataBoundary, useShellChrome } from "../state";
 import { IconChat, IconChevronRight, IconCloud, IconLock, IconSettings } from "./icons";
-import { TenantSwitcher } from "./TenantSwitcher";
+import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { Tooltip } from "./ui";
 
 export function TopBar() {
@@ -18,7 +18,7 @@ export function TopBar() {
 
   return (
     <header
-      aria-label="Current tenant, provider, and data boundary"
+      aria-label="Current organization, provider, and data boundary"
       className={`app-topbar relative flex h-[52px] shrink-0 items-center border-b border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 ${draggable ? "app-region-drag" : ""}`}
       style={platform === "windows" ? { paddingRight: 140 } : undefined}
     >
@@ -47,7 +47,7 @@ export function TopBar() {
             </Tooltip>
           </>
         ) : null}
-        <TenantSwitcher />
+        <OrganizationSwitcher />
       </div>
       <div ref={setTitleTarget} className="app-region-no-drag pointer-events-auto min-w-0 flex-1 truncate px-4 text-center text-sm font-medium text-[var(--color-text-soft)]" />
       <div className="flex min-w-0 shrink items-center gap-2">

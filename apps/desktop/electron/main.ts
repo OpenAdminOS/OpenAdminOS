@@ -1234,11 +1234,11 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Settings",
     },
     {
-      route: "/settings/connectors",
+      route: "/connections",
       name: "settings-connectors",
       file: "app/settings-connectors.png",
-      waitFor: ["Settings", "Connectors"],
-      heading: "Connectors",
+      waitFor: ["connections", "Results go to"],
+      heading: "connections",
     },
   ];
 
@@ -1248,7 +1248,7 @@ async function runScreenshotCapture(): Promise<void> {
       { route: "/office", name: "agent-team", waitFor: ["Agent Team", "Review inbox"] },
       { route: "/changes?scope=all", name: "fleet", waitFor: ["Changes"] },
       { route: "/chat?panel=workspaces", name: "workspaces", waitFor: ["Workspaces"] },
-      { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
+      { route: "/connections", name: "connectors", waitFor: ["Results go to"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
       { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Library"] },
       { route: "/settings/appearance", name: "appearance", waitFor: ["Midnight"] },

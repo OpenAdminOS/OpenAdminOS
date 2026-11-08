@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   ActivityRedirect,
   AgentsQueryRedirect,
+  ConnectionsRedirect,
   FleetRedirect,
   LegacyConnectorRedirect,
   LegacySettingsRedirect,
@@ -143,19 +144,32 @@ describe("legacy Settings routes", () => {
     );
   });
 
-  it("redirects connector deep links to the matching Settings drawer", async () => {
+  it("redirects connector deep links to the matching drawer on Connections", async () => {
     renderWithAppState(
       <Routes>
         <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
-        <Route path="/settings/connectors" element={<LocationProbe />} />
+        <Route path="/connections" element={<LocationProbe />} />
       </Routes>,
       { route: "/connectors/slack?from=agent#permissions" },
     );
 
     expect(await screen.findByTestId("location")).toHaveTextContent(
-      "/settings/connectors?from=agent&connector=slack#permissions",
+      "/connections?from=agent&connector=slack#permissions",
     );
   });
+
+  for (const legacy of ["/connectors", "/settings/connectors", "/settings/tenants"]) {
+    it(`redirects ${legacy} to Connections and keeps the connector drawer`, async () => {
+      renderWithAppState(
+        <Routes>
+          <Route path={legacy} element={<ConnectionsRedirect />} />
+          <Route path="/connections" element={<LocationProbe />} />
+        </Routes>,
+        { route: `${legacy}?connector=teams&target=x#delivery` },
+      );
+      expect(await screen.findByTestId("location")).toHaveTextContent("/connections?connector=teams#delivery");
+    });
+  }
 });
 
 describe("legacy fleet route", () => {

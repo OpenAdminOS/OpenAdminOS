@@ -1265,7 +1265,7 @@ export default function Changes() {
               }}
               onRunTenantCompare={() => void handleTenantCompare()}
               onSelectTenantEntry={setSelectedTenantCompareEntry}
-              onOpenTenantSettings={() => navigate("/settings/tenants")}
+              onOpenTenantSettings={() => navigate("/connections")}
             />
           ) : error ? (
             <EmptyState

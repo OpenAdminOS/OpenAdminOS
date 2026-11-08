@@ -655,21 +655,27 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
   const renameOrganization = useCallback(async (id: string, name: string) => {
     const api = getOpenAdminOSApi();
     if (!api) throw new Error("Organizations are unavailable in browser development.");
-    const nextState = await api.renameOrganization(id, name);
+    const nextState = await api.renameOrganization(id, name).catch((caught: unknown) => {
+      throw toError(caught);
+    });
     setState(nextState);
   }, []);
 
   const assignAgentSchedule = useCallback(async (slug: string, organizationId: string) => {
     const api = getOpenAdminOSApi();
     if (!api) throw new Error("Schedules are unavailable in browser development.");
-    const nextState = await api.assignAgentSchedule(slug, organizationId);
+    const nextState = await api.assignAgentSchedule(slug, organizationId).catch((caught: unknown) => {
+      throw toError(caught);
+    });
     setState(nextState);
   }, []);
 
   const dismissOrganizationMigrationNotice = useCallback(async () => {
     const api = getOpenAdminOSApi();
     if (!api) throw new Error("Schedules are unavailable in browser development.");
-    const nextState = await api.dismissOrganizationMigrationNotice();
+    const nextState = await api.dismissOrganizationMigrationNotice().catch((caught: unknown) => {
+      throw toError(caught);
+    });
     setState(nextState);
   }, []);
 

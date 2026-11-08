@@ -2,7 +2,7 @@ import { THEMES, useAppearance } from "../styles/appearance";
 import { useAnswerFont } from "../styles/answer-font";
 import { useDensity } from "../styles/density";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
-import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
+import { Navigate, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { PageHeader } from "../components/AppShell";
 import { Select } from "../components/Select";
 import { Card } from "../components/Card";
@@ -15,7 +15,6 @@ import {
   IconCheck,
   IconChat,
   IconCloud,
-  IconConnectors,
   IconExternal,
   IconHardDrive,
   IconHash,
@@ -26,23 +25,14 @@ import {
   IconSettings,
   IconShield,
   IconSparkle,
-  IconUsers,
   IconWarning,
 } from "../components/icons";
-import { TenantTile } from "../components/TenantTile";
 import {
   DEFAULT_DRIFT_RETENTION_DAYS,
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_DAYS,
   DEFAULT_RUN_HISTORY_RETENTION_KEEP_LAST_RUNS,
   resolveProviderDefaultModel,
   DEFAULT_AZURE_OPENAI_API_VERSION,
-  AVAILABLE_SERVICES,
-  SERVICE_PARTS,
-  grantedParts,
-  grantedScopeSet,
-  partLabel,
-  serviceStatus,
-  type ServiceId,
   type AuditLogExportFormat,
   type AzureOpenAIProviderConfig,
   type ChatInvestigationMode,
@@ -60,7 +50,6 @@ import {
   type RetrievalStatus,
   type RunHistoryPruneResult,
   type RunHistoryRetentionSettings,
-  type SavedAppRegistration,
   type SandboxSettings,
   type SchedulerLaunchSettings,
   type SelfTrainingSettings,
@@ -74,7 +63,6 @@ import {
 } from "../shared/openAdminOS";
 import { UPDATE_UNAVAILABLE_DETAIL, isNightlyVersion } from "../shared/update-channel";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { savedRegistrationName, tenantRegistrationSummary } from "../shared/app-registration";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
@@ -84,37 +72,17 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import {
   SETTINGS_ITEMS,
   SETTINGS_SECTIONS,
-  SERVICE_COPY,
-  SETUP_COPY,
+  SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS,
   searchSettings,
   userFacingErrorReason,
   type SettingsItemId,
   type SettingsSectionId,
 } from "../copy";
 import { DataSettingsSection } from "./Cache";
-import { ConnectorsSettingsSection } from "./Connectors";
-import { PilotProductionPage } from "../components/PilotMode";
-import { useToast } from "../components/Toast";
-import {
-  ServiceAccessDialog,
-  TenantCheckResultLine,
-  TenantCheckStatus,
-  TenantLicensesNotChecked,
-  TenantProbeWarning,
-  ServiceStatusBadge,
-  checkAgainResult,
-  licensesNotChecked,
-  tenantCheckButtonLabel,
-  useTenantCheck,
-  usesOwnRegistration,
-} from "../components/ServiceAccess";
-import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   Badge,
   Button as UiButton,
-  IconButton,
   KeyValue,
-  Menu,
   SegmentedControl,
   Switch,
 } from "../components/ui";
@@ -138,10 +106,8 @@ const OFFICIAL_REGISTRY_SOURCE =
 function settingsSectionIcon(section: SettingsSectionId) {
   switch (section) {
     case "providers": return <IconCloud size={14} />;
-    case "tenants": return <IconUsers size={14} />;
     case "data": return <IconHardDrive size={14} />;
     case "chat": return <IconChat size={14} />;
-    case "connectors": return <IconConnectors size={14} />;
     case "gateway": return <IconHash size={14} />;
     case "general": return <IconSettings size={14} />;
     case "appearance": return <IconSparkle size={14} />;
@@ -198,23 +164,12 @@ export default function Settings() {
     state,
     setActiveProvider,
     setActiveModel,
-    setActiveTenant,
-    disconnectTenant,
-    removeSavedAppRegistration,
     setRegistrySource,
     setRegistryInstallCountsEnabled,
     setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
-  const { openSetup, startPilot } = useSetupFlow();
-  const toast = useToast();
-  const pilot = state.tenants.some(
-    (tenant) => tenant.id === state.activeTenantId && tenant.kind === "sample",
-  );
-  // Connectors are a production feature; pilot mode hides the section.
-  const settingsSections = pilot
-    ? SETTINGS_SECTIONS.filter((entry) => entry.id !== "connectors")
-    : SETTINGS_SECTIONS;
+  const settingsSections = SETTINGS_SECTIONS;
 
   useEffect(() => {
     if (SETTINGS_SECTIONS.some((entry) => entry.id === sectionParam)) {
@@ -323,15 +278,6 @@ export default function Settings() {
     return new Set<SettingsSectionId>(settingsResults.map((result) => result.section));
   }, [settingsQuery, settingsResults]);
 
-  const updateConnectorRoute = (connectorId: string | null) => {
-    const next = new URLSearchParams(location.search);
-    next.delete("target");
-    if (connectorId) next.set("connector", connectorId);
-    else next.delete("connector");
-    const query = next.toString();
-    navigate(`/settings/connectors${query ? `?${query}` : ""}`, { replace: true });
-  };
-
   const onSettingsSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "ArrowDown") {
       event.preventDefault();
@@ -359,12 +305,20 @@ export default function Settings() {
     }
   };
 
-  if (pilot && sectionParam === "connectors") {
+  // Settings, Tenants and Settings, Connectors moved to Connections. A
+  // legacy `?section=` link lands there with its connector deep link kept.
+  if (
+    sectionParam &&
+    (SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS as readonly string[]).includes(sectionParam)
+  ) {
+    const query = new URLSearchParams(location.search);
+    query.delete("section");
+    query.delete("target");
     return (
-      <>
-        <PageHeader title="Settings" wide />
-        <PilotProductionPage feature="Connectors" plural />
-      </>
+      <Navigate
+        to={{ pathname: "/connections", search: query.toString() ? `?${query.toString()}` : "", hash: location.hash }}
+        replace
+      />
     );
   }
 
@@ -487,52 +441,11 @@ export default function Settings() {
                 onProviderConfigSaved={refresh}
               />
             </SettingsPageSection>
-            <SettingsPageSection
-              id="tenants"
-              visible={visibleSectionIds.has("tenants")}
-              query={settingsQuery}
-              action={
-                <div className="flex items-center gap-2">
-                  {pilot ? null : (
-                    <UiButton
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        void startPilot().catch((caught) =>
-                          toast.error(
-                            `Pilot mode did not open. ${caught instanceof Error ? userFacingErrorReason(caught.message) ?? "" : ""} Try again from Connections.`.replace(/\s+/g, " "),
-                          ),
-                        );
-                      }}
-                    >
-                      {PILOT_COPY.openAction}
-                    </UiButton>
-                  )}
-                  <UiButton variant="primary" size="sm" onClick={() => openSetup()}>Connect tenant</UiButton>
-                </div>
-              }
-            >
-              <TenantsSection
-                tenants={state.tenants}
-                activeTenantId={state.activeTenantId}
-                error={null}
-                savedRegistrations={state.savedAppRegistrations ?? []}
-                onSetActive={setActiveTenant}
-                onDisconnect={disconnectTenant}
-                onRemoveSavedRegistration={removeSavedAppRegistration}
-              />
-            </SettingsPageSection>
             <SettingsPageSection id="data" visible={visibleSectionIds.has("data")} query={settingsQuery}>
               <DataSettingsSection />
             </SettingsPageSection>
             <SettingsPageSection id="chat" visible={visibleSectionIds.has("chat")} query={settingsQuery}>
               <ChatSettingsSectionV2 />
-            </SettingsPageSection>
-            <SettingsPageSection id="connectors" visible={!pilot && visibleSectionIds.has("connectors")} query={settingsQuery}>
-              <ConnectorsSettingsSection
-                connectorId={searchParams.get("connector")}
-                onConnectorChange={updateConnectorRoute}
-              />
             </SettingsPageSection>
             <SettingsPageSection id="gateway" visible={visibleSectionIds.has("gateway")} query={settingsQuery}>
               <GatewaySection tenants={state.tenants} activeTenantId={state.activeTenantId} />
@@ -1207,423 +1120,6 @@ function providerInstallGuideUrl(providerId: ProviderId): string | undefined {
     default:
       return undefined;
   }
-}
-
-function TenantsSection({
-  tenants,
-  activeTenantId,
-  error,
-  savedRegistrations,
-  onSetActive,
-  onDisconnect,
-  onRemoveSavedRegistration,
-}: {
-  tenants: TenantRecord[];
-  activeTenantId?: string;
-  error: string | null;
-  savedRegistrations: SavedAppRegistration[];
-  onSetActive: (id: string) => Promise<void>;
-  onDisconnect: (id: string) => Promise<void>;
-  onRemoveSavedRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
-}) {
-  return (
-    <div className="max-w-[1040px]">
-      {error && (
-        <div className="mb-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-          {userFacingErrorReason(error) ??
-            "The tenant connection could not be updated. Review the sign-in state, then try again."}
-        </div>
-      )}
-
-      <div className="overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
-        {tenants.length === 0 ? (
-          <div className="p-5 text-base text-[var(--color-text-muted)]">
-              No tenants connected. Use the button above to sign in with
-              your Microsoft 365 admin account.
-          </div>
-        ) : (
-          tenants.map((tenant) => (
-            <TenantRow
-              key={tenant.id}
-              tenant={tenant}
-              isActive={tenant.id === activeTenantId}
-              onSetActive={onSetActive}
-              onDisconnect={onDisconnect}
-            />
-          ))
-        )}
-      </div>
-      {savedRegistrations.length > 0 && (
-        <SavedRegistrationsList
-          registrations={savedRegistrations}
-          onRemove={onRemoveSavedRegistration}
-        />
-      )}
-    </div>
-  );
-}
-
-function SavedRegistrationsList({
-  registrations,
-  onRemove,
-}: {
-  registrations: SavedAppRegistration[];
-  onRemove: (clientId: string, directoryTenantId?: string) => Promise<void>;
-}) {
-  const toast = useToast();
-  const [removing, setRemoving] = useState<string | null>(null);
-  const [removeError, setRemoveError] = useState<string | null>(null);
-  return (
-    <section aria-labelledby="saved-app-registrations-heading" className="mt-6">
-      <h3 id="saved-app-registrations-heading" className="text-base font-medium text-[var(--color-text)]">
-        {SETUP_COPY.savedRegistrationsSettingsTitle}
-      </h3>
-      <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">
-        {SETUP_COPY.savedRegistrationsSettingsBody}
-      </p>
-      {removeError && (
-        <div role="alert" className="mt-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-          {removeError}
-        </div>
-      )}
-      <div className="mt-3 overflow-hidden rounded-[10px] bg-[var(--color-surface)] ring-1 ring-[var(--color-border)]">
-        {registrations.map((entry) => {
-          const key = `${entry.clientId}|${entry.directoryTenantId ?? ""}`;
-          const name = savedRegistrationName(entry);
-          return (
-            <div
-              key={key}
-              className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-soft)] px-4 py-[var(--row-y)] last:border-b-0"
-            >
-              <div className="min-w-[220px] flex-1">
-                <div className="truncate text-base text-[var(--color-text)]" title={name}>{name}</div>
-                <div className="mt-0.5 break-all font-mono text-xs text-[var(--color-text-muted)]">
-                  {entry.label ? `${entry.clientId} · ` : ""}
-                  {entry.directoryTenantId ?? "Multi-tenant"}
-                </div>
-              </div>
-              <UiButton
-                variant="ghost"
-                size="sm"
-                aria-label={SETUP_COPY.removeSavedRegistration(name)}
-                disabled={removing !== null}
-                onClick={() => {
-                  setRemoving(key);
-                  setRemoveError(null);
-                  void onRemove(entry.clientId, entry.directoryTenantId)
-                    .then(() => toast.success(SETUP_COPY.savedRegistrationRemoved))
-                    .catch((caught) =>
-                      setRemoveError(
-                        SETUP_COPY.removeSavedRegistrationFailed(
-                          userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
-                        ).replace(/\s+/g, " "),
-                      ),
-                    )
-                    .finally(() => setRemoving(null));
-                }}
-              >
-                {removing === key ? "Removing" : "Remove"}
-              </UiButton>
-            </div>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function TenantServices({
-  tenant,
-  onAdd,
-}: {
-  tenant: TenantRecord;
-  onAdd: (serviceId: ServiceId, partIds?: string[]) => void;
-}) {
-  const { refreshTenantGrants } = useAppState();
-  const ownRegistration = usesOwnRegistration(tenant);
-  const tenantCheck = useTenantCheck(tenant.id);
-  const [checkResult, setCheckResult] = useState<ReturnType<typeof checkAgainResult> | null>(null);
-  const grantedPartIds = new Set(grantedParts(tenant).map((part) => part.id));
-  return (
-    <section
-      aria-label={`${tenant.displayName} services`}
-      className="border-b border-[var(--color-border-soft)] bg-[var(--color-bg-raised)] px-4 py-3 last:border-b-0"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <span className="text-xs font-medium text-[var(--color-text-muted)]">
-          {SERVICE_COPY.servicesHeading}
-        </span>
-        {ownRegistration ? (
-          <UiButton
-            size="sm"
-            variant="secondary"
-            leadingIcon={<IconRefresh size={12} />}
-            disabled={tenantCheck.busy}
-            title={SERVICE_COPY.checkAgainHint}
-            onClick={() => {
-              setCheckResult(null);
-              void tenantCheck
-                .run(() => refreshTenantGrants(tenant.id))
-                .then((result) => setCheckResult(checkAgainResult(result, tenant.id)));
-            }}
-          >
-            {tenantCheck.running ? tenantCheckButtonLabel(tenantCheck.progress) : SERVICE_COPY.checkAgain}
-          </UiButton>
-        ) : null}
-      </div>
-      <TenantCheckResultLine result={checkResult} />
-      <ul className="mt-2 divide-y divide-[var(--color-border-soft)]">
-        {AVAILABLE_SERVICES.map((service) => {
-          const status = serviceStatus(tenant, service.id);
-          const parts = SERVICE_PARTS.filter((part) => part.service === service.id);
-          const missing = parts.filter((part) => !grantedPartIds.has(part.id));
-          const missingScopes = [
-            ...new Set(
-              missing.flatMap((part) => part.scopes.map((scope) => scope.name)),
-            ),
-          ].filter((name) => !grantedScopeSet(tenant).has(name));
-          return (
-            <li key={service.id} className="py-2.5">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="min-w-[72px] text-sm font-medium text-[var(--color-text)]">{service.title}</span>
-                <ServiceStatusBadge status={status} />
-                <span className="text-xs text-[var(--color-text-muted)]">
-                  {SERVICE_COPY.partsSummary(parts.length - missing.length, parts.length)}
-                </span>
-                {missing.length > 0 ? (
-                  <UiButton
-                    className="ml-auto"
-                    size="sm"
-                    variant="secondary"
-                    aria-label={
-                      ownRegistration
-                        ? SERVICE_COPY.addPermissionsTitle(service.title)
-                        : SERVICE_COPY.addAccessTitle(service.title)
-                    }
-                    disabled={tenantCheck.busy}
-                    onClick={() => onAdd(service.id)}
-                  >
-                    {ownRegistration ? "Add permissions" : "Add access"}
-                  </UiButton>
-                ) : null}
-              </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                {parts.map((part) =>
-                  grantedPartIds.has(part.id) ? (
-                    <span key={part.id} className="inline-flex items-center gap-1.5 text-xs text-[var(--color-text-soft)]">
-                      <StatusDot tone="success" />
-                      {part.title}
-                    </span>
-                  ) : (
-                    <button
-                      key={part.id}
-                      type="button"
-                      aria-label={SERVICE_COPY.addPartLabel(partLabel(part))}
-                      disabled={tenantCheck.busy}
-                      onClick={() => onAdd(service.id, [part.id])}
-                      className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:pointer-events-none disabled:opacity-50"
-                    >
-                      <StatusDot tone="muted" />
-                      {part.title}
-                    </button>
-                  ),
-                )}
-              </div>
-              {ownRegistration && missingScopes.length > 0 ? (
-                <p className="mt-1.5 break-words font-mono text-xs leading-5 text-[var(--color-text-muted)]">
-                  {SERVICE_COPY.missingPermissions(missingScopes)}
-                </p>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
-  );
-}
-
-function TenantRow({
-  tenant,
-  isActive,
-  onSetActive,
-  onDisconnect,
-}: {
-  tenant: TenantRecord;
-  isActive: boolean;
-  onSetActive: (id: string) => Promise<void>;
-  onDisconnect: (id: string) => Promise<void>;
-}) {
-  const { openSetup } = useSetupFlow();
-  const [confirmDisconnect, setConfirmDisconnect] = useState(false);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [disconnectError, setDisconnectError] = useState<string | null>(null);
-  const [access, setAccess] = useState<{ serviceId: ServiceId; partIds?: string[] } | null>(null);
-  const entraLicenseName =
-    tenant.entraTier && tenant.entraTier !== "unknown"
-      ? tenant.entraTier === "free"
-        ? "Microsoft Entra ID Free"
-        : `Microsoft Entra ID ${tenant.entraTier.toUpperCase()}`
-      : null;
-  // Synthesise the Entra tier as the first row of the license list.
-  // Technically derived from service plans inside SKUs (not a SKU
-  // itself) but an admin thinks of it as just another license they
-  // have, so surfacing it identically removes the artificial split.
-  const skuLicenses = tenant.relevantLicenses ?? [];
-  const licenses = entraLicenseName
-    ? [
-        {
-          skuPartNumber: `__entra_${tenant.entraTier}`,
-          displayName: entraLicenseName,
-        },
-        ...skuLicenses,
-      ]
-    : skuLicenses;
-  const domain = tenant.username.includes("@")
-    ? tenant.username.slice(tenant.username.lastIndexOf("@") + 1)
-    : tenant.username;
-  const registration = tenantRegistrationSummary(tenant);
-  return (
-    <>
-      <div className="flex flex-wrap items-center gap-3 border-b border-[var(--color-border-soft)] px-0 py-[var(--row-y)] last:border-b-0">
-        <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="row" />
-        <div className="min-w-[220px] flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <span title={tenant.displayName} className="min-w-0 max-w-full truncate text-base font-medium text-[var(--color-text)]">
-              {tenant.displayName}
-            </span>
-            {tenant.kind === "sample" ? <Badge tone="info">{PILOT_COPY.badge}</Badge> : null}
-            {isActive ? <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone="success" />Active</span> : null}
-          </div>
-          <div className="mt-0.5 text-sm text-[var(--color-text-muted)]">
-            {tenant.kind === "sample"
-              ? "Fictional company, stored on this device"
-              : entraLicenseName
-                ? `${domain} · ${entraLicenseName}`
-                : licensesNotChecked(tenant)
-                  ? domain
-                  : `${domain} · Entra tier not available`}
-          </div>
-          {registration ? (
-            <div className="mt-0.5 truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
-              {registration.text}
-            </div>
-          ) : null}
-          <TenantProbeWarning tenant={tenant} />
-          <TenantLicensesNotChecked tenant={tenant} />
-          <TenantCheckStatus tenant={tenant} />
-        </div>
-        <div className="hidden min-w-[160px] flex-1 truncate text-sm text-[var(--color-text-muted)] xl:block" title={tenant.kind === "sample" ? "Built-in sample data" : licenses.map((license) => license.displayName).join(", ")}>
-          {tenant.kind === "sample"
-            ? "Built-in sample data"
-            : licenses.length > 0
-            ? licenses.map((license) => license.displayName).join(", ")
-            : "No license details"}
-        </div>
-        {tenant.kind !== "sample" ? (
-          // TODO(ugur): this reconnects an existing tenant, so the dialog could
-          // open with the tenant's current registration chosen. It opens
-          // unchosen like every other entry point until that is decided.
-          <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
-        ) : null}
-        {!isActive ? (
-          <UiButton variant="secondary" size="sm" onClick={() => void onSetActive(tenant.id)}>
-            Set active
-          </UiButton>
-        ) : null}
-        <Menu
-          ariaLabel={`${tenant.displayName} actions`}
-          trigger={<IconButton label={`${tenant.displayName} actions`} icon={<span className="text-md">⋯</span>} size="sm" />}
-          items={[
-            {
-              id: "disconnect",
-              label: tenant.kind === "sample" ? PILOT_COPY.leaveAction : "Disconnect",
-              danger: true,
-              onSelect: () => {
-                setDisconnectError(null);
-                setConfirmDisconnect(true);
-              },
-            },
-          ]}
-        />
-      </div>
-      {tenant.kind !== "sample" && (
-        <TenantServices tenant={tenant} onAdd={(serviceId, partIds) => setAccess({ serviceId, ...(partIds ? { partIds } : {}) })} />
-      )}
-      <ServiceAccessDialog
-        tenant={tenant}
-        serviceId={access?.serviceId ?? null}
-        {...(access?.partIds ? { initialPartIds: access.partIds } : {})}
-        open={access !== null}
-        onClose={() => setAccess(null)}
-      />
-      <Modal
-      open={confirmDisconnect}
-      onClose={() => {
-        if (!disconnecting) setConfirmDisconnect(false);
-      }}
-      size="md"
-    >
-      <ModalHeader
-        title={tenant.kind === "sample" ? PILOT_COPY.leaveTitle : `Disconnect ${tenant.displayName}`}
-        subtitle={tenant.kind === "sample" ? "Delete the pilot tenant and its local data" : "Remove the connection and its local tenant data"}
-        badge={<Badge tone={tenant.kind === "sample" ? "info" : "danger"}>Permanent local deletion</Badge>}
-        onClose={() => {
-          if (!disconnecting) setConfirmDisconnect(false);
-        }}
-      />
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          {tenant.kind === "sample"
-            ? PILOT_COPY.leaveBody
-            : "This removes the Microsoft sign-in connection and permanently deletes this tenant's local Graph cache, change history, chats, workspaces, run history, learning records, and queued deliveries from this device."}
-        </div>
-        <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
-          {tenant.kind === "sample"
-            ? "You can open pilot mode again later from the organization menu or Connections."
-            : "Microsoft 365 data in the tenant is not changed. Reconnecting later starts with an empty local cache."}
-        </p>
-        {disconnectError && (
-          <div
-            role="alert"
-            className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25"
-          >
-            {userFacingErrorReason(disconnectError) ??
-              "The tenant could not be fully disconnected. Some local cleanup may already have completed. Restart OpenAdminOS, check that secure storage is available, then try again."}
-          </div>
-        )}
-        <div className="flex justify-end gap-2 pt-1">
-          <Button
-            variant="ghost"
-            disabled={disconnecting}
-            onClick={() => setConfirmDisconnect(false)}
-          >
-            Cancel
-          </Button>
-          <Button
-            variant="danger"
-            disabled={disconnecting}
-            onClick={() => {
-              setDisconnecting(true);
-              setDisconnectError(null);
-              void onDisconnect(tenant.id)
-                .then(() => setConfirmDisconnect(false))
-                .catch((caught) =>
-                  setDisconnectError(
-                    caught instanceof Error ? caught.message : String(caught),
-                  ),
-                )
-                .finally(() => setDisconnecting(false));
-            }}
-          >
-            {disconnecting
-              ? tenant.kind === "sample" ? "Removing" : "Disconnecting"
-              : tenant.kind === "sample" ? PILOT_COPY.leaveAction : "Disconnect and delete local data"}
-          </Button>
-        </div>
-      </div>
-      </Modal>
-    </>
-  );
 }
 
 function ChatSettingsSectionV2() {

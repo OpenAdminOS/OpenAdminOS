@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { useAppState } from "../state";
-import { SERVICE_COPY, userFacingErrorReason } from "../copy";
+import { ORGANIZATION_COPY, SERVICE_COPY, userFacingErrorReason } from "../copy";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { Button } from "./Button";
 import {
@@ -14,41 +14,52 @@ import {
   IconRefresh,
   IconSettings,
 } from "./icons";
-import { TenantCheckStatus, licensesNotChecked, useTenantCheck } from "./ServiceAccess";
+import { TenantCheckStatus, useTenantCheck } from "./ServiceAccess";
 import { Modal, ModalHeader } from "./Modal";
 import { Pill } from "./Pill";
+import { ServiceMark, connectedServiceIds } from "./ServiceMark";
 import { TenantTile } from "./TenantTile";
 import { useToast } from "./Toast";
 import { Tooltip } from "./ui";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import { tenantRegistrationSummary } from "../shared/app-registration";
-import type { TenantRecord } from "../shared/openAdminOS";
+import {
+  activeOrganizationOf,
+  resolveOrganizations,
+  serviceById,
+  type OrganizationRecord,
+  type TenantRecord,
+} from "../shared/openAdminOS";
 
 const MENU_ITEM_CLASS =
   "flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]";
 
-function entraTierLabel(tier: "free" | "p1" | "p2" | "unknown" | undefined): string {
-  if (!tier || tier === "unknown") return "Entra tier not detected";
-  return tier === "free" ? "Entra Free" : `Entra ${tier.toUpperCase()}`;
-}
-
-export function TenantSwitcher() {
+/**
+ * The top-bar organization chip. Each organization shows the services it
+ * runs; "No organization" is a valid choice. Sample data is a labeled
+ * organization here, opened with Preview with sample data.
+ */
+export function OrganizationSwitcher() {
   const navigate = useNavigate();
-  const { state, addSampleTenant, setActiveTenant, disconnectTenant } = useAppState();
+  const { state, addSampleTenant, setActiveOrganization, disconnectTenant } = useAppState();
   const { openSetup } = useSetupFlow();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [pendingDisconnect, setPendingDisconnect] = useState<{
     tenantId: string;
-    displayName: string;
+    name: string;
     sample: boolean;
   } | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const activeTenant = state.activeTenantId
-    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
-    : undefined;
-  const pilotActive = activeTenant?.kind === "sample";
+  const organizations = resolveOrganizations(state);
+  const active = activeOrganizationOf(state);
+  const tenantOf = (organization: OrganizationRecord | undefined): TenantRecord | undefined =>
+    organization
+      ? state.tenants.find((tenant) => tenant.id === organization.connections.microsoft365?.tenantId)
+      : undefined;
+  const activeTenant = tenantOf(active);
+  const sampleActive = active?.kind === "sample";
 
   useEffect(() => {
     if (!open) return;
@@ -67,21 +78,20 @@ export function TenantSwitcher() {
     };
   }, [open]);
 
-  const pickTenant = async (tenantId: string) => {
-    if (tenantId === activeTenant?.id) {
+  const pick = async (organizationId: string | null) => {
+    if (organizationId === (active?.id ?? null)) {
       setOpen(false);
       return;
     }
     setBusy(true);
     try {
-      await setActiveTenant(tenantId);
+      await setActiveOrganization(organizationId);
       setOpen(false);
     } catch (error) {
-      const detail = userFacingErrorReason(
-        error instanceof Error ? error.message : String(error),
-      );
       toast.error(
-        `Switching tenants failed.${detail ? ` ${detail}` : ""} Try again from the tenant menu.`,
+        ORGANIZATION_COPY.switchFailed(
+          userFacingErrorReason(error instanceof Error ? error.message : String(error)) ?? "",
+        ),
       );
     } finally {
       setBusy(false);
@@ -96,32 +106,29 @@ export function TenantSwitcher() {
       toast.success(
         pendingDisconnect.sample
           ? "Pilot mode ended. Its sample data was deleted from this device."
-          : `${pendingDisconnect.displayName} disconnected.`,
+          : ORGANIZATION_COPY.disconnected(pendingDisconnect.name),
       );
       setPendingDisconnect(null);
     } catch (error) {
-      const detail = userFacingErrorReason(
-        error instanceof Error ? error.message : String(error),
-      );
       toast.error(
-        `Disconnecting the tenant failed.${detail ? ` ${detail}` : ""} Try again.`,
+        ORGANIZATION_COPY.disconnectFailed(
+          userFacingErrorReason(error instanceof Error ? error.message : String(error)) ?? "",
+        ),
       );
     } finally {
       setBusy(false);
     }
   };
 
-  const tooltip = activeTenant
-    ? activeTenant.kind === "sample"
-      ? "Pilot mode. Sample data from a fictional company. No Microsoft sign-in."
-      : `Signed in as ${activeTenant.username}. ${entraTierLabel(activeTenant.entraTier)}.${
-          activeTenant.tierProbeWarning
+  const tooltip = active
+    ? sampleActive
+      ? ORGANIZATION_COPY.tooltipSample
+      : `${ORGANIZATION_COPY.tooltipActive(active.name, activeTenant?.username ?? "")}${
+          activeTenant?.tierProbeWarning
             ? ` ${SERVICE_COPY.tierProbeWarningTitle} ${activeTenant.tierProbeWarning.message}`
             : ""
         }`
-    : state.tenants.length > 0
-      ? "No active tenant. Choose a connected tenant."
-      : "No tenant connected. Open setup to connect one.";
+    : ORGANIZATION_COPY.tooltipNone(organizations.length > 0);
 
   return (
     <>
@@ -133,27 +140,23 @@ export function TenantSwitcher() {
             aria-haspopup="menu"
             aria-expanded={open}
             aria-label={
-              activeTenant
-                ? `Switch tenant, ${activeTenant.displayName}`
-                : state.tenants.length > 0
-                  ? "Choose an active tenant"
-                  : "Connect a tenant"
+              active
+                ? ORGANIZATION_COPY.chipLabel(active.name)
+                : ORGANIZATION_COPY.chipLabelNone(organizations.length > 0)
             }
             className="flex h-9 max-w-[320px] items-center gap-2 rounded-[9px] px-2 text-left text-base text-[var(--color-text)] transition-colors hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
           >
-            {activeTenant ? (
-              <TenantTile tenantId={activeTenant.id} displayName={activeTenant.displayName} size="sm" />
+            {active && activeTenant ? (
+              <TenantTile tenantId={activeTenant.id} displayName={active.name} size="sm" />
             ) : (
-              <span className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] bg-[var(--color-warning-soft)] text-xs text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+              <span aria-hidden="true" className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] bg-[var(--color-bubble)] text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
                 ?
               </span>
             )}
             <span className="min-w-0 truncate font-medium">
-              {activeTenant?.displayName ?? "No tenant"}
+              {active?.name ?? ORGANIZATION_COPY.noOrganization}
             </span>
-            {activeTenant?.kind === "sample" ? (
-              <Pill tone="info">{PILOT_COPY.badge}</Pill>
-            ) : null}
+            {sampleActive ? <Pill tone="info">{ORGANIZATION_COPY.sampleLabel}</Pill> : null}
             <IconChevronDown size={11} className="shrink-0 text-[var(--color-text-muted)]" />
           </button>
         </Tooltip>
@@ -161,42 +164,62 @@ export function TenantSwitcher() {
         {open ? (
           <div
             role="menu"
-            aria-label="Connected tenants"
-            className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[330px] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]"
+            aria-label={ORGANIZATION_COPY.menuLabel}
+            className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[340px] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]"
           >
             <div className="px-2.5 pb-1.5 pt-1 text-sm text-[var(--color-text-muted)]">
-              Tenants
+              {ORGANIZATION_COPY.menuHeading}
             </div>
-            {state.tenants.length === 0 ? (
-              <div className="px-2.5 py-3 text-sm text-[var(--color-text-muted)]">No tenants connected.</div>
+            {organizations.length === 0 ? (
+              <div className="px-2.5 py-3 text-sm leading-5 text-[var(--color-text-muted)]">
+                <div className="text-[var(--color-text)]">{ORGANIZATION_COPY.none}</div>
+                <div className="mt-0.5">{ORGANIZATION_COPY.noneDetail}</div>
+              </div>
             ) : (
-              state.tenants.map((tenant) => {
-                const active = tenant.id === activeTenant?.id;
-                const domain = tenant.username.includes("@")
-                  ? tenant.username.split("@").at(-1)
-                  : tenant.username;
+              organizations.map((organization) => {
+                const tenant = tenantOf(organization);
+                if (!tenant) return null;
+                const isActive = organization.id === active?.id;
+                const sample = organization.kind === "sample";
+                const services = sample ? [] : connectedServiceIds(tenant);
                 const registration = tenantRegistrationSummary(tenant);
                 return (
                   <div
-                    key={tenant.id}
-                    className={`group flex flex-wrap items-center rounded-[9px] ${active ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}
+                    key={organization.id}
+                    className={`group flex flex-wrap items-center rounded-[9px] ${isActive ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}
                   >
                     <button
                       type="button"
                       role="menuitemradio"
-                      aria-checked={active}
+                      aria-checked={isActive}
                       disabled={busy}
-                      onClick={() => void pickTenant(tenant.id)}
+                      onClick={() => void pick(organization.id)}
                       className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
                     >
-                      <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="sm" />
+                      <TenantTile tenantId={tenant.id} displayName={organization.name} size="sm" />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-base font-medium text-[var(--color-text)]">{tenant.displayName}</span>
-                        <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
-                          {tenant.kind === "sample"
-                            ? `${PILOT_COPY.modeName} · fictional company`
-                            : `${domain} · ${!tenant.entraTier && licensesNotChecked(tenant) ? SERVICE_COPY.licensesNotChecked : entraTierLabel(tenant.entraTier)}`}
+                        <span className="flex min-w-0 items-center gap-1.5">
+                          <span className="truncate text-base font-medium text-[var(--color-text)]">{organization.name}</span>
+                          {sample ? <Pill tone="info">{ORGANIZATION_COPY.sampleLabel}</Pill> : null}
                         </span>
+                        {sample ? (
+                          <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
+                            {ORGANIZATION_COPY.sampleDetail}
+                          </span>
+                        ) : (
+                          <span
+                            className="mt-1 flex items-center gap-1"
+                            aria-label={ORGANIZATION_COPY.servicesLabel(services.map((id) => serviceById(id).title))}
+                          >
+                            {services.length > 0 ? (
+                              services.map((id) => <ServiceMark key={id} serviceId={id} size="sm" />)
+                            ) : (
+                              <span className="text-xs text-[var(--color-text-muted)]">
+                                {ORGANIZATION_COPY.servicesLabel([])}
+                              </span>
+                            )}
+                          </span>
+                        )}
                         {registration ? (
                           <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
                             {registration.text}
@@ -208,16 +231,16 @@ export function TenantSwitcher() {
                           </span>
                         ) : null}
                       </span>
-                      {active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
+                      {isActive ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
                     </button>
                     {tenant.tierProbeWarning ? <SwitcherLicenseRetry tenant={tenant} /> : null}
                     <button
                       type="button"
-                      aria-label={tenant.kind === "sample" ? PILOT_COPY.leaveAction : `Disconnect ${tenant.displayName}`}
-                      title={tenant.kind === "sample" ? PILOT_COPY.leaveAction : `Disconnect ${tenant.displayName}`}
+                      aria-label={sample ? PILOT_COPY.leaveAction : `Disconnect ${organization.name}`}
+                      title={sample ? PILOT_COPY.leaveAction : `Disconnect ${organization.name}`}
                       disabled={busy}
                       onClick={() => {
-                        setPendingDisconnect({ tenantId: tenant.id, displayName: tenant.displayName, sample: tenant.kind === "sample" });
+                        setPendingDisconnect({ tenantId: tenant.id, name: organization.name, sample });
                         setOpen(false);
                       }}
                       className="mr-1.5 rounded-[7px] p-1.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)] group-hover:opacity-100"
@@ -229,8 +252,48 @@ export function TenantSwitcher() {
                 );
               })
             )}
+            {organizations.length > 0 ? (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={!active}
+                disabled={busy}
+                onClick={() => void pick(null)}
+                className={`${MENU_ITEM_CLASS} ${!active ? "bg-[var(--color-active)]" : ""}`}
+              >
+                <span aria-hidden="true" className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
+                  ?
+                </span>
+                <span className="min-w-0 flex-1 truncate">{ORGANIZATION_COPY.noOrganization}</span>
+                {!active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
+              </button>
+            ) : null}
             <div className="my-1 h-px bg-[var(--color-border-soft)]" />
-            {pilotActive ? null : (
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                openSetup();
+              }}
+              className={MENU_ITEM_CLASS}
+            >
+              <IconPlus size={12} /> {ORGANIZATION_COPY.addOrganization}
+            </button>
+            {sampleActive && activeTenant ? (
+              <button
+                type="button"
+                role="menuitem"
+                disabled={busy}
+                onClick={() => {
+                  setPendingDisconnect({ tenantId: activeTenant.id, name: active!.name, sample: true });
+                  setOpen(false);
+                }}
+                className={MENU_ITEM_CLASS}
+              >
+                <IconClose size={12} /> {PILOT_COPY.leaveAction}
+              </button>
+            ) : (
               <button
                 type="button"
                 role="menuitem"
@@ -244,14 +307,16 @@ export function TenantSwitcher() {
                     })
                     .catch((error) =>
                       toast.error(
-                        `Pilot mode did not open.${error instanceof Error ? ` ${userFacingErrorReason(error.message)}` : ""} Try again from the tenant menu.`,
+                        ORGANIZATION_COPY.sampleFailed(
+                          error instanceof Error ? userFacingErrorReason(error.message) ?? "" : "",
+                        ),
                       ),
                     )
                     .finally(() => setBusy(false));
                 }}
                 className={MENU_ITEM_CLASS}
               >
-                <IconPlay size={12} /> {PILOT_COPY.openAction}
+                <IconPlay size={12} /> {ORGANIZATION_COPY.previewSample}
               </button>
             )}
             <button
@@ -259,63 +324,40 @@ export function TenantSwitcher() {
               role="menuitem"
               onClick={() => {
                 setOpen(false);
-                openSetup();
+                navigate("/connections");
               }}
               className={MENU_ITEM_CLASS}
             >
-              <IconPlus size={12} /> Connect tenant
+              <IconSettings size={12} /> {ORGANIZATION_COPY.manageConnections}
             </button>
-            {pilotActive && activeTenant ? (
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy}
-                onClick={() => {
-                  setPendingDisconnect({ tenantId: activeTenant.id, displayName: activeTenant.displayName, sample: true });
-                  setOpen(false);
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <IconClose size={12} /> {PILOT_COPY.leaveAction}
-              </button>
-            ) : (
-              <button
-                type="button"
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  navigate("/settings/tenants");
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <IconSettings size={12} /> Manage tenants
-              </button>
-            )}
           </div>
         ) : null}
       </div>
 
       <Modal open={pendingDisconnect !== null} onClose={() => { if (!busy) setPendingDisconnect(null); }} size="md">
         <ModalHeader
-          title={pendingDisconnect?.sample ? PILOT_COPY.leaveTitle : "Disconnect tenant"}
-          subtitle={pendingDisconnect?.displayName}
+          title={pendingDisconnect?.sample ? PILOT_COPY.leaveTitle : ORGANIZATION_COPY.disconnectTitle(pendingDisconnect?.name ?? "")}
+          subtitle={pendingDisconnect?.name}
           badge={
             <Pill tone={pendingDisconnect?.sample ? "info" : "danger"}>
-              {pendingDisconnect?.sample ? PILOT_COPY.badge : "Local credentials"}
+              {pendingDisconnect?.sample ? ORGANIZATION_COPY.sampleLabel : "Permanent local deletion"}
             </Pill>
           }
           onClose={() => setPendingDisconnect(null)}
         />
         <div className="space-y-4 p-6">
-          <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+          <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {pendingDisconnect?.sample
-              ? `${PILOT_COPY.leaveBody} You can open pilot mode again later.`
-              : "Cached credentials for this tenant will be removed from this machine. You can reconnect the tenant later."}
+              ? `${PILOT_COPY.leaveBody} You can open it again with ${ORGANIZATION_COPY.previewSample}.`
+              : ORGANIZATION_COPY.disconnectBody}
           </div>
+          {pendingDisconnect?.sample ? null : (
+            <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">{ORGANIZATION_COPY.disconnectNote}</p>
+          )}
           <div className="flex justify-end gap-2">
             <Button variant="ghost" disabled={busy} onClick={() => setPendingDisconnect(null)}>Cancel</Button>
             <Button variant="danger" disabled={busy} onClick={() => void disconnect()}>
-              {busy ? "Removing" : pendingDisconnect?.sample ? PILOT_COPY.leaveAction : "Disconnect"}
+              {busy ? "Removing" : pendingDisconnect?.sample ? PILOT_COPY.leaveAction : ORGANIZATION_COPY.disconnectAction}
             </Button>
           </div>
         </div>
@@ -325,9 +367,9 @@ export function TenantSwitcher() {
 }
 
 /**
- * Retry license check from the tenant menu. Its progress and Cancel show
- * under the tenant, and the result is reported in a toast, so it stays
- * visible after the menu closes.
+ * Retry license check from the organization menu. Its progress and Cancel
+ * show under the organization, and the result is reported in a toast, so
+ * it stays visible after the menu closes.
  */
 function SwitcherLicenseRetry({ tenant }: { tenant: TenantRecord }) {
   const { retryTenantLicenseCheck } = useAppState();

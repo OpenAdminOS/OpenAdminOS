@@ -69,6 +69,7 @@ it("lists the shell destinations and every Settings section", async () => {
     "Go to Chat",
     "Agents",
     "Marketplace",
+    "Connections",
     "Runs",
     "Runs: Needs review",
     "Runs: Failed",
@@ -100,10 +101,8 @@ it("lists the shell destinations and every Settings section", async () => {
 
   for (const section of [
     "Providers",
-    "Tenants",
     "Data",
     "Chat",
-    "Connectors",
     "Gateway",
     "General",
     "Appearance",
@@ -117,6 +116,8 @@ it("lists the shell destinations and every Settings section", async () => {
 
   expect(screen.queryByRole("option", { name: /Go to Cache/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /Go to Connectors/ })).not.toBeInTheDocument();
+  // Tenants and Connectors moved out of Settings into Connections.
+  expect(screen.queryByRole("option", { name: /Settings: (Tenants|Connectors)/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /Team office/ })).not.toBeInTheDocument();
 });
 

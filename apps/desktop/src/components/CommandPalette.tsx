@@ -9,6 +9,7 @@ import {
   IconAgentTeam,
   IconChat,
   IconCheck,
+  IconConnectors,
   IconHardDrive,
   IconMarketplace,
   IconPlay,
@@ -195,6 +196,14 @@ export function CommandPalette({
         group: "Navigate",
         icon: <IconMarketplace size={13} className="text-[var(--color-accent)]" />,
         action: go("/marketplace"),
+      },
+      {
+        id: "nav-connections",
+        label: "Connections",
+        hint: "Services, public references, where results go",
+        group: "Navigate",
+        icon: <IconConnectors size={13} className="text-[var(--color-accent)]" />,
+        action: go("/connections"),
       },
       {
         id: "nav-office", label: "Agent Team", group: "Navigate",

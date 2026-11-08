@@ -1,9 +1,7 @@
 export const SETTINGS_SECTIONS = [
   { id: "providers", title: "Providers", description: "Choose where answers are generated.", keywords: ["llm", "model", "ollama", "anthropic", "openai", "local", "hosted"] },
-  { id: "tenants", title: "Tenants", description: "Manage Microsoft 365 connections and delegated permissions.", keywords: ["microsoft", "entra", "account", "connection", "permissions"] },
   { id: "data", title: "Data", description: "Prepare and retain local tenant data.", keywords: ["cache", "preload", "refresh", "resources", "retention"] },
   { id: "chat", title: "Chat", description: "Configure investigation and local learning behavior.", keywords: ["conversation", "investigation", "learning"] },
-  { id: "connectors", title: "Connectors", description: "Configure external delivery integrations and routing defaults.", keywords: ["teams", "outlook", "slack", "discord", "signal", "whatsapp", "routing"] },
   { id: "gateway", title: "Gateway", description: "Pair local MCP clients with one tenant.", keywords: ["mcp", "loopback", "external", "proposal", "pairing", "client"] },
   { id: "general", title: "General", description: "Configure desktop behavior, safety, and local history.", keywords: ["menu bar", "scheduler", "sandbox", "retention", "audit", "answer font", "serif", "sans", "density", "compact", "comfortable"] },
   { id: "appearance", title: "Appearance", description: "Choose the desktop color theme.", keywords: ["theme", "system", "dark", "light", "midnight", "appearance", "color"] },
@@ -12,6 +10,9 @@ export const SETTINGS_SECTIONS = [
 ] as const;
 
 export type SettingsSectionId = (typeof SETTINGS_SECTIONS)[number]["id"];
+
+/** Former Settings sections that moved to Connections (2026-11-08). */
+export const SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS = ["tenants", "connectors"] as const;
 
 export const SETTINGS_ITEMS = {
   "chat-investigation-mode": { section: "chat", title: "Chat investigation mode", description: "Choose how single-tenant Chat gathers read-only evidence.", keywords: ["agentic", "deterministic", "tools"] },

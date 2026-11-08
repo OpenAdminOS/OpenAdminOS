@@ -763,7 +763,7 @@ export default function AgentDetail({
           >
             <AgentTeamsDeliveryCard
               delivery={agent.delivery?.teams}
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(updateAgentTeamsDelivery(agent.slug, next));
               }}
@@ -771,7 +771,7 @@ export default function AgentDetail({
 
             <AgentWhatsAppWebDeliveryCard
               delivery={agent.delivery?.whatsappWeb}
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentWhatsAppWebDelivery(agent.slug, next),
@@ -784,7 +784,7 @@ export default function AgentDetail({
               connectorName="Outlook"
               delivery={agent.delivery?.outlook}
               defaultFlag="useDefaultRecipients"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentOutlookDelivery(
@@ -800,7 +800,7 @@ export default function AgentDetail({
               connectorName="Slack"
               delivery={agent.delivery?.slack}
               defaultFlag="useDefaultChannel"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentSlackDelivery(
@@ -816,7 +816,7 @@ export default function AgentDetail({
               connectorName="Discord"
               delivery={agent.delivery?.discord}
               defaultFlag="useDefaultWebhook"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentDiscordDelivery(
@@ -832,7 +832,7 @@ export default function AgentDetail({
               connectorName="Signal"
               delivery={agent.delivery?.signal}
               defaultFlag="useDefaultRecipient"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentSignalDelivery(
