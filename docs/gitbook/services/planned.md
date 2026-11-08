@@ -1,11 +1,11 @@
 ---
 title: "Planned services"
-description: "Exchange, Teams and SharePoint are planned services. What that means today and why some of them need APIs beyond Microsoft Graph."
+description: "Exchange, Teams, SharePoint and Jamf Pro are planned services. What that means today and why some of them need APIs beyond Microsoft Graph."
 ---
 
 # Planned Services
 
-OpenAdminOS connects Microsoft 365 one service at a time, starting with [Intune](../generated/services/intune.md), [Entra](../generated/services/entra.md) and [Defender](../generated/services/defender.md). Exchange, Teams and SharePoint are planned. There are no dates.
+OpenAdminOS connects Microsoft 365 one service at a time, starting with [Intune](../generated/services/intune.md), [Entra](../generated/services/entra.md) and [Defender](../generated/services/defender.md). Exchange, Teams and SharePoint are planned, and so is Jamf Pro, the first service outside Microsoft 365. There are no dates.
 
 Planned means:
 
@@ -18,6 +18,15 @@ Planned means:
 | Exchange | Mailboxes, transport rules and mail flow. |
 | Teams | Teams, channels and Teams policies. |
 | SharePoint | Sites, sharing settings and storage. |
+
+## Jamf Pro
+
+Jamf Pro would cover computers, mobile devices, inventory, smart groups, policies and configuration profiles. It does not use Microsoft sign-in:
+
+- You would create an API client in Jamf Pro under Settings, System, API roles and clients, and give its API role read privileges only.
+- OpenAdminOS would store the client secret in the OS keychain and send it only to your Jamf Pro URL.
+- Each part would switch on only when a check proves the API role has the privileges it needs.
+- Jamf Pro would belong to an organization alongside its Microsoft 365 tenant, or on its own when a company runs only Jamf.
 
 ## Why Some Of Them Need More Than Microsoft Graph
 
