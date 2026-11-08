@@ -68,6 +68,13 @@ export const CONNECTIONS_COPY = {
     noReports: "Nowhere, no delivery rule is saved",
     prompts: "Prompts and tenant data",
     promptsLocal: "Nowhere, the model is local",
+    /**
+     * The region of a hosted provider. No provider reports it to
+     * OpenAdminOS today, so the map says where it is decided.
+     * TODO(ugur): show the region itself once providers carry one, for
+     * example "Anthropic API · US".
+     */
+    hostedRegion: (provider: string) => `Region set by your ${provider} account`,
     promptsNoModel: "Nowhere, no model is ready",
     promptsSample: "Nowhere, sample answers are prepared",
     noServices: "No service connected",

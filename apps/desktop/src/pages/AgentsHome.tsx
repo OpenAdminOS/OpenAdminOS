@@ -582,7 +582,12 @@ export default function AgentsHome() {
                     <ScheduleUsageForecast agent={row.installed} intervalSeconds={row.installed.schedule!.intervalSeconds} compact />
                   ) : null}
                 </div>
-                <div className="calm-row-actions flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
+                <div
+                  className="calm-row-actions flex shrink-0 items-center gap-1"
+                  // An action that names what is missing stays visible.
+                  data-persistent={needs.action.kind === "run" ? undefined : "true"}
+                  onClick={(event) => event.stopPropagation()}
+                >
                   <Button
                     size="sm"
                     variant={needs.action.kind === "run" ? "ghost" : "secondary"}

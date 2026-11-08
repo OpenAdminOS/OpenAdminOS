@@ -71,12 +71,16 @@ describe("Connections reach map", () => {
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
   });
 
-  it("names the hosted provider as the destination of prompts and tenant data", () => {
+  it("names the hosted provider and where its region is set in the map", async () => {
     const hosted = mockProviders.find((provider) => !provider.isLocal && provider.status === "connected")!;
     const state = createMockAppState({ activeProviderId: hosted.id });
     const model = buildReachModel(state);
     expect(model.model.kind).toBe("hosted");
-    expect(reachDescription(model)).toContain(`Prompts and tenant data go to ${hosted.name}.`);
+    render(state);
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(within(map).getByText(`${hosted.name}, hosted`)).toBeInTheDocument();
+    expect(within(map).getByText(CONNECTIONS_COPY.map.hostedRegion(hosted.name))).toBeInTheDocument();
+    expect(reachDescription(model)).toContain(`Prompts and tenant data go to ${hosted.name}. Region set by your ${hosted.name} account.`);
   });
 
   it("shows No organization with nothing read and a Connect action", async () => {
