@@ -1550,7 +1550,7 @@ Jamf Pro and Google Workspace connectors (separate issues; the mockup fixes the 
 
 - [x] Mockup `32-connections-first-run.html`, checked at desktop and phone widths in light and dark
 - [x] SPEC §4a decision block, mockup table row, CHANGELOG line
-- [ ] Public issue
+- [x] Public issue #171
 - [ ] Implementation plan with the `TenantRecord` to organization migration
 
 ## Design review (2026-11-08)
