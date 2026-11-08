@@ -9,7 +9,7 @@ import {
   type ServiceId,
   type ServicePart,
   type TenantRecord,
-} from "./openAdminOS";
+} from "./openAdminOS.js";
 
 /** One chip under an agent: a service it reads, or a missing part of one. */
 export interface AgentNeedChip {
