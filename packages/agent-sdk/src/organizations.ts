@@ -233,3 +233,14 @@ export function activeOrganizationOf(state: {
 }): OrganizationRecord | undefined {
   return organizationForTenant(resolveOrganizations(state), state.activeTenantId);
 }
+
+/**
+ * True when a schedule may run now: it is assigned, and its organization
+ * is the active one. Unassigned schedules and other organizations' wait.
+ */
+export function scheduleRunsInActiveOrganization(
+  schedule: { organizationId?: string | undefined } | undefined,
+  activeOrganizationId: string | undefined,
+): boolean {
+  return Boolean(schedule?.organizationId) && schedule?.organizationId === activeOrganizationId;
+}

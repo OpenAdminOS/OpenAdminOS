@@ -2700,6 +2700,11 @@ export interface CompanionRunDueReadSchedulesResult {
   skippedWrite: number;
   skippedInFlight: number;
   skippedNotDue: number;
+  /**
+   * Due schedules that belong to another organization or are unassigned.
+   * They wait for their organization; they are not errors.
+   */
+  waitingOtherOrganization: number;
   errors: Array<{
     agentSlug: string;
     message: string;

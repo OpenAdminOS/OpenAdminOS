@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import {
   agentCallsNoServiceApi,
   reconcileOrganizations,
+  scheduleRunsInActiveOrganization,
   type AgentSummary,
   type OrganizationRecord,
   type RunRecord,
@@ -641,5 +642,15 @@ describe("organization boundary on every start (review round 1)", () => {
     // A multi-tenant batch is a host-owned caller with an explicit tenant scope.
     const batch = await h.service.startRun("find-inactive-devices", { tenantId: woodgrove.id, trigger: "manual" });
     assert.equal(batch.tenantId, woodgrove.id);
+  });
+});
+
+describe("menu bar run due (review round 1)", () => {
+  it("runs only the active organization's assigned schedules; the others wait", () => {
+    assert.equal(scheduleRunsInActiveOrganization({ organizationId: "org-a" }, "org-a"), true);
+    assert.equal(scheduleRunsInActiveOrganization({ organizationId: "org-b" }, "org-a"), false);
+    assert.equal(scheduleRunsInActiveOrganization({}, "org-a"), false);
+    assert.equal(scheduleRunsInActiveOrganization({}, undefined), false);
+    assert.equal(scheduleRunsInActiveOrganization({ organizationId: "org-a" }, undefined), false);
   });
 });

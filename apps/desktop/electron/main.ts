@@ -128,7 +128,7 @@ import type {
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
-import { providerCatalog, servicePartById } from "@openadminos/agent-sdk";
+import { providerCatalog, scheduleRunsInActiveOrganization, servicePartById } from "@openadminos/agent-sdk";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -2633,8 +2633,13 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
       status: run.status,
       route: `/runs/${run.id}`,
     }));
+  // Only the active organization's schedules can run, so only they are listed and counted as due.
   const upcomingSchedules = state.installedAgents
-    .filter((agent) => agent.schedule?.enabled === true)
+    .filter(
+      (agent) =>
+        agent.schedule?.enabled === true &&
+        scheduleRunsInActiveOrganization(agent.schedule, state.activeOrganizationId),
+    )
     .map((agent) => {
       const latest = latestScheduledRunForAgent(state.runs, agent.slug);
       return {
@@ -2698,12 +2703,19 @@ async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult
     skippedWrite: 0,
     skippedInFlight: 0,
     skippedNotDue: 0,
+    waitingOtherOrganization: 0,
     errors: [],
   };
 
   for (const agent of state.installedAgents) {
     const schedule = agent.schedule;
     if (!schedule?.enabled) continue;
+    // Another organization's schedule, or an unassigned one, waits; it is
+    // not a failure of this organization's run.
+    if (!scheduleRunsInActiveOrganization(schedule, state.activeOrganizationId)) {
+      result.waitingOtherOrganization += 1;
+      continue;
+    }
     if (agent.mode === "write") {
       result.skippedWrite += 1;
       continue;

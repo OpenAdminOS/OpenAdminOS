@@ -304,6 +304,7 @@ export function makeMockBridge(
       skippedWrite: 0,
       skippedInFlight: 0,
       skippedNotDue: 0,
+      waitingOtherOrganization: 0,
       errors: [],
     })),
     setCompanionLaunchEnabled: vi.fn(async (enabled: boolean) =>

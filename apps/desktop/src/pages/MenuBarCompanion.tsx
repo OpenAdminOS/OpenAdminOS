@@ -255,7 +255,14 @@ export default function MenuBarCompanion() {
     setNotice(null);
     try {
       const result = await api.runDueReadSchedules();
-      setNotice(`${result.queued} read schedule${result.queued === 1 ? "" : "s"} queued.`);
+      const waiting = result.waitingOtherOrganization ?? 0;
+      setNotice(
+        `${result.queued} read schedule${result.queued === 1 ? "" : "s"} queued.${
+          waiting > 0
+            ? ` ${waiting} ${waiting === 1 ? "waits" : "wait"} for another organization or an assignment.`
+            : ""
+        }`,
+      );
       if (result.errors.length > 0) {
         await openMain("/agents?filter=scheduled");
       }
