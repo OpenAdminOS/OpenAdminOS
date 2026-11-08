@@ -12,7 +12,9 @@ export interface TrustAttachments {
 }
 
 export interface TrustCopyInput {
-  provider?: Pick<ProviderSummary, "name" | "isLocal">;
+  provider?: Pick<ProviderSummary, "name" | "isLocal"> & Partial<Pick<ProviderSummary, "id">>;
+  /** Nothing is connected: no tenant context exists to send. */
+  noTenant?: boolean;
   model?: string;
   scope?: TrustScope;
   attachments?: TrustAttachments;
@@ -33,7 +35,29 @@ export interface ToolHostsCopy {
 export const LOCAL_BOUNDARY_COPY = {
   plain: "Local model. Tenant data stays on this device.",
   withTools: "Local model. Graph and cache data stay on this device.",
+  /** Local model, nothing connected and no reference added. */
+  noTenant: "Local model. Nothing connected. Nothing leaves this device.",
 } as const;
+
+/** The status strip segment for a local model with no reference enabled. */
+export const NOTHING_LEAVES_COPY = "nothing leaves this device";
+
+/**
+ * Where a hosted provider sends prompts, as the status strip, the composer
+ * and the hosted confirmation name it ("Anthropic API · US").
+ */
+// TODO(ugur): confirm the region lines for Copilot, Gemini and Azure OpenAI. They say who sets the region rather than naming one.
+const HOSTED_DATA_LOCATIONS: Readonly<Record<string, string>> = {
+  anthropic: "Anthropic API · US",
+  openai: "OpenAI API · US",
+  copilot: "GitHub Copilot · region set by GitHub",
+  gemini: "Google Gemini API · region set by Google",
+  "azure-openai": "Azure OpenAI · your resource's region",
+};
+
+export function providerDataLocation(provider: Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>): string {
+  return (provider.id && HOSTED_DATA_LOCATIONS[provider.id]) || `${provider.name} · region not stated`;
+}
 
 export interface DerivedTrustCopy {
   strip: string;
@@ -107,6 +131,19 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
     };
   }
 
+  if (input.provider.isLocal && input.noTenant) {
+    return {
+      strip: toolHosts ? `local model · ${toolHosts.strip}` : "local-only · no data leaves this device",
+      ...(toolHosts ? { toolHosts } : {}),
+      confirmTitle: "Process your question on this device",
+      confirmBody: `${providerName}${modelDetail} will answer locally. Nothing is connected, so no tenant data is used.`,
+      storage: toolHosts
+        ? "The model and chat history stay on this device."
+        : "The model, prompts and chat history stay on this device.",
+      isLocal: true,
+    };
+  }
+
   if (input.provider.isLocal) {
     return {
       strip: toolHosts ? `local model · ${toolHosts.strip}` : "local-only · no data leaves this device",
@@ -120,6 +157,19 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
         ? "The model, Graph and cache data, and chat history stay on this device."
         : "Tenant data, prompts, and chat history stay on this device.",
       isLocal: true,
+    };
+  }
+
+  const location = providerDataLocation(input.provider);
+  if (input.noTenant) {
+    return {
+      strip: `hosted · prompts sent to ${location}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
+      ...(toolHosts ? { toolHosts } : {}),
+      boundary: `Prompts go to ${location}. Nothing is connected, so no tenant data is sent.`,
+      confirmTitle: "Send your question to a hosted provider",
+      confirmBody: `${providerName}${modelDetail} will receive your question, this conversation and results from the references you added. Nothing is connected, so no tenant data is included.`,
+      storage: "Chat history stays on this device.",
+      isLocal: false,
     };
   }
 

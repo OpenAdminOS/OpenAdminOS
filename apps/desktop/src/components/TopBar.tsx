@@ -65,7 +65,7 @@ export function TopBar() {
           ) : (
             <span
               role="status"
-              aria-label={`${boundary.label}${boundary.model ? ` · ${boundary.model}` : ""}${boundary.toolHosts ? ` · ${boundary.toolHosts}` : ""}`}
+              aria-label={`${boundary.label}${boundary.model ? ` · ${boundary.model}` : ""}${boundary.toolHosts ? ` · ${boundary.toolHosts}` : ""}${boundary.kind === "local" && boundary.note ? ` · ${boundary.note}` : ""}`}
               tabIndex={0}
               className={`app-region-no-drag flex h-8 min-w-0 max-w-[520px] items-center gap-1.5 rounded-[8px] px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)] ${
                 boundary.kind === "hosted"
@@ -77,6 +77,7 @@ export function TopBar() {
               <span className="truncate">{boundary.label}</span>
               {boundary.model ? <span className="truncate text-[var(--color-text-muted)]">· {boundary.model}</span> : null}
               {boundary.toolHosts ? <span className="truncate text-[var(--color-warning)]">· {boundary.toolHosts}</span> : null}
+              {boundary.kind === "local" && boundary.note ? <span className="truncate text-[var(--color-text-muted)]">· {boundary.note}</span> : null}
             </span>
           )}
         </Tooltip>

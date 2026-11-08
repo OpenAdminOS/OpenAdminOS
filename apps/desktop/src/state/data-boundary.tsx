@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { deriveTrustCopy } from "../copy";
+import { NOTHING_LEAVES_COPY, deriveTrustCopy, providerDataLocation } from "../copy";
 import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -29,6 +29,8 @@ export type DataBoundary =
       toolHosts?: string;
       /** Composer sentence naming every MCP host. */
       toolHostsNote?: string;
+      /** Status strip segment when nothing leaves the device: no reference is enabled. */
+      note?: string;
       tooltip: string;
       isVoiceHosted: false;
     }
@@ -116,6 +118,7 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       provider,
       ...(model ? { model } : {}),
       scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+      noTenant: !activeTenant,
       toolHosts: chatToolHosts(state),
     });
     const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
@@ -126,13 +129,15 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
         label: `Local · ${provider.name}`,
         ...(model ? { model } : {}),
         ...toolHosts,
+        ...(trust.toolHosts ? {} : { note: NOTHING_LEAVES_COPY }),
         tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
         isVoiceHosted: false,
       };
     }
     return {
       kind: "hosted",
-      label: `Hosted · ${provider.name}`,
+      // The strip names the provider and where it processes prompts (hard constraint 1).
+      label: `Hosted · ${providerDataLocation(provider)}`,
       ...(model ? { model } : {}),
       ...toolHosts,
       tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,

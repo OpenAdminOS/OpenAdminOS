@@ -75,6 +75,31 @@ describe("shell chrome", () => {
     expect(screen.getByText("Nightly")).toBeInTheDocument();
   });
 
+  it("says nothing leaves the device with a local model, nothing connected and no reference", async () => {
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({ tenants: [], activeTenantId: undefined, mcpServers: createMockMcpServers() })),
+    });
+    expect(
+      await screen.findByRole("status", { name: "Local · Ollama · llama3.1 · nothing leaves this device" }),
+    ).toBeInTheDocument();
+  });
+
+  it("names the hosted provider and its region with nothing connected, before any reference is added", async () => {
+    const user = userEvent.setup();
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({}, createMockAppState({ tenants: [], activeTenantId: undefined, activeProviderId: "openai", mcpServers: createMockMcpServers() })),
+    });
+    const status = await screen.findByRole("status", { name: "Hosted · OpenAI API · US · gpt-5" });
+    await user.hover(status);
+    expect(
+      await screen.findByText("Prompts go to OpenAI API · US. Nothing is connected, so no tenant data is sent."),
+    ).toBeInTheDocument();
+  });
+
   it("names the hosts that receive MCP tool queries, also with a local model", async () => {
     const user = userEvent.setup();
     renderRoute(<AppShell><div /></AppShell>, {
