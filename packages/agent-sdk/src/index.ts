@@ -30,6 +30,45 @@ export interface ProviderSummary {
   };
 }
 
+/** One provider check in the first-launch scan, as it resolves. */
+export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check";
+
+export interface ModelScanProbe {
+  providerId: ProviderId;
+  /** What the admin knows it as: Ollama, LM Studio, Claude Code, Codex. */
+  name: string;
+  /** Local runtimes keep prompts on the device; hosted CLIs send them to their provider. */
+  where: "local" | "hosted";
+  state: ModelScanProbeState;
+  /** One plain line, for example "Running, 3 models". */
+  summary: string;
+  /** Further plain lines: models, versions, what to do next. */
+  facts: string[];
+  /** It can answer now: running with a model, or signed in. */
+  ready: boolean;
+  models: string[];
+  /** Ollama only: OpenAdmin 8B is pulled on this device. */
+  hasOpenAdmin8B?: boolean;
+  durationMs?: number;
+}
+
+/**
+ * What the scan leads to, under the provider rules: a ready local model is
+ * selected automatically, a hosted provider is only offered.
+ */
+export type ModelScanOutcome =
+  | { kind: "local-selected"; providerId: ProviderId; model?: string }
+  | { kind: "local-ready"; providerId: ProviderId; model?: string }
+  | { kind: "hosted-detected"; providerIds: ProviderId[] }
+  | { kind: "nothing" };
+
+export interface ModelScanResult {
+  probes: ModelScanProbe[];
+  outcome: ModelScanOutcome;
+  startedAt: string;
+  finishedAt: string;
+}
+
 export interface ProviderTestResult {
   providerId: ProviderId;
   ok: boolean;
@@ -1079,6 +1118,11 @@ export interface AppState {
    * Never set in pilot mode. Hosted providers are never auto-selected.
    */
   providerAutoSelectNotice?: { providerId: ProviderId; providerName: string };
+  /**
+   * A fresh install has not run the first-launch model scan yet. The scan
+   * screen shows before anything else, once.
+   */
+  firstRunScanPending?: boolean;
   /** The MCP catalog with local install state. */
   mcpServers?: McpServerSummary[];
   /** Whether Chat offers tools, including MCP tools, to the selected model. */
@@ -2835,6 +2879,17 @@ export interface OpenAdminOSApi {
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
+  /**
+   * Scans this device for models and AI tools, every check in parallel
+   * with a short timeout. Each result is also sent to `onModelScanProgress`
+   * as it resolves. Local only: loopback ports, local files and processes.
+   */
+  startModelScan?(): Promise<ModelScanResult>;
+  /** Runs one check of the scan again, with a longer timeout. */
+  retryModelScanProbe?(providerId: ProviderId): Promise<ModelScanProbe>;
+  onModelScanProgress?(listener: (probe: ModelScanProbe) => void): () => void;
+  /** Records that the first-launch scan was finished or skipped. */
+  completeFirstRunScan?(): Promise<AppState>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
   getAzureOpenAIConfig(): Promise<AzureOpenAIProviderConfig>;
   setAzureOpenAIConfig(

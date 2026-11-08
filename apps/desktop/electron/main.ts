@@ -5540,6 +5540,20 @@ function registerIpcHandlers() {
     }),
   );
   ipcMain.handle("openadminos:list-providers", handleTrusted(() => store.listProviders()));
+  // The first-launch model scan: each check is sent to the window that asked as it resolves.
+  ipcMain.handle(
+    "openadminos:model-scan",
+    handleTrusted((event) =>
+      store.scanModels((probe) => {
+        if (!event.sender.isDestroyed()) event.sender.send("openadminos:model-scan-progress", probe);
+      }),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:model-scan-retry",
+    handleTrusted((_event, providerId: unknown) => store.retryModelScanProbe(validateProviderId(providerId, "providerId"))),
+  );
+  ipcMain.handle("openadminos:complete-first-run-scan", handleTrusted(() => store.completeFirstRunScan()));
   ipcMain.handle(
     "openadminos:test-provider",
     handleTrusted((_event, providerId: unknown, model?: unknown) =>

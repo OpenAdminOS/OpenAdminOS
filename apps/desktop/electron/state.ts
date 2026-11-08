@@ -180,6 +180,9 @@ import {
   type AppState,
   type McpServerSummary,
   type ProviderId,
+  type ModelScanOutcome,
+  type ModelScanProbe,
+  type ModelScanResult,
   type ProviderSummary,
   type InvalidAgentManifest,
   type RegistryAgentSummary,
@@ -211,6 +214,14 @@ import { createSampleGraph, type SampleGraph } from "./sample-tenant/graph.js";
 import { createPilotLlm } from "./sample-tenant/pilot-llm.js";
 import { PILOT_AGENT_SLUGS, PILOT_COPY } from "../src/shared/pilot-mode.js";
 import { pickLocalProviderToAutoSelect } from "../src/shared/provider-detection.js";
+import {
+  MODEL_SCAN_RETRY_TIMEOUT_MS,
+  buildModelScanChecks,
+  runModelScan,
+  runScanCheck,
+  scanOutcome,
+  type ModelScanCheck,
+} from "./model-scan.js";
 import {
   SAMPLE_TENANT_HOME_ACCOUNT_ID,
   SAMPLE_TENANT_ID,
@@ -327,6 +338,11 @@ interface PersistedState {
    * existing installs are never switched.
    */
   providerChosenByUser?: boolean;
+  /**
+   * Set only when this state file was created by this launch: a fresh
+   * install runs the first-launch model scan once, then clears it.
+   */
+  firstRunScan?: "pending";
   /**
    * The local provider the host selected automatically, and whether the
    * one-time Chat notice about it was dismissed. Cleared by an explicit
@@ -3082,6 +3098,7 @@ export class AppStateStore {
     if (this.tenantChecks.size > 0) {
       state.tenantChecks = [...this.tenantChecks.values()].map((entry) => entry.progress);
     }
+    if (persisted.firstRunScan === "pending") state.firstRunScanPending = true;
     const autoSelection = persisted.providerAutoSelection;
     if (
       autoSelection &&
@@ -3239,7 +3256,18 @@ export class AppStateStore {
     }
 
     return Promise.all(
-      providerCatalog.map(async (provider) => {
+      providerCatalog.map(async (provider) => this.checkProviderEntry(provider, azureOpenAIConfig, azureOpenAIConfigError)),
+    );
+  }
+
+  /** One provider's existing check, the same one `listProviders` runs. */
+  private async checkProviderEntry(
+    provider: ProviderSummary,
+    azureOpenAIConfig: AzureOpenAIProviderConfig | undefined,
+    azureOpenAIConfigError: string | undefined,
+  ): Promise<ProviderSummary> {
+    {
+      {
         try {
           if (provider.id === "ollama") return await checkOllama(provider);
           if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
@@ -3276,8 +3304,99 @@ export class AppStateStore {
             models: [],
           };
         }
-      }),
-    );
+      }
+    }
+  }
+
+  /** The first-launch scan's checks, built on `checkProviderEntry`. */
+  private async modelScanChecks(found: Map<ProviderId, ProviderSummary>): Promise<ModelScanCheck[]> {
+    let azureOpenAIConfig: AzureOpenAIProviderConfig | undefined;
+    let azureOpenAIConfigError: string | undefined;
+    try {
+      // Read from local state and the OS keychain only; nothing is sent to Azure here.
+      azureOpenAIConfig = await this.getAzureOpenAIConfig();
+    } catch (error) {
+      azureOpenAIConfigError = error instanceof Error ? error.message : String(error);
+    }
+    return buildModelScanChecks({
+      catalog: providerCatalog,
+      check: async (providerId) => {
+        // Tests and smoke runs inject the provider list, as for listProviders.
+        if (this.providerListFactory) {
+          const listed = (await this.providerListFactory()).find((provider) => provider.id === providerId);
+          if (!listed) throw new Error(`${providerId} is not listed.`);
+          found.set(providerId, listed);
+          return listed;
+        }
+        const entry = providerCatalog.find((provider) => provider.id === providerId)!;
+        // Azure OpenAI's check reads the saved configuration only.
+        const summary = await this.checkProviderEntry(entry, azureOpenAIConfig, azureOpenAIConfigError);
+        found.set(providerId, summary);
+        return summary;
+      },
+    });
+  }
+
+  /**
+   * Scans this device for models and AI tools (SPEC.md 4a, first launch),
+   * reporting each check as it resolves, then applies the provider rules:
+   * a ready local provider is selected for an admin who never chose one;
+   * hosted providers are only offered.
+   */
+  async scanModels(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
+    const startedAt = this.clock().toISOString();
+    const found = new Map<ProviderId, ProviderSummary>();
+    const probes = await runModelScan({ checks: await this.modelScanChecks(found), ...(onProbe ? { onProbe } : {}) });
+    const outcome = await this.applyModelScanOutcome([...found.values()]);
+    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString() };
+  }
+
+  async retryModelScanProbe(providerId: ProviderId): Promise<ModelScanProbe> {
+    if (!isProviderId(providerId)) throw new Error(`Unknown provider: ${String(providerId)}`);
+    const checks = await this.modelScanChecks(new Map());
+    const check = checks.find((entry) => entry.providerId === providerId);
+    if (!check) throw new Error(`${providerId} is not checked on this device.`);
+    return runScanCheck(check, MODEL_SCAN_RETRY_TIMEOUT_MS);
+  }
+
+  private async applyModelScanOutcome(providers: ProviderSummary[]): Promise<ModelScanOutcome> {
+    return this.serialize(async () => {
+      const current = await this.read();
+      const outcome = scanOutcome(providers, {
+        activeProviderId: current.activeProviderId,
+        providerChosenByUser: current.providerChosenByUser !== false,
+        pilot: this.isPilotModeActive(current),
+      });
+      const select = outcome.kind === "local-selected";
+      // OpenAdmin 8B is preferred when it is pulled and the admin never chose a provider or model.
+      const setModel =
+        (outcome.kind === "local-selected" || outcome.kind === "local-ready") &&
+        current.providerChosenByUser === false &&
+        Boolean(outcome.model) &&
+        !current.activeModelByProviderId?.[outcome.providerId];
+      if (!select && !setModel) return outcome;
+      const providerId = (outcome as { providerId: ProviderId }).providerId;
+      const updated: PersistedState = {
+        ...current,
+        ...(select ? { activeProviderId: providerId, providerAutoSelection: { providerId, noticeDismissed: false } } : {}),
+        ...(setModel ? { activeModelByProviderId: { ...current.activeModelByProviderId, [providerId]: (outcome as { model: string }).model } } : {}),
+      };
+      await this.write(updated);
+      console.info(`[providers] model scan selected local provider ${providerId}`);
+      return outcome;
+    });
+  }
+
+  /** The first-launch scan was finished or skipped; it does not show again. */
+  async completeFirstRunScan(): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      if (current.firstRunScan !== "pending") return;
+      const { firstRunScan: _done, ...rest } = current;
+      await this.write(rest);
+    });
+    this.emitStateChanged("first-run-scan-completed");
+    return this.getAppState();
   }
 
   async testProvider(
@@ -7242,9 +7361,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       raw = await readFile(this.filePath, "utf8");
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
-        await this.write(defaultState);
-        this.lastReadSnapshot = defaultState;
-        return defaultState;
+        // A fresh install: the first-launch model scan runs once.
+        const fresh: PersistedState = { ...defaultState, firstRunScan: "pending" };
+        await this.write(fresh);
+        this.lastReadSnapshot = fresh;
+        return fresh;
       }
       // The file exists but couldn't be read (permission, IO error).
       // Return the last-known-good snapshot rather than fabricating
@@ -7453,6 +7574,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       const mcpServers = sanitizeMcpServers((parsed as { mcpServers?: unknown }).mcpServers, this.mcpCatalog);
       if (mcpServers) state.mcpServers = mcpServers;
+      if ((parsed as { firstRunScan?: unknown }).firstRunScan === "pending") state.firstRunScan = "pending";
       const rawConnectors = (parsed as { connectors?: unknown }).connectors;
       if (
         rawConnectors &&

@@ -15,6 +15,7 @@ import type {
   UpdateChannel,
   UpdateState,
   IntuneChatStreamEvent,
+  ModelScanProbe,
   MultiTenantChatStreamEvent,
 } from "@openadminos/agent-sdk";
 
@@ -70,6 +71,16 @@ const api: OpenAdminOSApi = {
   setRegistryInstallCountsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-registry-install-counts-enabled", enabled),
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
+  startModelScan: () => ipcRenderer.invoke("openadminos:model-scan"),
+  retryModelScanProbe: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:model-scan-retry", providerId),
+  completeFirstRunScan: () => ipcRenderer.invoke("openadminos:complete-first-run-scan"),
+  onModelScanProgress: (listener: (probe: ModelScanProbe) => void): (() => void) => {
+    const handler = (_event: unknown, probe: ModelScanProbe) => listener(probe);
+    ipcRenderer.on("openadminos:model-scan-progress", handler);
+    return () => {
+      ipcRenderer.removeListener("openadminos:model-scan-progress", handler);
+    };
+  },
   testProvider: (providerId: ProviderId, model?: string) =>
     ipcRenderer.invoke("openadminos:test-provider", providerId, model),
   getAzureOpenAIConfig: () =>
