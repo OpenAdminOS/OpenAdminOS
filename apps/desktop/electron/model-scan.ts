@@ -36,11 +36,33 @@ export interface ModelScanCheck {
   providerId: ProviderId;
   name: string;
   where: "local" | "hosted";
+  target: string;
   run(signal: AbortSignal): Promise<ModelScanProbe>;
 }
 
-export function checkingProbe(check: Pick<ModelScanCheck, "providerId" | "name" | "where">): ModelScanProbe {
-  return { providerId: check.providerId, name: check.name, where: check.where, state: "checking", summary: "Checking", facts: [], ready: false, models: [] };
+export function checkingProbe(check: Pick<ModelScanCheck, "providerId" | "name" | "where" | "target">): ModelScanProbe {
+  return { providerId: check.providerId, name: check.name, where: check.where, target: check.target, state: "checking", summary: "Checking", facts: [], ready: false, models: [] };
+}
+
+/** What each check touches, shown while it runs. CLI checks run only the version and sign-in status commands. */
+export const SCAN_TARGETS: Readonly<Record<ProviderId, string>> = {
+  ollama: "localhost:11434",
+  "lm-studio": "localhost:1234",
+  "apple-foundation": "Apple Foundation helper",
+  anthropic: "claude auth status",
+  openai: "codex login status",
+  copilot: "copilot sign-in status",
+  gemini: "gemini --version",
+  "azure-openai": "saved Azure settings",
+};
+
+function endpointTarget(endpoint: string): string {
+  try {
+    const url = new URL(endpoint);
+    return url.port ? `${url.hostname === "127.0.0.1" ? "localhost" : url.hostname}:${url.port}` : url.hostname;
+  } catch {
+    return endpoint;
+  }
 }
 
 /** Runs one check within `timeoutMs`; a timeout or an error is a designed state. */
@@ -65,7 +87,7 @@ export async function runScanCheck(check: ModelScanCheck, timeoutMs: number, now
         durationMs: now() - started,
       };
     }
-    return { ...result, durationMs: now() - started };
+    return { ...result, target: result.target || check.target, durationMs: now() - started };
   } catch (error) {
     return {
       ...checkingProbe(check),
@@ -129,9 +151,15 @@ export function scanOutcome(
       ...(model ? { model } : {}),
     };
   }
-  const hosted = providers.filter((provider) => !provider.isLocal && isProviderReady(provider)).map((provider) => provider.id);
+  const hosted = providers
+    .filter((provider) => !provider.isLocal && isProviderReady(provider))
+    .map((provider) => provider.id)
+    .sort((a, b) => SCAN_ORDER.indexOf(a) - SCAN_ORDER.indexOf(b));
   return hosted.length > 0 ? { kind: "hosted-detected", providerIds: hosted } : { kind: "nothing" };
 }
+
+/** Hosted providers are offered in this order, whatever order their checks finished in. */
+const SCAN_ORDER: readonly ProviderId[] = ["ollama", "lm-studio", "apple-foundation", "anthropic", "openai", "copilot", "gemini", "azure-openai"];
 
 /** Names as the admin knows them. */
 export const SCAN_NAMES: Readonly<Record<ProviderId, string>> = {
@@ -148,12 +176,13 @@ export const SCAN_NAMES: Readonly<Record<ProviderId, string>> = {
 /** Turns an existing provider check into a scan result line. */
 export function scanProbeFromProvider(
   provider: ProviderSummary,
-  extra: { installedOnDisk?: boolean } = {},
+  extra: { installedOnDisk?: boolean; target?: string } = {},
 ): ModelScanProbe {
   const base = {
     providerId: provider.id,
     name: SCAN_NAMES[provider.id] ?? provider.name,
     where: provider.isLocal ? ("local" as const) : ("hosted" as const),
+    target: extra.target ?? SCAN_TARGETS[provider.id] ?? provider.name,
     models: provider.models,
   };
   const ready = isProviderReady(provider);
@@ -260,13 +289,19 @@ export function buildModelScanChecks(input: {
   return input.catalog
     .filter((provider) => provider.id !== "apple-foundation" || platform === "darwin")
     .map((provider): ModelScanCheck => {
-      const meta = { providerId: provider.id, name: SCAN_NAMES[provider.id] ?? provider.name, where: provider.isLocal ? "local" as const : "hosted" as const };
+      const endpoint =
+        provider.id === "ollama" ? resolveOllamaEndpoint() : provider.id === "lm-studio" ? resolveLmStudioEndpoint() : undefined;
+      const meta = {
+        providerId: provider.id,
+        name: SCAN_NAMES[provider.id] ?? provider.name,
+        where: provider.isLocal ? "local" as const : "hosted" as const,
+        target: endpoint ? endpointTarget(endpoint) : SCAN_TARGETS[provider.id] ?? provider.name,
+      };
       return {
         ...meta,
         async run(signal) {
           if (provider.id === "ollama" || provider.id === "lm-studio") {
-            const endpoint = provider.id === "ollama" ? resolveOllamaEndpoint() : resolveLmStudioEndpoint();
-            const trust = provider.id === "ollama" ? classifyOllamaEndpoint(endpoint) : classifyLmStudioEndpoint(endpoint);
+            const trust = provider.id === "ollama" ? classifyOllamaEndpoint(endpoint!) : classifyLmStudioEndpoint(endpoint!);
             if (!trust.isLocal) {
               return {
                 ...checkingProbe(meta),
@@ -279,7 +314,7 @@ export function buildModelScanChecks(input: {
               input.check(provider.id, signal),
               input.onDisk ? input.onDisk(provider.id) : installedOnDisk(provider.id, env, platform),
             ]);
-            return scanProbeFromProvider(summary, { installedOnDisk: onDisk });
+            return scanProbeFromProvider(summary, { installedOnDisk: onDisk, target: meta.target });
           }
           return scanProbeFromProvider(await input.check(provider.id, signal));
         },

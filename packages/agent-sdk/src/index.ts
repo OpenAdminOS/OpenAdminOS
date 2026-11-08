@@ -39,6 +39,8 @@ export interface ModelScanProbe {
   name: string;
   /** Local runtimes keep prompts on the device; hosted CLIs send them to their provider. */
   where: "local" | "hosted";
+  /** What the check touches on this device: a loopback address, a CLI command or a local file. */
+  target: string;
   state: ModelScanProbeState;
   /** One plain line, for example "Running, 3 models". */
   summary: string;

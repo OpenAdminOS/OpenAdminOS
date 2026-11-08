@@ -78,6 +78,7 @@ import { savedRegistrationName, tenantRegistrationSummary } from "../shared/app-
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
+import { ScanAgainButton } from "../setup/FirstRunScan";
 import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
@@ -476,7 +477,12 @@ export default function Settings() {
               id="providers"
               visible={visibleSectionIds.has("providers")}
               query={settingsQuery}
-              action={<UiButton variant="ghost" size="sm" onClick={() => void refresh()}>Refresh providers</UiButton>}
+              action={
+                <div className="flex items-center gap-2">
+                  <ScanAgainButton />
+                  <UiButton variant="ghost" size="sm" onClick={() => void refresh()}>Refresh providers</UiButton>
+                </div>
+              }
             >
               <ProvidersSection
                 providers={state.providers}

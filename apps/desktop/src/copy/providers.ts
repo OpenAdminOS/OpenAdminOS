@@ -14,3 +14,46 @@ export const PROVIDER_DETECTION_COPY = {
   autoSelectedNoticeDismiss: "Dismiss",
   autoSelectedNoticeSettings: "Open provider settings",
 } as const;
+
+/** The first-launch model scan (SPEC.md 4a, first launch). */
+export const MODEL_SCAN_COPY = {
+  title: "Looking for models on this device",
+  titleDone: "What this device can answer with",
+  subtitle:
+    "OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and ports only, and sends nothing.",
+  listHeading: "On this device",
+  progress: (done: number, total: number) => (total === 0 ? "Starting" : `${done} of ${total} checked`),
+  checking: "checking",
+  couldNotCheck: "Could not check",
+  retry: "Retry",
+  retryLabel: (name: string) => `Check ${name} again`,
+  announce: (name: string, summary: string) => `${name}: ${summary}.`,
+  finishedAnnouncement: (outcome: string) => `Scan finished. ${outcome}`,
+  ledger: (targets: readonly string[]) =>
+    `Checked here: ${targets.join(", ")}. Nothing was sent to a model or a provider.`,
+  localTitle: (model: string) => `${model} is ready on this device`,
+  localBody: (model: string, runtime: string) => `Chat answers with ${model} in ${runtime}. You can change the model at any time.`,
+  nothingLeaves: "Nothing leaves this device.",
+  openChat: "Open Chat",
+  hostedTitle: "A signed-in AI tool was found",
+  hostedBody:
+    "It is not selected for you, because prompts would leave this device. Choose it to answer with it, or keep everything local.",
+  hostedWhere: (location: string) => `Prompts go to ${location}`,
+  useHosted: (name: string) => `Use ${name}`,
+  keepLocalPrefix: "To keep everything on this device,",
+  setUpOpenAdmin: "set up OpenAdmin 8B",
+  continueWithoutModel: "Continue to Chat without a model",
+  nothingTitle: "No model found on this device",
+  nothingBody: "Install Ollama, then run this command to get OpenAdmin 8B, a model trained for Intune and Entra work:",
+  nothingRunningBody: (runtime: string) => `${runtime} is installed but not running. Start it, or get OpenAdmin 8B with:`,
+  installCommand: "ollama run openadminos/openadmin-8b",
+  setUpOpenAdminAction: "Set up OpenAdmin 8B",
+  allProviders: "Show all providers",
+  scanAgain: "Scan again",
+  continueToChat: "Continue to Chat",
+  scanFailed: "The scan did not start.",
+  previewPrefix: "Not ready to set up a model?",
+  previewLink: "Preview with sample data",
+  previewSuffix: "from a fictional company.",
+  previewFailed: (reason: string) => `Sample data did not open. ${reason}`,
+} as const;

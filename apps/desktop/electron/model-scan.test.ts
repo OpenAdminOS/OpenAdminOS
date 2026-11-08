@@ -24,10 +24,11 @@ const delayed = (ms: number, probe: ModelScanProbe): ModelScanCheck => ({
   providerId: probe.providerId,
   name: probe.name,
   where: probe.where,
+  target: probe.target,
   run: () => new Promise((resolve) => setTimeout(() => resolve(probe), ms)),
 });
 const found = (providerId: "ollama" | "anthropic" | "openai", name: string): ModelScanProbe => ({
-  ...checkingProbe({ providerId, name, where: providerId === "ollama" ? "local" : "hosted" }),
+  ...checkingProbe({ providerId, name, where: providerId === "ollama" ? "local" : "hosted", target: "test" }),
   state: "found",
   summary: "Running",
 });
@@ -51,8 +52,8 @@ describe("first-launch model scan", () => {
     const started = Date.now();
     const probes = await runModelScan({
       checks: [
-        { providerId: "copilot", name: "GitHub Copilot CLI", where: "hosted", run: () => new Promise(() => undefined) },
-        { providerId: "gemini", name: "Gemini CLI", where: "hosted", run: async () => { throw new Error("Gemini CLI could not start."); } },
+        { providerId: "copilot", name: "GitHub Copilot CLI", where: "hosted", target: "copilot sign-in status", run: () => new Promise(() => undefined) },
+        { providerId: "gemini", name: "Gemini CLI", where: "hosted", target: "gemini --version", run: async () => { throw new Error("Gemini CLI could not start."); } },
         delayed(10, found("ollama", "Ollama")),
       ],
       timeoutMs: 120,
@@ -143,7 +144,7 @@ describe("first-launch model scan", () => {
     it("reads hosted CLIs from their sign-in status", () => {
       assert.deepEqual(
         { ...scanProbeFromProvider(claudeReady), durationMs: undefined },
-        { providerId: "anthropic", name: "Claude Code", where: "hosted", models: ["claude-sonnet-5-5"], state: "found", ready: true, summary: "Signed in", facts: ["Version 2.4.0"], durationMs: undefined },
+        { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", models: ["claude-sonnet-5-5"], state: "found", ready: true, summary: "Signed in", facts: ["Version 2.4.0"], durationMs: undefined },
       );
       const signedOut = scanProbeFromProvider({ ...catalog("openai"), status: "error", detail: "Run `codex login`.", models: [], cli: { state: "signed-out" } });
       assert.equal(signedOut.summary, "Installed, not signed in");
