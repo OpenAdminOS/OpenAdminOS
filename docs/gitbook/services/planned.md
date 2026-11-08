@@ -24,7 +24,7 @@ Planned means:
 Jamf Pro would cover computers, mobile devices, inventory, smart groups, policies and configuration profiles. It does not use Microsoft sign-in:
 
 - You would create an API client in Jamf Pro under Settings, System, API roles and clients, and give its API role read privileges only.
-- OpenAdminOS would store the client secret in the OS keychain and send it only to your Jamf Pro URL.
+- OpenAdminOS would store the client secret in the OS keychain, exchange it for a short-lived access token with OAuth client credentials, and send both only to your Jamf Pro URL.
 - Each part would switch on only when a check proves the API role has the privileges it needs.
 - Jamf Pro would belong to an organization alongside its Microsoft 365 tenant, or on its own when a company runs only Jamf.
 

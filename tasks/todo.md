@@ -1541,6 +1541,9 @@ Direction approved 2026-11-08 (SPEC §4a, "Decided 2026-11-08"). Design: `docs/m
 8. Hard constraint 3 wording is updated in `CLAUDE.md` and `AGENTS.md`, and every `requireTenant` gate is reviewed against it with tests.
 9. Unit and renderer tests for each criterion, Playwright screenshots in light and dark, and a live check in the running app from a fresh profile.
 10. SPEC and CHANGELOG updated, separate evaluator and GPT-6.1-Sol review before merge.
+11. Each schedule belongs to one organization; migration moves existing schedules to the organization of the tenant active at migration and says so; a test proves a schedule never runs while another organization is active.
+12. The first hosted send without an organization asks for confirmation naming provider, model, region and what leaves; a test proves that acknowledgement is refused for a send with tenant context, and the first send in an organization asks again.
+13. A manual run without an organization opens the preflight, which names the services the agent needs; tests cover the Chat gate, hosted acknowledgement and preflight changes named in the SPEC block.
 
 ## Out of scope
 
@@ -1566,3 +1569,11 @@ Open states for the implementation plan: connecting a tenant that already belong
 3. [x] The Connections page said every report send shows a preview, but saved delivery rules post automatically. The page, the reach map label and the SPEC block now say reports go out under saved delivery rules.
 4. [x] "References never receive tenant data" overstated the boundary. SPEC and mockup now say they receive no Graph or cache data, and private details typed into a question can reach them.
 5. [x] planned.md applied Microsoft-only rules to Jamf. Those rules are now scoped to Microsoft 365 services, with a Jamf paragraph on API client access; the website copy is regenerated.
+
+## PR #173 review round 2 (GPT-6.1-Sol, 2026-11-08)
+
+Round 1 fixes confirmed. No blocking findings.
+
+1. [x] SPEC and mockup said schedules are per tenant today; they belong to the agent and run against the active tenant (`state.ts` `fireDueSchedules`). Corrected, with schedule ownership, migration and isolation in the SPEC and criterion 11.
+2. [x] The SPEC block did not name the Chat tenant gate, the tenant-bound hosted-send acknowledgement or the manual-run preflight. Named; consent for a hosted send without an organization is defined, with criteria 12 and 13.
+3. [x] Jamf is OAuth client credentials (secret exchanged for an access token), not an API key. SPEC, mockup and planned.md corrected.

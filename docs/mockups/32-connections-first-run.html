@@ -613,7 +613,7 @@
       </div>
       <ul class="notes">
         <li>An organization is created by its first connection: connecting Intune from section D creates "Woodgrove" from the tenant's display name. It can be renamed.</li>
-        <li>Each organization holds at most one Microsoft 365 tenant and one instance per other vendor. Runs, conversations, cache, schedules and drift stay per organization, as they are per tenant today.</li>
+        <li>Each organization holds at most one Microsoft 365 tenant and one instance per other vendor. Runs, conversations, cache and drift stay per organization, as they are per tenant today. Schedules today belong to the agent and follow the active tenant; with organizations each schedule belongs to one organization and never runs against another.</li>
         <li>Fabrikam and Northwind show Jamf for illustration. Jamf support is not built yet.</li>
       </ul>
     </section>
@@ -652,7 +652,7 @@
     <!-- H -->
     <section class="section" id="h">
       <h2>H. Connecting Jamf Pro, for when Jamf support ships</h2>
-      <p class="lede">The first service outside Microsoft. Jamf Pro uses API clients with a client ID and secret, so this is the API key method from the vendor MCP authentication design (tasks/todo.md, 2026-11-03): the secret goes to the OS keychain and is sent only to the declared host. Shown to fix the pattern, not as a release commitment.</p>
+      <p class="lede">The first service outside Microsoft. Jamf Pro uses API clients: the client ID and secret are exchanged for a short-lived access token with OAuth client credentials. The secret is stored in the OS keychain like the API key method of the vendor MCP authentication design (tasks/todo.md, 2026-11-03), the token stays in memory, and both are sent only to the declared host. Shown to fix the pattern, not as a release commitment.</p>
       <div class="grid2">
         <div class="solo">
           <div class="dialog">
