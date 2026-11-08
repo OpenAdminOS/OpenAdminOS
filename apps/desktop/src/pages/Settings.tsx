@@ -500,7 +500,7 @@ export default function Settings() {
                       onClick={() => {
                         void startPilot().catch((caught) =>
                           toast.error(
-                            `Pilot mode did not open. ${caught instanceof Error ? userFacingErrorReason(caught.message) ?? "" : ""} Try again from Settings, Tenants.`.replace(/\s+/g, " "),
+                            `Pilot mode did not open. ${caught instanceof Error ? userFacingErrorReason(caught.message) ?? "" : ""} Try again from Connections.`.replace(/\s+/g, " "),
                           ),
                         );
                       }}
@@ -1579,7 +1579,7 @@ function TenantRow({
         </div>
         <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
           {tenant.kind === "sample"
-            ? "You can open pilot mode again later from the tenant menu or Settings, Tenants."
+            ? "You can open pilot mode again later from the organization menu or Connections."
             : "Microsoft 365 data in the tenant is not changed. Reconnecting later starts with an empty local cache."}
         </p>
         {disconnectError && (
@@ -3501,8 +3501,8 @@ function GeneralSection() {
           id="default-tenant-scope"
           description={
             activeTenant
-              ? "Agents use this tenant unless overridden at run time. Change in Settings → Tenants."
-              : "No tenant connected. Connect one from Settings → Tenants."
+              ? "Agents use this tenant unless overridden at run time. Change in Connections."
+              : "No tenant connected. Connect one from Connections."
           }
           control={
             activeTenant ? (

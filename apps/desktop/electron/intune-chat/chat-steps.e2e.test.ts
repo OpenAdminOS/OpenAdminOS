@@ -688,7 +688,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
   it("keeps the partial-answer note with the lazy refresh, the step timeline and streaming when a service is not connected", async () => {
     const intuneOnly = requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name));
-    const note = "Not included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Settings, Tenants.";
+    const note = "Not included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Connections.";
     for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
       await withHarness(async ({ store, graphPaths, script }) => {
         script([
@@ -903,7 +903,7 @@ describe("Chat steps, sources and follow-ups end to end", () => {
 
   describe("access blocks and docs questions", () => {
     const intuneOnly = requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name));
-    const blocked = "Defender is not connected for this tenant. Add it in Settings, Tenants.";
+    const blocked = "Defender is not connected for this tenant. Add it in Connections.";
     const ask = (store: AppStateStore, send: "sendIntuneChatMessage" | "streamIntuneChatMessage", content: string) =>
       send === "sendIntuneChatMessage" ? store.sendIntuneChatMessage({ content }) : store.streamIntuneChatMessage({ content }, () => {});
 

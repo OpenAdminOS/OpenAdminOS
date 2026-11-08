@@ -691,7 +691,7 @@ export interface TenantRecord {
    * `/subscribedSkus` probe that produces `entraTier`. Filtered to
    * the SKUs an admin would actually think about — Microsoft 365
    * Business / Enterprise tiers, EMS, standalone Azure AD Premium.
-   * Surfaced in Settings → Tenants. Absent when the probe has not
+   * Surfaced in Connections. Absent when the probe has not
    * run yet or returned no relevant SKUs.
    */
   relevantLicenses?: TenantLicense[];
@@ -773,7 +773,7 @@ export interface ConnectTenantOptions {
   partIds?: string[];
 }
 
-/** A subscribed SKU surfaced in the Settings → Tenants license panel. */
+/** A subscribed SKU surfaced in the Connections license panel. */
 export interface TenantLicense {
   /** Microsoft SKU part number, e.g. `SPE_E5`, `SPB`, `EMSPREMIUM`. */
   skuPartNumber: string;

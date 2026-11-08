@@ -195,7 +195,7 @@ it("Chat and cache Graph access never widens consent beyond the tenant's granted
     const selection = await internal.buildGraph("tenant-1", ["Policy.Read.All"]);
     await assert.rejects(
       selection.createGraph(() => undefined).request({ method: "GET", path: "/identity/conditionalAccess/policies" }),
-      /This needs Entra Conditional Access and policies, which is not granted for Test\. Add it in Settings, Tenants\./,
+      /This needs Entra Conditional Access and policies, which is not granted for Test\. Add it in Connections\./,
     );
     assert.equal(browserCalls, 0);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }

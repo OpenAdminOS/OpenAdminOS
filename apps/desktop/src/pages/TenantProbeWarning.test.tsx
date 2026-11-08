@@ -25,7 +25,7 @@ function ownRegistrationTenant(warned: boolean): TenantRecord {
 }
 
 describe("Entra tier probe warning", () => {
-  it("shows the mismatch on the tenant in Settings, Tenants", async () => {
+  it("shows the mismatch on the tenant in Connections", async () => {
     const state = createMockAppState({ tenants: [ownRegistrationTenant(true)] });
     renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/tenants", bridge: makeMockBridge({}, state) });
 

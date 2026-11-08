@@ -167,7 +167,7 @@ describe("agents by service", () => {
 
     expect(
       await screen.findByText(
-        `Runs are blocked until Defender is connected for ${intuneOnlyTenant.displayName}. Add it in Settings, Tenants.`,
+        `Runs are blocked until Defender is connected for ${intuneOnlyTenant.displayName}. Add it in Connections.`,
       ),
     ).toBeInTheDocument();
     expect(screen.queryByText(/requested before the first run/)).not.toBeInTheDocument();

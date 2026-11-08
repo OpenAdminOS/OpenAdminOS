@@ -501,7 +501,7 @@ export function ServiceNotConnectedPanel({
         </ul>
         <div className="mt-4 flex justify-end">
           <Button size="sm" variant="ghost" onClick={() => navigate("/settings/tenants")}>
-            Open Settings, Tenants
+            Open Connections
           </Button>
         </div>
       </section>

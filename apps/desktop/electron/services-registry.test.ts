@@ -271,7 +271,7 @@ describe("available scopes", () => {
     });
     assert.equal(
       missingServiceCopy(alertOnly, ["SecurityAlert.Read.All"]),
-      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+      "Defender is not connected for this tenant. Add it in Connections.",
     );
   });
 
@@ -304,18 +304,18 @@ describe("missing service copy", () => {
   it("names a service that has no part granted as not connected", () => {
     assert.equal(
       missingServiceCopy(peopleOnly, ["SecurityIncident.Read.All"]),
-      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+      "Defender is not connected for this tenant. Add it in Connections.",
     );
     assert.equal(
       missingServiceCopy({ grantedScopes: [] }, ["SecurityIncident.Read.All", "DeviceManagementApps.Read.All"]),
-      "Intune and Defender are not connected for this tenant. Add them in Settings, Tenants.",
+      "Intune and Defender are not connected for this tenant. Add them in Connections.",
     );
   });
 
   it("names the missing part of a partly connected service with the tenant", () => {
     assert.equal(
       missingServiceCopy(peopleOnly, ["AuditLog.Read.All"]),
-      "This needs Entra sign-in logs, which is not granted for Contoso. Add it in Settings, Tenants.",
+      "This needs Entra sign-in logs, which is not granted for Contoso. Add it in Connections.",
     );
   });
 

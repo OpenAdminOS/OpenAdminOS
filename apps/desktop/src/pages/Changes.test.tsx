@@ -1001,7 +1001,7 @@ describe("Changes page", () => {
     expect(await screen.findByText("No change history yet")).toBeInTheDocument();
     expect(
       screen.getByText(
-        /Intune is not connected\. Its earlier snapshots are not shown\. Add it in Settings, Tenants to track its changes again\./,
+        /Intune is not connected\. Its earlier snapshots are not shown\. Add it in Connections to track its changes again\./,
       ),
     ).toBeInTheDocument();
   });

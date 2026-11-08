@@ -182,7 +182,7 @@ function restrictPlannedResourcesForTenant(
   if (dropped.length === 0) return {};
   const reason =
     missingServiceCopy(tenant, requiredScopesForResources(dropped)) ??
-    `This question needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+    `This question needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Connections.`;
   if (planned.resources.length === 0) return { blocked: reason };
   const labels = dropped.map((resource) => definitionForResource(resource).label);
   return { omitted: `Not included in this answer: ${formatServiceList(labels)}. ${reason}` };
@@ -276,7 +276,7 @@ function unavailableResourcesForTenant(
   const labels = unavailable.map((resource) => definitionForResource(resource).label);
   const reason =
     missingServiceCopy(tenant, needed) ??
-    `This needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Settings, Tenants.`;
+    `This needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Connections.`;
   return {
     resources: unavailable,
     missingScopes,
@@ -851,7 +851,7 @@ export class IntuneChatService {
             const kinds = skippedResources.map((resource) => resource.resource);
             const reason =
               (record ? missingServiceCopy(record, requiredScopesForResources(kinds)) : undefined) ??
-              "Its service is not connected for this tenant. Add it in Settings, Tenants.";
+              "Its service is not connected for this tenant. Add it in Connections.";
             const devicesSkipped = kinds.includes("managedDevices");
             const message = `Not included: ${formatServiceList(skippedResources.map((resource) => resource.label))}. ${reason}`;
             skippedNotes.set(tenant.tenantId, { devicesSkipped, message });

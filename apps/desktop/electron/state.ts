@@ -6185,7 +6185,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     if (!result.account) {
       throw new Error(
-        "Microsoft sign-in did not return an account. Try connecting again from Settings → Tenants.",
+        "Microsoft sign-in did not return an account. Try connecting again from Connections.",
       );
     }
     const account = result.account;
@@ -6352,7 +6352,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     if (tenant.appRegistration?.kind !== "custom") {
       throw new Error(
-        "Check again applies to your own app registration. Use Add access in Settings, Tenants for the OpenAdminOS app.",
+        "Check again applies to your own app registration. Use Add access in Connections for the OpenAdminOS app.",
       );
     }
     return this.runTenantCheck(tenant, "permissions", async (operation) => {
@@ -7080,7 +7080,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           if (ungranted.length > 0) {
             throw new Error(
               missingServiceCopy(tenant, ungranted) ??
-                `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Settings, Tenants.`,
+                `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Connections.`,
             );
           }
         }

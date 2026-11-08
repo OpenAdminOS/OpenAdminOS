@@ -809,10 +809,10 @@ export function missingServiceCopy(
   );
   if (missingServices.length > 0) {
     const titles = missingServices.map((service) => service.title);
-    return `${formatServiceList(titles)} ${titles.length === 1 ? "is" : "are"} not connected for this tenant. Add ${titles.length === 1 ? "it" : "them"} in Settings, Tenants.`;
+    return `${formatServiceList(titles)} ${titles.length === 1 ? "is" : "are"} not connected for this tenant. Add ${titles.length === 1 ? "it" : "them"} in Connections.`;
   }
   const labels = parts.map(partLabel);
-  return `This needs ${formatServiceList(labels)}, which ${labels.length === 1 ? "is" : "are"} not granted for ${tenant.displayName ?? "this tenant"}. Add ${labels.length === 1 ? "it" : "them"} in Settings, Tenants.`;
+  return `This needs ${formatServiceList(labels)}, which ${labels.length === 1 ? "is" : "are"} not granted for ${tenant.displayName ?? "this tenant"}. Add ${labels.length === 1 ? "it" : "them"} in Connections.`;
 }
 
 /**

@@ -1505,7 +1505,7 @@ function TimelineView({
       <EmptyState
         icon={<IconWarning size={18} />}
         title="No current change history"
-        description={`${omittedNotice} Add it in Settings, Tenants to track changes again.`}
+        description={`${omittedNotice} Add it in Connections to track changes again.`}
         action={
           <Button variant="secondary" onClick={onClearFilters}>
             Show all resources
@@ -1520,7 +1520,7 @@ function TimelineView({
         icon={<IconClock size={18} />}
         title="No change history yet"
         description={`Refresh the tenant cache to capture a baseline, then refresh again to detect changes.${
-          omittedNotice ? ` ${omittedNotice} Add it in Settings, Tenants to track its changes again.` : ""
+          omittedNotice ? ` ${omittedNotice} Add it in Connections to track its changes again.` : ""
         }`}
         action={
           <Button variant="primary" onClick={onRefresh}>
@@ -2462,7 +2462,7 @@ function TenantCompareResults({
       <EmptyState
         icon={<IconWarning size={18} />}
         title="Nothing to compare"
-        description={`${omittedNotice} Add it in Settings, Tenants to compare it again.`}
+        description={`${omittedNotice} Add it in Connections to compare it again.`}
       />
     );
   }

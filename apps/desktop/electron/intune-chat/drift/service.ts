@@ -368,7 +368,7 @@ export class DriftService {
     const { resources } = this.grantedResources(tenant, undefined);
     if (resources.length === 0) {
       throw new Error(
-        "No connected service has tracked configuration for this tenant. Add Intune or Entra in Settings, Tenants.",
+        "No connected service has tracked configuration for this tenant. Add Intune or Entra in Connections.",
       );
     }
     return this.host.createDriftBaseline({

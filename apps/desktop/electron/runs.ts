@@ -458,7 +458,7 @@ export class RunService {
         const titles = missingServices.map((service) => service.title);
         const one = titles.length === 1;
         throw new Error(
-          `${agent.name} needs ${formatServiceList(titles)}, which ${one ? "is" : "are"} not connected for ${runTenant.displayName}. Add ${one ? "it" : "them"} in Settings, Tenants, then run the agent again.`,
+          `${agent.name} needs ${formatServiceList(titles)}, which ${one ? "is" : "are"} not connected for ${runTenant.displayName}. Add ${one ? "it" : "them"} in Connections, then run the agent again.`,
         );
       }
 
