@@ -412,7 +412,9 @@ export class RunDeliveryService {
     if (!run || !isTerminalRunStatus(run.status)) {
       return { retryable: false };
     }
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
@@ -517,7 +519,9 @@ export class RunDeliveryService {
       return { retryable: false };
     }
 
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
@@ -746,7 +750,9 @@ export class RunDeliveryService {
       };
     }
 
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
@@ -841,7 +847,9 @@ export class RunDeliveryService {
       return { retryable: false };
     }
 
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;

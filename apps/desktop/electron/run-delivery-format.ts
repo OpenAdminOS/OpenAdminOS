@@ -613,6 +613,9 @@ export function extractConnectorRefs(result: unknown): {
 
 
 
+/** How a report labels a run that had no organization (an agent that calls no service API). */
+export const NO_ORGANIZATION_REPORT_LABEL = "No organization";
+
 export function formatTeamsDeliveryMessage(
   run: RunRecord,
   agent: AgentSummary,
@@ -666,7 +669,7 @@ export function formatWhatsAppDeliveryMessage(
     "",
     `Agent: ${agent.name}`,
     `Status: ${status}`,
-    `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    `Tenant: ${tenant?.displayName ?? run.tenantId ?? NO_ORGANIZATION_REPORT_LABEL}`,
     ...(tenant?.kind === "sample"
       ? ["Data: Pilot mode sample data from a fictional company"]
       : []),
@@ -755,7 +758,7 @@ export function formatChatDeliveryMessage(
     "",
     `*Agent:* ${agent.name}`,
     `*Status:* ${status}`,
-    `*Tenant:* ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    `*Tenant:* ${tenant?.displayName ?? run.tenantId ?? NO_ORGANIZATION_REPORT_LABEL}`,
     ...(tenant?.kind === "sample"
       ? ["*Data:* Pilot mode sample data from a fictional company"]
       : []),
@@ -799,7 +802,7 @@ export function formatPlainDeliveryMessage(
     "",
     `Agent: ${agent.name}`,
     `Status: ${status}`,
-    `Tenant: ${tenant?.displayName ?? run.tenantId ?? "Unknown tenant"}`,
+    `Tenant: ${tenant?.displayName ?? run.tenantId ?? NO_ORGANIZATION_REPORT_LABEL}`,
     ...(tenant?.kind === "sample"
       ? ["Data: Pilot mode sample data from a fictional company"]
       : []),
@@ -843,7 +846,9 @@ export function resolveRunTenant(
   persisted: PersistedState,
   run: RunRecord,
 ): TenantRecord | undefined {
-  const tenantId = run.tenantId ?? persisted.activeTenantId;
+  // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
   return tenantId
     ? persisted.tenants.find((candidate) => candidate.id === tenantId)
     : undefined;

@@ -461,3 +461,134 @@ describe("post-run WhatsApp delivery", () => {
     }
   });
 });
+
+describe("reports of a run with no organization (review round 1)", () => {
+  const customerB = {
+    id: "tenant-b",
+    displayName: "Customer B",
+    username: "admin@customer-b.example",
+    homeAccountId: "home-b",
+    addedAt: now,
+  };
+  const sample = {
+    id: "openadminos-sample-tenant",
+    kind: "sample",
+    displayName: "Contoso (pilot)",
+    username: "admin@contoso.invalid",
+    homeAccountId: "sample",
+    addedAt: now,
+  };
+
+  it("labels a Slack report No organization even when another organization is active now", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-noorg-"));
+    const statePath = join(dir, "state.json");
+    const posted: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      posted.push(String(body.text));
+      return new Response(JSON.stringify({ ok: true, channel: body.channel, ts: "1.2" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [deliveryAgentWith({ slack: { enabled: true, useDefaultChannel: true } })],
+      runs: [completedRun("run-noorg")],
+      tenants: [customerB],
+      activeTenantId: customerB.id,
+      connectors: { slack: { config: { defaultChannel: "C123", defaultChannelLabel: "#alerts" } } },
+      runDeliveryQueue: [connectorQueueItem("run-noorg", "slack")],
+    });
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      connectorSecretsFor: () => ({
+        get: async (key) => (key === "botToken" ? "xoxb-test" : undefined),
+        set: async () => undefined,
+        remove: async () => undefined,
+      }),
+    });
+    try {
+      await store.processPendingRunDeliveries();
+      assert.equal(posted.length, 1);
+      assert.match(posted[0]!, /No organization/);
+      assert.doesNotMatch(posted[0]!, /Customer B/);
+    } finally {
+      globalThis.fetch = originalFetch;
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivers a WhatsApp report while the sample organization is active instead of refusing it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-noorg-sample-"));
+    const statePath = join(dir, "state.json");
+    const sent: string[] = [];
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [deliveryAgent({ enabled: true })],
+      runs: [completedRun("run-noorg")],
+      tenants: [sample],
+      activeTenantId: sample.id,
+      connectors: { "whatsapp-web": { config: { defaultTargetType: "self" } } },
+      runDeliveryQueue: [queueItem("run-noorg")],
+    });
+    const store = createStore({
+      statePath,
+      sendMessage: async ({ text }) => {
+        sent.push(text);
+        return { messageId: "m1" };
+      },
+    });
+    try {
+      await store.processPendingRunDeliveries();
+      const state = await readJson(statePath);
+      const run = (state.runs as RunRecord[])[0];
+      assert.equal(sent.length, 1);
+      assert.match(sent[0]!, /Tenant: No organization/);
+      assert.doesNotMatch(sent[0]!, /Contoso|sample data/i);
+      assert.equal(run?.logs.some((log) => /available in production/i.test(log.message)), false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const connectorId of ["teams", "outlook"] as const) {
+    it(`skips ${connectorId} delivery for a run with no organization and says why`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), `openadminos-delivery-noorg-${connectorId}-`));
+      const statePath = join(dir, "state.json");
+      const originalFetch = globalThis.fetch;
+      let calls = 0;
+      globalThis.fetch = (async () => {
+        calls += 1;
+        throw new Error("No request may be sent.");
+      }) as typeof fetch;
+      await writeJson(statePath, {
+        activeProviderId: "ollama",
+        installedAgents: [deliveryAgentWith({ [connectorId]: { enabled: true, useDefaultTarget: true, useDefaultRecipients: true } })],
+        runs: [completedRun("run-noorg")],
+        tenants: [customerB],
+        activeTenantId: customerB.id,
+        runDeliveryQueue: [{ id: `run-noorg:${connectorId}`, runId: "run-noorg", connectorId, attempts: 0, createdAt: now, nextAttemptAt: now }],
+      });
+      const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+      try {
+        await store.processPendingRunDeliveries();
+        const state = await readJson(statePath);
+        const run = (state.runs as RunRecord[])[0];
+        assert.equal(calls, 0);
+        assert.equal(state.runDeliveryQueue, undefined);
+        assert.ok(run?.logs.some((log) => log.message.startsWith("Report delivery skipped. This run had no organization")));
+      } finally {
+        globalThis.fetch = originalFetch;
+        store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
