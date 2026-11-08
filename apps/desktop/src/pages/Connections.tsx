@@ -24,6 +24,7 @@ import { Badge, Button as UiButton, StatusDot } from "../components/ui";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
+import { deliveryDestinations } from "../shared/delivery-destinations";
 import {
   AVAILABLE_SERVICES,
   SERVICE_PARTS,
@@ -33,7 +34,6 @@ import {
   resolveOrganizations,
   resolveProviderDefaultModel,
   serviceStatus,
-  type AgentSummary,
   type AppState,
   type OrganizationRecord,
   type SavedAppRegistration,
@@ -45,23 +45,6 @@ import { PILOT_COPY } from "../shared/pilot-mode";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { chatToolHosts, useAppState } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
-
-/** Result connectors an agent can deliver to, in the order Settings lists them. */
-const DELIVERY_CONNECTORS: ReadonlyArray<{ key: keyof NonNullable<AgentSummary["delivery"]>; name: string }> = [
-  { key: "teams", name: "Microsoft Teams" },
-  { key: "outlook", name: "Outlook" },
-  { key: "slack", name: "Slack" },
-  { key: "discord", name: "Discord" },
-  { key: "signal", name: "Signal" },
-  { key: "whatsappWeb", name: "WhatsApp" },
-];
-
-/** Connectors that at least one installed agent sends reports to under a saved delivery rule. */
-export function deliveryDestinations(agents: readonly AgentSummary[]): string[] {
-  return DELIVERY_CONNECTORS.filter((connector) =>
-    agents.some((agent) => agent.delivery?.[connector.key]?.enabled === true),
-  ).map((connector) => connector.name);
-}
 
 interface ReachService {
   serviceId: ServiceId;

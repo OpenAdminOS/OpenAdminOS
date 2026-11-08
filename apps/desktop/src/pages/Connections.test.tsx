@@ -2,7 +2,8 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import Connections, { buildReachModel, deliveryDestinations, reachDescription } from "./Connections";
+import Connections, { buildReachModel, reachDescription } from "./Connections";
+import { deliveryDestinations } from "../shared/delivery-destinations";
 import {
   createMockAgent,
   createMockAppState,

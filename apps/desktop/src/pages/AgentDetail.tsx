@@ -42,6 +42,7 @@ import {
 } from "../components/ui";
 import { useAppState } from "../state";
 import { agentNeeds } from "../shared/agent-needs";
+import { manualRunReportDestinations } from "../shared/delivery-destinations";
 import { AgentNeedChips } from "../components/AgentNeedChips";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -63,6 +64,7 @@ import {
   type ServiceId,
   resolveRunModel,
   type AgentManifestPreview,
+  type AgentSummary,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSignalDelivery,
@@ -2672,6 +2674,19 @@ function ChoiceButton({
   );
 }
 
+/** Where the report of a run with no organization goes, from the agent's saved delivery rules. */
+function noOrganizationReportLine(destinations: { sent: string[]; skipped: string[] }): string {
+  const list = (names: string[]) =>
+    names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  const sent = destinations.sent.length > 0
+    ? `Saved delivery rules send its report to ${list(destinations.sent)}.`
+    : "No saved delivery rule sends its report.";
+  const skipped = destinations.skipped.length > 0
+    ? ` ${list(destinations.skipped)} ${destinations.skipped.length === 1 ? "is" : "are"} skipped: ${destinations.skipped.length === 1 ? "it posts" : "they post"} with an organization's Microsoft sign-in.`
+    : "";
+  return `${sent}${skipped}`;
+}
+
 /** What Run again keeps from the original run when it opens the preflight. */
 export interface RerunChoice {
   providerId?: ProviderId;
@@ -2703,7 +2718,7 @@ function RunPreflightModal({
   onOpenConnections?: () => void;
   dryRun: boolean;
   open: boolean;
-  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown; connectors?: readonly unknown[]; graphOperations?: readonly unknown[] };
+  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown; connectors?: readonly unknown[]; graphOperations?: readonly unknown[]; delivery?: AgentSummary["delivery"] };
   activeTenant: TenantRecord | undefined;
   providerName: string;
   providerIsLocal: boolean;
@@ -2828,7 +2843,7 @@ function RunPreflightModal({
             {activeTenant
               ? "OpenAdminOS runs this agent against the active organization and saves the result to local run history."
               : serviceFree
-                ? "OpenAdminOS runs this agent on this device with no organization and saves the result to local run history. It cannot reach any service."
+                ? `OpenAdminOS runs this agent with no organization and saves the result to local run history. It reads no service data. ${noOrganizationReportLine(manualRunReportDestinations(agent, false))}`
                 : "This agent cannot start until an organization with its services is active."} {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
               ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."
               : "This agent cannot change tenant state."}
