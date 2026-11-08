@@ -1554,7 +1554,22 @@ Jamf Pro and Google Workspace connectors (separate issues; the mockup fixes the 
 - [x] Mockup `32-connections-first-run.html`, checked at desktop and phone widths in light and dark
 - [x] SPEC §4a decision block, mockup table row, CHANGELOG line
 - [x] Public issue #171
-- [ ] Implementation plan with the `TenantRecord` to organization migration
+- [x] Implementation plan with the `TenantRecord` to organization migration (part B, below)
+
+## Part B plan: organizations and Connections (branch `organizations/connections`)
+
+Criteria 5, 6, 7, 8, 11 and 13. Part A (criteria 1 to 4 and 12) is built on `first-run/without-sign-in`.
+
+Data model: `TenantRecord` stays the Microsoft 365 connection. `OrganizationRecord` sits above it in `state.json` with an id, a name, an optional `kind: "sample"`, and `connections.microsoft365.tenantId`; other vendor services each add one keyed connection later. The active organization is the one that holds the active tenant, so `activeTenantId` stays the single source and every tenant-keyed store (runs, conversations, cache, drift, office) keeps working unchanged. Organization ids are derived from the tenant id (`org-<tenantId>`), so the migration is deterministic and idempotent at read time even though `read()` does not persist.
+
+- [x] SDK types: `OrganizationRecord`, `AppState.organizations`, `AgentSchedule.organizationId`, migration notice, `agentCallsNoServiceApi`
+- [x] Host: organization reconcile and migration on read, rename, choose No organization, schedule assignment, schedules gated by organization, service-free runs without a tenant
+- [x] Host tests: migration from current state files (one real tenant active, none active, pilot alongside real tenants), idempotency, invalid records, schedule isolation, `services: []` with `User.Read` still needs an organization
+- [x] Renderer: organization switcher, Connections page with reach map, routes and redirects, sidebar item, account menu, Settings sections removed
+- [x] Renderer: agent service needs and named actions, preflight without an organization, schedules surfaces for unassigned schedules
+- [x] Gates: review every `requireTenant` and `requireTenantAndProvider` call against hard constraint 3, with tests. Agent runs (Agents list, agent drawer, command palette, Run again) no longer gate on a tenant: they open the preflight, which names the services. Cache refresh, Changes, schedules (Run due now, Schedules page) and Chat keep the gate, because they always read a service. Chat is part A.
+- [x] Docs: `CLAUDE.md`, `AGENTS.md`, SPEC, CHANGELOG, GitBook pages, `docs:generate`
+- [ ] Verification under Node 22, app launch on a migrated state file, screenshots light and dark
 
 ## Design review (2026-11-08)
 
