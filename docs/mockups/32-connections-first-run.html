@@ -33,7 +33,7 @@
       B. First launch with no model
       C. Answer from a public reference, no organization
       D. A question that needs a service
-      E. Connections page with the reach map
+      E. Connections page (sidebar item) with the reach map
       F. Organization switcher
       G. Agents with service needs
       H. Connecting Jamf Pro, for when Jamf support ships
@@ -337,7 +337,7 @@
         <div class="app">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Runs</div>
+            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
             <div class="spacer"></div>
             <div class="org-chip"><span class="org-tile none">+</span><div><div class="name">No organization</div><div class="sub">Nothing connected</div></div></div>
           </aside>
@@ -385,7 +385,7 @@
         <div class="app" style="min-height: 600px;">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Runs</div>
+            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
             <div class="spacer"></div>
             <div class="org-chip"><span class="org-tile none">+</span><div><div class="name">No organization</div><div class="sub">Nothing connected</div></div></div>
           </aside>
@@ -421,7 +421,7 @@
         <div class="app" style="min-height: 560px;">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Runs</div>
+            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
             <div class="recent">Today</div>
             <div class="nav on">Failed sign-ins KQL</div>
             <div class="spacer"></div>
@@ -466,7 +466,7 @@
         <div class="app" style="min-height: 600px;">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Runs</div>
+            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
             <div class="recent">Today</div>
             <div class="nav on">Devices not synced</div>
             <div class="nav">Failed sign-ins KQL</div>
@@ -512,7 +512,7 @@
         <div class="app" style="min-height: 820px;">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Runs</div><div class="nav">Changes</div>
+            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav on">Connections</div><div class="nav">Runs</div><div class="nav">Changes</div>
             <div class="spacer"></div>
             <div class="org-chip"><span class="org-tile">C</span><div><div class="name">Woodgrove</div><div class="sub">Intune, Entra</div></div></div>
           </aside>
@@ -580,7 +580,7 @@
         </div>
       </div>
       <ul class="notes">
-        <li>Route: Settings, Connections, opened from the organization chip. It merges today's Settings, Tenants (per service) and Settings, Connectors (results). <span class="todo">TODO(ugur): keep it under Settings, or make it a sidebar item?</span></li>
+        <li>Connections is its own sidebar item after Marketplace (decided 2026-11-08) at <code>/connections</code>, and the organization chip opens it too. It replaces Settings, Tenants (per service) and Settings, Connectors (results), which redirect here.</li>
         <li>Public references stay global, not per organization, because they never receive tenant data. Vendor services with credentials are per organization, as decided for vendor MCP authentication.</li>
         <li>Planned services are not listed here, per the 2026-11-04 decision that planned services appear only in the docs.</li>
         <li>The map is generated from the same lists as the status strip and the result connectors, so they cannot disagree. With a hosted model the device box names the provider model and "Prompts and tenant data" shows the provider with its region, for example Anthropic API · US.</li>
@@ -595,7 +595,7 @@
         <div class="app" style="min-height: 460px;">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div>
+            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div>
             <div class="spacer"></div>
             <div class="org-chip"><span class="org-tile">C</span><div><div class="name">Woodgrove</div><div class="sub">Intune, Entra</div></div></div>
           </aside>
@@ -626,7 +626,7 @@
         <div class="app" style="min-height: 520px;">
           <aside class="side">
             <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav on">Agents</div><div class="nav">Marketplace</div><div class="nav">Runs</div>
+            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav on">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
             <div class="spacer"></div>
             <div class="org-chip"><span class="org-tile">C</span><div><div class="name">Woodgrove</div><div class="sub">Intune, Entra</div></div></div>
           </aside>
