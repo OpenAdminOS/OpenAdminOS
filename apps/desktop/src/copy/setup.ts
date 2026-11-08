@@ -31,10 +31,6 @@ export const SETUP_COPY = {
   cancelled: "Sign-in cancelled. Nothing was connected.",
   lateSuccess: (tenantName: string) =>
     `Tenant ${tenantName} connected. Your earlier action was not resumed.`,
-  guestChatHint:
-    "No tenant connected. You can draft a question now; connecting happens when you send.",
-  guestComposerPlaceholder:
-    "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
   signInChoiceLegend: "Sign in with",
   signInChoiceHint:
     "Choose the Entra app registration that signs you in. The read permissions below are the same for both. Access can be revoked from Enterprise applications at any time.",

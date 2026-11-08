@@ -74,7 +74,8 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, FIRST_RUN_CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, providerDataLocation } from "../copy";
+import { ModelChoice, NoTenantChatHome, NotConnectedCard, isProviderReady } from "../components/chat/ChatFirstRun";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -86,7 +87,6 @@ import { hostedDisclosureKey, readHostedDisclosures, recordHostedDisclosure, sho
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
-import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
@@ -129,8 +129,9 @@ type UnifiedAgentSuggestion = {
 type HostedChatConsentPrompt = {
   content: string;
   conversationId?: string | null;
-  tenantId: string;
-  tenantName: string;
+  /** Absent when nothing is connected: the confirmation is bound to no tenant. */
+  tenantId?: string;
+  tenantName?: string;
   providerId: ProviderId;
   providerName: string;
   model?: string;
@@ -333,6 +334,8 @@ function IntuneChatContent() {
   const providerReady = Boolean(
     provider && ["connected", "available"].includes(provider.status),
   );
+  // The model is the one thing Chat cannot answer without (SPEC.md 4a, 2026-11-08).
+  const modelReady = isProviderReady(provider);
   const dataBoundary = dataBoundaryContext?.boundary ?? (
     !providerReady
       ? {
@@ -658,7 +661,14 @@ function IntuneChatContent() {
       conversationIdOverride !== undefined
         ? conversationIdOverride
         : activeConversationId;
+    const requestedAgentMatch = matchComposerAgent(content, state.installedAgents);
+    // With a tenant the setup flow gates the send as before. With nothing
+    // connected, a question needs only a model; agents and multi-tenant
+    // questions still need a tenant.
+    const needsTenantSetup =
+      Boolean(activeTenant) || Boolean(requestedAgentMatch) || shouldUseMultiTenantFlow(content, scopeMode);
     if (
+      needsTenantSetup &&
       !(activeTenant?.kind === "sample" ? requireTenant : requireTenantAndProvider)(
         createPendingIntent({
           kind: "chat-send",
@@ -671,7 +681,13 @@ function IntuneChatContent() {
       setInput(content);
       return;
     }
-    const requestedAgentMatch = matchComposerAgent(content, state.installedAgents);
+    if (!activeTenant && !modelReady) {
+      writeChatDraft(targetConversationId, content);
+      setInput(content);
+      setError(null);
+      setNotice(FIRST_RUN_CHAT_COPY.noModelSendNotice);
+      return;
+    }
     if (requestedAgentMatch?.extraInstructions) {
       writeChatDraft(targetConversationId, content);
       setInput(content);
@@ -712,8 +728,7 @@ function IntuneChatContent() {
     const contextSummary = workspaceContext ? workspaceContextSummary : undefined;
     if (
       provider &&
-      activeTenant &&
-      activeTenant.kind !== "sample" &&
+      activeTenant?.kind !== "sample" &&
       !provider.isLocal &&
       (requiresHostedChatConsent(provider, activeTenant) || Boolean(workspaceContext))
     ) {
@@ -722,8 +737,7 @@ function IntuneChatContent() {
         ...(conversationIdOverride !== undefined
           ? { conversationId: conversationIdOverride }
           : {}),
-        tenantId: activeTenant.id,
-        tenantName: activeTenant.displayName,
+        ...(activeTenant ? { tenantId: activeTenant.id, tenantName: activeTenant.displayName } : {}),
         providerId: provider.id,
         providerName: provider.name,
         ...(activeModel ? { model: activeModel } : {}),
@@ -1819,15 +1833,37 @@ function IntuneChatContent() {
                 </div>
               </div>
             ) : (
-              <div className="mb-6 max-w-[620px]">
+              // Nothing connected: Chat answers from the model and references (SPEC.md 4a, 2026-11-08).
+              <div className="mb-6 max-w-[660px]">
                 <h1 className="font-serif text-display font-medium tracking-[-0.015em] text-[var(--color-text)]">
-                  Connect a tenant to begin
+                  {FIRST_RUN_CHAT_COPY.homeTitle}
                 </h1>
                 <p className="mt-2 text-md leading-6 text-[var(--color-text-muted)]">
-                  {SETUP_COPY.guestChatHint}
+                  {FIRST_RUN_CHAT_COPY.homeSubtitle}
                 </p>
+                {modelReady && provider ? (
+                  <p className="mt-3 flex flex-wrap items-center gap-x-2 text-sm text-[var(--color-text-soft)]">
+                    <span>
+                      {provider.isLocal
+                        ? FIRST_RUN_CHAT_COPY.modelLineLocal(activeModel ?? provider.name, provider.name)
+                        : FIRST_RUN_CHAT_COPY.modelLineHosted(activeModel ?? provider.name, providerDataLocation(provider))}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => navigate("/settings/providers")}
+                      className="rounded font-medium text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+                    >
+                      {FIRST_RUN_CHAT_COPY.changeModel}
+                    </button>
+                  </p>
+                ) : null}
               </div>
             )}
+            {!activeTenant && !modelReady ? (
+              <div className="mb-6">
+                <ModelChoice providers={state.providers} onSelectProvider={setActiveProvider} />
+              </div>
+            ) : null}
             {state.providerAutoSelectNotice && !pilot ? (
               <ProviderAutoSelectNotice
                 providerName={state.providerAutoSelectNotice.providerName}
@@ -1899,7 +1935,10 @@ function IntuneChatContent() {
                 </div>
               </section>
             ) : null}
-            {pilot ? null : (
+            {!activeTenant && modelReady ? (
+              <NoTenantChatHome state={state} disabled={sending} onAsk={(question) => void handleSend(question, null)} />
+            ) : null}
+            {pilot || !activeTenant ? null : (
             <div className="mt-5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
               <span className="mr-0.5">Try</span>
               {homeSuggestions.map((prompt) => (
@@ -1996,6 +2035,19 @@ function IntuneChatContent() {
                   const messageTenant = messageConversation?.tenantId
                     ? state.tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
+                  if (message.role === "assistant" && message.notConnected && message.id !== shownProgressMessageId) {
+                    const question = previousUserPromptForMessage(displayedMessages, message);
+                    return (
+                      <div key={message.id} data-message-id={message.id} className="mt-3 scroll-mt-[18px]">
+                        <NotConnectedCard
+                          notConnected={message.notConnected}
+                          tenants={state.tenants}
+                          activeTenant={activeTenant}
+                          {...(question && !sending ? { onAskAgain: () => void handleSend(question, message.conversationId) } : {})}
+                        />
+                      </div>
+                    );
+                  }
                   return (
                     <div key={message.id} data-message-id={message.id} className="scroll-mt-[18px]">
                       <ChatMessageBubble
@@ -2304,9 +2356,13 @@ function ChatComposer({
         ? `Ask about ${activeTenant.displayName}, or type / to run an agent`
         : "Ask about this tenant, or type / to run an agent"
       : "Ask a follow-up, or type / to run an agent"
-    : SETUP_COPY.guestComposerPlaceholder;
+    : dataBoundary.kind === "none"
+      ? FIRST_RUN_CHAT_COPY.placeholderNoModel
+      : FIRST_RUN_CHAT_COPY.placeholderNoTenant;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-  const hostedSentence = `Prompts and tenant data go to ${activeProvider?.name ?? "the selected provider"} while this model is selected.${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
+  // The hosted line names the provider and where it processes prompts before any reference is added.
+  const location = activeProvider ? providerDataLocation(activeProvider) : "the selected provider";
+  const hostedSentence = `${activeTenant ? FIRST_RUN_CHAT_COPY.hostedTenantSentence(location) : FIRST_RUN_CHAT_COPY.hostedNoTenantSentence(location)}${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
 
   return (
     <div className="relative">
@@ -2391,11 +2447,6 @@ function ChatComposer({
       ) : null}
 
       <div className="intune-chat-composer relative rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
-        {!activeTenant ? (
-          <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
-            {SETUP_COPY.guestChatHint}
-          </div>
-        ) : null}
         <label htmlFor={`intune-chat-composer-${placement}`} className="sr-only">
           {CHAT_COPY.composerLabel}
         </label>
@@ -2545,7 +2596,7 @@ function ChatComposer({
         <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
           <IconLock size={13} />
           <span>
-            {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : LOCAL_BOUNDARY_COPY.plain}
+            {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : activeTenant ? LOCAL_BOUNDARY_COPY.plain : LOCAL_BOUNDARY_COPY.noTenant}
             {dataBoundary.toolHostsNote ? <span className="text-[var(--color-warning)]"> {dataBoundary.toolHostsNote}</span> : null}
           </span>
         </div>
@@ -3963,12 +4014,15 @@ function HostedChatConsentModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
+  const noTenant = Boolean(prompt && !prompt.tenantId);
+  const providerForCopy = prompt
+    ? { id: prompt.providerId, name: prompt.providerName, isLocal: false }
+    : { name: "Hosted provider", isLocal: false };
   const trustCopy = deriveTrustCopy({
-    provider: prompt
-      ? { name: prompt.providerName, isLocal: false }
-      : { name: "Hosted provider", isLocal: false },
+    provider: providerForCopy,
     ...(prompt?.model ? { model: prompt.model } : {}),
-    scope: { tenantNames: prompt ? [prompt.tenantName] : [] },
+    scope: { tenantNames: prompt?.tenantName ? [prompt.tenantName] : [] },
+    noTenant,
     ...(prompt?.toolHosts ? { toolHosts: prompt.toolHosts } : {}),
     ...(prompt?.workspaceContextSummary
       ? {
@@ -3994,9 +4048,10 @@ function HostedChatConsentModal({
           {trustCopy.confirmBody}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
-          <ConsentFact label="Tenant" value={prompt?.tenantName ?? "Active tenant"} />
+          <ConsentFact label="Tenant" value={noTenant ? "None connected" : prompt?.tenantName ?? "Active tenant"} />
           <ConsentFact label="Provider" value={prompt?.providerName ?? "Hosted provider"} />
           <ConsentFact label="Model" value={prompt?.model ?? "Provider default"} />
+          <ConsentFact label="Region" value={providerDataLocation(providerForCopy)} />
           <ConsentFact label="Stored data" value={trustCopy.storage} />
           {prompt?.workspaceContextSummary && (
             <ConsentFact
@@ -4015,10 +4070,9 @@ function HostedChatConsentModal({
                 What leaves this device
               </div>
               <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
-                The prompt text, selected cached Graph evidence, source freshness,
-                and answer instructions are sent to the hosted provider for this
-                response. Raw cache tables, chat history storage, and self-training
-                files remain on this device.
+                {noTenant
+                  ? "Your question, this conversation and results from the references you added are sent to the hosted provider for this response. Nothing is connected, so no tenant data is included. Chat history stays on this device."
+                  : "The prompt text, selected cached Graph evidence, source freshness, and answer instructions are sent to the hosted provider for this response. Raw cache tables, chat history storage, and self-training files remain on this device."}
                 {prompt?.workspaceContextSummary
                   ? " Selected workspace evidence, notes, and instructions are included in this response prompt."
                   : ""}
@@ -4040,7 +4094,9 @@ function HostedChatConsentModal({
             className="mt-1 h-3.5 w-3.5 accent-[var(--color-accent)]"
           />
           <span>
-            Remember this decision for this tenant and provider on this device.
+            {noTenant
+              ? "Remember this decision for questions without a tenant on this provider on this device. A send with a tenant asks again."
+              : "Remember this decision for this tenant and provider on this device."}
           </span>
         </label>
         <div className="flex justify-end gap-2 pt-2">
@@ -4069,33 +4125,43 @@ function ConsentFact({ label, value }: { label: string; value: string }) {
   );
 }
 
+/**
+ * A hosted send asks once per tenant and provider, and once per provider
+ * for questions with nothing connected. The two are separate decisions:
+ * a remembered no-tenant confirmation never covers a send with a tenant.
+ */
 function requiresHostedChatConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
 ): provider is { id: ProviderId; isLocal: false } {
-  if (!provider || provider.isLocal || !tenant) return false;
-  return !hasRememberedHostedChatConsent(tenant.id, provider.id);
+  if (!provider || provider.isLocal) return false;
+  return !hasRememberedHostedChatConsent(tenant?.id, provider.id);
 }
 
 function rememberedHostedProviderConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
 ): HostedProviderConsentInput | undefined {
-  if (!provider || provider.isLocal || !tenant) return undefined;
-  if (!hasRememberedHostedChatConsent(tenant.id, provider.id)) return undefined;
-  return createHostedProviderConsent(tenant.id, provider.id, true);
+  if (!provider || provider.isLocal) return undefined;
+  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id)) return undefined;
+  return createHostedProviderConsent(tenant?.id, provider.id, true);
 }
 
-function createHostedProviderConsent(
-  tenantId: string,
+/** `tenantId` undefined binds the confirmation to a send with no tenant. */
+export function createHostedProviderConsent(
+  tenantId: string | undefined,
   providerId: ProviderId,
   remember: boolean,
   workspaceContext?: WorkspacePromptContextSummary,
 ): HostedProviderConsentInput {
+  const acknowledgedAt = new Date().toISOString();
+  if (!tenantId) {
+    return { noTenant: true, providerId, acknowledgedAt, ...(remember ? { remember: true } : {}) };
+  }
   return {
     tenantId,
     providerId,
-    acknowledgedAt: new Date().toISOString(),
+    acknowledgedAt,
     ...(remember ? { remember: true } : {}),
     ...(workspaceContext ? { workspaceContext } : {}),
   };
@@ -4112,12 +4178,15 @@ export function createHostedBatchProviderConsent(
   };
 }
 
-function hostedChatConsentKey(tenantId: string, providerId: ProviderId): string {
-  return `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`;
+function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId): string {
+  // Tenant ids are GUIDs or the sample id, so the no-tenant key never collides with one.
+  return tenantId
+    ? `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`
+    : `openadminos:intune-chat-hosted-consent:v1:no-tenant:${providerId}`;
 }
 
 function hasRememberedHostedChatConsent(
-  tenantId: string,
+  tenantId: string | undefined,
   providerId: ProviderId,
 ): boolean {
   try {
@@ -4127,7 +4196,7 @@ function hasRememberedHostedChatConsent(
   }
 }
 
-function rememberHostedChatConsent(tenantId: string, providerId: ProviderId): void {
+function rememberHostedChatConsent(tenantId: string | undefined, providerId: ProviderId): void {
   try {
     window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId), "true");
   } catch {
