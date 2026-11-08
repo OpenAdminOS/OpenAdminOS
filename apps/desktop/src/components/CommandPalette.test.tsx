@@ -320,3 +320,21 @@ function LocationProbe() {
   const location = useLocation();
   return <div data-testid="palette-location">{location.pathname + location.search}</div>;
 }
+
+it("opens the agent preflight instead of setup when no organization is active", async () => {
+  const user = userEvent.setup();
+  const { activeTenantId: _none, ...state } = createMockAppState();
+  const bridge = makeMockBridge({}, { ...state, tenants: [] });
+  const agent = state.installedAgents[0]!;
+  renderRoute(
+    <>
+      <CommandPalette open onClose={vi.fn()} />
+      <LocationProbe />
+    </>,
+    { path: "*", route: "/", bridge },
+  );
+  await user.click(await screen.findByRole("option", { name: new RegExp(`^Run ${agent.name}`) }));
+  await waitFor(() => expect(screen.getByTestId("palette-location")).toHaveTextContent(`/agents/${agent.slug}/confirm`));
+  expect(bridge.startRun).not.toHaveBeenCalled();
+  expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
+});

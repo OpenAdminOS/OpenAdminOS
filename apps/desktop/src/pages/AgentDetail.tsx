@@ -41,11 +41,18 @@ import {
   Skeleton,
 } from "../components/ui";
 import { useAppState } from "../state";
+import { agentNeeds } from "../shared/agent-needs";
+import { AgentNeedChips } from "../components/AgentNeedChips";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
+  activeOrganizationOf,
+  agentCallsNoServiceApi,
+  formatServiceList,
+  resolveOrganizations,
+  serviceById,
   agentServiceIds,
   availableScopeSet,
   missingPartsForScopes,
@@ -215,6 +222,14 @@ export default function AgentDetail({
       setRunError(PILOT_COPY.agentRefused(agent.name));
       return;
     }
+    // With no organization the preflight opens instead of setup: it names
+    // the services the agent needs, and starts an agent that calls no
+    // service API. Its Connect action opens setup with this run kept.
+    if (agent && !activeTenant && !choice?.tenantId) {
+      setRunError(null);
+      setPendingRunChoice(choice ?? {});
+      return;
+    }
     if (
       agent &&
       !requireTenantAndProvider(
@@ -235,7 +250,7 @@ export default function AgentDetail({
     }
     setRunError(null);
     setPendingRunChoice(choice ?? {});
-  }, [agent, pilot, requireTenantAndProvider]);
+  }, [activeTenant, agent, pilot, requireTenantAndProvider]);
 
   const trackDeliverySave = (save: Promise<void>): Promise<void> => {
     const tracked = save.finally(() => {
@@ -631,8 +646,8 @@ export default function AgentDetail({
           ) : null}
           {agent.manifestError ? <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge> : null}
           {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
-          <ServiceChips services={agentServiceIds(agent)} />
         </div>
+        <AgentNeedChips needs={agentNeeds(agent, pilot ? undefined : activeTenant, resolveOrganizations(state).length > 0)} />
         {activeTenant && !pilot && missingAgentServices.length > 0 ? (
           <ServiceNotConnectedNotice
             tenant={activeTenant}
@@ -1065,8 +1080,28 @@ export default function AgentDetail({
           providerIsLocal={pendingTenant?.kind === "sample" || pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
           pilot={pendingTenant?.kind === "sample"}
+          organizationName={activeOrganizationOf(state)?.name}
+          hasOrganizations={resolveOrganizations(state).length > 0}
           model={pendingTenant?.kind === "sample" ? "Prepared sample text" : pendingModel}
           deliverySaving={pendingDeliverySaveCount > 0}
+          onConnect={() => {
+            const choice = pendingRunChoice ?? {};
+            setPendingRunChoice(null);
+            requireTenantAndProvider(
+              createPendingIntent({
+                kind: "agent-run",
+                slug: agent.slug,
+                ...(choice.dryRun ? { dryRun: true } : {}),
+                ...(choice.providerId ? { providerId: choice.providerId } : {}),
+                ...(choice.model ? { model: choice.model } : {}),
+                returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
+              }),
+            );
+          }}
+          onOpenConnections={() => {
+            setPendingRunChoice(null);
+            navigate("/connections");
+          }}
           onClose={() => setPendingRunChoice(null)}
           onConfirm={() => {
             void handleStartRun(pendingRunChoice ?? undefined);
@@ -2639,15 +2674,23 @@ function RunPreflightModal({
   providerIsLocal,
   requestedScopes,
   pilot = false,
+  organizationName,
+  hasOrganizations = false,
   model,
   deliverySaving,
+  onConnect,
+  onOpenConnections,
   onClose,
   onConfirm,
 }: {
   pilot?: boolean;
+  organizationName?: string | undefined;
+  hasOrganizations?: boolean;
+  onConnect?: () => void;
+  onOpenConnections?: () => void;
   dryRun: boolean;
   open: boolean;
-  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown };
+  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown; connectors?: readonly unknown[]; graphOperations?: readonly unknown[] };
   activeTenant: TenantRecord | undefined;
   providerName: string;
   providerIsLocal: boolean;
@@ -2670,8 +2713,11 @@ function RunPreflightModal({
     : [];
   // Scopes the services cannot account for block the run, as in preflight.
   const scopeBlockCopy = unmappedScopesCopy(agent.scopes) ?? uncoveredScopesCopy(agent);
+  // Only an agent that calls no service API runs without an organization.
+  const serviceFree = agentCallsNoServiceApi(agent);
+  const neededTitles = agentServiceIds(agent).map((id) => serviceById(id).title);
   const canStart =
-    Boolean(activeTenant) && !deliverySaving && missingServices.length === 0 && !scopeBlockCopy;
+    (Boolean(activeTenant) || serviceFree) && !deliverySaving && missingServices.length === 0 && !scopeBlockCopy;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -2680,12 +2726,38 @@ function RunPreflightModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
-        {!activeTenant && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-            Connect or select a Microsoft 365 tenant before starting this run.
-            OpenAdminOS never runs an agent without an active tenant scope.
+        {!activeTenant && serviceFree ? (
+          <div role="status" className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+            No organization needed. {agent.name} calls no service API, so it runs on
+            this device without an organization.
           </div>
-        )}
+        ) : null}
+        {!activeTenant && !serviceFree ? (
+          <div role="alert" className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-warning)]/25">
+            <div className="font-medium">
+              {neededTitles.length > 0
+                ? `${agent.name} needs ${formatServiceList(neededTitles)}.`
+                : `${agent.name} needs the Microsoft 365 sign-in.`}
+            </div>
+            <p className="mt-1 text-[var(--color-text-soft)]">
+              No organization is active. An agent reads a service only when that service is
+              connected in the active organization.{" "}
+              {hasOrganizations
+                ? "Choose an organization that has it, or connect it."
+                : "Connect it to add an organization."}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="primary" onClick={onConnect}>
+                {`Connect ${neededTitles[0] ?? "Microsoft 365"}`}
+              </Button>
+              {hasOrganizations ? (
+                <Button size="sm" variant="secondary" onClick={onOpenConnections}>
+                  Choose an organization
+                </Button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
         {!providerIsLocal && (
           <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             Hosted provider selected. Tenant prompts and agent context are sent
@@ -2716,7 +2788,14 @@ function RunPreflightModal({
           </div>
         )}
         <div className="grid gap-3 md:grid-cols-2">
-          <PreflightFact label="Tenant" value={activeTenant?.displayName ?? "No tenant selected"} />
+          <PreflightFact
+            label="Organization"
+            value={activeTenant ? organizationName ?? activeTenant.displayName : serviceFree ? "None needed" : "No organization"}
+          />
+          <PreflightFact
+            label="Services"
+            value={serviceFree ? "No service needed" : neededTitles.length > 0 ? formatServiceList(neededTitles) : "Microsoft 365 sign-in"}
+          />
           <PreflightFact
             label="Provider"
             value={`${providerName}${providerIsLocal ? " · local" : " · hosted"}`}
@@ -2733,8 +2812,11 @@ function RunPreflightModal({
           </div>
           <p className="mt-2 text-base leading-relaxed text-[var(--color-text-soft)]">
             {pilot ? "Pilot mode runs this agent on the fictional sample tenant with prepared text instead of a model. Changes only touch the in-memory sample data. " : null}
-            OpenAdminOS runs this agent against the active tenant and saves the
-            result to local run history. {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
+            {activeTenant
+              ? "OpenAdminOS runs this agent against the active organization and saves the result to local run history."
+              : serviceFree
+                ? "OpenAdminOS runs this agent on this device with no organization and saves the result to local run history. It cannot reach any service."
+                : "This agent cannot start until an organization with its services is active."} {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
               ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."
               : "This agent cannot change tenant state."}
           </p>

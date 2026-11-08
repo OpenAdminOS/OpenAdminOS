@@ -102,10 +102,16 @@ export function CommandPalette({
       ...state.installedAgents.map((agent) => ({
         id: `run-agent-${agent.id}`,
         label: `Run ${formatAgentDisplayName(agent)}`,
-        hint: agent.mode === "write" ? "Review required before changes" : "Run with current tenant and provider",
+        hint: agent.mode === "write" ? "Review required before changes" : "Run in the active organization with the current provider",
         group: "Actions" as const,
         icon: <IconPlay size={13} className="text-[var(--color-accent)]" />,
         action: async () => {
+          // With no organization the agent's preflight names what it needs.
+          if (!state.activeTenantId) {
+            navigate(`/agents/${encodeURIComponent(agent.slug)}/confirm`);
+            onClose();
+            return;
+          }
           if (
             !requireTenantAndProvider(
               createPendingIntent({

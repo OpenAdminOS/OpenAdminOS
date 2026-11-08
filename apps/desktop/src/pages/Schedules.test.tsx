@@ -35,7 +35,7 @@ describe("Agents schedule actions", () => {
     expect(await screen.findByText(/About 30 runs per 30 days/)).toBeInTheDocument();
   });
 
-  it("shows why schedules are paused and switches to the most recently used real tenant", async () => {
+  it("shows why schedules are paused and switches to the most recently used organization", async () => {
     const user = userEvent.setup();
     const scheduledAgent = createMockAgent({
       schedule: {
@@ -76,14 +76,14 @@ describe("Agents schedule actions", () => {
 
     expect(
       await screen.findByText(
-        "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.",
+        "Schedules are paused while the sample organization is active. Switch to one of your organizations to resume.",
       ),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Switch to Contoso Production" }));
-    await waitFor(() => expect(bridge.setActiveTenant).toHaveBeenCalledWith(realTenant.id));
+    await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith(`org-${realTenant.id}`));
   });
 
-  it("says schedules are paused while no tenant is active", async () => {
+  it("says schedules are paused while no organization is active", async () => {
     const user = userEvent.setup();
     const scheduledAgent = createMockAgent({
       schedule: { enabled: true, intervalSeconds: 900 },
@@ -105,11 +105,11 @@ describe("Agents schedule actions", () => {
 
     expect(
       await screen.findByText(
-        "Schedules are paused while no tenant is active. Select or connect a tenant to resume.",
+        "Schedules are paused while no organization is active. Choose an organization to resume its schedules.",
       ),
     ).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Switch to Contoso Production" }));
-    await waitFor(() => expect(bridge.setActiveTenant).toHaveBeenCalledWith(realTenant.id));
+    await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith(`org-${realTenant.id}`));
   });
 
   it("shows the production page for the Schedules tab in pilot mode", async () => {
@@ -135,48 +135,71 @@ describe("Agents schedule actions", () => {
     expect(screen.queryByRole("tab", { name: "Schedules" })).not.toBeInTheDocument();
   });
 
-  it("resumes a due batch only after the final explicit setup action", async () => {
+  it("runs due schedules of the active organization only and waits on the others", async () => {
     const user = userEvent.setup();
-    const scheduledAgent = createMockAgent({
-      schedule: {
-        enabled: true,
-        intervalSeconds: 900,
-        lastScheduledRunAt: "2026-01-01T00:00:00.000Z",
-      },
+    const due = { enabled: true, intervalSeconds: 900, lastScheduledRunAt: "2026-01-01T00:00:00.000Z" };
+    const mine = createMockAgent({ id: "mine", slug: "mine", name: "Mine", schedule: { ...due, organizationId: "org-tenant-1" } });
+    const other = createMockAgent({ id: "other", slug: "other", name: "Other", schedule: { ...due, organizationId: "org-tenant-2" } });
+    const loose = createMockAgent({ id: "loose", slug: "loose", name: "Loose", schedule: due });
+    const second = { ...createMockAppState().tenants[0]!, id: "tenant-2", displayName: "Fabrikam" };
+    const state = createMockAppState({
+      tenants: [createMockAppState().tenants[0]!, second],
+      installedAgents: [mine, other, loose],
     });
-    const emptyState = createMockAppState({
-      tenants: [],
-      activeTenantId: undefined,
-      installedAgents: [scheduledAgent],
-    });
-    const connectedState = createMockAppState({ installedAgents: [scheduledAgent] });
-    const bridge = makeMockBridge(
-      { connectTenant: vi.fn(async () => connectedState) },
-      emptyState,
-    );
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<Agents />, { path: "/agents", route: "/agents?filter=scheduled", bridge });
 
-    renderRoute(<Agents />, {
-      path: "/agents",
-      route: "/agents?filter=scheduled",
-      bridge,
-    });
-
-    await user.click(await screen.findByRole("button", { name: "Schedule actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Run due now (1)" }));
-    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
-    await user.click(
-      await screen.findByRole("button", {
-        name: /Approve \d+ read scopes and continue to Microsoft/,
-      }),
-    );
     expect(
-      await screen.findByRole("button", { name: "Run due schedules" }),
+      await screen.findByText(
+        "1 schedule is unassigned and paused. Assign it to an organization on the agent page. 1 schedule belongs to another organization and runs only while that organization is active.",
+      ),
     ).toBeInTheDocument();
-    expect(bridge.startRun).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Run due schedules" }));
+    expect(screen.getByText(/Every 15m · in Contoso IT/)).toBeInTheDocument();
+    expect(screen.getByText(/Every 15m · in Fabrikam/)).toBeInTheDocument();
+    expect(screen.getByText(/Every 15m · Unassigned, paused/)).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Schedule actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Run due now (1)" }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
+    expect(vi.mocked(bridge.startRun).mock.calls[0]?.[0]).toBe("mine");
+  });
+
+  it("says where schedules went when they moved to organizations, until dismissed", async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({ schedule: { enabled: true, intervalSeconds: 900, organizationId: "org-tenant-1" } });
+    const state = createMockAppState({
+      installedAgents: [agent],
+      organizationMigration: { assignedCount: 2, assignedOrganizationId: "org-tenant-1", unassignedCount: 0 },
+    });
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<Schedules />, { path: "/schedules", route: "/schedules", bridge });
+    expect(
+      await screen.findByText(
+        "Schedules now belong to organizations. 2 schedules moved to Contoso IT and run only while it is active.",
+      ),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(bridge.dismissOrganizationMigrationNotice).toHaveBeenCalledOnce());
+    await waitFor(() => expect(screen.queryByText(/Schedules now belong to organizations/)).not.toBeInTheDocument());
+  });
+
+  it("says why schedules stayed unassigned and assigns one from its card", async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({ id: "loose", slug: "loose", name: "Loose", schedule: { enabled: true, intervalSeconds: 900 } });
+    const state = createMockAppState({
+      installedAgents: [agent],
+      organizationMigration: { assignedCount: 0, unassignedCount: 1, unassignedReason: "pilot-active" },
+    });
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<Agents />, { path: "/agents/:slug", route: "/agents/loose?action=schedule", bridge });
+    expect(
+      (await screen.findAllByText(
+        "Schedules now belong to organizations. 1 schedule stays paused and unassigned because the sample organization was active. Assign each one on its agent page.",
+      )).length,
+    ).toBeGreaterThan(0);
+    expect(screen.getByText("Unassigned. This schedule is paused until you assign it to an organization.")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Assign" }));
+    await waitFor(() => expect(bridge.assignAgentSchedule).toHaveBeenCalledWith("loose", "org-tenant-1"));
+    expect(await screen.findByText(/Contoso IT\. Runs only while Contoso IT is active\./)).toBeInTheDocument();
   });
 
   it("uses query-addressable Installed and Schedules tabs for installed agents only", async () => {

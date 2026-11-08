@@ -1,69 +1,98 @@
 import { useMemo, useState } from "react";
 
 import { useAppState } from "../state";
+import { SCHEDULE_ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
+import { activeOrganizationOf, resolveOrganizations } from "../shared/openAdminOS";
 import { Button } from "./Button";
 import { IconWarning } from "./icons";
 
-const PAUSED_COPY =
-  "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.";
-const NO_TENANT_PAUSED_COPY =
-  "Schedules are paused while no tenant is active. Select or connect a tenant to resume.";
-
+/**
+ * Why schedules are not running, wherever schedules are shown. Each
+ * schedule belongs to one organization and runs only while it is active;
+ * an unassigned schedule waits until the admin assigns it. After the move
+ * to organizations, a one-time notice says where existing schedules went.
+ */
 export function SchedulesPausedNotice({ className = "" }: { className?: string }) {
-  const { state, setActiveTenant } = useAppState();
-  const [switching, setSwitching] = useState(false);
+  const { state, setActiveOrganization, dismissOrganizationMigrationNotice } = useAppState();
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const sampleActive = state.tenants.some(
-    (tenant) => tenant.id === state.activeTenantId && tenant.kind === "sample",
-  );
-  const recentTenant = useMemo(
-    () =>
-      state.tenants
-        .filter((tenant) => tenant.kind !== "sample")
-        .sort(
-          (left, right) =>
-            Date.parse(right.lastUsedAt ?? right.addedAt) -
-            Date.parse(left.lastUsedAt ?? left.addedAt),
-        )[0],
-    [state.tenants],
-  );
+  const organizations = resolveOrganizations(state);
+  const active = activeOrganizationOf(state);
+  const sampleActive = active?.kind === "sample";
+  const enabled = state.installedAgents.filter((agent) => agent.schedule?.enabled);
+  const unassigned = enabled.filter(
+    (agent) => !organizations.some((organization) => organization.id === agent.schedule?.organizationId && organization.kind !== "sample"),
+  ).length;
+  const elsewhere = enabled.filter(
+    (agent) =>
+      active !== undefined &&
+      agent.schedule?.organizationId !== active.id &&
+      organizations.some((organization) => organization.id === agent.schedule?.organizationId),
+  ).length;
+  const recent = useMemo(() => {
+    const realIds = new Set(
+      organizations.filter((organization) => organization.kind !== "sample").map((organization) => organization.connections.microsoft365?.tenantId),
+    );
+    const tenant = state.tenants
+      .filter((entry) => realIds.has(entry.id))
+      .sort((left, right) => Date.parse(right.lastUsedAt ?? right.addedAt) - Date.parse(left.lastUsedAt ?? left.addedAt))[0];
+    return tenant ? organizations.find((organization) => organization.connections.microsoft365?.tenantId === tenant.id) : undefined;
+  }, [organizations, state.tenants]);
+  const migration = state.organizationMigration;
+  const migratedTo = migration?.assignedOrganizationId
+    ? organizations.find((organization) => organization.id === migration.assignedOrganizationId)
+    : undefined;
 
-  // Without an active tenant the scheduler skips due schedules, so say so
-  // wherever schedules are shown.
-  const noTenantActive =
-    !state.tenants.some((tenant) => tenant.id === state.activeTenantId) &&
-    state.installedAgents.some((agent) => agent.schedule?.enabled);
+  const paused = sampleActive
+    ? SCHEDULE_ORGANIZATION_COPY.pausedSample
+    : !active && enabled.length > 0
+      ? SCHEDULE_ORGANIZATION_COPY.pausedNone
+      : undefined;
+  const waiting = !paused && (unassigned > 0 || elsewhere > 0)
+    ? SCHEDULE_ORGANIZATION_COPY.waiting(unassigned, elsewhere)
+    : undefined;
 
-  if (!sampleActive && !noTenantActive) return null;
+  if (!paused && !waiting && !migration) return null;
+
+  const run = (task: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    void task()
+      .catch((caught) =>
+        setError(userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? ""),
+      )
+      .finally(() => setBusy(false));
+  };
 
   return (
-    <div
-      role="status"
-      className={`flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25 ${className}`}
-    >
-      <span className="flex min-w-0 items-center gap-2">
-        <IconWarning size={14} className="shrink-0" />
-        <span>{sampleActive ? PAUSED_COPY : NO_TENANT_PAUSED_COPY}</span>
-      </span>
-      {recentTenant ? (
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={switching}
-          onClick={() => {
-            setSwitching(true);
-            setError(null);
-            void setActiveTenant(recentTenant.id)
-              .catch((caught) =>
-                setError(caught instanceof Error ? caught.message : String(caught)),
-              )
-              .finally(() => setSwitching(false));
-          }}
-        >
-          {switching ? "Switching…" : `Switch to ${recentTenant.displayName}`}
-        </Button>
+    <div className={`space-y-2 ${className}`}>
+      {migration ? (
+        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-sm text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+          <span className="min-w-0 flex-1">{SCHEDULE_ORGANIZATION_COPY.migrated(migration, migratedTo?.name)}</span>
+          <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(dismissOrganizationMigrationNotice)}>
+            {SCHEDULE_ORGANIZATION_COPY.dismiss}
+          </Button>
+        </div>
       ) : null}
-      {error ? <span role="alert">Could not switch tenants: {error}</span> : null}
+      {paused || waiting ? (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25"
+        >
+          <span className="flex min-w-0 items-center gap-2">
+            <IconWarning size={14} className="shrink-0" />
+            <span>{paused ?? waiting}</span>
+          </span>
+          {paused && recent ? (
+            <Button size="sm" variant="secondary" disabled={busy} onClick={() => run(() => setActiveOrganization(recent.id))}>
+              {busy ? "Switching" : `Switch to ${recent.name}`}
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {error !== null ? (
+        <p role="alert" className="text-sm text-[var(--color-danger)]">{SCHEDULE_ORGANIZATION_COPY.failed(error)}</p>
+      ) : null}
     </div>
   );
 }

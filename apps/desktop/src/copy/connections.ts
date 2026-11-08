@@ -111,3 +111,45 @@ export const CONNECTIONS_COPY = {
   connect: "Connect",
   addPart: (title: string) => `Add ${title}`,
 } as const;
+
+/** Schedules belong to one organization and run only while it is active. */
+export const SCHEDULE_ORGANIZATION_COPY = {
+  pausedSample:
+    "Schedules are paused while the sample organization is active. Switch to one of your organizations to resume.",
+  pausedNone:
+    "Schedules are paused while no organization is active. Choose an organization to resume its schedules.",
+  waiting: (unassigned: number, elsewhere: number) =>
+    [
+      unassigned > 0
+        ? `${unassigned} ${unassigned === 1 ? "schedule is" : "schedules are"} unassigned and paused. Assign ${unassigned === 1 ? "it" : "each one"} to an organization on the agent page.`
+        : "",
+      elsewhere > 0
+        ? `${elsewhere} ${elsewhere === 1 ? "schedule belongs" : "schedules belong"} to another organization and ${elsewhere === 1 ? "runs" : "run"} only while that organization is active.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  migrated: (
+    notice: { assignedCount: number; unassignedCount: number; unassignedReason?: "no-active-tenant" | "pilot-active" },
+    organizationName: string | undefined,
+  ) =>
+    [
+      notice.assignedCount > 0
+        ? `Schedules now belong to organizations. ${notice.assignedCount} ${notice.assignedCount === 1 ? "schedule moved" : "schedules moved"} to ${organizationName ?? "the organization that was active"} and ${notice.assignedCount === 1 ? "runs" : "run"} only while it is active.`
+        : "Schedules now belong to organizations.",
+      notice.unassignedCount > 0
+        ? `${notice.unassignedCount} ${notice.unassignedCount === 1 ? "schedule stays" : "schedules stay"} paused and unassigned because ${notice.unassignedReason === "pilot-active" ? "the sample organization was active" : "no organization was active"}. Assign each one on its agent page.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" "),
+  dismiss: "Dismiss",
+  failed: (detail: string) => `That did not work.${detail ? ` ${detail}` : ""} Try again.`,
+  rowLabel: "Organization",
+  runsIn: (name: string) => `Runs only while ${name} is active.`,
+  unassigned: "Unassigned. This schedule is paused until you assign it to an organization.",
+  assignLabel: "Assign to organization",
+  assignAction: "Assign",
+  assigned: (name: string) => `Schedule assigned to ${name}.`,
+  noOrganizations: "Connect an organization to assign this schedule. Schedules never run in the sample organization.",
+} as const;

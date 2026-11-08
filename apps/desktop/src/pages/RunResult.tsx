@@ -119,7 +119,11 @@ export default function RunResult() {
       );
       return;
     }
+    // A run that had no organization (an agent that calls no service API)
+    // runs again without one; the host refuses it if the agent changed.
+    const runWithoutOrganization = !run.tenantId && !state.activeTenantId && !run.officeContext && run.status !== "planned";
     if (
+      !runWithoutOrganization &&
       !requireTenantAndProvider(
         createPendingIntent({
           kind: "agent-run",

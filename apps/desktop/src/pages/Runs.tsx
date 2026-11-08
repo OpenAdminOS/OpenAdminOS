@@ -428,7 +428,7 @@ export function tenantNameForRun(
   run: RunRecord,
   tenants: { id: string; displayName: string }[],
 ): string {
-  if (!run.tenantId) return "No tenant";
+  if (!run.tenantId) return "No organization";
   return tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ?? run.tenantId;
 }
 

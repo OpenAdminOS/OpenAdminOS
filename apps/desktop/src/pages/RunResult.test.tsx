@@ -573,3 +573,18 @@ it("opens run details on the Logs tab when a failed run has no error playbook", 
   expect(screen.getByRole("tab", { name: "Logs" })).toHaveAttribute("aria-selected", "true");
   expect(screen.getByRole("region", { name: "Run status" })).toHaveTextContent("Open Run details below for the logs.");
 });
+
+it("runs a service-free run again without an organization and keeps setup closed", async () => {
+  const user = userEvent.setup();
+  const run = { ...createAwaitingConfirmationRun({ status: "completed", plan: undefined }), tenantId: undefined };
+  const { activeTenantId: _none, ...state } = createMockAppState({
+    installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read", scopes: [], services: [] })],
+    runs: [run],
+  });
+  const bridge = makeMockBridge({}, { ...state, tenants: [] });
+  renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+  await user.click(await screen.findByRole("button", { name: "Run again" }));
+  await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
+  expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]).not.toHaveProperty("tenantId");
+  expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
+});

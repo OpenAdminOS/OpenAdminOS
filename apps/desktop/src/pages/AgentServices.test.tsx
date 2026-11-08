@@ -1,11 +1,12 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Route, Routes } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import Agents from "./Agents";
 import Marketplace from "./Marketplace";
 import { createMockAgent, createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
-import type { RegistryAgentSummary } from "../shared/openAdminOS";
+import { SERVICE_PARTS, type RegistryAgentSummary } from "../shared/openAdminOS";
 
 function registryAgent(overrides: Partial<RegistryAgentSummary>): RegistryAgentSummary {
   const { installedAt: _installedAt, ...agent } = createMockAgent({ mode: "read" });
@@ -61,8 +62,8 @@ describe("agents by service", () => {
     });
 
     const list = await screen.findByLabelText("Installed agents");
-    expect(within(list).getByLabelText("Services: Defender")).toBeInTheDocument();
-    expect(within(list).getByLabelText("Services: Entra")).toBeInTheDocument();
+    expect(within(list).getByLabelText("Needs Defender")).toBeInTheDocument();
+    expect(within(list).getByLabelText("Needs Entra")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
     expect(screen.getByRole("menuitemradio", { name: "All services" })).toHaveAttribute("aria-checked", "true");
@@ -216,5 +217,107 @@ describe("agents by service", () => {
     expect(
       await screen.findByText(`Every scope listed here is granted for ${intuneOnlyTenant.displayName}.`),
     ).toBeInTheDocument();
+  });
+});
+
+const entraNoSignIns = {
+  ...createMockAppState().tenants[0]!,
+  grantedScopes: [
+    ...new Set(
+      SERVICE_PARTS.filter((part) => part.service === "entra" && part.id !== "entra.signins").flatMap((part) =>
+        part.scopes.map((scope) => `graph:${scope.name}`),
+      ),
+    ),
+  ],
+};
+
+function noOrganizationState(installedAgents: ReturnType<typeof createMockAgent>[]) {
+  const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents });
+  return { ...state, tenants: [] };
+}
+
+describe("agents with service needs", () => {
+  it("names what is missing in the row action and runs a service-free agent anywhere", async () => {
+    const state = createMockAppState({
+      tenants: [entraNoSignIns],
+      installedAgents: [
+        createMockAgent({ id: "score", slug: "score", name: "Secure score prioritizer", mode: "read", scopes: ["SecurityEvents.Read.All"], services: ["defender"] }),
+        createMockAgent({ id: "risky", slug: "risky", name: "Sign-in failures", mode: "read", scopes: ["AuditLog.Read.All"], services: ["entra"] }),
+        createMockAgent({ id: "guests", slug: "guests", name: "Guest review", mode: "read", scopes: ["User.Read.All"], services: ["entra"] }),
+        createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] }),
+      ],
+    });
+    renderRoute(<Agents />, { path: "/agents", route: "/agents", bridge: makeMockBridge({}, state) });
+
+    const list = await screen.findByLabelText("Installed agents");
+    const row = (name: string) => within(list).getByText(name).closest(".calm-list-row") as HTMLElement;
+    expect(within(row("Secure score prioritizer")).getByRole("button", { name: "Connect Defender" })).toBeInTheDocument();
+    expect(within(row("Secure score prioritizer")).getByLabelText("Needs Defender, not connected")).toBeInTheDocument();
+    expect(within(row("Sign-in failures")).getByRole("button", { name: "Add sign-in logs" })).toBeInTheDocument();
+    expect(within(row("Sign-in failures")).getByLabelText("Needs Entra; Entra sign-in logs, not connected")).toBeInTheDocument();
+    expect(within(row("Guest review")).getByRole("button", { name: "Run" })).toBeInTheDocument();
+    expect(within(row("Script draft")).getByLabelText("No service needed")).toBeInTheDocument();
+    expect(within(row("Script draft")).getByRole("button", { name: "Run" })).toBeInTheDocument();
+  });
+
+  it("opens the service dialog for the missing part from the row action", async () => {
+    const user = userEvent.setup();
+    const state = createMockAppState({
+      tenants: [entraNoSignIns],
+      installedAgents: [createMockAgent({ id: "risky", slug: "risky", name: "Sign-in failures", mode: "read", scopes: ["AuditLog.Read.All"], services: ["entra"] })],
+    });
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<Agents />, { path: "/agents", route: "/agents", bridge });
+    await user.click(await screen.findByRole("button", { name: "Add sign-in logs" }));
+    const dialog = screen.getByRole("dialog", { name: "Add Entra access" });
+    expect(within(dialog).getByRole("checkbox", { name: "Sign-in logs" })).toBeChecked();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+  });
+
+  it("opens the preflight without an organization, names the services and starts nothing", async () => {
+    const user = userEvent.setup();
+    const devices = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+    const bridge = makeMockBridge({}, noOrganizationState([devices]));
+    renderRoute(
+      <Routes>
+        <Route path="/agents" element={<Agents />} />
+        <Route path="/agents/:slug/confirm" element={<Agents startRunOnOpen />} />
+      </Routes>,
+      { path: "*", route: "/agents", bridge },
+    );
+
+    await user.click(await screen.findByRole("button", { name: "Connect Intune" }));
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Inactive devices needs Intune.");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("No organization is active.");
+    expect(within(dialog).getByText("No organization")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+    // Connect opens setup instead of a run.
+    await user.click(within(dialog).getByRole("button", { name: "Connect Intune" }));
+    expect(await screen.findByRole("radio", { name: "OpenAdminOS app" })).toBeInTheDocument();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+  });
+
+  it("still needs an organization for an agent with services: [] and only the sign-in scope", async () => {
+    const whoami = createMockAgent({ id: "whoami", slug: "whoami", name: "Who am I", mode: "read", scopes: ["User.Read"], services: [] });
+    const bridge = makeMockBridge({}, noOrganizationState([whoami]));
+    renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/whoami/confirm", bridge });
+
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Who am I needs the Microsoft 365 sign-in.");
+    expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+  });
+
+  it("runs an agent that calls no service API with no organization", async () => {
+    const user = userEvent.setup();
+    const draft = createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] });
+    const bridge = makeMockBridge({}, noOrganizationState([draft]));
+    renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
+
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(dialog).getByRole("status")).toHaveTextContent("No organization needed.");
+    expect(within(dialog).getByText("None needed")).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("draft", expect.not.objectContaining({ tenantId: expect.anything() })));
   });
 });

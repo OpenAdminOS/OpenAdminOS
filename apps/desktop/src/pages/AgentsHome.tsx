@@ -11,7 +11,8 @@ import { NewAgentModal } from "../components/NewAgentModal";
 import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
-import { ServiceChips } from "../components/ServiceAccess";
+import { ServiceAccessDialog } from "../components/ServiceAccess";
+import { AgentNeedChips } from "../components/AgentNeedChips";
 import { AGENT_COPY, SERVICE_COPY } from "../copy";
 import {
   IconChevronDown,
@@ -36,8 +37,10 @@ import type { AgentDisplay } from "../shared/agent-display";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import {
   AVAILABLE_SERVICES,
+  activeOrganizationOf,
   agentServiceIds,
   isServiceId,
+  resolveOrganizations,
   serviceById,
   type AgentSummary,
   type InvalidAgentManifest,
@@ -47,6 +50,7 @@ import {
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { useAppState } from "../state";
+import { agentNeeds, type AgentNeeds } from "../shared/agent-needs";
 
 type ModeFilter = "all" | "read" | "write";
 
@@ -93,11 +97,22 @@ export default function AgentsHome() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
-  const schedulesPaused = activeTenant?.kind === "sample";
+  const organizations = resolveOrganizations(state);
+  const activeOrganization = activeOrganizationOf(state);
+  const schedulesPaused = activeTenant?.kind === "sample" || !activeOrganization;
+  const [access, setAccess] = useState<{ serviceId: ServiceId; partIds?: string[] } | null>(null);
 
+  // Run due now and Run all scheduled run only the schedules of the active
+  // organization; the others wait for their organization.
   const scheduledAgents = useMemo(
-    () => state.installedAgents.filter((agent) => agent.schedule?.enabled === true),
-    [state.installedAgents],
+    () =>
+      state.installedAgents.filter(
+        (agent) =>
+          agent.schedule?.enabled === true &&
+          activeOrganization !== undefined &&
+          agent.schedule.organizationId === activeOrganization.id,
+      ),
+    [activeOrganization, state.installedAgents],
   );
   const dueAgents = useMemo(
     () => scheduledAgents.filter((agent) => nextRunTime(agent) <= Date.now()),
@@ -197,6 +212,10 @@ export default function AgentsHome() {
       licenseMissing: hasLicenseShortfall(agent.requiresEntraTier, activeTenant?.entraTier),
     }));
   }, [activeTenant?.entraTier, state.installedAgents, state.runs]);
+
+  // The sample organization has every service; only the pilot agents run there.
+  const rowNeeds = (row: LibraryRow): AgentNeeds =>
+    agentNeeds(row.installed, activeTenant, organizations.length > 0);
 
   const categories = useMemo(
     () => Array.from(new Set(sourceRows.map((row) => row.display.category))).sort(),
@@ -299,7 +318,21 @@ export default function AgentsHome() {
     });
   };
 
-  const runAgent = async (agent: AgentSummary) => {
+  const runAgent = async (agent: AgentSummary, needs: AgentNeeds) => {
+    if (needs.action.kind === "connect-service") {
+      setAccess({ serviceId: needs.action.serviceId });
+      return;
+    }
+    if (needs.action.kind === "add-part") {
+      setAccess({ serviceId: needs.action.serviceId, partIds: [needs.action.partId] });
+      return;
+    }
+    // Without an organization the preflight names the services the agent
+    // needs, and runs an agent that calls no service API.
+    if (!activeTenant) {
+      navigate(`/agents/${encodeURIComponent(agent.slug)}/confirm`);
+      return;
+    }
     if (
       !requireTenantAndProvider(
         createPendingIntent({
@@ -509,8 +542,14 @@ export default function AgentsHome() {
         <div aria-label="Installed agents">
           {rows.map((row) => {
             const scheduled = row.installed.schedule?.enabled === true;
+            const needs = rowNeeds(row);
+            const scheduleOrganization = organizations.find(
+              (organization) => organization.id === row.installed.schedule?.organizationId,
+            );
             const meta = scheduled
-              ? `Every ${formatInterval(row.installed.schedule!.intervalSeconds)}`
+              ? `Every ${formatInterval(row.installed.schedule!.intervalSeconds)} · ${
+                  scheduleOrganization ? `in ${scheduleOrganization.name}` : "Unassigned, paused"
+                }`
               : row.latestRun
                 ? `Last run ${formatRelative(row.latestRun.queuedAt)}`
                 : "Never run";
@@ -531,7 +570,7 @@ export default function AgentsHome() {
                       </span>
                     </span>
                     <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
-                    <span className="mt-1 block"><ServiceChips services={agentServiceIds(row.display)} /></span>
+                    <AgentNeedChips needs={rowNeeds(row)} />
                     {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
                     {row.installed.manifestError ? (
                       <span className="mt-0.5 block truncate text-xs text-[var(--color-danger)]" title={row.installed.manifestError}>
@@ -546,13 +585,13 @@ export default function AgentsHome() {
                 <div className="calm-row-actions flex shrink-0 items-center gap-1" onClick={(event) => event.stopPropagation()}>
                   <Button
                     size="sm"
-                    variant="ghost"
-                    leadingIcon={<IconPlay size={13} />}
+                    variant={needs.action.kind === "run" ? "ghost" : "secondary"}
+                    leadingIcon={needs.action.kind === "run" ? <IconPlay size={13} /> : undefined}
                     disabled={row.display.compatibility?.supported === false || Boolean(row.installed.manifestError)}
                     title={row.installed.manifestError ? AGENT_COPY.invalidRowHint : undefined}
-                    onClick={() => void runAgent(row.installed)}
+                    onClick={() => void runAgent(row.installed, needs)}
                   >
-                    Run
+                    {needs.action.label}
                   </Button>
                   <Menu
                     ariaLabel={`${row.display.name} actions`}
@@ -578,6 +617,15 @@ export default function AgentsHome() {
           ) : null}
         </div>
       </section>
+      {activeTenant ? (
+        <ServiceAccessDialog
+          tenant={activeTenant}
+          serviceId={access?.serviceId ?? null}
+          {...(access?.partIds ? { initialPartIds: access.partIds } : {})}
+          open={access !== null}
+          onClose={() => setAccess(null)}
+        />
+      ) : null}
       <NewAgentModal open={addFlow === "agent"} onClose={closeAddFlow} />
       {editingInvalid ? (
         <NewAgentModal
@@ -629,3 +677,4 @@ function formatRelative(iso: string, future = false) {
 function titleCase(value: string) {
   return value.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
+
