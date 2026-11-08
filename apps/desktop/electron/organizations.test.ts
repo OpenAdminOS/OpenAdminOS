@@ -15,7 +15,15 @@ import {
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
 import { SAMPLE_TENANT_ID } from "./sample-tenant/dataset.js";
-import { noOrganizationRunCopy, RunService, type RunPersistedState, type RunServiceHost } from "./runs.js";
+import {
+  noOrganizationRunCopy,
+  OTHER_ORGANIZATION_RUN_COPY,
+  RunService,
+  SCHEDULE_OTHER_ORGANIZATION_COPY,
+  UNASSIGNED_SCHEDULE_RUN_COPY,
+  type RunPersistedState,
+  type RunServiceHost,
+} from "./runs.js";
 import { AppStateStore } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
@@ -497,7 +505,7 @@ describe("agents without an organization", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     assert.deepEqual(h.graphBuilds, []);
     // A schedule, an Agent Team task or a retry still needs an organization.
-    await assert.rejects(h.service.startRun("team-script-draft", { trigger: "schedule" }), /No organization is active/);
+    await assert.rejects(h.service.startRun("team-script-draft", { trigger: "schedule" }), /unassigned, so it is paused/);
   });
 
   it("refuses a scheduled start when the schedule belongs to another organization", async () => {
@@ -560,5 +568,78 @@ describe("schedule edits (review round 1)", () => {
     } finally {
       await fixture.close();
     }
+  });
+});
+
+function twoOrganizations(agentOverrides: Record<string, unknown>, activeTenantId: string) {
+  // Grants absent means every service, so only the boundary decides.
+  const tenants = [woodgrove, fabrikam].map((tenant) => {
+    const { grantedScopes: _grants, ...rest } = tenant as Record<string, unknown>;
+    return rest;
+  }) as unknown as TenantRecord[];
+  const organizations = reconcileOrganizations({ rawOrganizations: [], rawNotice: undefined, tenants, installedAgents: [] }).organizations;
+  return runHarness({
+    activeProviderId: "ollama",
+    installedAgents: [agent("find-inactive-devices", agentOverrides) as unknown as AgentSummary],
+    runs: [],
+    tenants,
+    organizations,
+    activeTenantId,
+  });
+}
+
+describe("organization boundary on every start (review round 1)", () => {
+  it("refuses a scheduled start pinned to another tenant while another organization is active", async () => {
+    // Fabrikam (B) is active; the schedule belongs to Woodgrove (A) and the caller pins A.
+    const h = twoOrganizations({ schedule: { ...schedule(), organizationId: `org-${woodgrove.id}` } }, fabrikam.id);
+    await assert.rejects(
+      h.service.startRun("find-inactive-devices", { trigger: "schedule", tenantId: woodgrove.id }),
+      (error: Error) => error.message === OTHER_ORGANIZATION_RUN_COPY,
+    );
+    await assert.rejects(
+      h.service.startRun("find-inactive-devices", { trigger: "schedule" }),
+      (error: Error) => error.message === SCHEDULE_OTHER_ORGANIZATION_COPY,
+    );
+    assert.equal(h.state().runs.length, 0);
+  });
+
+  it("refuses a scheduled start of an unassigned schedule", async () => {
+    const h = twoOrganizations({ schedule: schedule() }, woodgrove.id);
+    await assert.rejects(
+      h.service.startRun("find-inactive-devices", { trigger: "schedule" }),
+      (error: Error) => error.message === UNASSIGNED_SCHEDULE_RUN_COPY,
+    );
+  });
+
+  it("queues a scheduled start in its own active organization against the active tenant", async () => {
+    const h = twoOrganizations({ schedule: { ...schedule(), organizationId: `org-${woodgrove.id}` } }, woodgrove.id);
+    const run = await h.service.startRun("find-inactive-devices", { trigger: "schedule", tenantId: woodgrove.id });
+    assert.equal(run.tenantId, woodgrove.id);
+    assert.equal(run.trigger, "schedule");
+  });
+
+  it("holds renderer starts to the active tenant but lets host-owned batches pin their own", async () => {
+    const h = twoOrganizations({}, fabrikam.id);
+    await assert.rejects(
+      h.service.startRun("find-inactive-devices", { tenantId: woodgrove.id }, { activeOrganizationOnly: true }),
+      (error: Error) => error.message === OTHER_ORGANIZATION_RUN_COPY,
+    );
+    const active = await h.service.startRun("find-inactive-devices", { tenantId: fabrikam.id }, { activeOrganizationOnly: true });
+    assert.equal(active.tenantId, fabrikam.id);
+    // Run for real takes the dry run's tenant, which is not the active one.
+    const dry = {
+      id: "dry", agentSlug: "find-inactive-devices", status: "planned", dryRun: true, tenantId: woodgrove.id,
+      providerId: "ollama", model: "test", inputSettings: {}, queuedAt: "2026-11-01T00:00:00.000Z", steps: [], logs: [],
+    } as unknown as RunRecord;
+    const writer = twoOrganizations({ mode: "write" }, fabrikam.id);
+    const internal = writer as unknown as { state(): RunPersistedState };
+    internal.state().runs.push(dry);
+    await assert.rejects(
+      writer.service.startRun("find-inactive-devices", { runForRealOfRunId: "dry" }, { activeOrganizationOnly: true }),
+      (error: Error) => error.message === OTHER_ORGANIZATION_RUN_COPY,
+    );
+    // A multi-tenant batch is a host-owned caller with an explicit tenant scope.
+    const batch = await h.service.startRun("find-inactive-devices", { tenantId: woodgrove.id, trigger: "manual" });
+    assert.equal(batch.tenantId, woodgrove.id);
   });
 });

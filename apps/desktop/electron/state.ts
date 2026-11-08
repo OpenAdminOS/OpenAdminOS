@@ -7049,8 +7049,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async startRun(
     agentSlug: string,
     options: StartRunOptions = {},
+    boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
-    return this.runService.startRun(agentSlug, options);
+    return this.runService.startRun(agentSlug, options, boundary);
   }
 
   async confirmRun(runId: string, phrase: string): Promise<RunRecord> {

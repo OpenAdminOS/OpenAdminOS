@@ -161,6 +161,25 @@ describe("Agents schedule actions", () => {
     await user.click(screen.getByRole("menuitem", { name: "Run due now (1)" }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
     expect(vi.mocked(bridge.startRun).mock.calls[0]?.[0]).toBe("mine");
+    // A scheduled start, so the host checks the schedule's organization.
+    expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]).toEqual({ trigger: "schedule" });
+  });
+
+  it("shows the host refusal when the organization changes during a batch", async () => {
+    const user = userEvent.setup();
+    const due = { enabled: true, intervalSeconds: 900, lastScheduledRunAt: "2026-01-01T00:00:00.000Z", organizationId: "org-tenant-1" };
+    const first = createMockAgent({ id: "first", slug: "first", name: "First", schedule: due });
+    const second = createMockAgent({ id: "second", slug: "second", name: "Second", schedule: due });
+    const startRun = vi
+      .fn()
+      .mockResolvedValueOnce(createAwaitingConfirmationRun({ id: "run-first", agentSlug: "first" }))
+      .mockRejectedValueOnce(new Error("This schedule belongs to another organization. It runs only while that organization is active."));
+    const bridge = makeMockBridge({ startRun }, createMockAppState({ installedAgents: [first, second] }));
+    renderRoute(<Agents />, { path: "/agents", route: "/agents?filter=scheduled", bridge });
+    await user.click(await screen.findByRole("button", { name: "Schedule actions" }));
+    await user.click(screen.getByRole("menuitem", { name: "Run due now (2)" }));
+    expect(await screen.findByText(/This schedule belongs to another organization/)).toBeInTheDocument();
+    expect(startRun).toHaveBeenCalledTimes(2);
   });
 
   it("says where schedules went when they moved to organizations, until dismissed", async () => {

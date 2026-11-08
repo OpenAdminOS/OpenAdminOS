@@ -166,8 +166,10 @@ export default function AgentsHome() {
       setBulkRunning(mode);
       let started = 0;
       try {
+        // Each start is a scheduled start, so the host refuses it if the
+        // schedule's organization is no longer the active one.
         for (const agent of agents) {
-          await startRun(agent.slug);
+          await startRun(agent.slug, { trigger: "schedule" });
           started += 1;
         }
         toast.success(`${started} scheduled ${started === 1 ? "run" : "runs"} queued.`);

@@ -6452,9 +6452,11 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:start-run",
     handleTrusted((_event, agentSlug: unknown, options?: unknown) =>
+      // A renderer start may only pin the active organization's tenant.
       store.startRun(
         requireAgentSlug(agentSlug, "agentSlug"),
         validateStartRunOptions(options),
+        { activeOrganizationOnly: true },
       ),
     ),
   );

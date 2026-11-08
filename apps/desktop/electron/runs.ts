@@ -75,6 +75,13 @@ export function noOrganizationRunCopy(agent: Pick<AgentSummary, "name" | "scopes
   return `No organization is active. ${agent.name} ${needs}, so it runs only in an organization where that is connected. Choose or add an organization in Connections, then run it again.`;
 }
 
+export const OTHER_ORGANIZATION_RUN_COPY =
+  "That run belongs to an organization that is not active. Switch to it in the organization menu, then run the agent again.";
+export const SCHEDULE_OTHER_ORGANIZATION_COPY =
+  "This schedule belongs to another organization. It runs only while that organization is active.";
+export const UNASSIGNED_SCHEDULE_RUN_COPY =
+  "This schedule is unassigned, so it is paused. Assign it to an organization on the agent page, then run it.";
+
 export interface RunServiceHost {
   read(): Promise<RunPersistedState>;
   write(state: RunPersistedState): Promise<void>;
@@ -227,9 +234,17 @@ export class RunService {
     return result;
   }
 
+  /**
+   * Queue a run. `boundary.activeOrganizationOnly` is set for every start
+   * that comes from the renderer: it may only pin the active tenant.
+   * Host-owned callers (multi-tenant batches, Agent Team) pin their own
+   * tenants. A scheduled start is always held to the active organization,
+   * checked here under the same lock that queues the run.
+   */
   async startRun(
     agentSlug: string,
     options: StartRunOptions = {},
+    boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
     const queued = await this.host.serialize(async () => {
       const persisted = await this.host.read();
@@ -244,7 +259,7 @@ export class RunService {
       // manually, from Chat or from a schedule.
       const manifestError = this.host.agentManifestError?.(agent);
       if (manifestError) throw new Error(invalidAgentManifestCopy(agent.name, manifestError));
-      // Pilot runs use prepared text instead of a provider, and only the
+    // Pilot runs use prepared text instead of a provider, and only the
       // pilot agents can run on the pilot tenant. Refuse everything else
       // before any provider or Graph work.
       const requestedTenantId =
@@ -263,6 +278,24 @@ export class RunService {
       }
       if ((options.dryRun || options.runForRealOfRunId) && options.trigger === "schedule") {
         throw new Error("Dry runs and Run for real are manual run options. Open the agent to run it manually.");
+      }
+      // Hard constraint 3: a start the renderer asks for, and every
+      // scheduled start, runs only in the organization active right now.
+      if (
+        (boundary.activeOrganizationOnly || options.trigger === "schedule") &&
+        options.tenantId !== undefined &&
+        options.tenantId !== persisted.activeTenantId
+      ) {
+        throw new Error(OTHER_ORGANIZATION_RUN_COPY);
+      }
+      if (options.trigger === "schedule") {
+        const active = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
+        if (!agent.schedule?.organizationId) {
+          throw new Error(UNASSIGNED_SCHEDULE_RUN_COPY);
+        }
+        if (!active || agent.schedule.organizationId !== active.id) {
+          throw new Error(SCHEDULE_OTHER_ORGANIZATION_COPY);
+        }
       }
       if (options.dryRun && (options.office || options.officeContext)) {
         throw new Error("Dry runs are available from the agent page or Chat. Run this assignment from Agent Team normally.");
@@ -442,13 +475,14 @@ export class RunService {
       ) {
         throw new Error(noOrganizationRunCopy(agent));
       }
-      // A schedule runs only in its own organization, even if another
-      // organization became active after the scheduler picked it.
-      if (options.trigger === "schedule") {
-        const organization = organizationForTenant(persisted.organizations ?? [], pinnedTenantId);
-        if (!organization || agent.schedule?.organizationId !== organization.id) {
-          throw new Error("This schedule belongs to another organization. It runs only while that organization is active.");
-        }
+      // Run for real and Team retries take the tenant of the original run;
+      // a renderer start still runs only in the active organization.
+      if (
+        boundary.activeOrganizationOnly &&
+        pinnedTenantId !== undefined &&
+        pinnedTenantId !== persisted.activeTenantId
+      ) {
+        throw new Error(OTHER_ORGANIZATION_RUN_COPY);
       }
 
       // Entra ID tier preflight: if the agent declares a required tier
