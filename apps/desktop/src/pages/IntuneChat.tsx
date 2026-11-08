@@ -75,7 +75,8 @@ import {
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, providerDataLocation } from "../copy";
-import { ModelChoice, NoTenantChatHome, NotConnectedCard, isProviderReady } from "../components/chat/ChatFirstRun";
+import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "../components/chat/ChatFirstRun";
+import { isProviderReady } from "../shared/provider-detection";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -1861,7 +1862,7 @@ function IntuneChatContent() {
             )}
             {!activeTenant && !modelReady ? (
               <div className="mb-6">
-                <ModelChoice providers={state.providers} onSelectProvider={setActiveProvider} />
+                <ModelChoice providers={state.providers} activeProviderId={state.activeProviderId} onSelectProvider={setActiveProvider} />
               </div>
             ) : null}
             {state.providerAutoSelectNotice && !pilot ? (

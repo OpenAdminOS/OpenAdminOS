@@ -19,7 +19,7 @@ import {
   type ProviderSummary,
   type TenantRecord,
 } from "../../shared/openAdminOS";
-import { isProviderImplemented } from "../../shared/providers";
+import { detectedHostedProviders } from "../../shared/provider-detection";
 import { useSetupFlow } from "../../setup/SetupFlowContext";
 import { McpServerDialog } from "../marketplace/McpServerDialog";
 import { ServiceAccessDialog } from "../ServiceAccess";
@@ -28,32 +28,16 @@ import { useToast } from "../Toast";
 import { IconCheck, IconCloud, IconCopy, IconHardDrive, IconShield } from "../icons";
 
 /**
- * A provider Chat can send with: implemented and connected. Azure OpenAI
- * has no connected probe, so a configured deployment counts at
- * "available", as in the setup flow.
- */
-export function isProviderReady(provider: ProviderSummary | undefined): boolean {
-  return Boolean(
-    provider &&
-      isProviderImplemented(provider.id) &&
-      (provider.status === "connected" || (provider.id === "azure-openai" && provider.status === "available")),
-  );
-}
-
-/** Hosted CLIs signed in on this device. Never selected for the admin: each needs one click. */
-export function detectedHostedProviders(providers: readonly ProviderSummary[]): ProviderSummary[] {
-  return providers.filter((provider) => !provider.isLocal && provider.status === "connected" && isProviderImplemented(provider.id));
-}
-
-/**
  * The only setup Chat cannot work without. Shown in place of the empty
  * Chat while no model is ready (mockup 32, section B).
  */
 export function ModelChoice({
   providers,
+  activeProviderId,
   onSelectProvider,
 }: {
   providers: readonly ProviderSummary[];
+  activeProviderId: ProviderId;
   onSelectProvider: (id: ProviderId) => Promise<void>;
 }) {
   const navigate = useNavigate();
@@ -61,7 +45,7 @@ export function ModelChoice({
   const [selecting, setSelecting] = useState<ProviderId | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [previewing, setPreviewing] = useState(false);
-  const detected = detectedHostedProviders(providers);
+  const detected = detectedHostedProviders(providers, activeProviderId);
 
   const select = (id: ProviderId) => {
     setSelecting(id);
