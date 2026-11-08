@@ -82,6 +82,8 @@ import type {
   SavedAppRegistration,
   TenantAppRegistration,
   ConnectTenantOptions,
+  OrganizationMigrationNotice,
+  OrganizationRecord,
   TenantRecord,
   TenantSession,
   AzureOpenAIProviderConfig,
@@ -160,6 +162,9 @@ import {
   invalidAgentManifestCopy,
   mergeGrantedScopes,
   missingServiceCopy,
+  normalizeOrganizationName,
+  organizationForTenant,
+  reconcileOrganizations,
   qualifyScope,
   normalizeGraphScopeName,
   providerCatalog,
@@ -345,6 +350,14 @@ interface PersistedState {
   tenants: TenantRecord[];
   activeTenantId?: string;
   /**
+   * Organizations above the tenants, reconciled on every read (see
+   * `organizations.ts`). Absent only in state files written before
+   * organizations; reading one migrates it, and the next write saves it.
+   */
+  organizations?: OrganizationRecord[];
+  /** What the move to organizations did with schedules, until dismissed. */
+  organizationMigration?: OrganizationMigrationNotice;
+  /**
    * Custom app registrations used for a successful connect, most recent
    * first. Public identifiers only, never secrets. Bounded and validated
    * on read.
@@ -523,6 +536,7 @@ const defaultState: PersistedState = {
   installedAgents: [],
   runs: [],
   tenants: [],
+  organizations: [],
 };
 
 function sanitizeRunHistoryRetentionInteger(
@@ -3057,6 +3071,7 @@ export class AppStateStore {
         model: activeModel,
       }),
       tenants: persisted.tenants,
+      organizations: persisted.organizations ?? [],
       savedAppRegistrations: persisted.savedAppRegistrations ?? [],
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
@@ -3078,6 +3093,11 @@ export class AppStateStore {
     }
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
+      const activeOrganization = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
+      if (activeOrganization) state.activeOrganizationId = activeOrganization.id;
+    }
+    if (persisted.organizationMigration) {
+      state.organizationMigration = persisted.organizationMigration;
     }
     if (this.tenantChecks.size > 0) {
       state.tenantChecks = [...this.tenantChecks.values()].map((entry) => entry.progress);
@@ -4733,9 +4753,18 @@ export class AppStateStore {
           schedule.enabled && existing.schedule?.enabled !== true
             ? updatedAt
             : undefined;
+        // A schedule keeps its organization. A new one belongs to the
+        // active organization; with none active it waits unassigned.
+        // The renderer never sets this field here.
+        const organizationId =
+          existing.schedule?.organizationId ??
+          (activeTenant && activeTenant.kind !== "sample"
+            ? organizationForTenant(persisted.organizations ?? [], activeTenant.id)?.id
+            : undefined);
         next[idx] = {
           ...existing,
           schedule: {
+            ...(organizationId ? { organizationId } : {}),
             enabled: schedule.enabled,
             intervalSeconds: Math.floor(schedule.intervalSeconds),
             notifyOnSuccess: schedule.notifyOnSuccess ?? existing.schedule?.notifyOnSuccess ?? true,
@@ -4854,11 +4883,19 @@ export class AppStateStore {
       }
       return;
     }
+    // Each schedule belongs to one organization and never runs while
+    // another one is active. Unassigned schedules wait for the admin.
+    const activeOrganization = organizationForTenant(persisted.organizations ?? [], activeTenant!.id);
+    let waiting = 0;
 
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
+      if (!activeOrganization || schedule.organizationId !== activeOrganization.id) {
+        waiting += 1;
+        continue;
+      }
       // The Agents page shows an invalid manifest as unavailable; its
       // schedule waits until the manifest is fixed.
       if (this.agentManifestError(agent)) {
@@ -4894,6 +4931,11 @@ export class AppStateStore {
           error,
         );
       }
+    }
+    if (waiting > 0) {
+      console.info(
+        `[scheduler] ${waiting} due schedule${waiting === 1 ? " waits" : "s wait"} for another organization or an assignment`,
+      );
     }
   }
 
@@ -6089,7 +6131,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const scheduledAgents = persisted.installedAgents.filter(
       (agent) => agent.schedule?.enabled === true,
     );
+    // The next due schedule is one that can run now: it belongs to the
+    // active organization.
+    const activeOrganizationId = organizationForTenant(
+      persisted.organizations ?? [],
+      persisted.activeTenantId,
+    )?.id;
     const next = [...scheduledAgents
+      .filter((agent) => activeOrganizationId !== undefined && agent.schedule?.organizationId === activeOrganizationId)
       .map((agent) => {
         const schedule = agent.schedule;
         const last = schedule?.lastScheduledRunAt
@@ -6869,6 +6918,88 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return this.getAppState();
   }
 
+  async setActiveOrganization(id: string | null): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      if (id === null) {
+        const next = { ...persisted };
+        delete next.activeTenantId;
+        await this.write(next);
+        return;
+      }
+      const organization = (persisted.organizations ?? []).find((entry) => entry.id === id);
+      const tenantId = organization?.connections.microsoft365?.tenantId;
+      if (!organization || !tenantId || !persisted.tenants.some((tenant) => tenant.id === tenantId)) {
+        throw new Error("That organization is no longer on this device. Choose another one from the organization menu.");
+      }
+      const lastUsedAt = new Date().toISOString();
+      await this.write({
+        ...persisted,
+        tenants: persisted.tenants.map((tenant) =>
+          tenant.id === tenantId ? { ...tenant, lastUsedAt } : tenant,
+        ),
+        activeTenantId: tenantId,
+      });
+    });
+    return this.getAppState();
+  }
+
+  async renameOrganization(id: string, name: string): Promise<AppState> {
+    const normalized = normalizeOrganizationName(name);
+    if (!normalized) {
+      throw new Error("Enter a name for the organization.");
+    }
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const organizations = persisted.organizations ?? [];
+      const target = organizations.find((entry) => entry.id === id);
+      if (!target) {
+        throw new Error("That organization is no longer on this device. Reopen Connections and try again.");
+      }
+      if (target.kind === "sample") {
+        throw new Error("The sample organization keeps its name. Rename an organization you connected.");
+      }
+      await this.write({
+        ...persisted,
+        organizations: organizations.map((entry) => (entry.id === id ? { ...entry, name: normalized } : entry)),
+      });
+    });
+    return this.getAppState();
+  }
+
+  async assignAgentSchedule(slug: string, organizationId: string): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);
+      if (!organization) {
+        throw new Error("That organization is no longer on this device. Choose another one for this schedule.");
+      }
+      if (organization.kind === "sample") {
+        throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
+      }
+      const index = persisted.installedAgents.findIndex((agent) => agent.slug === slug || agent.id === slug);
+      const agent = index >= 0 ? persisted.installedAgents[index] : undefined;
+      if (!agent?.schedule) {
+        throw new Error("This agent has no schedule to assign. Add a schedule from the agent page first.");
+      }
+      const installedAgents = [...persisted.installedAgents];
+      installedAgents[index] = { ...agent, schedule: { ...agent.schedule, organizationId } };
+      await this.write({ ...persisted, installedAgents });
+    });
+    return this.getAppState();
+  }
+
+  async dismissOrganizationMigrationNotice(): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      if (!persisted.organizationMigration) return;
+      const next = { ...persisted };
+      delete next.organizationMigration;
+      await this.write(next);
+    });
+    return this.getAppState();
+  }
+
   async disconnectTenant(id: string): Promise<AppState> {
     await this.cancelGraphCachePreload(id).catch(() => undefined);
     for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
@@ -7356,6 +7487,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
       }
+      const reconciled = reconcileOrganizations({
+        rawOrganizations: (parsed as { organizations?: unknown }).organizations,
+        rawNotice: (parsed as { organizationMigration?: unknown }).organizationMigration,
+        tenants: state.tenants,
+        activeTenantId: state.activeTenantId,
+        installedAgents: state.installedAgents,
+      });
+      state.organizations = reconciled.organizations;
+      state.installedAgents = reconciled.installedAgents;
+      if (reconciled.notice) state.organizationMigration = reconciled.notice;
       const savedAppRegistrations = sanitizeSavedAppRegistrations(
         (parsed as { savedAppRegistrations?: unknown }).savedAppRegistrations,
       );
@@ -7700,7 +7841,24 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * half-flushed JSON. Plain `writeFile` truncated first and was the
    * root cause of the "redirected to onboarding mid-action" bug.
    */
-  private async write(state: PersistedState): Promise<void> {
+  private async write(input: PersistedState): Promise<void> {
+    // Keep organizations consistent with the tenants being written, so a
+    // removed tenant's organization and its schedule assignments never
+    // outlive it in the file.
+    const reconciled = reconcileOrganizations({
+      rawOrganizations: input.organizations ?? [],
+      rawNotice: input.organizationMigration,
+      tenants: input.tenants,
+      activeTenantId: input.activeTenantId,
+      installedAgents: input.installedAgents,
+    });
+    const state: PersistedState = {
+      ...input,
+      organizations: reconciled.organizations,
+      installedAgents: reconciled.installedAgents,
+    };
+    if (reconciled.notice) state.organizationMigration = reconciled.notice;
+    else delete state.organizationMigration;
     await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;

@@ -9,6 +9,7 @@ import { SetupFlowProvider } from "../setup/SetupFlowContext";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   SERVICE_PARTS,
+  resolveOrganizations,
   DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   deriveTrustState,
@@ -715,6 +716,35 @@ export function makeMockBridge(
     setActiveTenant: vi.fn(async (id: string) =>
       updateState({ ...appState, activeTenantId: id }),
     ),
+    setActiveOrganization: vi.fn(async (id: string | null) => {
+      const tenantId = id === null
+        ? undefined
+        : resolveOrganizations(appState).find((organization) => organization.id === id)?.connections.microsoft365?.tenantId;
+      const { activeTenantId: _previous, ...rest } = appState;
+      return updateState(tenantId ? { ...rest, activeTenantId: tenantId } : rest);
+    }),
+    renameOrganization: vi.fn(async (id: string, name: string) =>
+      updateState({
+        ...appState,
+        organizations: resolveOrganizations(appState).map((organization) =>
+          organization.id === id ? { ...organization, name } : organization,
+        ),
+      }),
+    ),
+    assignAgentSchedule: vi.fn(async (slug: string, organizationId: string) =>
+      updateState({
+        ...appState,
+        installedAgents: appState.installedAgents.map((agent) =>
+          agent.slug === slug && agent.schedule
+            ? { ...agent, schedule: { ...agent.schedule, organizationId } }
+            : agent,
+        ),
+      }),
+    ),
+    dismissOrganizationMigrationNotice: vi.fn(async () => {
+      const { organizationMigration: _notice, ...rest } = appState;
+      return updateState(rest);
+    }),
     disconnectTenant: vi.fn(async (id: string) =>
       updateState({
         ...appState,

@@ -75,6 +75,11 @@ interface AppStateContextValue {
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
+  /** Make an organization active, or choose "No organization" with null. */
+  setActiveOrganization: (id: string | null) => Promise<void>;
+  renameOrganization: (id: string, name: string) => Promise<void>;
+  assignAgentSchedule: (slug: string, organizationId: string) => Promise<void>;
+  dismissOrganizationMigrationNotice: () => Promise<void>;
   disconnectTenant: (id: string) => Promise<void>;
   removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
   updateAgentSettings: (
@@ -631,6 +636,43 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
+  const setActiveOrganization = useCallback(async (id: string | null) => {
+    const api = getOpenAdminOSApi();
+    if (!api) return;
+    setError(null);
+    try {
+      const nextState = await api.setActiveOrganization(id);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const organizationError = toError(caughtError);
+      setError(organizationError);
+      throw organizationError;
+    }
+  }, []);
+
+  // These throw to the caller, which shows the reason next to the control.
+  const renameOrganization = useCallback(async (id: string, name: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) throw new Error("Organizations are unavailable in browser development.");
+    const nextState = await api.renameOrganization(id, name);
+    setState(nextState);
+  }, []);
+
+  const assignAgentSchedule = useCallback(async (slug: string, organizationId: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) throw new Error("Schedules are unavailable in browser development.");
+    const nextState = await api.assignAgentSchedule(slug, organizationId);
+    setState(nextState);
+  }, []);
+
+  const dismissOrganizationMigrationNotice = useCallback(async () => {
+    const api = getOpenAdminOSApi();
+    if (!api) throw new Error("Schedules are unavailable in browser development.");
+    const nextState = await api.dismissOrganizationMigrationNotice();
+    setState(nextState);
+  }, []);
+
   const disconnectTenant = useCallback(async (id: string) => {
     const api = getOpenAdminOSApi();
     if (!api) return;
@@ -1158,6 +1200,10 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       cancelConnectTenant,
       getRequestedScopes,
       setActiveTenant,
+      setActiveOrganization,
+      renameOrganization,
+      assignAgentSchedule,
+      dismissOrganizationMigrationNotice,
       disconnectTenant,
       removeSavedAppRegistration,
       updateAgentSettings,
@@ -1210,6 +1256,10 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setUsageTelemetryEnabled,
       setRegistrySource,
       setActiveTenant,
+      setActiveOrganization,
+      renameOrganization,
+      assignAgentSchedule,
+      dismissOrganizationMigrationNotice,
       startRun,
       state,
       submitAgentCommunitySubmission,

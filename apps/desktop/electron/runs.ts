@@ -11,8 +11,11 @@ import {
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
+  agentCallsNoServiceApi,
   agentServiceIds,
   formatServiceList,
+  organizationForTenant,
+  serviceById,
   invalidAgentManifestCopy,
   missingServicesForAgent,
   uncoveredScopesCopy,
@@ -30,6 +33,7 @@ import {
   type RunStepStatus,
   type SecretAccessor,
   type StartRunOptions,
+  type OrganizationRecord,
   type TenantRecord,
   type TenantSession,
 } from "@openadminos/agent-sdk";
@@ -55,6 +59,20 @@ export interface RunPersistedState {
   runs: RunRecord[];
   tenants: TenantRecord[];
   activeTenantId?: string;
+  organizations?: OrganizationRecord[];
+}
+
+/**
+ * Why an agent cannot start with no organization active. Only an agent
+ * that calls no service API runs without one; `services: []` with the
+ * sign-in scopes still needs an organization.
+ */
+export function noOrganizationRunCopy(agent: Pick<AgentSummary, "name" | "scopes" | "services">): string {
+  const titles = agentServiceIds(agent).map((id) => serviceById(id).title);
+  const needs = titles.length > 0
+    ? `reads ${formatServiceList(titles)}`
+    : "uses the Microsoft 365 sign-in";
+  return `No organization is active. ${agent.name} ${needs}, so it runs only in an organization where that is connected. Choose or add an organization in Connections, then run it again.`;
 }
 
 export interface RunServiceHost {
@@ -404,7 +422,9 @@ export class RunService {
       // user here in the first place, but defend in depth.
       //   - explicit id  -> validate it exists and pin it
       //   - omitted      -> default to currently-active tenant
-      let pinnedTenantId: string;
+      //   - none active  -> only an agent that calls no service API runs,
+      //                     manually, with no tenant at all
+      let pinnedTenantId: string | undefined;
       if (typeof options.tenantId === "string") {
         const exists = persisted.tenants.some((tenant) => tenant.id === options.tenantId);
         if (!exists) {
@@ -413,10 +433,22 @@ export class RunService {
         pinnedTenantId = options.tenantId;
       } else if (persisted.activeTenantId) {
         pinnedTenantId = persisted.activeTenantId;
-      } else {
-        throw new Error(
-          "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
-        );
+      } else if (
+        !agentCallsNoServiceApi(agent) ||
+        options.trigger === "schedule" ||
+        options.office ||
+        options.officeContext ||
+        options.retryOfRunId
+      ) {
+        throw new Error(noOrganizationRunCopy(agent));
+      }
+      // A schedule runs only in its own organization, even if another
+      // organization became active after the scheduler picked it.
+      if (options.trigger === "schedule") {
+        const organization = organizationForTenant(persisted.organizations ?? [], pinnedTenantId);
+        if (!organization || agent.schedule?.organizationId !== organization.id) {
+          throw new Error("This schedule belongs to another organization. It runs only while that organization is active.");
+        }
       }
 
       // Entra ID tier preflight: if the agent declares a required tier
@@ -479,7 +511,7 @@ export class RunService {
         slug: agent.slug, version: agent.version, manifest: agent.provenance?.manifestSha256,
         settings: agent.settings, personaId: options.office?.personaId, officeAssessment:options.officeContext?.assessmentKey })).digest("hex");
       if (options.retryOfRunId) queuedRun.retryOfRunId = options.retryOfRunId;
-      queuedRun.tenantId = pinnedTenantId;
+      if (pinnedTenantId) queuedRun.tenantId = pinnedTenantId;
       queuedRun.trigger = options.trigger ?? "manual";
       if (options.office) queuedRun.office = options.office;
       if (options.officeContext) {
@@ -918,9 +950,17 @@ export class RunService {
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const baseLlm = await this.baseRunLlm(input.run, input.agent, input.providerId, input.model);
-      const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
-      const llm = this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug);
-      const stampedRun = this.stampTenant(input.run, selection.tenantId);
+      // A run without a tenant was admitted only for an agent that calls
+      // no service API. It gets no tenant session, and a Graph client
+      // that refuses every call, so nothing can reach a service.
+      const selection = input.run.tenantId === undefined && agentCallsNoServiceApi(input.agent)
+        ? { createGraph: () => noServiceGraph(), tenantId: undefined, tenantSession: undefined }
+        : await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
+      const llm = selection.tenantId
+        ? this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug)
+        : baseLlm;
+      const stamp = (next: RunRecord) => (selection.tenantId ? this.stampTenant(next, selection.tenantId) : next);
+      const stampedRun = stamp(input.run);
       await this.persistRunSnapshot(stampedRun);
       controller.signal.throwIfAborted();
       await driver({
@@ -931,13 +971,12 @@ export class RunService {
         model: input.model,
         llm,
         createGraph: selection.createGraph,
-        tenant: selection.tenantSession,
+        ...(selection.tenantSession ? { tenant: selection.tenantSession } : {}),
         connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
         confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
-        onProgress: (next) =>
-          this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
+        onProgress: (next) => this.queueRunSnapshot(stamp(next)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
@@ -1406,4 +1445,20 @@ export class RunService {
     });
     this.host.emitStateChanged("run-step-updated", runId);
   }
+}
+
+/**
+ * The Graph client of a run with no organization. Such a run is admitted
+ * only for an agent that calls no service API, so any call is a defect in
+ * the agent, and it fails instead of reaching a tenant.
+ */
+function noServiceGraph(): RunGraphApi {
+  const refuse = async (): Promise<never> => {
+    throw new Error("This run has no organization, so it cannot call Microsoft Graph. Choose an organization with the service connected, then run the agent again.");
+  };
+  return {
+    listManagedDevices: refuse,
+    retireManagedDevice: refuse,
+    request: refuse,
+  };
 }

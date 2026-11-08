@@ -1,6 +1,7 @@
 import type { NotGrantedService, ServiceId } from "./services.js";
 
 export * from "./services.js";
+export * from "./organizations.js";
 
 export type ProviderId =
   | "ollama"
@@ -439,6 +440,14 @@ export interface AgentSchedule {
   notifyOnChangeOnly?: boolean;
   /** When the scheduler last fired this agent. Updated by the host. */
   lastScheduledRunAt?: string;
+  /**
+   * The organization this schedule runs in. A schedule never runs while
+   * another organization is active. Absent means unassigned: the schedule
+   * waits until the admin assigns it, and is never assigned to the sample
+   * organization. Set by the host; the renderer assigns with
+   * `assignAgentSchedule`.
+   */
+  organizationId?: string;
 }
 
 export interface AgentDeliverySettings {
@@ -736,6 +745,48 @@ export interface TenantAppRegistration {
   authority?: string;
   /** Admin-supplied name for a custom registration. Display only. */
   label?: string;
+}
+
+/**
+ * The company an admin manages: the shell scope. It holds at most one
+ * Microsoft 365 tenant, kept as a `TenantRecord`, and later one instance
+ * per other vendor service, each as its own key in `connections`. It is
+ * created by its first connection and named after it, and it is removed
+ * when its last connection is removed. Runs, conversations, cache and
+ * drift stay keyed by the tenant id, so they belong to the organization
+ * that holds the tenant.
+ */
+export interface OrganizationRecord {
+  /** `org-<tenantId>` for an organization created by a Microsoft 365 connection. */
+  id: string;
+  /** Admin-visible name. Defaults to the tenant display name; renamable. */
+  name: string;
+  /** The built-in sample organization that holds the pilot tenant. */
+  kind?: "sample";
+  createdAt: string;
+  connections: OrganizationConnections;
+}
+
+/**
+ * One connection per service vendor. Microsoft 365 is the only one today;
+ * a vendor service such as Jamf Pro adds its own optional key.
+ */
+export interface OrganizationConnections {
+  microsoft365?: { tenantId: string };
+}
+
+/**
+ * What the move to organizations did with existing schedules, shown once
+ * on the schedules surfaces until the admin dismisses it.
+ */
+export interface OrganizationMigrationNotice {
+  /** Schedules moved to the organization of the real tenant that was active. */
+  assignedCount: number;
+  assignedOrganizationId?: string;
+  /** Schedules left unassigned and paused because no real tenant was active. */
+  unassignedCount: number;
+  /** Why schedules were left unassigned. */
+  unassignedReason?: "no-active-tenant" | "pilot-active";
 }
 
 /**
@@ -1060,6 +1111,17 @@ export interface AppState {
   trust: TrustState;
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /**
+   * Organizations, one per connected tenant today. The active organization
+   * is the one that holds `activeTenantId`; none means "No organization".
+   * The host always sends it; renderer code reads it through
+   * `resolveOrganizations`, which also covers tenants without a record.
+   */
+  organizations?: OrganizationRecord[];
+  /** The organization that holds the active tenant, when one is active. */
+  activeOrganizationId?: string;
+  /** Present until the admin dismisses the schedule migration notice. */
+  organizationMigration?: OrganizationMigrationNotice;
   /** Custom app registrations remembered on this device, most recently used first. */
   savedAppRegistrations?: SavedAppRegistration[];
   /** ISO timestamp of the last successful registry index refresh. Null until first fetch. */
@@ -3162,6 +3224,20 @@ export interface OpenAdminOSApi {
   addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
+  /**
+   * Make an organization active, or choose "No organization" with null.
+   * The organization's Microsoft 365 tenant becomes the active tenant.
+   */
+  setActiveOrganization(id: string | null): Promise<AppState>;
+  /** Rename an organization. The sample organization keeps its name. */
+  renameOrganization(id: string, name: string): Promise<AppState>;
+  /**
+   * Assign an agent's schedule to an organization. The sample organization
+   * is refused: schedules never run in pilot mode.
+   */
+  assignAgentSchedule(slug: string, organizationId: string): Promise<AppState>;
+  /** Hide the schedule migration notice. */
+  dismissOrganizationMigrationNotice(): Promise<AppState>;
   disconnectTenant(id: string): Promise<AppState>;
   /**
    * Forget a remembered custom app registration. Tenants already

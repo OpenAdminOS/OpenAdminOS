@@ -6529,6 +6529,27 @@ function registerIpcHandlers() {
     store.setActiveTenant(requireBoundedString(id, "tenantId", 256)),
   ),
   );
+  ipcMain.handle("openadminos:set-active-organization", handleTrusted((_event, id: unknown) =>
+    store.setActiveOrganization(id === null ? null : requireBoundedString(id, "organizationId", 300)),
+  ),
+  );
+  ipcMain.handle("openadminos:rename-organization", handleTrusted((_event, id: unknown, name: unknown) =>
+    store.renameOrganization(
+      requireBoundedString(id, "organizationId", 300),
+      requireBoundedString(name, "name", 400),
+    ),
+  ),
+  );
+  ipcMain.handle("openadminos:assign-agent-schedule", handleTrusted((_event, slug: unknown, organizationId: unknown) =>
+    store.assignAgentSchedule(
+      requireAgentSlug(slug, "slug"),
+      requireBoundedString(organizationId, "organizationId", 300),
+    ),
+  ),
+  );
+  ipcMain.handle("openadminos:dismiss-organization-migration-notice", handleTrusted(() =>
+    store.dismissOrganizationMigrationNotice(),
+  ));
   ipcMain.handle("openadminos:disconnect-tenant", handleTrusted((_event, id: unknown) =>
     store.disconnectTenant(requireBoundedString(id, "tenantId", 256)),
   ),

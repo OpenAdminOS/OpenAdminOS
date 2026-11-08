@@ -481,6 +481,14 @@ const api: OpenAdminOSApi = {
   cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:set-active-tenant", id),
+  setActiveOrganization: (id: string | null) =>
+    ipcRenderer.invoke("openadminos:set-active-organization", id),
+  renameOrganization: (id: string, name: string) =>
+    ipcRenderer.invoke("openadminos:rename-organization", id, name),
+  assignAgentSchedule: (slug: string, organizationId: string) =>
+    ipcRenderer.invoke("openadminos:assign-agent-schedule", slug, organizationId),
+  dismissOrganizationMigrationNotice: () =>
+    ipcRenderer.invoke("openadminos:dismiss-organization-migration-notice"),
   disconnectTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:disconnect-tenant", id),
   removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) =>

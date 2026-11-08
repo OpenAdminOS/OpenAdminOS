@@ -422,6 +422,14 @@ export class RunDeliveryService {
       await this.host.appendRunLog(item.runId, "warn", message);
       return { retryable: false, error: message };
     }
+    // Teams and Outlook post with an organization's Microsoft sign-in. A
+    // run with no organization never borrows the one active now.
+    if (!run.tenantId && (item.connectorId === "teams" || item.connectorId === OUTLOOK_CONNECTOR_ID)) {
+      const message =
+        "Report delivery skipped. This run had no organization, and Teams and Outlook post with an organization's Microsoft sign-in. Run the agent in an organization to send its report there.";
+      await this.host.appendRunLog(item.runId, "warn", message);
+      return { retryable: false, error: message };
+    }
     try {
       switch (item.connectorId) {
         case "teams":
