@@ -682,144 +682,180 @@ button:disabled {
 }
 
 
-/* First-launch model scan. The motion lives here only: rows arrive in one
-   sequence, a hairline sweeps under each running check, and a resolved
-   check settles its mark and draws its hairline once in the state colour. */
-@keyframes scan-row-in {
-  from { opacity: 0; transform: translateY(4px); }
-  to { opacity: 1; transform: none; }
+/* First-launch model scan: one orchestrated sequence. The device tile
+   springs in, rings radiate and a sweep turns while checks run, nodes
+   appear and resolve with a spring, found nodes draw a link to the device
+   (green when it stays local, amber when prompts leave the device), and
+   the result slides in at the settle. Colour only marks those two facts. */
+@keyframes scan-device-in {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  70% { opacity: 1; transform: translate(-50%, -50%) scale(1.04); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
-@keyframes scan-sweep {
-  0% { transform: translateX(-110%); }
-  100% { transform: translateX(340%); }
+@keyframes scan-ring-out {
+  0% { transform: scale(0.28); opacity: 0.55; }
+  100% { transform: scale(1.12); opacity: 0; }
 }
-@keyframes scan-draw {
-  0% { transform: scaleX(0); opacity: 1; }
-  45% { transform: scaleX(1); opacity: 1; }
-  100% { transform: scaleX(1); opacity: 0; }
-}
-@keyframes scan-spin {
+@keyframes scan-turn {
   to { transform: rotate(360deg); }
 }
-@keyframes scan-settle {
-  0% { transform: scale(0.4); opacity: 0; }
-  60% { transform: scale(1.15); opacity: 1; }
-  100% { transform: scale(1); }
+@keyframes scan-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
-@keyframes scan-text-in {
-  from { opacity: 0; transform: translateX(-3px); }
+@keyframes scan-link-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes scan-hero-in {
+  from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: none; }
 }
-.scan-row {
-  animation: scan-row-in 280ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+@keyframes scan-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.14); }
+  100% { transform: scale(1); }
 }
-.scan-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 1px;
-  overflow: hidden;
-  background: var(--color-border-soft);
+.scan-stage { cursor: default; }
+.scan-screen[data-phase="scanning"] .scan-stage { cursor: pointer; }
+.scan-orbit {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
 }
-.scan-line::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  transform-origin: left center;
+.scan-orbit-inner { stroke: var(--color-border-soft); stroke-dasharray: 2 3; }
+.scan-ring {
+  fill: none;
+  stroke: var(--color-text-faint);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+  transform-box: view-box;
+  transform-origin: 50px 50px;
+  opacity: 0;
+  animation: scan-ring-out 1.65s cubic-bezier(0.22, 0.61, 0.36, 1) 0.25s infinite;
 }
-.scan-row[data-tone="checking"] .scan-line::after {
-  width: 28%;
-  background: linear-gradient(90deg, transparent, var(--color-text-muted), transparent);
-  animation: scan-sweep 1.15s cubic-bezier(0.45, 0, 0.25, 1) infinite;
+.scan-sweep {
+  transform-box: view-box;
+  transform-origin: 50px 50px;
+  animation: scan-turn 2.2s linear 0.3s infinite;
+  transition: opacity 500ms ease;
 }
-.scan-row[data-tone="ready"] .scan-line::after,
-.scan-row[data-tone="found"] .scan-line::after {
-  background: var(--color-success);
-  animation: scan-draw 1.1s ease-out both;
+.scan-sweep line {
+  stroke: var(--color-text);
+  stroke-width: 1.25;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+  opacity: 0.22;
 }
-.scan-row[data-tone="warning"] .scan-line::after {
-  background: var(--color-warning);
-  animation: scan-draw 1.1s ease-out both;
+.scan-rings { transition: opacity 600ms ease; }
+.scan-screen[data-phase="settled"] .scan-rings,
+.scan-screen[data-phase="settled"] .scan-sweep,
+.scan-screen[data-phase="error"] .scan-rings,
+.scan-screen[data-phase="error"] .scan-sweep {
+  opacity: 0;
+  animation-play-state: paused;
 }
-.scan-row[data-tone="muted"] .scan-line::after {
-  background: var(--color-text-faint);
-  animation: scan-draw 0.9s ease-out both;
+.scan-device {
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 0 1px var(--color-border-strong), 0 18px 40px -18px rgba(31, 29, 26, 0.35);
+  animation: scan-device-in 620ms cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  z-index: 1;
 }
-.scan-mark {
-  position: relative;
-  display: block;
-  width: 14px;
-  height: 14px;
-  border-radius: 999px;
+.scan-link {
+  stroke-width: 0.42;
+  stroke-linecap: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: scan-link-draw 520ms cubic-bezier(0.65, 0, 0.35, 1) 120ms forwards;
 }
-.scan-row[data-tone="checking"] .scan-mark {
+.scan-link[data-where="local"] { stroke: var(--color-success); }
+.scan-link[data-where="hosted"] { stroke: var(--color-warning); }
+.scan-node {
+  opacity: 0;
+  transform: translate(-50%, -28px) scale(0.6);
+  transition:
+    opacity 360ms ease,
+    transform 560ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 2;
+}
+.scan-node[data-visible="true"] {
+  opacity: 1;
+  transform: translate(-50%, -28px) scale(1);
+}
+.scan-node[data-visible="true"][data-tone="muted"] { opacity: 0.5; }
+.scan-node[data-visible="true"][data-settled="true"][data-tone="muted"] {
+  opacity: 0.32;
+  transform: translate(-50%, -28px) scale(0.86);
+}
+.scan-node-dot {
   border: 1.5px solid var(--color-border-strong);
-  border-top-color: var(--color-text);
-  animation: scan-spin 0.85s linear infinite;
+  background: var(--color-bg);
+  color: var(--color-text-muted);
+  transition: background-color 280ms ease, border-color 280ms ease, color 280ms ease;
 }
-.scan-row[data-tone="ready"] .scan-mark {
+.scan-node-status { color: var(--color-text-muted); }
+.scan-node[data-tone="checking"] .scan-node-dot,
+.scan-node[data-tone="starting"] .scan-node-dot {
+  border-style: dashed;
+  animation: scan-breathe 1.1s ease-in-out infinite;
+}
+.scan-node[data-tone="ready"] .scan-node-dot {
+  border-color: var(--color-success);
   background: var(--color-success);
-  animation: scan-settle 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  color: var(--color-bg);
+  animation: scan-pop 520ms cubic-bezier(0.34, 1.56, 0.64, 1);
 }
-.scan-row[data-tone="ready"] .scan-mark::after {
-  content: "";
-  position: absolute;
-  left: 4.6px;
-  top: 2.6px;
-  width: 4px;
-  height: 7px;
-  border: solid var(--color-bg);
-  border-width: 0 1.6px 1.6px 0;
-  transform: rotate(45deg);
+.scan-node[data-tone="ready"] .scan-node-status { color: var(--color-success); }
+.scan-node[data-tone="ready"][data-where="hosted"] .scan-node-dot {
+  box-shadow: 0 0 0 3px var(--color-bg), 0 0 0 4.5px var(--color-warning);
 }
-.scan-row[data-tone="found"] .scan-mark {
-  border: 1.5px solid var(--color-success);
-  animation: scan-settle 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+.scan-node[data-tone="ready"][data-where="hosted"] .scan-node-status { color: var(--color-warning); }
+.scan-node[data-tone="installed"] .scan-node-dot {
+  border-color: var(--color-success);
+  color: var(--color-success);
 }
-.scan-row[data-tone="warning"] .scan-mark {
-  border: 1.5px solid var(--color-warning);
-  animation: scan-settle 360ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+.scan-node[data-tone="warning"] .scan-node-dot {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
 }
-.scan-row[data-tone="warning"] .scan-mark::after {
-  content: "";
-  position: absolute;
-  left: 5.25px;
-  top: 2.5px;
-  width: 1.5px;
-  height: 4.5px;
-  background: var(--color-warning);
-  box-shadow: 0 6px 0 0 var(--color-warning);
+.scan-node[data-tone="warning"] .scan-node-status { color: var(--color-warning); }
+.scan-node[data-tone="muted"] .scan-node-dot {
+  border-color: var(--color-border);
+  color: var(--color-text-faint);
 }
-.scan-row[data-tone="muted"] .scan-mark {
-  height: 1.5px;
-  margin-top: 9px;
-  width: 10px;
-  margin-left: 2px;
-  background: var(--color-text-faint);
-  border-radius: 1px;
+.scan-hero-in {
+  animation: scan-hero-in 520ms cubic-bezier(0.22, 0.9, 0.3, 1) both;
 }
-.scan-resolve {
-  animation: scan-text-in 300ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+.scan-list-mark {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  border: 1.5px solid var(--color-border-strong);
 }
+.scan-list-row[data-tone="ready"] .scan-list-mark { background: var(--color-success); border-color: var(--color-success); }
+.scan-list-row[data-tone="installed"] .scan-list-mark { border-color: var(--color-success); }
+.scan-list-row[data-tone="warning"] .scan-list-mark { border-color: var(--color-warning); }
+.scan-list-row[data-tone="muted"] .scan-list-mark { border-color: var(--color-border); }
 @media (prefers-reduced-motion: reduce) {
-  .scan-row,
-  .scan-resolve,
-  .scan-mark,
-  .scan-line::after {
+  .scan-ring,
+  .scan-sweep,
+  .scan-device,
+  .scan-link,
+  .scan-node-dot,
+  .scan-hero-in {
     animation: none !important;
   }
-  .scan-row:not([data-tone="checking"]) .scan-line::after {
-    opacity: 0;
-  }
-  .scan-row[data-tone="checking"] .scan-line::after {
-    width: 100%;
-    background: var(--color-border);
-  }
+  .scan-rings,
+  .scan-sweep { display: none; }
+  .scan-link { stroke-dashoffset: 0; }
+  .scan-node { transition: none; }
 }
-html[data-reduced-motion] .scan-row:not([data-tone="checking"]) .scan-line::after {
-  opacity: 0;
-}
+.scan-screen[data-motion="reduced"] .scan-rings,
+.scan-screen[data-motion="reduced"] .scan-sweep { display: none; }
+.scan-screen[data-motion="reduced"] .scan-link { stroke-dashoffset: 0; animation: none; }
+.scan-screen[data-motion="reduced"] .scan-node { transition: none; }
 
 @media (prefers-reduced-motion: reduce) {
   *,

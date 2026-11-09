@@ -32,6 +32,28 @@ export const MODEL_SCAN_COPY = {
   ledger: (targets: readonly string[]) =>
     `Checked here: ${targets.join(", ")}. Nothing was sent to a model or a provider.`,
   localTitle: (model: string) => `${model} is ready on this device`,
+  hostedReady: (name: string) => `${name} is signed in on this device`,
+  installedTitle: (name: string) => `${name} is installed on this device`,
+  heroLead: (kind: "local" | "hosted" | "start" | "nothing") =>
+    kind === "local"
+      ? "Ready on this device"
+      : kind === "hosted"
+        ? "Signed in on this device"
+        : kind === "start"
+          ? "Installed, not running"
+          : "Nothing to answer with yet",
+  localLine: (runtime: string) => `Runs in ${runtime}. Chat answers with it from now on.`,
+  hostedLine: "It is not selected until you choose it, because prompts leave this device when it answers.",
+  hostedWhereNamed: (name: string, location: string) => `${name}: prompts go to ${location}`,
+  keepLocal: (name: string) => `To keep everything on this device, start ${name}.`,
+  installedLine: "Start it to answer on this device. OpenAdminOS runs the start command for you and checks it again.",
+  nothingShort: "No model yet",
+  start: (name: string) => `Start ${name}`,
+  starting: (name: string) => `Starting ${name}`,
+  startingShort: "Starting",
+  started: (name: string) => `${name} started.`,
+  startFailed: (name: string) => `${name} did not start. Start it yourself, then scan again.`,
+  skip: "Skip",
   localBody: (model: string, runtime: string) => `Chat answers with ${model} in ${runtime}. You can change the model at any time.`,
   nothingLeaves: "Nothing leaves this device.",
   openChat: "Open Chat",
