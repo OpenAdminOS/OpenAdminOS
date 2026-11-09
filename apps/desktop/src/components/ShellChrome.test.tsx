@@ -429,3 +429,19 @@ function BoundaryProbe() {
     </>
   );
 }
+
+it("keeps a reference count for the short boundary chip (design round)", async () => {
+  const { createMockMcpServers } = await import("../test/test-utils");
+  renderRoute(<AppShell><div /></AppShell>, {
+    path: "*",
+    route: "/chat",
+    bridge: makeMockBridge({}, createMockAppState({
+      activeProviderId: "openai",
+      mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: true } }),
+    })),
+  });
+  const count = await screen.findByTestId("boundary-reference-count");
+  expect(count).toHaveTextContent("+2 references");
+  // The short form hides the model and the host list below 1100 px; the wide form hides the count.
+  expect(count.className).toContain("min-[1101px]:hidden");
+});

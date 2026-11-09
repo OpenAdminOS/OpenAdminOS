@@ -1,6 +1,6 @@
 import { useNavigate } from "react-router";
 
-import { useDataBoundary, useShellChrome } from "../state";
+import { chatToolHosts, useAppState, useDataBoundary, useShellChrome } from "../state";
 import { IconChat, IconChevronRight, IconCloud, IconLock, IconSettings } from "./icons";
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { Tooltip } from "./ui";
@@ -10,6 +10,10 @@ export function TopBar() {
   const platform = window.openAdminOS?.platform;
   const { collapsed, toggleSidebar, setTitleTarget, setActionsTarget } = useShellChrome();
   const { boundary } = useDataBoundary();
+  const { state } = useAppState();
+  // Up to a 1100 px window the chip is one short line: where prompts go and
+  // how many references receive words from questions, never cut off.
+  const referenceCount = boundary.kind !== "none" && boundary.toolHosts ? chatToolHosts(state).length : 0;
   const draggable = platform === "macos" || platform === "windows";
 
   const newConversation = () => {
@@ -75,8 +79,13 @@ export function TopBar() {
             >
               {boundary.kind === "local" ? <IconLock size={11} className="shrink-0" /> : <IconCloud size={11} className="shrink-0" />}
               <span className="truncate">{boundary.label}</span>
-              {boundary.model ? <span className="truncate text-[var(--color-text-muted)]">· {boundary.model}</span> : null}
-              {boundary.toolHosts ? <span className="truncate text-[var(--color-warning)]">· {boundary.toolHosts}</span> : null}
+              {boundary.model ? <span className="truncate text-[var(--color-text-muted)] max-[1100px]:hidden">· {boundary.model}</span> : null}
+              {boundary.toolHosts ? <span className="truncate text-[var(--color-warning)] max-[1100px]:hidden">· {boundary.toolHosts}</span> : null}
+              {referenceCount > 0 ? (
+                <span data-testid="boundary-reference-count" className="shrink-0 whitespace-nowrap text-[var(--color-text-muted)] min-[1101px]:hidden">
+                  {`+${referenceCount} reference${referenceCount === 1 ? "" : "s"}`}
+                </span>
+              ) : null}
             </span>
           )}
         </Tooltip>
