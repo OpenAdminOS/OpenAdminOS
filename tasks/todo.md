@@ -1697,3 +1697,23 @@ No blocking findings; round 2 fixes verified. Muse confirms the earlier smoke ti
 7. [x] Reconcile keeps records with a long or duplicate id under a fresh deterministic id with their vendor connections, keeps unknown connection values that are not records, and the migration notice counts only schedules it moved. (73cb2c7e)
 - [x] `registration-script.test.ts` timed out under full-suite load (seen here in round 2 too): its tests start PowerShell several times, so the file allows 60 seconds per test. (commit after 73cb2c7e)
 - [x] The Settings search test read its first result before the page finished loading under full-suite load. It now waits for the result. (test commit after the registration fix)
+
+## PR #174 review round 4 (GPT-6.1-Sol and Muse Wonder Full, reviewed 8f7e47c, 2026-11-09)
+
+### GPT-6.1-Sol
+
+1. [x] Blocking: trust copy could promise no delivery while reports still left. The destination list excluded connectors by health status, so a saved Slack token with no global configuration and a channel on the agent rule was listed nowhere while the host posted. `deliveryBlock` in `src/shared/delivery-destinations.ts` is now the one decision: the host calls it before sending (organization skip, missing channel or recipient), and Connections, Results go to and the run review list a connector whenever it returns no block. Only the rule being off, Teams or Outlook without an organization, or no destination at all count as nothing sent; the copy says reports can go there. Tests: token-only Slack with an agent channel (renderer and host), stale error and needs-setup statuses, and a host parity test that runs six fixtures through `processPendingRunDeliveries` and the destination list and asserts a send exactly where the list says one may happen. (4a7eb47d)
+
+### CI smoke regression (maintainer)
+
+2. [x] Blocking: the Electron Intune Chat smoke failed at "edit prompt loaded into composer" on 46b8436 (both attempts) and 8f7e47c. Reproduced on Linux (node:22-bookworm, xvfb-run): 1 of 3 runs failed at that step on 8f7e47c. Cause: a Chat send stays in progress after the answer is shown, until the conversation list reloads, and Edit and resend ignored clicks in that window without any sign. The smoke clicked Edit as soon as the answer appeared. Edit is now disabled until the send settles, like Regenerate, so the click waits; the smoke needed no change. The PR's Chat-adjacent changes (data boundary refactor, Connections wording in Chat) do not change rendering in that flow; the longer Linux reload window makes the race likely. Test holds the reload and asserts Edit is disabled, then loads the prompt once the send settles; it fails without the fix. (5bb40eb9)
+
+### Muse Wonder Full round 4
+
+No blocking findings; round 3 fixes verified.
+
+3. [x] A tenantless pending plan was not refused inside the confirmation lock under No organization: it moved to running and failed in apply. `confirmRun` now refuses a plan without a tenant from every caller before any transition, with `PLAN_NO_ORGANIZATION_COPY`, and the stored run stays unchanged. The confirmation page shows "This plan has no organization" and keeps Apply disabled instead of "Apply will be simulated". Host test for all four plan kinds, with and without the renderer boundary; renderer test. (fbe2c1cc)
+4. [x] `NovaActionHost.activeTenantId` is required, so `assertStillActive` always runs. (6f96f58f)
+5. [x] The rerun continuation is set in an effect: the run page renders one component per run. A Switch records the pending rerun at once, a failed switch clears it, and closing the page before the switch lands says Run again did not continue. Test closes the page while the switch is pending. (dd5e86b9)
+6. [x] Reconcile moves a schedule that named a replaced over-long id to the kept record; duplicate ids are not remapped. (83e4d553)
+7. [x] Testing a connector or running an agent from No organization says no organization with Microsoft 365 is active and how to choose or connect one; the run failure recovery matches it. (b6be39be)
