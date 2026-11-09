@@ -74,7 +74,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, providerDataLocation } from "../copy";
+import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
 import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "../components/chat/ChatFirstRun";
 import { isProviderReady } from "../shared/provider-detection";
 import {
@@ -2367,8 +2367,13 @@ function ChatComposer({
       : FIRST_RUN_CHAT_COPY.placeholderNoTenant;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
   // The hosted line names the provider and where it processes prompts before any reference is added.
-  const location = activeProvider ? providerDataLocation(activeProvider) : "the selected provider";
-  const hostedSentence = `${activeTenant ? FIRST_RUN_CHAT_COPY.hostedTenantSentence(location) : FIRST_RUN_CHAT_COPY.hostedNoTenantSentence(location)}${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
+  const goesTo = activeProvider ? promptsGoTo(activeProvider, Boolean(activeTenant)) : `${activeTenant ? "Prompts and tenant data go" : "Prompts go"} to the selected provider`;
+  const baseSentence = activeTenant ? FIRST_RUN_CHAT_COPY.hostedTenantSentence(goesTo) : FIRST_RUN_CHAT_COPY.hostedNoTenantSentence(goesTo);
+  const toolHostsSentence = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
+  const hostedSentence = `${baseSentence}${toolHostsSentence}`;
+  // The shield's tooltip adds what the location depends on; the line under the composer stays short.
+  const locationDetail = activeProvider ? providerDataLocationDetail(activeProvider) : undefined;
+  const hostedTooltip = `${baseSentence}${locationDetail ? ` ${locationDetail}` : ""}${toolHostsSentence}`;
 
   return (
     <div className="relative">
@@ -2547,7 +2552,7 @@ function ChatComposer({
           />
           <span className="min-w-2 flex-1" />
           {dataBoundary.kind === "hosted" ? (
-            <Tooltip content={hostedSentence} panelClassName="max-w-72">
+            <Tooltip content={hostedTooltip} panelClassName="max-w-72">
               <button
                 type="button"
                 aria-label="Where data goes"
@@ -4040,6 +4045,8 @@ function HostedChatConsentPanel({
   const workspace = prompt.workspaceContextSummary
     ? `${prompt.workspaceContextSummary.workspaceTitle} (${prompt.workspaceContextSummary.evidenceCount} evidence, ${prompt.workspaceContextSummary.noteCount} notes)`
     : undefined;
+  const locationDetail = providerDataLocationDetail({ id: prompt.providerId });
+  const through = sendsThroughTool({ id: prompt.providerId });
   const facts: Array<[string, string, boolean]> = [
     [HOSTED_CONFIRM_COPY.goesTo, providerDataLocation({ id: prompt.providerId, name: prompt.providerName }), true],
     [HOSTED_CONFIRM_COPY.whatIsSent, noTenant ? HOSTED_CONFIRM_COPY.sentNoTenant(Boolean(prompt.toolHosts?.length)) : HOSTED_CONFIRM_COPY.sentTenant(tenant, workspace), false],
@@ -4064,16 +4071,25 @@ function HostedChatConsentPanel({
       }}
     >
       <h2 id={titleId} className="text-base font-medium text-[var(--color-text)]">
-        {HOSTED_CONFIRM_COPY.title(company)}
+        {through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company)}
       </h2>
       <p className="mt-1 text-sm text-[var(--color-text-soft)]">
-        {noTenant ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, company) : HOSTED_CONFIRM_COPY.bodyTenant(tool, company, tenant)}
+        {through
+          ? noTenant
+            ? HOSTED_CONFIRM_COPY.bodyThroughNoTenant(tool)
+            : HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, tenant)
+          : noTenant
+            ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, company)
+            : HOSTED_CONFIRM_COPY.bodyTenant(tool, company, tenant)}
       </p>
       <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
         {facts.map(([term, value, hosted]) => (
           <div key={term} className="contents">
             <dt className="text-[var(--color-text-muted)]">{term}</dt>
-            <dd className={hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text)]"}>{value}</dd>
+            <dd className={hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text)]"}>
+              {value}
+              {hosted && locationDetail ? <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">{locationDetail}</span> : null}
+            </dd>
           </div>
         ))}
       </dl>
@@ -4091,7 +4107,7 @@ function HostedChatConsentPanel({
       </label>
       <div className="mt-4 flex flex-wrap items-center gap-2">
         <Button data-hosted-send="" variant="primary" onClick={onConfirm}>
-          {HOSTED_CONFIRM_COPY.send(company)}
+          {through ? HOSTED_CONFIRM_COPY.sendThrough(tool) : HOSTED_CONFIRM_COPY.send(company)}
         </Button>
         <Button variant="ghost" onClick={onClose}>
           {HOSTED_CONFIRM_COPY.cancel}

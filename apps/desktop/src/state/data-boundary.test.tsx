@@ -14,7 +14,7 @@ function VoiceProbe() {
 }
 
 describe("voice boundary (PR #175 Muse round 2, I)", () => {
-  it("names the region and says no tenant data is sent when nothing is connected", async () => {
+  it("says where voice goes, what its location depends on, and that no tenant data is sent when nothing is connected", async () => {
     await act(async () => {
       renderWithAppState(
         <DataBoundaryProvider>
@@ -25,7 +25,7 @@ describe("voice boundary (PR #175 Muse round 2, I)", () => {
     });
     const tooltip = await screen.findByTestId("tooltip");
     await act(async () => undefined);
-    expect(tooltip.textContent).toContain("Prompts go to OpenAI API · US. Nothing is connected, so no tenant data is sent.");
+    expect(tooltip.textContent).toContain("Voice audio and prompts go to OpenAI. Nothing is connected, so no tenant data is sent. Processing follows your OpenAI workspace's data residency setting.");
     expect(tooltip.textContent).not.toMatch(/Tenant context will be sent/);
   });
 });

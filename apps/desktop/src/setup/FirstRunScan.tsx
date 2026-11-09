@@ -13,7 +13,7 @@ import { useLocation, useNavigate } from "react-router";
 import { Button } from "../components/Button";
 import { ModelChoiceList } from "../components/ModelChoiceList";
 import { IconLogo } from "../components/icons";
-import { MODEL_SCAN_COPY, deriveToolHostsCopy } from "../copy";
+import { MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocationDetail } from "../copy";
 import { chatToolHosts } from "../state/data-boundary";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
 import { useAppState } from "../state";
@@ -586,6 +586,14 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                         ))}
                       </ul>
                       <p>{MODEL_SCAN_COPY.ledger(targets, notContacted)}</p>
+                      {/* Where each signed-in tool would send prompts depends on its account or deployment. */}
+                      {rows
+                        .filter((probe) => probe.where === "hosted" && probe.state === "found" && providerDataLocationDetail({ id: probe.providerId }))
+                        .map((probe) => (
+                          <p key={`where-${probe.providerId}`}>
+                            {MODEL_SCAN_COPY.whereDetail(probe.name, providerDataLocationDetail({ id: probe.providerId })!)}
+                          </p>
+                        ))}
                     </div>
                   </details>
                   <button type="button" disabled={activity !== null} onClick={() => setRun((value) => value + 1)} className={linkClass}>

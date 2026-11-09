@@ -70,7 +70,7 @@ describe("shell chrome", () => {
     });
 
     expect(
-      await screen.findByRole("status", { name: /Hosted · OpenAI.*gpt-5/ }),
+      await screen.findByRole("status", { name: /Hosted · Codex · location set by your account.*gpt-5/ }),
     ).toBeInTheDocument();
     expect(screen.getByText("Nightly")).toBeInTheDocument();
   });
@@ -93,10 +93,10 @@ describe("shell chrome", () => {
       route: "/chat",
       bridge: makeMockBridge({}, createMockAppState({ tenants: [], activeTenantId: undefined, activeProviderId: "openai", mcpServers: createMockMcpServers() })),
     });
-    const status = await screen.findByRole("status", { name: "Hosted · OpenAI API · US · gpt-5" });
+    const status = await screen.findByRole("status", { name: "Hosted · Codex · location set by your account · gpt-5" });
     await user.hover(status);
     expect(
-      await screen.findByText("Prompts go to OpenAI API · US. Nothing is connected, so no tenant data is sent."),
+      await screen.findByText(/^Prompts leave this device through Codex; location set by your account\. Nothing is connected, so no tenant data is sent\. Codex sends prompts to OpenAI/),
     ).toBeInTheDocument();
   });
 

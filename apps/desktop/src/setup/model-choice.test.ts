@@ -20,7 +20,7 @@ describe("the choice of what answers in Chat (design round, B)", () => {
       ["ollama", "Ollama", "Not running", "start"],
       ["anthropic", "Claude Code", "Signed in", "use"],
     ]);
-    expect(options[1]!.whereLine).toBe("Prompts go to Anthropic API · US");
+    expect(options[1]!.whereLine).toBe("Prompts leave this device through Claude Code; location set by your account");
   });
 
   it("preselects the first local option that can answer or be started, and never a hosted one", () => {
@@ -62,7 +62,7 @@ describe("the choice of what answers in Chat (design round, B)", () => {
     const options = optionsFromProviders(providers);
     expect(options[0]).toMatchObject({ providerId: "ollama", name: "Ollama", state: "Not running", action: "start" });
     for (const option of options.filter((entry) => entry.where === "hosted")) {
-      expect(option.whereLine).toMatch(/^Prompts go to /);
+      expect(option.whereLine).toMatch(/^Prompts (go to|leave this device through) /);
     }
   });
 });

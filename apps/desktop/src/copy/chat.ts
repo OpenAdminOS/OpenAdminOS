@@ -49,8 +49,9 @@ export const FIRST_RUN_CHAT_COPY = {
   previewFailed: (reason: string) => `Sample data did not open. ${reason}`,
   noModelFooter: "Read-only by default. Write actions always ask for your confirmation.",
   noModelSendNotice: "Choose a model above to send this question. It is kept in the composer.",
-  hostedNoTenantSentence: (location: string) => `Prompts go to ${location}. Nothing is connected, so no tenant data is sent.`,
-  hostedTenantSentence: (location: string) => `Prompts and tenant data go to ${location}.`,
+  /** `goesTo` is `promptsGoTo(provider)`: "Prompts go to ..." or "Prompts leave this device through ...". */
+  hostedNoTenantSentence: (goesTo: string) => `${goesTo}. Nothing is connected, so no tenant data is sent.`,
+  hostedTenantSentence: (goesTo: string) => `${goesTo}.`,
 } as const;
 
 /** The company behind a hosted provider, as the hosted send confirmation names it. */
@@ -65,6 +66,11 @@ export const PROVIDER_COMPANIES: Readonly<Partial<Record<string, string>>> = {
 /** The hosted send confirmation above the composer (mockup 32, section D). */
 export const HOSTED_CONFIRM_COPY = {
   title: (company: string) => `Send this question to ${company}?`,
+  /** A CLI decides where it sends prompts (Claude Code to Anthropic, Bedrock or Vertex), so the tool is named. */
+  titleThrough: (tool: string) => `Send this question through ${tool}?`,
+  bodyThroughNoTenant: (tool: string) => `${tool} answers with your existing sign-in. Nothing is connected, so no tenant data is included.`,
+  bodyThroughTenant: (tool: string, tenant: string) => `${tool} answers with your existing sign-in. Selected cached data from ${tenant} is included.`,
+  sendThrough: (tool: string) => `Send through ${tool}`,
   bodyNoTenant: (tool: string, company: string) => `${tool} answers through ${company}. Nothing is connected, so no tenant data is included.`,
   bodyTenant: (tool: string, company: string, tenant: string) => `${tool} answers through ${company}. Selected cached data from ${tenant} is included.`,
   goesTo: "Goes to",

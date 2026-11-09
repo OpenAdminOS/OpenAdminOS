@@ -1,4 +1,4 @@
-import { MODEL_CHOICE_COPY, PROVIDER_TOOL_NAMES, providerDataLocation } from "../copy";
+import { MODEL_CHOICE_COPY, PROVIDER_TOOL_NAMES, promptsGoTo } from "../copy";
 import type { ModelScanOutcome, ModelScanProbe, ProviderId, ProviderSummary } from "../shared/openAdminOS";
 
 /**
@@ -104,7 +104,7 @@ export function optionsFromProbes(
       providerId: probe.providerId,
       name,
       where: "hosted",
-      whereLine: MODEL_CHOICE_COPY.hostedWhere(providerDataLocation({ id: probe.providerId, name })),
+      whereLine: promptsGoTo({ id: probe.providerId, name }),
       state: probe.ready ? MODEL_CHOICE_COPY.signedIn : probe.summary === "Installed, not signed in" ? MODEL_CHOICE_COPY.notSignedIn : MODEL_CHOICE_COPY.installed,
       action: "use",
     });
@@ -138,7 +138,7 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
       providerId: provider.id,
       name,
       where: "hosted",
-      whereLine: MODEL_CHOICE_COPY.hostedWhere(providerDataLocation({ id: provider.id, name })),
+      whereLine: promptsGoTo({ id: provider.id, name }),
       state: provider.id === "azure-openai" ? MODEL_CHOICE_COPY.configured : MODEL_CHOICE_COPY.signedIn,
       action: "use",
     });

@@ -8,7 +8,10 @@ import {
   type SetStateAction,
 } from "react";
 
-import { NOTHING_LEAVES_COPY, deriveTrustCopy, providerDataLocation } from "../copy";
+import { NOTHING_LEAVES_COPY, deriveTrustCopy, providerDataLocation, providerDataLocationDetail } from "../copy";
+
+/** Where Nova voice audio is processed: OpenAI's service, following the workspace's data residency. */
+const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
 import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -77,18 +80,16 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
     ).model;
 
     if (voiceHosted) {
-      // Voice runs on OpenAI: name its region, and say no tenant data is sent when nothing is connected.
-      const trust = deriveTrustCopy({
-        provider: { id: "openai", name: "OpenAI", isLocal: false },
-        model: "GPT-Live-1",
-        scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
-        noTenant: !activeTenant,
-      });
+      // Voice runs on OpenAI's own service, not Codex: say where it goes, what
+      // the location depends on, and that no tenant data is sent when nothing is connected.
+      const voiceBoundary = activeTenant
+        ? "Voice audio, prompts and tenant data go to OpenAI."
+        : "Voice audio and prompts go to OpenAI. Nothing is connected, so no tenant data is sent.";
       return {
         kind: "hosted",
         label: "Voice · OpenAI",
         model: "GPT-Live-1",
-        tooltip: `${trust.boundary ?? trust.strip} Nova voice audio and shared context are active.`,
+        tooltip: `${voiceBoundary} ${VOICE_LOCATION_DETAIL} Nova voice audio and shared context are active.`,
         isVoiceHosted: true,
       };
     }
@@ -142,7 +143,8 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
       label: `Hosted · ${providerDataLocation(provider)}`,
       ...(model ? { model } : {}),
       ...toolHosts,
-      tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,
+      // The tooltip adds what the location depends on (the account, the workspace, the deployment type).
+      tooltip: `${trust.boundary ?? trust.strip}${providerDataLocationDetail(provider) ? ` ${providerDataLocationDetail(provider)}` : ""}${toolDetail}`,
       isVoiceHosted: false,
     };
   }, [state, voiceHosted]);

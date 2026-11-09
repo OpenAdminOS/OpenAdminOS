@@ -18,7 +18,7 @@ export const PROVIDER_DETECTION_COPY = {
 /**
  * What each provider is called wherever the admin chooses a model. For a
  * CLI tool the name is the tool; where prompts go is the provider, on its
- * own line ("Claude Code", "Prompts go to Anthropic API · US").
+ * own line ("Claude Code", "Prompts leave this device through Claude Code; location set by your account").
  */
 export const PROVIDER_TOOL_NAMES: Readonly<Partial<Record<string, string>>> = {
   ollama: "Ollama",
@@ -49,7 +49,6 @@ export const MODEL_CHOICE_COPY = {
     id === "lm-studio" ? "On this device. OpenAdminOS starts its server." : "On this device. OpenAdminOS starts it for you.",
   localGetModel: "On this device. Get OpenAdmin 8B, a model trained for Intune and Entra work.",
   localLoadModel: "On this device. Load a model in LM Studio, then scan again.",
-  hostedWhere: (location: string) => `Prompts go to ${location}`,
   chooseModel: "Choose a model",
   openChat: "Open Chat",
   use: (name: string) => `Use ${name}`,
@@ -72,6 +71,7 @@ export const MODEL_SCAN_COPY = {
   chooseTitle: "Choose what answers in Chat",
   chooseBody: "Models on this device keep prompts here. Signed-in tools send prompts to their provider.",
   whatRan: "What ran",
+  whereDetail: (name: string, detail: string) => `${name}: ${detail}`,
   whatRanDetail:
     "It read local files and loopback ports and ran each tool's version command; for Claude Code and Codex also their sign-in status command, which may check the sign-in with the provider.",
   listHeading: "On this device",

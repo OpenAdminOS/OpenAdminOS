@@ -21,7 +21,7 @@ Each tool appears around your device and resolves to found, not found, or could 
 
 The result is one choice of what answers in Chat:
 
-- Models on this device come first, and the first one that can answer or be started is selected. Signed-in tools follow, each with where prompts go (for example "Prompts go to Anthropic API · US"). A hosted tool is never selected for you.
+- Models on this device come first, and the first one that can answer or be started is selected. Signed-in tools follow, each saying where prompts go, for example "Prompts leave this device through Claude Code; location set by your account". Where that is depends on your account, workspace or deployment: Claude Code can send prompts to Anthropic, Amazon Bedrock or Google Vertex, and on Anthropic's API inference can run in any region unless your workspace restricts it to the US. **What ran** has the detail for each tool. A hosted tool is never selected for you.
 - One button follows your choice: **Open Chat** for a ready local model, **Start Ollama and open Chat** for one that is installed but not running (it keeps running after you quit OpenAdminOS), **Use Claude Code** for a signed-in tool, or **Get OpenAdmin 8B** when Ollama has no model yet. A start that fails says why under its row.
 - A check that did not answer within 2.5 seconds shows **Retry** on its row.
 - With nothing found, the screen shows the command for OpenAdmin 8B (`ollama run openadminos/openadmin-8b`) and all providers.
@@ -34,7 +34,7 @@ Chat then opens with nothing connected. Questions about products, KQL, PowerShel
 
 The empty Chat suggests public references such as Microsoft Learn, each with the host it sends question words to. None is added until you add it through the Marketplace install review.
 
-With a hosted model and nothing connected, the first question asks you to confirm, above the composer so your question stays in view: where it goes (for example "Anthropic API · US"), what is sent (your question and the conversation, and results from references you added) and what stays on this device. You can choose not to be asked again for that model. The first question after you connect a tenant asks again with the tenant-bound confirmation.
+With a hosted model and nothing connected, the first question asks you to confirm, above the composer so your question stays in view: where it goes (for example "Claude Code · location set by your account", with what that location depends on), what is sent (your question and the conversation, and results from references you added) and what stays on this device. You can choose not to be asked again for that model. The first question after you connect a tenant asks again with the tenant-bound confirmation.
 
 If a sign-in, the Marketplace or a model download cannot reach the internet, the message names the host that could not be reached, whether this device has a system proxy (OpenAdminOS connects directly; Ollama uses the proxy set in its own environment) and what to do next.
 

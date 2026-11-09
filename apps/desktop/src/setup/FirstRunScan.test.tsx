@@ -115,6 +115,8 @@ describe("first-launch model scan screen", () => {
     expect(await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.chooseTitle })).toBeInTheDocument();
     expect(screen.getByText("What ran: localhost:11434; localhost:1234; claude --version, claude auth status; copilot --version. The Claude Code and Codex sign-in status commands may check with their provider. No prompt was sent to any model.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Scan finished\./));
+    // What ran says what each signed-in tool's location depends on (maintainer decision, 2026-11-09).
+    expect(screen.getByText(/^Claude Code: Claude Code sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex/)).toBeInTheDocument();
   });
 
   it("shows the settled state with no motion under reduced motion", async () => {
@@ -142,7 +144,7 @@ describe("first-launch model scan screen", () => {
     expect(names).toEqual(["ollama", "anthropic", "copilot"]);
     expect(radio("Ollama")).toBeChecked();
     expect(radio("Claude Code")).not.toBeChecked();
-    expect(within(group).getByText("Prompts go to Anthropic API · US")).toBeInTheDocument();
+    expect(within(group).getByText("Prompts leave this device through Claude Code; location set by your account")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start Ollama and open Chat" })).toBeInTheDocument();
     expect(screen.getByText("Ollama keeps running after you quit OpenAdminOS.")).toBeInTheDocument();
     // One filled button; the rest are quiet links.
