@@ -18,8 +18,11 @@ import { tenantDataSourceForTool } from "./tools.js";
 import { writeMcpQuery } from "./mcp-query-writer.js";
 import { mcpSentText } from "./chat-steps.js";
 import { CitationRegistry, LEARN_SERVER_ID, validFollowUps, validTitle, type ChatSourcePlan, type DocsIndexPassage, type ModelStepHooks, type ModelStepOutcome, type QuestionKindReason } from "./chat-steps.js";
+import { isSplashtopReadTool, SPLASHTOP_READ_TOOLS } from "../splashtop/reads.js";
 import {
   MCP_TOOL_RULES,
+  SPLASHTOP_TOOL_RULES,
+  splashtopToolDefinitionsForPrompt,
   executeIntuneChatTool,
   holdsTenantData,
   isMcpChatToolName,
@@ -34,6 +37,7 @@ import {
   type McpCallHooks,
   type McpChatContext,
   type McpResultItem,
+  type SplashtopChatContext,
 } from "./tools.js";
 
 /**
@@ -63,11 +67,12 @@ const MAX_UNFINISHED_RETRIES = 2;
  * reported loop success, so capability memory never flipped either.
  */
 const MAX_NO_EVIDENCE_RETRIES = 2;
-const EVIDENCE_TOOLS = new Set([
+const EVIDENCE_TOOLS = new Set<string>([
   "query_cache",
   "graph_get",
   "refresh_resource",
   "query_drift",
+  ...SPLASHTOP_READ_TOOLS.map((tool) => tool.name),
 ]);
 
 /**
@@ -399,7 +404,7 @@ export async function runAgenticChat(
     const assistantText = completion.text.trim();
     turns.push({ role: "assistant", content: assistantText });
 
-    const action = parseModelAction(assistantText, input.tools.mcp);
+    const action = parseModelAction(assistantText, input.tools.mcp, input.tools.splashtop);
     // The model step finishes with what the reply decided, then the work
     // the classification started (a docs index search, a tenant refresh)
     // runs, so every step appends below the one before it.
@@ -847,6 +852,9 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     "",
     "Available tools:",
     toolDefinitionsForPrompt(Boolean(input.tools.webSearch), input.voice, !docsOnly),
+    ...(!docsOnly && input.tools.splashtop?.tools.length
+      ? ["", "Splashtop tools (this organization's Splashtop connection):", splashtopToolDefinitionsForPrompt(input.tools.splashtop), SPLASHTOP_TOOL_RULES]
+      : []),
     ...(input.tools.mcp?.tools.length
       ? ["", "Installed MCP tools:", mcpToolDefinitionsForPrompt(input.tools.mcp.tools), MCP_TOOL_RULES]
       : []),
@@ -948,7 +956,7 @@ function titleField(title: string | undefined): { title?: string } {
   return title ? { title } : {};
 }
 
-function parseModelAction(text: string, mcp: McpChatContext | undefined): ParsedModelAction {
+function parseModelAction(text: string, mcp: McpChatContext | undefined, splashtop?: SplashtopChatContext): ParsedModelAction {
   const extraction = extractLastJsonObject(text);
   if (!extraction.found) {
     return { kind: "final", answer: text, sources: [] };
@@ -972,7 +980,7 @@ function parseModelAction(text: string, mcp: McpChatContext | undefined): Parsed
     return { kind: "final", answer, next: record.next, title: record.title, ...declared };
   }
   if (typeof record.tool === "string") {
-    if (!isToolName(record.tool, mcp)) {
+    if (!isToolName(record.tool, mcp, splashtop)) {
       return { kind: "malformed", reason: `Unknown tool: ${record.tool}` };
     }
     const params =
@@ -1125,8 +1133,10 @@ function findBalancedJsonCandidates(text: string): string[] {
   return candidates;
 }
 
-function isToolName(value: string, mcp: McpChatContext | undefined): value is IntuneChatInvestigationToolName {
+function isToolName(value: string, mcp: McpChatContext | undefined, splashtop?: SplashtopChatContext): value is IntuneChatInvestigationToolName {
   if (isMcpChatToolName(value)) return Boolean(mcp?.tools.some(tool => tool.name === value));
+  // Only the Splashtop tools offered for this organization's token count as tools.
+  if (isSplashtopReadTool(value)) return Boolean(splashtop?.tools.includes(value));
   return (
     value === "list_cached_resources" ||
     value === "query_cache" ||

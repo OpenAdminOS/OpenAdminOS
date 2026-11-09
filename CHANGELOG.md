@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- Splashtop: Splashtop API Reference (Open API reference, read-only tools) and a built-in Splashtop Docs search in the Marketplace, off by default; the Splashtop Open API connects per organization on Connections with an Enterprise API token kept in this device's secure storage and sent only to the region's host (webapi.splashtop.com, .eu or .nr), Chat reads computers, inventory, users, groups, sessions, team history, policies and vulnerabilities, and Plan a change prepares reboots, deletions, renames, disabled users and ended sessions that apply only after a typed phrase such as `REBOOT 12 COMPUTERS`.
+
 - The first run works with organizations and Connections: the scan and Connect Microsoft 365 use the shared device tile and motion, the active scope reads "No organization", Connect Microsoft 365 reopens from Connections, provider and model changes from the scan and Chat's model choice are in the audit log, and Connections, the organization switcher, need chips and the run review show the real provider and service logos.
 
 - Every provider and Microsoft 365 service shows its real logo, taken unmodified from the vendor's official files, in the scan, the model choice, Settings, Providers, the not-connected card and the Microsoft 365 step. Settings, About, the README and the logo NOTICE files say that names and logos belong to their owners and how to request removal.

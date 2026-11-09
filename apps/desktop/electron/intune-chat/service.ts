@@ -137,7 +137,7 @@ import {
   selfTrainingCandidateFromPrompt,
   type PlannedChatContext,
 } from "./planner.js";
-import { executeIntuneChatTool, isTenantTool, mcpPrivateTermsForTenant, type IntuneChatToolContext, type McpChatContext } from "./tools.js";
+import { executeIntuneChatTool, isTenantTool, mcpPrivateTermsForTenant, type IntuneChatToolContext, type McpChatContext, type SplashtopChatContext } from "./tools.js";
 import {
   CitationRegistry,
   MICROSOFT_GRAPH,
@@ -463,6 +463,11 @@ export interface ChatServiceHost {
    * used by the external gateway's read tools.
    */
   mcpChatContext?(tenant: TenantRecord): Promise<McpChatContext | undefined>;
+  /**
+   * The Splashtop connection of the organization that holds this tenant,
+   * for a Chat answer. Undefined when it has none.
+   */
+  splashtopChatContext?(tenant: TenantRecord): Promise<SplashtopChatContext | undefined>;
   readonly appVersion: string;
   readonly userDataPath: string | undefined;
   readonly intelligenceStore: IntelligenceSqliteStore | undefined;
@@ -3374,7 +3379,7 @@ export class IntuneChatService {
     /** With nothing connected, a request to write a query or script is docs. */
     forceDocs?: boolean;
     steps: ChatStepRecorder;
-  }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
+  }): Promise<{ mcp: { mcp?: McpChatContext; splashtop?: SplashtopChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
     // The first step shows at once; its detail follows when the kind and sources are known.
     const planStep = input.steps.start({ kind: "plan", title: "Reading the question", origin: "device", originLabel: ON_DEVICE });
     const installed = await this.mcpToolsFor(input.tenant, input.conversationId);
@@ -3503,12 +3508,21 @@ export class IntuneChatService {
     return this.host.requireIntelligenceStore().getConversation(conversationId)?.title === initialTitle ? modelTitle : undefined;
   }
 
-  /** MCP tools for one answer, with the tenant values earlier turns observed. */
-  private async mcpToolsFor(tenant: TenantRecord, conversationId: string): Promise<{ mcp?: McpChatContext }> {
+  /**
+   * MCP tools for one answer, with the tenant values earlier turns
+   * observed, and the organization's Splashtop tools when it has them.
+   */
+  private async mcpToolsFor(tenant: TenantRecord, conversationId: string): Promise<{ mcp?: McpChatContext; splashtop?: SplashtopChatContext }> {
+    const splashtop = await this.host.splashtopChatContext?.(tenant).catch((error: unknown) => {
+      // A missing token or a removed connection leaves Chat without Splashtop, never without an answer.
+      console.warn("[intune-chat] Splashtop is not offered for this answer:", error instanceof Error ? error.message : error);
+      return undefined;
+    });
+    const withSplashtop = splashtop && splashtop.tools.length > 0 ? { splashtop } : {};
     const mcp = await this.host.mcpChatContext?.(tenant);
-    if (!mcp || mcp.tools.length === 0) return {};
+    if (!mcp || mcp.tools.length === 0) return withSplashtop;
     mcp.tenantValues.addAll(this.host.requireIntelligenceStore().listChatTenantValues(conversationId));
-    return { mcp };
+    return { mcp, ...withSplashtop };
   }
 
   /**

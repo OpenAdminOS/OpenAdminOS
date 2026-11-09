@@ -69,6 +69,9 @@ import {
 } from "./scheduler-registration.js";
 import { redactSupportPublicText } from "./support-secret-redaction.js";
 import type {
+  ConnectSplashtopInput,
+  PrepareSplashtopChangeInput,
+  SplashtopChangeKind,
   AgentCommunitySubmissionMetadata,
   CompanionLaunchSettings,
   AgentDiscordDelivery,
@@ -6026,6 +6029,60 @@ function registerIpcHandlers() {
     handleTrusted((_event, serverId: unknown, enabled: unknown) => {
       if (typeof enabled !== "boolean") throw new Error("enabled must be a boolean.");
       return store.setMcpServerEnabled(requireBoundedString(serverId, "serverId", 64), enabled);
+    }),
+  );
+  // Splashtop: the token arrives once with connect or rotate and never goes back to the renderer.
+  ipcMain.handle(
+    "openadminos:connect-splashtop",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) throw new Error("Splashtop connect input must be an object.");
+      return store.connectSplashtop({
+        organizationId: requireBoundedString(input.organizationId, "organizationId", 400),
+        region: requireBoundedString(input.region, "region", 16) as ConnectSplashtopInput["region"],
+        token: requireBoundedString(input.token, "token", 4096),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:test-splashtop",
+    handleTrusted((_event, organizationId: unknown) =>
+      store.testSplashtop(requireBoundedString(organizationId, "organizationId", 400)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:rotate-splashtop-token",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) throw new Error("Splashtop token input must be an object.");
+      return store.rotateSplashtopToken({
+        organizationId: requireBoundedString(input.organizationId, "organizationId", 400),
+        token: requireBoundedString(input.token, "token", 4096),
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:disconnect-splashtop",
+    handleTrusted((_event, organizationId: unknown) =>
+      store.disconnectSplashtop(requireBoundedString(organizationId, "organizationId", 400)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:list-splashtop-change-targets",
+    handleTrusted((_event, organizationId: unknown, kind: unknown) =>
+      store.listSplashtopChangeTargets(
+        requireBoundedString(organizationId, "organizationId", 400),
+        requireBoundedString(kind, "kind", 32) as SplashtopChangeKind,
+      ),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:prepare-splashtop-change",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) throw new Error("Splashtop change input must be an object.");
+      // The host validates the kind, ids and names again before it reads Splashtop.
+      return store.prepareSplashtopChange({
+        ...(input as unknown as PrepareSplashtopChangeInput),
+        organizationId: requireBoundedString(input.organizationId, "organizationId", 400),
+      });
     }),
   );
   ipcMain.handle(

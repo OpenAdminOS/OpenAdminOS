@@ -5,7 +5,8 @@ import { Modal, ModalHeader } from "./Modal";
 import { useToast } from "./Toast";
 import { Badge } from "./ui";
 import { ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
-import type { OrganizationRecord, TenantRecord } from "../shared/openAdminOS";
+import { splashtopConnectionOf, type OrganizationRecord, type TenantRecord } from "../shared/openAdminOS";
+import { SPLASHTOP_COPY } from "../copy/splashtop";
 import { useAppState } from "../state";
 
 /**
@@ -48,7 +49,10 @@ export function DisconnectOrganizationDialog({
         <section aria-labelledby="disconnect-deletes" className="text-sm leading-relaxed">
           <h3 id="disconnect-deletes" className="font-medium text-[var(--color-text)]">{ORGANIZATION_COPY.disconnectDeletesTitle}</h3>
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[var(--color-text-soft)]">
-            {ORGANIZATION_COPY.disconnectDeletes(runCount).map((item) => <li key={item}>{item}</li>)}
+            {[
+              ...ORGANIZATION_COPY.disconnectDeletes(runCount),
+              ...(splashtopConnectionOf(organization) ? [SPLASHTOP_COPY.organizationDisconnectItem] : []),
+            ].map((item) => <li key={item}>{item}</li>)}
           </ul>
           <p className="mt-1.5 text-[var(--color-text-muted)]">
             {`${ORGANIZATION_COPY.disconnectSchedules} ${ORGANIZATION_COPY.disconnectAuditKept}${wasActive ? ` ${ORGANIZATION_COPY.disconnectNoOrganizationAfter}` : ""}`}

@@ -1,6 +1,7 @@
 import defenderIcon from "../assets/service-logos/defender-for-cloud.svg";
 import entraIcon from "../assets/service-logos/entra-id-color.svg";
 import intuneIcon from "../assets/service-logos/intune.svg";
+import splashtopIcon from "../assets/service-logos/splashtop-logo-120.png";
 import {
   AVAILABLE_SERVICES,
   serviceById,
@@ -10,14 +11,15 @@ import {
 } from "../shared/openAdminOS";
 
 /**
- * Microsoft's product icon for each service, unmodified (sources in
- * `assets/service-logos/NOTICE.md`). Each is a single colour file that
- * Microsoft provides for light and dark surfaces alike.
+ * The owner's icon for each service, unmodified (sources in
+ * `assets/service-logos/NOTICE.md`). Microsoft's are single colour files
+ * for light and dark surfaces alike; Splashtop's sits on a white tile.
  */
 const ICONS: Readonly<Partial<Record<string, string>>> = {
   intune: intuneIcon,
   entra: entraIcon,
   defender: defenderIcon,
+  splashtop: splashtopIcon,
 };
 
 /** Every Microsoft 365 service OpenAdminOS connects has its icon; another service shows its first two letters. */

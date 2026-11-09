@@ -14,6 +14,26 @@ export interface McpEndpoint {
   url: string;
   /** The tool allowlist from the catalog. Other tools are never listed or called. */
   tools?: readonly string[];
+  /**
+   * A reference that OpenAdminOS runs itself on this device, calling a
+   * public HTTP API at `url`'s host instead of an MCP server. It goes
+   * through the same allowlist, authorization and output limits.
+   */
+  builtin?: BuiltinReference;
+}
+
+export interface BuiltinCallResult {
+  text: string;
+  structured?: unknown;
+}
+
+/** A public reference implemented in the app. Its calls use the host's capped, same-origin fetch. */
+export interface BuiltinReference {
+  serverName: string;
+  serverVersion: string;
+  tools: readonly McpToolInfo[];
+  /** Throws `McpHostError` with a designed message; `sent` false when nothing left the device. */
+  call(name: string, args: Record<string, unknown>, fetch: FetchLike, signal: AbortSignal): Promise<BuiltinCallResult>;
 }
 
 export interface McpToolInfo {
@@ -135,7 +155,9 @@ export function cleanMcpSchema(schema: unknown): Record<string, unknown> | undef
 }
 
 interface Session {
-  client: Client;
+  /** Absent for a built-in reference. */
+  client?: Client;
+  builtin?: BuiltinReference;
   tools: McpToolInfo[];
   missingTools: string[];
 }
@@ -172,8 +194,8 @@ export class McpHost {
     const session = this.open(endpoint);
     this.sessions.set(endpoint.id, session);
     try {
-      const { client, tools, missingTools } = await session;
-      const info = client.getServerVersion();
+      const { client, builtin, tools, missingTools } = await session;
+      const info = builtin ? { name: builtin.serverName, version: builtin.serverVersion } : client?.getServerVersion();
       return {
         ...(info?.name ? { serverName: info.name } : {}),
         ...(info?.version ? { serverVersion: info.version } : {}),
@@ -257,9 +279,10 @@ export class McpHost {
     // Nothing awaits between this check and the dispatch below.
     const authorization = this.checkGeneration(endpoint, generation);
     const signals = [authorization.controller.signal, ...(signal ? [signal] : [])];
+    if (session.builtin) return this.callBuiltin(endpoint, session.builtin, name, args, signals, authorization, signal);
     let result: Awaited<ReturnType<Client["callTool"]>>;
     try {
-      result = await session.client.callTool({ name, arguments: args }, undefined, {
+      result = await session.client!.callTool({ name, arguments: args }, undefined, {
         timeout: this.callTimeoutMs,
         signal: signals.length === 1 ? signals[0]! : AbortSignal.any(signals),
       });
@@ -278,6 +301,53 @@ export class McpHost {
     }
     const structured = result.structuredContent ?? parseJson(text);
     const data = structured !== null && typeof structured === "object" ? { structured } : {};
+    if (text.length <= this.maxOutputChars) return { text, truncated: false, ...data };
+    return { text: text.slice(0, this.maxOutputChars), truncated: true, ...data };
+  }
+
+  /** A built-in reference call, with the same deadline, revocation and output cap as a server call. */
+  private async callBuiltin(
+    endpoint: McpEndpoint,
+    builtin: BuiltinReference,
+    name: string,
+    args: Record<string, unknown>,
+    signals: AbortSignal[],
+    authorization: Authorization,
+    signal: AbortSignal | undefined,
+  ): Promise<McpCallResult> {
+    const deadline = new AbortController();
+    let timedOut = false;
+    // A referenced timer cleared in finally: the deadline holds on every Node version.
+    const timer = setTimeout(() => {
+      timedOut = true;
+      deadline.abort();
+    }, this.callTimeoutMs);
+    let result: BuiltinCallResult;
+    try {
+      const stop = AbortSignal.any([...signals, deadline.signal]);
+      // The call ends at the deadline or a revocation even if a request ignores the signal.
+      result = await new Promise<BuiltinCallResult>((resolve, reject) => {
+        const abort = () => reject(stop.reason ?? new Error("aborted"));
+        if (stop.aborted) return abort();
+        stop.addEventListener("abort", abort, { once: true });
+        builtin.call(name, args, this.fetch, stop).then(resolve, reject).finally(() => stop.removeEventListener("abort", abort));
+      });
+    } catch (error) {
+      signal?.throwIfAborted();
+      if (authorization.controller.signal.aborted) {
+        throw new McpHostError("revoked", `${endpoint.name} was ${this.authorization(endpoint.id).revoked === "uninstalled" ? "uninstalled" : "turned off"} while it answered. Its answer was not used.`);
+      }
+      if (timedOut) {
+        const seconds = Math.max(1, Math.round(this.callTimeoutMs / 1000));
+        throw new McpHostError("timeout", `${endpoint.name} did not answer within ${seconds} second${seconds === 1 ? "" : "s"}. Retry, or ask a narrower question.`);
+      }
+      if (error instanceof McpHostError) throw error;
+      throw new McpHostError("unreachable", `${endpoint.name} could not be reached at ${new URL(endpoint.url).hostname}. Check the network connection, then retry.`);
+    } finally {
+      clearTimeout(timer);
+    }
+    const text = result.text.trim();
+    const data = result.structured !== null && typeof result.structured === "object" ? { structured: result.structured } : {};
     if (text.length <= this.maxOutputChars) return { text, truncated: false, ...data };
     return { text: text.slice(0, this.maxOutputChars), truncated: true, ...data };
   }
@@ -310,7 +380,7 @@ export class McpHost {
     const session = this.sessions.get(id);
     if (!session) return;
     this.sessions.delete(id);
-    await session.then((open) => open.client.close(), () => undefined).catch(() => undefined);
+    await session.then((open) => open.client?.close(), () => undefined).catch(() => undefined);
   }
 
   async closeAll(): Promise<void> {
@@ -332,6 +402,14 @@ export class McpHost {
   }
 
   private async open(endpoint: McpEndpoint): Promise<Session> {
+    if (endpoint.builtin) {
+      const tools = endpoint.builtin.tools
+        .filter((tool) => isAllowedTool(endpoint, tool.name))
+        .map((tool) => sanitizeTool(tool))
+        .filter((tool): tool is McpToolInfo => tool !== undefined);
+      const missingTools = (endpoint.tools ?? []).filter((name) => !tools.some((tool) => tool.name === name));
+      return { builtin: endpoint.builtin, tools, missingTools };
+    }
     const client = new Client({ name: "OpenAdminOS", version: this.options.clientVersion });
     const transport = new StreamableHTTPClientTransport(new URL(endpoint.url), {
       fetch: this.fetch,

@@ -83,6 +83,13 @@
           "children": []
         },
         {
+          "title": "Splashtop",
+          "source": "services/splashtop.md",
+          "route": "services/splashtop",
+          "path": "services/splashtop",
+          "children": []
+        },
+        {
           "title": "Planned services",
           "source": "services/planned.md",
           "route": "services/planned",

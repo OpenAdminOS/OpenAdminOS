@@ -2,6 +2,8 @@ import {
   DEFAULT_GRAPH_READ_SCOPE_NAMES,
   grantedParts,
   qualifyScope,
+  splashtopConnectionOf,
+  splashtopRegion,
   type AgentSummary,
   type OrganizationRecord,
   type TenantRecord,
@@ -41,6 +43,9 @@ export const CONFIGURATION_AUDIT_EVENT_TYPES = [
   "schedule.unassigned",
   "provider.configuration-changed",
   "organizations.migrated",
+  "splashtop.connected",
+  "splashtop.token-rotated",
+  "splashtop.disconnected",
 ] as const;
 
 export type ConfigurationAuditEventType = (typeof CONFIGURATION_AUDIT_EVENT_TYPES)[number];
@@ -221,6 +226,39 @@ export function diffConfigurationAudit(
     });
   }
 
+  // Splashtop connections. The token is never part of state; its rotation
+  // shows as a new tokenSetAt on the same connection.
+  for (const organization of nextOrganizations) {
+    const after = splashtopConnectionOf(organization);
+    if (!after) continue;
+    const before = splashtopConnectionOf(previousOrganizationById.get(organization.id));
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    const where = { region: after.region, host: splashtopRegion(after.region).host, teamId: after.teamId };
+    if (!before || before.connectedAt !== after.connectedAt) {
+      seeds.push({
+        type: "splashtop.connected",
+        ...organizationFields(organization),
+        ...(tenantId ? { tenantId } : {}),
+        details: { ...where, ...(after.account ? { account: after.account } : {}), reconnected: before !== undefined },
+      });
+    } else if (before.tokenSetAt !== after.tokenSetAt) {
+      seeds.push({ type: "splashtop.token-rotated", ...organizationFields(organization), ...(tenantId ? { tenantId } : {}), details: where });
+    }
+  }
+  for (const organization of previousOrganizations) {
+    const before = splashtopConnectionOf(organization);
+    if (!before) continue;
+    const next = nextOrganizationById.get(organization.id);
+    if (next && splashtopConnectionOf(next)) continue;
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    seeds.push({
+      type: "splashtop.disconnected",
+      ...organizationFields(organization),
+      ...(tenantId ? { tenantId } : {}),
+      details: { region: before.region, host: splashtopRegion(before.region).host, teamId: before.teamId, organizationRemoved: next === undefined },
+    });
+  }
+
   // The active organization is the one that holds the active tenant.
   const previousActive = organizationOfTenant(previousOrganizations, previous.activeTenantId);
   const nextActive = organizationOfTenant(nextOrganizations, next.activeTenantId);
@@ -374,6 +412,9 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "schedule.unassigned": ["agentSlug", "agentName", "previousOrganizationId", "previousOrganizationName", "scheduleRemoved"],
   "provider.configuration-changed": ["providerId", "changed", "endpoint", "deployment", "apiVersion", "apiKey"],
   "organizations.migrated": ["organizationIds", "organizationNames", "schedulesAssigned", "schedulesUnassigned", "assignedOrganizationId"],
+  "splashtop.connected": ["region", "host", "teamId", "account", "reconnected"],
+  "splashtop.token-rotated": ["region", "host", "teamId"],
+  "splashtop.disconnected": ["region", "host", "teamId", "organizationRemoved"],
 };
 
 /** Keeps the allowed detail fields of a recorded shape; a field of another shape is left out, not the event. */
