@@ -800,7 +800,7 @@ export class RunService {
       }
       // A plan with no organization has no tenant to apply to, whatever is
       // active now; it is refused here so it stays exactly as it was.
-      if (run.tenantId === undefined) throw new OrganizationBoundaryError(PLAN_NO_ORGANIZATION_COPY);
+      if (!run.tenantId) throw new OrganizationBoundaryError(PLAN_NO_ORGANIZATION_COPY);
       if (boundary.activeOrganizationOnly && run.tenantId !== persisted.activeTenantId) {
         const name =
           organizationForTenant(persisted.organizations ?? [], run.tenantId)?.name ??
@@ -1049,10 +1049,10 @@ export class RunService {
       // that refuses every call, so nothing can reach a service.
       // A run without a tenant whose agent now needs a service fails
       // closed: it never falls back to the organization active now.
-      if (input.run.tenantId === undefined && !agentCallsNoServiceApi(input.agent)) {
+      if (!input.run.tenantId && !agentCallsNoServiceApi(input.agent)) {
         throw new Error(noOrganizationRunCopy(input.agent));
       }
-      const selection = input.run.tenantId === undefined
+      const selection = !input.run.tenantId
         ? { createGraph: () => noServiceGraph(), tenantId: undefined, tenantSession: undefined }
         : await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
       const llm = selection.tenantId
@@ -1123,7 +1123,7 @@ export class RunService {
     try {
       assertRunCanApply(input.run);
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
-      if (input.run.tenantId === undefined) throw new Error(noOrganizationRunCopy(input.agent));
+      if (!input.run.tenantId) throw new Error(noOrganizationRunCopy(input.agent));
       const baseLlm = await this.baseRunLlm(input.run, input.agent, input.providerId, input.model);
       const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
       const llm = this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug);
@@ -1209,7 +1209,7 @@ export class RunService {
         input.run.external?.requiredScopes ??
         [];
       systemScopes = scopes;
-      if (input.run.tenantId === undefined) {
+      if (!input.run.tenantId) {
         throw new Error(`${noun} run has no organization, so it cannot apply. Prepare it again in an organization.`);
       }
       const selection = await this.host.buildGraph(input.run.tenantId, scopes, this.executionOptions(input.run, controller.signal));

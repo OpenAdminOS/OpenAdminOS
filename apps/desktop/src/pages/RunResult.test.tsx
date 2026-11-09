@@ -748,6 +748,21 @@ it("runs Run for real after Switch from No organization without opening setup (M
   expect(bridge.startRun).toHaveBeenCalledTimes(1);
 });
 
+describe("a plan stored with an empty tenant (Muse round 5)", () => {
+  it("gets the no-organization notice and keeps Apply disabled", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ tenantId: "" });
+    const bridge = makeMockBridge({}, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] }));
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    const alert = (await screen.findAllByRole("alert")).find((element) => element.textContent?.includes(RERUN_COPY.planNoOrganizationTitle))!;
+    expect(alert).toHaveTextContent(RERUN_COPY.planNoOrganizationBody);
+    expect(screen.queryByText(/This plan was prepared in/)).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Type here to enable Apply"), run.plan!.confirmationPhrase);
+    expect(screen.getByRole("button", { name: /^Apply / })).toBeDisabled();
+    expect(bridge.confirmRun).not.toHaveBeenCalled();
+  });
+});
+
 describe("a plan prepared with no organization (Muse round 4)", () => {
   it("keeps Apply disabled under No organization and says the plan stays unchanged", async () => {
     const user = userEvent.setup();

@@ -885,6 +885,20 @@ describe("applying a reviewed plan holds to the active organization (review roun
     }
   }
 
+  for (const [label, run] of cases) {
+    it(`refuses ${label} stored with an empty tenant as a plan with no organization (Muse round 5)`, async () => {
+      const blank = { ...run, tenantId: "" } as RunRecord;
+      const h = harness(blank, undefined);
+      await assert.rejects(h.service.confirmRun(blank.id, plan.confirmationPhrase, { activeOrganizationOnly: true }), (error: Error) => {
+        assert.equal(error.name, "OrganizationBoundaryError");
+        assert.equal(error.message, PLAN_NO_ORGANIZATION_COPY);
+        return true;
+      });
+      assert.deepEqual(h.state().runs, [blank]);
+      assert.deepEqual(h.graphBuilds, []);
+    });
+  }
+
   it("applies the plan when its organization is active", async () => {
     const run = pending("run-agent");
     const h = harness(run, woodgrove.id);

@@ -299,7 +299,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
         onReject={rejectRun}
         onRunForReal={reRun}
         inactiveOrganization={
-          run.status === "awaiting-confirmation" && run.tenantId !== undefined && run.tenantId !== state.activeTenantId
+          run.status === "awaiting-confirmation" && Boolean(run.tenantId) && run.tenantId !== state.activeTenantId
             ? { name: runOrganization?.name ?? tenantName, ...(runOrganization ? { id: runOrganization.id } : {}) }
             : undefined
         }
@@ -1062,7 +1062,7 @@ function ConfirmationPage({
                 runId={run.id}
                 plan={plan}
                 requiresRiskAcknowledgement={run.riskAssessment?.status === "complete" && run.riskAssessment.flags.some((flag) => flag.severity === "danger")}
-                blocked={Boolean(inactiveOrganization) || run.tenantId === undefined}
+                blocked={Boolean(inactiveOrganization) || !run.tenantId}
                 onConfirm={onConfirm}
                 onReject={onReject}
               />}
