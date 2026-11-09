@@ -932,98 +932,74 @@ select { color-scheme: inherit; }
 .need-chip[data-state="none"] { padding-left: 8px; }
 .need-chip[data-state="missing"] { color: var(--color-warning); background: var(--color-warning-soft); }
 
-/* Connections reach map: services in, this device, everything that leaves. */
+/* Connections reach map: services in, this device, everything that leaves.
+   Wide is three columns with computed connectors; below 760 px of content
+   width (data-layout="stacked") the zones stack and the order carries the
+   direction. */
 .reach-map {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 104px minmax(170px, 0.8fr) 104px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 168px minmax(0, 1fr);
+  column-gap: 56px;
   align-items: center;
-  gap: 0;
-  padding: 20px 22px;
-  border-radius: 16px;
+  margin: 0;
+  padding: 20px 24px 28px;
+  border-radius: var(--radius-lg);
   background: var(--color-surface);
   box-shadow: inset 0 0 0 1px var(--color-border-soft);
 }
-.reach-zone h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--color-text-soft); }
-.reach-zone h4 { margin: 10px 0 6px; font-size: 12px; font-weight: 400; color: var(--color-text-soft); }
-.reach-zone h4:first-of-type { margin-top: 0; }
-.reach-items { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.reach-item {
-  display: flex;
-  min-width: 0;
+.reach-links { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; }
+.reach-links path { fill: none; stroke: var(--color-text-faint); stroke-width: 1.25; stroke-linecap: round; }
+.reach-links path[data-direction="out"] { stroke-dasharray: 3 4; }
+.reach-links path[data-tone="missing"] { stroke: var(--color-border); }
+.reach-links path[data-tone="hosted"] { stroke: var(--color-warning); stroke-dasharray: none; }
+.reach-links path.reach-link-draw { stroke-dasharray: 1; animation: reach-link-draw var(--dur-enter) var(--ease-in-out) both; }
+.reach-links path.reach-link-fade { animation: reach-link-fade var(--dur-enter) var(--ease-in-out) both; }
+@keyframes reach-link-draw { from { stroke-dashoffset: 1; } to { stroke-dashoffset: 0; } }
+@keyframes reach-link-fade { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .reach-links path.reach-link-draw,
+  .reach-links path.reach-link-fade { animation: none; }
+}
+.reach-zone { min-width: 0; }
+.reach-zone h3 { margin: 0 0 8px; font-size: var(--text-sm); line-height: var(--text-sm--line-height); font-weight: 500; color: var(--color-text); }
+.reach-group + .reach-group { margin-top: 12px; }
+.reach-group h4 { margin: 0 0 4px; font-size: var(--text-xs); line-height: var(--text-xs--line-height); font-weight: 400; color: var(--color-text-muted); }
+.reach-rows { margin: 0; padding: 0; list-style: none; }
+.reach-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
-  border-radius: 9px;
-  background: var(--color-bg);
-  padding: 6px 8px;
-  box-shadow: inset 0 0 0 1px var(--color-border);
-  font-size: 13px;
+  gap: 10px;
+  height: 32px;
+  font-size: var(--text-sm);
   color: var(--color-text);
 }
-.reach-item > .reach-item-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.reach-item[data-off="true"] {
-  background: transparent;
-  box-shadow: none;
-  border: 1px dashed var(--color-border-strong);
-  color: var(--color-text-muted);
+.reach-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reach-row[data-off="true"] .reach-row-title { color: var(--color-text-muted); }
+.reach-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--text-sm); color: var(--color-text-soft); }
+.reach-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-text-faint); }
+.reach-state[data-tone="ok"] .reach-dot { background: var(--color-success); }
+.reach-state[data-tone="part"] .reach-dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-text-muted); }
+.reach-state[data-tone="off"] { color: var(--color-text-muted); }
+.reach-state[data-tone="off"] .reach-dot { background: transparent; box-shadow: inset 0 0 0 1px var(--color-text-faint); }
+.reach-state[data-tone="leaves"] { color: var(--color-warning); }
+.reach-hub { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
+/* The caption hangs under the tile so the tile sits on the row midline. */
+.reach-hub-caption { position: absolute; top: 100%; left: 50%; width: 168px; margin-top: 10px; transform: translateX(-50%); }
+.reach-hub-name { font-size: var(--text-sm); line-height: var(--text-sm--line-height); font-weight: 500; color: var(--color-text); }
+.reach-hub-note { font-size: var(--text-xs); line-height: var(--text-xs--line-height); color: var(--color-text-muted); }
+.reach-map[data-layout="stacked"] { grid-template-columns: minmax(0, 1fr); row-gap: 0; padding: 16px 18px; }
+.reach-map[data-layout="stacked"] .reach-hub {
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  margin: 14px 0;
+  padding: 12px 0;
+  text-align: left;
+  border-block: 1px solid var(--color-border-soft);
 }
-.reach-item .reach-state { margin-left: auto; white-space: nowrap; font-size: 12px; color: var(--color-text-soft); }
-.reach-item .reach-state[data-tone="ok"] { color: var(--color-success); }
-.reach-item .reach-state[data-tone="warning"] { color: var(--color-warning); }
-.reach-lane { position: relative; display: grid; min-height: 120px; height: 100%; place-items: center; }
-.reach-lane::before {
-  content: "";
-  position: absolute;
-  left: 8px;
-  right: 8px;
-  top: 50%;
-  border-top: 1.5px solid var(--color-text-muted);
-}
-.reach-lane[data-direction="out"]::before { border-top-style: dashed; }
-.reach-lane::after {
-  content: "";
-  position: absolute;
-  right: 4px;
-  top: calc(50% - 4.5px);
-  border-top: 5px solid transparent;
-  border-bottom: 5px solid transparent;
-  border-left: 7px solid var(--color-text-muted);
-}
-.reach-lane > span {
-  position: absolute;
-  left: 4px;
-  right: 4px;
-  bottom: calc(50% + 6px);
-  text-align: center;
-  font-size: 11.5px;
-  line-height: 1.3;
-  color: var(--color-text-muted);
-}
-.reach-device {
-  border-radius: 16px;
-  background: var(--color-text);
-  color: var(--color-bg);
-  padding: 16px 16px 14px;
-}
-.reach-device-title { margin-bottom: 8px; font-family: var(--font-serif, Georgia, serif); font-size: 18px; font-weight: 500; line-height: 1.25; }
-.reach-device ul { margin: 0; padding: 0; list-style: none; font-size: 12.5px; opacity: 0.85; }
-.reach-device li { padding: 2px 0; overflow-wrap: anywhere; }
-@media (max-width: 1180px) {
-  .reach-map { grid-template-columns: 1fr; gap: 10px; }
-  .reach-lane { min-height: 44px; }
-  .reach-lane::before { left: 50%; right: auto; top: 4px; bottom: 4px; border-top: 0; border-left: 1.5px solid var(--color-text-muted); }
-  .reach-lane[data-direction="out"]::before { border-left-style: dashed; }
-  .reach-lane::after {
-    top: auto;
-    bottom: 0;
-    right: auto;
-    left: calc(50% - 5px);
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 7px solid var(--color-text-muted);
-    border-bottom: 0;
-  }
-  .reach-lane > span { left: calc(50% + 12px); right: auto; bottom: auto; top: 50%; transform: translateY(-50%); text-align: left; white-space: nowrap; }
-}
+.reach-map[data-layout="stacked"] .reach-hub-caption { position: static; width: auto; margin: 0; transform: none; }
 
 .calm-section-label {
   color: var(--color-text-muted);

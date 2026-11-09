@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 
 import { PageBody, PageHeader } from "../components/AppShell";
 import { IconRefresh } from "../components/icons";
+import { DeviceTile } from "../components/DeviceTile";
 import { DisconnectOrganizationDialog } from "../components/DisconnectOrganizationDialog";
 import { ReferenceMark, ServiceMark } from "../components/ServiceMark";
 import {
@@ -64,7 +65,15 @@ export interface ReachModel {
   organizationName?: string;
   sample: boolean;
   services: ReachService[];
-  model: { kind: "none" | "local" | "hosted" | "sample"; name: string; providerName?: string; channel?: string; location?: string };
+  model: {
+    kind: "none" | "local" | "hosted" | "sample";
+    name: string;
+    /** The model id alone, as the status strip shows it. */
+    modelName?: string;
+    providerName?: string;
+    channel?: string;
+    location?: string;
+  };
   referenceHosts: string[];
   /** null while the connector list loads or when it could not be loaded. */
   reportDestinations: string[] | null;
@@ -105,8 +114,8 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     : boundary.kind === "none" || !provider
       ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
       : boundary.kind === "local"
-        ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), providerName: provider.name }
-        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), providerName: provider.name, channel: hostedChannel(provider), location: providerDataLocation(provider) };
+        ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerName: provider.name }
+        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerName: provider.name, channel: hostedChannel(provider), location: providerDataLocation(provider) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
     sample,
@@ -170,93 +179,306 @@ export function reachDescription(model: ReachModel): string {
   return `${services} ${device} ${words} ${reports}${voice}`;
 }
 
+/** Below this content width the map stacks and draws no connectors. */
+export const REACH_STACK_BELOW = 760;
+
+/** Wide draws three columns with connectors; stacked lists the zones in order. */
+export function reachLayout(width: number): "wide" | "stacked" {
+  return width > 0 && width < REACH_STACK_BELOW ? "stacked" : "wide";
+}
+
+/**
+ * Line colours (SPEC section 3): a missing service uses the border colour,
+ * and only a line that carries prompts to a hosted provider is amber.
+ */
+export type ReachLinkTone = "default" | "missing" | "hosted";
+
+export interface ReachLink {
+  id: string;
+  direction: "in" | "out";
+  tone: ReachLinkTone;
+}
+
+/** One connector per row that data crosses, in the order the rows render. */
+export function reachLinks(model: ReachModel): ReachLink[] {
+  return [
+    ...model.services.map((service): ReachLink => ({
+      id: `service:${service.serviceId}`,
+      direction: "in",
+      tone: service.status === "missing" ? "missing" : "default",
+    })),
+    ...(model.model.kind === "hosted" ? [{ id: "prompts", direction: "out", tone: "hosted" } satisfies ReachLink] : []),
+    ...(model.voice ? [{ id: "voice", direction: "out", tone: "hosted" } satisfies ReachLink] : []),
+    ...model.referenceHosts.map((host): ReachLink => ({ id: `host:${host}`, direction: "out", tone: "default" })),
+    ...(model.reportDestinations ?? []).map((name): ReachLink => ({ id: `report:${name}`, direction: "out", tone: "default" })),
+  ];
+}
+
+export interface ReachPath extends ReachLink {
+  d: string;
+}
+
+interface Rect {
+  left: number;
+  right: number;
+  top: number;
+  height: number;
+}
+
+/** Spacing of the line ends at the tile edge. */
+const REACH_FAN = 9;
+
+/**
+ * Cubic curves from each row to the tile, control points at the horizontal
+ * midpoint, fanned at the tile edge. Coordinates are relative to `box`.
+ */
+export function reachPaths(box: Rect, tile: Rect, rows: ReadonlyMap<string, Rect>, links: readonly ReachLink[]): ReachPath[] {
+  const tileY = tile.top + tile.height / 2 - box.top;
+  const count = { in: links.filter((link) => link.direction === "in").length, out: links.filter((link) => link.direction === "out").length };
+  const index = { in: 0, out: 0 };
+  const paths: ReachPath[] = [];
+  for (const link of links) {
+    const row = rows.get(link.id);
+    const i = index[link.direction]++;
+    if (!row) continue;
+    const y = row.top + row.height / 2 - box.top;
+    const fanY = tileY + (i - (count[link.direction] - 1) / 2) * REACH_FAN;
+    const [x1, y1, x2, y2] =
+      link.direction === "in"
+        ? [row.right - box.left + 10, y, tile.left - box.left - 6, fanY]
+        : [tile.right - box.left + 6, fanY, row.left - box.left - 10, y];
+    const mid = (x1 + x2) / 2;
+    const r = (value: number) => Math.round(value * 10) / 10;
+    paths.push({ ...link, d: `M${r(x1)} ${r(y1)} C${r(mid)} ${r(y1)}, ${r(mid)} ${r(y2)}, ${r(x2)} ${r(y2)}` });
+  }
+  return paths;
+}
+
+function prefersReducedMotion(): boolean {
+  return (
+    document.documentElement.hasAttribute("data-reduced-motion") ||
+    (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches)
+  );
+}
+
+/** Measures the map, picks its layout and computes the connectors. */
+function useReachGeometry(model: ReachModel) {
+  const ref = useRef<HTMLElement | null>(null);
+  const [layout, setLayout] = useState<"wide" | "stacked">("wide");
+  const [paths, setPaths] = useState<ReachPath[]>([]);
+  // Lines present on first paint draw in once; later ones appear in place.
+  const [drawIn, setDrawIn] = useState<ReadonlySet<string> | null>(null);
+  const links = useMemo(() => reachLinks(model), [model]);
+
+  const measure = useCallback(() => {
+    const figure = ref.current;
+    if (!figure) return;
+    const box = figure.getBoundingClientRect();
+    const nextLayout = reachLayout(box.width);
+    setLayout(nextLayout);
+    const tile = figure.querySelector(".device-tile")?.getBoundingClientRect();
+    if (nextLayout === "stacked" || !tile || tile.width === 0) {
+      setPaths([]);
+      return;
+    }
+    const rows = new Map<string, Rect>();
+    figure.querySelectorAll<HTMLElement>("[data-link-id]").forEach((row) => rows.set(row.dataset.linkId!, row.getBoundingClientRect()));
+    const next = reachPaths(box, tile, rows, links);
+    setPaths(next);
+    if (next.length > 0) setDrawIn((current) => current ?? new Set(prefersReducedMotion() ? [] : next.map((path) => path.id)));
+  }, [links]);
+
+  useLayoutEffect(() => {
+    measure();
+  }, [measure, layout]);
+
+  useEffect(() => {
+    const figure = ref.current;
+    if (!figure) return;
+    const resize = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(() => measure());
+    resize?.observe(figure);
+    // Theme and density change type metrics and row heights.
+    const theme = typeof MutationObserver === "undefined" ? undefined : new MutationObserver(() => measure());
+    theme?.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-mode", "data-density"] });
+    let live = true;
+    void document.fonts?.ready.then(() => {
+      if (live) measure();
+    });
+    return () => {
+      live = false;
+      resize?.disconnect();
+      theme?.disconnect();
+    };
+  }, [measure]);
+
+  return { ref, layout, paths, drawIn };
+}
+
+type ReachStateTone = "ok" | "part" | "off" | "leaves";
+
+/** A dot and words; colour only where SPEC section 3 gives it a meaning. */
+function ReachState({ tone, children }: { tone?: ReachStateTone; children: ReactNode }) {
+  return (
+    <span className="reach-state" data-tone={tone}>
+      {tone && tone !== "leaves" ? <span className="reach-dot" aria-hidden="true" /> : null}
+      {children}
+    </span>
+  );
+}
+
+function serviceTone(status: ServiceConnectionStatus): ReachStateTone {
+  return status === "connected" ? "ok" : status === "partial" ? "part" : "off";
+}
+
+function ReachRow({
+  linkId,
+  mark,
+  off = false,
+  title,
+  titleHint,
+  state,
+}: {
+  linkId?: string;
+  mark: ReactNode;
+  off?: boolean;
+  title: string;
+  titleHint?: string;
+  state?: ReactNode;
+}) {
+  return (
+    <li className="reach-row" data-link-id={linkId} data-off={off ? "true" : undefined}>
+      {mark}
+      <span className="reach-row-title" title={titleHint ?? title}>{title}</span>
+      {state ?? <span />}
+    </li>
+  );
+}
+
 function ReachMap({ model }: { model: ReachModel }) {
   const description = reachDescription(model);
+  const { ref, layout, paths, drawIn } = useReachGeometry(model);
+  const hosted = model.model.kind === "hosted";
   return (
-    <figure className="reach-map m-0" aria-labelledby="reach-map-title" aria-describedby="reach-map-description">
+    <figure
+      ref={ref}
+      className="reach-map"
+      data-layout={layout}
+      aria-labelledby="reach-map-title"
+      aria-describedby="reach-map-description"
+    >
       <h2 id="reach-map-title" className="sr-only">{CONNECTIONS_COPY.map.label}</h2>
       <figcaption id="reach-map-description" className="sr-only">{description}</figcaption>
-      <div className="reach-zone" aria-hidden="true">
+      {layout === "wide" && paths.length > 0 ? (
+        <svg className="reach-links" aria-hidden="true">
+          {paths.map((path, index) => {
+            const draws = drawIn?.has(path.id) ?? false;
+            const solid = path.direction === "in" || path.tone === "hosted";
+            return (
+              <path
+                key={path.id}
+                d={path.d}
+                data-direction={path.direction}
+                data-tone={path.tone}
+                {...(draws && solid ? { pathLength: 1 } : {})}
+                className={draws ? (solid ? "reach-link-draw" : "reach-link-fade") : undefined}
+                style={draws ? { animationDelay: `${index * 40}ms` } : undefined}
+              />
+            );
+          })}
+        </svg>
+      ) : null}
+      <div className="reach-zone" data-zone="in" aria-hidden="true">
         <h3>{CONNECTIONS_COPY.map.readFrom}</h3>
-        <ul className="reach-items">
+        <ul className="reach-rows">
           {model.services.length === 0 ? (
-            <li className="reach-item" data-off="true"><span className="reach-item-text">{CONNECTIONS_COPY.map.noServices}</span></li>
+            <ReachRow mark={<ReferenceMark name="" off />} off title={CONNECTIONS_COPY.map.noServices} />
           ) : (
             model.services.map((service) => (
-              <li key={service.serviceId} className="reach-item" data-off={service.status === "missing" ? "true" : undefined}>
-                <ServiceMark serviceId={service.serviceId} off={service.status === "missing"} />
-                <span className="reach-item-text">{service.title}</span>
-                <span className="reach-state" data-tone={service.status === "connected" ? "ok" : undefined}>
-                  {serviceStateText(service)}
-                </span>
-              </li>
+              <ReachRow
+                key={service.serviceId}
+                linkId={`service:${service.serviceId}`}
+                mark={<ServiceMark serviceId={service.serviceId} off={service.status === "missing"} />}
+                off={service.status === "missing"}
+                title={service.title}
+                state={<ReachState tone={serviceTone(service.status)}>{serviceStateText(service)}</ReachState>}
+              />
             ))
           )}
         </ul>
       </div>
-      <div className="reach-lane" data-direction="in" aria-hidden="true"><span>{CONNECTIONS_COPY.map.tenantData}</span></div>
-      <div className="reach-device" aria-hidden="true">
-        <div className="reach-device-title">{CONNECTIONS_COPY.map.device}</div>
-        <ul>
-          <li>{model.model.name}</li>
-          <li>{CONNECTIONS_COPY.map.deviceHistory}</li>
-          <li>{model.sample ? CONNECTIONS_COPY.map.deviceSample : CONNECTIONS_COPY.map.deviceTokens}</li>
-        </ul>
+      <div className="reach-hub" aria-hidden="true">
+        <DeviceTile size={layout === "stacked" ? "sm" : "lg"} />
+        <div className="reach-hub-caption">
+          <div className="reach-hub-name">{CONNECTIONS_COPY.map.device}</div>
+          <div className="reach-hub-note">{model.sample ? CONNECTIONS_COPY.map.deviceSample : CONNECTIONS_COPY.map.deviceStays}</div>
+        </div>
       </div>
-      <div className="reach-lane" data-direction="out" aria-hidden="true"><span>{CONNECTIONS_COPY.map.sentOut}</span></div>
-      <div className="reach-zone" aria-hidden="true">
+      <div className="reach-zone" data-zone="out" aria-hidden="true">
         <h3>{CONNECTIONS_COPY.map.leaves}</h3>
-        <h4>{CONNECTIONS_COPY.map.questionWords}</h4>
-        <ul className="reach-items">
-          {model.referenceHosts.length === 0 ? (
-            <li className="reach-item" data-off="true"><span className="reach-item-text">{CONNECTIONS_COPY.map.noReferences}</span></li>
-          ) : (
-            model.referenceHosts.map((host) => (
-              <li key={host} className="reach-item"><ReferenceMark name={host} /><span className="reach-item-text">{host}</span></li>
-            ))
-          )}
-        </ul>
-        <h4>{CONNECTIONS_COPY.map.reports}</h4>
-        <ul className="reach-items">
-          {model.reportDestinations === null ? (
-            <li className="reach-item" data-off="true" aria-busy={model.reportDestinationsState === "loading"}>
-              <span className="reach-item-text">
-                {model.reportDestinationsState === "failed" ? CONNECTIONS_COPY.map.reportsFailed : CONNECTIONS_COPY.map.reportsLoading}
-              </span>
-            </li>
-          ) : model.reportDestinations.length === 0 ? (
-            <li className="reach-item" data-off="true"><span className="reach-item-text">{CONNECTIONS_COPY.map.noReports}</span></li>
-          ) : (
-            model.reportDestinations.map((name) => (
-              <li key={name} className="reach-item"><ReferenceMark name={name} /><span className="reach-item-text">{name}</span></li>
-            ))
-          )}
-        </ul>
-        <h4>{model.organizationName ? CONNECTIONS_COPY.map.prompts : CONNECTIONS_COPY.map.promptsNoOrganization}</h4>
-        <ul className="reach-items">
-          <li className="reach-item" data-off={model.model.kind === "hosted" ? undefined : "true"}>
-            <span className="reach-item-text">
-              {promptsDestination(model.model)}
-              {model.model.kind === "hosted" ? (
-                <span className="block text-xs text-[var(--color-text-muted)]">
-                  {model.model.location}
-                </span>
-              ) : null}
-            </span>
-            {model.model.kind === "hosted" ? <span className="reach-state" data-tone="warning">Leaves</span> : null}
-          </li>
-        </ul>
+        <div className="reach-group">
+          <h4>{model.organizationName ? CONNECTIONS_COPY.map.prompts : CONNECTIONS_COPY.map.promptsNoOrganization}</h4>
+          <ul className="reach-rows">
+            {hosted ? (
+              <ReachRow
+                linkId="prompts"
+                mark={<ReferenceMark name={(model.model.location ?? model.model.providerName ?? model.model.name).split(" ")[0] ?? ""} />}
+                title={model.model.location ?? promptsDestination(model.model)}
+                titleHint={`${model.model.location ?? ""}, ${promptsDestination(model.model)}`}
+                state={model.model.modelName ? <ReachState tone="leaves">{model.model.modelName}</ReachState> : undefined}
+              />
+            ) : (
+              <ReachRow
+                mark={<ReferenceMark name="" off />}
+                off
+                title={promptsDestination(model.model)}
+                state={model.model.modelName ? <ReachState>{model.model.modelName}</ReachState> : undefined}
+              />
+            )}
+          </ul>
+        </div>
         {model.voice ? (
-          <>
+          <div className="reach-group">
             <h4>{CONNECTIONS_COPY.map.voice}</h4>
-            <ul className="reach-items">
-              <li className="reach-item">
-                <span className="reach-item-text">{CONNECTIONS_COPY.map.voiceDestination(model.voice.provider)}</span>
-                <span className="reach-state" data-tone="warning">Leaves</span>
-              </li>
+            <ul className="reach-rows">
+              <ReachRow
+                linkId="voice"
+                mark={<ReferenceMark name={model.voice.provider} />}
+                title={CONNECTIONS_COPY.map.voiceDestination(model.voice.provider)}
+                state={model.voice.model ? <ReachState tone="leaves">{model.voice.model}</ReachState> : undefined}
+              />
             </ul>
-          </>
+          </div>
         ) : null}
+        <div className="reach-group">
+          <h4>{CONNECTIONS_COPY.map.questionWords}</h4>
+          <ul className="reach-rows">
+            {model.referenceHosts.length === 0 ? (
+              <ReachRow mark={<ReferenceMark name="" off />} off title={CONNECTIONS_COPY.map.noReferences} />
+            ) : (
+              model.referenceHosts.map((host) => (
+                <ReachRow key={host} linkId={`host:${host}`} mark={<ReferenceMark name={host} />} title={host} />
+              ))
+            )}
+          </ul>
+        </div>
+        <div className="reach-group">
+          <h4>{CONNECTIONS_COPY.map.reports}</h4>
+          <ul className="reach-rows" aria-busy={model.reportDestinationsState === "loading" || undefined}>
+            {model.reportDestinations === null ? (
+              <ReachRow
+                mark={<ReferenceMark name="" off />}
+                off
+                title={model.reportDestinationsState === "failed" ? CONNECTIONS_COPY.map.reportsFailed : CONNECTIONS_COPY.map.reportsLoading}
+              />
+            ) : model.reportDestinations.length === 0 ? (
+              <ReachRow mark={<ReferenceMark name="" off />} off title={CONNECTIONS_COPY.map.noReports} />
+            ) : (
+              model.reportDestinations.map((name) => (
+                <ReachRow key={name} linkId={`report:${name}`} mark={<ReferenceMark name={name} />} title={name} />
+              ))
+            )}
+          </ul>
+        </div>
       </div>
     </figure>
   );

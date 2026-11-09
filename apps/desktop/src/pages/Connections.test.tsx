@@ -2,7 +2,7 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import Connections, { buildReachModel, reachDescription } from "./Connections";
+import Connections, { REACH_STACK_BELOW, buildReachModel, reachDescription, reachLayout, reachLinks, reachPaths } from "./Connections";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
 import {
   createMockAgent,
@@ -94,8 +94,10 @@ describe("Connections reach map", () => {
     expect(model.model.kind).toBe("hosted");
     render(state);
     const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    expect(within(map).getByText(`${hosted.name}, through the Codex CLI`)).toBeInTheDocument();
-    expect(within(map).getByText("OpenAI API · US")).toBeInTheDocument();
+    // The row names where prompts go and the model; the channel is its hint.
+    const row = within(map).getByText("OpenAI API · US");
+    expect(row).toHaveAttribute("title", expect.stringContaining(`${hosted.name}, through the Codex CLI`));
+    expect(within(map).getByText(model.model.modelName!)).toBeInTheDocument();
     expect(reachDescription(model)).toContain("Prompts and tenant data go through the Codex CLI to OpenAI. Prompts go to OpenAI API · US.");
     expect(reachDescription(model)).not.toContain("Region not reported");
   });
@@ -110,6 +112,71 @@ describe("Connections reach map", () => {
     expect(map).toHaveAccessibleDescription(/^No organization reads no service into this device\./);
     await user.click(screen.getByRole("button", { name: CONNECTIONS_COPY.connectMicrosoft365 }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+});
+
+describe("reach map connectors and layout", () => {
+  it("makes only the line that carries prompts to a hosted provider amber", () => {
+    const hosted = createMockAppState({
+      activeProviderId: "openai",
+      tenants: [partialTenant],
+      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true } }),
+      installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })],
+    });
+    const links = reachLinks(buildReachModel(hosted, [teamsConnector()]));
+    expect(links.map((link) => [link.id, link.direction, link.tone])).toEqual([
+      ["service:intune", "in", "default"],
+      ["service:entra", "in", "default"],
+      // A missing service is drawn in the border colour, never amber.
+      ["service:defender", "in", "missing"],
+      ["prompts", "out", "hosted"],
+      ["host:www.kqlsearch.com", "out", "default"],
+      ["report:Microsoft Teams", "out", "default"],
+    ]);
+    expect(links.filter((link) => link.tone === "hosted").map((link) => link.id)).toEqual(["prompts"]);
+  });
+
+  it("draws no prompts line for a local model", () => {
+    const links = reachLinks(buildReachModel(createMockAppState({ tenants: [partialTenant] }), []));
+    expect(links.some((link) => link.id === "prompts" || link.tone === "hosted")).toBe(false);
+  });
+
+  it("curves each row to the tile and fans the ends 9 px apart at the tile edge", () => {
+    const box = { left: 0, right: 900, top: 0, height: 300 };
+    const tile = { left: 400, right: 472, top: 100, height: 72 };
+    const rows = new Map([
+      ["a", { left: 24, right: 300, top: 40, height: 32 }],
+      ["b", { left: 24, right: 300, top: 72, height: 32 }],
+      ["c", { left: 600, right: 880, top: 40, height: 32 }],
+    ]);
+    const paths = reachPaths(box, tile, rows, [
+      { id: "a", direction: "in", tone: "default" },
+      { id: "b", direction: "in", tone: "missing" },
+      { id: "c", direction: "out", tone: "hosted" },
+    ]);
+    expect(paths.map((path) => path.d)).toEqual([
+      "M310 56 C352 56, 352 131.5, 394 131.5",
+      "M310 88 C352 88, 352 140.5, 394 140.5",
+      "M478 136 C534 136, 534 56, 590 56",
+    ]);
+  });
+
+  it(`stacks the map below ${REACH_STACK_BELOW} px of content width`, () => {
+    expect(reachLayout(REACH_STACK_BELOW - 1)).toBe("stacked");
+    expect(reachLayout(630)).toBe("stacked");
+    expect(reachLayout(REACH_STACK_BELOW)).toBe("wide");
+    expect(reachLayout(938)).toBe("wide");
+    // Not laid out yet: keep the wide figure.
+    expect(reachLayout(0)).toBe("wide");
+  });
+
+  it("renders the wide layout with the device tile and its caption", async () => {
+    render(createMockAppState({ tenants: [partialTenant] }));
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(map).toHaveAttribute("data-layout", "wide");
+    expect(map.querySelector(".device-tile")).not.toBeNull();
+    expect(within(map).getByText(CONNECTIONS_COPY.map.deviceStays)).toBeInTheDocument();
+    expect(within(map).getByText(/^\d of 6 parts$/)).toBeInTheDocument();
   });
 });
 
