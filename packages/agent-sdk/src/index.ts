@@ -1096,6 +1096,15 @@ export interface ResolvedProviderModel {
   source: ProviderModelSource;
 }
 
+/** A disconnect whose cleanup is pending. */
+export interface TenantCleanupSummary {
+  tenantId: string;
+  displayName: string;
+  removedAt: string;
+  /** Why the last cleanup attempt did not finish. */
+  error?: string;
+}
+
 export interface AppState {
   appVersion: string;
   activeProviderId: ProviderId;
@@ -1127,6 +1136,12 @@ export interface AppState {
   activeOrganizationId?: string;
   /** Present until the admin dismisses the schedule migration notice. */
   organizationMigration?: OrganizationMigrationNotice;
+  /**
+   * Disconnected organizations whose cleanup (sign-in removal, local data)
+   * has not finished. Cleanup resumes at the next launch or with
+   * `retryTenantCleanup`; the same tenant connects again only after it.
+   */
+  tenantCleanups?: TenantCleanupSummary[];
   /** Custom app registrations remembered on this device, most recently used first. */
   savedAppRegistrations?: SavedAppRegistration[];
   /** ISO timestamp of the last successful registry index refresh. Null until first fetch. */
@@ -3248,7 +3263,13 @@ export interface OpenAdminOSApi {
   assignAgentSchedule(slug: string, organizationId: string): Promise<AppState>;
   /** Hide the schedule migration notice. */
   dismissOrganizationMigrationNotice(): Promise<AppState>;
+  /**
+   * Disconnect a tenant. The organization is removed at once; if its
+   * cleanup could not finish, the state lists it in `tenantCleanups`.
+   */
   disconnectTenant(id: string): Promise<AppState>;
+  /** Retry the cleanup of a disconnected organization listed in `tenantCleanups`. */
+  retryTenantCleanup(id: string): Promise<AppState>;
   /**
    * Forget a remembered custom app registration. Tenants already
    * connected with it keep working.
@@ -4493,6 +4514,18 @@ export interface ConnectorBuildContext {
    * recoverable failure.
    */
   idempotencyKeyFor(stepId: string, iteration: number): string;
+  /**
+   * Host transport for every HTTP request the connector makes, including
+   * retries. The desktop host passes one that refuses a request once the
+   * organization the work runs for is being disconnected. Defaults to the
+   * global fetch.
+   */
+  fetch?: typeof fetch;
+  /**
+   * Called immediately before a send over a transport that is not
+   * `fetch`, such as a local CLI or a socket. Throws to refuse the send.
+   */
+  assertEgress?: () => void;
 }
 
 export interface ConnectorFactory<TCapabilities> {

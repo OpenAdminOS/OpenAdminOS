@@ -15,7 +15,7 @@ import {
   SIGNAL_CONNECTOR_ID,
   signalDescriptor,
 } from "./descriptor.js";
-import { createSignalClient, type SignalClient } from "./client.js";
+import { createSignalClient, runSignalProcess, type SignalClient } from "./client.js";
 
 export * from "./capabilities.js";
 export {
@@ -85,6 +85,14 @@ export const signalConnector: ConnectorFactory<SignalConnectorCapabilities> =
       if (httpUrl) clientOptions.httpUrl = httpUrl;
       if (cliPath) clientOptions.cliPath = cliPath;
       if (configPath) clientOptions.configPath = configPath;
+      if (ctx.fetch) clientOptions.fetchImpl = ctx.fetch;
+      const assertEgress = ctx.assertEgress;
+      if (assertEgress) {
+        clientOptions.runProcess = (file, args, options) => {
+          assertEgress();
+          return runSignalProcess(file, args, options);
+        };
+      }
       const client = createSignalClient(clientOptions);
       return {
         descriptor: signalDescriptor,

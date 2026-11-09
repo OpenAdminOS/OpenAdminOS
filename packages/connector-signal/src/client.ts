@@ -89,7 +89,7 @@ function createSignalRestClient(options: CreateSignalClientOptions): SignalClien
 }
 
 function createSignalCliClient(options: CreateSignalClientOptions): SignalClient {
-  const run = options.runProcess ?? runProcess;
+  const run = options.runProcess ?? runSignalProcess;
   const cliPath = options.cliPath?.trim() || "signal-cli";
   const timeoutMs = options.timeoutMs ?? 30_000;
   const baseArgs = options.configPath?.trim()
@@ -148,7 +148,7 @@ async function fetchWithTimeout(
   }
 }
 
-function runProcess(
+export function runSignalProcess(
   file: string,
   args: readonly string[],
   options: { timeoutMs: number },

@@ -93,6 +93,7 @@ function buildCapabilities(
         );
       }
       try {
+        ctx.assertEgress?.();
         return await client.sendMessage({ ...args, to });
       } catch (error) {
         if (error instanceof WhatsAppWebNotLinkedError) {
