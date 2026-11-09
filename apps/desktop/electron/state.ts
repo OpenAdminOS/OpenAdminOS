@@ -3254,7 +3254,8 @@ export class AppStateStore {
         },
       });
     });
-
+    // Saving the settings is an explicit action on Azure OpenAI: it is checked again.
+    if (this.scanResultsServed) await this.detectProvider("azure-openai");
     return this.getAzureOpenAIConfig();
   }
 
@@ -3263,7 +3264,10 @@ export class AppStateStore {
     // except the scan itself, which is bounded and local only. Every caller
     // (app state, Office, the menu bar, schedulers, validators, the Chat
     // preview) gets the scan's own results, or "not checked".
-    if ((await this.read()).firstRunScan === "pending") {
+    // After the first run, listing keeps serving them for the session: a
+    // provider is checked in full only when the admin acts on it (selects
+    // or tests it), and all of them when the admin refreshes providers.
+    if (this.scanResultsServed || (await this.read()).firstRunScan === "pending") {
       return providerCatalog.map(
         (provider) =>
           this.modelScanProviders.get(provider.id) ?? {
@@ -3289,6 +3293,49 @@ export class AppStateStore {
     return Promise.all(
       providerCatalog.map(async (provider) => this.checkProviderEntry(provider, azureOpenAIConfig, azureOpenAIConfigError)),
     );
+  }
+
+  /** Set when the first-run scan completes; cleared by `refreshProviders`. */
+  private scanResultsServed = false;
+
+  /**
+   * Checks one provider in full because the admin acted on it. After the
+   * first run, while the scan results are served, the result replaces that
+   * provider's entry and no other provider is checked.
+   */
+  private async detectProvider(id: ProviderId): Promise<ProviderSummary | undefined> {
+    // While the scan is pending nothing but the scan detects, and without
+    // served results listing already checks every provider in full.
+    if (!this.scanResultsServed) {
+      return (await this.listProviders()).find((entry) => entry.id === id);
+    }
+    let summary: ProviderSummary | undefined;
+    if (this.providerListFactory) {
+      summary = (await this.providerListFactory()).find((entry) => entry.id === id);
+    } else {
+      const entry = providerCatalog.find((provider) => provider.id === id)!;
+      let config: AzureOpenAIProviderConfig | undefined;
+      let configError: string | undefined;
+      if (id === "azure-openai") {
+        try {
+          config = await this.getAzureOpenAIConfig();
+        } catch (error) {
+          configError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      summary = await this.checkProviderEntry(entry, config, configError);
+    }
+    if (summary) this.modelScanProviders.set(id, summary);
+    return summary;
+  }
+
+  /**
+   * The admin asked to refresh providers: listing checks every provider in
+   * full again from the next read. While the first-run scan is pending it
+   * changes nothing.
+   */
+  async refreshProviders(): Promise<void> {
+    this.scanResultsServed = false;
   }
 
   /** One provider's existing check, the same one `listProviders` runs. */
@@ -3528,6 +3575,9 @@ export class AppStateStore {
       if (current.firstRunScan !== "pending") return;
       const { firstRunScan: _done, ...rest } = current;
       await this.write(rest);
+      // Leaving the scan (Continue, Preview, Open chat) runs no discovery:
+      // the scan results stay what listing serves this session.
+      this.scanResultsServed = true;
     });
     this.emitStateChanged("first-run-scan-completed");
     return this.getAppState();
@@ -3540,8 +3590,8 @@ export class AppStateStore {
     if (!isProviderId(providerId)) {
       throw new Error(`Unknown provider: ${String(providerId)}`);
     }
-    const providers = await this.listProviders();
-    const provider = providers.find((entry) => entry.id === providerId);
+    // Testing is an explicit action on this provider: it is checked in full.
+    const provider = await this.detectProvider(providerId);
     if (!provider) {
       throw new Error(`Provider not found: ${providerId}`);
     }
@@ -6196,7 +6246,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         providerChosenByUser: true,
       });
     });
-
+    // Selecting a provider is an explicit action on it: it is checked in full.
+    await this.detectProvider(id);
     return this.getAppState();
   }
 

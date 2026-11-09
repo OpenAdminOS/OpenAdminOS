@@ -508,6 +508,70 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
   });
 });
 
+describe("after the first-run scan (review round 3, item 1)", () => {
+  it("leaves the scan by every exit without discovery, and checks a provider in full only when the admin acts on it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    let listed = 0;
+    let generation = 0;
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+    delete process.env.OLLAMA_HOST;
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: () => {
+        listed += 1;
+        return providerCatalog.map((provider) => ({ ...provider, status: "connected" as const, models: ["m"], detail: `check ${generation}` }));
+      },
+      llmFactory: () => ({
+        available: true, defaultModel: "m",
+        async complete() { return { text: "ok", model: "m" }; },
+        async *stream() { yield { delta: "ok", accumulated: "ok", done: true, model: "m" }; },
+      }),
+    });
+    const detail = async (id: string) => (await store.listProviders()).find((provider) => provider.id === id)?.detail;
+    try {
+      await store.scanModels();
+      const afterScan = listed;
+      // Every exit: Continue to Chat, Open chat with a local model, Preview with sample data, then what runs in the background.
+      await store.completeFirstRunScan();
+      await store.getAppState();
+      await store.setActiveProviderAndModel("ollama", "m");
+      await store.addSampleTenant().catch(() => undefined);
+      await store.tickOffice().catch(() => undefined);
+      await store.setActiveModel("ollama", "m").catch(() => undefined);
+      assert.equal(listed, afterScan, "no exit and no background caller ran provider detection");
+      assert.equal(await detail("anthropic"), "check 0");
+
+      // Testing and selecting are explicit actions: that provider alone is checked again.
+      generation = 1;
+      await store.testProvider("anthropic");
+      assert.equal(listed, afterScan + 1);
+      assert.equal(await detail("anthropic"), "check 1");
+      assert.equal(await detail("openai"), "check 0");
+      generation = 2;
+      await store.setActiveProvider("openai");
+      assert.equal(listed, afterScan + 2);
+      assert.equal(await detail("openai"), "check 2");
+      assert.equal(await detail("ollama"), "check 0");
+
+      // Refresh providers in Settings checks every provider in full again.
+      await store.refreshProviders();
+      const providers = await store.listProviders();
+      assert.ok(providers.every((provider) => provider.detail === "check 2"));
+      assert.equal(listed, afterScan + 3);
+    } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
 describe("review round 2: coordination and Start (items 3, 7, B)", () => {
   const fresh = async (onList?: () => void) => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));

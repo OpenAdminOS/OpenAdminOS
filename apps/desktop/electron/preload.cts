@@ -75,6 +75,7 @@ const api: OpenAdminOSApi = {
   retryModelScanProbe: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:model-scan-retry", providerId),
   startLocalRuntime: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:start-local-runtime", providerId),
   completeFirstRunScan: () => ipcRenderer.invoke("openadminos:complete-first-run-scan"),
+  refreshProviders: () => ipcRenderer.invoke("openadminos:refresh-providers"),
   setActiveProviderAndModel: (providerId: ProviderId, model: string) =>
     ipcRenderer.invoke("openadminos:set-active-provider-and-model", providerId, model),
   onModelScanProgress: (listener: (probe: ModelScanProbe, scanId?: string) => void): (() => void) => {

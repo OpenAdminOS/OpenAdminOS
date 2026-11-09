@@ -209,6 +209,11 @@ export default function Settings() {
   } = useAppState();
   const { openSetup, startPilot } = useSetupFlow();
   const toast = useToast();
+  // An explicit refresh checks every provider in full, also right after the first-run scan.
+  const refreshProviders = useCallback(async () => {
+    await window.openAdminOS?.refreshProviders?.();
+    await refresh();
+  }, [refresh]);
   const pilot = state.tenants.some(
     (tenant) => tenant.id === state.activeTenantId && tenant.kind === "sample",
   );
@@ -480,7 +485,7 @@ export default function Settings() {
               action={
                 <div className="flex items-center gap-2">
                   <ScanAgainButton />
-                  <UiButton variant="ghost" size="sm" onClick={() => void refresh()}>Refresh providers</UiButton>
+                  <UiButton variant="ghost" size="sm" onClick={() => void refreshProviders()}>Refresh providers</UiButton>
                 </div>
               }
             >

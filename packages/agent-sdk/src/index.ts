@@ -2923,6 +2923,11 @@ export interface OpenAdminOSApi {
   setActiveProviderAndModel?(providerId: ProviderId, model: string): Promise<AppState>;
   /** Records that the first-launch scan was finished or skipped. */
   completeFirstRunScan?(): Promise<AppState>;
+  /**
+   * After the first-launch scan, provider listing serves the scan results;
+   * this asks for every provider to be checked in full from the next read.
+   */
+  refreshProviders?(): Promise<void>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
   getAzureOpenAIConfig(): Promise<AzureOpenAIProviderConfig>;
   setAzureOpenAIConfig(

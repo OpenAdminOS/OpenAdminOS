@@ -5560,6 +5560,7 @@ function registerIpcHandlers() {
     handleTrusted((_event, providerId: unknown) => store.retryModelScanProbe(validateProviderId(providerId, "providerId"))),
   );
   ipcMain.handle("openadminos:complete-first-run-scan", handleTrusted(() => store.completeFirstRunScan()));
+  ipcMain.handle("openadminos:refresh-providers", handleTrusted(() => store.refreshProviders()));
   ipcMain.handle(
     "openadminos:set-active-provider-and-model",
     handleTrusted((_event, providerId: unknown, model: unknown) =>
