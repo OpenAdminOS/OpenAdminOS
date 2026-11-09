@@ -17,7 +17,7 @@ import {
   scanProbeFromProvider,
   type ModelScanCheck,
 } from "./model-scan.js";
-import { checkLmStudio, checkOllama } from "./provider-detail.js";
+import { checkAzureOpenAI, checkLmStudio, checkOllama } from "./provider-detail.js";
 import { chmod, readFile } from "node:fs/promises";
 import { scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
@@ -569,6 +569,44 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     } finally {
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
+describe("failed checks are could not check for every provider (review round 3, item 5)", () => {
+  it("maps a failed check to could not check with its reason, before any provider-specific negative", () => {
+    for (const provider of providerCatalog) {
+      const probe = scanProbeFromProvider({ ...provider, status: "error", checkFailed: true, detail: `${provider.name} failed this check.`, models: [] }, { installedOnDisk: true });
+      assert.equal(probe.state, "could-not-check", provider.id);
+      assert.deepEqual(probe.facts, [`${provider.name} failed this check.`], provider.id);
+    }
+  });
+
+  it("reports an Azure OpenAI endpoint that is not a URL as could not check, with its detail", () => {
+    const azure = providerCatalog.find((provider) => provider.id === "azure-openai")!;
+    const summary = checkAzureOpenAI(azure, { endpoint: "not a url", deployment: "gpt", apiVersion: "2024-10-21", hasKey: true });
+    const probe = scanProbeFromProvider(summary);
+    assert.equal(probe.state, "could-not-check");
+    assert.match(probe.facts.join(" "), /not a valid URL/);
+  });
+
+  it("reports an Apple helper that fails as could not check, end to end through the scan", { skip: process.platform !== "darwin" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-apple-"));
+    const helper = join(dir, "helper");
+    await writeFile(helper, "#!/bin/sh\necho 'not json'\nexit 3\n");
+    await chmod(helper, 0o755);
+    const original = process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER;
+    process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER = helper;
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      const apple = (await store.scanModels()).probes.find((probe) => probe.providerId === "apple-foundation");
+      assert.equal(apple?.state, "could-not-check", apple?.summary);
+      assert.notEqual(apple?.summary, "Not available");
+    } finally {
+      if (original === undefined) delete process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER;
+      else process.env.OPENADMINOS_APPLE_FOUNDATION_HELPER = original;
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }

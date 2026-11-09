@@ -308,6 +308,8 @@ export function checkAzureOpenAI(
     return {
       ...provider,
       status: "error",
+      // The saved settings could not be read as an endpoint: a failed check, not "not configured".
+      checkFailed: true,
       detail: "Azure OpenAI endpoint is not a valid URL. Check Settings.",
       models: [deployment],
       defaultModel: deployment,

@@ -192,6 +192,12 @@ export function scanProbeFromProvider(
   const ready = isProviderReady(provider);
   const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+  // A check that failed is "could not check" with its reason, for every
+  // provider, before any provider-specific negative such as "Not available".
+  if (!ready && provider.checkFailed) {
+    return { ...base, state: "could-not-check", ready: false, summary: "Could not check", facts: [provider.detail ?? `${base.name} did not answer as expected. Retry to check again.`] };
+  }
+
   if (provider.id === "ollama" || provider.id === "lm-studio") {
     const openAdmin = provider.id === "ollama" && hasOpenAdmin8B(provider.models);
     if (ready) {
@@ -206,9 +212,6 @@ export function scanProbeFromProvider(
         ],
         ...(provider.id === "ollama" ? { hasOpenAdmin8B: openAdmin } : {}),
       };
-    }
-    if (provider.checkFailed) {
-      return { ...base, state: "could-not-check", ready: false, summary: "Could not check", facts: [provider.detail ?? `${base.name} did not answer as expected. Retry to check again.`] };
     }
     if (provider.status === "connected") {
       return { ...base, state: "found", ready: false, summary: "Running, no model loaded", facts: [provider.id === "ollama" ? "Pull a model, for example `ollama pull openadminos/openadmin-8b`, then scan again." : "Load a model in LM Studio, then scan again."] };
@@ -242,7 +245,7 @@ export function scanProbeFromProvider(
 
   // Hosted CLIs: the CLI's own version and sign-in status, never a model call.
   const cliState = provider.cli?.state;
-  if (provider.checkFailed || cliState === "request-failed") {
+  if (cliState === "request-failed") {
     return { ...base, state: "could-not-check", ready: false, summary: "Could not check", facts: [provider.detail ?? `${base.name} did not answer. Retry to check again.`] };
   }
   if (provider.status === "not-installed" || cliState === "not-installed") {

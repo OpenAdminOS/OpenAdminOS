@@ -3356,6 +3356,7 @@ export class AppStateStore {
           return {
             ...provider,
             status: "error",
+            checkFailed: true,
             detail: azureOpenAIConfigError,
             models: [],
           };
@@ -3373,6 +3374,7 @@ export class AppStateStore {
       return {
         ...provider,
         status: "error",
+        checkFailed: true,
         detail:
           error instanceof Error
             ? error.message
