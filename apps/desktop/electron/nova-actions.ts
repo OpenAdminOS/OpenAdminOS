@@ -7,6 +7,19 @@ export interface NovaActionHost {
   connectors(): Promise<ConnectorSummary[]>;
   send(input: { connectorId: string; config: Record<string, unknown>; method: string; args: Record<string, unknown>; tenantId: string; actionId: string; signal: AbortSignal }): Promise<unknown>;
   startRun(slug: string, options: StartRunOptions): Promise<RunRecord>;
+  /** The tenant of the active organization now, read when an action runs. */
+  activeTenantId?(): Promise<string | undefined>;
+}
+
+/** Said when the organization changed between the preview and the confirmation. */
+export const NOVA_ORGANIZATION_CHANGED =
+  'The active organization changed after Nova prepared this. Nothing was run or sent. Ask Nova again in the organization you want to use.';
+
+/** An action runs only while the organization it was prepared in is still active. */
+async function assertStillActive(host: NovaActionHost, tenantId: string): Promise<void> {
+  if (host.activeTenantId && (await host.activeTenantId()) !== tenantId) {
+    throw new Error(NOVA_ORGANIZATION_CHANGED);
+  }
 }
 export interface PreparedNovaAction {
   preview: NovaActionPreview;
@@ -65,6 +78,7 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     const agent = candidates[0]!;
     return { preview: { id, title: `Run ${agent.name}`, target: state.tenants.find(t => t.id === tenantId)?.displayName || 'Selected tenant', body: `Run ${agent.name} against the selected tenant. Write plans require their normal review. Existing saved result-delivery routes may send notifications when the run finishes.`, kind: 'run' }, execute: async signal => {
       signal.throwIfAborted();
+      await assertStillActive(host, tenantId);
       const run = await host.startRun(agent.slug, { tenantId, providerId: state.activeProviderId });
       return { text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`, route: `/runs/${run.id}` };
     } };
@@ -103,6 +117,7 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
   const parts = novaMessageParts(evidence, intent.connectorId);
   const deliveryNote = parts.length > 1 ? `This report will be sent as ${parts.length} numbered messages, in order. Review the full content below. If a send fails, remaining messages stop without automatic retries.` : undefined;
   return { preview: { id, kind: 'send', title: `Send via ${connector.descriptor.name}`, target, body: evidence, ...(deliveryNote ? { deliveryNote } : {}) }, execute: async signal => {
+    await assertStillActive(host, tenantId);
     let accepted = 0;
     try {
       for (const [index, part] of parts.entries()) {

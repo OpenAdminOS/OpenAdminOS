@@ -6933,6 +6933,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return this.getAppState();
   }
 
+  /** The active organization's tenant right now, for checks at the moment an action runs. */
+  async activeTenantId(): Promise<string | undefined> {
+    return (await this.read()).activeTenantId;
+  }
+
   async setActiveOrganization(id: string | null): Promise<AppState> {
     await this.serialize(async () => {
       const persisted = await this.read();
