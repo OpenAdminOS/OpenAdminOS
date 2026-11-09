@@ -138,3 +138,11 @@ describe("organization switcher keyboard and focus (review round 1)", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Switch organization, Fabrikam" })).toHaveFocus());
   });
 });
+
+it("marks No organization with a neutral empty tile, not a question mark", async () => {
+  const { activeTenantId: _none, ...state } = createMockAppState();
+  renderSwitcher(state);
+  const chip = await screen.findByRole("button", { name: ORGANIZATION_COPY.chipLabelNone(true) });
+  expect(within(chip).getByTestId("no-organization-mark")).toBeEmptyDOMElement();
+  expect(chip).not.toHaveTextContent("?");
+});

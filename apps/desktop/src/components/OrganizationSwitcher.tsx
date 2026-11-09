@@ -191,9 +191,7 @@ export function OrganizationSwitcher() {
             {active && activeTenant ? (
               <TenantTile tenantId={activeTenant.id} displayName={active.name} size="sm" />
             ) : (
-              <span aria-hidden="true" className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] bg-[var(--color-bubble)] text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-                ?
-              </span>
+              <NoOrganizationMark />
             )}
             <span className="min-w-0 truncate font-medium">
               {active?.name ?? ORGANIZATION_COPY.noOrganization}
@@ -310,9 +308,7 @@ export function OrganizationSwitcher() {
                 onClick={() => void pick(null)}
                 className={`${MENU_ITEM_CLASS} ${!active ? "bg-[var(--color-active)]" : ""}`}
               >
-                <span aria-hidden="true" className="inline-flex h-5 w-5 items-center justify-center rounded-[5px] text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-                  ?
-                </span>
+                <NoOrganizationMark />
                 <span className="min-w-0 flex-1 truncate">{ORGANIZATION_COPY.noOrganization}</span>
                 {!active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
               </button>
@@ -451,5 +447,16 @@ function SwitcherLicenseRetry({ tenant }: { tenant: TenantRecord }) {
     >
       <IconRefresh size={11} />
     </button>
+  );
+}
+
+/** An empty dashed tile, as for a service that is not connected in mockup 32: nothing is chosen, nothing is wrong. */
+function NoOrganizationMark() {
+  return (
+    <span
+      aria-hidden="true"
+      data-testid="no-organization-mark"
+      className="inline-block h-5 w-5 shrink-0 rounded-[5px] border border-dashed border-[var(--color-border-strong)]"
+    />
   );
 }
