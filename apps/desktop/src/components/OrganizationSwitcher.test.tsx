@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { ORGANIZATION_COPY, SERVICE_COPY } from "../copy";
@@ -230,4 +230,94 @@ describe("switcher filter, order and height (design round)", () => {
     expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
     expect(screen.getByTestId("organization-list").className).toMatch(/max-h-\[min\(360px,55vh\)\] overflow-y-auto/);
   });
+});
+
+describe("switcher filter and focus (design round review, Muse E and F)", () => {
+  function many(count: number) {
+    const base = createMockAppState().tenants[0]!;
+    const names = ["Woodgrove Bank", "Fabrikam", "Northwind Traders", "Adatum", "Tailspin Toys", "Litware", "Proseware"];
+    return names.slice(0, count).map((name, index) => ({
+      ...base,
+      id: `tenant-${index}`,
+      displayName: name,
+      username: `admin@${name.split(" ")[0]!.toLowerCase()}.example`,
+      lastUsedAt: `2026-11-0${index + 1}T10:00:00.000Z`,
+    }));
+  }
+
+  it("keeps the filter outside the menu with its own keys, a focus ring and a polite count", async () => {
+    const user = userEvent.setup();
+    const tenants = many(7);
+    const bridge = renderSwitcher(createMockAppState({ tenants, activeTenantId: tenants[0]!.id }));
+    const chip = await screen.findByRole("button", { name: /Switch organization/ });
+    await user.click(chip);
+    const menu = screen.getByRole("menu", { name: ORGANIZATION_COPY.menuLabel });
+    expect(chip).toHaveAttribute("aria-controls", menu.id);
+    const filter = screen.getByRole("searchbox", { name: ORGANIZATION_COPY.findOrganization });
+    expect(menu).not.toContainElement(filter);
+    expect(filter.closest("label")?.className).toContain("focus-within:ring-2");
+    await waitFor(() => expect(filter).toHaveFocus());
+    await user.type(filter, "ware");
+    // Home and End move the caret in the input, not focus in the menu.
+    await user.keyboard("{Home}");
+    expect(filter).toHaveFocus();
+    expect(screen.getByText(ORGANIZATION_COPY.matchCount(2))).toBeInTheDocument();
+    // Down enters the list; Up from its first item returns to the filter.
+    await user.keyboard("{ArrowDown}");
+    expect(within(menu).getAllByRole("menuitemradio")[0]).toHaveFocus();
+    await user.keyboard("{ArrowUp}");
+    expect(filter).toHaveFocus();
+    // Enter picks the first match.
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith("org-tenant-6"));
+  });
+
+  it("keeps focus on the picked organization while busy and after a failed switch", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState().tenants[0]!;
+    let fail!: (error: Error) => void;
+    const bridge = renderSwitcher(createMockAppState({ tenants: [base, { ...base, id: "tenant-2", displayName: "Fabrikam" }] }));
+    vi.mocked(bridge.setActiveOrganization).mockImplementation(() => new Promise((_resolve, reject) => (fail = reject)));
+    await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
+    const fabrikam = screen.getByRole("menuitemradio", { name: /Fabrikam/ });
+    fabrikam.focus();
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(fabrikam).toHaveAttribute("aria-disabled", "true"));
+    expect(fabrikam).not.toBeDisabled();
+    expect(fabrikam).toHaveFocus();
+    fail(new Error("The local state file could not be written."));
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /Fabrikam/ })).toHaveFocus());
+    expect(screen.getByRole("menu", { name: ORGANIZATION_COPY.menuLabel })).toBeInTheDocument();
+  });
+});
+
+it("moves focus from Retry license check to the Cancel that replaces it (design round review, Muse E)", async () => {
+  const user = userEvent.setup();
+  const base = createMockAppState().tenants[0]!;
+  const tenant = { ...base, tierProbeWarning: { message: "The license check did not finish.", at: "2026-11-09T10:00:00.000Z" } } as typeof base;
+  const state = createMockAppState({ tenants: [tenant] });
+  let notify: (() => void) | undefined;
+  const bridge = makeMockBridge({}, state);
+  vi.mocked(bridge.onAppStateChanged!).mockImplementation((listener) => {
+    notify = () => listener({ reason: "tenant-check" });
+    return () => undefined;
+  });
+  // The host reports the check as running, as it does over IPC.
+  vi.mocked(bridge.retryTenantLicenseCheck).mockImplementation(() => {
+    vi.mocked(bridge.getAppState).mockResolvedValue({ ...state, tenantChecks: [{ tenantId: tenant.id, kind: "license", phase: "checking" }] } as never);
+    notify?.();
+    return new Promise(() => undefined);
+  });
+  renderRoute(
+    <>
+      <OrganizationSwitcher />
+      <Routes>
+        <Route path="*" element={<LocationProbe />} />
+      </Routes>
+    </>,
+    { path: "*", route: "/chat", bridge },
+  );
+  await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
+  await user.click(screen.getByRole("menuitem", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
+  await waitFor(() => expect(screen.getByRole("menuitem", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") })).toHaveFocus());
 });

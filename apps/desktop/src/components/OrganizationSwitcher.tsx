@@ -33,6 +33,8 @@ import {
 const MENU_ITEM_CLASS =
   "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]";
 
+const SWITCHER_MENU_ID = "organization-switcher-menu";
+
 /** From this many organizations the switcher starts with a filter field. */
 export const ORGANIZATION_FILTER_FROM = 6;
 
@@ -86,6 +88,19 @@ export function OrganizationSwitcher() {
     return () => window.cancelAnimationFrame(frame);
   }, [open]);
 
+  /** Down moves into the list; Enter picks the first match; Home and End stay in the input. */
+  const onFilterKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      menuItems()[0]?.focus();
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const first = shown[0];
+      if (first) void pick(first.id);
+      else if (showNoOrganization) void pick(null);
+    } else if (event.key === "Tab") close(false);
+  };
+
   const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
     const items = menuItems();
     const index = items.indexOf(document.activeElement as HTMLElement);
@@ -95,7 +110,11 @@ export function OrganizationSwitcher() {
     };
     // From outside the list, Down goes to the first item and Up to the last.
     if (event.key === "ArrowDown") move(index < 0 ? 0 : index + 1);
-    else if (event.key === "ArrowUp") move(index < 0 ? items.length - 1 : index - 1);
+    else if (event.key === "ArrowUp" && index === 0 && filterRef.current) {
+      // Up from the first organization returns to the filter.
+      event.preventDefault();
+      filterRef.current.focus();
+    } else if (event.key === "ArrowUp") move(index < 0 ? items.length - 1 : index - 1);
     else if (event.key === "Home") move(0);
     else if (event.key === "End") move(items.length - 1);
     else if (event.key === "Tab") close(false);
@@ -139,11 +158,16 @@ export function OrganizationSwitcher() {
       close();
       return;
     }
+    // On failure focus goes back to the item that was picked, in the open menu.
+    const origin = document.activeElement instanceof HTMLElement && menuRef.current?.contains(document.activeElement)
+      ? document.activeElement
+      : null;
     setBusy(true);
     try {
       await setActiveOrganization(organizationId);
       close();
     } catch (error) {
+      window.requestAnimationFrame(() => origin?.focus());
       toast.error(
         ORGANIZATION_COPY.switchFailed(
           userFacingErrorReason(error instanceof Error ? error.message : String(error)) ?? "",
@@ -202,6 +226,7 @@ export function OrganizationSwitcher() {
             }}
             aria-haspopup="menu"
             aria-expanded={open}
+            aria-controls={open ? SWITCHER_MENU_ID : undefined}
             aria-label={
               active
                 ? ORGANIZATION_COPY.chipLabel(active.name)
@@ -219,27 +244,36 @@ export function OrganizationSwitcher() {
         </Tooltip>
 
         {open ? (
-          <div
-            ref={menuRef}
-            role="menu"
-            aria-label={ORGANIZATION_COPY.menuLabel}
-            onKeyDown={onMenuKeyDown}
-            className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[320px] overflow-hidden rounded-lg bg-[var(--color-bg-elevated)] p-1.5 shadow-[var(--shadow-pop)]"
-          >
+          <div className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[320px] overflow-hidden rounded-lg bg-[var(--color-bg-elevated)] p-1.5 shadow-[var(--shadow-pop)]">
+            {/* The filter sits outside the menu, so the input keeps its own keys. */}
             {showFilter ? (
-              <label className="mb-1 flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2.5 text-sm text-[var(--color-text-muted)]">
+              <label className="mb-1 flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2.5 text-sm text-[var(--color-text-muted)] focus-within:ring-2 focus-within:ring-[var(--color-focus)]">
                 <IconSearch size={14} aria-hidden="true" />
                 <input
                   ref={filterRef}
                   type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
+                  onKeyDown={onFilterKeyDown}
                   placeholder={ORGANIZATION_COPY.findOrganization}
                   aria-label={ORGANIZATION_COPY.findOrganization}
+                  aria-controls={SWITCHER_MENU_ID}
                   className="min-w-0 flex-1 bg-transparent text-md text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)]"
                 />
               </label>
             ) : null}
+            {showFilter ? (
+              <span role="status" aria-live="polite" className="sr-only">
+                {query.trim() ? ORGANIZATION_COPY.matchCount(shown.length) : ""}
+              </span>
+            ) : null}
+            <div
+              ref={menuRef}
+              id={SWITCHER_MENU_ID}
+              role="menu"
+              aria-label={ORGANIZATION_COPY.menuLabel}
+              onKeyDown={onMenuKeyDown}
+            >
             {organizations.length === 0 ? (
               <div className="px-2.5 py-3 text-sm leading-5 text-[var(--color-text-muted)]">
                 <div className="text-[var(--color-text)]">{ORGANIZATION_COPY.none}</div>
@@ -270,9 +304,12 @@ export function OrganizationSwitcher() {
                           type="button"
                           role="menuitemradio"
                           aria-checked={isActive}
-                          disabled={busy}
+                          // Busy keeps focus on the item: aria-disabled, not disabled.
+                          aria-disabled={busy || undefined}
                           tabIndex={-1}
-                          onClick={() => void pick(organization.id)}
+                          onClick={() => {
+                            if (!busy) void pick(organization.id);
+                          }}
                           className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
                         >
                           <OrganizationAvatar name={organization.name} />
@@ -308,8 +345,10 @@ export function OrganizationSwitcher() {
                     role="menuitemradio"
                     aria-checked={!active}
                     tabIndex={-1}
-                    disabled={busy}
-                    onClick={() => void pick(null)}
+                    aria-disabled={busy || undefined}
+                    onClick={() => {
+                      if (!busy) void pick(null);
+                    }}
                     className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${!active ? "bg-[var(--color-active)]" : ""}`}
                   >
                     <NoOrganizationMark />
@@ -388,6 +427,7 @@ export function OrganizationSwitcher() {
             >
               <IconConnectors size={14} /> {ORGANIZATION_COPY.manageConnections}
             </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -443,6 +483,12 @@ function SwitcherLicenseRetry({ tenant }: { tenant: TenantRecord }) {
       aria-label={label}
       title={label}
       onClick={() => {
+        // The retry button gives way to Cancel; focus moves there, not to the page.
+        window.setTimeout(() =>
+          window.requestAnimationFrame(() =>
+            document.querySelector<HTMLElement>(`[aria-label="${CSS.escape(SERVICE_COPY.cancelCheckFor(tenant.displayName))}"]`)?.focus(),
+          ),
+        );
         void check.run(() => retryTenantLicenseCheck(tenant.id)).then((result) => {
           if (result.status === "ended") {
             if (result.tone === "danger") toast.error(result.message);

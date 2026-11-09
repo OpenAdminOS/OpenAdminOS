@@ -9,6 +9,7 @@ export const ORGANIZATION_COPY = {
   /** The filter shown first in the switcher once there are this many organizations. */
   findOrganization: "Find an organization",
   noMatch: (query: string) => `No organization matches ${query}.`,
+  matchCount: (count: number) => (count === 1 ? "1 organization matches." : `${count} organizations match.`),
   /** One line per organization: its services in words, and its own app registration. */
   servicesLine: (titles: readonly string[], ownRegistration: boolean) =>
     `${titles.length > 0 ? titles.join(", ") : "No services connected"}${ownRegistration ? ". Own app registration" : ""}`,
