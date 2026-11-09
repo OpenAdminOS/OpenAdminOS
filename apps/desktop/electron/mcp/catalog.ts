@@ -250,6 +250,29 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     communityText: true,
   },
   {
+    id: "splashtop-docs",
+    name: "Splashtop Docs",
+    publisher: "Splashtop",
+    url: "https://docs.splashtop.com/mcp",
+    description:
+      "The Splashtop Open API reference: endpoints, parameters, authentication and regions for Splashtop Enterprise. Chat can look up which endpoint lists computers, sessions or logs and how to call it. Read-only reference; it never calls the Splashtop API for you.",
+    pitch: "Splashtop Open API reference: endpoints, parameters and how to call them.",
+    useFor: "Splashtop Open API questions: which endpoint to use, its parameters, authentication and regional base URLs. Not for Microsoft 365 or Intune.",
+    aliases: ["splashtop", "splashtop docs", "splashtop api"],
+    topics: ["splashtop", "remote access", "remote support", "splashtop api", "open api"],
+    auth: "none",
+    readOnly: true,
+    // The server also lists execute-request, which sends any request to the Splashtop API
+    // through the server operator. Only the four reference tools are used.
+    tools: ["search-endpoints", "list-endpoints", "get-endpoint", "get-server-variables"],
+    queryHints: {
+      "search-endpoints": "pattern takes a short keyword such as computers, sessions or logs.",
+      "get-endpoint": "path is an API path from search-endpoints, method is GET, POST, PUT or DELETE.",
+    },
+    operator: "ReadMe hosts this server for Splashtop and generates it from Splashtop's API documentation.",
+    policy: { label: "Splashtop API documentation", url: "https://docs.splashtop.com/docs/getting-started" },
+  },
+  {
     id: "endoflife-ai",
     name: "endoflife.ai",
     publisher: "EndofLife AI Inc.",
