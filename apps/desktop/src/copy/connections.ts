@@ -70,11 +70,11 @@ export const CONNECTIONS_COPY = {
     promptsLocal: "Nowhere, the model is local",
     /**
      * The region of a hosted provider. No provider reports it to
-     * OpenAdminOS today, so the map says where it is decided.
+     * OpenAdminOS today, and the map never guesses one.
      * TODO(ugur): show the region itself once providers carry one, for
      * example "Anthropic API · US".
      */
-    hostedRegion: (provider: string) => `Region set by your ${provider} account`,
+    hostedRegion: (_provider: string) => "Region not reported to OpenAdminOS",
     promptsNoModel: "Nowhere, no model is ready",
     promptsSample: "Nowhere, sample answers are prepared",
     noServices: "No service connected",
