@@ -22,8 +22,8 @@ Results come back as third-party reference material. Chat numbers and cites them
 | IntuneAutomation | www.intuneautomation.com | IntuneAutomation | PowerShell scripts for Intune automation | Every tool the server lists |
 | Microsoft Release Communications | www.microsoft.com | Microsoft | Microsoft 365 roadmap items and Azure updates, including retirements | `get_recent_m365_roadmaps`, `get_m365_roadmap_by_id`, `get_recent_azure_updates`, `get_azure_update_by_id` |
 | WindowsForum | mcp.windowsforum.com | WindowsForum.com | Windows update KB articles, release dates and known issues | `search_kb`, `get_kb_article` |
-| Splashtop Docs | docs.splashtop.com | Splashtop | The Splashtop Open API reference: endpoints, parameters, regions | `search-endpoints`, `list-endpoints`, `get-endpoint`, `get-server-variables` |
-| Splashtop Knowledge Base | support-splashtopbusiness.splashtop.com | Splashtop | Splashtop Help Center articles. Built into OpenAdminOS: no MCP server in between | `search_articles`, `get_article` |
+| Splashtop API Reference | docs.splashtop.com | Splashtop | The Splashtop Open API reference: endpoints, parameters, regions | `search-endpoints`, `list-endpoints`, `get-endpoint`, `get-server-variables` |
+| Splashtop Docs | support-splashtopbusiness.splashtop.com | Splashtop | Splashtop Help Center articles. Built into OpenAdminOS: no MCP server in between | `search_articles`, `get_article` |
 | endoflife.ai | mcp.endoflife.ai | EndofLife AI Inc. | End-of-life and end-of-support dates, lifecycles, upgrade paths, CISA KEV exposure | Every tool except `scan_stack` and `check_sbom` |
 
 The **Splashtop** listing is a connection, not a reference: it opens the connect step on **Connections**, where the Splashtop Open API is connected to one organization with an API token. See [Splashtop](../services/splashtop.md).
@@ -35,7 +35,7 @@ Some servers list more tools than OpenAdminOS needs. For those, the catalog name
 - **WindowsForum** lists 29 tools, including forum search and member lookups. Only the two Knowledge Base tools are offered, because Chat needs update articles, not forum or member data.
 - **endoflife.ai** offers everything except `scan_stack` and `check_sbom`. Those take a whole software inventory or bill of materials, which would send a list of what runs in your estate.
 - **Release Communications** offers all four of its tools.
-- **Splashtop Docs** offers its four reference tools. Its `execute-request` tool, which would send any request to the Splashtop API through the server operator, is never offered.
+- **Splashtop API Reference** offers its four reference tools. Its `execute-request` tool, which would send any request to the Splashtop API through the server operator, is never offered.
 
 If a server stops listing an offered tool, its card says "Installed · tools missing", its details name the missing tools, and Chat does not use the server until Check connection finds every offered tool again. Chat also notices this on its own: when a call opens a new session, for example after a restart, and the server no longer lists an offered tool, the call is refused before anything is sent, the answer says which tool is missing, and the card changes to "Installed · tools missing".
 

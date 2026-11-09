@@ -1888,11 +1888,11 @@ Also: choke point enumeration with a closed lease (Graph, MSAL, session, connect
 
 # Splashtop: support assistant and Open API connection (2026-11-09)
 
-Branch `splashtop/connection`, based on `main` after PR #174. Includes the two prepared commits from `splashtop/marketplace` (Splashtop Docs MCP, Coming soon card, which this branch replaces).
+Branch `splashtop/connection`, based on `main` after PR #174. Includes the two prepared commits from `splashtop/marketplace` (Splashtop API Reference MCP, Coming soon card, which this branch replaces).
 
 ## Decisions (maintainer, 2026-11-09)
 
-1. Support assistant without sign-in: the Splashtop Docs MCP (`docs.splashtop.com/mcp`, four reference tools) and a built-in knowledge base search over Splashtop's Zendesk Help Center (`support-splashtopbusiness.splashtop.com/api/v2/help_center/...`, public, no auth), offered to Chat as a built-in public reference with `search_articles` and `get_article`, installable in the Marketplace, off by default, with the public reference trust disclosure, third-party fencing and designed errors.
+1. Support assistant without sign-in: the Splashtop API Reference MCP (`docs.splashtop.com/mcp`, four reference tools) and a built-in knowledge base search over Splashtop's Zendesk Help Center (`support-splashtopbusiness.splashtop.com/api/v2/help_center/...`, public, no auth), offered to Chat as a built-in public reference with `search_articles` and `get_article`, installable in the Marketplace, off by default, with the public reference trust disclosure, third-party fencing and designed errors.
 2. Splashtop Open API as a built-in service per organization: a Team Owner or Super Admin API token, stored with safeStorage and bound to the organization, sent only to the regional host (Global/US `webapi.splashtop.com`, EU `webapi.splashtop.eu`, Oceania `webapi.splashtop.nr`, paths `/api/open/v1/...`, Bearer). Enterprise only. Connect, test, rotate and disconnect on Connections, audited. Designed errors for 401, 403, 429 and a wrong region.
 3. Reads as a service with parts (computers, inventory, users and groups, sessions and logs, policies and vulnerabilities), each a paginated read tool. Results are organization data.
 4. Writes as write plans with diff confirmation: reboot computers, delete a computer, disable a user, end a session (destructive, typed phrase), rename a computer (non-destructive). Existing write-plan and confirmation path, so organization isolation applies.
@@ -1908,8 +1908,8 @@ Branch `splashtop/connection`, based on `main` after PR #174. Includes the two p
 
 ## Acceptance criteria
 
-1. Splashtop Knowledge Base is a Marketplace listing (Built in, off by default, host `support-splashtopbusiness.splashtop.com` named in the install review). Installed and enabled, Chat offers `search_articles` and `get_article`; params pass the public reference egress checks; results are fenced as third-party content with article links as sources. 404, 429 (with the wait time), 5xx, timeouts, network failures and malformed answers each give a designed message. Tests with mocked HTTP.
-2. Splashtop Docs MCP and the knowledge base search are verified live once (no auth), recorded below.
+1. Splashtop Docs is a Marketplace listing (Built in, off by default, host `support-splashtopbusiness.splashtop.com` named in the install review). Installed and enabled, Chat offers `search_articles` and `get_article`; params pass the public reference egress checks; results are fenced as third-party content with article links as sources. 404, 429 (with the wait time), 5xx, timeouts, network failures and malformed answers each give a designed message. Tests with mocked HTTP.
+2. Splashtop API Reference MCP and the knowledge base search are verified live once (no auth), recorded below.
 3. Connections shows Splashtop under Other services for the active organization: Connect (region, token, what it needs, where it goes), Test, Rotate token, Disconnect. The token is never returned to the renderer, is stored with safeStorage under the organization id, and is sent only to the chosen region's host over HTTPS with no redirects. Connect calls `users/basic_info` and saves nothing on failure. 401, 403 (plan or role), 429, a wrong region and network failures each give a designed message. Tests cover storage, host binding, region and each error.
 4. Connect, rotate and disconnect record configuration audit events with no secret. Disconnecting the organization (Microsoft 365) also deletes its Splashtop token and connection.
 5. Chat read tools for the active organization only: computers, inventory, users, groups, session logs (active and finished), team history (audit), endpoint policies and vulnerabilities, each with pagination and a row cap. Results are fenced as organization data and their values never reach a public reference query. A test proves another organization's token is never used.
@@ -1920,7 +1920,7 @@ Branch `splashtop/connection`, based on `main` after PR #174. Includes the two p
 
 ## Live verification
 
-- 2026-11-09, Splashtop Docs MCP (`https://docs.splashtop.com/mcp`, no auth): `initialize` (server "Splashtop API" 1.0, protocol 2025-06-18), `tools/list` (five tools; the four offered are present), `list-endpoints` (the full Open API path list used to build the client), `get-endpoint` for every endpoint OpenAdminOS calls, and `get-server-variables` (the three regional hosts). Also through OpenAdminOS's MCP host: handshake, allowlist and `search-endpoints` for reboot (`electron/splashtop/live.test.ts`).
+- 2026-11-09, Splashtop API Reference MCP (`https://docs.splashtop.com/mcp`, no auth): `initialize` (server "Splashtop API" 1.0, protocol 2025-06-18), `tools/list` (five tools; the four offered are present), `list-endpoints` (the full Open API path list used to build the client), `get-endpoint` for every endpoint OpenAdminOS calls, and `get-server-variables` (the three regional hosts). Also through OpenAdminOS's MCP host: handshake, allowlist and `search-endpoints` for reboot (`electron/splashtop/live.test.ts`).
 - 2026-11-09, Splashtop Help Center (no auth): `GET /api/v2/help_center/articles/search.json?query=reboot computer` (200, 492 results, `x-rate-limit: 700`), `GET /api/v2/help_center/en-us/articles/115000983226.json` (200, article with body HTML), a missing article (404), an empty query (refused by Zendesk with a message, OpenAdminOS refuses it before sending). Also through the built-in reference: search and article read (`electron/splashtop/live.test.ts`).
 - Not verified live: the Splashtop Open API itself. It needs an Enterprise API token, which this environment does not have. Request and answer shapes follow the endpoint specs above; tests use mocked answers in those shapes.
 
