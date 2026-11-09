@@ -189,12 +189,12 @@ describe("first-launch model scan screen", () => {
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
     await finish();
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.chooseTitle });
-    const node = (initials: string) => [...container.querySelectorAll<HTMLElement>(".scan-node")].find((entry) => entry.textContent?.startsWith(initials))!;
-    expect(node("Ol")).toHaveAttribute("data-selected", "true");
+    const node = (name: string) => [...container.querySelectorAll<HTMLElement>(".scan-node")].find((entry) => entry.querySelector(".scan-node-name")?.textContent === name)!;
+    expect(node("Ollama")).toHaveAttribute("data-selected", "true");
     await user.click(radio("Claude Code"));
-    expect(node("Cc")).toHaveAttribute("data-selected", "true");
-    expect(node("Ol")).toHaveAttribute("data-selected", "false");
-    await user.click(node("Ol"));
+    expect(node("Claude Code")).toHaveAttribute("data-selected", "true");
+    expect(node("Ollama")).toHaveAttribute("data-selected", "false");
+    await user.click(node("Ollama"));
     expect(radio("Ollama")).toBeChecked();
   });
 

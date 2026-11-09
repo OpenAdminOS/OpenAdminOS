@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/Button";
-import { ServiceMark, serviceLetters } from "../components/ServiceMark";
+import { ServiceLogo, ServiceMark } from "../components/ServiceMark";
 import { useToast } from "../components/Toast";
 import { adminApprovalMessage } from "../components/chat/ChatFirstRun";
 import { IconCheck, IconLogo } from "../components/icons";
@@ -232,9 +232,9 @@ function Permissions({ serviceIds, withSignIn }: { serviceIds: readonly ServiceI
       {/* Capped so the actions stay in view; it scrolls, and takes focus to scroll by keyboard. */}
       <ul tabIndex={0} aria-label="Permissions" className="permission-list mt-2 max-h-[118px] space-y-1.5 overflow-y-auto pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
         {groups.map((group) => (
-          <li key={group.label} className="grid grid-cols-[76px_minmax(0,1fr)] gap-x-2">
-            <span className="text-xs leading-5 text-[var(--color-text-soft)]">{group.label}</span>
-            <span className="font-mono text-xs leading-5 text-[var(--color-text-muted)] [overflow-wrap:anywhere]">{group.scopes.join(", ")}</span>
+          <li key={group.label}>
+            <span className="block text-xs leading-5 text-[var(--color-text-soft)]">{group.label}</span>
+            <span className="block break-words font-mono text-xs leading-5 text-[var(--color-text-muted)]">{group.scopes.join(", ")}</span>
           </li>
         ))}
       </ul>
@@ -353,7 +353,9 @@ function MicrosoftStage({
             data-state={state}
             onClick={state === "connected" ? undefined : () => onToggle(service.id)}
           >
-            <span className="ms-node-tile flex items-center justify-center font-medium">{serviceLetters(service.id, service.title)}</span>
+            <span className="ms-node-tile flex items-center justify-center font-medium">
+              <ServiceLogo service={service.id} title={service.title} size={28} />
+            </span>
             <span className="scan-node-plate mt-1.5 flex flex-col items-center rounded-[6px] px-1.5">
               <span className="ms-node-name text-sm font-medium leading-[18px]">{service.title}</span>
               <span className="ms-node-status text-xs leading-4">
