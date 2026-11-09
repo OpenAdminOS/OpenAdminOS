@@ -48,6 +48,7 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { hostedChannel } from "../shared/providers";
 import { chatToolHosts, deriveDataBoundary, novaVoiceSentence, useAppState, useDataBoundaryOptional } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
+import { TenantCleanupNotice } from "../components/TenantCleanupNotice";
 
 interface ReachService {
   serviceId: ServiceId;
@@ -1309,6 +1310,7 @@ export default function Connections() {
           </div>
         ) : (
           <div className="connections-page calm-page-column-wide pb-16">
+            <TenantCleanupNotice className="mb-5" />
             <Tabs
               className="mb-5"
               ariaLabel={CONNECTIONS_COPY.viewsLabel}

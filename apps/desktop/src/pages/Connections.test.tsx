@@ -923,3 +923,43 @@ describe("hosted voice with a hosted chat model and references (design round rev
     expect(composer).toContain("learn.microsoft.com and www.kqlsearch.com");
   });
 });
+
+describe("Disconnect redesign: a partial outcome is a warning (Muse 1)", () => {
+  it("says the organization was removed and what is pending, then offers Retry cleanup until it finishes", async () => {
+    const user = userEvent.setup();
+    const pending = { tenantId: "tenant-1", displayName: "Contoso IT", removedAt: "2026-11-09T10:00:00.000Z", error: "Its Agent Team data could not be deleted. The database is locked." };
+    const disconnectTenant = vi.fn(async () => createMockAppState({ tenants: [], tenantCleanups: [pending] }));
+    const bridge = render(createMockAppState(), { disconnectTenant });
+    await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+    await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
+    const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
+    await user.click(within(dialog).getByRole("checkbox", { name: ORGANIZATION_COPY.disconnectConfirmLocal("Contoso IT") }));
+    await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectAction }));
+    // Not "Disconnecting failed": a warning with what was done and what is pending.
+    expect(await screen.findByText(ORGANIZATION_COPY.disconnectedCleanupPending("Contoso IT", pending.error))).toBeInTheDocument();
+    expect(screen.queryByText(/Disconnecting failed/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ })).not.toBeInTheDocument();
+    const notice = await screen.findByRole("region", { name: ORGANIZATION_COPY.cleanupHeading });
+    expect(notice).toHaveTextContent(ORGANIZATION_COPY.cleanupBody("Contoso IT", pending.error));
+    await user.click(within(notice).getByRole("button", { name: `${ORGANIZATION_COPY.retryCleanup}, Contoso IT` }));
+    await waitFor(() => expect(bridge.retryTenantCleanup).toHaveBeenCalledWith("tenant-1"));
+    expect(await screen.findByText(ORGANIZATION_COPY.cleanupFinished("Contoso IT"))).toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByRole("region", { name: ORGANIZATION_COPY.cleanupHeading })).not.toBeInTheDocument());
+  });
+
+  it("reloads the state after a failed disconnect, so the page shows what changed on the host", async () => {
+    const user = userEvent.setup();
+    const disconnectTenant = vi.fn(async () => {
+      throw new Error("The local state file could not be written.");
+    });
+    const bridge = render(createMockAppState(), { disconnectTenant });
+    await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+    await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
+    const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
+    await user.click(within(dialog).getByRole("checkbox", { name: ORGANIZATION_COPY.disconnectConfirmLocal("Contoso IT") }));
+    const reads = bridge.getAppState.mock.calls.length;
+    await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectAction }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent("The local state file could not be written.");
+    await waitFor(() => expect(bridge.getAppState.mock.calls.length).toBeGreaterThan(reads));
+  });
+});

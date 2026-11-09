@@ -63,6 +63,17 @@ export const ORGANIZATION_COPY = {
   disconnectSchedules: "Its schedules stay on their agents, unassigned, until you assign them to another organization.",
   disconnectConfirmLocal: (name: string) => `Delete ${name}'s local data from this device`,
   disconnected: (name: string) => `${name} disconnected. Its local data was deleted from this device.`,
+  /** Disconnect removed the organization, but its cleanup did not finish. A warning, not a failure. */
+  disconnectedCleanupPending: (name: string, error?: string) =>
+    `${name} was removed and its work stopped. Cleanup on this device is pending${error ? `: ${error}` : "."} It resumes at the next launch, or choose Retry cleanup on Connections.`,
+  cleanupHeading: "Disconnect cleanup pending",
+  cleanupBody: (name: string, error?: string) =>
+    `${name} is removed, but its cleanup on this device has not finished${error ? `: ${error}` : "."} Cleanup resumes at the next launch. ${name} can be connected again once it finishes.`,
+  retryCleanup: "Retry cleanup",
+  retryingCleanup: "Retrying cleanup",
+  cleanupFinished: (name: string) => `Cleanup of ${name} finished. Its local data was deleted from this device.`,
+  cleanupStillPending: (name: string, error?: string) =>
+    `Cleanup of ${name} did not finish${error ? `: ${error}` : "."} Try again, or restart OpenAdminOS to resume it.`,
   disconnectFailed: (detail: string) =>
     `Disconnecting failed.${detail ? ` ${detail}` : ""} Restart OpenAdminOS, check that secure storage is available, then try again.`,
   renameLabel: "Organization name",

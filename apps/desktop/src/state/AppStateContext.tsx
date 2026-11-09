@@ -32,6 +32,7 @@ import {
   type RequestedScope,
   type RunRecord,
   type StartRunOptions,
+  type TenantCleanupSummary,
   type TenantRecord,
 } from "../shared/openAdminOS";
 
@@ -80,7 +81,13 @@ interface AppStateContextValue {
   renameOrganization: (id: string, name: string) => Promise<void>;
   assignAgentSchedule: (slug: string, organizationId: string) => Promise<void>;
   dismissOrganizationMigrationNotice: () => Promise<void>;
-  disconnectTenant: (id: string) => Promise<void>;
+  /**
+   * Disconnect a tenant. Resolves with its pending cleanup when the
+   * organization was removed but its cleanup did not finish.
+   */
+  disconnectTenant: (id: string) => Promise<TenantCleanupSummary | undefined>;
+  /** Retry a pending disconnect cleanup. Resolves with it when still pending. */
+  retryTenantCleanup: (id: string) => Promise<TenantCleanupSummary | undefined>;
   removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
   updateAgentSettings: (
     slug: string,
@@ -681,16 +688,35 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
 
   const disconnectTenant = useCallback(async (id: string) => {
     const api = getOpenAdminOSApi();
-    if (!api) return;
+    if (!api) return undefined;
     setError(null);
     try {
       const nextState = await api.disconnectTenant(id);
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
+      return nextState.tenantCleanups?.find((cleanup) => cleanup.tenantId === id);
     } catch (caughtError) {
       const tenantError = toError(caughtError);
       setError(tenantError);
+      // What changed on the host is shown even when the call failed.
+      await api.getAppState().then((fresh) => {
+        setState(fresh);
+        setRegistryAgents(fresh.registryAgents);
+      }).catch(() => undefined);
       throw tenantError;
+    }
+  }, []);
+
+  const retryTenantCleanup = useCallback(async (id: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) return undefined;
+    try {
+      const nextState = await api.retryTenantCleanup(id);
+      setState(nextState);
+      return nextState.tenantCleanups?.find((cleanup) => cleanup.tenantId === id);
+    } catch (caughtError) {
+      await api.getAppState().then(setState).catch(() => undefined);
+      throw toError(caughtError);
     }
   }, []);
 
@@ -1211,6 +1237,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       assignAgentSchedule,
       dismissOrganizationMigrationNotice,
       disconnectTenant,
+      retryTenantCleanup,
       removeSavedAppRegistration,
       updateAgentSettings,
       updateAgentSchedule,
@@ -1240,6 +1267,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       cancelTenantCheck,
       addSampleTenant,
       disconnectTenant,
+      retryTenantCleanup,
       removeSavedAppRegistration,
       draftAgentManifest,
       error,

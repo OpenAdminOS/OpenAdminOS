@@ -183,8 +183,9 @@ export function OrganizationSwitcher() {
     if (!pendingDisconnect) return;
     setBusy(true);
     try {
-      await disconnectTenant(pendingDisconnect.tenantId);
-      toast.success(
+      const pending = await disconnectTenant(pendingDisconnect.tenantId);
+      if (pending) toast.warning(ORGANIZATION_COPY.disconnectedCleanupPending(pendingDisconnect.name, pending.error));
+      else toast.success(
         pendingDisconnect.sample
           ? "Pilot mode ended. Its sample data was deleted from this device."
           : ORGANIZATION_COPY.disconnected(pendingDisconnect.name),

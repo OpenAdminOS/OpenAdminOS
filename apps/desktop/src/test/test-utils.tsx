@@ -752,6 +752,11 @@ export function makeMockBridge(
         tenants: appState.tenants.filter((tenant) => tenant.id !== id),
       }),
     ),
+    retryTenantCleanup: vi.fn(async (id: string) => {
+      const { tenantCleanups, ...rest } = appState;
+      const remaining = (tenantCleanups ?? []).filter((cleanup) => cleanup.tenantId !== id);
+      return updateState(remaining.length > 0 ? { ...rest, tenantCleanups: remaining } : rest);
+    }),
     removeSavedAppRegistration: vi.fn(async (clientId: string, directoryTenantId?: string) =>
       updateState({
         ...appState,

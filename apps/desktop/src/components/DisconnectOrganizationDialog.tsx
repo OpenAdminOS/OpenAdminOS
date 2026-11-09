@@ -102,8 +102,11 @@ export function DisconnectOrganizationDialog({
               setBusy(true);
               setError(null);
               void disconnectTenant(tenant.id)
-                .then(() => {
-                  toast.success(sample ? "Pilot mode ended. Its sample data was deleted from this device." : ORGANIZATION_COPY.disconnected(organization.name));
+                .then((pending) => {
+                  // Removed, with its cleanup pending: a warning with what is
+                  // done and what is not, never a failure.
+                  if (pending) toast.warning(ORGANIZATION_COPY.disconnectedCleanupPending(organization.name, pending.error));
+                  else toast.success(sample ? "Pilot mode ended. Its sample data was deleted from this device." : ORGANIZATION_COPY.disconnected(organization.name));
                   onClose();
                 })
                 .catch((caught) =>
