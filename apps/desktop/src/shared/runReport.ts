@@ -19,7 +19,8 @@ export function runReportPlaintext(
     `Started: ${run.queuedAt}`,
     `Duration: ${formatDuration(run)}`,
     `Provider: ${runProviderLabel(run)}`,
-    `Tenant: ${tenant}`,
+    // A run with no organization says so, as delivered reports do.
+    run.tenantId ? `Tenant: ${tenant}` : "Organization: none",
     ...(ctx.sampleData ? ["Data: Pilot mode sample data from a fictional company"] : []),
   ];
 
@@ -63,7 +64,7 @@ export function runReportMarkdown(
     `**Started:** ${run.queuedAt}`,
     `**Duration:** ${formatDuration(run)}`,
     `**Provider:** ${run.pilot ? PILOT_COPY.providerName : `${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`}`,
-    `**Tenant:** ${tenant}`,
+    run.tenantId ? `**Tenant:** ${tenant}` : "**Organization:** none",
     ...(ctx.sampleData ? ["**Data:** Pilot mode sample data from a fictional company"] : []),
   ];
 
