@@ -62,8 +62,8 @@ describe("agents by service", () => {
     });
 
     const list = await screen.findByLabelText("Installed agents");
-    expect(within(list).getByLabelText("Needs Defender")).toBeInTheDocument();
-    expect(within(list).getByLabelText("Needs Entra")).toBeInTheDocument();
+    expect(within(list).getByText("Needs Defender")).toBeInTheDocument();
+    expect(within(list).getByText("Needs Entra")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
     expect(screen.getByRole("menuitemradio", { name: "All services" })).toHaveAttribute("aria-checked", "true");
@@ -252,11 +252,11 @@ describe("agents with service needs", () => {
     const list = await screen.findByLabelText("Installed agents");
     const row = (name: string) => within(list).getByText(name).closest(".calm-list-row") as HTMLElement;
     expect(within(row("Secure score prioritizer")).getByRole("button", { name: "Connect Defender" })).toBeInTheDocument();
-    expect(within(row("Secure score prioritizer")).getByLabelText("Needs Defender, not connected")).toBeInTheDocument();
+    expect(within(row("Secure score prioritizer")).getByText("Needs Defender, not connected")).toBeInTheDocument();
     expect(within(row("Sign-in failures")).getByRole("button", { name: "Add sign-in logs" })).toBeInTheDocument();
-    expect(within(row("Sign-in failures")).getByLabelText("Needs Entra; Entra sign-in logs, not connected")).toBeInTheDocument();
+    expect(within(row("Sign-in failures")).getByText("Needs Entra; Entra sign-in logs, not connected")).toBeInTheDocument();
     expect(within(row("Guest review")).getByRole("button", { name: "Run" })).toBeInTheDocument();
-    expect(within(row("Script draft")).getByLabelText("No service needed")).toBeInTheDocument();
+    expect(within(row("Script draft")).getAllByText("No service needed")[0]).toHaveClass("sr-only");
     expect(within(row("Script draft")).getByRole("button", { name: "Run" })).toBeInTheDocument();
   });
 
@@ -383,4 +383,15 @@ it("names the Azure OpenAI API, not a local CLI, in the run review", async () =>
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
   expect(dialog).toHaveTextContent("sent through the Azure OpenAI API to your deployment");
   expect(dialog).not.toHaveTextContent("local CLI");
+});
+
+it("gives screen readers the service needs as text, not a label on a span", async () => {
+  const agent = createMockAgent({ id: "score", slug: "score", name: "Secure score prioritizer", mode: "read", scopes: ["SecurityEvents.Read.All"], services: ["defender"] });
+  renderRoute(<Agents />, { path: "/agents", route: "/agents", bridge: makeMockBridge({}, createMockAppState({ tenants: [intuneOnlyTenant], installedAgents: [agent] })) });
+  const text = await screen.findByText("Needs Defender, not connected");
+  expect(text).toHaveClass("sr-only");
+  expect(text.closest("[aria-hidden='true']")).toBeNull();
+  // The row button's accessible name includes the needs.
+  expect(screen.getByRole("button", { name: /Secure score prioritizer.*Needs Defender, not connected/ })).toBeInTheDocument();
+  expect(document.querySelector("span[aria-label^='Needs']")).toBeNull();
 });
