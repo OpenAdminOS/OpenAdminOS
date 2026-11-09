@@ -325,6 +325,39 @@ describe("first-launch model scan screen", () => {
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
   });
 
+  it("keeps every exit disabled while a Start is polling (Muse round 3, M2)", async () => {
+    const user = userEvent.setup();
+    const stopped = [probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Installed, not running", ready: false })];
+    const { bridge, finish } = scanBridge({ kind: "nothing" }, stopped);
+    vi.mocked(bridge.startLocalRuntime!).mockReturnValue(new Promise(() => undefined));
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    await user.click((await screen.findAllByRole("button", { name: "Start Ollama" }))[0]!);
+    await waitFor(() => expect(bridge.startLocalRuntime).toHaveBeenCalledOnce());
+    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.previewLink]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.continueWithoutModel }));
+    expect(bridge.completeFirstRunScan).not.toHaveBeenCalled();
+  });
+
+  it("leaves once when Continue is pressed twice before it settles (Muse round 3, M2)", async () => {
+    const user = userEvent.setup();
+    const { bridge } = scanBridge({ kind: "nothing" });
+    let complete: (() => void) | undefined;
+    vi.mocked(bridge.completeFirstRunScan!).mockImplementation(() => new Promise((resolve) => { complete = () => resolve(createMockAppState()); }));
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    const continueButton = screen.getByRole("button", { name: MODEL_SCAN_COPY.continueToChat });
+    await user.click(continueButton);
+    await waitFor(() => expect(continueButton).toBeDisabled());
+    await user.click(continueButton);
+    complete?.();
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    expect(bridge.completeFirstRunScan).toHaveBeenCalledOnce();
+  });
+
   it("focuses the heading on open and on settle (round 2, item L)", async () => {
     const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] });
     renderGate(bridge);

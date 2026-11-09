@@ -350,7 +350,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   };
 
   const start = async (probe: ModelScanProbe) => {
-    if (!api?.startLocalRuntime) return;
+    if (!api?.startLocalRuntime || finishing.current || busy !== null) return;
     setBusy(`start:${probe.providerId}`);
     setStartErrors(({ [probe.providerId]: _cleared, ...others }) => others);
     setAnnouncement(MODEL_SCAN_COPY.starting(probe.name));
@@ -375,7 +375,13 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     }
   };
 
+  // Set while the window is leaving: no second exit, Start or switch runs meanwhile.
+  const finishing = useRef(false);
+
   const finish = async (to: string | null) => {
+    if (finishing.current) return;
+    finishing.current = true;
+    setBusy((current) => current ?? "finish");
     setActionError(null);
     try {
       if (firstRun) await api?.completeFirstRunScan?.();
@@ -383,11 +389,14 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
       onClose();
       if (to) navigate(to);
     } catch (caught) {
+      finishing.current = false;
+      setBusy((current) => (current === "finish" ? null : current));
       setActionError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
   const useHosted = async (providerId: ProviderId) => {
+    if (finishing.current || busy !== null) return;
     setBusy(providerId);
     setActionError(null);
     try {
@@ -402,6 +411,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
 
   // An explicit switch to a local model the admin did not choose before.
   const switchLocal = async (providerId: ProviderId, model?: string) => {
+    if (finishing.current || busy !== null) return;
     setBusy(providerId);
     setActionError(null);
     try {
@@ -417,6 +427,8 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   };
 
   const preview = async () => {
+    if (finishing.current || busy !== null) return;
+    finishing.current = true;
     setBusy("preview");
     setActionError(null);
     try {
@@ -424,6 +436,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
       await startPilot();
       onClose();
     } catch (caught) {
+      finishing.current = false;
       setActionError(MODEL_SCAN_COPY.previewFailed(caught instanceof Error ? caught.message : String(caught)));
     } finally {
       setBusy(null);
@@ -497,7 +510,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                 {!scanError ? (
                   // A scan that stalls before its checks can still be left; nothing is selected.
                   <p className="mt-6 text-sm">
-                    <button type="button" onClick={() => void finish("/chat")} className={linkClass}>
+                    <button type="button" disabled={busy !== null} onClick={() => void finish("/chat")} className={linkClass}>
                       {MODEL_SCAN_COPY.continueToChat}
                     </button>
                   </p>
@@ -507,10 +520,10 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                     <p className="font-medium">{MODEL_SCAN_COPY.scanFailed}</p>
                     <p className="mt-1">{scanError}</p>
                     <div className="mt-3 flex gap-2">
-                      <Button size="sm" variant="secondary" onClick={() => setRun((value) => value + 1)}>
+                      <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => setRun((value) => value + 1)}>
                         {MODEL_SCAN_COPY.scanAgain}
                       </Button>
-                      <Button size="sm" variant="ghost" onClick={() => void finish("/chat")}>
+                      <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void finish("/chat")}>
                         {MODEL_SCAN_COPY.continueToChat}
                       </Button>
                     </div>
