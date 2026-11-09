@@ -1801,8 +1801,13 @@ enforced at choke points, not by each caller.
   guarded fetch. Connectors receive the host transport in
   `ConnectorBuildContext.fetch` (every request and retry) and
   `ConnectorBuildContext.assertEgress` (called right before a send over a
-  transport that is not fetch: the WhatsApp socket and the Signal CLI). A
-  forgotten caller still cannot reach the network for a closing tenant.
+  transport that is not fetch: the WhatsApp socket and the Signal CLI). Model
+  requests that carry tenant data are a choke point too: Chat gets its model
+  through a tenant-scoped wrapper and Agent Team through its host, so every
+  `complete` or `stream` is refused once one of the tenants in its prompt is
+  closing and one in flight is aborted with the lease signal; runs stop through
+  their lease-cancelled controller. A forgotten caller still cannot reach the
+  network for a closing tenant.
 - **Persistence choke points.** Tenant-scoped writes in the SQLite store
   (conversations, messages, tool calls, graph cache, drift baselines, multi-tenant
   jobs and batches, workspaces, learning events, the refresh schedule) and in

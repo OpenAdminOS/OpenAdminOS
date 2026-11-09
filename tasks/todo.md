@@ -1876,6 +1876,12 @@ Also: choke point enumeration with a closed lease (Graph, MSAL, session, connect
 2. [x] Gateway read tools are leased; covered by reproduction 4 and the enumeration test.
 3. [x] Nits: `stopRunsForTenant` is removed (the bounded lease drain replaces it and logs work still stopping); `refreshDueGraphCaches` skips a closing tenant and does not mark its schedule, also when it starts closing mid-refresh (test); the comment at `setAzureOpenAIConfig` says a folder sync failure after the rename reports failure for a saved change; the sign-in failure now leaves the organization removed with cleanup pending, and the warning says its work stopped.
 
+### Evaluator (separate feature-dev:code-reviewer, 85c88174)
+
+- [x] Important: non-streaming Chat and the multi-tenant summary could still send tenant data to the model after closing began (the lease signal was dropped). Chat now gets its model through `tenantLlm`, the model egress choke point: each `complete` and `stream` is refused once a tenant in its prompt is closing, and a request in flight is aborted with the lease signal. Test: model egress choke point.
+- [x] Below threshold, fixed anyway: when the phase 1 write fails, `abortClose` reopens in the same generation, so work stopped by the close still saves its final state.
+- Found sound: lifecycle, write filter, two phases, launch resume order, read hook, serialize and write chain context, MSAL proxy, every connector build site, the six connectors, SQLite and Agent Team guards; no deadlock between the write chain and the drain, no async context leak that refuses an open tenant.
+
 ### Verification
 
 - Node 22: typecheck, electron, runtime, scripts, renderer, qa and docs:check (results in the hand-back).
