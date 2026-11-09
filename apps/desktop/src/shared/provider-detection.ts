@@ -23,7 +23,8 @@ export function isProviderReady(provider: ProviderSummary | undefined): boolean 
   // Ollama counts only with a text-generation model. Azure OpenAI counts
   // only with a configured deployment: the catalog placeholder also reads
   // "available" before any check has run.
-  if ((provider.id === "ollama" || provider.id === "azure-openai") && provider.models.length === 0) {
+  // LM Studio counts only with a loaded model: a running server with none cannot answer.
+  if ((provider.id === "ollama" || provider.id === "azure-openai" || provider.id === "lm-studio") && provider.models.length === 0) {
     return false;
   }
   return (

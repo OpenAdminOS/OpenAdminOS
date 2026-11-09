@@ -693,6 +693,308 @@ button:disabled {
   transform: translateY(-1px);
 }
 
+
+/* First-launch model scan (mockup 32, sections A and B): one orchestrated
+   sequence of about 2.4 s. The device tile springs in, two rings radiate
+   and a conic sweep turns while checks run, nodes enter staggered and pop
+   as they resolve, found nodes draw a link to the device, and the choice
+   rises in at the settle. Colour marks two facts only: green stays on this
+   device, amber leaves it. Easing and durations use the shared motion tokens
+   (--ease-out, --ease-in-out, --ease-spring, --dur-state, --dur-enter). */
+@keyframes scan-device-in {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
+  to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+}
+@keyframes scan-ring-out {
+  0% { opacity: 0.5; transform: scale(0.32); }
+  100% { opacity: 0; transform: scale(1.08); }
+}
+@keyframes scan-turn {
+  to { transform: rotate(360deg); }
+}
+@keyframes scan-breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+@keyframes scan-link-draw {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes scan-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scan-pop {
+  0% { transform: scale(1); }
+  45% { transform: scale(1.1); }
+  100% { transform: scale(1); }
+}
+@keyframes scan-spin {
+  to { transform: rotate(360deg); }
+}
+.scan-stage { cursor: default; }
+.scan-screen[data-phase="scanning"] .scan-stage { cursor: pointer; }
+.scan-orbit {
+  fill: none;
+  stroke: var(--color-border);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+}
+.scan-orbit-inner { stroke: var(--color-border-soft); stroke-dasharray: 2 3; }
+.scan-ring {
+  fill: none;
+  stroke: var(--color-border-strong);
+  stroke-width: 1px;
+  vector-effect: non-scaling-stroke;
+  transform-origin: 50px 50px;
+  transform-box: view-box;
+  animation: scan-ring-out 1.8s var(--ease-out) infinite;
+}
+/* The one gradient on the screen, with a job: a 40 degree radar wedge. */
+.scan-sweep {
+  background: conic-gradient(from 0deg, transparent 0deg 320deg, color-mix(in srgb, var(--color-text) 9%, transparent) 360deg);
+  animation: scan-turn 2.2s linear infinite;
+  pointer-events: none;
+}
+.scan-rings,
+.scan-sweep { transition: opacity 300ms ease; }
+.scan-screen[data-phase="settled"] .scan-rings,
+.scan-screen[data-phase="settled"] .scan-sweep,
+.scan-screen[data-phase="error"] .scan-rings,
+.scan-screen[data-phase="error"] .scan-sweep {
+  opacity: 0;
+}
+.scan-device {
+  transform: translate(-50%, -50%);
+  max-width: 104px;
+  animation: scan-device-in 360ms var(--ease-spring) both;
+}
+/* The shared DeviceTile fills the stage's 20 percent slot, at most 104 px. */
+.scan-device .device-tile { width: 100%; height: 100%; border-radius: 27%; }
+.scan-device .device-tile svg { width: 50%; height: auto; }
+/* Widths in viewBox units (the stage is about 520 px for 100 units): 1.25 px, 2.25 px selected. */
+.scan-link {
+  stroke-width: 0.25;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0.55;
+  animation: scan-link-draw var(--dur-enter) var(--ease-in-out) forwards;
+  transition: opacity var(--dur-state) ease, stroke-width var(--dur-state) ease;
+}
+.scan-link[data-where="local"] { stroke: var(--color-success); }
+.scan-link[data-where="hosted"] { stroke: var(--color-warning); }
+.scan-stage[data-has-selection="false"] .scan-link { opacity: 1; }
+.scan-link[data-selected="true"] { opacity: 1; stroke-width: 0.44; }
+/* The heading takes focus only to place screen readers on the result; it is not a control. */
+#model-scan-heading:focus-visible { outline: none; }
+.scan-node {
+  transform: translate(-50%, -22px) scale(0.8);
+  opacity: 0;
+  transition: opacity var(--dur-state) ease, transform 320ms var(--ease-spring);
+}
+.scan-node[data-visible="true"] {
+  opacity: 1;
+  transform: translate(-50%, -22px) scale(1);
+}
+.scan-node[data-selectable="true"] { cursor: pointer; }
+.scan-node-dot {
+  width: 44px;
+  height: 44px;
+  background: var(--color-surface);
+  color: var(--color-text-muted);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+  transition: width 240ms ease, height 240ms ease, background-color 240ms ease, color 240ms ease;
+}
+/* The label sits on a plate of the page colour, so the orbit never crosses text. */
+.scan-node-plate { background: var(--color-bg); }
+.scan-node-name { color: var(--color-text); }
+.scan-node-status { color: var(--color-text-muted); }
+.scan-node[data-tone="checking"] .scan-node-dot,
+.scan-node[data-tone="starting"] .scan-node-dot {
+  box-shadow: none;
+  border: 1px dashed var(--color-border-strong);
+  animation: scan-breathe 1.4s ease-in-out infinite;
+}
+.scan-node[data-tone="installed"][data-where="local"] .scan-node-dot {
+  color: var(--color-success);
+  box-shadow: inset 0 0 0 1.5px var(--color-success);
+  animation: scan-pop 280ms ease;
+}
+.scan-node[data-tone="installed"][data-where="hosted"] .scan-node-dot {
+  color: var(--color-text-soft);
+  box-shadow: inset 0 0 0 1.5px var(--color-border-strong);
+  animation: scan-pop 280ms ease;
+}
+/* Ready on this device: a soft green fill and a full ring, so a vendor logo
+   inside stays on a quiet surface it was drawn for. */
+.scan-node[data-tone="ready"][data-where="local"] .scan-node-dot {
+  background: var(--color-success-soft);
+  color: var(--color-success);
+  box-shadow: inset 0 0 0 2px var(--color-success);
+  animation: scan-pop 280ms ease;
+}
+.scan-node[data-tone="ready"][data-where="hosted"] .scan-node-dot {
+  background: var(--color-warning-soft);
+  color: var(--color-warning);
+  box-shadow: inset 0 0 0 1.5px var(--color-warning);
+  animation: scan-pop 280ms ease;
+}
+.scan-node[data-tone="unknown"] .scan-node-dot {
+  color: var(--color-text-soft);
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+}
+.scan-node[data-tone="muted"] .scan-node-dot {
+  color: var(--color-text-faint);
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+/* Inside a node a neutral mark takes the node's own colour and surface. */
+.scan-node-dot .provider-logo-neutral { background: none; box-shadow: none; color: inherit; font-size: 13px !important; }
+.scan-node[data-settled="true"][data-tone="muted"] .scan-node-dot .provider-logo-neutral { font-size: 12px !important; }
+/* A not-found node fades through its ring, surface and name; a vendor logo
+   inside is shown as provided, never dimmed or recoloured. */
+.scan-node[data-tone="muted"] .scan-node-dot { background: var(--color-bg); }
+/* Settled, a tool that is not here shrinks and drops its status; its name stays readable. */
+.scan-node[data-settled="true"][data-tone="muted"] .scan-node-dot { width: 32px; height: 32px; font-size: 12px; }
+.scan-node[data-settled="true"][data-tone="muted"] { transform: translate(-50%, -16px) scale(1); }
+.scan-node[data-settled="true"][data-tone="muted"] .scan-node-status { display: none; }
+.scan-node[data-settled="true"][data-tone="muted"] .scan-node-name { color: var(--color-text-muted); font-weight: 400; }
+.scan-node[data-selected="true"] .scan-node-dot {
+  outline: 2px solid var(--color-text);
+  outline-offset: 3px;
+}
+.scan-rise { animation: scan-rise var(--dur-enter) var(--ease-out) both; }
+.scan-segment { background: var(--color-border); transition: background-color 240ms ease; }
+.scan-segment[data-done="true"] { background: var(--color-text-muted); }
+.scan-list-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--color-border);
+}
+.scan-list-row[data-tone="checking"] .scan-list-mark { box-shadow: none; border: 1px dashed var(--color-border-strong); animation: scan-breathe 1.4s ease-in-out infinite; }
+.scan-list-row[data-tone="installed"][data-where="local"] .scan-list-mark { box-shadow: inset 0 0 0 1.5px var(--color-success); }
+.scan-list-row[data-tone="installed"][data-where="hosted"] .scan-list-mark { box-shadow: inset 0 0 0 1.5px var(--color-border-strong); }
+.scan-list-row[data-tone="ready"][data-where="local"] .scan-list-mark { background: var(--color-success); box-shadow: none; }
+.scan-list-row[data-tone="ready"][data-where="hosted"] .scan-list-mark { background: var(--color-warning); box-shadow: none; }
+.scan-list-row[data-tone="unknown"] .scan-list-mark { box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+.scan-spinner {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--color-on-accent) 35%, transparent);
+  border-top-color: var(--color-on-accent);
+  animation: scan-spin 700ms linear infinite;
+}
+.model-choice-radio {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+  background: var(--color-bg);
+  transition: box-shadow 140ms ease;
+}
+.model-choice-radio:checked { box-shadow: inset 0 0 0 5px var(--color-text); }
+.model-choice-radio:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.model-choice-radio:disabled { opacity: 0.5; }
+/* Connect Microsoft 365, the second onboarding step (mockup 32, section B):
+   the scan's stage with the services on the orbit. A service that is not
+   connected is a dashed tile; a selected one is linked to this device by a
+   dashed line; a connected one turns solid and its link draws in. Neither
+   colour of the scan applies: Microsoft 365 is where the data already is. */
+.ms-node {
+  transform: translate(-50%, -24px);
+  cursor: pointer;
+}
+.ms-node[data-state="connected"] { cursor: default; }
+.ms-node-tile {
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px dashed var(--color-border-strong);
+  transition: color 200ms ease, border-color 200ms ease, background-color 200ms ease;
+}
+.ms-node[data-state="picked"] .ms-node-tile {
+  color: var(--color-text);
+  border-color: var(--color-text-soft);
+}
+.ms-node[data-state="connected"] .ms-node-tile {
+  color: var(--color-text);
+  background: var(--color-bg-raised);
+  border: 1px solid transparent;
+  box-shadow: inset 0 0 0 1.5px var(--color-text-soft);
+}
+.microsoft-step[data-phase="connected"] .ms-node[data-state="connected"] .ms-node-tile { animation: scan-pop 280ms ease 200ms both; }
+.ms-node-name { color: var(--color-text-soft); }
+.ms-node[data-state="picked"] .ms-node-name,
+.ms-node[data-state="connected"] .ms-node-name { color: var(--color-text); }
+.ms-node-status { color: var(--color-text-muted); }
+.ms-node:not([data-state="connected"]):hover .ms-node-tile { border-color: var(--color-text-soft); }
+.ms-link {
+  stroke: var(--color-text-muted);
+  stroke-width: 0.25;
+  stroke-dasharray: 1.1 1.1;
+}
+.ms-link[data-state="connected"] {
+  stroke: var(--color-text-soft);
+  stroke-width: 0.36;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.ms-link[data-state="connected"][data-animate="true"] {
+  stroke-dashoffset: 1;
+  animation: scan-link-draw var(--dur-enter) var(--ease-in-out) forwards;
+}
+.service-check {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+  background: var(--color-bg);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.service-check:checked { background: var(--color-text); box-shadow: none; }
+.service-check:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.service-check:disabled { opacity: 0.55; }
+.onboarding-steps .onboarding-step-mark { color: var(--color-text-muted); box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+.onboarding-steps .onboarding-step-label { color: var(--color-text-muted); }
+.onboarding-steps .onboarding-step-rule { background: var(--color-border); }
+.onboarding-steps [data-state="current"] .onboarding-step-mark { background: var(--color-text); color: var(--color-bg); box-shadow: none; }
+.onboarding-steps [data-state="current"] .onboarding-step-label { color: var(--color-text); font-weight: 500; }
+.onboarding-steps [data-state="done"] .onboarding-step-mark { color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-text-soft); }
+.onboarding-steps [data-state="done"] .onboarding-step-label { color: var(--color-text-soft); }
+.scan-screen[data-motion="reduced"] .ms-link { animation: none; stroke-dashoffset: 0; }
+.scan-screen[data-motion="reduced"] .ms-node-tile { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .scan-ring,
+  .scan-sweep,
+  .scan-device,
+  .scan-link,
+  .scan-node-dot,
+  .scan-rise,
+  .scan-list-mark,
+  .ms-link,
+  .ms-node-tile {
+    animation: none !important;
+  }
+  .ms-link[data-state="connected"] { stroke-dashoffset: 0; }
+  .scan-rings,
+  .scan-sweep { display: none; }
+  .scan-link { stroke-dashoffset: 0; }
+  .scan-node { transition: none; }
+}
+.scan-screen[data-motion="reduced"] .scan-rings,
+.scan-screen[data-motion="reduced"] .scan-sweep { display: none; }
+.scan-screen[data-motion="reduced"] .scan-link { stroke-dashoffset: 0; animation: none; }
+.scan-screen[data-motion="reduced"] .scan-node { transition: none; }
+.scan-screen[data-motion="reduced"] .scan-device,
+.scan-screen[data-motion="reduced"] .scan-rise,
+.scan-screen[data-motion="reduced"] .scan-node-dot { animation: none; }
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -891,9 +1193,16 @@ select { color-scheme: inherit; }
 }
 .svc-mark[data-size="sm"] { width: 17px; height: 17px; border-radius: 5px; font-size: 9px; }
 .svc-mark[data-size="lg"] { width: 30px; height: 30px; border-radius: 8px; font-size: 12px; }
-.svc-mark[data-service="intune"] { background: var(--color-svc-intune); }
-.svc-mark[data-service="entra"] { background: var(--color-svc-entra); }
-.svc-mark[data-service="defender"] { background: var(--color-svc-defender); }
+/* A service tile carries Microsoft's own icon on a quiet surface
+   (assets/service-logos/NOTICE.md); the icon is never recoloured. */
+.svc-mark[data-service="intune"],
+.svc-mark[data-service="entra"],
+.svc-mark[data-service="defender"] {
+  background: var(--color-bg-raised);
+  color: var(--color-text-soft);
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+}
+.svc-mark[data-service="provider"],
 .svc-mark[data-service="reference"] {
   background: var(--color-surface);
   color: var(--color-text-soft);
@@ -1079,6 +1388,17 @@ button.conn-part:disabled { cursor: default; opacity: 0.5; }
   .calm-row-actions { opacity: 1; transform: none; }
 }
 
+/* Provider marks (assets/provider-logos/NOTICE.md): the vendor's light or
+   dark variant follows the appearance; neutral marks are quiet tiles. */
+.provider-logo-dark { display: none; }
+:root[data-mode="dark"] .provider-logo-light { display: none; }
+:root[data-mode="dark"] .provider-logo-dark { display: block; }
+.provider-logo-neutral {
+  color: var(--color-text-soft);
+  background: var(--color-bg-raised);
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+  letter-spacing: 0;
+}
 /* Run review facts: a hairline definition list with a 120 px term column. */
 .preflight-facts { margin: 0; border-top: 1px solid var(--color-border-soft); }
 .preflight-fact {

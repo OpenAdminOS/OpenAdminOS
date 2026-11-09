@@ -15,6 +15,7 @@ import type {
   UpdateChannel,
   UpdateState,
   IntuneChatStreamEvent,
+  ModelScanProbe,
   MultiTenantChatStreamEvent,
 } from "@openadminos/agent-sdk";
 
@@ -70,6 +71,23 @@ const api: OpenAdminOSApi = {
   setRegistryInstallCountsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-registry-install-counts-enabled", enabled),
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
+  startModelScan: (scanId?: string) => ipcRenderer.invoke("openadminos:model-scan", scanId),
+  retryModelScanProbe: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:model-scan-retry", providerId),
+  startLocalRuntime: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:start-local-runtime", providerId),
+  completeFirstRunScan: (options?: { microsoftStepPending?: boolean }) =>
+    ipcRenderer.invoke("openadminos:complete-first-run-scan", options ? { microsoftStepPending: options.microsoftStepPending === true } : undefined),
+  completeFirstRunMicrosoftStep: () => ipcRenderer.invoke("openadminos:complete-first-run-microsoft-step"),
+  dismissSampleDataRemovedNotice: () => ipcRenderer.invoke("openadminos:dismiss-sample-data-removed-notice"),
+  refreshProviders: () => ipcRenderer.invoke("openadminos:refresh-providers"),
+  setActiveProviderAndModel: (providerId: ProviderId, model: string) =>
+    ipcRenderer.invoke("openadminos:set-active-provider-and-model", providerId, model),
+  onModelScanProgress: (listener: (probe: ModelScanProbe, scanId?: string) => void): (() => void) => {
+    const handler = (_event: unknown, payload: { scanId?: string; probe: ModelScanProbe }) => listener(payload.probe, payload.scanId);
+    ipcRenderer.on("openadminos:model-scan-progress", handler);
+    return () => {
+      ipcRenderer.removeListener("openadminos:model-scan-progress", handler);
+    };
+  },
   testProvider: (providerId: ProviderId, model?: string) =>
     ipcRenderer.invoke("openadminos:test-provider", providerId, model),
   getAzureOpenAIConfig: () =>
@@ -98,6 +116,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-intune-chat-messages", conversationId),
   sendIntuneChatMessage: (input) =>
     ipcRenderer.invoke("openadminos:send-intune-chat-message", input),
+  previewIntuneChatSend: (input: { content: string }) =>
+    ipcRenderer.invoke("openadminos:preview-intune-chat-send", input),
   streamIntuneChatMessage: (input, onEvent, options) => {
     const streamId = options?.streamId ?? crypto.randomUUID();
     let cleanedUp = false;
@@ -477,7 +497,6 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:retry-tenant-license-check", tenantId),
   cancelTenantCheck: (tenantId) =>
     ipcRenderer.invoke("openadminos:cancel-tenant-check", tenantId),
-  addSampleTenant: () => ipcRenderer.invoke("openadminos:add-sample-tenant"),
   cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:set-active-tenant", id),

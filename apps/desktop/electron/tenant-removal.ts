@@ -19,11 +19,17 @@ export interface TenantRemovalRecord {
   error?: string;
 }
 
-export function tenantRemovalFor(tenant: TenantRecord, removedAt: string, runIds: readonly string[]): TenantRemovalRecord {
+export function tenantRemovalFor(
+  tenant: TenantRecord,
+  removedAt: string,
+  runIds: readonly string[],
+  options: { legacySample?: boolean } = {},
+): TenantRemovalRecord {
   return {
     tenantId: tenant.id,
     displayName: tenant.displayName,
-    ...(tenant.kind === "sample" ? { kind: "sample" as const } : {}),
+    // The sample tenant of removed pilot mode never signed in: nothing to remove at Microsoft.
+    ...(options.legacySample ? { kind: "sample" as const } : {}),
     ...(tenant.appRegistration ? { appRegistration: tenant.appRegistration } : {}),
     ...(tenant.homeAccountId ? { homeAccountId: tenant.homeAccountId } : {}),
     removedAt,

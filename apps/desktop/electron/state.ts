@@ -1,4 +1,5 @@
 import { OfficeService } from "./office.js";
+import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -44,7 +45,6 @@ import {
   findRegistryAgentById,
   effectiveAgentManifestIssue,
   listAllRegistryAgentsWithIssues,
-  listBuiltInRegistryAgents,
   listRegisteredConnectors,
   loadAgentManifestPreview,
   noSecrets,
@@ -59,6 +59,11 @@ import {
   setAgentUpdatesDir,
   toInstalledAgent,
   type TokenCacheStorage,
+  classifyLmStudioEndpoint,
+  classifyOllamaEndpoint,
+  cliSpawn,
+  resolveLmStudioEndpoint,
+  resolveOllamaEndpoint,
 } from "@openadminos/runtime";
 import type {
   AgentDraft,
@@ -195,6 +200,9 @@ import {
   type AppState,
   type McpServerSummary,
   type ProviderId,
+  type ModelScanOutcome,
+  type ModelScanProbe,
+  type ModelScanResult,
   type ProviderSummary,
   type InvalidAgentManifest,
   type RegistryAgentSummary,
@@ -222,16 +230,21 @@ import { defaultUpdateChannel } from "../src/shared/update-channel.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { searchEndpoints } from "./graph-catalog.js";
-import { createSampleGraph, type SampleGraph } from "./sample-tenant/graph.js";
-import { createPilotLlm } from "./sample-tenant/pilot-llm.js";
-import { PILOT_AGENT_SLUGS, PILOT_COPY } from "../src/shared/pilot-mode.js";
 import { pickLocalProviderToAutoSelect } from "../src/shared/provider-detection.js";
 import {
-  SAMPLE_TENANT_HOME_ACCOUNT_ID,
-  SAMPLE_TENANT_ID,
-  SAMPLE_TENANT_NAME,
-  SAMPLE_TENANT_USERNAME,
-} from "./sample-tenant/dataset.js";
+  MODEL_SCAN_RETRY_TIMEOUT_MS,
+  MODEL_SCAN_TIMEOUT_MS,
+  buildModelScanChecks,
+  scanProviderCheck,
+  runModelScan,
+  lmStudioAppInstalled,
+  runtimeLaunch,
+  runtimeReadyUrl,
+  startLocalRuntime,
+  runScanCheck,
+  scanOutcome,
+  type ModelScanCheck,
+} from "./model-scan.js";
 
 import {
   DEFAULT_REGISTRY_SOURCE,
@@ -345,6 +358,15 @@ interface PersistedState {
    */
   providerChosenByUser?: boolean;
   /**
+   * Set only when this state file was created by this launch: a fresh
+   * install runs the first-launch model scan once, then clears it.
+   */
+  firstRunScan?: "pending";
+  /** The first launch went to provider setup before Connect Microsoft 365; it shows later, once. */
+  firstRunMicrosoftStep?: "pending";
+  /** The one-time removal of pilot mode's sample tenant happened; a one-line notice says so once. */
+  sampleDataRemovedNotice?: true;
+  /**
    * The local provider the host selected automatically, and whether the
    * one-time Chat notice about it was dismissed. Cleared by an explicit
    * provider choice.
@@ -405,6 +427,8 @@ interface PersistedState {
   retrievalAutoInstallAttemptedAt?: string;
   /** Last background attempt to pull the embedding model via Ollama. */
   embeddingModelPullAttemptedAt?: string;
+  /** Why the last background pull failed, shown in Settings until a pull succeeds. */
+  embeddingModelPullError?: string;
   /**
    * MCP write-gateway configuration. The pairing token is never stored
    * here; it lives in provider-style safeStorage. Off by default.
@@ -703,25 +727,16 @@ const OIDC_SCOPES = new Set(["openid", "profile", "offline_access", "email"]);
 export const NO_MICROSOFT_365_ORGANIZATION = (action: string) =>
   `No organization with Microsoft 365 is active. Choose one in the organization switcher, or connect a Microsoft 365 tenant in Connections, before ${action}.`;
 
+/** The tenant id pilot mode used for its sample tenant, before pilot mode was removed. */
+export const LEGACY_SAMPLE_TENANT_ID = "openadminos-sample-tenant";
+
+/** A sample tenant written by an earlier version: marked "sample", or the pilot tenant's id. */
+function isLegacySampleTenant(tenant: TenantRecord): boolean {
+  return (tenant as { kind?: unknown }).kind === "sample" || tenant.id === LEGACY_SAMPLE_TENANT_ID;
+}
+
 const AUDIT_LOG_SCHEMA_VERSION = 1;
 const AUDIT_CHAIN_START_HASH = "0".repeat(64);
-
-function sampleRelevantLicenses(): NonNullable<TenantRecord["relevantLicenses"]> {
-  return [
-    {
-      skuPartNumber: "SPE_E5",
-      displayName: "Microsoft 365 E5",
-      enabledUnits: 80,
-      consumedUnits: 70,
-    },
-    {
-      skuPartNumber: "EMSPREMIUM",
-      displayName: "Enterprise Mobility + Security E5",
-      enabledUnits: 80,
-      consumedUnits: 65,
-    },
-  ];
-}
 
 type AuditLogEventSource =
   | "run-history"
@@ -916,20 +931,7 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
     });
   }
 
-  return events
-    .map((event) => {
-      const tenant = event.tenantId ? tenantById.get(event.tenantId) : undefined;
-      if (tenant?.kind !== "sample") return event;
-      return {
-        ...event,
-        details: {
-          ...event.details,
-          sampleData: true,
-          sampleDataNotice: "Pilot mode sample data from a fictional company",
-        },
-      };
-    })
-    .sort(compareAuditEvents);
+  return events.sort(compareAuditEvents);
 }
 
 function runAuditDetails(
@@ -1003,15 +1005,11 @@ function actorForTenant(
     };
   }
   return {
-    kind: tenant.kind === "sample" ? "local-admin" : "connected-admin",
+    kind: "connected-admin",
     tenantId: tenant.id,
     tenantName: tenant.displayName,
-    ...(tenant.kind !== "sample"
-      ? {
-          username: tenant.username,
-          homeAccountId: tenant.homeAccountId,
-        }
-      : {}),
+    username: tenant.username,
+    homeAccountId: tenant.homeAccountId,
   };
 }
 
@@ -1276,7 +1274,7 @@ function withTierProbeOutcome<T extends TenantRecord>(tenant: T, outcome: TierPr
 
 /** True when the license check would run for the tenant. */
 function needsTierProbe(tenant: TenantRecord): boolean {
-  return tenant.kind === "sample" || grantedScopeSet(tenant).has("Organization.Read.All");
+  return grantedScopeSet(tenant).has("Organization.Read.All");
 }
 
 /** The warning saved when a license check is cancelled or reaches the deadline. */
@@ -1541,6 +1539,12 @@ export interface AppStateStoreOptions {
    */
   statsApiUrl?: string;
   /**
+   * Reads the device's system proxy for a URL (Electron's
+   * `session.resolveProxy`), so a network failure can say whether one is
+   * set. OpenAdminOS's own requests do not go through it.
+   */
+  resolveProxy?: ProxyResolver;
+  /**
    * Factory for a per-client-id token cache when a tenant is connected
    * with a bring-your-own app registration. Custom registrations must
    * not share the default identity's cache. Receives the canonical
@@ -1615,11 +1619,7 @@ export interface AppStateStoreOptions {
    * development workflows. Packaged builds must leave this false.
    */
   allowDevRegistrySource?: boolean;
-  /**
-   * Test hook for the pilot tenant clock. The pilot Graph, prepared Chat
-   * answers, and pilot agent text all read time from it. Production uses
-   * the system clock.
-   */
+  /** Test hook for the clock. Production uses the system clock. */
   clock?: () => Date;
   /**
    * Test hook for the interactive Microsoft sign-in used by connectTenant.
@@ -1632,6 +1632,38 @@ export interface AppStateStoreOptions {
   tenantDrainMs?: number;
   /** Test hook: MCP servers to offer instead of the built-in catalog. */
   mcpCatalog?: readonly McpCatalogEntry[];
+}
+
+/**
+ * What listing serves after a scan: each provider as its check found it.
+ * A check that timed out or was refused has no summary (a stopped check's
+ * summary can land after the scan is done), so it is served as a failed
+ * check with the reason its scan row showed, never as "not checked".
+ */
+/** "127.0.0.1:11434" from a runtime endpoint. */
+function endpointHost(endpoint: string): string {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return endpoint;
+  }
+}
+
+function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes: readonly ModelScanProbe[]): Map<ProviderId, ProviderSummary> {
+  const results = new Map(found);
+  for (const probe of probes) {
+    if (probe.state !== "could-not-check" || results.has(probe.providerId)) continue;
+    const entry = providerCatalog.find((provider) => provider.id === probe.providerId);
+    if (!entry) continue;
+    results.set(probe.providerId, {
+      ...entry,
+      status: "error",
+      checkFailed: true,
+      detail: probe.facts[0] ?? `${probe.name} could not be checked. Retry or refresh providers.`,
+      models: [],
+    });
+  }
+  return results;
 }
 
 /** How long Disconnect waits for an organization's work to stop before cleanup goes on. */
@@ -1671,6 +1703,7 @@ export class AppStateStore {
   private readonly tokenStoreFor: AppStateStoreOptions["tokenStoreFor"];
   private readonly legacyTokenStoresFor: AppStateStoreOptions["legacyTokenStoresFor"];
   private readonly statsApiUrl: string;
+  private resolveProxy: ProxyResolver | undefined;
   private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
   private readonly sandboxedCodeDefault: boolean;
@@ -1705,7 +1738,6 @@ export class AppStateStore {
   private readonly allowDevRegistrySource: boolean;
   private readonly clock: () => Date;
   private readonly interactiveSignIn: typeof runInteractiveFlow;
-  private sampleGraph: SampleGraph;
   private tenantConnectController: AbortController | undefined;
   /** Tenant checks and license probes in progress, by tenant ID. */
   private readonly tenantChecks = new Map<
@@ -1793,6 +1825,7 @@ export class AppStateStore {
       this.intelligenceStore?.setTenantWriteGuard((tenantId, what) => this.tenantLifecycle.assertWritable(tenantId, what));
       this.graphFactory = options.graphFactory;
       this.providerListFactory = options.providerListFactory;
+      this.resolveProxy = options.resolveProxy;
       this.llmFactory = options.llmFactory;
       this.whatsAppWebClientFactory = options.whatsAppWebClientFactory;
       this.connectorSecretsForOverride = options.connectorSecretsFor;
@@ -1813,7 +1846,6 @@ export class AppStateStore {
       this.tenantCheckDeadlineMs = options.tenantCheckDeadlineMs ?? TENANT_CHECK_DEADLINE_MS;
       this.tenantDrainMs = options.tenantDrainMs ?? TENANT_DRAIN_MS;
     }
-    this.sampleGraph = createSampleGraph({ clock: this.clock });
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
     this.mcpHost = new McpHost({
       clientVersion: this.appVersion,
@@ -1919,7 +1951,6 @@ export class AppStateStore {
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),
-      buildPilotLlm: (agentSlug) => createPilotLlm({ agentSlug, clock: host.clock }),
       buildGraph: (pinnedTenantId, agentScopes, execution) =>
         host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),
@@ -2030,20 +2061,6 @@ export class AppStateStore {
     });
   }
   async saveOfficePersona(input: unknown) {
-    if (input && typeof input === "object" && !Array.isArray(input)) {
-      const tenantId = (input as { tenantId?: unknown }).tenantId;
-      const persisted = await this.read();
-      if (
-        typeof tenantId === "string" &&
-        persisted.tenants.some(
-          (tenant) => tenant.id === tenantId && tenant.kind === "sample",
-        )
-      ) {
-        throw new Error(
-          PILOT_COPY.featureInProduction("Agent Team"),
-        );
-      }
-    }
     return this.officeService.save(input);
   }
   deleteOfficePersona(id: string) { return this.officeService.remove(id); }
@@ -2419,10 +2436,12 @@ export class AppStateStore {
   async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
     const status = await this.getRetrievalStatus();
     const embedding = await embeddingModelState();
+    const pullError = (await this.read()).embeddingModelPullError;
     const withEmbedding: RetrievalStatus = {
       ...status,
       ollamaReachable: embedding.ollamaReachable,
       embeddingModelInstalled: embedding.installed,
+      ...(pullError && !embedding.installed ? { embeddingModelError: pullError } : {}),
     };
     if (!withEmbedding.available) return withEmbedding;
     const manifest = await fetchIndexManifest();
@@ -2600,7 +2619,23 @@ export class AppStateStore {
         });
       });
 
-      await pullEmbeddingModel(endpoint);
+      try {
+        await pullEmbeddingModel(endpoint);
+      } catch (error) {
+        // Not silent: Settings shows why, naming the registry and the proxy Ollama uses.
+        const message =
+          (await describeNetworkFailure({ what: "The local index model download", url: "https://registry.ollama.ai/", error, path: "ollama" })) ??
+          (error instanceof Error ? error.message : String(error));
+        await this.serialize(async () => {
+          await this.write({ ...(await this.read()), embeddingModelPullError: message });
+        });
+        this.emitStateChanged("retrieval-embedding-failed");
+        throw error;
+      }
+      await this.serialize(async () => {
+        const { embeddingModelPullError: _cleared, ...rest } = await this.read();
+        await this.write(rest);
+      });
       this.emitStateChanged("retrieval-embedding-installed");
     } catch (error) {
       console.info(
@@ -2647,7 +2682,6 @@ export class AppStateStore {
   }
 
   private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
-    if (tenant.kind === "sample") return this.sampleTenantSession();
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     return this.guardTenantSession(tenant.id, createTenantSession({
@@ -2697,6 +2731,7 @@ export class AppStateStore {
     const registrySource = persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE;
     const result = await refreshRegistry(this.userDataPath, registrySource, {
       allowDevSource: this.allowDevRegistrySource,
+      ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}),
     });
 
     const bothSourcesFailed = result.error !== null && !result.fromCache;
@@ -2856,12 +2891,10 @@ export class AppStateStore {
    * rather than surfaced.
    */
   private async forgetReplacedSignIn(previous: TenantRecord, current: TenantRecord): Promise<void> {
-    if (previous.kind === "sample") return;
     const previousPartition = tokenCachePartition(previous.appRegistration);
     if (previousPartition === tokenCachePartition(current.appRegistration)) return;
     const stillUsed = (await this.read()).tenants.some(
       (tenant) =>
-        tenant.kind !== "sample" &&
         tenant.homeAccountId === previous.homeAccountId &&
         tokenCachePartition(tenant.appRegistration) === previousPartition,
     );
@@ -2881,11 +2914,6 @@ export class AppStateStore {
    * and a token that arrives after closing began is withheld.
    */
   private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
-    if (tenant.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.noSignIn,
-      );
-    }
     const client = this.msalClientFor(tenant.appRegistration);
     const lifecycle = this.tenantLifecycle;
     const guarded = new Set<PropertyKey>(["acquireTokenSilent", "acquireTokenInteractive", "acquireTokenByCode", "acquireTokenByDeviceCode", "acquireTokenByRefreshToken"]);
@@ -2935,18 +2963,6 @@ export class AppStateStore {
    */
   withTenantLease<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     return this.tenantLifecycle.withTenantLease(tenantId, (lease) => work(lease.signal));
-  }
-
-  private sampleTenantSession(): TenantSession {
-    return {
-      tenantId: SAMPLE_TENANT_ID,
-      username: SAMPLE_TENANT_USERNAME,
-      acquireTokenForScopes: async () => {
-        throw new Error(
-          PILOT_COPY.noSignIn,
-        );
-      },
-    };
   }
 
   private requireIntelligenceStore(): IntelligenceSqliteStore {
@@ -3178,8 +3194,13 @@ export class AppStateStore {
   }
 
   async getAppState(): Promise<AppState> {
+    // While the first-launch scan is pending, app state loads without
+    // provider detection: the scan does that, bounded and local only, and
+    // the first screen does not wait for every provider check.
+    const pendingScan = (await this.read()).firstRunScan === "pending";
+    // listProviders serves the scan's results or "not checked" while pending.
     const providers = await this.listProviders();
-    const persisted = await this.autoSelectLocalProvider(await this.read(), providers);
+    const persisted = pendingScan ? await this.read() : await this.autoSelectLocalProvider(await this.read(), providers);
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
       providers[0];
@@ -3260,13 +3281,15 @@ export class AppStateStore {
     if (this.tenantChecks.size > 0) {
       state.tenantChecks = [...this.tenantChecks.values()].map((entry) => entry.progress);
     }
+    if (persisted.firstRunScan === "pending") state.firstRunScanPending = true;
+    if (persisted.firstRunMicrosoftStep === "pending") state.firstRunMicrosoftStepPending = true;
+    if (persisted.sampleDataRemovedNotice === true) state.sampleDataRemoved = true;
     const autoSelection = persisted.providerAutoSelection;
     if (
       autoSelection &&
       !autoSelection.noticeDismissed &&
       persisted.providerChosenByUser === false &&
-      activeProvider?.id === autoSelection.providerId &&
-      !this.isPilotModeActive(persisted)
+      activeProvider?.id === autoSelection.providerId
     ) {
       state.providerAutoSelectNotice = {
         providerId: activeProvider.id,
@@ -3406,11 +3429,30 @@ export class AppStateStore {
         },
       }, azureOpenAIKey ? { azureOpenAIKey } : {});
     });
-
+    // Saving the settings is an explicit action on Azure OpenAI: it is checked again.
+    if (this.scanResultsServed) await this.detectProvider("azure-openai");
     return this.getAzureOpenAIConfig();
   }
 
   async listProviders(): Promise<ProviderSummary[]> {
+    // While the first-launch scan is pending, nothing detects providers
+    // except the scan itself, which is bounded and local only. Every caller
+    // (app state, Office, the menu bar, schedulers, validators, the Chat
+    // preview) gets the scan's own results, or "not checked".
+    // After the first run, listing keeps serving them for the session: a
+    // provider is checked in full only when the admin acts on it (selects
+    // or tests it), and all of them when the admin refreshes providers.
+    if (this.scanResultsServed || (await this.read()).firstRunScan === "pending") {
+      return providerCatalog.map(
+        (provider) =>
+          this.modelScanProviders.get(provider.id) ?? {
+            ...provider,
+            status: "not-checked",
+            detail: "Not checked yet. The first-launch scan checks it.",
+            models: [],
+          },
+      );
+    }
     if (this.providerListFactory) {
       return this.providerListFactory();
     }
@@ -3424,45 +3466,379 @@ export class AppStateStore {
     }
 
     return Promise.all(
-      providerCatalog.map(async (provider) => {
+      providerCatalog.map(async (provider) => this.checkProviderEntry(provider, azureOpenAIConfig, azureOpenAIConfigError)),
+    );
+  }
+
+  /**
+   * A Microsoft sign-in failure as the admin reads it: a network failure
+   * names login.microsoftonline.com, whether a system proxy is set and the
+   * fix; anything else keeps the MSAL mapping.
+   */
+  private async signInFailure(error: unknown, registration: Parameters<typeof humanizeMsalError>[1]): Promise<Error> {
+    const network = await describeNetworkFailure({ what: "Microsoft sign-in", url: "https://login.microsoftonline.com/", error, ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}) });
+    return new Error(network ?? humanizeMsalError(error, registration));
+  }
+
+  /** Set when a scan, Retry or Start is asked for and when the first-run scan completes; cleared by `refreshProviders`. */
+  private scanResultsServed = false;
+
+  /**
+   * Checks one provider in full because the admin acted on it. After the
+   * first run, while the scan results are served, the result replaces that
+   * provider's entry and no other provider is checked.
+   */
+  private async detectProvider(id: ProviderId): Promise<ProviderSummary | undefined> {
+    // While the scan is pending nothing but the scan detects, and without
+    // served results listing already checks every provider in full.
+    if (!this.scanResultsServed) {
+      return (await this.listProviders()).find((entry) => entry.id === id);
+    }
+    let summary: ProviderSummary | undefined;
+    if (this.providerListFactory) {
+      summary = (await this.providerListFactory()).find((entry) => entry.id === id);
+    } else {
+      const entry = providerCatalog.find((provider) => provider.id === id)!;
+      let config: AzureOpenAIProviderConfig | undefined;
+      let configError: string | undefined;
+      if (id === "azure-openai") {
         try {
-          if (provider.id === "ollama") return await checkOllama(provider);
-          if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
-          if (provider.id === "lm-studio") return await checkLmStudio(provider);
-          if (provider.id === "anthropic") return await checkClaudeCode(provider);
-          if (provider.id === "openai") return await checkCodex(provider);
-          if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);
-          if (provider.id === "azure-openai") {
-            if (azureOpenAIConfigError) {
-              return {
-                ...provider,
-                status: "error",
-                detail: azureOpenAIConfigError,
-                models: [],
-              };
-            }
-            return await checkAzureOpenAI(
-              provider,
-              azureOpenAIConfig ?? this.emptyAzureOpenAIConfig(),
-            );
-          }
-          return provider;
+          config = await this.getAzureOpenAIConfig();
         } catch (error) {
-          // A single provider check must never abort the whole app state.
-          // Tenant connection reads app state, so a probing failure here used
-          // to surface as a failed sign-in (e.g. a Windows spawn EINVAL).
+          configError = error instanceof Error ? error.message : String(error);
+        }
+      }
+      summary = await this.checkProviderEntry(entry, config, configError);
+    }
+    if (summary) this.modelScanProviders.set(id, summary);
+    return summary;
+  }
+
+  /**
+   * The admin asked to refresh providers: listing checks every provider in
+   * full again from the next read. While the first-run scan is pending it
+   * changes nothing.
+   */
+  async refreshProviders(): Promise<void> {
+    this.scanResultsServed = false;
+  }
+
+  /** One provider's existing check, the same one `listProviders` runs. */
+  private async checkProviderEntry(
+    provider: ProviderSummary,
+    azureOpenAIConfig: AzureOpenAIProviderConfig | undefined,
+    azureOpenAIConfigError: string | undefined,
+  ): Promise<ProviderSummary> {
+    try {
+      if (provider.id === "ollama") return await checkOllama(provider);
+      if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
+      if (provider.id === "lm-studio") return await checkLmStudio(provider);
+      if (provider.id === "anthropic") return await checkClaudeCode(provider);
+      if (provider.id === "openai") return await checkCodex(provider);
+      if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);
+      if (provider.id === "azure-openai") {
+        if (azureOpenAIConfigError) {
           return {
             ...provider,
             status: "error",
-            detail:
-              error instanceof Error
-                ? error.message
-                : `${provider.name} could not be checked. Refresh providers to retry.`,
+            checkFailed: true,
+            detail: azureOpenAIConfigError,
             models: [],
           };
         }
+        return await checkAzureOpenAI(
+          provider,
+          azureOpenAIConfig ?? this.emptyAzureOpenAIConfig(),
+        );
+      }
+      return provider;
+    } catch (error) {
+      // A single provider check must never abort the whole app state.
+      // Tenant connection reads app state, so a probing failure here used
+      // to surface as a failed sign-in (e.g. a Windows spawn EINVAL).
+      return {
+        ...provider,
+        status: "error",
+        checkFailed: true,
+        detail:
+          error instanceof Error
+            ? error.message
+            : `${provider.name} could not be checked. Refresh providers to retry.`,
+        models: [],
+      };
+    }
+  }
+
+  /** The first-launch scan's checks, built on `checkProviderEntry`. */
+  private async modelScanChecks(found: Map<ProviderId, ProviderSummary>): Promise<ModelScanCheck[]> {
+    return buildModelScanChecks({
+      catalog: providerCatalog,
+      check: async (providerId, signal, timeoutMs) => {
+        // Tests and smoke runs inject the provider list, as for listProviders.
+        if (this.providerListFactory) {
+          const listed = (await this.providerListFactory()).find((provider) => provider.id === providerId);
+          if (!listed) throw new Error(`${providerId} is not listed.`);
+          found.set(providerId, listed);
+          return listed;
+        }
+        const entry = providerCatalog.find((provider) => provider.id === providerId)!;
+        // Azure OpenAI's check reads the saved configuration and its key from
+        // the OS keychain, inside its own bounded check: a stalled keychain
+        // read times out as could not check and holds up no other check.
+        const summary = await scanProviderCheck(entry, {
+          signal,
+          timeoutMs,
+          azure: async () => checkAzureOpenAI(entry, await this.getAzureOpenAIConfig()),
+        });
+        found.set(providerId, summary);
+        return summary;
+      },
+    });
+  }
+
+  /**
+   * Scans this device for models and AI tools (SPEC.md 4a, first launch),
+   * reporting each check as it resolves, then applies the provider rules:
+   * a ready local provider is selected for an admin who never chose one;
+   * hosted providers are only offered.
+   */
+  async scanModels(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
+    // From the moment a scan is asked for, listing serves scan results: a
+    // read that overlaps the scan (app state, a background tick) runs no
+    // detection of its own and contacts nothing the scan leaves alone.
+    this.scanResultsServed = true;
+    // One scan at a time: a second request while one is queued or running
+    // shares it. Each subscriber gets every progress event, including the
+    // ones sent before it joined, so a second window or Scan again misses
+    // nothing.
+    const shared = this.sharedModelScan;
+    if (shared) {
+      if (onProbe) {
+        for (const probe of shared.emitted) onProbe(probe);
+        shared.subscribers.add(onProbe);
+      }
+      return shared.promise;
+    }
+    const next: { subscribers: Set<(probe: ModelScanProbe) => void>; emitted: ModelScanProbe[]; promise: Promise<ModelScanResult> } = {
+      subscribers: new Set(onProbe ? [onProbe] : []),
+      emitted: [],
+      promise: Promise.resolve(undefined as never),
+    };
+    next.promise = this.exclusiveModelScan(() =>
+      this.runModelScanOnce((probe) => {
+        next.emitted.push(probe);
+        for (const subscriber of next.subscribers) subscriber(probe);
       }),
+    ).finally(() => {
+      if (this.sharedModelScan === next) this.sharedModelScan = undefined;
+    });
+    this.sharedModelScan = next;
+    return next.promise;
+  }
+
+  private sharedModelScan:
+    | { subscribers: Set<(probe: ModelScanProbe) => void>; emitted: ModelScanProbe[]; promise: Promise<ModelScanResult> }
+    | undefined;
+  private modelScanQueue: Promise<unknown> = Promise.resolve();
+  private modelScanGeneration = 0;
+
+  /** Scan, Retry and Start rescans run one at a time, in the order they were asked for. */
+  private exclusiveModelScan<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.modelScanQueue.catch(() => undefined).then(task);
+    this.modelScanQueue = run.catch(() => undefined);
+    return run;
+  }
+  /** What the latest scan found, served by `listProviders` while the first-run scan is pending. */
+  private modelScanProviders = new Map<ProviderId, ProviderSummary>();
+
+  private async runModelScanOnce(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
+    const startedAt = this.clock().toISOString();
+    const found = new Map<ProviderId, ProviderSummary>();
+    const probes = await runModelScan({ checks: await this.modelScanChecks(found), ...(onProbe ? { onProbe } : {}) });
+    this.modelScanProviders = scanResultsFor(found, probes);
+    // Every scan, a manual one after a restart included, leaves listing on
+    // its bounded results until the admin refreshes providers.
+    this.scanResultsServed = true;
+    const outcome = await this.applyModelScanOutcome([...found.values()]);
+    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString(), generation: ++this.modelScanGeneration };
+  }
+
+  /**
+   * Runs one check again with a longer timeout, and the others with the
+   * scan timeout, then applies the outcome: a check that now succeeds can
+   * change what the scan leads with.
+   */
+  async retryModelScanProbe(providerId: ProviderId): Promise<ModelScanResult> {
+    if (!isProviderId(providerId)) throw new Error(`Unknown provider: ${String(providerId)}`);
+    this.scanResultsServed = true;
+    return this.exclusiveModelScan(() => this.retryModelScanProbeNow(providerId));
+  }
+
+  private async retryModelScanProbeNow(providerId: ProviderId): Promise<ModelScanResult> {
+    const startedAt = this.clock().toISOString();
+    const found = new Map<ProviderId, ProviderSummary>();
+    const checks = await this.modelScanChecks(found);
+    if (!checks.some((entry) => entry.providerId === providerId)) throw new Error(`${providerId} is not checked on this device.`);
+    const probes = await Promise.all(
+      checks.map((check) => runScanCheck(check, check.providerId === providerId ? MODEL_SCAN_RETRY_TIMEOUT_MS : MODEL_SCAN_TIMEOUT_MS)),
     );
+    this.modelScanProviders = scanResultsFor(found, probes);
+    this.scanResultsServed = true;
+    const outcome = await this.applyModelScanOutcome([...found.values()]);
+    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString(), generation: ++this.modelScanGeneration };
+  }
+
+  private async applyModelScanOutcome(providers: ProviderSummary[]): Promise<ModelScanOutcome> {
+    return this.serialize(async () => {
+      const current = await this.read();
+      const outcome = scanOutcome(providers, {
+        activeProviderId: current.activeProviderId,
+        providerChosenByUser: current.providerChosenByUser !== false,
+        ...(current.activeModelByProviderId ? { activeModelByProviderId: current.activeModelByProviderId } : {}),
+      });
+      const select = outcome.kind === "local-selected";
+      // OpenAdmin 8B is preferred when it is pulled and the admin never chose a provider or model.
+      const setModel =
+        (outcome.kind === "local-selected" || outcome.kind === "local-ready") &&
+        current.providerChosenByUser === false &&
+        Boolean(outcome.model) &&
+        !current.activeModelByProviderId?.[outcome.providerId];
+      if (!select && !setModel) return outcome;
+      const providerId = (outcome as { providerId: ProviderId }).providerId;
+      const updated: PersistedState = {
+        ...current,
+        ...(select ? { activeProviderId: providerId, providerAutoSelection: { providerId, noticeDismissed: false } } : {}),
+        ...(setModel ? { activeModelByProviderId: { ...current.activeModelByProviderId, [providerId]: (outcome as { model: string }).model } } : {}),
+      };
+      await this.write(updated);
+      console.info(`[providers] model scan selected local provider ${providerId}`);
+      return outcome;
+    });
+  }
+
+  /**
+   * Starts Ollama or LM Studio for the admin from the scan, waits for its
+   * loopback endpoint, then scans again so the outcome follows the
+   * provider rules. An endpoint off this device is never started or called.
+   */
+  async startLocalRuntime(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan?: ModelScanResult }> {
+    if (providerId !== "ollama" && providerId !== "lm-studio") {
+      throw new Error("Only Ollama and LM Studio can be started from the scan.");
+    }
+    // All of Start runs in the scan queue: two windows never spawn the same
+    // runtime twice, and the scan after it is a fresh one that starts once
+    // the runtime answers, never a scan already running from before.
+    this.scanResultsServed = true;
+    return this.exclusiveModelScan(() => this.startLocalRuntimeNow(providerId));
+  }
+
+  private async startLocalRuntimeNow(providerId: "ollama" | "lm-studio"): Promise<{ started: boolean; message?: string; scan?: ModelScanResult }> {
+    const endpoint = (providerId === "ollama" ? resolveOllamaEndpoint() : resolveLmStudioEndpoint()).replace(/\/$/, "");
+    const local = (providerId === "ollama" ? classifyOllamaEndpoint(endpoint) : classifyLmStudioEndpoint(endpoint)).isLocal;
+    const name = providerId === "ollama" ? "Ollama" : "LM Studio";
+    const manualCommand = providerId === "ollama" ? "ollama serve" : "lms server start";
+    if (!local) {
+      return { started: false, message: `${name} is set to ${endpoint}, outside this device. The scan only starts runtimes on this device.` };
+    }
+    const isUp = async () => {
+      try {
+        const response = await fetch(runtimeReadyUrl(providerId, endpoint), { signal: AbortSignal.timeout(1_000) });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    };
+    // Already answering, for example started by an earlier Start from another window: nothing is spawned.
+    if (!(await isUp())) {
+      const launch = await runtimeLaunch(providerId);
+      const result = await startLocalRuntime({
+        name,
+        manualCommand,
+        launch,
+        appWithoutCommand: !launch && providerId === "lm-studio" && (await lmStudioAppInstalled()),
+        host: endpointHost(endpoint),
+        // The shared CLI launcher hides the console window on Windows and refuses a batch launcher it cannot resolve, with a reason.
+        spawn: (launch) =>
+          new Promise<void>((resolve, reject) => {
+            const { child, error } = cliSpawn(launch.command, launch.args, { detached: true, stdio: "ignore", windowsHide: true });
+            if (!child) {
+              reject(error);
+              return;
+            }
+            child.once("error", reject);
+            child.once("spawn", () => {
+              child.unref();
+              resolve();
+            });
+          }),
+        isUp,
+      });
+      // A failed start returns its failure as it is; only a started runtime is scanned again.
+      if (!result.started) return { started: false, message: result.message };
+    }
+    return { started: true, scan: await this.runModelScanOnce() };
+  }
+
+
+  /**
+   * The first-launch scan was finished or skipped; it does not show again.
+   * `microsoftStepPending` keeps Connect Microsoft 365 for later, when the
+   * scan left for provider setup instead of Chat.
+   */
+  async completeFirstRunScan(options: { microsoftStepPending?: boolean } = {}): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      if (current.firstRunScan !== "pending") return;
+      const { firstRunScan: _done, ...rest } = current;
+      await this.write(options.microsoftStepPending === true ? { ...rest, firstRunMicrosoftStep: "pending" } : rest);
+      // Leaving the scan (Continue, Preview, Open chat) runs no discovery:
+      // the scan results stay what listing serves this session.
+      this.scanResultsServed = true;
+    });
+    this.emitStateChanged("first-run-scan-completed");
+    return this.getAppState();
+  }
+
+  /** The deferred Connect Microsoft 365 step was shown and left; it does not show again on its own. */
+  /**
+   * One-time upgrade: pilot mode and its sample data were removed
+   * (maintainer decision, 2026-11-09). A sample tenant left by an earlier
+   * version goes through the same removal as Disconnect, which deletes its
+   * runs, conversations, cache and organization, and the app says so once.
+   * Idempotent: with no sample tenant left it does nothing.
+   */
+  async removeLegacySampleData(): Promise<boolean> {
+    const sample = (await this.read()).tenants.find(isLegacySampleTenant);
+    if (!sample) return false;
+    await this.disconnectTenant(sample.id);
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      await this.write({ ...persisted, sampleDataRemovedNotice: true });
+    });
+    this.emitStateChanged("sample-data-removed");
+    return true;
+  }
+
+  /** The notice about removed sample data was shown. */
+  async dismissSampleDataRemovedNotice(): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      if (current.sampleDataRemovedNotice !== true) return;
+      const { sampleDataRemovedNotice: _shown, ...rest } = current;
+      await this.write(rest);
+    });
+    return this.getAppState();
+  }
+
+  async completeFirstRunMicrosoftStep(): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      if (current.firstRunMicrosoftStep !== "pending") return;
+      const { firstRunMicrosoftStep: _done, ...rest } = current;
+      await this.write(rest);
+    });
+    this.emitStateChanged("first-run-microsoft-step-completed");
+    return this.getAppState();
   }
 
   async testProvider(
@@ -3472,15 +3848,29 @@ export class AppStateStore {
     if (!isProviderId(providerId)) {
       throw new Error(`Unknown provider: ${String(providerId)}`);
     }
-    const providers = await this.listProviders();
-    const provider = providers.find((entry) => entry.id === providerId);
+    // While the first-launch scan is pending nothing but the scan touches a
+    // provider, so no test prompt is sent from a second window or over IPC.
+    if ((await this.read()).firstRunScan === "pending") {
+      return { providerId, ok: false, message: "The first-launch scan is still checking this device. Finish or skip it, then test again." };
+    }
+    // Testing is an explicit action on this provider: it is checked in full.
+    const provider = await this.detectProvider(providerId);
     if (!provider) {
       throw new Error(`Provider not found: ${providerId}`);
     }
+    // A test prompt needs a real ready status; a provider that was not
+    // checked, is missing or failed its check is not tested. Azure OpenAI is
+    // "available" once configured. Gemini CLI's sign-in is only known after
+    // a request, so an installed CLI is tested, also after a failed request
+    // (that is how a fixed sign-in is confirmed); the installed CLI reports
+    // its model, a failed or missing one reports none.
     const providerReady =
       provider.status === "connected" ||
       (provider.id === "azure-openai" && provider.status === "available") ||
-      (provider.id === "gemini" && provider.status !== "not-installed" && provider.cli?.state !== "unsupported-version");
+      (provider.id === "gemini" &&
+        (provider.status === "available" || provider.status === "error") &&
+        provider.models.length > 0 &&
+        provider.cli?.state !== "unsupported-version");
     if (!providerReady) {
       return {
         providerId,
@@ -3554,6 +3944,11 @@ export class AppStateStore {
         durationMs: Date.now() - startedAt,
         message: error instanceof Error ? error.message : String(error),
       };
+    } finally {
+      // Gemini's sign-in is only known from a request, and the request just
+      // ran: while listing serves cached results, check Gemini again so
+      // Settings shows what the Test found, success or failure.
+      if (providerId === "gemini" && this.scanResultsServed) await this.detectProvider("gemini").catch(() => undefined);
     }
   }
 
@@ -3755,12 +4150,7 @@ export class AppStateStore {
     input: SetGraphCacheRefreshScheduleInput,
   ): Promise<GraphCacheRefreshScheduleSettings> {
     const persisted = await this.read();
-    const tenant = this.resolveTenant(persisted, input.tenantId);
-    if (tenant.kind === "sample" && input.enabled) {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Scheduling"),
-      );
-    }
+    this.resolveTenant(persisted, input.tenantId);
     return this.chatService.setGraphCacheRefreshSchedule(input);
   }
 
@@ -4045,6 +4435,10 @@ export class AppStateStore {
     return this.chatService.refreshGraphCache(options);
   }
 
+  async previewIntuneChatSend(input: { content: string }): Promise<{ reachesModel: boolean }> {
+    return this.chatService.previewIntuneChatSend(input);
+  }
+
   async sendIntuneChatMessage(
     input: SendIntuneChatMessageInput,
   ): Promise<SendIntuneChatMessageResult> {
@@ -4118,11 +4512,6 @@ export class AppStateStore {
   async createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceDetail> {
     const persisted = await this.read();
     const tenant = this.resolveTenant(persisted, input.tenantId);
-    if (tenant.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Workspaces", true),
-      );
-    }
     return this.requireIntelligenceStore().createWorkspace({
       id: `wksp_${randomUUID()}`,
       tenantId: tenant.id,
@@ -4270,12 +4659,7 @@ export class AppStateStore {
       if (!resolvedTenantIds.has(mapping.tenantId)) {
         throw new Error(`Tenant ${mapping.tenantId} is not part of this multi-tenant result.`);
       }
-      const tenant = this.resolveTenant(persisted, mapping.tenantId);
-      if (tenant.kind === "sample") {
-        throw new Error(
-          PILOT_COPY.featureInProduction("Workspaces", true),
-        );
-      }
+      this.resolveTenant(persisted, mapping.tenantId);
       if (mapping.workspaceId) {
         const workspace = store.getWorkspace(
           mapping.workspaceId,
@@ -4343,11 +4727,6 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
-    if (tenant?.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connectors", true),
-      );
-    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         NO_MICROSOFT_365_ORGANIZATION("testing this connector"),
@@ -4568,11 +4947,6 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
-    if (tenant?.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connectors", true),
-      );
-    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         NO_MICROSOFT_365_ORGANIZATION("invoking connectors"),
@@ -4636,11 +5010,6 @@ export class AppStateStore {
     const tenant = persisted.tenants.find(t => t.id === input.tenantId);
     const factory = findConnectorFactory(input.connectorId);
     if (!tenant || !factory) throw new Error("Tenant or connector is unavailable.");
-    if (tenant.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connector deliveries", true),
-      );
-    }
     const config = persisted.connectors?.[input.connectorId]?.config ?? {};
     if (JSON.stringify(config) !== JSON.stringify(input.config)) throw new Error("Connector settings changed. Review a new preview before sending.");
     // The connector transport refuses every request once the organization
@@ -4905,11 +5274,6 @@ export class AppStateStore {
       const activeTenant = persisted.activeTenantId
         ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
         : undefined;
-      if (activeTenant?.kind === "sample" && schedule?.enabled) {
-        throw new Error(
-          PILOT_COPY.featureInProduction("Scheduling"),
-        );
-      }
       const idx = persisted.installedAgents.findIndex(
         (agent) => agent.slug === slug || agent.id === slug,
       );
@@ -4935,7 +5299,7 @@ export class AppStateStore {
         // (`assignAgentSchedule`) assigns. The renderer never sets it here.
         const organizationId = existing.schedule
           ? existing.schedule.organizationId
-          : activeTenant && activeTenant.kind !== "sample"
+          : activeTenant
             ? organizationForTenant(persisted.organizations ?? [], activeTenant.id)?.id
             : undefined;
         next[idx] = {
@@ -4968,7 +5332,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentTeamsDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentTeamsDelivery(slug, delivery);
   }
 
@@ -4976,7 +5339,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentWhatsAppWebDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentWhatsAppWebDelivery(slug, delivery);
   }
 
@@ -4984,7 +5346,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentOutlookDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentOutlookDelivery(slug, delivery);
   }
 
@@ -4992,7 +5353,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSlackDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSlackDelivery(slug, delivery);
   }
 
@@ -5000,7 +5360,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentDiscordDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentDiscordDelivery(slug, delivery);
   }
 
@@ -5008,23 +5367,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSignalDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSignalDelivery(slug, delivery);
-  }
-
-  private async assertSampleDeliveryAllowed(
-    delivery: { enabled: boolean } | null,
-  ): Promise<void> {
-    if (!delivery?.enabled) return;
-    const persisted = await this.read();
-    const activeTenant = persisted.activeTenantId
-      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
-      : undefined;
-    if (activeTenant?.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connector deliveries", true),
-      );
-    }
   }
 
   /**
@@ -5040,15 +5383,10 @@ export class AppStateStore {
     const activeTenant = persisted.activeTenantId
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
       : undefined;
-    // Schedules run against the active tenant. They wait in pilot mode,
-    // and without an active tenant, where every due schedule would only
+    // Schedules run against the active tenant. They wait without an
+    // active tenant, where every due schedule would only
     // record a "No tenant connected" failure. The schedules surfaces say so.
-    const pausedReason =
-      activeTenant?.kind === "sample"
-        ? "pilot mode is active"
-        : !activeTenant
-          ? "no tenant is connected"
-          : undefined;
+    const pausedReason = !activeTenant ? "no tenant is connected" : undefined;
     if (pausedReason) {
       const dueCount = persisted.installedAgents.filter(
         (agent) => agent.schedule?.enabled && nowMs >= scheduleDueAtMs(agent, nowMs),
@@ -5140,7 +5478,7 @@ export class AppStateStore {
     // only advances, like a skipped schedule.
     const current = await this.read();
     const tenantId = current.tenants.some(
-      (tenant) => tenant.id === current.activeTenantId && tenant.kind !== "sample",
+      (tenant) => tenant.id === current.activeTenantId,
     )
       ? current.activeTenantId
       : undefined;
@@ -5694,11 +6032,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async installAgent(agentId: string): Promise<AppState> {
-    // Agent install is a production feature. The renderer hides it in pilot
-    // mode; the host refuses it too so no other caller can bypass that.
-    if (this.isPilotModeActive(await this.read())) {
-      throw new Error(PILOT_COPY.featureInProduction("Agent install"));
-    }
     let installedSlug: string | undefined;
     let installIdForReport: string | undefined;
     const initialCandidate = this.listRegistryAgents().find(
@@ -5716,9 +6049,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     await this.serialize(async () => {
       const persisted = await this.read();
-      if (this.isPilotModeActive(persisted)) {
-        throw new Error(PILOT_COPY.featureInProduction("Agent install"));
-      }
       const existing = persisted.installedAgents.find(
         (agent) =>
           agent.id === agentId ||
@@ -5992,6 +6322,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       manifestText = await response.text();
     } catch (err) {
+      // An unreachable Marketplace names its host, the proxy and the fix.
+      const network = await describeNetworkFailure({ what: "The Marketplace", url: target.manifestUrl, error: timeoutWhenAborted(err), ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}) });
+      if (network) throw new Error(network);
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`${context}: failed to fetch manifest: ${reason}`);
     } finally {
@@ -6165,7 +6498,33 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         providerChosenByUser: true,
       });
     });
+    // Selecting a provider is an explicit action on it: it is checked in full.
+    await this.detectProvider(id);
+    return this.getAppState();
+  }
 
+  /**
+   * Selects a provider and its model together, validated first and written
+   * once, so a failed model never leaves the provider half switched.
+   */
+  async setActiveProviderAndModel(id: ProviderId, model: string): Promise<AppState> {
+    if (!isProviderId(id)) throw new Error(`Unknown provider: ${String(id)}`);
+    if (typeof model !== "string" || !model.trim()) throw new Error("A model name is required.");
+    const provider = (await this.listProviders()).find((entry) => entry.id === id);
+    if (!provider) throw new Error(`Provider not found: ${id}`);
+    if (provider.models.length > 0 && !provider.models.includes(model)) {
+      throw new Error(`${provider.name} does not list ${model}. Scan again, then choose a model it lists.`);
+    }
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const { providerAutoSelection: _cleared, ...rest } = persisted;
+      await this.write({
+        ...rest,
+        activeProviderId: id,
+        providerChosenByUser: true,
+        activeModelByProviderId: { ...persisted.activeModelByProviderId, [id]: model },
+      });
+    });
     return this.getAppState();
   }
 
@@ -6189,21 +6548,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * active one is not ready. Runs whenever provider readiness is listed for
    * app state, so a local runtime started later is picked up too. Hosted
    * providers are never selected here: that would send tenant data off the
-   * device without the user deciding it. Skipped in pilot mode.
+   * device without the user deciding it.
    */
   private async autoSelectLocalProvider(
     persisted: PersistedState,
     providers: ProviderSummary[],
   ): Promise<PersistedState> {
     if (persisted.providerChosenByUser !== false) return persisted;
-    if (this.isPilotModeActive(persisted)) return persisted;
     const candidate = pickLocalProviderToAutoSelect(providers, persisted.activeProviderId);
     if (!candidate) return persisted;
     return this.serialize(async () => {
       // Re-check against the latest state: the user may have picked a
-      // provider, or pilot mode may have started, since the first read.
+      // provider since the first read.
       const current = await this.read();
-      if (current.providerChosenByUser !== false || this.isPilotModeActive(current)) {
+      if (current.providerChosenByUser !== false) {
         return current;
       }
       const next = pickLocalProviderToAutoSelect(providers, current.activeProviderId);
@@ -6217,13 +6575,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       console.info(`[providers] selected local provider ${next.id} automatically`);
       return updated;
     });
-  }
-
-  private isPilotModeActive(persisted: PersistedState): boolean {
-    if (!persisted.activeTenantId) return false;
-    return persisted.tenants.some(
-      (tenant) => tenant.id === persisted.activeTenantId && tenant.kind === "sample",
-    );
   }
 
   async setActiveModel(
@@ -6409,7 +6760,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         timeoutMs: 300_000,
       });
     } catch (error) {
-      throw new Error(humanizeMsalError(error, registration));
+      throw await this.signInFailure(error, registration);
     } finally {
       if (this.tenantConnectController === controller) {
         this.tenantConnectController = undefined;
@@ -6491,14 +6842,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // another account signing in, is saved as a tenant warning.
     void this.backgroundTierProbe(tenant);
 
-    // Connecting a real tenant ends pilot mode. The pilot tenant goes
-    // through the normal disconnect path, which purges its runs, cache,
-    // and conversations without any Microsoft sign-in call.
-    if ((await this.read()).tenants.some((entry) => entry.kind === "sample")) {
-      await this.disconnectTenant(SAMPLE_TENANT_ID);
-      await this.setActiveTenant(tenant.id);
-    }
-
     return this.getAppState();
   }
 
@@ -6530,9 +6873,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (!tenant) {
       throw new Error("Tenant not found. Refresh Settings and try again.");
     }
-    if (tenant.kind === "sample") {
-      throw new Error("The sample tenant already includes every service.");
-    }
     if (tenant.appRegistration?.kind === "custom") {
       // Consent for an own registration is granted on the app itself.
       throw new Error(
@@ -6551,7 +6891,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       try {
         result = await this.tenantCheckSignIn(operation, tenant, toResourceScopes(scopeNames));
       } catch (error) {
-        throw new Error(humanizeMsalError(error, tenant.appRegistration));
+        throw await this.signInFailure(error, tenant.appRegistration);
       }
       // Consent from another account must not change this tenant's grants.
       assertSignedInAccount(result, connectedAccountOf(tenant));
@@ -6581,9 +6921,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     if (!tenant) {
       throw new Error("Tenant not found. Refresh Settings and try again.");
     }
-    if (tenant.kind === "sample") {
-      throw new Error("The sample tenant already includes every service.");
-    }
     if (tenant.appRegistration?.kind !== "custom") {
       throw new Error(
         "Check again applies to your own app registration. Use Add access in Connections for the OpenAdminOS app.",
@@ -6605,12 +6942,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       } catch (silentError) {
         if (silentError instanceof TenantAccountMismatchError) throw silentError;
         if (!isInteractionRequired(silentError)) {
-          throw new Error(humanizeMsalError(silentError, tenant.appRegistration));
+          throw await this.signInFailure(silentError, tenant.appRegistration);
         }
         try {
           result = await this.tenantCheckSignIn(operation, tenant, CUSTOM_REGISTRATION_SCOPES);
         } catch (error) {
-          throw new Error(humanizeMsalError(error, tenant.appRegistration));
+          throw await this.signInFailure(error, tenant.appRegistration);
         }
         // A fresh sign-in could be anyone, so it must match before grants
         // are replaced.
@@ -6812,104 +7149,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     throw new TenantCheckSupersededError(current ? "reconnected" : "disconnected");
   }
 
-  async addSampleTenant(): Promise<AppState> {
-    const addedAt = new Date().toISOString();
-    let created = false;
-    const sample: TenantRecord = {
-      id: SAMPLE_TENANT_ID,
-      kind: "sample",
-      displayName: SAMPLE_TENANT_NAME,
-      username: SAMPLE_TENANT_USERNAME,
-      homeAccountId: SAMPLE_TENANT_HOME_ACCOUNT_ID,
-      addedAt,
-      lastUsedAt: addedAt,
-      entraTier: "p2",
-      entraTierDetectedAt: addedAt,
-      relevantLicenses: sampleRelevantLicenses(),
-    };
-    await this.serialize(async () => {
-      const persisted = await this.read();
-      this.openTenantForConnection(persisted, SAMPLE_TENANT_ID);
-      const existing = persisted.tenants.find((tenant) => tenant.id === SAMPLE_TENANT_ID);
-      created = !existing;
-      if (created) this.sampleGraph = createSampleGraph({ clock: this.clock });
-      const pilotAgents = this.pilotAgentsToInstall(persisted.installedAgents, addedAt);
-      const nextTenants = existing
-        ? persisted.tenants.map((tenant) =>
-            tenant.id === SAMPLE_TENANT_ID
-              ? (() => {
-                  const { appRegistration: _, ...sampleState } = tenant;
-                  return { ...sampleState, ...sample, addedAt: tenant.addedAt };
-                })()
-              : tenant,
-          )
-        : [...persisted.tenants, sample];
-      await this.write({
-        ...persisted,
-        installedAgents: [...persisted.installedAgents, ...pilotAgents],
-        tenants: nextTenants,
-        activeTenantId: SAMPLE_TENANT_ID,
-      });
-    });
-    if (created) {
-      void this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID }).catch(
-        (error) =>
-          console.warn(
-            "[sample-tenant] cache preload did not start",
-            error instanceof Error ? error.message : String(error),
-          ),
-      );
-    }
-    return this.getAppState();
-  }
-
-  /**
-   * The three pilot agents install from the bundled registry, without the
-   * Hub and without reporting an install, so pilot mode works offline and
-   * sends nothing. They stay installed after pilot mode ends.
-   */
-  private pilotAgentsToInstall(
-    installedAgents: AgentSummary[],
-    installedAt: string,
-  ): AgentSummary[] {
-    const installed = new Set(installedAgents.flatMap((agent) => [agent.slug, agent.id]));
-    const bundled = listBuiltInRegistryAgents();
-    return PILOT_AGENT_SLUGS.flatMap((slug) => {
-      if (installed.has(slug)) return [];
-      const entry = bundled.find((agent) => agent.slug === slug);
-      if (!entry) {
-        console.warn(`[pilot] bundled agent ${slug} is missing; it will not be available in pilot mode`);
-        return [];
-      }
-      const compatible = withAgentCompatibility(entry, this.appVersion);
-      const agent = toInstalledAgent(compatible, installedAt);
-      agent.provenance = buildAgentProvenance({ agent: compatible, installedAt: agent.installedAt });
-      return [agent];
-    });
-  }
-
-  /**
-   * Pilot data is materialized relative to each request, but Chat history
-   * and Settings read the SQLite cache. Refresh it when the app starts in
-   * pilot mode with a cache older than one day.
-   */
-  async refreshPilotCacheIfStale(): Promise<boolean> {
-    const persisted = await this.read();
-    const active = persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId);
-    if (active?.kind !== "sample" || !this.intelligenceStore) return false;
-    const status = await this.chatService.getGraphCacheStatus(SAMPLE_TENANT_ID);
-    const oldest = Math.min(
-      ...status.resources.map((resource) =>
-        resource.refreshedAt ? Date.parse(resource.refreshedAt) : 0,
-      ),
-    );
-    if (Number.isFinite(oldest) && this.clock().getTime() - oldest < 24 * 60 * 60 * 1000) {
-      return false;
-    }
-    await this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID });
-    return true;
-  }
-
   cancelConnectTenant(): void {
     this.tenantConnectController?.abort();
     this.tenantConnectController = undefined;
@@ -7015,16 +7254,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     tenant: TenantRecord,
     options: { force?: boolean },
   ): Promise<Exclude<TierProbeOutcome, { kind: "failed" | "cancelled" }>> {
-    if (tenant.kind === "sample") {
-      return {
-        kind: "found",
-        fields: {
-          entraTier: "p2",
-          entraTierDetectedAt: new Date().toISOString(),
-          relevantLicenses: sampleRelevantLicenses(),
-        },
-      };
-    }
     // The probe reads /subscribedSkus. Without Organization.Read.All it
     // would open a consent prompt the admin did not ask for, so the
     // licenses are not checked until a service that includes it is
@@ -7154,9 +7383,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (!target) {
         throw new Error("That organization is no longer on this device. Reopen Connections and try again.");
       }
-      if (target.kind === "sample") {
-        throw new Error("The sample organization keeps its name. Rename an organization you connected.");
-      }
       await this.write({
         ...persisted,
         organizations: organizations.map((entry) => (entry.id === id ? { ...entry, name: normalized } : entry)),
@@ -7171,9 +7397,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);
       if (!organization) {
         throw new Error("That organization is no longer on this device. Choose another one for this schedule.");
-      }
-      if (organization.kind === "sample") {
-        throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
       }
       if (!organization.connections.microsoft365) {
         throw new Error("This version of OpenAdminOS cannot run schedules in that organization. Choose another one, or update OpenAdminOS.");
@@ -7230,7 +7453,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         runs: persisted.runs.filter((run) => run.tenantId !== id),
         tenantRemovals: [
           ...(persisted.tenantRemovals ?? []).filter((removal) => removal.tenantId !== id),
-          tenantRemovalFor(current, new Date().toISOString(), removedRunIds),
+          tenantRemovalFor(current, new Date().toISOString(), removedRunIds, { legacySample: isLegacySampleTenant(current) }),
         ],
       };
       const deliveryQueue = (persisted.runDeliveryQueue ?? []).filter((item) => !removed.has(item.runId));
@@ -7334,7 +7557,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
     if (failure === undefined) {
       this.tenantLifecycle.markRemoved(id);
-      if (removal.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     } else {
       console.warn("[tenant-lifecycle] cleanup is pending", { tenantId: id, error: failure });
     }
@@ -7494,17 +7716,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       );
     }
     const scopes = (agentScopes ?? []).filter((scope) => scope.length > 0);
-    if (tenant.kind === "sample") {
-      const tenantSession = this.sampleTenantSession();
-      return {
-        createGraph: (log) =>
-          this.graphFactory
-            ? this.graphFactory({ tenantId: tenant.id, scopes, log })
-            : this.sampleGraph,
-        tenantId: tenant.id,
-        tenantSession,
-      };
-    }
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const tenantSession = this.guardTenantSession(tenant.id, createTenantSession({
@@ -7621,7 +7832,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     await this.serialize(async () => {
       const persisted = await this.read();
       const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
-      if (!tenant || tenant.kind === "sample" || tenant.grantedScopes === undefined) return;
+      if (!tenant || tenant.grantedScopes === undefined) return;
       // A token from an earlier connection says nothing about this one.
       if (tenant.connectionId !== signedIn.connectionId) return;
       const known = new Set(tenant.grantedScopes.map(qualifyScope));
@@ -7649,14 +7860,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const persisted = await this.read();
     // A run of a tenant that was disconnected meanwhile sends no report.
     if (run.tenantId && !persisted.tenants.some((tenant) => tenant.id === run.tenantId)) return;
-    if (
-      run.tenantId &&
-      persisted.tenants.some(
-        (tenant) => tenant.id === run.tenantId && tenant.kind === "sample",
-      )
-    ) {
-      return;
-    }
     return this.runDeliveryService.enqueueRunDeliveries(run);
   }
 
@@ -7705,9 +7908,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       raw = await readFile(this.filePath, "utf8");
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
-        // A fresh copy: the bootstrap state is written through the same chain
-        // as every other write and is never shared with later mutations.
-        const fresh = structuredClone(defaultState);
+        // A fresh install: the first-launch model scan runs once. The
+        // bootstrap state is written through the same chain as every other
+        // write and is never shared with later mutations.
+        const fresh: PersistedState = { ...structuredClone(defaultState), firstRunScan: "pending" };
         await this.write(fresh);
         return this.lastReadSnapshot ?? fresh;
       }
@@ -7810,7 +8014,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
               // Before scheduler failures carried a tenant, a schedule that
               // fired with no tenant connected saved a tenant-less failed
               // run. No tenant removal ever matched it, so it outlived
-              // every tenant, including the pilot tenant. Every run start
+              // every tenant. Every run start
               // pins a tenant, so a tenant-less scheduled run can only be
               // one of these records.
               .filter((run) => !(run.trigger === "schedule" && !run.tenantId))
@@ -7891,6 +8095,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (typeof parsed.embeddingModelPullAttemptedAt === "string") {
         state.embeddingModelPullAttemptedAt = parsed.embeddingModelPullAttemptedAt;
       }
+      if (typeof parsed.embeddingModelPullError === "string") {
+        state.embeddingModelPullError = parsed.embeddingModelPullError;
+      }
       if (isPlainRecordValue(parsed.gateway)) {
         const gateway = parsed.gateway as Record<string, unknown>;
         if (
@@ -7962,6 +8169,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       const mcpServers = sanitizeMcpServers((parsed as { mcpServers?: unknown }).mcpServers, this.mcpCatalog);
       if (mcpServers) state.mcpServers = mcpServers;
+      if ((parsed as { firstRunScan?: unknown }).firstRunScan === "pending") state.firstRunScan = "pending";
+      if ((parsed as { firstRunMicrosoftStep?: unknown }).firstRunMicrosoftStep === "pending") state.firstRunMicrosoftStep = "pending";
+      if ((parsed as { sampleDataRemovedNotice?: unknown }).sampleDataRemovedNotice === true) state.sampleDataRemovedNotice = true;
       const rawConnectors = (parsed as { connectors?: unknown }).connectors;
       if (
         rawConnectors &&

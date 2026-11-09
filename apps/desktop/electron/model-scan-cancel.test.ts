@@ -1,0 +1,390 @@
+import assert from "node:assert/strict";
+import { chmod, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createServer, type Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, it } from "node:test";
+
+import { providerCatalog } from "@openadminos/agent-sdk";
+import { createGeminiLlm, discoverCli, probeLmStudioLlm } from "@openadminos/runtime";
+
+import { runScanCheck, scanProbeFromProvider, scanProviderCheck } from "./model-scan.js";
+import { checkLmStudio, checkOllama } from "./provider-detail.js";
+import { AppStateStore } from "./state.js";
+
+/** Review round 2 on PR #175: items 4, 5, 6 and Muse G, K and T. */
+
+const catalog = (id: string) => providerCatalog.find((provider) => provider.id === id)!;
+const posix = process.platform !== "win32";
+
+async function fakeCli(dir: string, name: string, body: string): Promise<string> {
+  const path = join(dir, name);
+  await writeFile(path, `#!/bin/sh\necho "$*" >> "${join(dir, `${name}.log`)}"\n${body}\n`);
+  await chmod(path, 0o755);
+  return path;
+}
+
+// Up to 5 seconds: a killed child is reaped by the system, which can be slow on a loaded machine.
+async function gone(pid: number): Promise<boolean> {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  return false;
+}
+
+/**
+ * Runs a scan check and stops it through its signal once the wrapper has
+ * started its child (the file holds the child's pid), as the scan's timeout
+ * does. Waiting for the child instead of racing a fixed timeout keeps the
+ * test independent of how fast a loaded machine starts the wrapper (review
+ * round 5, item 4).
+ */
+async function stopOnceStarted(id: string, binary: string, pidFile: string) {
+  const controller = new AbortController();
+  const pending = scanProviderCheck(catalog(id), { signal: controller.signal, binaryPath: binary });
+  let pid = "";
+  for (let attempt = 0; attempt < 200 && !pid; attempt += 1) {
+    pid = (await readFile(pidFile, "utf8").catch(() => "")).trim();
+    if (!pid) await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.ok(pid, "the wrapper started its child");
+  controller.abort();
+  const summary = await pending;
+  return { pid: Number(pid), probe: scanProbeFromProvider(summary) };
+}
+
+/**
+ * A server that is not running: "Not installed", or "Installed, not running"
+ * when the runtime is on this device. Never a failed check.
+ */
+function assertNotRunning(probe: ReturnType<typeof scanProbeFromProvider>): void {
+  assert.notEqual(probe.state, "could-not-check", probe.facts.join(" "));
+  assert.equal(probe.ready, false);
+  assert.match(probe.summary, /^(Not installed|Installed, not running)$/);
+}
+
+async function serve(handler: Parameters<typeof createServer>[1]): Promise<{ server: Server; url: string }> {
+  const server = createServer(handler);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  return { server, url: `http://127.0.0.1:${(server.address() as { port: number }).port}` };
+}
+
+describe("cancellation (item 4 and T)", () => {
+  it("spawns nothing when the signal is already aborted, whatever the number of candidates", { skip: !posix }, async () => {
+    const one = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+    const two = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+    try {
+      await fakeCli(one, "gemini", 'echo "9.9.9"');
+      await fakeCli(two, "gemini", 'echo "9.9.9"');
+      const controller = new AbortController();
+      controller.abort();
+      await assert.rejects(() => discoverCli("gemini", { PATH: `${one}:${two}` }, undefined, controller.signal), /stopped/);
+      await assert.rejects(() => readFile(join(one, "gemini.log"), "utf8"));
+      await assert.rejects(() => readFile(join(two, "gemini.log"), "utf8"));
+    } finally {
+      await rm(one, { recursive: true, force: true });
+      await rm(two, { recursive: true, force: true });
+    }
+  });
+
+  for (const [id, name] of [["anthropic", "claude"], ["openai", "codex"]] as const) {
+    it(`kills a ${name} wrapper and the child it started when the check times out`, { skip: !posix }, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+      try {
+        const childPid = join(dir, "child");
+        const binary = await fakeCli(dir, name, `sleep 30 &\necho $! > "${childPid}"\nwait`);
+        const { pid, probe } = await stopOnceStarted(id, binary, childPid);
+        assert.notEqual(probe.ready, true, "a stopped check is never ready");
+        assert.equal(await gone(pid), true, `the ${name} wrapper's child must not survive`);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  // Wrappers that start a child and wait, as npm launchers and version managers do (review round 3, item 2).
+  for (const [id, name, label] of [["gemini", "gemini", "Gemini CLI"], ["copilot", "copilot", "GitHub Copilot CLI"]] as const) {
+    it(`kills a ${label} wrapper and the child it started when the check times out`, { skip: !posix }, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+      try {
+        const childPid = join(dir, "child");
+        const binary = await fakeCli(dir, name, `sleep 60 &\necho $! > "${childPid}"\nwait`);
+        const { pid, probe } = await stopOnceStarted(id, binary, childPid);
+        assert.equal(probe.state, "could-not-check", probe.summary);
+        assert.equal(await gone(pid), true, `the ${label} wrapper's child must not survive`);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("stops a Gemini request and the child its wrapper started", { skip: !posix }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+    try {
+      const childPid = join(dir, "child");
+      // --version answers; a request starts a child and waits on it.
+      const binary = await fakeCli(dir, "gemini", `if [ "$1" = "--version" ]; then echo 9.9.9; exit 0; fi\nsleep 60 &\necho $! > "${childPid}"\nwait`);
+      const llm = createGeminiLlm({ binaryPath: binary });
+      const controller = new AbortController();
+      const request = llm.complete({ prompt: "hello", signal: controller.signal }).catch((error: unknown) => error);
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        if (await readFile(childPid, "utf8").catch(() => "")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      controller.abort();
+      await request;
+      assert.equal(await gone(Number((await readFile(childPid, "utf8")).trim())), true, "the request's child must not survive");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("kills a Gemini CLI that hangs on --version", { skip: !posix }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+    try {
+      const pidFile = join(dir, "pid");
+      const binary = await fakeCli(dir, "gemini", `echo $$ > "${pidFile}"\nexec sleep 30`);
+      const { pid, probe } = await stopOnceStarted("gemini", binary, pidFile);
+      assert.equal(probe.state, "could-not-check", probe.summary);
+      assert.equal(await gone(pid), true);
+      // The scan's own timeout reports a check that hangs as could not check.
+      const timedOut = await runScanCheck(
+        { providerId: "gemini", name: "Gemini CLI", where: "hosted", target: "gemini --version", run: async () => new Promise(() => undefined) },
+        100,
+      );
+      assert.equal(timedOut.state, "could-not-check");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("stops an LM Studio request that never answers", async () => {
+    const { server, url } = await serve(() => undefined);
+    try {
+      const controller = new AbortController();
+      setTimeout(() => controller.abort(), 50);
+      const started = Date.now();
+      const probe = await probeLmStudioLlm({ endpoint: `${url}/v1`, signal: controller.signal, timeoutMs: 10_000 });
+      assert.ok(Date.now() - started < 1_000);
+      assert.equal(probe.status, "error", "a stopped check is not a server that is not running");
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe("failed HTTP checks are not install results (item 6 and G)", () => {
+  const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+  afterEach(() => {
+    if (original.ollama === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+    else process.env.OPENAGENTS_OLLAMA_URL = original.ollama;
+    if (original.lm === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+    else process.env.OPENADMINOS_LM_STUDIO_URL = original.lm;
+  });
+
+  it("reports malformed JSON from a running Ollama and LM Studio as could not check", async () => {
+    const { server, url } = await serve((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end("{not json"));
+    try {
+      process.env.OPENAGENTS_OLLAMA_URL = url;
+      process.env.OPENADMINOS_LM_STUDIO_URL = `${url}/v1`;
+      assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "could-not-check");
+      assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "could-not-check");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reports a timeout as could not check", async () => {
+    const { server, url } = await serve(() => undefined);
+    try {
+      process.env.OPENAGENTS_OLLAMA_URL = url;
+      process.env.OPENADMINOS_LM_STUDIO_URL = `${url}/v1`;
+      assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"), { timeoutMs: 100 })).state, "could-not-check");
+      assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"), { timeoutMs: 100 })).state, "could-not-check");
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("reports a server stopped after an earlier check as not running, on a real socket (CI on Linux, PR #175)", async () => {
+    const { server, url } = await serve(() => undefined);
+    process.env.OPENAGENTS_OLLAMA_URL = url;
+    process.env.OPENADMINOS_LM_STUDIO_URL = `${url}/v1`;
+    try {
+      // Two checks that time out leave keep-alive sockets in fetch's pool.
+      await checkOllama(catalog("ollama"), { timeoutMs: 100 });
+      await checkLmStudio(catalog("lm-studio"), { timeoutMs: 100 });
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    assertNotRunning(scanProbeFromProvider(await checkOllama(catalog("ollama"))));
+    assertNotRunning(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))));
+  });
+
+  // The errors are injected in the shapes Node 22's fetch produces, so the
+  // result does not depend on how a closed port behaves on the test host
+  // (a parallel test process can take over a just-closed ephemeral port).
+  describe("only a refused connection is not running (CI on Linux, PR #175)", () => {
+    const originalFetch = globalThis.fetch;
+    afterEach(() => { globalThis.fetch = originalFetch; });
+    const coded = (code: string) => Object.assign(new Error(`connect ${code} 127.0.0.1:11434`), { code });
+    const fetchFailed = (cause: unknown) => Object.assign(new TypeError("fetch failed"), { cause });
+    const refused: Array<[string, unknown]> = [
+      ["ECONNREFUSED on 127.0.0.1 (Linux and macOS)", fetchFailed(coded("ECONNREFUSED"))],
+      ["localhost refused on IPv6 and IPv4 (AggregateError with a code)", fetchFailed(Object.assign(new AggregateError([coded("ECONNREFUSED"), coded("ECONNREFUSED")]), { code: "ECONNREFUSED" }))],
+      ["localhost refused on every address (AggregateError without a code)", fetchFailed(new AggregateError([coded("ECONNREFUSED"), coded("EADDRNOTAVAIL")]))],
+    ];
+    const failed: Array<[string, unknown]> = [
+      ["a timeout", Object.assign(new Error("The operation was aborted"), { name: "AbortError" })],
+      ["a socket the server closed mid-response", fetchFailed(Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }))],
+      ["one address refused and one timed out", fetchFailed(new AggregateError([coded("ECONNREFUSED"), coded("ETIMEDOUT")]))],
+    ];
+    for (const [label, error] of refused) {
+      it(`not running: ${label}`, async () => {
+        globalThis.fetch = (async () => { throw error; }) as typeof fetch;
+        process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+        process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+        assertNotRunning(scanProbeFromProvider(await checkOllama(catalog("ollama"))));
+        assertNotRunning(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))));
+      });
+    }
+    it("not running: a stopped server whose pooled socket was reused (UND_ERR_SOCKET, then refused)", async () => {
+      let calls = 0;
+      globalThis.fetch = (async () => {
+        calls += 1;
+        throw calls % 2 === 1
+          ? fetchFailed(Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }))
+          : fetchFailed(coded("ECONNREFUSED"));
+      }) as typeof fetch;
+      process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+      assertNotRunning(scanProbeFromProvider(await checkOllama(catalog("ollama"))));
+      assertNotRunning(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))));
+      assert.equal(calls, 4, "each check retried once on a new connection");
+    });
+
+    for (const [label, error] of failed) {
+      it(`could not check: ${label}`, async () => {
+        globalThis.fetch = (async () => { throw error; }) as typeof fetch;
+        process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+        process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+        assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "could-not-check");
+        assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "could-not-check");
+      });
+    }
+  });
+
+  it("marks an installed runtime whose server is down as installed, so Settings and the scan agree (design round, L)", { skip: !posix }, async () => {
+    const bin = await mkdtemp(join(tmpdir(), "oaos-installed-"));
+    const original = process.env.PATH;
+    try {
+      await fakeCli(bin, "ollama", "exit 0");
+      process.env.PATH = `${bin}:/usr/bin:/bin`;
+      // A port that was just closed: the connection is refused.
+      const { server, url } = await serve(() => undefined);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      process.env.OPENAGENTS_OLLAMA_URL = url;
+      const summary = await checkOllama(catalog("ollama"));
+      assert.equal(summary.status, "not-installed");
+      assert.equal(summary.installed, true);
+      const probe = scanProbeFromProvider(summary);
+      assert.equal(probe.summary, "Installed, not running", "the scan says what Settings says");
+    } finally {
+      if (original === undefined) delete process.env.PATH;
+      else process.env.PATH = original;
+      await rm(bin, { recursive: true, force: true });
+    }
+  });
+
+  it("reads at most four Ollama model capabilities at once (K)", async () => {
+    let active = 0;
+    let peak = 0;
+    const { server, url } = await serve((request, response) => {
+      if (request.url === "/api/tags") {
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: Array.from({ length: 12 }, (_, i) => ({ name: `model-${i}` })) }));
+        return;
+      }
+      active += 1;
+      peak = Math.max(peak, active);
+      setTimeout(() => {
+        active -= 1;
+        response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ capabilities: ["completion"] }));
+      }, 20);
+    });
+    try {
+      process.env.OPENAGENTS_OLLAMA_URL = url;
+      const summary = await checkOllama(catalog("ollama"));
+      assert.equal(summary.models.length, 12);
+      assert.ok(peak <= 4, `peak concurrency ${peak}`);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe("Retry gives HTTP checks its longer budget (review round 3, item 4)", () => {
+  it("finds an Ollama that answers after 3 seconds on Retry, and not within the first scan's 2.5 seconds", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oaos-retry-"));
+    const { server, url } = await serve((request, response) => {
+      const answer = () => request.url === "/api/tags"
+        ? response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "slow-model" }] }))
+        : response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ capabilities: ["completion"] }));
+      // The model list is slow; its capabilities answer at once.
+      if (request.url === "/api/tags") setTimeout(answer, 3_000);
+      else answer();
+    });
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    process.env.OPENAGENTS_OLLAMA_URL = url;
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      const first = await store.scanModels();
+      assert.equal(first.probes.find((probe) => probe.providerId === "ollama")?.state, "could-not-check");
+      const retry = await store.retryModelScanProbe("ollama");
+      const ollama = retry.probes.find((probe) => probe.providerId === "ollama");
+      assert.equal(ollama?.ready, true, ollama?.facts.join(" "));
+      assert.deepEqual(ollama?.models, ["slow-model"]);
+    } finally {
+      if (original.ollama === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = original.ollama;
+      if (original.lm === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original.lm;
+      store.close();
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
+describe("Azure settings inside a bounded check (item 5)", () => {
+  it("does not hold up the other checks when the keychain read stalls", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oaos-azure-"));
+    const original = process.env.OPENAGENTS_OLLAMA_URL;
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    Object.assign(store, { getAzureOpenAIConfig: () => new Promise(() => undefined) });
+    try {
+      const seen: string[] = [];
+      const started = Date.now();
+      const result = await store.scanModels((probe) => { if (probe.state !== "checking") seen.push(probe.providerId); });
+      assert.ok(Date.now() - started < 6_000);
+      assert.equal(result.probes.find((probe) => probe.providerId === "azure-openai")?.state, "could-not-check");
+      assert.ok(seen.includes("ollama"), "other checks resolved and reported");
+      assert.notEqual(seen[0], "azure-openai");
+    } finally {
+      if (original === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

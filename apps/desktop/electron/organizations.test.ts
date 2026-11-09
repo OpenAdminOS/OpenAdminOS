@@ -16,7 +16,6 @@ import {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { SAMPLE_TENANT_ID } from "./sample-tenant/dataset.js";
 import {
   noOrganizationRunCopy,
   OTHER_ORGANIZATION_RUN_COPY,
@@ -57,15 +56,6 @@ const fabrikam = {
     authority: "https://login.microsoftonline.com/22222222-2222-2222-2222-222222222222",
     label: "Fabrikam OpenAdminOS",
   },
-};
-
-const pilot = {
-  id: SAMPLE_TENANT_ID,
-  displayName: "Contoso (pilot)",
-  username: "admin@contoso.invalid",
-  homeAccountId: "sample",
-  addedAt: "2026-11-01T08:00:00.000Z",
-  kind: "sample",
 };
 
 function agent(slug: string, overrides: Record<string, unknown> = {}) {
@@ -261,34 +251,6 @@ describe("organization migration", () => {
     }
   });
 
-  it("leaves schedules unassigned when pilot mode is active alongside real tenants, never on the sample organization", async () => {
-    const fixture = await makeStore(currentVersionState({
-      tenants: [woodgrove, fabrikam, pilot],
-      activeTenantId: SAMPLE_TENANT_ID,
-    }));
-    try {
-      const app = await fixture.store.getAppState();
-      const sample = app.organizations?.find((organization) => organization.kind === "sample");
-      assert.equal(sample?.id, `org-${SAMPLE_TENANT_ID}`);
-      assert.equal(sample?.name, "Contoso (pilot)");
-      assert.equal(app.activeOrganizationId, sample?.id);
-      assert.equal(scheduleOf(app.installedAgents, "find-inactive-devices")?.organizationId, undefined);
-      assert.deepEqual(app.organizationMigration, {
-        assignedCount: 0,
-        unassignedCount: 2,
-        unassignedReason: "pilot-active",
-      });
-      await assert.rejects(
-        fixture.store.assignAgentSchedule("find-inactive-devices", sample!.id),
-        /Scheduling is available in production/,
-      );
-      const assigned = await fixture.store.assignAgentSchedule("find-inactive-devices", `org-${fabrikam.id}`);
-      assert.equal(scheduleOf(assigned.installedAgents, "find-inactive-devices")?.organizationId, `org-${fabrikam.id}`);
-    } finally {
-      await fixture.close();
-    }
-  });
-
   it("says nothing about schedules when there were none", async () => {
     const fixture = await makeStore(currentVersionState({ installedAgents: [agent("find-inactive-devices")] }));
     try {
@@ -308,7 +270,7 @@ describe("organization migration", () => {
         { id: "org-gone", name: "Gone", createdAt: "x", connections: { microsoft365: { tenantId: "gone" } } },
         // Malformed records are dropped.
         "not a record",
-        // The sample kind follows the tenant, never the record.
+        // A stored "sample" kind from before pilot mode was removed is dropped.
         { id: "org-fake-sample", name: "x".repeat(200), kind: "sample", createdAt: "x", connections: { microsoft365: { tenantId: fabrikam.id } } },
         // No id: kept under a fresh id (round 3) unless its tenant is
         // already claimed, as here, where it loses to the record above.
@@ -319,7 +281,7 @@ describe("organization migration", () => {
     try {
       const app = await fixture.store.getAppState();
       assert.deepEqual(
-        app.organizations?.map((organization) => [organization.id, organization.name, organization.kind]),
+        app.organizations?.map((organization) => [organization.id, organization.name, (organization as { kind?: unknown }).kind]),
         [
           ["org-custom", "Woodgrove Retail", undefined],
           ["org-fake-sample", "x".repeat(80), undefined],
@@ -335,14 +297,13 @@ describe("organization migration", () => {
 });
 
 describe("organizations", () => {
-  it("renames an organization and refuses an empty name or the sample organization", async () => {
-    const fixture = await makeStore(currentVersionState({ tenants: [woodgrove, pilot] }));
+  it("renames an organization and refuses an empty name", async () => {
+    const fixture = await makeStore(currentVersionState({ tenants: [woodgrove] }));
     try {
       const renamed = await fixture.store.renameOrganization(`org-${woodgrove.id}`, "  Woodgrove  ");
       assert.equal(renamed.organizations?.[0]?.name, "Woodgrove");
       assert.equal(renamed.tenants[0]?.displayName, "Woodgrove Bank");
       await assert.rejects(fixture.store.renameOrganization(`org-${woodgrove.id}`, "   "), /Enter a name/);
-      await assert.rejects(fixture.store.renameOrganization(`org-${SAMPLE_TENANT_ID}`, "Mine"), /keeps its name/);
       await assert.rejects(fixture.store.renameOrganization("org-missing", "Mine"), /no longer on this device/);
     } finally {
       await fixture.close();
@@ -749,31 +710,6 @@ describe("organization switch during a scheduler tick (Muse round 2)", () => {
 });
 
 describe("tenant checks after a Run for real rewrite (Muse round 2)", () => {
-  it("refuses a pilot Run for real of a dry run planned on a real tenant", async () => {
-    const tenants = [woodgrove, pilot] as unknown as TenantRecord[];
-    const writer = agent("stale-guest-cleanup", { mode: "write", scopes: [], services: [] }) as unknown as AgentSummary;
-    const dry = {
-      id: "dry-real", agentSlug: "stale-guest-cleanup", status: "planned", dryRun: true, tenantId: woodgrove.id,
-      providerId: "ollama", model: "test", inputSettings: {}, queuedAt: "2026-11-01T00:00:00.000Z", steps: [], logs: [],
-    } as unknown as RunRecord;
-    const h = runHarness({
-      activeProviderId: "ollama",
-      installedAgents: [writer],
-      runs: [dry],
-      tenants,
-      organizations: reconcileOrganizations({ rawOrganizations: [], rawNotice: undefined, tenants, installedAgents: [] }).organizations,
-      activeTenantId: SAMPLE_TENANT_ID,
-    });
-    // Pilot runs need the prepared-text model; the start is refused before it is used.
-    (h.service as unknown as { host: Record<string, unknown> }).host.buildPilotLlm = () => {
-      throw new Error("must not run");
-    };
-    await assert.rejects(
-      h.service.startRun("stale-guest-cleanup", { runForRealOfRunId: "dry-real" }),
-      (error: Error) => error.message === OTHER_ORGANIZATION_RUN_COPY,
-    );
-    assert.deepEqual(h.state().runs.map((run) => run.id), ["dry-real"]);
-  });
 });
 
 describe("duplicate tenant claims keep unknown connections (Muse round 2)", () => {

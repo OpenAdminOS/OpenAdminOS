@@ -11,7 +11,6 @@ import {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { SAMPLE_TENANT_ID } from "./sample-tenant/dataset.js";
 import { AppStateStore } from "./state.js";
 
 type Readiness = Partial<Record<ProviderId, Partial<ProviderSummary>>>;
@@ -227,33 +226,6 @@ describe("provider detection", () => {
       await fixture.close();
     }
   });
-
-  it("does nothing in pilot mode", async () => {
-    const fixture = await makeFixture({ providers: {} });
-    try {
-      await fixture.store.addSampleTenant();
-      fixture.setProviders({ "lm-studio": READY_LM_STUDIO });
-      const state = await fixture.store.getAppState();
-      assert.equal(state.activeTenantId, SAMPLE_TENANT_ID);
-      assert.equal(state.activeProviderId, "ollama");
-      assert.equal(state.providerAutoSelectNotice, undefined);
-      assert.equal((await fixture.persisted()).providerAutoSelection, undefined);
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("hides an earlier notice while pilot mode is active", async () => {
-    const fixture = await makeFixture({ providers: { "lm-studio": READY_LM_STUDIO } });
-    try {
-      assert.ok((await fixture.store.getAppState()).providerAutoSelectNotice);
-      const pilot = await fixture.store.addSampleTenant();
-      assert.equal(pilot.activeTenantId, SAMPLE_TENANT_ID);
-      assert.equal((await fixture.store.getAppState()).providerAutoSelectNotice, undefined);
-    } finally {
-      await fixture.close();
-    }
-  });
 });
 
 interface PersistedSnapshot {
@@ -268,9 +240,14 @@ async function makeFixture(options: {
 }) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-provider-detection-"));
   const statePath = join(dir, "state.json");
-  if (options.existingState) {
-    await writeFile(statePath, JSON.stringify(options.existingState), "utf8");
-  }
+  // Without an existing state this is a fresh install whose first-launch
+  // model scan has finished: app state then detects providers as before.
+  // (While the scan is pending, app state skips detection; model-scan.test.ts.)
+  await writeFile(
+    statePath,
+    JSON.stringify(options.existingState ?? { activeProviderId: "ollama", providerChosenByUser: false, installedAgents: [], runs: [], tenants: [] }),
+    "utf8",
+  );
   let readiness = options.providers;
   const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
   const stores: AppStateStore[] = [];
@@ -301,7 +278,6 @@ async function makeFixture(options: {
       return JSON.parse(await readFile(statePath, "utf8")) as PersistedSnapshot;
     },
     async close() {
-      await store.cancelGraphCachePreload(SAMPLE_TENANT_ID).catch(() => undefined);
       for (const entry of stores) entry.close();
       await rm(dir, { recursive: true, force: true });
     },

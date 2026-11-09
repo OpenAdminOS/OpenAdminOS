@@ -1,3 +1,6 @@
+import defenderIcon from "../assets/service-logos/defender-for-cloud.svg";
+import entraIcon from "../assets/service-logos/entra-id-color.svg";
+import intuneIcon from "../assets/service-logos/intune.svg";
 import {
   AVAILABLE_SERVICES,
   serviceById,
@@ -6,31 +9,71 @@ import {
   type TenantRecord,
 } from "../shared/openAdminOS";
 
-const SERVICE_MARK_TEXT: Record<string, string> = {
-  intune: "In",
-  entra: "En",
-  defender: "De",
+/**
+ * Microsoft's product icon for each service, unmodified (sources in
+ * `assets/service-logos/NOTICE.md`). Each is a single colour file that
+ * Microsoft provides for light and dark surfaces alike.
+ */
+const ICONS: Readonly<Partial<Record<string, string>>> = {
+  intune: intuneIcon,
+  entra: entraIcon,
+  defender: defenderIcon,
 };
 
-/** Two-letter tile for a service. Decorative: callers label the row. */
+/** Every Microsoft 365 service OpenAdminOS connects has its icon; another service shows its first two letters. */
+export function serviceLogoKind(service: string): "logo" | "neutral" {
+  return ICONS[service] ? "logo" : "neutral";
+}
+
+function titleOf(service: string): string {
+  try {
+    return serviceById(service as ServiceId).title;
+  } catch {
+    return service.charAt(0).toUpperCase() + service.slice(1);
+  }
+}
+
+/** The service's icon alone, for a surface that draws its own tile, such as the onboarding stage. */
+export function ServiceLogo({ service, size, label }: { service: string; size: number; label?: string }) {
+  const icon = ICONS[service];
+  const a11y = label ? { role: "img" as const, "aria-label": label } : { "aria-hidden": true as const };
+  if (icon) {
+    return (
+      <span {...a11y} data-service-logo={service} data-kind="logo" className="inline-flex shrink-0" style={{ width: size, height: size }}>
+        <img src={icon} alt="" draggable={false} className="h-full w-full object-contain" />
+      </span>
+    );
+  }
+  return (
+    <span {...a11y} data-service-logo={service} data-kind="neutral" className="inline-flex shrink-0 items-center justify-center font-medium" style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.5)) }}>
+      {titleOf(service).slice(0, 2)}
+    </span>
+  );
+}
+
+const INNER: Readonly<Record<"sm" | "md" | "lg", number>> = { sm: 13, md: 16, lg: 20 };
+
+/**
+ * A Microsoft 365 service as its icon on a small tile (mockup 32). A
+ * service that is not connected is always a dashed tile, wherever it
+ * shows; the icon inside stays as Microsoft provides it. Decorative next
+ * to a visible name; `label` names it when it stands alone.
+ */
 export function ServiceMark({
   serviceId,
   size = "md",
   off = false,
+  label,
 }: {
-  serviceId: ServiceId;
+  serviceId: ServiceId | string;
   size?: "sm" | "md" | "lg";
   off?: boolean;
+  label?: string;
 }) {
+  const a11y = label ? { role: "img" as const, "aria-label": label } : { "aria-hidden": true as const };
   return (
-    <span
-      aria-hidden="true"
-      className="svc-mark"
-      data-service={serviceId}
-      data-size={size}
-      data-off={off ? "true" : undefined}
-    >
-      {SERVICE_MARK_TEXT[serviceId] ?? serviceById(serviceId).title.slice(0, 2)}
+    <span {...a11y} className="svc-mark" data-service={serviceId} data-size={size} data-off={off ? "true" : undefined}>
+      <ServiceLogo service={serviceId} size={INNER[size]} />
     </span>
   );
 }

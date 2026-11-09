@@ -102,7 +102,7 @@ export default function AgentsHome() {
     : undefined;
   const organizations = resolveOrganizations(state);
   const activeOrganization = activeOrganizationOf(state);
-  const schedulesPaused = activeTenant?.kind === "sample" || !activeOrganization;
+  const schedulesPaused = !activeOrganization;
   const [access, setAccess] = useState<{ serviceId: ServiceId; partIds?: string[] } | null>(null);
 
   // Run due now and Run all scheduled run only the schedules of the active
@@ -234,7 +234,6 @@ export default function AgentsHome() {
     }));
   }, [activeTenant?.entraTier, state.installedAgents, state.runs]);
 
-  // The sample organization has every service; only the pilot agents run there.
   const rowNeeds = (row: LibraryRow): AgentNeeds =>
     agentNeeds(row.installed, activeTenant, organizations.length > 0);
 
@@ -585,7 +584,7 @@ export default function AgentsHome() {
             const scheduled = row.installed.schedule?.enabled === true;
             const needs = rowNeeds(row);
             const scheduleOrganization = organizations.find(
-              (organization) => organization.id === row.installed.schedule?.organizationId && organization.kind !== "sample",
+              (organization) => organization.id === row.installed.schedule?.organizationId,
             );
             const modeText = row.display.mode === "write" ? "Makes changes" : "Read-only";
             const every = scheduled ? `Every ${intervalWords(row.installed.schedule!.intervalSeconds)}` : "";

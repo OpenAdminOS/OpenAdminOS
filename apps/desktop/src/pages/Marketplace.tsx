@@ -6,7 +6,6 @@ import { IconCloud, IconExternal, IconRefresh, IconSearch, IconShield, IconWarni
 import { AgentHubList, matchesAgentQuery } from "../components/marketplace/AgentHubList";
 import { CoverArt, inkFor } from "../components/marketplace/CoverArt";
 import { ListingTags, McpServerDialog } from "../components/marketplace/McpServerDialog";
-import { usePilotMode } from "../components/PilotMode";
 import { useToast } from "../components/Toast";
 import { IconButton } from "../components/ui";
 import type { McpServerSummary } from "../shared/openAdminOS";
@@ -26,7 +25,6 @@ function matchesServer(server: McpServerSummary, query: string): boolean {
 export default function Marketplace() {
   const { state, registryAgents, refreshRegistry } = useAppState();
   const toast = useToast();
-  const pilot = usePilotMode();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [spot, setSpot] = useState(0);
@@ -176,7 +174,7 @@ export default function Marketplace() {
               note="From the community registry. Reviewed in pull requests on GitHub."
               hidden={searching && agentMatches === 0}
             >
-              <AgentHubList query={query} pilot={pilot} />
+              <AgentHubList query={query} />
             </Shelf>
           ) : null}
 

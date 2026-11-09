@@ -1,12 +1,11 @@
 import { lazy, Suspense, useEffect } from "react";
 import { Navigate, Route, Routes, useLocation, useNavigate, useParams } from "react-router";
+import { ModelScanGate } from "./setup/FirstRunScan";
 import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { IconChat, IconWarning } from "./components/icons";
 import { EmptyState } from "./components/ui";
-import { PilotProductionOnly } from "./components/PilotMode";
 import { ServiceGate } from "./components/ServiceAccess";
-import { FirstLaunchWelcome } from "./setup/WelcomeView";
 
 const Office = lazy(() => import("./pages/Office"));
 const Agents = lazy(() => import("./pages/Agents"));
@@ -55,7 +54,7 @@ export default function App() {
   }
 
   return (
-    <FirstLaunchWelcome>
+    <ModelScanGate>
       <AppShell>
         <Suspense fallback={<RouteFallback />}>
           <Routes>
@@ -75,21 +74,15 @@ export default function App() {
             <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
             <Route
               path="/office"
-              element={
-                <PilotProductionOnly feature="Agent Team">
-                  <Office />
-                </PilotProductionOnly>
-              }
+              element={<Office />}
             />
             <Route
               path="/changes"
               element={
-                <PilotProductionOnly feature="Changes" plural>
-                  {/* Drift tracks Intune and Entra configuration. */}
-                  <ServiceGate anyOf={["intune", "entra"]} feature="Changes">
-                    <Changes />
-                  </ServiceGate>
-                </PilotProductionOnly>
+                // Drift tracks Intune and Entra configuration.
+                <ServiceGate anyOf={["intune", "entra"]} feature="Changes">
+                  <Changes />
+                </ServiceGate>
               }
             />
             <Route path="/fleet" element={<FleetRedirect />} />
@@ -108,7 +101,7 @@ export default function App() {
           </Routes>
         </Suspense>
       </AppShell>
-    </FirstLaunchWelcome>
+    </ModelScanGate>
   );
 }
 

@@ -12,12 +12,16 @@ import {
   grantedScopeSet,
   missingPartsForScopes,
   missingServiceCopy,
+  notConnectedAnswerText,
   notGrantedServiceForScopes,
+  partsNeededForScopes,
+  serviceStatus,
   resolveProviderDefaultModel,
   graphAccessDenialFromError,
   graphAccessDenialText,
   type AgentSummary,
   type ChatInvestigationMode,
+  type IntuneChatNotConnected,
   type ChatInvestigationSettings,
   type DriftTimelineInput,
   type DriftTimelineResult,
@@ -122,6 +126,7 @@ import {
   buildAnswerPack,
   chatTitleForPrompt,
   classifyChatQuestion,
+  isExplicitDocsRequest,
   definitionForResource,
   hasTenantReference,
   isSmallTalk,
@@ -156,8 +161,6 @@ import {
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
 import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
-import { answerPilotChatMessage } from "./pilot-chat.js";
-import { PILOT_COPY } from "../../src/shared/pilot-mode.js";
 
 type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
@@ -167,15 +170,50 @@ type WorkspacePromptContextPayload = {
 interface TenantResourceRestriction {
   /** Every planned resource was dropped: the whole answer. */
   blocked?: string;
+  /** What `blocked` names, for the not-connected card. */
+  notConnected?: IntuneChatNotConnected;
   /** Some were dropped: one line appended to the answer that names them. */
   omitted?: string;
 }
 
+/**
+ * The scope of a Chat send while no tenant is connected. It grants
+ * nothing, so `restrictPlannedResourcesForTenant` drops every planned
+ * resource, and its empty id resolves to no tenant: `resolveTenant`
+ * refuses it, so the cache refresh cannot start, and the tool context
+ * built for it refuses every Graph request. A docs question is answered
+ * from the model, the local docs index and enabled references; a tenant
+ * or mixed question gets the not-connected result.
+ */
+const NO_TENANT_SCOPE: TenantRecord = Object.freeze({
+  id: "",
+  displayName: "",
+  username: "",
+  homeAccountId: "",
+  addedAt: new Date(0).toISOString(),
+  grantedScopes: [],
+}) as TenantRecord;
+
+const NO_TENANT_GRAPH_REFUSAL =
+  "No organization is active, so Chat reads no tenant data. Connect Microsoft 365 to answer this.";
+
 function restrictPlannedResourcesForTenant(
   planned: PlannedChatContext,
   tenant: TenantRecord,
+  noTenant = false,
 ): TenantResourceRestriction {
   const originalResources = [...planned.resources];
+  if (noTenant) {
+    // Every tenant or mixed question is blocked, also when the planner
+    // found no resource: the card then asks for a tenant without
+    // preselecting a service.
+    planned.resources = [];
+    const notConnected: IntuneChatNotConnected = {
+      reason: "no-tenant",
+      partIds: partsNeededForScopes(requiredScopesForResources(originalResources), undefined).map((part) => part.id),
+    };
+    return { blocked: notConnectedAnswerText(notConnected), notConnected };
+  }
   const available = availableScopeSet(tenant);
   const isAvailable = (resource: GraphCacheResourceKind) =>
     definitionForResource(resource).scopes.every((scope) => available.has(scope));
@@ -185,7 +223,17 @@ function restrictPlannedResourcesForTenant(
   const reason =
     missingServiceCopy(tenant, requiredScopesForResources(dropped)) ??
     `This question needs Microsoft Graph access that is not granted for ${tenant.displayName}. Add it in Connections.`;
-  if (planned.resources.length === 0) return { blocked: reason };
+  if (planned.resources.length === 0) {
+    const parts = partsNeededForScopes(requiredScopesForResources(dropped), tenant);
+    const notConnected: IntuneChatNotConnected | undefined = parts.length > 0
+      ? {
+          reason: parts.some((part) => serviceStatus(tenant, part.service) === "missing") ? "service-missing" : "part-missing",
+          partIds: parts.map((part) => part.id),
+          tenantId: tenant.id,
+        }
+      : undefined;
+    return { blocked: reason, ...(notConnected ? { notConnected } : {}) };
+  }
   const labels = dropped.map((resource) => definitionForResource(resource).label);
   return { omitted: `Not included in this answer: ${formatServiceList(labels)}. ${reason}` };
 }
@@ -204,11 +252,60 @@ function accessBlockTiming(
   blocked: string | undefined,
   plan: { sources: ChatSourcePlan; docsSourceAvailable: boolean } | undefined,
   modelClassifies: boolean,
+  noTenant = false,
 ): { now?: string; deferred?: string } {
   if (!blocked) return {};
+  // With no tenant a docs question is answered from the model alone when
+  // no documentation source is installed: it needs no tenant data.
+  // A docs kind can still become mixed when the model calls a tenant tool;
+  // the deferred block then answers before any tenant data is loaded.
+  if (noTenant) return !modelClassifies && plan?.sources.kind !== "docs" ? { now: blocked } : { deferred: blocked };
   if (!plan?.docsSourceAvailable) return { now: blocked };
   if (modelClassifies) return { deferred: blocked };
   return plan.sources.kind === "docs" ? {} : { now: blocked };
+}
+
+/**
+ * Refuses a model call that has no verified hosted confirmation: a
+ * backstop behind the routing decision, so no path can call a hosted
+ * model without one. For a local model the check passes at once.
+ */
+export function gateHostedLlm<T extends { complete: (...args: never[]) => unknown; stream: (...args: never[]) => unknown }>(llm: T, verify: () => void): T {
+  return {
+    ...llm,
+    complete: ((...args: never[]) => {
+      verify();
+      return llm.complete(...args);
+    }) as T["complete"],
+    stream: ((...args: never[]) => {
+      verify();
+      return llm.stream(...args);
+    }) as T["stream"],
+  };
+}
+
+/** The not-connected result of an answer that is the access line, for the card. */
+function notConnectedFor(
+  accessBlockedMessage: string | undefined,
+  restriction: TenantResourceRestriction,
+  answeredOtherwise: boolean,
+): { notConnected?: IntuneChatNotConnected } {
+  return accessBlockedMessage && restriction.notConnected && !answeredOtherwise ? { notConnected: restriction.notConnected } : {};
+}
+
+/**
+ * A conversation continued while no tenant is connected must hold no
+ * tenant data: its memory goes into the prompt, also to a hosted provider
+ * under a no-tenant confirmation. A conversation that belongs to a tenant,
+ * or whose earlier answers used tenant data, is refused.
+ */
+function assertNoTenantConversation(conversation: IntuneChatConversation, history: readonly IntuneChatMessage[]): void {
+  if (conversation.scopeKind === "multi-tenant" || conversation.tenantId) {
+    throw new Error("This conversation belongs to a tenant. Switch to that tenant, or start a new conversation.");
+  }
+  if (history.some((message) => message.role === "assistant" && usedTenantEvidence(message))) {
+    throw new Error("Earlier answers in this conversation used tenant data. Connect that tenant, or start a new conversation.");
+  }
 }
 
 /** A deferred access block: the kind settled to tenant or mixed, so the access line is the answer. */
@@ -464,6 +561,11 @@ export class IntuneChatService {
    * when the tenant starts closing. Without a lifecycle host (unit tests)
    * the work runs as before.
    */
+  /** `leased` for a tenant send; a send with no tenant (SPEC.md 4a) has no lease to take. */
+  private leasedScope<T>(tenantId: string | undefined, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+    return tenantId ? this.leased(tenantId, signal, work) : work(signal);
+  }
+
   private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
     if (!this.host.tenantLease) return work(signal);
     return this.host.tenantLease(tenantId, (leaseSignal) => work(signal ? AbortSignal.any([signal, leaseSignal]) : leaseSignal));
@@ -1406,15 +1508,6 @@ export class IntuneChatService {
       activeTenantId: activeTenant.id,
     });
     const selectedTenantSet = new Set(resolvedTenantIds);
-    // Pilot Chat answers prepared prompts only and never reaches a model,
-    // so the pilot tenant cannot join a multi-tenant answer.
-    if (
-      persisted.tenants.some(
-        (tenant) => tenant.kind === "sample" && selectedTenantSet.has(tenant.id),
-      )
-    ) {
-      throw new Error(PILOT_COPY.multiTenantRejected);
-    }
     const savedQuery = input.savedQueryId
       ? store
           .listSavedMultiTenantQueries()
@@ -1589,6 +1682,11 @@ export class IntuneChatService {
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
     const persisted = await this.host.read();
+    // A conversation with nothing connected asks for the cache without an
+    // id: there is no cache to report. An explicit unknown id still fails.
+    if (tenantId === undefined && !persisted.tenants.some((tenant) => tenant.id === persisted.activeTenantId)) {
+      return { resources: [] };
+    }
     const resolvedTenant = this.host.resolveTenant(persisted, tenantId);
     const store = this.host.requireIntelligenceStore();
     return {
@@ -1919,18 +2017,11 @@ export class IntuneChatService {
 
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
-    const tenant = this.host.resolveTenant(persisted);
-    // The send runs under the tenant's lease; Disconnect refuses and drains it.
-    return this.leased(tenant.id, undefined, async () => {
-    if (tenant.kind === "sample") {
-      return answerPilotChatMessage({
-        message: input,
-        tenant,
-        store,
-        graph: (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
-        now: this.host.now?.() ?? new Date(),
-      });
-    }
+    // Chat sends with a model and no tenant (SPEC.md 4a, 2026-11-08).
+    const noTenant = !persisted.activeTenantId;
+    const tenant = noTenant ? NO_TENANT_SCOPE : this.host.resolveTenant(persisted);
+    // A tenant send runs under the tenant's lease; Disconnect refuses and drains it. No tenant, no lease.
+    return this.leasedScope(noTenant ? undefined : tenant.id, undefined, async () => {
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
@@ -1939,17 +2030,27 @@ export class IntuneChatService {
       persisted.activeModelByProviderId,
     ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
+    if (noTenant && input.workspaceContext) {
+      throw new Error("Workspaces belong to an organization. Choose one to attach workspace context, or send without it.");
+    }
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
       : undefined;
-    this.requireHostedChatConsent(
-      input,
-      tenant,
-      provider,
-      providerId,
-      workspaceContext?.summary,
-    );
-    if (provider?.isLocal === false && input.hostedProviderConsent) {
+    // A no-tenant question that is blocked before any model call sends
+    // nothing, so it needs no hosted confirmation.
+    // The same routing decision as the preview: a no-tenant question that
+    // never reaches the model needs no confirmation. Every hosted model call
+    // below is gated on `consentVerified` as well (see gateHostedLlm).
+    const reachesModel = noTenant ? (await this.noTenantRoute(content, persisted, provider, selectedModel)).reachesModel : true;
+    let consentVerified = provider?.isLocal !== false;
+    const verifyConsent = () => {
+      if (consentVerified) return;
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel);
+      consentVerified = true;
+    };
+    if (reachesModel) verifyConsent();
+    // The consent audit is per tenant; a no-tenant send has none to record against.
+    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant) {
       this.recordHostedProviderConsentSafely({
         tenantIds: [tenant.id],
         providerId,
@@ -1968,14 +2069,19 @@ export class IntuneChatService {
       ? ["managedDevices" as const]
       : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const restriction = restrictPlannedResourcesForTenant(planned, tenant);
+    const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const now = new Date().toISOString();
 
     let conversation = input.conversationId
       ? store.getConversation(input.conversationId)
       : undefined;
     if (conversation) {
-      assertConversationTenant(conversation, tenant.id);
+      if (noTenant) assertNoTenantConversation(conversation, store.listMessages(conversation.id));
+      else {
+        assertConversationTenant(conversation, tenant.id);
+        // A conversation started without a tenant belongs to the first tenant it is continued in.
+        if (!conversation.tenantId) store.bindConversationTenant(conversation.id, tenant.id);
+      }
     }
     // A new chat is named after the question until the answer gives it a title.
     const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
@@ -1983,7 +2089,7 @@ export class IntuneChatService {
       conversation = store.createConversation({
         id: `chat_${randomUUID()}`,
         title: chatTitleForPrompt(content),
-        tenantId: tenant.id,
+        tenantId: noTenant ? null : tenant.id,
         now,
       });
     }
@@ -2010,10 +2116,12 @@ export class IntuneChatService {
     // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
     // directResources is set exactly when a direct answer can apply; direct answers read the cache
     // before any model call, so those questions keep the refresh before the answer.
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
-    const veto = docsVeto(content, history);
-    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
-    const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh);
+    // With nothing connected, an explicit docs request is not left to the model's classification.
+    const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
+    const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
+    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
+    const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
     let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
 
@@ -2112,7 +2220,7 @@ export class IntuneChatService {
     let modelFollowUps: string[] = [];
     let modelTitle: string | undefined;
 
-    const directDeviceAnswer = !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs"
+    const directDeviceAnswer = !noTenant && !planned.hasWriteIntent && !accessBlockedMessage && answerPlan.sources.kind !== "docs"
       ? await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant), () => {}, entry => { (toolTrace ??= []).push(entry); }) ??
         voiceAppPlatformCountAnswer(content, cacheStatus, (resource) =>
           this.graphAggregatesFor(store, tenant.id, [resource])[resource],
@@ -2131,7 +2239,8 @@ export class IntuneChatService {
       assistantContent = directDeviceAnswer;
       responseModel = undefined;
     } else {
-      const llm = withTenantDataOutputFilter(await this.tenantLlm(providerId, selectedModel, [tenant.id]));
+      // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
+      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]), verifyConsent));
       const withMemory = conversationMemory
         ? `Conversation so far (earliest first, may be truncated):\n${fenceTenantData(conversationMemory, "chat:history")}\n\nCurrent question: ${content}`
         : content;
@@ -2208,8 +2317,9 @@ export class IntuneChatService {
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               questionKind: answerPlan.sources.kind,
               requiredServerIds: answerPlan.sources.requiredServerIds,
-              ...(lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
+              ...(lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : noTenant ? noTenantUpgrade(answerPlan.kind, loadTenantData) : {}),
               tenant,
+              ...(noTenant ? { noTenant: true } : {}),
               providerId,
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
@@ -2283,6 +2393,7 @@ export class IntuneChatService {
       model: responseModel,
       ...(engineNotice ? { engineNotice } : {}),
       questionKind: answerPlan.sources.kind,
+      ...(notConnectedFor(accessBlockedMessage, restriction, Boolean(namedAgent) || planned.hasWriteIntent)),
       steps: steps.steps,
       ...(documentationSources.length > 0 ? { documentationSources } : {}),
       ...(followUps.length > 0 ? { followUps } : {}),
@@ -2318,18 +2429,20 @@ export class IntuneChatService {
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
 
-    await this.maybeCreateSelfTrainingSuggestionFromChat({
-      tenantId: tenant.id,
-      question: content,
-      agentSuggestions,
-    });
+    if (!noTenant) {
+      await this.maybeCreateSelfTrainingSuggestionFromChat({
+        tenantId: tenant.id,
+        question: content,
+        agentSuggestions,
+      });
+    }
 
     return {
       conversation: store.getConversation(conversation.id) ?? conversation,
       userMessage,
       assistantMessage,
       cacheStatus: {
-        tenantId: tenant.id,
+        ...(noTenant ? {} : { tenantId: tenant.id }),
         resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
         schedule: store.getGraphCacheRefreshSchedule(tenant.id),
       },
@@ -2349,25 +2462,20 @@ export class IntuneChatService {
 
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
-    const tenant = this.host.resolveTenant(persisted);
-    // The send runs under the tenant's lease; Disconnect stops and drains it.
-    return this.leased(tenant.id, options.signal, async (leaseSignal) => {
+    // Chat sends with a model and no tenant (SPEC.md 4a, 2026-11-08).
+    const noTenant = !persisted.activeTenantId;
+    const tenant = noTenant ? NO_TENANT_SCOPE : this.host.resolveTenant(persisted);
+    // A tenant send runs under the tenant's lease; Disconnect stops and drains it. No tenant, no lease.
+    return this.leasedScope(noTenant ? undefined : tenant.id, options.signal, async (leaseSignal) => {
     if (leaseSignal) options = { ...options, signal: leaseSignal };
-    if (tenant.kind === "sample") {
-      return answerPilotChatMessage({
-        message: input,
-        tenant,
-        store,
-        graph: (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
-        now: this.host.now?.() ?? new Date(),
-        onEvent,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-    }
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
     options.signal?.throwIfAborted();
+    // Nova keeps requiring a tenant.
+    if (noTenant && (options.voice || options.scope)) {
+      throw new Error("Nova voice needs an organization. Connect Microsoft 365, or ask in Chat, which answers without one.");
+    }
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");
     const selectedModel = resolveProviderDefaultModel(
@@ -2377,17 +2485,27 @@ export class IntuneChatService {
     if (options.scope && (("model" in options.scope && options.scope.model !== selectedModel) || (options.scope.isLocal !== undefined && options.scope.isLocal !== provider?.isLocal)))
       throw new Error("Nova's reasoning model or provider trust changed. Start a new conversation.");
     const chatBudget = intuneChatProviderBudget(providerId);
+    if (noTenant && input.workspaceContext) {
+      throw new Error("Workspaces belong to an organization. Choose one to attach workspace context, or send without it.");
+    }
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
       : undefined;
-    this.requireHostedChatConsent(
-      input,
-      tenant,
-      provider,
-      providerId,
-      workspaceContext?.summary,
-    );
-    if (provider?.isLocal === false && input.hostedProviderConsent) {
+    // A no-tenant question that is blocked before any model call sends
+    // nothing, so it needs no hosted confirmation.
+    // The same routing decision as the preview: a no-tenant question that
+    // never reaches the model needs no confirmation. Every hosted model call
+    // below is gated on `consentVerified` as well (see gateHostedLlm).
+    const reachesModel = noTenant ? (await this.noTenantRoute(content, persisted, provider, selectedModel)).reachesModel : true;
+    let consentVerified = provider?.isLocal !== false;
+    const verifyConsent = () => {
+      if (consentVerified) return;
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel);
+      consentVerified = true;
+    };
+    if (reachesModel) verifyConsent();
+    // The consent audit is per tenant; a no-tenant send has none to record against.
+    if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant) {
       this.recordHostedProviderConsentSafely({
         tenantIds: [tenant.id],
         providerId,
@@ -2407,7 +2525,12 @@ export class IntuneChatService {
       ? store.getConversation(input.conversationId)
       : undefined;
     if (conversation) {
-      assertConversationTenant(conversation, tenant.id);
+      if (noTenant) assertNoTenantConversation(conversation, store.listMessages(conversation.id));
+      else {
+        assertConversationTenant(conversation, tenant.id);
+        // A conversation started without a tenant belongs to the first tenant it is continued in.
+        if (!conversation.tenantId) store.bindConversationTenant(conversation.id, tenant.id);
+      }
     }
     // A new chat is named after the question until the answer gives it a title.
     const newConversationTitle = conversation ? undefined : chatTitleForPrompt(content);
@@ -2415,7 +2538,7 @@ export class IntuneChatService {
       conversation = store.createConversation({
         id: `chat_${randomUUID()}`,
         title: chatTitleForPrompt(content),
-        tenantId: tenant.id,
+        tenantId: noTenant ? null : tenant.id,
         now,
       });
     }
@@ -2431,7 +2554,7 @@ export class IntuneChatService {
     const planned = planChatContext(voiceContext?.planningQuestion ?? content);
     const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
     if (directResources && !planned.hasWriteIntent) planned.resources = directResources;
-    const restriction = restrictPlannedResourcesForTenant(planned, tenant);
+    const restriction = restrictPlannedResourcesForTenant(planned, tenant, noTenant);
     const userMessage: IntuneChatMessage = {
       id: `msg_${randomUUID()}`,
       conversationId: conversation.id,
@@ -2454,7 +2577,7 @@ export class IntuneChatService {
       ...(selectedModel ? { model: selectedModel } : {}),
     };
     const initialCacheStatus: GraphCacheStatus = {
-      tenantId: tenant.id,
+      ...(noTenant ? {} : { tenantId: tenant.id }),
       resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
       schedule: store.getGraphCacheRefreshSchedule(tenant.id),
     };
@@ -2476,13 +2599,15 @@ export class IntuneChatService {
     // A tool-loop answer lets the model classify the question and reads the tenant only once it needs it.
     // directResources is set exactly when a direct answer can apply; direct answers read the cache
     // before any model call, so those questions keep the refresh before the answer.
-    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent;
-    const veto = docsVeto(content, history);
+    // With nothing connected, an explicit docs request is not left to the model's classification.
+    const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
+    const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
+    const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
       ? undefined
-      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
-    const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh);
+      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
+    const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
     let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
     const isCancelled = () => options.signal?.aborted === true;
@@ -2518,7 +2643,7 @@ export class IntuneChatService {
         userMessage,
         assistantMessage,
         cacheStatus: {
-          tenantId: tenant.id,
+          ...(noTenant ? {} : { tenantId: tenant.id }),
           resources: currentCacheStatus,
           schedule: store.getGraphCacheRefreshSchedule(tenant.id),
         },
@@ -2647,7 +2772,7 @@ export class IntuneChatService {
             stage: "building-context",
             contextStatus: "active",
             cacheStatus: {
-              tenantId: tenant.id,
+              ...(noTenant ? {} : { tenantId: tenant.id }),
               resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
               schedule: store.getGraphCacheRefreshSchedule(tenant.id),
             },
@@ -2756,7 +2881,7 @@ export class IntuneChatService {
       emitDelta(content, delta);
     };
 
-    const directVoiceAnswer = accessBlockedMessage || answerPlan?.sources.kind === "docs"
+    const directVoiceAnswer = noTenant || accessBlockedMessage || answerPlan?.sources.kind === "docs"
       ? undefined
       : await voiceDeviceEvidenceAnswer(content, cacheStatus, this.buildChatToolContext(tenant, options.signal), message => sendProgress({ message, stage: "running-tools" }), entry => { (toolTrace ??= []).push(entry); }) ?? voiceInventoryAnswer(content, cacheStatus) ?? voiceAppPlatformCountAnswer(content, cacheStatus, (resource) => this.graphAggregatesFor(store, tenant.id, [resource])[resource]) ?? voiceDeviceSummaryAnswer(content, cacheStatus, () => this.graphAggregatesFor(store, tenant.id, ["managedDevices"]).managedDevices);
     const namedAgent = persisted.installedAgents.find(a => [a.name, a.slug].some(n => n.toLowerCase() === content.toLowerCase()));
@@ -2776,7 +2901,8 @@ export class IntuneChatService {
       responseModel = undefined;
       emitDelta(assistantContent);
     } else {
-      const llm = withTenantDataOutputFilter(await this.tenantLlm(providerId, selectedModel, [tenant.id]));
+      // Tenant work goes through the model egress choke point; a send with no tenant has none to close.
+      const llm = withTenantDataOutputFilter(gateHostedLlm(noTenant ? await this.host.buildLlm(providerId, selectedModel) : await this.tenantLlm(providerId, selectedModel, [tenant.id]), verifyConsent));
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory
@@ -2861,7 +2987,7 @@ export class IntuneChatService {
               contextStatus: "completed",
               modelStatus: "active",
               cacheStatus: {
-                tenantId: tenant.id,
+                ...(noTenant ? {} : { tenantId: tenant.id }),
                 resources: cacheStatus,
                 schedule: store.getGraphCacheRefreshSchedule(tenant.id),
               },
@@ -2879,8 +3005,9 @@ export class IntuneChatService {
               documentation,
               ...(learnFirst ? { documentationFallback: (reason?: string) => this.searchDocsIndex(modelQuestion, steps, reason) } : {}),
               ...(answerPlan ? { questionKind: answerPlan.sources.kind, requiredServerIds: answerPlan.sources.requiredServerIds } : {}),
-              ...(answerPlan && lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : {}),
+              ...(answerPlan && lazyRefresh ? modelClassification(veto, answerPlan.kind, loadTenantData) : answerPlan && noTenant ? noTenantUpgrade(answerPlan.kind, loadTenantData) : {}),
               tenant,
+              ...(noTenant ? { noTenant: true } : {}),
               providerId,
               providerIsLocal: provider?.isLocal === true,
               ...(selectedModel ? { model: selectedModel } : {}),
@@ -2962,7 +3089,7 @@ export class IntuneChatService {
                 contextStatus: "completed",
                 modelStatus: "active",
                 cacheStatus: {
-                  tenantId: tenant.id,
+                  ...(noTenant ? {} : { tenantId: tenant.id }),
                   resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
                   schedule: store.getGraphCacheRefreshSchedule(tenant.id),
                 },
@@ -3094,6 +3221,7 @@ export class IntuneChatService {
       ...(responseModel ? { model: responseModel } : {}),
       ...(engineNotice ? { engineNotice } : {}),
       ...(answerPlan ? { questionKind: answerPlan.sources.kind } : {}),
+      ...(notConnectedFor(accessBlockedMessage, restriction, Boolean(namedAgent) || planned.hasWriteIntent)),
       steps: steps.steps,
       ...(documentationSources.length > 0 ? { documentationSources } : {}),
       ...(followUps.length > 0 ? { followUps } : {}),
@@ -3129,18 +3257,20 @@ export class IntuneChatService {
     }
     store.touchConversation(conversation.id, this.answeredChatTitle(conversation.id, newConversationTitle, modelTitle), assistantMessage.createdAt);
 
-    await this.maybeCreateSelfTrainingSuggestionFromChat({
-      tenantId: tenant.id,
-      question: content,
-      agentSuggestions,
-    });
+    if (!noTenant) {
+      await this.maybeCreateSelfTrainingSuggestionFromChat({
+        tenantId: tenant.id,
+        question: content,
+        agentSuggestions,
+      });
+    }
 
     const result: SendIntuneChatMessageResult = {
       conversation: store.getConversation(conversation.id) ?? conversation,
       userMessage,
       assistantMessage,
       cacheStatus: {
-        tenantId: tenant.id,
+        ...(noTenant ? {} : { tenantId: tenant.id }),
         resources: store.getGraphCacheStatus(tenant.id, [...GRAPH_CACHE_RESOURCES]),
         schedule: store.getGraphCacheRefreshSchedule(tenant.id),
       },
@@ -3241,6 +3371,8 @@ export class IntuneChatService {
     modelClassifies: boolean;
     /** Why a docs label is not allowed, when it is not. */
     veto?: string;
+    /** With nothing connected, a request to write a query or script is docs. */
+    forceDocs?: boolean;
     steps: ChatStepRecorder;
   }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
     // The first step shows at once; its detail follows when the kind and sources are known.
@@ -3249,7 +3381,9 @@ export class IntuneChatService {
     // A model that skips the tool loop is offered no MCP tools, so none is planned as a source.
     const mcp = input.toolsOffered ? installed : {};
     const servers = mcp.mcp?.servers ?? [];
-    const keywordKind = input.planned.hasWriteIntent
+    const keywordKind = input.forceDocs
+      ? "docs"
+      : input.planned.hasWriteIntent
       ? "tenant"
       : classifyChatQuestion(input.content, { plannedResources: input.planned.resources, namesSource: namedServers(input.content, servers).length > 0 });
     const context = { question: input.content, servers, docsIndexAvailable: Boolean(this.host.documentationIndexVersion?.()) };
@@ -3409,12 +3543,14 @@ export class IntuneChatService {
       // A partly granted part is not usable, matching Settings.
       grantedScopes: availableScopeSet(tenant),
       graphForScopes: async (scopes) => {
+        if (!tenantId) throw new Error(NO_TENANT_GRAPH_REFUSAL);
         const uniqueScopes = [...new Set(scopes)].sort();
         return this.host.graphFactory
           ? this.host.graphFactory({ tenantId, scopes: uniqueScopes, log })
           : (await this.host.buildGraph(tenantId, uniqueScopes)).createGraph(log);
       },
       refreshResource: async (resource) => {
+        if (!tenantId) throw new Error(NO_TENANT_GRAPH_REFUSAL);
         const result = await this.refreshGraphCacheInternal({
           tenantId,
           resources: [resource],
@@ -3431,7 +3567,8 @@ export class IntuneChatService {
           error: "Refresh did not return a resource result.",
         };
       },
-      getDriftTimeline: (input) => this.host.getDriftTimeline(input),
+      getDriftTimeline: (input) =>
+        tenantId ? this.host.getDriftTimeline(input) : Promise.reject(new Error(NO_TENANT_GRAPH_REFUSAL)),
     };
   }
 
@@ -3457,12 +3594,60 @@ export class IntuneChatService {
     }
   }
 
+  /**
+   * A hosted send needs a fresh acknowledgement bound to the provider and
+   * to the send's scope: the active tenant, or no tenant (`tenant`
+   * undefined). A no-tenant acknowledgement covers the question, the
+   * conversation and reference results only, so it is refused for any
+   * send that includes tenant context; the first send with a tenant asks
+   * again with the tenant-bound confirmation.
+   */
+  /**
+   * Whether a send with no tenant reaches the model, the same way the send
+   * decides it: blocked questions (a write request, a named agent, or a
+   * tenant question decided by the keyword rules without the tool loop)
+   * get their answer on the device.
+   */
+  /**
+   * The one routing decision for a send with no tenant, used by the send
+   * itself and by the renderer's preview: whether the question reaches the
+   * model. It follows the send step by step: planned resources are cleared
+   * (nothing is connected), a request to write code is docs, the keyword
+   * kind is vetoed to mixed by a tenant reference, and without the tool loop
+   * only a docs kind is answered by the model.
+   */
+  private async noTenantRoute(content: string, persisted: ChatPersistedState, provider: ProviderSummary, model: string | undefined): Promise<{ reachesModel: boolean }> {
+    const planned = planChatContext(content);
+    if (planned.hasWriteIntent) return { reachesModel: false };
+    if (persisted.installedAgents.some((agent) => [agent.name, agent.slug].some((name) => name.toLowerCase() === content.toLowerCase()))) return { reachesModel: false };
+    const docsWithoutTenant = isExplicitDocsRequest(content);
+    const toolsOffered = resolveAgenticCapability({ mode: this.host.requireIntelligenceStore().getChatInvestigationSettings().mode, provider, providerId: provider.id, ...(model ? { model } : {}) }).enabled;
+    const directResources = voiceDeviceEvidenceIntent(content) || Boolean(voiceResourcesForQuestion(content));
+    if (toolsOffered && !directResources && !docsWithoutTenant) return { reachesModel: true };
+    if (docsWithoutTenant) return { reachesModel: true };
+    const servers = toolsOffered ? (await this.mcpToolsFor(NO_TENANT_SCOPE, "")).mcp?.servers ?? [] : [];
+    const keyword = classifyChatQuestion(content, { plannedResources: [], namesSource: namedServers(content, servers).length > 0 });
+    const kind = keyword === "docs" && hasTenantReference(content) ? "mixed" : keyword;
+    return { reachesModel: kind === "docs" };
+  }
+
+  /** For the renderer: whether a send with no tenant would reach the model and so needs a hosted confirmation. */
+  async previewIntuneChatSend(input: { content: string }): Promise<{ reachesModel: boolean }> {
+    const persisted = await this.host.read();
+    if (persisted.activeTenantId) return { reachesModel: true };
+    const providers = await this.host.listProviders();
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const model = resolveProviderDefaultModel(provider, persisted.activeModelByProviderId).model;
+    return this.noTenantRoute(input.content.trim(), persisted, provider, model);
+  }
+
   private requireHostedChatConsent(
     input: SendIntuneChatMessageInput,
-    tenant: TenantRecord,
+    tenant: TenantRecord | undefined,
     provider: ProviderSummary | undefined,
     providerId: ProviderId,
     workspaceContext?: WorkspacePromptContextSummary,
+    model?: string,
   ): void {
     if (provider?.isLocal !== false) {
       return;
@@ -3471,13 +3656,36 @@ export class IntuneChatService {
     const consent = input.hostedProviderConsent;
     if (!consent) {
       throw new Error(
-        "Hosted provider confirmation is required before Chat can send tenant context to the selected provider.",
+        tenant
+          ? "Hosted provider confirmation is required before Chat can send tenant context to the selected provider."
+          : "Hosted provider confirmation is required before Chat can send your question to the selected provider.",
       );
     }
 
-    if (consent.tenantId !== tenant.id || consent.providerId !== providerId) {
+    if (consent.providerId !== providerId) {
+      throw new Error(
+        "Hosted provider confirmation does not match the selected provider. Confirm the chat send again.",
+      );
+    }
+    if (tenant && consent.noTenant === true) {
+      throw new Error(
+        "Hosted provider confirmation covered a send with no organization. This send includes tenant context, so confirm it again.",
+      );
+    }
+    if (!tenant && consent.noTenant !== true) {
+      throw new Error(
+        "Hosted provider confirmation names a tenant, and no tenant is connected. Confirm the chat send again.",
+      );
+    }
+    if (tenant && consent.tenantId !== tenant.id) {
       throw new Error(
         "Hosted provider confirmation does not match the active tenant and provider. Confirm the chat send again.",
+      );
+    }
+    // A no-tenant decision is per model; a tenant decision names one when the window sent it.
+    if ((consent.noTenant === true || consent.model !== undefined) && consent.model !== model) {
+      throw new Error(
+        "Hosted provider confirmation names a different model than the one selected. Confirm the chat send again.",
       );
     }
 
@@ -3725,6 +3933,17 @@ function modelClassification(
     onUpgrade: () => { kind.upgrade(); },
     ensureTenantData: loadTenantData,
   };
+}
+
+/**
+ * With nothing connected and the kind already decided, a tenant tool call
+ * still upgrades the kind and meets the access block before it runs.
+ */
+function noTenantUpgrade(
+  kind: QuestionKindTracker,
+  loadTenantData: () => Promise<void>,
+): Pick<RunAgenticChatInput, "onUpgrade" | "ensureTenantData"> {
+  return { onUpgrade: () => { kind.upgrade(); }, ensureTenantData: loadTenantData };
 }
 
 /** Whether an answer read tenant data: a tenant or mixed kind, a Graph refresh, or a tenant tool call. */

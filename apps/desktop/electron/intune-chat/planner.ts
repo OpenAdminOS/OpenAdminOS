@@ -584,6 +584,32 @@ export function resolveQuestionKind(
  * which still requires tenant evidence. When in doubt the label is mixed
  * or tenant, never docs.
  */
+/**
+ * A request to write a query or script, or one that names documentation,
+ * with no reference to the admin's tenant. With nothing connected such a
+ * request stays docs without the model's classification: there is no
+ * tenant to read, and a model tuned for tenant work labels it tenant.
+ */
+/**
+ * A request for code the admin runs themselves, with common request
+ * wording before the verb: "Can you write", "Please draft", "Generate",
+ * "Give me". Used only with nothing connected.
+ */
+const CODE_REQUEST =
+  /^(?:(?:can|could|would|will) you\s+|please\s+|pls\s+|i (?:need|want|would like)(?: you to)?\s+|help me\s+)*(?:write|draft|generate|create|build|make|give me|show me|produce|put together)\b[^?]*\b(?:kql|kusto|queries|query|scripts?|powershell|cmdlets?)\b/;
+/** Asking to run the code here, or naming a tenant value, is not a code request. */
+const RUN_AGAINST = /\b(?:run it|run this|run that|execute|against|run (?:on|in|for) (?:our|my|the))\b/;
+
+export function isExplicitDocsRequest(question: string): boolean {
+  const trimmed = question.trim();
+  const lower = trimmed.toLowerCase();
+  // Writing a query or script asks for code, also when it says "our" or
+  // "which"; asking to run it, or a tenant value such as a device name,
+  // still needs the tenant.
+  const codeRequest = (CODE_AUTHORING.test(lower) || CODE_REQUEST.test(lower)) && !RUN_AGAINST.test(lower) && !TENANT_VALUE.test(trimmed);
+  return codeRequest || (DOCS_REFERENCE.test(lower) && !hasTenantReference(question));
+}
+
 export function classifyChatQuestion(
   question: string,
   input: { plannedResources: readonly GraphCacheResourceKind[]; namesSource: boolean },

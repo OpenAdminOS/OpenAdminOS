@@ -14,9 +14,7 @@ import { OPENADMINOS_APP_CLIENT_ID } from "../shared/openAdminOS";
 
 const INTUNE_PARTS = ["intune.people", "intune.devices", "intune.apps"];
 import { useSetupFlow } from "./SetupFlowContext";
-import { FirstLaunchWelcome } from "./WelcomeView";
-import { ORGANIZATION_COPY, PROVIDER_DETECTION_COPY, SETUP_COPY, WELCOME_COPY } from "../copy";
-import { PILOT_COPY } from "../shared/pilot-mode";
+import { ORGANIZATION_COPY, PROVIDER_DETECTION_COPY, SETUP_COPY } from "../copy";
 
 function SetupTrigger() {
   const { requireTenant } = useSetupFlow();
@@ -205,7 +203,7 @@ describe("contextual tenant setup", () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const connectTenant = vi.fn(async () => createMockAppState());
-    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+    renderSetup(makeMockBridge({ connectTenant }, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -239,7 +237,7 @@ describe("contextual tenant setup", () => {
       },
       emptyState,
     );
-    renderWelcome(bridge);
+    renderSetup(bridge);
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -251,17 +249,16 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByText(/with 5 delegated Microsoft Graph permissions, all read-only/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(PILOT_COPY.removedAfterConnect)).not.toBeInTheDocument();
   });
 
   it("connects with a custom app registration when the admin supplies one", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const connectTenant = vi.fn(async () => createMockAppState());
-    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+    renderSetup(makeMockBridge({ connectTenant }, emptyState));
 
     await user.click(
-      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
+      await screen.findByRole("button", { name: OWN_REGISTRATION_ENTRY }),
     );
     await user.type(
       screen.getByLabelText(/Application \(client\) ID/i),
@@ -286,7 +283,7 @@ describe("contextual tenant setup", () => {
   it("requires at least one service and counts shared scopes once", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -316,7 +313,7 @@ describe("contextual tenant setup", () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const connectTenant = vi.fn(async () => createMockAppState());
-    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+    renderSetup(makeMockBridge({ connectTenant }, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -358,7 +355,7 @@ describe("contextual tenant setup", () => {
   it("shows the Intune people part as included when Entra is selected", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -379,7 +376,7 @@ describe("contextual tenant setup", () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const connectTenant = vi.fn(async () => createMockAppState());
-    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+    renderSetup(makeMockBridge({ connectTenant }, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -402,7 +399,7 @@ describe("contextual tenant setup", () => {
   it("hides the service picker for an own app registration", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -418,11 +415,11 @@ describe("contextual tenant setup", () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const bridge = makeMockBridge({}, emptyState);
-    renderWelcome(bridge);
+    renderSetup(bridge);
 
     await user.click(
       await screen.findByRole("button", {
-        name: "Your organization blocks third-party apps? Use your own app registration.",
+        name: OWN_REGISTRATION_ENTRY,
       }),
     );
     const displayName = screen.getByLabelText("Application display name");
@@ -459,9 +456,9 @@ describe("contextual tenant setup", () => {
   it("never asks for a client secret", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
     await user.click(
-      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
+      await screen.findByRole("button", { name: OWN_REGISTRATION_ENTRY }),
     );
     expect(screen.queryByLabelText(/secret/i)).not.toBeInTheDocument();
     expect(
@@ -471,29 +468,21 @@ describe("contextual tenant setup", () => {
     ).toBeInTheDocument();
   });
 
-  it("shows the full-window welcome when a launch has no tenants", async () => {
+  it("opens no welcome screen and no setup dialog on a launch with no tenants", async () => {
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
 
-    expect(
-      await screen.findByRole("heading", { level: 1, name: "Welcome to OpenAdminOS" }),
-    ).toBeInTheDocument();
-    expect(screen.queryByText("App content")).not.toBeInTheDocument();
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(
-      screen.getAllByRole("heading", { level: 2 }).map((heading) => heading.textContent),
-    ).toEqual(["Start in pilot mode", "Connect your tenant"]);
-    expect(screen.getByRole("button", { name: "Start pilot mode" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect tenant" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Read-only by default. Write actions always ask for your confirmation."),
-    ).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Welcome to OpenAdminOS" })).not.toBeInTheDocument();
   });
 
-  it("opens setup on the permissions stage from the Connect card", async () => {
+  it("opens setup on the permissions stage with nothing chosen", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     expect(
@@ -504,38 +493,19 @@ describe("contextual tenant setup", () => {
     expectUnchosenSignIn();
   });
 
-  it("starts pilot mode from the welcome and leaves the welcome", async () => {
+  it("preselects the service parts an entry point names and keeps the app choice open", async () => {
     const user = userEvent.setup();
+    const connectTenant = vi.fn(async () => createMockAppState());
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    const addSampleTenant = vi.fn(async () => pilotState());
-    const bridge = makeMockBridge({ addSampleTenant }, emptyState);
-    renderWelcome(bridge);
+    renderSetup(makeMockBridge({ connectTenant }, emptyState));
 
-    await user.click(await screen.findByRole("button", { name: "Start pilot mode" }));
-
-    await waitFor(() => expect(addSampleTenant).toHaveBeenCalledOnce());
-    expect(await screen.findByText("App content")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Welcome to OpenAdminOS" })).not.toBeInTheDocument();
-  });
-
-  it("leaves the guest shell when the admin skips the welcome", async () => {
-    const user = userEvent.setup();
-    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
-
-    await user.click(await screen.findByRole("button", { name: "Skip for now" }));
-    expect(await screen.findByText("App content")).toBeInTheDocument();
-  });
-
-  it("does not show the welcome when a tenant is already connected", async () => {
-    renderWelcome();
-
-    await screen.findByText("App content");
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(
-      screen.queryByRole("heading", { name: "Welcome to OpenAdminOS" }),
-    ).not.toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: "Connect Intune devices" }));
+    expectUnchosenSignIn();
+    await user.click(screen.getByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(
+      await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }),
+    );
+    await waitFor(() => expect(connectTenant).toHaveBeenCalledWith({ partIds: ["intune.devices"] }));
   });
 
   it("continues first-run setup into provider selection when no provider is connected", async () => {
@@ -549,7 +519,7 @@ describe("contextual tenant setup", () => {
       activeTenantId: undefined,
       providers,
     });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -578,7 +548,7 @@ describe("contextual tenant setup", () => {
       providers,
     });
     const bridge = makeMockBridge({}, emptyState);
-    renderWelcome(bridge);
+    renderSetup(bridge);
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
@@ -598,41 +568,6 @@ describe("contextual tenant setup", () => {
 
     await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("Codex") }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
-  });
-
-  it("says pilot data was removed after connecting from pilot mode", async () => {
-    const user = userEvent.setup();
-    const connectedState = createMockAppState();
-    const bridge = makeMockBridge(
-      { connectTenant: vi.fn(async () => connectedState) },
-      pilotState(),
-    );
-    renderWithAppState(<OpenSetupButton />, { route: "/chat", bridge });
-
-    await user.click(await screen.findByRole("button", { name: "Open setup" }));
-    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Approve 10 read scopes and continue to Microsoft" }),
-    );
-    expect(await screen.findByText(PILOT_COPY.removedAfterConnect)).toBeInTheDocument();
-  });
-
-  it("does not ask for a provider before pilot agent runs", async () => {
-    const user = userEvent.setup();
-    const providers = mockProviders.map((provider) => ({
-      ...provider,
-      status: "error" as const,
-    }));
-    const onReady = vi.fn();
-    renderWithAppState(<RequireProviderButton onReady={onReady} />, {
-      route: "/agents",
-      bridge: makeMockBridge({}, { ...pilotState(), providers }),
-    });
-
-    await user.click(await screen.findByRole("button", { name: "Run agent" }));
-    expect(onReady).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("heading", { name: "Pick an LLM provider" })).not.toBeInTheDocument();
   });
 
   it("opens every connect entry point on two equal, unchosen sign-in choices", async () => {
@@ -703,12 +638,12 @@ describe("contextual tenant setup", () => {
     expect(connectTenant.mock.calls[0]?.[0]).not.toHaveProperty("appRegistration");
   });
 
-  it("opens with the own registration chosen from the welcome link", async () => {
+  it("opens with the own registration chosen from an own-registration entry point", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({}, emptyState));
+    renderSetup(makeMockBridge({}, emptyState));
     await user.click(
-      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
+      await screen.findByRole("button", { name: OWN_REGISTRATION_ENTRY }),
     );
     expect(await screen.findByRole("radio", { name: "Your own app registration" })).toBeChecked();
     expect(screen.getByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
@@ -784,9 +719,9 @@ describe("contextual tenant setup", () => {
       throw new Error("Microsoft could not find your app registration.");
     });
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    renderWelcome(makeMockBridge({ connectTenant }, emptyState));
+    renderSetup(makeMockBridge({ connectTenant }, emptyState));
     await user.click(
-      await screen.findByRole("button", { name: WELCOME_COPY.ownRegistrationLink }),
+      await screen.findByRole("button", { name: OWN_REGISTRATION_ENTRY }),
     );
     await user.type(
       screen.getByLabelText(/Application \(client\) ID/i),
@@ -812,30 +747,25 @@ describe("contextual tenant setup", () => {
   });
 });
 
-function renderWelcome(bridge?: ReturnType<typeof makeMockBridge>) {
-  return renderWithAppState(
-    <FirstLaunchWelcome>
+const OWN_REGISTRATION_ENTRY = "Use your own app registration";
+
+/** The setup entry points the app offers: Connect, own registration and a named service part. */
+function SetupEntryPoints() {
+  const { openSetup, openSetupForParts, openOwnRegistration } = useSetupFlow();
+  return (
+    <div>
       <div>App content</div>
-    </FirstLaunchWelcome>,
-    { route: "/chat", ...(bridge ? { bridge } : {}) },
+      <Button onClick={() => openSetup()}>Connect tenant</Button>
+      <Button onClick={() => openOwnRegistration()}>{OWN_REGISTRATION_ENTRY}</Button>
+      <Button onClick={() => openSetupForParts(["intune.devices"])}>Connect Intune devices</Button>
+    </div>
   );
 }
 
-function pilotState() {
-  return createMockAppState({
-    tenants: [
-      {
-        id: "openadminos-sample-tenant",
-        kind: "sample",
-        displayName: "Contoso (pilot)",
-        username: "admin@contoso-sample.invalid",
-        homeAccountId: "openadminos-sample-account",
-        addedAt: "2026-10-26T12:00:00.000Z",
-      },
-    ],
-    activeTenantId: "openadminos-sample-tenant",
-  });
+function renderSetup(bridge?: ReturnType<typeof makeMockBridge>) {
+  return renderWithAppState(<SetupEntryPoints />, { route: "/chat", ...(bridge ? { bridge } : {}) });
 }
+
 
 function expectUnchosenSignIn() {
   const openAdminOS = screen.getByRole("radio", { name: "OpenAdminOS app" });
@@ -882,7 +812,7 @@ describe("connecting an organization whose disconnect is still cleaning up (Disc
       throw new Error(message);
     });
     const bridge = makeMockBridge({ connectTenant }, emptyState);
-    renderWelcome(bridge);
+    renderSetup(bridge);
 
     await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
     await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));

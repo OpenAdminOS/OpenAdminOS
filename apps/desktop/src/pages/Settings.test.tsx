@@ -26,6 +26,21 @@ function provider(id: string) {
 }
 
 describe("Settings provider section", () => {
+  it("says Installed, not running for a runtime the scan found installed, as the scan does (design round, L)", async () => {
+    const providers = mockProviders.map((entry) =>
+      entry.id === "lm-studio" ? { ...entry, status: "not-installed" as const, installed: true, models: [] } : entry,
+    );
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge({}, createMockAppState({ providers })),
+    });
+    const heading = await screen.findByRole("heading", { name: "Providers" });
+    const view = within(heading.closest("section") as HTMLElement);
+    expect(view.getByText("Installed, not running")).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "Install guide" })).toBeNull();
+  });
+
   it("stores the Chat answer font as a device-local General preference", async () => {
     const user = userEvent.setup();
     setAnswerFont("serif");
@@ -678,6 +693,15 @@ describe("Settings provider section", () => {
     expect(screen.getByText("Test ping sent.")).toBeInTheDocument();
   });
 
+  it("states in About that product names and logos belong to their owners", async () => {
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/about", bridge: makeMockBridge() });
+    expect(
+      await screen.findByText(
+        "Product names and logos are trademarks or registered trademarks of their respective owners. OpenAdminOS is not affiliated with, endorsed by, or sponsored by any of them.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("switches to nightly builds from About and checks for updates", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({
@@ -759,6 +783,15 @@ describe("Settings provider section", () => {
     ).toBeInTheDocument();
     expect(screen.getByRole("switch", { name: "Get nightly builds" })).toBeDisabled();
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeDisabled();
+  });
+
+  it("shows why the local index model could not download, with the fix (design and enterprise round)", async () => {
+    const message = "The local index model download could not reach registry.ollama.ai: its name did not resolve. Ollama downloads it itself and uses the proxy set in its own environment (HTTPS_PROXY), not this device's proxy setting. If this device reaches the internet through a proxy, set HTTPS_PROXY where Ollama runs and restart it. Otherwise check the network connection, then try again.";
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => ({ available: true, version: "2026-11-01", chunkCount: 10, embeddingModel: "nomic-embed-text", ollamaReachable: true, embeddingModelInstalled: false, embeddingModelError: message })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    expect(await screen.findByRole("alert", { name: "" })).toHaveTextContent(message);
   });
 
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {

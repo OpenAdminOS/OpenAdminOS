@@ -6,6 +6,7 @@ import { IconChevronDown, IconRefresh } from "../components/icons";
 import { Modal, ModalHeader } from "../components/Modal";
 import { DeviceTile } from "../components/DeviceTile";
 import { DisconnectOrganizationDialog } from "../components/DisconnectOrganizationDialog";
+import { ProviderMark } from "../components/ProviderLogo";
 import { ReferenceMark, ServiceMark } from "../components/ServiceMark";
 import {
   ServiceAccessDialog,
@@ -21,7 +22,7 @@ import {
 } from "../components/ServiceAccess";
 import { TenantTile } from "../components/TenantTile";
 import { useToast } from "../components/Toast";
-import { Badge, Menu, StatusDot, Tabs, Tooltip, Button as UiButton } from "../components/ui";
+import { Menu, StatusDot, Tabs, Tooltip, Button as UiButton } from "../components/ui";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, promptsGoTo, providerDataLocation, providerDataLocationDetail, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
@@ -38,13 +39,14 @@ import {
   type AppState,
   type ConnectorSummary,
   type OrganizationRecord,
+  type ProviderId,
   type SavedAppRegistration,
   type ServiceConnectionStatus,
   type ServiceId,
   type TenantRecord,
 } from "../shared/openAdminOS";
-import { PILOT_COPY } from "../shared/pilot-mode";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import { MicrosoftStepButton, useOpenMicrosoftStep } from "../setup/FirstRunScan";
 import { hostedChannel } from "../shared/providers";
 import { chatToolHosts, deriveDataBoundary, novaVoiceSentence, useAppState, useDataBoundaryOptional } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
@@ -65,13 +67,14 @@ interface ReachService {
  */
 export interface ReachModel {
   organizationName?: string;
-  sample: boolean;
   services: ReachService[];
   model: {
-    kind: "none" | "local" | "hosted" | "sample";
+    kind: "none" | "local" | "hosted";
     name: string;
     /** The model id alone, as the status strip shows it. */
     modelName?: string;
+    /** The provider, for its logo. */
+    providerId?: ProviderId;
     providerName?: string;
     channel?: string;
     /** Where prompts go, in the shared sentence form (promptsGoTo). */
@@ -93,7 +96,6 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
   const tenant = organization
     ? state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId)
     : undefined;
-  const sample = organization?.kind === "sample";
   const services = tenant
     ? AVAILABLE_SERVICES.map((service) => {
         const parts = SERVICE_PARTS.filter((part) => part.service === service.id);
@@ -115,24 +117,20 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
   const voiceBoundary = voiceHosted ? deriveDataBoundary(state, true) : undefined;
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const modelName = boundary.model ?? provider?.name ?? "";
-  const model: ReachModel["model"] = sample
-    ? { kind: "sample", name: CONNECTIONS_COPY.map.modelSample }
-    : boundary.kind === "none" || !provider
-      ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
-      : boundary.kind === "local"
-        ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerName: provider.name }
-        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization) && !sample), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
+  const model: ReachModel["model"] = boundary.kind === "none" || !provider
+    ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
+    : boundary.kind === "local"
+      ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerId: provider.id, providerName: provider.name }
+      : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerId: provider.id, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization)), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
-    sample,
     services,
     model,
-    // Pilot Chat never calls a model or a tool.
-    referenceHosts: sample ? [] : chatToolHosts(state),
+    referenceHosts: chatToolHosts(state),
     // Until the connector list resolves, nothing is known about where
     // reports go; the map says so instead of saying nowhere.
-    reportDestinations: sample ? [] : connectors ? reportDestinations(resultDestinations(state.installedAgents, connectors)) : null,
-    reportDestinationsState: sample || connectors ? "ready" : connectors === null ? "failed" : "loading",
+    reportDestinations: connectors ? reportDestinations(resultDestinations(state.installedAgents, connectors)) : null,
+    reportDestinationsState: connectors ? "ready" : connectors === null ? "failed" : "loading",
     ...(voiceBoundary?.kind === "hosted" && voiceBoundary.isVoiceHosted && voiceBoundary.voiceProvider
       ? { voice: { provider: voiceBoundary.voiceProvider, location: voiceBoundary.voiceLocation ?? voiceBoundary.voiceProvider, ...(voiceBoundary.model ? { model: voiceBoundary.model } : {}) } }
       : {}),
@@ -148,7 +146,6 @@ function serviceStateText(service: ReachService): string {
 function promptsDestination(model: ReachModel["model"]): string {
   if (model.kind === "hosted") return model.location ?? model.providerName ?? model.name;
   if (model.kind === "local") return CONNECTIONS_COPY.map.promptsLocal;
-  if (model.kind === "sample") return CONNECTIONS_COPY.map.promptsSample;
   return CONNECTIONS_COPY.map.promptsNoModel;
 }
 
@@ -168,9 +165,7 @@ export function reachDescription(model: ReachModel): string {
       ? `The model runs on this device: ${model.model.name}.`
       : model.model.kind === "hosted"
         ? `The model is hosted: ${model.model.name}. ${model.model.promptsSentence ?? "Prompts go to the provider"}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."}${model.model.locationDetail ? ` ${model.model.locationDetail}` : ""}`
-        : model.model.kind === "sample"
-          ? "Sample answers are prepared on this device. No model is used."
-          : "No model is ready.";
+        : "No model is ready.";
   const words = model.referenceHosts.length > 0
     ? `Words from questions go to ${listText(model.referenceHosts)}.`
     : "Words from questions go nowhere: no public reference is on.";
@@ -422,7 +417,7 @@ function ReachMap({ model }: { model: ReachModel }) {
         <DeviceTile size={layout === "stacked" ? "sm" : "lg"} />
         <div className="reach-hub-caption">
           <div className="reach-hub-name">{CONNECTIONS_COPY.map.device}</div>
-          <div className="reach-hub-note">{model.sample ? CONNECTIONS_COPY.map.deviceSample : CONNECTIONS_COPY.map.deviceStays}</div>
+          <div className="reach-hub-note">{CONNECTIONS_COPY.map.deviceStays}</div>
         </div>
       </div>
       <div className="reach-zone" data-zone="out" aria-hidden="true">
@@ -433,7 +428,7 @@ function ReachMap({ model }: { model: ReachModel }) {
             {hosted ? (
               <ReachRow
                 linkId="prompts"
-                mark={<ReferenceMark name={(model.model.location ?? model.model.providerName ?? model.model.name).split(" ")[0] ?? ""} />}
+                mark={model.model.providerId ? <ProviderMark provider={model.model.providerId} /> : <ReferenceMark name={(model.model.location ?? model.model.providerName ?? model.model.name).split(" ")[0] ?? ""} />}
                 title={model.model.location ?? promptsDestination(model.model)}
                 titleHint={`${model.model.location ?? ""}, ${promptsDestination(model.model)}`}
                 {...(model.model.locationDetail ? { detail: model.model.locationDetail } : {})}
@@ -455,7 +450,7 @@ function ReachMap({ model }: { model: ReachModel }) {
             <ul className="reach-rows">
               <ReachRow
                 linkId="voice"
-                mark={<ReferenceMark name={model.voice.provider} />}
+                mark={<ProviderMark provider="openai" />}
                 title={CONNECTIONS_COPY.map.voiceDestination(model.voice.location)}
                 state={model.voice.model ? <ReachState tone="leaves">{model.voice.model}</ReachState> : undefined}
               />
@@ -548,7 +543,6 @@ function MicrosoftServiceRows({
 }) {
   const [access, setAccess] = useState<{ serviceId: ServiceId; partIds?: string[] } | null>(null);
   const ownRegistration = usesOwnRegistration(tenant);
-  const sample = tenant.kind === "sample";
   const grantedPartIds = new Set(grantedParts(tenant).map((part) => part.id));
   return (
     <>
@@ -576,7 +570,7 @@ function MicrosoftServiceRows({
               <div className="min-w-0">
                 <div className="text-base font-medium text-[var(--color-text)]">{service.title}</div>
                 <div className="text-sm text-[var(--color-text-muted)]">{service.summary}</div>
-                {sample || status === "missing" ? null : (
+                {status === "missing" ? null : (
                   <div className="conn-parts">
                     {parts.map((part) =>
                       grantedPartIds.has(part.id) ? (
@@ -611,7 +605,7 @@ function MicrosoftServiceRows({
                 </ReachState>
               </span>
               <span className="conn-row-action">
-                {!sample && missing.length > 0 ? (
+                {missing.length > 0 ? (
                   <UiButton
                     size="sm"
                     variant="secondary"
@@ -782,22 +776,19 @@ function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRe
   const [disconnecting, setDisconnecting] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [showingPermissions, setShowingPermissions] = useState(false);
-  const sample = tenant.kind === "sample";
   const ownRegistration = usesOwnRegistration(tenant);
   const registration = tenantRegistrationSummary(tenant);
   const license = entraLicenseName(tenant);
   const licenses = [...(license ? [license] : []), ...(tenant.relevantLicenses ?? []).map((entry) => entry.displayName)];
   // The shared app is the default and goes unsaid; any other registration is named.
-  const facts = sample
-    ? ORGANIZATION_COPY.sampleDetail
-    : [
+  const facts = [
         tenantDomain(tenant),
         ...(registration && registration.text !== "OpenAdminOS app" ? [registration.text] : []),
         `signed in as ${tenant.username}`,
       ].join(", ");
   // Not-checked licenses are explained once, by TenantLicensesNotChecked.
   const licenseHint =
-    sample || (licenses.length === 0 && licensesNotChecked(tenant))
+    licenses.length === 0 && licensesNotChecked(tenant)
       ? null
       : licenses.length > 0
         ? CONNECTIONS_COPY.licenses(licenses)
@@ -847,16 +838,12 @@ function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRe
               </UiButton>
             }
             items={[
-              ...(sample
-                ? []
-                : [
-                    { id: "permissions", label: CONNECTIONS_COPY.permissions, onSelect: () => setShowingPermissions(true) },
-                    { id: "rename", label: CONNECTIONS_COPY.renameOrganization, onSelect: () => setRenaming(true) },
-                    { id: "manage-separator", type: "separator" as const },
-                  ]),
+              { id: "permissions", label: CONNECTIONS_COPY.permissions, onSelect: () => setShowingPermissions(true) },
+              { id: "rename", label: CONNECTIONS_COPY.renameOrganization, onSelect: () => setRenaming(true) },
+              { id: "manage-separator", type: "separator" as const },
               {
                 id: "disconnect",
-                label: sample ? PILOT_COPY.leaveAction : CONNECTIONS_COPY.disconnect,
+                label: CONNECTIONS_COPY.disconnect,
                 danger: true,
                 onSelect: () => setDisconnecting(true),
               },
@@ -987,7 +974,6 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
           const tenant = state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId);
           if (!tenant) return null;
           const isActive = organization.id === active?.id;
-          const sample = organization.kind === "sample";
           return (
             <li key={organization.id} className="flex flex-wrap items-center gap-3 py-3">
               <TenantTile tenantId={tenant.id} displayName={organization.name} size="row" />
@@ -997,7 +983,6 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
                 ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-base font-medium text-[var(--color-text)]">{organization.name}</span>
-                    {sample ? <Badge tone="info">{ORGANIZATION_COPY.sampleLabel}</Badge> : null}
                     {isActive ? (
                       <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
                         <StatusDot tone="neutral" />{CONNECTIONS_COPY.active}
@@ -1006,21 +991,19 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
                   </div>
                 )}
                 <div className="mt-0.5 truncate text-sm text-[var(--color-text-muted)]">
-                  {sample ? ORGANIZATION_COPY.sampleDetail : `${CONNECTIONS_COPY.microsoft365} · ${tenantDomain(tenant)}`}
+                  {CONNECTIONS_COPY.microsoft365} · {tenantDomain(tenant)}
                 </div>
               </div>
               {editing === organization.id ? null : (
                 <span className="flex flex-wrap gap-2">
-                  {sample ? null : (
-                    <UiButton
-                      size="sm"
-                      variant="ghost"
-                      aria-label={`${ORGANIZATION_COPY.renameAction} ${organization.name}`}
-                      onClick={() => setEditing(organization.id)}
-                    >
-                      {ORGANIZATION_COPY.renameAction}
-                    </UiButton>
-                  )}
+                  <UiButton
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`${ORGANIZATION_COPY.renameAction} ${organization.name}`}
+                    onClick={() => setEditing(organization.id)}
+                  >
+                    {ORGANIZATION_COPY.renameAction}
+                  </UiButton>
                   {isActive ? null : (
                     <UiButton
                       size="sm"
@@ -1042,10 +1025,10 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
                   <UiButton
                     size="sm"
                     variant="ghost"
-                    aria-label={`${sample ? PILOT_COPY.leaveAction : CONNECTIONS_COPY.disconnect}, ${organization.name}`}
+                    aria-label={`${CONNECTIONS_COPY.disconnect}, ${organization.name}`}
                     onClick={() => setDisconnecting(organization.id)}
                   >
-                    {sample ? PILOT_COPY.leaveAction : CONNECTIONS_COPY.disconnect}
+                    {CONNECTIONS_COPY.disconnect}
                   </UiButton>
                 </span>
               )}
@@ -1175,7 +1158,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
         <SectionHeading id="connections-leaves-now" title={CONNECTIONS_COPY.leavesNowHeading} />
         <ul className="conn-rows">
           <li className="conn-row">
-            {hosted ? <ReferenceMark name={prompts.split(" ")[0] ?? ""} size="lg" /> : <ReferenceMark name="" size="lg" off />}
+            {hosted && model.model.providerId ? <ProviderMark provider={model.model.providerId} size="lg" /> : hosted ? <ReferenceMark name={prompts.split(" ")[0] ?? ""} size="lg" /> : <ReferenceMark name="" size="lg" off />}
             <div className="min-w-0">
               <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.promptsNoOrganization}</div>
               <div className={`text-sm ${hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`}>{prompts}</div>
@@ -1190,7 +1173,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
           </li>
           {model.voice ? (
             <li className="conn-row">
-              <ReferenceMark name={model.voice.provider} size="lg" />
+              <ProviderMark provider="openai" size="lg" />
               <div className="min-w-0">
                 <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.voice}</div>
                 <div className="text-sm text-[var(--color-warning)]">{CONNECTIONS_COPY.map.voiceDestination(model.voice.location)}</div>
@@ -1257,6 +1240,8 @@ export default function Connections() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { state, loading, removeSavedAppRegistration } = useAppState();
   const { openSetup } = useSetupFlow();
+  // Connect Microsoft 365 opens the onboarding step (services, permissions, sign-in) where it is available.
+  const openMicrosoftStep = useOpenMicrosoftStep();
   // The Results section loads the connector list; the map uses the same one.
   // undefined while loading, null when the list could not be loaded.
   const [connectors, setConnectors] = useState<ConnectorSummary[] | null | undefined>(undefined);
@@ -1267,7 +1252,6 @@ export default function Connections() {
   const tenant = organization
     ? state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId)
     : undefined;
-  const sample = organization?.kind === "sample";
   const savedRegistrations = state.savedAppRegistrations ?? [];
   const view: ConnectionsView = searchParams.get("view") === "organizations" ? "organizations" : "connections";
   const setView = (next: string) => {
@@ -1301,6 +1285,7 @@ export default function Connections() {
       <PageHeader
         title={organization ? CONNECTIONS_COPY.title(organization.name) : CONNECTIONS_COPY.pageTitle}
         subtitle={organization ? CONNECTIONS_COPY.lede : CONNECTIONS_COPY.ledeNone}
+        {...(organization ? { actions: <MicrosoftStepButton /> } : {})}
         wide
       />
       <PageBody>
@@ -1331,15 +1316,9 @@ export default function Connections() {
             ) : (
               <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
                 {!organization ? (
-                  <NoOrganization model={reach} onConnect={openSetup} onShowReferences={showReferences} />
+                  <NoOrganization model={reach} onConnect={openMicrosoftStep ?? openSetup} onShowReferences={showReferences} />
                 ) : (
                   <>
-                    {sample ? (
-                      <div role="status" className="mb-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-                        {CONNECTIONS_COPY.sampleOrganization}
-                      </div>
-                    ) : null}
-
                     <ReachMap model={reach} />
 
                     <section aria-labelledby="connections-services" className="mt-8">
@@ -1365,20 +1344,12 @@ export default function Connections() {
 
                 <section aria-labelledby="connections-results" className="mt-8">
                   <SectionHeading id="connections-results" title={CONNECTIONS_COPY.resultsHeading} body={CONNECTIONS_COPY.resultsBody} />
-                  {sample ? (
-                    <p className="border-y border-[var(--color-border-soft)] py-3 text-sm text-[var(--color-text-muted)]">
-                      {PILOT_COPY.featureInProduction("Connector deliveries", true)}
-                    </p>
-                  ) : (
-                    <>
-                      <ResultDestinationsSummary destinations={destinations} loaded={Boolean(connectors)} />
-                      <ConnectorsSettingsSection
-                        connectorId={searchParams.get("connector")}
-                        onConnectorChange={updateConnectorRoute}
-                        onConnectorsLoaded={setConnectors}
-                      />
-                    </>
-                  )}
+                  <ResultDestinationsSummary destinations={destinations} loaded={Boolean(connectors)} />
+                  <ConnectorsSettingsSection
+                    connectorId={searchParams.get("connector")}
+                    onConnectorChange={updateConnectorRoute}
+                    onConnectorsLoaded={setConnectors}
+                  />
                 </section>
               </div>
             )}

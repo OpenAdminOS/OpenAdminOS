@@ -7,6 +7,22 @@ import { CliEvents, CliProviderError, cliFailure, cliProviderEnv, discoverCli, r
 import { CliRpc, rpcObject } from "./cli-rpc.js";
 
 export interface CopilotProviderOptions { binaryPath?: string; defaultModel?: string; timeoutMs?: number; }
+/**
+ * For the first-launch scan: whether the Copilot CLI is installed, from its
+ * `--version` only. It never starts the CLI's RPC server, so no sign-in or
+ * model catalog request reaches GitHub; the sign-in is checked when the
+ * admin selects Copilot.
+ */
+export async function probeCopilotInstallation(options: { binaryPath?: string; signal?: AbortSignal } = {}): Promise<CliProbe> {
+  try {
+    const detected = await discoverCli("copilot", cliProviderEnv("copilot"), options.binaryPath, options.signal);
+    return { installed: true, ready: false, ...detected, models: [], detail: "Installed. OpenAdminOS checks its sign-in when you select it." };
+  } catch (error) {
+    const failure = error instanceof CliProviderError ? error.failure : "request-failed";
+    return { installed: failure !== "not-installed", ready: false, failure, models: [], detail: error instanceof Error ? error.message : "Copilot could not be checked." };
+  }
+}
+
 export async function probeCopilotLlm(options: CopilotProviderOptions = {}): Promise<CliProbe> {
   let detected: { binaryPath: string; version: string } | undefined;
   let rpc: CliRpc | undefined;

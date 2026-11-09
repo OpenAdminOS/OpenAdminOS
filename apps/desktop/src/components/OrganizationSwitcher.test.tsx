@@ -38,15 +38,14 @@ function renderSwitcher(state = createMockAppState()) {
 }
 
 describe("organization switcher", () => {
-  it("lists each organization with the services it runs, a labeled sample organization and no way into sample data", async () => {
+  it("lists each organization with the services it runs and no way into sample data", async () => {
     const user = userEvent.setup();
     const base = createMockAppState().tenants[0]!;
     const woodgrove = { ...base, id: "tenant-woodgrove", displayName: "Woodgrove", grantedScopes: scopes("intune", "entra") };
     const fabrikam = { ...base, id: "tenant-fabrikam", displayName: "Fabrikam", grantedScopes: scopes("intune", "entra", "defender") };
-    const sample = { ...base, id: "openadminos-sample-tenant", displayName: "Contoso (pilot)", kind: "sample" as const };
     renderSwitcher(
       createMockAppState({
-        tenants: [woodgrove, fabrikam, sample],
+        tenants: [woodgrove, fabrikam],
         activeTenantId: woodgrove.id,
         organizations: [
           { id: "org-tenant-woodgrove", name: "Woodgrove Bank", createdAt: base.addedAt, connections: { microsoft365: { tenantId: woodgrove.id } } },
@@ -62,11 +61,11 @@ describe("organization switcher", () => {
     expect(within(active).getByLabelText("Services: Intune, Entra")).toBeInTheDocument();
     const other = within(menu).getByRole("menuitemradio", { name: /Fabrikam/ });
     expect(within(other).getByLabelText("Services: Intune, Entra, Defender")).toBeInTheDocument();
-    const pilot = within(menu).getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
-    expect(within(pilot).getByText(ORGANIZATION_COPY.sampleLabel)).toBeInTheDocument();
+    // Microsoft's service icons before the services line (step 4).
+    expect([...other.querySelectorAll("[data-service-logo][data-kind='logo']")].map((node) => node.getAttribute("data-service-logo"))).toEqual(["intune", "entra", "defender"]);
     expect(within(menu).getByRole("menuitemradio", { name: new RegExp(`^${ORGANIZATION_COPY.noOrganization}`) })).toHaveAttribute("aria-checked", "false");
     expect(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.addOrganization })).toBeInTheDocument();
-    // Pilot mode is being removed: the menu offers no way into sample data.
+    // There is no sample data: the menu offers no way into it.
     expect(within(menu).queryByRole("menuitem", { name: /sample data/i })).not.toBeInTheDocument();
     await user.click(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.manageConnections }));
     expect(screen.getByTestId("location")).toHaveTextContent("/connections");
