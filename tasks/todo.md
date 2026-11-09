@@ -1717,3 +1717,10 @@ No blocking findings; round 3 fixes verified.
 5. [x] The rerun continuation is set in an effect: the run page renders one component per run. A Switch records the pending rerun at once, a failed switch clears it, and closing the page before the switch lands says Run again did not continue. Test closes the page while the switch is pending. (dd5e86b9)
 6. [x] Reconcile moves a schedule that named a replaced over-long id to the kept record; duplicate ids are not remapped. (83e4d553)
 7. [x] Testing a connector or running an agent from No organization says no organization with Microsoft 365 is active and how to choose or connect one; the run failure recovery matches it. (b6be39be)
+
+## PR #174 review round 5 (GPT-6.1-Sol, 2026-11-09)
+
+Reviewed head a068806; round 4 fixes verified.
+
+1. [x] Blocking: the empty public reference line said nothing leaves the device with a local model until a reference is added, while a saved delivery rule still sends run reports. The line now speaks only about question words sent to reference hosts; a renderer test with a token-only Slack rule checks it. (acb3d6f6)
+2. [x] The Connections map ignored hosted Nova voice: the strip showed Voice · OpenAI while the map said prompts go nowhere. The map and its text alternative now list the voice destination from the same boundary state as the strip, with a parity test. (8c9fa904)
