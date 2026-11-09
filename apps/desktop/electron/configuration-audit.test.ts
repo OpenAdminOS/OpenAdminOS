@@ -436,3 +436,29 @@ function canonicalJson(value: unknown): string {
     .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
     .join(",")}}`;
 }
+
+describe("legacy grants (design round review)", () => {
+  it("treats a connection with no recorded grants as the default read scopes, like the runtime", async () => {
+    const { diffConfigurationAudit } = await import("./configuration-audit.js");
+    const { DEFAULT_GRAPH_READ_SCOPE_NAMES, grantedParts } = await import("@openadminos/agent-sdk");
+    const legacy = { ...contoso, grantedScopes: undefined } as unknown as import("@openadminos/agent-sdk").TenantRecord;
+    const narrowed = { ...contoso, grantedScopes: ["graph:User.Read"] } as unknown as import("@openadminos/agent-sdk").TenantRecord;
+    const events = diffConfigurationAudit(
+      { activeProviderId: "ollama", tenants: [legacy], activeTenantId: contoso.id, installedAgents: [] },
+      { activeProviderId: "ollama", tenants: [narrowed], activeTenantId: contoso.id, installedAgents: [] },
+      { timestamp: NOW, newId: (() => { let n = 0; return () => `e${++n}`; })(), publicReferenceName: () => undefined },
+    );
+    const types = events.map((event) => event.type);
+    // Replacing the legacy grants with User.Read removes the default read access.
+    assert.ok(types.includes("microsoft365.access-removed"));
+    const added = events.find((event) => event.type === "microsoft365.access-added");
+    if (DEFAULT_GRAPH_READ_SCOPE_NAMES.includes("User.Read")) assert.equal(added, undefined);
+    else assert.deepEqual(added?.details.scopes, ["graph:User.Read"]);
+    const removed = events.find((event) => event.type === "microsoft365.access-removed")!;
+    const expectedScopes = DEFAULT_GRAPH_READ_SCOPE_NAMES.map((name) => `graph:${name}`).filter((scope) => scope !== "graph:User.Read").sort();
+    assert.deepEqual(removed.details.scopes, expectedScopes);
+    const removedParts = grantedParts(legacy).map((part) => part.id).filter((id) => !grantedParts(narrowed).some((part) => part.id === id));
+    assert.deepEqual([...(removed.details.partIds as string[])].sort(), removedParts.sort());
+    assert.ok(removedParts.length > 0);
+  });
+});

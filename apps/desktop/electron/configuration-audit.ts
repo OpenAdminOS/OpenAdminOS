@@ -1,5 +1,7 @@
 import {
+  DEFAULT_GRAPH_READ_SCOPE_NAMES,
   grantedParts,
+  qualifyScope,
   type AgentSummary,
   type OrganizationRecord,
   type TenantRecord,
@@ -90,8 +92,17 @@ function sampleDetail(sample: boolean): Record<string, ConfigurationAuditDetail>
   return sample ? { sampleData: true } : {};
 }
 
+/**
+ * The scopes the app treats as granted, by the same rule as the runtime:
+ * a connection with no recorded grants (made before grants were recorded)
+ * has the default read scopes, not none.
+ */
 function grantedScopeNames(tenant: TenantRecord): Set<string> {
-  return new Set(tenant.grantedScopes ?? []);
+  return new Set(
+    tenant.kind === "sample" || tenant.grantedScopes === undefined
+      ? DEFAULT_GRAPH_READ_SCOPE_NAMES.map(qualifyScope)
+      : tenant.grantedScopes.map(qualifyScope),
+  );
 }
 
 function grantedPartIds(tenant: TenantRecord): Set<string> {
