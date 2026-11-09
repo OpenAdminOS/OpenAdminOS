@@ -3295,7 +3295,7 @@ export class AppStateStore {
     );
   }
 
-  /** Set by every scan and when the first-run scan completes; cleared by `refreshProviders`. */
+  /** Set when a scan, Retry or Start is asked for and when the first-run scan completes; cleared by `refreshProviders`. */
   private scanResultsServed = false;
 
   /**
@@ -3418,6 +3418,10 @@ export class AppStateStore {
    * hosted providers are only offered.
    */
   async scanModels(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
+    // From the moment a scan is asked for, listing serves scan results: a
+    // read that overlaps the scan (app state, a background tick) runs no
+    // detection of its own and contacts nothing the scan leaves alone.
+    this.scanResultsServed = true;
     // One scan at a time: a second request while one is queued or running
     // shares it. Each subscriber gets every progress event, including the
     // ones sent before it joined, so a second window or Scan again misses
@@ -3481,6 +3485,7 @@ export class AppStateStore {
    */
   async retryModelScanProbe(providerId: ProviderId): Promise<ModelScanResult> {
     if (!isProviderId(providerId)) throw new Error(`Unknown provider: ${String(providerId)}`);
+    this.scanResultsServed = true;
     return this.exclusiveModelScan(() => this.retryModelScanProbeNow(providerId));
   }
 
@@ -3539,6 +3544,7 @@ export class AppStateStore {
     // All of Start runs in the scan queue: two windows never spawn the same
     // runtime twice, and the scan after it is a fresh one that starts once
     // the runtime answers, never a scan already running from before.
+    this.scanResultsServed = true;
     return this.exclusiveModelScan(() => this.startLocalRuntimeNow(providerId));
   }
 

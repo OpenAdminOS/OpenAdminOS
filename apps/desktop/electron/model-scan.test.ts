@@ -728,6 +728,60 @@ describe("a manual scan in a completed profile (review round 4, item 1)", () => 
   });
 });
 
+describe("reads that overlap a manual scan (review round 5, item 1)", () => {
+  it("contacts no off-device endpoint while Scan again runs in a completed profile", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], activeProviderId: "anthropic", providerChosenByUser: true }));
+    // LM Studio on this device answers slowly, which keeps the scan running.
+    const { createServer } = await import("node:http");
+    let release: (() => void) | undefined;
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    const slow = createServer((_request, response) => { void held.then(() => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [] }))); });
+    await new Promise<void>((resolve) => slow.listen(0, "127.0.0.1", resolve));
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    process.env.OPENAGENTS_OLLAMA_URL = "http://10.255.255.1:11434";
+    delete process.env.OLLAMA_HOST;
+    process.env.OPENADMINOS_LM_STUDIO_URL = `http://127.0.0.1:${(slow.address() as { port: number }).port}/v1`;
+    const realFetch = globalThis.fetch;
+    const contacted: string[] = [];
+    let lmStudioAsked: (() => void) | undefined;
+    const asked = new Promise<void>((resolve) => { lmStudioAsked = resolve; });
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("10.255.255.1")) {
+        contacted.push(url);
+        throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+      }
+      if (url.endsWith("/v1/models")) lmStudioAsked?.();
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      const scan = store.scanModels();
+      await asked;
+      // The scan is still waiting on LM Studio: background reads happen now.
+      await store.getAppState();
+      await store.listProviders();
+      await store.tickOffice().catch(() => undefined);
+      assert.deepEqual(contacted, [], "no read during the scan contacted the off-device endpoint");
+      release?.();
+      await scan;
+      assert.deepEqual(contacted, []);
+    } finally {
+      release?.();
+      globalThis.fetch = realFetch;
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      slow.closeAllConnections?.();
+      await new Promise<void>((resolve) => slow.close(() => resolve()));
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
 describe("Gemini Test refreshes what listing serves (review round 4, item 2)", { skip: process.platform === "win32" }, () => {
   const run = async (succeeds: boolean) => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-gemini-test-"));
