@@ -44,7 +44,7 @@ export const LOCAL_BOUNDARY_COPY = {
 // deployment, so the label says who sets it and the detail says what the
 // options are. For a CLI the CLI decides the channel: Claude Code can use
 // Anthropic, Amazon Bedrock or Google Vertex, and Codex the endpoint its
-// configuration selects. PR #175 uses the same values.
+// configuration selects. PR #174 uses the same values.
 const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: string; through?: true }>> = {
   anthropic: {
     label: "Claude Code · location set by your account",
@@ -62,6 +62,7 @@ const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: s
     detail:
       "Global deployments can process in any Azure region, Data Zone deployments within the US, EU or Asia Pacific, Standard deployments within your resource's geography.",
   },
+  // Labels name the tool, not the vendor API; a CLI is the way prompts leave.
   copilot: { label: "GitHub Copilot CLI · location not stated", through: true },
   gemini: { label: "Gemini CLI · location not stated", through: true },
 };
