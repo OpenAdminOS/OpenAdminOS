@@ -1,13 +1,13 @@
 {
-  "updatedAt": "2026-11-09T08:00:47.475Z",
+  "updatedAt": "2026-11-09T09:00:47.457Z",
   "agents": {
     "find-inactive-devices": {
       "installs": 35,
       "installs7d": 2
     },
     "intune-device-posture-auditor": {
-      "installs": 11,
-      "installs7d": 1
+      "installs": 12,
+      "installs7d": 2
     },
     "offboarding-agent": {
       "installs": 23,
@@ -34,28 +34,28 @@
       "installs7d": 8
     },
     "dormant-app-registrations": {
-      "installs": 40,
-      "installs7d": 5
+      "installs": 41,
+      "installs7d": 6
     },
     "risky-sign-in-triage": {
       "installs": 24,
       "installs7d": 5
     },
     "secure-score-prioritizer": {
-      "installs": 27,
-      "installs7d": 6
+      "installs": 28,
+      "installs7d": 7
     },
     "sign-in-failure-explainer": {
       "installs": 28,
       "installs7d": 4
     },
     "stale-guest-cleanup": {
-      "installs": 23,
-      "installs7d": 3
+      "installs": 24,
+      "installs7d": 4
     },
     "tenant-change-audit": {
-      "installs": 22,
-      "installs7d": 3
+      "installs": 23,
+      "installs7d": 4
     },
     "team-evidence-review": {
       "installs": 15,
