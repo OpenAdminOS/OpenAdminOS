@@ -806,7 +806,7 @@ function SetupEntryPoints() {
     <div>
       <div>App content</div>
       <Button onClick={() => openSetup()}>Connect tenant</Button>
-      <Button onClick={openOwnRegistration}>{OWN_REGISTRATION_ENTRY}</Button>
+      <Button onClick={() => openOwnRegistration()}>{OWN_REGISTRATION_ENTRY}</Button>
       <Button onClick={() => openSetupForParts(["intune.devices"])}>Connect Intune devices</Button>
       <Button onClick={() => void startPilot()}>Start pilot mode</Button>
     </div>

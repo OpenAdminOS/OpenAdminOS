@@ -418,7 +418,7 @@ export function NotConnectedCard({
               <Button variant="primary" onClick={() => openSetupForParts(notConnected.partIds)}>
                 {serviceNames ? NOT_CONNECTED_COPY.connect(serviceNames) : NOT_CONNECTED_COPY.connectTenant}
               </Button>
-              <Button variant="secondary" onClick={openOwnRegistration}>
+              <Button variant="secondary" onClick={() => openOwnRegistration(notConnected.partIds)}>
                 {NOT_CONNECTED_COPY.ownRegistration}
               </Button>
             </>

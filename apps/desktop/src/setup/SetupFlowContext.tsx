@@ -29,6 +29,12 @@ import { TenantSetupDialog, type SetupStage } from "./TenantSetupDialog";
 
 const SOFT_TIMEOUT_MS = 180_000;
 
+/** Options of an entry point that shows its own result after a connect, such as the Microsoft 365 onboarding step. */
+export interface SetupOpenOptions {
+  /** Called with the connected tenant instead of the dialog's ready step; the dialog closes. */
+  onConnected?: (tenant: TenantRecord) => void;
+}
+
 interface SetupFlowValue {
   requireTenant(intent?: PendingIntent): boolean;
   requireTenantAndProvider(intent?: PendingIntent): boolean;
@@ -39,9 +45,9 @@ interface SetupFlowValue {
    * preselected, such as the not-connected card in Chat. The app choice
    * stays open.
    */
-  openSetupForParts(partIds: readonly string[]): void;
-  /** Opens tenant setup with "Your own app registration" chosen. */
-  openOwnRegistration(): void;
+  openSetupForParts(partIds: readonly string[], options?: SetupOpenOptions): void;
+  /** Opens tenant setup with "Your own app registration" chosen, and the named parts preselected. */
+  openOwnRegistration(partIds?: readonly string[], options?: SetupOpenOptions): void;
   /** Adds or reopens the pilot tenant and makes it active. */
   startPilot(): Promise<void>;
 }
@@ -76,6 +82,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const [presetPartIds, setPresetPartIds] = useState<readonly string[] | undefined>();
   const attemptIdRef = useRef(0);
   const restoredRef = useRef(false);
+  // Set by an entry point that shows its own result after a connect.
+  const onConnectedRef = useRef<SetupOpenOptions["onConnected"]>(undefined);
 
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
@@ -133,8 +141,9 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   }, [getRequestedScopes]);
 
   const beginFlow = useCallback(
-    (nextIntent: PendingIntent | null, requestedStage?: SetupStage, partIds?: readonly string[]) => {
+    (nextIntent: PendingIntent | null, requestedStage?: SetupStage, partIds?: readonly string[], options?: SetupOpenOptions) => {
       attemptIdRef.current += 1;
+      onConnectedRef.current = options?.onConnected;
       setIntent(nextIntent);
       setError(null);
       setPilotRemoved(false);
@@ -210,17 +219,18 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
 
   const openSetup = useCallback(() => beginFlow(null, "permissions"), [beginFlow]);
   const openSetupForParts = useCallback(
-    (partIds: readonly string[]) => beginFlow(null, "permissions", partIds),
+    (partIds: readonly string[], options?: SetupOpenOptions) => beginFlow(null, "permissions", partIds, options),
     [beginFlow],
   );
   const openOwnRegistration = useCallback(
-    () => beginFlow(null, "own-registration"),
+    (partIds?: readonly string[], options?: SetupOpenOptions) => beginFlow(null, "own-registration", partIds, options),
     [beginFlow],
   );
 
   const closeFlow = useCallback(() => {
     const wasWaiting = stage === "waiting" || stage === "timeout";
     attemptIdRef.current += 1;
+    onConnectedRef.current = undefined;
     setOpen(false);
     setIntent(null);
     setError(null);
@@ -242,6 +252,15 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       const tenant = await connectTenant(options);
       if (attemptId !== attemptIdRef.current) {
         if (tenant) toast.success(SETUP_COPY.lateSuccess(tenant.displayName));
+        return;
+      }
+      const onConnected = onConnectedRef.current;
+      if (tenant && onConnected && !intent) {
+        // The entry point shows what was connected itself.
+        onConnectedRef.current = undefined;
+        setConnectedTenant(tenant);
+        setOpen(false);
+        onConnected(tenant);
         return;
       }
       setConnectedTenant(tenant);
