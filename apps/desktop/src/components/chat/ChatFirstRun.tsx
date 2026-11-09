@@ -28,7 +28,7 @@ import { ServiceAccessDialog } from "../ServiceAccess";
 import { ServiceMark } from "../ServiceMark";
 import { Button } from "../Button";
 import { useToast } from "../Toast";
-import { IconCheck, IconCopy, IconShield } from "../icons";
+import { IconCheck, IconShield } from "../icons";
 
 /**
  * The only setup Chat cannot work without, shown in place of the empty Chat
@@ -389,10 +389,9 @@ export function NotConnectedCard({
           ? NOT_CONNECTED_COPY.noTenantBody(serviceNames)
           : NOT_CONNECTED_COPY.noTenantGenericBody
         : NOT_CONNECTED_COPY.tenantBody(tenant?.displayName ?? "this tenant");
-  const otherParts = services.flatMap((service) => {
-    const rest = service.parts.filter((part) => !part.planned && !notConnected.partIds.includes(part.id));
-    return rest.length > 0 ? [NOT_CONNECTED_COPY.otherParts(service.title, rest.map((part) => part.title.toLowerCase()).join(", "))] : [];
-  });
+  // Every read-only scope the connect asks for, sign-in included when nothing is connected yet.
+  const scopeCount = new Set([...parts.flatMap((part) => part.scopes.map((scope) => scope.name)), ...(connectFirst ? BASELINE_SCOPES : [])]).size;
+  const markService = services[0];
 
   const askAdmin = async () => {
     const message = adminApprovalMessage(notConnected, tenant);
@@ -406,59 +405,62 @@ export function NotConnectedCard({
   };
 
   return (
-    <section aria-labelledby={headingId} className="rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border)]">
-      <div className="flex items-start gap-3">
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
-          <IconShield size={16} />
+    <section aria-labelledby={headingId} className="grid grid-cols-[30px_minmax(0,1fr)] gap-x-3 rounded-lg bg-[var(--color-surface)] p-4 ring-1 ring-inset ring-[var(--color-border-soft)]">
+      {/* The service it needs, dashed because it is not connected (mockup 32, section E). */}
+      {markService ? (
+        <ServiceMark service={markService.id} title={markService.title} size={30} off />
+      ) : (
+        <span aria-hidden="true" className="service-mark inline-flex h-[30px] w-[30px] items-center justify-center rounded-[8px]" data-off="true">
+          <IconShield size={14} />
         </span>
-        <div className="min-w-0">
-          <h3 id={headingId} className="text-md font-semibold text-[var(--color-text)]">
-            {title}
-          </h3>
-          <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">{body}</p>
-        </div>
-      </div>
-      {parts.length > 0 || connectFirst ? (
-        <ul aria-label="Permissions" className="mt-3 space-y-2 border-t border-[var(--color-border-soft)] pt-3">
-          {parts.map((part) => (
-            <PermissionRow key={part.id} label={services.length > 1 ? partLabel(part) : part.title} scopes={part.scopes.map((scope) => scope.name)} />
-          ))}
-          {connectFirst ? <PermissionRow label={NOT_CONNECTED_COPY.signInPart} scopes={[...BASELINE_SCOPES]} /> : null}
-          {otherParts.map((line) => (
-            <li key={line} className="text-sm text-[var(--color-text-muted)]">
-              {line}
-            </li>
-          ))}
-        </ul>
-      ) : null}
-      <div className="mt-4 flex flex-wrap gap-2">
-        {connectFirst ? (
-          <>
-            <Button size="sm" variant="primary" onClick={() => openSetupForParts(notConnected.partIds)}>
-              {serviceNames ? NOT_CONNECTED_COPY.connect(serviceNames) : NOT_CONNECTED_COPY.connectTenant}
-            </Button>
-            <Button size="sm" variant="secondary" onClick={openOwnRegistration}>
-              {NOT_CONNECTED_COPY.ownRegistration}
-            </Button>
-          </>
-        ) : tenant ? (
-          missingServices.map((service, index) => (
-            <Button key={service.id} size="sm" variant={index === 0 ? "primary" : "secondary"} onClick={() => setAdding(service.id)}>
-              {NOT_CONNECTED_COPY.add(service.title)}
-            </Button>
-          ))
+      )}
+      <div className="min-w-0">
+        <h3 id={headingId} className="pt-1 text-md font-medium leading-[22px] text-[var(--color-text)]">
+          {title}
+        </h3>
+        <p className="mt-1 text-base text-[var(--color-text-soft)]">{body}</p>
+        {scopeCount > 0 ? (
+          <details className="not-connected-permissions mt-3 text-sm">
+            <summary className="cursor-pointer select-none rounded-sm text-[var(--color-text-soft)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
+              {NOT_CONNECTED_COPY.permissionsSummary(scopeCount)}
+            </summary>
+            <ul aria-label="Permissions" className="mt-2 space-y-2">
+              {parts.map((part) => (
+                <PermissionRow key={part.id} label={services.length > 1 ? partLabel(part) : part.title} scopes={part.scopes.map((scope) => scope.name)} />
+              ))}
+              {connectFirst ? <PermissionRow label={NOT_CONNECTED_COPY.signInPart} scopes={[...BASELINE_SCOPES]} /> : null}
+            </ul>
+          </details>
         ) : null}
-        <Button size="sm" variant="ghost" leadingIcon={<IconCopy size={12} />} onClick={() => void askAdmin()}>
-          {NOT_CONNECTED_COPY.askAdmin}
-        </Button>
-      </div>
-      {copyFailed ? (
-        <div role="alert" className="mt-3 text-sm text-[var(--color-warning)]">
-          <p>{NOT_CONNECTED_COPY.askAdminFailed}</p>
-          <textarea readOnly aria-label="Message for an admin" value={copyFailed} rows={6} className="mt-2 w-full rounded-lg bg-[var(--color-bg-raised)] p-2 font-mono text-xs text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]" />
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {connectFirst ? (
+            <>
+              <Button variant="primary" onClick={() => openSetupForParts(notConnected.partIds)}>
+                {serviceNames ? NOT_CONNECTED_COPY.connect(serviceNames) : NOT_CONNECTED_COPY.connectTenant}
+              </Button>
+              <Button variant="secondary" onClick={openOwnRegistration}>
+                {NOT_CONNECTED_COPY.ownRegistration}
+              </Button>
+            </>
+          ) : tenant ? (
+            missingServices.map((service, index) => (
+              <Button key={service.id} variant={index === 0 ? "primary" : "secondary"} onClick={() => setAdding(service.id)}>
+                {NOT_CONNECTED_COPY.add(service.title)}
+              </Button>
+            ))
+          ) : null}
+          <Button variant="ghost" onClick={() => void askAdmin()}>
+            {NOT_CONNECTED_COPY.askAdmin}
+          </Button>
         </div>
-      ) : null}
-      <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">{NOT_CONNECTED_COPY.fine}</p>
+        {copyFailed ? (
+          <div role="alert" className="mt-3 text-sm text-[var(--color-warning)]">
+            <p>{NOT_CONNECTED_COPY.askAdminFailed}</p>
+            <textarea readOnly aria-label="Message for an admin" value={copyFailed} rows={6} className="mt-2 w-full rounded-md bg-[var(--color-bg-raised)] p-2 font-mono text-xs text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]" />
+          </div>
+        ) : null}
+        <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">{NOT_CONNECTED_COPY.fine}</p>
+      </div>
       {tenant ? (
         <ServiceAccessDialog
           tenant={tenant}
@@ -472,17 +474,12 @@ export function NotConnectedCard({
   );
 }
 
+/** One part's scopes as a plain mono list, grouped under the part's name. */
 function PermissionRow({ label, scopes }: { label: string; scopes: readonly string[] }) {
   return (
-    <li className="flex flex-col gap-1 min-[560px]:flex-row min-[560px]:gap-3">
-      <span className="w-[170px] shrink-0 text-sm font-medium text-[var(--color-text)]">{label}</span>
-      <span className="flex flex-wrap gap-1">
-        {scopes.map((scope) => (
-          <code key={scope} className="rounded-md bg-[var(--color-bg-raised)] px-1.5 py-0.5 font-mono text-xs text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            {scope}
-          </code>
-        ))}
-      </span>
+    <li>
+      <span className="text-xs font-medium text-[var(--color-text-soft)]">{label}</span>
+      <span className="mt-0.5 block font-mono text-xs leading-5 text-[var(--color-text-muted)]">{scopes.join(", ")}</span>
     </li>
   );
 }

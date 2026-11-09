@@ -194,14 +194,18 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
 
     expect(await screen.findByRole("heading", { name: "This needs Intune" })).toBeInTheDocument();
     expect(screen.getByText(DEVICE_QUESTION)).toBeInTheDocument();
-    const permissions = within(screen.getByRole("list", { name: "Permissions" }));
+    // The permissions sit in a quieter disclosure, grouped by part (design round, E).
+    expect(screen.getByText(/^\d+ read-only Microsoft Graph permissions$/).closest("details")).not.toHaveAttribute("open");
+    const permissions = within(screen.getByRole("list", { name: "Permissions", hidden: true }));
     expect(permissions.getByText("Devices and configuration")).toBeInTheDocument();
+    const listed = permissions.getAllByText(/\./).map((node) => node.textContent ?? "").join(", ") + ", " + (permissions.getByText(/openid/).textContent ?? "");
     for (const scope of ["DeviceManagementManagedDevices.Read.All", "DeviceManagementConfiguration.Read.All", "Device.Read.All", "openid", "profile", "offline_access", "User.Read"]) {
-      expect(permissions.getByText(scope)).toBeInTheDocument();
+      expect(listed).toContain(scope);
     }
-    expect(permissions.getByText(/Other Intune parts \(users and groups, apps\) can be added now or later\./)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect Intune" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: NOT_CONNECTED_COPY.ownRegistration })).toBeInTheDocument();
+    expect(screen.queryByText(/Other Intune parts/)).toBeNull();
+    // Actions in weight order: Connect, own registration, Ask an admin.
+    const actions = screen.getAllByRole("button").filter((button) => ["Connect Intune", NOT_CONNECTED_COPY.ownRegistration, NOT_CONNECTED_COPY.askAdmin].includes(button.textContent ?? ""));
+    expect(actions.map((button) => button.textContent)).toEqual(["Connect Intune", NOT_CONNECTED_COPY.ownRegistration, NOT_CONNECTED_COPY.askAdmin]);
     expect(screen.getByText(NOT_CONNECTED_COPY.fine)).toBeInTheDocument();
   });
 

@@ -95,7 +95,7 @@ export const NOT_CONNECTED_COPY = {
   tenantBody: (tenant: string) =>
     `Add it for ${tenant} to answer this. Your question is kept and nothing was read from the missing service.`,
   signInPart: "Sign-in",
-  otherParts: (service: string, parts: string) => `Other ${service} parts (${parts}) can be added now or later.`,
+  permissionsSummary: (count: number) => `${count} read-only Microsoft Graph permission${count === 1 ? "" : "s"}`,
   connect: (services: string) => `Connect ${services}`,
   connectTenant: "Connect a tenant",
   add: (service: string) => `Add ${service}`,
