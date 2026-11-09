@@ -80,7 +80,7 @@ export function TopBar() {
               {boundary.kind === "local" ? <IconLock size={11} className="shrink-0" /> : <IconCloud size={11} className="shrink-0" />}
               <span className="truncate">{boundary.label}</span>
               {boundary.model ? <span className="truncate text-[var(--color-text-muted)] max-[1100px]:hidden">· {boundary.model}</span> : null}
-              {boundary.toolHosts ? <span className="truncate text-[var(--color-warning)] max-[1100px]:hidden">· {boundary.toolHosts}</span> : null}
+              {boundary.toolHosts ? <span data-testid="boundary-tool-hosts" className="truncate text-[var(--color-text-muted)] max-[1100px]:hidden">· {boundary.toolHosts}</span> : null}
               {referenceCount > 0 ? (
                 <span data-testid="boundary-reference-count" className="shrink-0 whitespace-nowrap text-[var(--color-text-muted)] min-[1101px]:hidden">
                   {`+${referenceCount} reference${referenceCount === 1 ? "" : "s"}`}

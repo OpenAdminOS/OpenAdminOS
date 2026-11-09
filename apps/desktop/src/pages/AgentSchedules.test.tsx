@@ -1,3 +1,4 @@
+import { SCHEDULE_ORGANIZATION_COPY } from "../copy";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
@@ -358,4 +359,13 @@ describe("where schedule results go (design round review)", () => {
     expect(await screen.findByText(/Microsoft Teams has no destination set, so nothing is sent there\.$/)).toBeInTheDocument();
     expect(screen.queryByText(/Results can go to Microsoft Teams/)).not.toBeInTheDocument();
   });
+});
+
+it("shows paused schedules as a neutral state, not amber (design round review, Muse V)", async () => {
+  const agent = createMockAgent({ schedule: { enabled: true, intervalSeconds: 900, organizationId: "org-tenant-1" } });
+  const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents: [agent] });
+  renderRoute(<Agents />, { path: "/agents", route: "/agents?filter=scheduled", bridge: makeMockBridge({}, state) });
+  const notice = (await screen.findByText(SCHEDULE_ORGANIZATION_COPY.pausedNone)).closest("[data-tone]")!;
+  expect(notice).toHaveAttribute("data-tone", "neutral");
+  expect(notice.className).not.toContain("color-warning");
 });

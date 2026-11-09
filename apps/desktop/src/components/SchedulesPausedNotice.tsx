@@ -69,7 +69,9 @@ export function SchedulesPausedNotice({ className = "" }: { className?: string }
       {paused || waiting ? (
         <div
           role="status"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25"
+          // Paused schedules are a state, not data leaving the device: neutral, not amber.
+          data-tone="neutral"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-sm text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]"
         >
           <span className="flex min-w-0 items-center gap-2">
             <IconWarning size={14} className="shrink-0" />

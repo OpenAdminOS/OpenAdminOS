@@ -445,3 +445,14 @@ it("keeps a reference count for the short boundary chip (design round)", async (
   // The short form hides the model and the host list below 1100 px; the wide form hides the count.
   expect(count.className).toContain("min-[1101px]:hidden");
 });
+
+it("keeps reference hosts muted in the boundary chip at every width (design round review, Muse V)", async () => {
+  const { createMockMcpServers } = await import("../test/test-utils");
+  renderRoute(<AppShell><div /></AppShell>, {
+    path: "*",
+    route: "/chat",
+    bridge: makeMockBridge({}, createMockAppState({ mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }) })),
+  });
+  const hosts = await screen.findByTestId("boundary-tool-hosts");
+  expect(hosts.className).not.toContain("color-warning");
+});
