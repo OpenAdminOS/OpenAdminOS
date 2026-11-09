@@ -179,7 +179,7 @@ export function reachDescription(model: ReachModel): string {
       ? `Run reports and agent messages can go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
       : "Run reports and agent messages go nowhere: no saved rule or step sends to a connector.";
   const voice = model.voice
-    ? ` ${novaVoiceSentence(model.voice.location, Boolean(model.organizationName))}${model.voice.model ? ` The voice model is ${model.voice.model}.` : ""}`
+    ? ` ${novaVoiceSentence(Boolean(model.organizationName))}${model.voice.model ? ` The voice model is ${model.voice.model}.` : ""}`
     : "";
   return `${services} ${device} ${words} ${reports}${voice}`;
 }

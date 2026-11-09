@@ -372,7 +372,7 @@ describe("preflight without an organization (review round 1)", () => {
     const state = { ...noOrganizationState([draft]), activeProviderId: "openai" as const };
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge: makeMockBridge({}, state) });
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(dialog).toHaveTextContent("Prompts and agent context go to Codex · location set by your account. No organization is active, so no tenant data is included.");
+    expect(dialog).toHaveTextContent("Prompts leave this device through Codex; location set by your account, with agent context. No organization is active, so no tenant data is included.");
     expect(dialog).toHaveTextContent("Codex sends prompts to OpenAI, or to the endpoint its configuration selects.");
     expect(dialog).not.toHaveTextContent("Tenant prompts");
   });
@@ -384,7 +384,7 @@ describe("preflight without an organization (review round 1)", () => {
       route: "/agents/devices/confirm",
       bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "openai", installedAgents: [agent] })),
     });
-    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Prompts, tenant data and agent context go to Codex · location set by your account.");
+    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Prompts and tenant data leave this device through Codex; location set by your account, with agent context.");
   });
 });
 

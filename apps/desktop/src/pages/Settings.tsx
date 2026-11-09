@@ -71,7 +71,7 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import {
   SETTINGS_ITEMS,
-  providerDataLocation,
+  promptsGoTo,
   providerDataLocationDetail,
   SETTINGS_SECTIONS,
   SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS,
@@ -620,7 +620,7 @@ function ProviderRow({
   );
   const cliLabel = provider.cli ? ({ ready: "Connected", "check-required": "Test required", "not-installed": "Not installed", "signed-out": "Signed out", "access-denied": "Access denied", "unsupported-version": "Update required", "request-failed": "Request failed" } as const)[provider.cli.state] : undefined;
   // A hosted provider names where its prompts go, like every other surface.
-  const kind = provider.isLocal ? "Local" : `Prompts go to ${providerDataLocation(provider)}`;
+  const kind = provider.isLocal ? "Local" : promptsGoTo(provider);
   const status = testing
     ? { label: "Checking", tone: "info" as const }
     : !implemented

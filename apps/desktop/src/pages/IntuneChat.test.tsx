@@ -674,7 +674,7 @@ describe("IntuneChat agent picker", () => {
 });
 
 describe("IntuneChat hosted-provider disclosure", () => {
-  const sentence = "Prompts and tenant data go to Codex · location set by your account while this model is selected.";
+  const sentence = "Prompts and tenant data leave this device through Codex; location set by your account while this model is selected.";
   const conversation: IntuneChatConversation = {
     id: "conversation-hosted", title: "Stale devices", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
   };
@@ -717,7 +717,7 @@ describe("IntuneChat hosted-provider disclosure", () => {
     const { activeTenantId: _none, ...state } = createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } });
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge: makeMockBridge({}, state) });
     const note = await screen.findByRole("note");
-    expect(note).toHaveTextContent("Prompts go to Codex · location set by your account while this model is selected. No organization is active, so no tenant data is included.");
+    expect(note).toHaveTextContent("Prompts leave this device through Codex; location set by your account while this model is selected. No organization is active, so no tenant data is included.");
     expect(note).not.toHaveTextContent("tenant data go to");
   });
 
@@ -763,7 +763,7 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("Prompts and tenant data go to");
     // A new conversation shows the hosted sentence in full under the composer.
     expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts and tenant data go to Codex · location set by your account while this model is selected.",
+      "Prompts and tenant data leave this device through Codex; location set by your account while this model is selected.",
     );
 
     await user.type(composer, "Which Windows devices are stale?");
@@ -771,7 +771,7 @@ describe("IntuneChat hosted-provider consent", () => {
 
     expect(
       await screen.findByRole("heading", {
-        name: "Send tenant context to hosted provider",
+        name: "Send this question through Codex?",
       }),
     ).toBeInTheDocument();
     expect(
@@ -791,7 +791,9 @@ describe("IntuneChat hosted-provider consent", () => {
     ).not.toBeChecked();
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
 
-    const modalSendButton = screen.getAllByRole("button", { name: "Send" }).at(-1);
+    // A CLI is named as the way the question leaves (the same wording as PR #175).
+    expect(screen.getByText("Codex answers with your existing sign-in. Selected cached data from Contoso IT is included.")).toBeInTheDocument();
+    const modalSendButton = screen.getAllByRole("button", { name: "Send through Codex" }).at(-1);
     expect(modalSendButton).toBeDefined();
     await user.click(modalSendButton!);
 

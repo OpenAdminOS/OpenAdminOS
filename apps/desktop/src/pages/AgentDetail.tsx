@@ -6,7 +6,7 @@ import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
 import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
-import { AGENT_COPY, providerDataLocation, providerDataLocationDetail } from "../copy";
+import { AGENT_COPY, promptsGoTo, providerDataLocationDetail } from "../copy";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -2855,8 +2855,7 @@ function RunPreflightModal({
             : null;
   const missingServicesBlock = !blocker && activeTenant && missingServices.length > 0;
   const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : undefined);
-  const location = providerDataLocation({ id: providerId, name: providerName });
-  const locationDetail = providerDataLocationDetail({ id: providerId, name: providerName });
+  const locationDetail = providerDataLocationDetail({ id: providerId });
   const changes = dryRun
     ? "None. This run only prepares a plan. Graph writes, connector changes and automatic result delivery are blocked."
     : agent.mode === "write"
@@ -2896,8 +2895,8 @@ function RunPreflightModal({
               <>
                 <span className="mt-0.5 block text-xs text-[var(--color-warning)]">
                   {activeTenant
-                    ? `Prompts, tenant data and agent context go to ${location}.`
-                    : `Prompts and agent context go to ${location}. No organization is active, so no tenant data is included.`}
+                    ? `${promptsGoTo({ id: providerId, name: providerName }, true)}, with agent context.`
+                    : `${promptsGoTo({ id: providerId, name: providerName })}, with agent context. No organization is active, so no tenant data is included.`}
                 </span>
                 {locationDetail ? <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">{locationDetail}</span> : null}
               </>

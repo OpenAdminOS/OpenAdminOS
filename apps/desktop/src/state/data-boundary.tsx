@@ -8,7 +8,10 @@ import {
   type SetStateAction,
 } from "react";
 
-import { NOVA_VOICE_PROVIDER, deriveTrustCopy, providerDataLocation, providerDataLocationDetail } from "../copy";
+import { deriveTrustCopy, providerDataLocation } from "../copy";
+
+/** Voice runs on OpenAI's own service, not Codex; the same line as PR #175. */
+const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
 import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -87,16 +90,14 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
   if (voiceHosted) {
     // Hosted voice names its own destination, says whether tenant data is
     // in scope, and keeps a local chat model honest.
-    const location = providerDataLocation(NOVA_VOICE_PROVIDER);
-    const detail = providerDataLocationDetail(NOVA_VOICE_PROVIDER);
     const chatLocal = provider?.isLocal === true;
     return {
       kind: "hosted",
       label: "Voice · OpenAI",
       model: "GPT-Live-1",
-      voiceProvider: NOVA_VOICE_PROVIDER.name,
-      voiceLocation: location,
-      tooltip: `${novaVoiceSentence(location, Boolean(activeTenant), chatLocal ? provider?.name : undefined)}${detail ? ` ${detail}` : ""}`,
+      voiceProvider: "OpenAI",
+      voiceLocation: "OpenAI",
+      tooltip: `${novaVoiceSentence(Boolean(activeTenant), chatLocal ? provider?.name : undefined)} Nova voice audio and shared context are active.`,
       isVoiceHosted: true,
     };
   }
@@ -178,15 +179,15 @@ export function useDataBoundaryOptional(): DataBoundaryContextValue | undefined 
 }
 
 /**
- * What hosted Nova voice sends, as the strip tooltip and the composer say
- * it: audio, shared context and its web searches, tenant data only with an
- * organization, and a local chat model that stays on this device.
+ * What hosted Nova voice sends, as the strip tooltip, the composer and the
+ * reach map say it: voice audio and prompts, tenant data only with an
+ * organization, its web searches, and a local chat model that stays on
+ * this device. Voice goes to OpenAI's own service, never through Codex.
  */
-export function novaVoiceSentence(location: string, hasOrganization: boolean, localChatModel?: string): string {
-  const what = hasOrganization
-    ? "Nova voice is active: audio, shared context with tenant data, and its web searches go to"
-    : "Nova voice is active: audio, shared context and its web searches go to";
-  const tenant = hasOrganization ? "" : " No organization is active, so no tenant data is included.";
+export function novaVoiceSentence(hasOrganization: boolean, localChatModel?: string): string {
+  const base = hasOrganization
+    ? "Voice audio, prompts and tenant data go to OpenAI."
+    : "Voice audio and prompts go to OpenAI. No organization is active, so no tenant data is sent.";
   const local = localChatModel ? ` The chat model, ${localChatModel}, stays on this device.` : "";
-  return `${what} ${location}.${tenant}${local}`;
+  return `${base} ${VOICE_LOCATION_DETAIL} Nova's web searches also go to OpenAI.${local}`;
 }

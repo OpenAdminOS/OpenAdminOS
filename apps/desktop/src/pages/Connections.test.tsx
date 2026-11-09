@@ -743,7 +743,7 @@ describe("hosted voice in the map (review round 5)", () => {
     // The provider is structured data on the boundary, never parsed from its label (Muse round 6).
     expect(strip.kind === "hosted" ? strip.voiceProvider : undefined).toBe("OpenAI");
     expect(model.voice?.provider).toBe("OpenAI");
-    expect(reachDescription(model)).toContain("Nova voice is active: audio, shared context with tenant data, and its web searches go to OpenAI API · location set by your OpenAI workspace.");
+    expect(reachDescription(model)).toContain("Voice audio, prompts and tenant data go to OpenAI. Processing follows your OpenAI workspace's data residency setting. Nova's web searches also go to OpenAI.");
     expect(reachDescription(model)).toContain("The voice model is GPT-Live-1.");
     const quiet = buildReachModel(state, [], false);
     expect(quiet.voice).toBeUndefined();
@@ -809,13 +809,15 @@ describe("hosted voice with a local chat model (design round review, Muse D)", (
   it("names the voice destination, keeps the local chat model local, and drops tenant data without an organization", async () => {
     const { activeTenantId: _none, ...noOrg } = createMockAppState();
     const strip = deriveDataBoundary(noOrg, true);
-    expect(strip.kind === "hosted" ? strip.voiceLocation : undefined).toBe("OpenAI API · location set by your OpenAI workspace");
-    expect(strip.tooltip).toContain("Nova voice is active: audio, shared context and its web searches go to OpenAI API · location set by your OpenAI workspace.");
-    expect(strip.tooltip).toContain("No organization is active, so no tenant data is included.");
+    // Voice goes to OpenAI's own service, never through Codex, in PR #175's words.
+    expect(strip.kind === "hosted" ? strip.voiceLocation : undefined).toBe("OpenAI");
+    expect(strip.tooltip).toContain("Voice audio and prompts go to OpenAI. No organization is active, so no tenant data is sent.");
+    expect(strip.tooltip).toContain("Processing follows your OpenAI workspace's data residency setting.");
+    expect(strip.tooltip).toContain("Nova's web searches also go to OpenAI.");
     expect(strip.tooltip).toMatch(/The chat model, Ollama, stays on this device\./);
     expect(strip.tooltip).not.toMatch(/Codex|Tenant context will be sent/);
     const withOrg = deriveDataBoundary(createMockAppState(), true);
-    expect(withOrg.tooltip).toContain("shared context with tenant data");
+    expect(withOrg.tooltip).toContain("Voice audio, prompts and tenant data go to OpenAI.");
   });
 });
 

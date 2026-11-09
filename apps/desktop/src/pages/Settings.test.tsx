@@ -360,7 +360,7 @@ describe("Settings provider section", () => {
     expect(providerView.getAllByText("Active")).toHaveLength(5);
     expect(providerView.getAllByText("Not installed")).toHaveLength(3);
     expect(providerView.queryByText("Coming soon")).not.toBeInTheDocument();
-    expect(providerView.getByText("Prompts go to Codex · location set by your account")).toBeInTheDocument();
+    expect(providerView.getByText("Prompts leave this device through Codex; location set by your account")).toBeInTheDocument();
     expect(providerView.getByText("Prompts go to Azure OpenAI · location set by your deployment type")).toBeInTheDocument();
     expect(providerView.queryByText("Hosted via CLI")).not.toBeInTheDocument();
 

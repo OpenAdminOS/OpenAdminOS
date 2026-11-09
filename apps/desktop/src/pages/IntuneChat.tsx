@@ -75,7 +75,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, providerDataLocation } from "../copy";
+import { CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocationDetail, sendsThroughTool } from "../copy";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -2312,10 +2312,10 @@ function ChatComposer({
   // keeps the chat model local; without an organization no tenant data is sent.
   const toolNote = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
   const hostedSentence = dataBoundary.kind === "hosted" && dataBoundary.isVoiceHosted
-    ? `${novaVoiceSentence(dataBoundary.voiceLocation ?? "the voice provider", Boolean(activeTenant), activeProvider?.isLocal ? activeProvider.name : undefined)}${toolNote}`
+    ? `${novaVoiceSentence(Boolean(activeTenant), activeProvider?.isLocal ? activeProvider.name : undefined)}${toolNote}`
     : activeTenant
-      ? `Prompts and tenant data go to ${activeProvider ? providerDataLocation(activeProvider) : "the selected provider"} while this model is selected.${toolNote}`
-      : `Prompts go to ${activeProvider ? providerDataLocation(activeProvider) : "the selected provider"} while this model is selected. No organization is active, so no tenant data is included.${toolNote}`;
+      ? `${activeProvider ? promptsGoTo(activeProvider, true) : "Prompts and tenant data go to the selected provider"} while this model is selected.${toolNote}`
+      : `${activeProvider ? promptsGoTo(activeProvider) : "Prompts go to the selected provider"} while this model is selected. No organization is active, so no tenant data is included.${toolNote}`;
 
   return (
     <div className="relative">
@@ -3990,17 +3990,29 @@ function HostedChatConsentModal({
         }
       : {}),
   });
+  // A CLI decides where it sends prompts, so the tool is named; an API is
+  // named by its company (the same wording as PR #175).
+  const tool = prompt?.providerName ?? "Hosted provider";
+  const through = prompt ? sendsThroughTool({ id: prompt.providerId }) : false;
+  const company = (prompt && PROVIDER_COMPANIES[prompt.providerId]) ?? tool;
+  const title = through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company);
+  const lead = through
+    ? HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, prompt?.tenantName ?? "the active tenant")
+    : HOSTED_CONFIRM_COPY.bodyTenant(tool, company, prompt?.tenantName ?? "the active tenant");
+  const locationDetail = prompt ? providerDataLocationDetail({ id: prompt.providerId }) : undefined;
   return (
     <Modal open={Boolean(prompt)} onClose={onClose} size="md">
       <ModalHeader
-        title={trustCopy.confirmTitle}
+        title={title}
         subtitle={prompt?.providerName ?? "Hosted provider"}
         badge={<Badge tone="warning">Hosted</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
         <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-          {trustCopy.confirmBody}
+          <p>{lead}</p>
+          <p className="mt-1">{trustCopy.confirmBody}</p>
+          {locationDetail ? <p className="mt-1 text-[var(--color-text-soft)]">{locationDetail}</p> : null}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <ConsentFact label="Tenant" value={prompt?.tenantName ?? "Active tenant"} />
@@ -4057,7 +4069,7 @@ function HostedChatConsentModal({
             Cancel
           </Button>
           <Button variant="primary" onClick={onConfirm}>
-            Send
+            {through ? HOSTED_CONFIRM_COPY.sendThrough(tool) : HOSTED_CONFIRM_COPY.send(company)}
           </Button>
         </div>
       </div>
