@@ -10,7 +10,7 @@ import { after, before, describe, it } from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { partIdsFor, qualifyScope, requestedScopes, type IntuneChatStep, type IntuneChatStreamEvent } from "@openadminos/agent-sdk";
+import { partIdsFor, providerCatalog, qualifyScope, requestedScopes, type IntuneChatStep, type IntuneChatStreamEvent } from "@openadminos/agent-sdk";
 
 import { AppStateStore } from "../state.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
@@ -140,6 +140,13 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
     filePath: statePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     mcpCatalog: [{ ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` }],
+    // A hosted provider reports its model, so the window and the host resolve the same one; no CLI on this device is probed.
+    ...(options.provider
+      ? {
+          providerListFactory: () => providerCatalog.map((entry) =>
+            entry.id === options.provider!.id ? { ...entry, status: "available" as const, models: [options.provider!.model] } : entry),
+        }
+      : {}),
     graphFactory: (input) => {
       graphBuilds.push(input.tenantId);
       if (options.graphError) throw new Error(options.graphError);
@@ -961,7 +968,7 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
   const DEVICE_QUESTION = "Which devices have not synced in 30 days?";
   const ask = (store: AppStateStore, send: "sendIntuneChatMessage" | "streamIntuneChatMessage", input: Parameters<AppStateStore["sendIntuneChatMessage"]>[0]) =>
     send === "sendIntuneChatMessage" ? store.sendIntuneChatMessage(input) : store.streamIntuneChatMessage(input, () => {});
-  const noTenantConsent = (providerId = "anthropic") => ({ noTenant: true as const, providerId: providerId as "anthropic", acknowledgedAt: new Date().toISOString() });
+  const noTenantConsent = (providerId = "anthropic", model = "claude-sonnet-5-5") => ({ noTenant: true as const, providerId: providerId as "anthropic", model, acknowledgedAt: new Date().toISOString() });
 
   it("answers a docs question from Microsoft Learn with no Graph call and no tenant on the conversation", async () => {
     for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
@@ -1157,6 +1164,15 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
           () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent("openai") }),
           /does not match the selected provider/,
         );
+        // The confirmation names the model; a decision for another model, or none, is refused (Muse round 2, Q).
+        await assert.rejects(
+          () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent("anthropic", "claude-opus-5-5") }),
+          /names a different model than the one selected/,
+        );
+        await assert.rejects(
+          () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: { noTenant: true, providerId: "anthropic", acknowledgedAt: new Date().toISOString() } }),
+          /names a different model than the one selected/,
+        );
         assert.equal(prompts.length, 0);
         const message = (await store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent() })).assistantMessage;
         assert.equal(message.status, "completed");
@@ -1226,8 +1242,15 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
           assert.deepEqual(graphBuilds, [], send);
           assert.deepEqual(graphPaths, [], send);
           assert.equal((await store.listIntuneChatConversations()).length, 0, send);
+          // A tenant confirmation that names another model is refused (Muse round 2, Q).
+          await assert.rejects(
+            () => ask(store, send, { content: DEVICE_QUESTION, hostedProviderConsent: { tenantId: tenant.id, providerId: "anthropic", model: "claude-opus-5-5", acknowledgedAt: new Date().toISOString() } }),
+            /names a different model than the one selected/,
+            send,
+          );
+          assert.equal(prompts.length, 0, send);
           // The tenant-bound confirmation still works for the same send.
-          const message = (await ask(store, send, { content: DEVICE_QUESTION, hostedProviderConsent: { tenantId: tenant.id, providerId: "anthropic", acknowledgedAt: new Date().toISOString() } })).assistantMessage;
+          const message = (await ask(store, send, { content: DEVICE_QUESTION, hostedProviderConsent: { tenantId: tenant.id, providerId: "anthropic", model: "claude-sonnet-5-5", acknowledgedAt: new Date().toISOString() } })).assistantMessage;
           assert.equal(message.status, "completed", send);
         }, { provider: hosted });
       }

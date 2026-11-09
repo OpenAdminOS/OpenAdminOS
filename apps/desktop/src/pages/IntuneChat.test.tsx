@@ -307,11 +307,15 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(within(dialog).getByText(/Your question, this conversation and results from the references you added are sent to the hosted provider/)).toBeInTheDocument();
     expect(within(dialog).getAllByText(/no tenant data is included/).length).toBeGreaterThan(0);
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    // The remembered decision is per provider and model, and the label says so (Muse round 2, Q).
+    expect(within(dialog).getByRole("checkbox", {
+      name: "Remember this decision for questions without a tenant on OpenAI gpt-5 on this device. A send with a tenant or another model asks again.",
+    })).not.toBeChecked();
 
     await user.click(within(dialog).getByRole("button", { name: "Send" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
     const consent = vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0].hostedProviderConsent;
-    expect(consent).toMatchObject({ noTenant: true, providerId: "openai" });
+    expect(consent).toMatchObject({ noTenant: true, providerId: "openai", model: "gpt-5" });
     expect(consent).not.toHaveProperty("tenantId");
   });
 

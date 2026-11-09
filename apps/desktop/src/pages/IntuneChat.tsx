@@ -1156,6 +1156,7 @@ function IntuneChatContent() {
         pending.providerId,
         rememberHostedConsent,
         pending.workspaceContextSummary,
+        pending.model,
       ),
       pending.conversationId,
       pending.workspaceContext,
@@ -4105,7 +4106,7 @@ function HostedChatConsentModal({
           />
           <span>
             {noTenant
-              ? "Remember this decision for questions without a tenant on this provider on this device. A send with a tenant asks again."
+              ? `Remember this decision for questions without a tenant on ${prompt?.providerName ?? "this provider"}${prompt?.model ? ` ${prompt.model}` : ""} on this device. A send with a tenant or another model asks again.`
               : "Remember this decision for this tenant and provider on this device."}
           </span>
         </label>
@@ -4156,7 +4157,7 @@ function rememberedHostedProviderConsent(
 ): HostedProviderConsentInput | undefined {
   if (!provider || provider.isLocal) return undefined;
   if (!hasRememberedHostedChatConsent(tenant?.id, provider.id, model)) return undefined;
-  return createHostedProviderConsent(tenant?.id, provider.id, true);
+  return createHostedProviderConsent(tenant?.id, provider.id, true, undefined, model);
 }
 
 /** `tenantId` undefined binds the confirmation to a send with no tenant. */
@@ -4165,14 +4166,18 @@ export function createHostedProviderConsent(
   providerId: ProviderId,
   remember: boolean,
   workspaceContext?: WorkspacePromptContextSummary,
+  model?: string,
 ): HostedProviderConsentInput {
   const acknowledgedAt = new Date().toISOString();
+  // The model the admin saw in the confirmation; the host refuses a send that would use another.
+  const named = model ? { model } : {};
   if (!tenantId) {
-    return { noTenant: true, providerId, acknowledgedAt, ...(remember ? { remember: true } : {}) };
+    return { noTenant: true, providerId, ...named, acknowledgedAt, ...(remember ? { remember: true } : {}) };
   }
   return {
     tenantId,
     providerId,
+    ...named,
     acknowledgedAt,
     ...(remember ? { remember: true } : {}),
     ...(workspaceContext ? { workspaceContext } : {}),

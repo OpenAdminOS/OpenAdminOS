@@ -4037,6 +4037,7 @@ function validateHostedProviderConsent(
   }
   const providerId = validateProviderId(value.providerId, "hostedProviderConsent.providerId");
   const remember = typeof value.remember === "boolean" ? { remember: value.remember } : {};
+  const model = value.model === undefined ? undefined : requireBoundedString(value.model, "hostedProviderConsent.model", 256);
   // Bound to no tenant or to one tenant, never both: a no-tenant
   // acknowledgement covers no tenant context and no workspace.
   if (value.noTenant !== undefined) {
@@ -4046,11 +4047,12 @@ function validateHostedProviderConsent(
     if (value.tenantId !== undefined || workspaceContext) {
       throw new Error("hostedProviderConsent.noTenant cannot be combined with a tenant or workspace context.");
     }
-    return { noTenant: true, providerId, acknowledgedAt, ...remember };
+    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember };
   }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
     providerId,
+    ...(model !== undefined ? { model } : {}),
     acknowledgedAt,
     ...remember,
     ...(workspaceContext ? { workspaceContext } : {}),

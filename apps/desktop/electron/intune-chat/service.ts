@@ -1952,7 +1952,7 @@ export class IntuneChatService {
     let consentVerified = provider?.isLocal !== false;
     const verifyConsent = () => {
       if (consentVerified) return;
-      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary);
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel);
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
@@ -2413,7 +2413,7 @@ export class IntuneChatService {
     let consentVerified = provider?.isLocal !== false;
     const verifyConsent = () => {
       if (consentVerified) return;
-      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary);
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary, selectedModel);
       consentVerified = true;
     };
     if (reachesModel) verifyConsent();
@@ -3555,6 +3555,7 @@ export class IntuneChatService {
     provider: ProviderSummary | undefined,
     providerId: ProviderId,
     workspaceContext?: WorkspacePromptContextSummary,
+    model?: string,
   ): void {
     if (provider?.isLocal !== false) {
       return;
@@ -3587,6 +3588,12 @@ export class IntuneChatService {
     if (tenant && consent.tenantId !== tenant.id) {
       throw new Error(
         "Hosted provider confirmation does not match the active tenant and provider. Confirm the chat send again.",
+      );
+    }
+    // A no-tenant decision is per model; a tenant decision names one when the window sent it.
+    if ((consent.noTenant === true || consent.model !== undefined) && consent.model !== model) {
+      throw new Error(
+        "Hosted provider confirmation names a different model than the one selected. Confirm the chat send again.",
       );
     }
 

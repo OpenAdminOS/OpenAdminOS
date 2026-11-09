@@ -2104,14 +2104,17 @@ export interface LocalDataSummary {
 /**
  * A fresh acknowledgement for one hosted-provider Chat send. It is bound
  * either to the active tenant (`tenantId`) or to a send with no tenant
- * connected (`noTenant`), and always to the provider. The host refuses a
- * no-tenant acknowledgement for any send that includes tenant context.
+ * connected (`noTenant`), and always to the provider and, when named, the
+ * model. The host refuses a no-tenant acknowledgement for any send that
+ * includes tenant context.
  */
 export type HostedProviderChatConsent =
   | {
       tenantId: string;
       noTenant?: undefined;
       providerId: ProviderId;
+      /** The model the admin confirmed. When present, the host refuses a send that would use another model. */
+      model?: string;
       acknowledgedAt: string;
       remember?: boolean;
       workspaceContext?: HostedProviderWorkspaceContextConsent;
@@ -2121,6 +2124,8 @@ export type HostedProviderChatConsent =
       /** The question, the conversation and reference results leave the device; no tenant data does. */
       noTenant: true;
       providerId: ProviderId;
+      /** A no-tenant decision is remembered per provider and model, so the host always checks the model. */
+      model?: string;
       acknowledgedAt: string;
       remember?: boolean;
       workspaceContext?: undefined;
