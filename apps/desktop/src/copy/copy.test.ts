@@ -8,6 +8,7 @@ import {
   chatErrorCopy,
   deriveToolHostsCopy,
   deriveTrustCopy,
+  providerDataLocation,
   searchSettings,
 } from "./index.js";
 
@@ -108,5 +109,16 @@ describe("hosted trust copy names the region (PR #175 Muse round 2, R)", () => {
     expect(copy.strip).toBe("hosted · tenant context sent to OpenAI API · US");
     expect(copy.boundary).toBe("Tenant context will be sent to OpenAI API · US.");
     expect(copy.confirmBody).toBe("OpenAI using gpt-5 (OpenAI API · US) will receive the prompt and selected context from Contoso.");
+  });
+});
+
+describe("hosted data locations (maintainer decision, 2026-11-09)", () => {
+  it("names the documented API location, or says the region is not stated, for every hosted provider", () => {
+    expect(providerDataLocation({ id: "anthropic", name: "Claude Code" })).toBe("Anthropic API · US");
+    expect(providerDataLocation({ id: "openai", name: "Codex" })).toBe("OpenAI API · US");
+    expect(providerDataLocation({ id: "copilot", name: "GitHub Copilot CLI" })).toBe("GitHub Copilot · region not stated");
+    expect(providerDataLocation({ id: "gemini", name: "Gemini CLI" })).toBe("Google Gemini API · region not stated");
+    expect(providerDataLocation({ id: "azure-openai", name: "Azure OpenAI" })).toBe("Azure OpenAI · your resource's region");
+    expect(providerDataLocation({ name: "Example" })).toBe("Example · region not stated");
   });
 });

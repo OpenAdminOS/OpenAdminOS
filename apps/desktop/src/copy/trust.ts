@@ -46,12 +46,14 @@ export const NOTHING_LEAVES_COPY = "nothing leaves this device";
  * Where a hosted provider sends prompts, as the status strip, the composer
  * and the hosted confirmation name it ("Anthropic API · US").
  */
-// TODO(ugur): confirm the region lines for Copilot, Gemini and Azure OpenAI. They say who sets the region rather than naming one.
+// Decided by the maintainer on 2026-11-09: the documented API location where
+// there is one, "region not stated" where the provider does not state one,
+// and the admin's own resource for Azure OpenAI. PR #174 uses the same values.
 const HOSTED_DATA_LOCATIONS: Readonly<Record<string, string>> = {
   anthropic: "Anthropic API · US",
   openai: "OpenAI API · US",
-  copilot: "GitHub Copilot · region set by GitHub",
-  gemini: "Google Gemini API · region set by Google",
+  copilot: "GitHub Copilot · region not stated",
+  gemini: "Google Gemini API · region not stated",
   "azure-openai": "Azure OpenAI · your resource's region",
 };
 
