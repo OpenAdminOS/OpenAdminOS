@@ -2,7 +2,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
-import { cliProcessEnv, cliSpawn } from "./cli-invocation.js";
+import { cliProcessEnv, cliSpawn, signalCliTree } from "./cli-invocation.js";
 
 export type CliFailure = "not-installed" | "signed-out" | "access-denied" | "unsupported-version" | "request-failed";
 export interface CliProbe {
@@ -81,8 +81,13 @@ export function requireCliVersion(version: string, minimum: string, name: string
   if (comparison < 0 || version.includes("-")) throw new CliProviderError("unsupported-version", `${name} ${minimum} or newer (stable) is required. Update the CLI, then refresh providers.`);
 }
 
+/**
+ * Spawns a provider CLI in its own process group on macOS and Linux, so
+ * `terminateCli` also stops what a wrapper script started. Windows keeps
+ * the console-less default and stops the tree with `taskkill /T`.
+ */
 export function spawnProvider(binary: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): ChildProcessWithoutNullStreams {
-  const spawned = cliSpawn(binary, args, { env, cwd, windowsHide: true, stdio: "pipe" });
+  const spawned = cliSpawn(binary, args, { env, cwd, windowsHide: true, stdio: "pipe", detached: process.platform !== "win32" });
   if (spawned.error) {
     throw new CliProviderError(
       "request-failed",
@@ -104,11 +109,15 @@ export class CliEvents<T> {
   async *[Symbol.asyncIterator]() { while (true) { if (this.error) throw this.error; if (this.queue.length) { yield this.queue.shift()!; continue; } if (this.ended) return; await new Promise<void>((r) => { this.wake = r; }); this.wake = undefined; } }
 }
 
+/**
+ * Stops a provider CLI and everything it started: SIGTERM to its process
+ * group, then SIGKILL after 500 ms for whatever is left, also when the
+ * wrapper itself already exited and left a child behind.
+ */
 export function terminateCli(child: ChildProcessWithoutNullStreams) {
   child.stdin.destroy();
-  if (child.exitCode !== null) return;
-  child.kill();
-  const timer = setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 500);
+  signalCliTree(child, "SIGTERM");
+  if (process.platform === "win32") return;
+  const timer = setTimeout(() => signalCliTree(child, "SIGKILL"), 500);
   timer.unref();
-  child.once("exit", () => clearTimeout(timer));
 }

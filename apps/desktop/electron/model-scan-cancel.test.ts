@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
 import { providerCatalog } from "@openadminos/agent-sdk";
-import { discoverCli, probeLmStudioLlm } from "@openadminos/runtime";
+import { createGeminiLlm, discoverCli, probeLmStudioLlm } from "@openadminos/runtime";
 
 import { runScanCheck, scanProbeFromProvider, scanProviderCheck } from "./model-scan.js";
 import { checkLmStudio, checkOllama } from "./provider-detail.js";
@@ -78,6 +78,47 @@ describe("cancellation (item 4 and T)", () => {
       }
     });
   }
+
+  // Wrappers that start a child and wait, as npm launchers and version managers do (review round 3, item 2).
+  for (const [id, name, label] of [["gemini", "gemini", "Gemini CLI"], ["copilot", "copilot", "GitHub Copilot CLI"]] as const) {
+    it(`kills a ${label} wrapper and the child it started when the check times out`, { skip: !posix }, async () => {
+      const dir = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+      try {
+        const childPid = join(dir, "child");
+        const binary = await fakeCli(dir, name, `sleep 60 &\necho $! > "${childPid}"\nwait`);
+        const probe = await runScanCheck(
+          { providerId: id, name: label, where: "hosted", target: `${name} --version`, run: (signal) => scanProviderCheck(catalog(id), { signal, binaryPath: binary }).then((summary) => scanProbeFromProvider(summary)) },
+          1500,
+        );
+        assert.equal(probe.state, "could-not-check");
+        const pid = Number((await readFile(childPid, "utf8")).trim());
+        assert.equal(await gone(pid), true, `the ${label} wrapper's child must not survive`);
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+
+  it("stops a Gemini request and the child its wrapper started", { skip: !posix }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oaos-cancel-"));
+    try {
+      const childPid = join(dir, "child");
+      // --version answers; a request starts a child and waits on it.
+      const binary = await fakeCli(dir, "gemini", `if [ "$1" = "--version" ]; then echo 9.9.9; exit 0; fi\nsleep 60 &\necho $! > "${childPid}"\nwait`);
+      const llm = createGeminiLlm({ binaryPath: binary });
+      const controller = new AbortController();
+      const request = llm.complete({ prompt: "hello", signal: controller.signal }).catch((error: unknown) => error);
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        if (await readFile(childPid, "utf8").catch(() => "")) break;
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      controller.abort();
+      await request;
+      assert.equal(await gone(Number((await readFile(childPid, "utf8")).trim())), true, "the request's child must not survive");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 
   it("kills a Gemini CLI that hangs on --version", { skip: !posix }, async () => {
     const dir = await mkdtemp(join(tmpdir(), "oaos-cancel-"));

@@ -221,15 +221,38 @@ export function cliArgs<
  * the process itself is killed.
  */
 export function killCliProcess(child: ChildProcess, ownGroup: boolean): void {
-  if (ownGroup && process.platform !== "win32" && typeof child.pid === "number") {
-    try {
-      process.kill(-child.pid, "SIGKILL");
-      return;
-    } catch {
-      // The group is already gone; fall through to the process itself.
-    }
+  if (ownGroup) {
+    signalCliTree(child, "SIGKILL");
+    return;
   }
   child.kill("SIGKILL");
+}
+
+/**
+ * Signals a CLI spawned in its own process group and everything it
+ * started: the group on macOS and Linux, the process tree through
+ * `taskkill /T /F` on Windows (which has no graceful equivalent, so any
+ * signal there ends the tree).
+ */
+export function signalCliTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (typeof pid !== "number") return;
+  if (process.platform === "win32") {
+    if (child.exitCode !== null) return;
+    try {
+      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore", shell: false });
+      killer.on("error", () => child.kill());
+    } catch {
+      child.kill();
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // The group is already gone; the process itself, if it still runs.
+    if (child.exitCode === null) child.kill(signal);
+  }
 }
 
 export function cliSpawn(
