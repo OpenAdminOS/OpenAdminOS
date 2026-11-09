@@ -3528,45 +3528,58 @@ export class AppStateStore {
     if (providerId !== "ollama" && providerId !== "lm-studio") {
       throw new Error("Only Ollama and LM Studio can be started from the scan.");
     }
+    // All of Start runs in the scan queue: two windows never spawn the same
+    // runtime twice, and the scan after it is a fresh one that starts once
+    // the runtime answers, never a scan already running from before.
+    return this.exclusiveModelScan(() => this.startLocalRuntimeNow(providerId));
+  }
+
+  private async startLocalRuntimeNow(providerId: "ollama" | "lm-studio"): Promise<{ started: boolean; message?: string; scan?: ModelScanResult }> {
     const endpoint = (providerId === "ollama" ? resolveOllamaEndpoint() : resolveLmStudioEndpoint()).replace(/\/$/, "");
     const local = (providerId === "ollama" ? classifyOllamaEndpoint(endpoint) : classifyLmStudioEndpoint(endpoint)).isLocal;
     const name = providerId === "ollama" ? "Ollama" : "LM Studio";
     const manualCommand = providerId === "ollama" ? "ollama serve" : "lms server start";
-    const launch = local ? await runtimeLaunch(providerId) : undefined;
-    const result = local
-      ? await startLocalRuntime({
-          name,
-          manualCommand,
-          launch,
-          appWithoutCommand: !launch && providerId === "lm-studio" && (await lmStudioAppInstalled()),
-          // The shared CLI launcher hides the console window on Windows and refuses a batch launcher it cannot resolve, with a reason.
-          spawn: (launch) =>
-            new Promise<void>((resolve, reject) => {
-              const { child, error } = cliSpawn(launch.command, launch.args, { detached: true, stdio: "ignore", windowsHide: true });
-              if (!child) {
-                reject(error);
-                return;
-              }
-              child.once("error", reject);
-              child.once("spawn", () => {
-                child.unref();
-                resolve();
-              });
-            }),
-          isUp: async () => {
-            try {
-              const response = await fetch(runtimeReadyUrl(providerId, endpoint), { signal: AbortSignal.timeout(1_000) });
-              return response.ok;
-            } catch {
-              return false;
+    if (!local) {
+      return { started: false, message: `${name} is set to ${endpoint}, outside this device. The scan only starts runtimes on this device.` };
+    }
+    const isUp = async () => {
+      try {
+        const response = await fetch(runtimeReadyUrl(providerId, endpoint), { signal: AbortSignal.timeout(1_000) });
+        return response.ok;
+      } catch {
+        return false;
+      }
+    };
+    // Already answering, for example started by an earlier Start from another window: nothing is spawned.
+    if (!(await isUp())) {
+      const launch = await runtimeLaunch(providerId);
+      const result = await startLocalRuntime({
+        name,
+        manualCommand,
+        launch,
+        appWithoutCommand: !launch && providerId === "lm-studio" && (await lmStudioAppInstalled()),
+        // The shared CLI launcher hides the console window on Windows and refuses a batch launcher it cannot resolve, with a reason.
+        spawn: (launch) =>
+          new Promise<void>((resolve, reject) => {
+            const { child, error } = cliSpawn(launch.command, launch.args, { detached: true, stdio: "ignore", windowsHide: true });
+            if (!child) {
+              reject(error);
+              return;
             }
-          },
-        })
-      : { started: false as const, message: `${name} is set to ${endpoint}, outside this device. The scan only starts runtimes on this device.` };
-    // A failed start returns its failure as it is; only a started runtime is scanned again.
-    if (!result.started) return { started: false, message: result.message };
-    return { started: true, scan: await this.scanModels() };
+            child.once("error", reject);
+            child.once("spawn", () => {
+              child.unref();
+              resolve();
+            });
+          }),
+        isUp,
+      });
+      // A failed start returns its failure as it is; only a started runtime is scanned again.
+      if (!result.started) return { started: false, message: result.message };
+    }
+    return { started: true, scan: await this.runModelScanOnce() };
   }
+
 
   /** The first-launch scan was finished or skipped; it does not show again. */
   async completeFirstRunScan(): Promise<AppState> {

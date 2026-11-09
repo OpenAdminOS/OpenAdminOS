@@ -703,37 +703,87 @@ describe("review round 2: coordination and Start (items 3, 7, B)", () => {
     }
   });
 
-  it("starts LM Studio through the shared CLI launcher with fixed arguments (Muse round 2, O)", { skip: process.platform === "win32" }, async () => {
+  /**
+   * A fake LM Studio: `lms` on PATH appends its arguments to a log, and the
+   * stub server answers its models list only once `lms` has run, so
+   * "started" means the launch happened (review round 3, item 7).
+   */
+  async function fakeLmStudio() {
     const { createServer } = await import("node:http");
-    const { store, cleanup } = await fresh();
     const bin = await mkdtemp(join(tmpdir(), "openadminos-lms-"));
-    const server = createServer((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [] })));
+    const log = join(bin, "lms.log");
+    await writeFile(join(bin, "lms"), `#!/bin/sh\necho "$*" >> "${log}"\n`);
+    await chmod(join(bin, "lms"), 0o755);
+    const launched = () => readFile(log, "utf8").then((text) => text.trim().split("\n").filter(Boolean), () => [] as string[]);
+    const server = createServer((_request, response) => {
+      void launched().then((lines) => {
+        if (lines.length === 0) response.writeHead(503).end();
+        else response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [{ id: "local-model" }] }));
+      });
+    });
     await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
     const original = { path: process.env.PATH, home: process.env.HOME, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    // HOME points at the temp folder, so no real ~/.lmstudio/bin/lms is found first.
+    process.env.PATH = `${bin}:/usr/bin:/bin`;
+    process.env.HOME = bin;
+    process.env.OPENADMINOS_LM_STUDIO_URL = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+    return {
+      launched,
+      cleanup: async () => {
+        for (const [key, value] of [["PATH", original.path], ["HOME", original.home], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+          if (value === undefined) delete process.env[key];
+          else process.env[key] = value;
+        }
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await rm(bin, { recursive: true, force: true });
+      },
+    };
+  }
+
+  it("starts LM Studio through the shared CLI launcher with fixed arguments (Muse round 2, O)", { skip: process.platform === "win32" }, async () => {
+    const { store, cleanup } = await fresh();
+    const lm = await fakeLmStudio();
     try {
-      const log = join(bin, "lms.log");
-      await writeFile(join(bin, "lms"), `#!/bin/sh\necho "$*" >> "${log}"\n`);
-      await chmod(join(bin, "lms"), 0o755);
-      process.env.PATH = `${bin}:/usr/bin:/bin`;
-      process.env.HOME = bin;
-      process.env.OPENADMINOS_LM_STUDIO_URL = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
       const result = await store.startLocalRuntime("lm-studio");
       assert.equal(result.started, true, result.message);
-      // The runtime is detached, so its first write can land after the endpoint answers.
-      let written = "";
-      for (let attempt = 0; attempt < 40 && !written; attempt += 1) {
-        written = await readFile(log, "utf8").catch(() => "");
-        if (!written) await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      assert.equal(written.trim(), "server start");
+      assert.deepEqual(await lm.launched(), ["server start"]);
     } finally {
-      for (const [key, value] of [["PATH", original.path], ["HOME", original.home], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
-        if (value === undefined) delete process.env[key];
-        else process.env[key] = value;
-      }
-      await new Promise<void>((resolve) => server.close(() => resolve()));
-      await rm(bin, { recursive: true, force: true });
+      await lm.cleanup();
       await cleanup();
+    }
+  });
+
+  it("scans afresh once a started runtime answers, never joining a scan from before, and starts it once for two windows (review round 3, item 3)", { skip: process.platform === "win32" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    const lm = await fakeLmStudio();
+    // The provider list reads LM Studio's state when a check starts, then takes a while, like a slow scan.
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => {
+        const running = (await lm.launched()).length > 0;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+        return providerCatalog.map((provider) =>
+          provider.id === "lm-studio" && running
+            ? { ...provider, status: "connected" as const, models: ["local-model"], defaultModel: "local-model" }
+            : { ...provider, status: "not-installed" as const, models: [] });
+      },
+    });
+    try {
+      const before = store.scanModels();
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const [scan, first, second] = await Promise.all([before, store.startLocalRuntime("lm-studio"), store.startLocalRuntime("lm-studio")]);
+      assert.notEqual(scan.probes.find((probe) => probe.providerId === "lm-studio")?.ready, true, "the scan from before saw LM Studio stopped");
+      for (const start of [first, second]) {
+        assert.equal(start.started, true, start.message);
+        assert.equal(start.scan?.probes.find((probe) => probe.providerId === "lm-studio")?.ready, true, "Start returns a scan made after the runtime answered");
+        assert.notEqual(start.scan?.outcome.kind, "nothing");
+      }
+      assert.deepEqual(await lm.launched(), ["server start"], "two Starts launched LM Studio once");
+    } finally {
+      await lm.cleanup();
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 
