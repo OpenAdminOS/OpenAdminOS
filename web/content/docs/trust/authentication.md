@@ -66,7 +66,17 @@ Chat and cache refreshes may ask you to sign in again when a session has expired
 
 ## Disconnecting And Revoking
 
-Disconnecting a tenant in OpenAdminOS removes its account and tokens from the local cache and deletes its local run history and cached data. It does not remove the enterprise application or the consent from the tenant. To revoke access in the tenant, delete the OpenAdminOS enterprise application or remove its granted permissions in Entra admin center.
+Disconnecting an organization in OpenAdminOS first stops its running agents and cache refresh, then removes its account and tokens from the local cache and deletes its local data: the Graph cache and change history, run history and queued report deliveries, chats, workspaces and learning records, Agent Team data, and its part of multi-tenant chats and jobs. Configuration audit entries are kept. The confirmation asks for an explicit check before anything is deleted.
+
+Disconnecting does not change anything in the tenant. The app registration and the admin consent stay, and tokens that were already issued stay valid until they expire. How to revoke access depends on how the organization was connected.
+
+### Revoking the OpenAdminOS app
+
+The OpenAdminOS enterprise application (service principal) is shared by every OpenAdminOS user in the tenant. Deleting it, or removing its granted permissions, signs out every admin in the tenant who uses OpenAdminOS, not only you. To revoke access for everyone, open Entra admin center, go to Enterprise applications, select OpenAdminOS, and delete it or remove its permissions under Permissions. To end sessions that already have tokens, revoke the user's sessions in Entra admin center (Users, select the user, Revoke sessions) as well.
+
+### Revoking your own app registration
+
+An organization connected with your own app registration uses that registration, not the OpenAdminOS app. Open Entra admin center, go to Enterprise applications, select your registration by its name or application (client) ID, and remove the granted permissions or delete it. Delete the app registration itself under App registrations if nothing else uses it. Revoke the user's sessions as well to end tokens that were already issued.
 
 ## Pilot Mode
 

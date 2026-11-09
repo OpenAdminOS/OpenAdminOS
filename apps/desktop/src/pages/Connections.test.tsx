@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import Connections, { REACH_STACK_BELOW, buildReachModel, reachDescription, reachLayout, reachLinks, reachPaths } from "./Connections";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
 import {
+  createAwaitingConfirmationRun,
   createMockAgent,
   createMockAppState,
   createMockMcpServers,
@@ -789,7 +790,9 @@ describe("disconnect confirmation (enterprise round)", () => {
     await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
     await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
     const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
-    for (const item of ORGANIZATION_COPY.disconnectDeletes) expect(dialog).toHaveTextContent(item);
+    for (const item of ORGANIZATION_COPY.disconnectDeletes(0)) expect(dialog).toHaveTextContent(item);
+    expect(dialog).toHaveTextContent(ORGANIZATION_COPY.disconnectAuditKept);
+    expect(dialog).toHaveTextContent(ORGANIZATION_COPY.disconnectNoOrganizationAfter);
     expect(dialog).toHaveTextContent("The OpenAdminOS enterprise application and the admin consent granted to it stay in the tenant.");
     await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectRevokeLink }));
     expect(bridge.openExternal).toHaveBeenCalledWith("https://docs.openadminos.com/trust-model/authentication#disconnecting-and-revoking");
@@ -813,5 +816,50 @@ describe("hosted voice with a local chat model (design round review, Muse D)", (
     expect(strip.tooltip).not.toMatch(/Codex|Tenant context will be sent/);
     const withOrg = deriveDataBoundary(createMockAppState(), true);
     expect(withOrg.tooltip).toContain("shared context with tenant data");
+  });
+});
+
+describe("disconnect names the registration and what goes (design round review)", () => {
+  it("names an own app registration with its client ID and links its revoke steps", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const tenant = {
+      ...base.tenants[0]!,
+      appRegistration: { kind: "custom" as const, clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", label: "Contoso admin tools", authority: "https://login.microsoftonline.com/contoso.example" },
+    };
+    const bridge = render(createMockAppState({ tenants: [tenant] }));
+    await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+    await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
+    const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
+    expect(dialog).toHaveTextContent("Your app registration Contoso admin tools (client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee) and the admin consent granted to it stay in the tenant.");
+    expect(dialog).not.toHaveTextContent("OpenAdminOS enterprise application");
+    // The tenant domain shows in the destructive dialog.
+    expect(dialog).toHaveTextContent(`${tenant.username.split("@")[1]}, signed in as ${tenant.username}`);
+    await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectRevokeLink }));
+    expect(bridge.openExternal).toHaveBeenCalledWith(ORGANIZATION_COPY.disconnectRevokeOwnUrl);
+  });
+
+  it("counts the runs it deletes and keeps the recovery steps in a failure", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "completed", tenantId: "tenant-1" });
+    const disconnectTenant = vi.fn(async () => { throw new Error("Secure storage is not available."); });
+    render(createMockAppState({ runs: [run, { ...run, id: "run-2" }] }), { disconnectTenant });
+    await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+    await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
+    const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
+    expect(dialog).toHaveTextContent("Its run history (2 runs) and queued report deliveries");
+    await user.click(within(dialog).getByRole("checkbox", { name: ORGANIZATION_COPY.disconnectConfirmLocal("Contoso IT") }));
+    await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectAction }));
+    expect(await within(dialog).findByRole("alert")).toHaveTextContent(/Secure storage is not available\..*Restart OpenAdminOS/);
+  });
+
+  it("offers Disconnect on each row of the Organizations tab", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState().tenants[0]!;
+    render(createMockAppState({ tenants: [base, { ...base, id: "tenant-2", displayName: "Fabrikam", username: "admin@fabrikam.example" }] }), {}, "/connections?view=organizations");
+    await user.click(await screen.findByRole("button", { name: `${CONNECTIONS_COPY.disconnect}, Fabrikam` }));
+    const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Fabrikam/ });
+    // Fabrikam is not active, so the active organization stays.
+    expect(dialog).not.toHaveTextContent(ORGANIZATION_COPY.disconnectNoOrganizationAfter);
   });
 });

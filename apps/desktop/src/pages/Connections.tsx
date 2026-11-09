@@ -913,6 +913,11 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
   const organizations = resolveOrganizations(state);
   const active = activeOrganizationOf(state);
   const [editing, setEditing] = useState<string | null>(null);
+  const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const disconnectTarget = organizations.find((organization) => organization.id === disconnecting);
+  const disconnectTenantRecord = disconnectTarget
+    ? state.tenants.find((entry) => entry.id === disconnectTarget.connections.microsoft365?.tenantId)
+    : undefined;
   return (
     <section aria-labelledby="connections-organizations">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -979,6 +984,14 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
                       {CONNECTIONS_COPY.makeActive}
                     </UiButton>
                   )}
+                  <UiButton
+                    size="sm"
+                    variant="ghost"
+                    aria-label={`${sample ? PILOT_COPY.leaveAction : CONNECTIONS_COPY.disconnect}, ${organization.name}`}
+                    onClick={() => setDisconnecting(organization.id)}
+                  >
+                    {sample ? PILOT_COPY.leaveAction : CONNECTIONS_COPY.disconnect}
+                  </UiButton>
                 </span>
               )}
             </li>
@@ -986,6 +999,14 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
         })}
       </ul>
       )}
+      {disconnectTarget && disconnectTenantRecord ? (
+        <DisconnectOrganizationDialog
+          open
+          organization={disconnectTarget}
+          tenant={disconnectTenantRecord}
+          onClose={() => setDisconnecting(null)}
+        />
+      ) : null}
     </section>
   );
 }

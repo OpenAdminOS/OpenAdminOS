@@ -41,18 +41,27 @@ export const ORGANIZATION_COPY = {
   disconnectNote: "Microsoft 365 data in the tenant is not changed. Connecting the tenant again creates the organization again with an empty local cache.",
   disconnectAction: "Disconnect and delete local data",
   /** What disconnecting deletes from this device, named one by one. */
-  disconnectDeletes: [
+  disconnectDeletes: (runCount: number) => [
     "Microsoft sign-in tokens for this organization",
     "Its Graph cache and change history",
-    "Its run history and queued report deliveries",
+    `Its run history (${runCount} ${runCount === 1 ? "run" : "runs"}) and queued report deliveries`,
     "Its chats, workspaces and learning records",
+    "Its Agent Team missions, assignments and memory",
+    "Its part of multi-tenant chats and jobs that include it",
   ],
+  disconnectAuditKept: "Configuration audit entries, including this disconnect, are kept.",
+  disconnectNoOrganizationAfter: "No organization will be active afterwards.",
+  disconnectSubtitle: (domain: string, username: string) => `${domain}, signed in as ${username}`,
   disconnectDeletesTitle: "Deleted from this device",
   disconnectKeepsTitle: "Stays in Microsoft Entra",
   disconnectKeepsBody:
-    "The OpenAdminOS enterprise application and the admin consent granted to it stay in the tenant. Disconnecting here does not revoke them.",
+    "The OpenAdminOS enterprise application and the admin consent granted to it stay in the tenant. Disconnecting here does not revoke them. Other admins in the tenant who use OpenAdminOS rely on the same enterprise application.",
+  /** An organization connected with the admin's own app registration names that registration. */
+  disconnectKeepsOwn: (label: string, clientId: string) =>
+    `Your app registration ${label} (client ID ${clientId}) and the admin consent granted to it stay in the tenant. Disconnecting here does not revoke them.`,
   disconnectRevokeLink: "How to revoke access in Entra",
   disconnectRevokeUrl: "https://docs.openadminos.com/trust-model/authentication#disconnecting-and-revoking",
+  disconnectRevokeOwnUrl: "https://docs.openadminos.com/trust-model/authentication#revoking-your-own-app-registration",
   disconnectSchedules: "Its schedules stay on their agents, unassigned, until you assign them to another organization.",
   disconnectConfirmLocal: (name: string) => `Delete ${name}'s local data from this device`,
   disconnected: (name: string) => `${name} disconnected. Its local data was deleted from this device.`,
