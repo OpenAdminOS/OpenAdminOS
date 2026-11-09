@@ -25,6 +25,7 @@ export function Modal({
   size = "md",
   closeOnScrim = true,
   ariaLabel,
+  ariaDescribedBy,
 }: {
   open: boolean;
   onClose: () => void;
@@ -32,6 +33,8 @@ export function Modal({
   size?: "md" | "lg";
   closeOnScrim?: boolean;
   ariaLabel?: string;
+  /** The id of the element that describes the dialog, such as what blocks it. */
+  ariaDescribedBy?: string;
 }) {
   const overlayId = useId();
   const headingId = useId();
@@ -112,6 +115,7 @@ export function Modal({
         aria-modal="true"
         aria-labelledby={ariaLabel ? undefined : headingId}
         aria-label={ariaLabel}
+        aria-describedby={ariaDescribedBy}
         tabIndex={-1}
         className={`relative w-full ${widthClass} max-h-full overscroll-contain overflow-hidden rounded-[18px] bg-[var(--color-raised)] shadow-[var(--shadow-dialog)] animate-fade-in-scale flex flex-col`}
         onClick={(e) => e.stopPropagation()}

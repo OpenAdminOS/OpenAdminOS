@@ -513,7 +513,7 @@ it('requires one-use visual approval, retains the full evidence, and invalidates
   const sends: unknown[] = [];
   const nova = new NovaService(f.secrets, async () => f.state, async () => ({
     conversation: { id: 'test-chat' }, assistantMessage: { status: 'completed', content: 'Verified device report. '.repeat(150) },
-  } as SendIntuneChatMessageResult), fetch, {
+  } as SendIntuneChatMessageResult), fetch, { activeTenantId: async () => f.state.activeTenantId,
     connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {}, status: 'connected' } as never],
     send: async input => { sends.push(input); return { messageId: 'accepted' }; }, startRun: async () => { throw new Error('Unexpected run'); },
   });
@@ -535,7 +535,7 @@ it('requires one-use visual approval, retains the full evidence, and invalidates
 it('does not execute a prepared connector action after tenant changes', async () => {
   const f = fixture();
   let sends = 0;
-  const nova = new NovaService(f.secrets, async () => f.state, async () => ({ conversation: { id: 'chat' }, assistantMessage: { status: 'completed', content: 'Report' } } as SendIntuneChatMessageResult), fetch, {
+  const nova = new NovaService(f.secrets, async () => f.state, async () => ({ conversation: { id: 'chat' }, assistantMessage: { status: 'completed', content: 'Report' } } as SendIntuneChatMessageResult), fetch, { activeTenantId: async () => f.state.activeTenantId,
     connectors: async () => [{ descriptor: { id: 'whatsapp-web', name: 'WhatsApp' }, config: {} } as never],
     send: async () => { sends++; }, startRun: async () => { throw new Error('Unexpected run'); },
   });
@@ -551,7 +551,7 @@ it('opens connector setup directly from voice without invoking reasoning', async
   const f = fixture();
   const { sessionId } = await f.nova.handle({ action: 'start', mode: 'local', tenantId: 'tenant-a', consent: false });
   const result = await f.nova.handle({ action: 'answer', sessionId: sessionId!, text: 'Open connectors' });
-  assert.equal(result.route, '/settings/connectors'); assert.equal(f.chats.length, 0);
+  assert.equal(result.route, '/connections'); assert.equal(f.chats.length, 0);
 });
 
 it('retrieves a fresh report and requires a single visual decision for every connector', async () => {
@@ -561,7 +561,7 @@ it('retrieves a fresh report and requires a single visual decision for every con
   const nova = new NovaService(f.secrets, async () => f.state, async input => {
     questions.push(input.content);
     return { conversation: { id: 'report' }, assistantMessage: { status: 'completed', content: `Fresh report ${questions.length}` } } as SendIntuneChatMessageResult;
-  }, fetch, {
+  }, fetch, { activeTenantId: async () => f.state.activeTenantId,
     connectors: async () => ids.map(id => ({ descriptor: { id, name: id }, status: 'connected', config: { defaultRecipients: 'admin@example.test', defaultTeamId: 'team', defaultChannelId: 'channel', defaultChannel: 'slack-channel', defaultRecipient: 'signal-recipient' } } as never)),
     send: async input => { deliveries.push(input.connectorId); }, startRun: async () => { throw new Error('Unexpected run'); },
   });
@@ -587,7 +587,7 @@ it('routes conversational email requests and follow-up capability questions usin
   const nova = new NovaService(f.secrets, async () => f.state, async input => {
     questions.push(input.content);
     return { conversation: { id: 'report' }, assistantMessage: { status: 'completed', content: 'Verified non-compliant device list' } } as SendIntuneChatMessageResult;
-  }, fetch, {
+  }, fetch, { activeTenantId: async () => f.state.activeTenantId,
     connectors: async () => [{ descriptor: { id: 'outlook', name: 'Outlook' }, status, config: { defaultRecipients: 'admin@example.test' } } as never],
     send: async input => { sends.push(input); }, startRun: async () => { throw new Error('Unexpected run'); },
   });
@@ -619,7 +619,7 @@ it('reports connector capabilities from configuration and never attaches an olde
   const nova = new NovaService(f.secrets, async () => f.state, async () => {
     questions++;
     return { conversation: { id: 'report' }, assistantMessage: failed ? { status: 'failed', error: 'No permission', content: '' } : { status: 'completed', content: 'Previous report' } } as SendIntuneChatMessageResult;
-  }, fetch, {
+  }, fetch, { activeTenantId: async () => f.state.activeTenantId,
     connectors: async () => [{ descriptor: { id: 'outlook', name: 'Outlook' }, status: 'connected', config: { defaultRecipients: 'admin@example.test' } } as never],
     send: async () => { throw new Error('Must not send'); }, startRun: async () => { throw new Error('Unexpected run'); },
   });
@@ -641,7 +641,7 @@ it('interprets unfamiliar delivery wording, resolves corrections and keeps appro
   const nova = new NovaService(f.secrets, async () => f.state, async input => {
     questions.push(input.content);
     return { conversation: { id: 'report' }, assistantMessage: { content: 'Verified report', status: 'completed' } } as SendIntuneChatMessageResult;
-  }, fetch, {
+  }, fetch, { activeTenantId: async () => f.state.activeTenantId,
     classifyCommand: async (_text, context, options) => { contexts.push(context); assert.equal(options.scope.providerId, 'ollama'); assert.equal(options.scope.isLocal, true); return JSON.stringify(reply); },
     connectors: async () => ['outlook', 'teams'].map(id => ({ descriptor: { id, name: id }, status: 'connected', config: { defaultRecipients: 'admin@example.test', defaultTeamId: 'team', defaultChannelId: 'channel' } } as never)),
     send: async input => { sends.push(input); }, startRun: async () => { throw new Error('Unexpected run'); },
@@ -674,7 +674,7 @@ it('fails closed on interpretation failures and discards replaced or cross-tenan
   let mode = 'invalid';
   let chats = 0;
   const contexts: unknown[] = [];
-  const nova = new NovaService(f.secrets, async () => f.state, async () => { chats++; throw new Error('Unexpected research'); }, fetch, {
+  const nova = new NovaService(f.secrets, async () => f.state, async () => { chats++; throw new Error('Unexpected research'); }, fetch, { activeTenantId: async () => f.state.activeTenantId,
     classifyCommand: async (_text, context, options) => {
       contexts.push(context); signal = options.signal;
       if (mode === 'invalid') return '{"kind":"send","connectorId":"outlook","self":false,"to":"invented"}';
@@ -718,7 +718,7 @@ it('keeps the full noncompliant list through channel selection, failed setup and
     } as any, () => {});
     assert.ok(content, input.content);
     return {conversation:{id:'report'},assistantMessage:{content,status:'completed'}} as SendIntuneChatMessageResult;
-  }, fetch, {
+  }, fetch, { activeTenantId: async () => f.state.activeTenantId,
     classifyCommand: async () => { throw new Error('Explicit commands must not need a model'); },
     connectors: async () => ['outlook','teams','whatsapp-web'].map(id => ({descriptor:{id,name:id},status:id==='whatsapp-web'?'needs-setup':'connected',config:{defaultRecipients:'admin@example.test',defaultTeamId:'team',defaultChannelId:'channel',defaultChannelName:'General'}} as never)),
     send:async input => {sends.push(input);}, startRun:async () => {throw new Error('Unexpected run');}
@@ -745,7 +745,7 @@ it('keeps the full noncompliant list through channel selection, failed setup and
 it('retains a split spoken delivery request while interpretation is pending and never researches its connector fragment', async () => {
   const f = fixture();
   let contexts: any[] = [];
-  const nova = new NovaService(f.secrets, async () => f.state, async () => {throw new Error('Unexpected research');}, fetch, {
+  const nova = new NovaService(f.secrets, async () => f.state, async () => {throw new Error('Unexpected research');}, fetch, { activeTenantId: async () => f.state.activeTenantId,
     classifyCommand: async (_text, context) => {contexts.push(context); if(contexts.length===1) return new Promise<string>(()=>{}); return '{"kind":"research"}';},
     connectors:async () => [], send:async () => {throw new Error('Unexpected send');},startRun:async () => {throw new Error('Unexpected run');}
   });
@@ -771,7 +771,7 @@ it('answers general capabilities directly while preserving a running task and it
   let chats = 0, sends = 0;
   const nova = new NovaService(f.secrets, async () => f.state, async (_input, options) => {
     chats++; signal=options.signal; return new Promise<SendIntuneChatMessageResult>(resolve=>{finish=resolve;});
-  }, fetch, {classifyCommand: async () => {throw new Error('No classifier needed');},
+  }, fetch, { activeTenantId: async () => f.state.activeTenantId,classifyCommand: async () => {throw new Error('No classifier needed');},
     connectors:async()=>[{descriptor:{id:'outlook',name:'Outlook'},status:'connected',config:{defaultRecipients:'admin@example.test'}} as never],
     send:async()=>{sends++;},startRun:async()=>{throw new Error('Unexpected run');}});
   const {sessionId} = await nova.handle({action:'start',mode:'local',tenantId:'tenant-a',consent:false});

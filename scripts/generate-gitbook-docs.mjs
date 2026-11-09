@@ -86,7 +86,9 @@ function git(args, fallback = "unknown") {
 }
 
 function lastChanged(path) {
-  const hash = git(["log", "-1", "--format=%h", "--", path]);
+  // A fixed length: git's automatic abbreviation grows with the object
+  // count, so a fresh CI clone and a local clone can print different hashes.
+  const hash = git(["log", "-1", "--abbrev=8", "--format=%h", "--", path]);
   const date = git(["log", "-1", "--format=%cs", "--", path]);
   return { hash, date };
 }
@@ -640,6 +642,7 @@ function summaryPage(agents) {
 - [Installation](getting-started/installation.md)
 - [First run](getting-started/first-run.md)
 - [Connect a tenant](getting-started/connect-tenant.md)
+- [Organizations and Connections](getting-started/organizations.md)
 - [Connect with the shared app](getting-started/connect-shared-app.md)
 - [Own app registration](getting-started/own-app-registration.md)
 

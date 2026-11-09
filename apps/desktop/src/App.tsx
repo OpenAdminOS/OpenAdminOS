@@ -15,6 +15,7 @@ const Runs = lazy(() => import("./pages/Runs"));
 const IntuneChat = lazy(() => import("./pages/IntuneChat"));
 const Changes = lazy(() => import("./pages/Changes"));
 const Settings = lazy(() => import("./pages/Settings"));
+const Connections = lazy(() => import("./pages/Connections"));
 const RunResult = lazy(() => import("./pages/RunResult"));
 const MenuBarCompanion = lazy(() => import("./pages/MenuBarCompanion"));
 
@@ -94,8 +95,11 @@ export default function App() {
             <Route path="/fleet" element={<FleetRedirect />} />
             <Route path="/workspaces" element={<WorkspacesRedirect />} />
             <Route path="/workspaces/:workspaceId" element={<WorkspaceDetailRedirect />} />
-            <Route path="/connectors" element={<LegacySettingsRedirect section="connectors" />} />
+            <Route path="/connections" element={<Connections />} />
+            <Route path="/connectors" element={<ConnectionsRedirect />} />
             <Route path="/connectors/:connectorId" element={<LegacyConnectorRedirect />} />
+            <Route path="/settings/tenants" element={<ConnectionsRedirect />} />
+            <Route path="/settings/connectors" element={<ConnectionsRedirect />} />
             <Route path="/runs" element={<Runs />} />
             <Route path="/activity" element={<ActivityRedirect />} />
             <Route path="/runs/:id" element={<RunResult />} />
@@ -212,7 +216,29 @@ export function PersonaOfficeRedirect() {
   );
 }
 
-export function LegacySettingsRedirect({ section }: { section: "data" | "connectors" }) {
+/**
+ * Connections replaced Settings, Tenants and Settings, Connectors. Old
+ * links keep their query and hash, so `?connector=<id>` still opens that
+ * connector's drawer.
+ */
+export function ConnectionsRedirect() {
+  const location = useLocation();
+  const query = new URLSearchParams(location.search);
+  query.delete("section");
+  query.delete("target");
+  return (
+    <Navigate
+      to={{
+        pathname: "/connections",
+        search: query.toString() ? `?${query.toString()}` : "",
+        hash: location.hash,
+      }}
+      replace
+    />
+  );
+}
+
+export function LegacySettingsRedirect({ section }: { section: "data" }) {
   const location = useLocation();
   return (
     <Navigate
@@ -230,7 +256,7 @@ export function LegacyConnectorRedirect() {
   return (
     <Navigate
       to={{
-        pathname: "/settings/connectors",
+        pathname: "/connections",
         search: query.toString() ? `?${query.toString()}` : "",
         hash: location.hash,
       }}

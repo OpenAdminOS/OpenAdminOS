@@ -118,6 +118,13 @@ export const IconPlus = ({ size = 16, ...p }: IconProps) => (
   </svg>
 );
 
+export const IconFlask = ({ size = 16, ...p }: IconProps) => (
+  <svg {...base(size, p)}>
+    <path d="M9.5 3.5 H14.5 M10.5 3.5 V9.5 L5 19 A1.2 1.2 0 0 0 6 20.5 H18 A1.2 1.2 0 0 0 19 19 L13.5 9.5 V3.5" />
+    <path d="M7.6 15 H16.4" />
+  </svg>
+);
+
 export const IconSearch = ({ size = 16, ...p }: IconProps) => (
   <svg {...base(size, p)}>
     <circle cx="11" cy="11" r="6.5" />

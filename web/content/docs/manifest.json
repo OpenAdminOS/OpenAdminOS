@@ -35,6 +35,13 @@
           "children": []
         },
         {
+          "title": "Organizations and Connections",
+          "source": "getting-started/organizations.md",
+          "route": "basics/organizations",
+          "path": "basics/organizations",
+          "children": []
+        },
+        {
           "title": "Connect with the shared app",
           "source": "getting-started/connect-shared-app.md",
           "route": "basics/connect-shared-app",
@@ -452,6 +459,10 @@
     {
       "source": "getting-started/connect-tenant",
       "destination": "basics/connect-tenant"
+    },
+    {
+      "source": "getting-started/organizations",
+      "destination": "basics/organizations"
     },
     {
       "source": "getting-started/connect-shared-app",

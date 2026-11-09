@@ -74,7 +74,7 @@ These are non-negotiable. If you find yourself about to violate one, stop and as
 
 2. **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. No "trust this agent" exception. Every write operation gets human-in-the-loop approval, every time. Destructive operations require typed confirmation (e.g., user must type `RETIRE 47 DEVICES` to proceed).
 
-3. **No agent runs without an active tenant scope.** The current tenant is shown in the status strip at all times. If the tenant context is ambiguous or expired, agents cannot start.
+3. **No agent reads or writes a service unless that service is connected in the active organization.** The active organization, or "No organization", is shown at all times. If its context is ambiguous or expired, agents that need it cannot start. Only an agent that calls no service API at all (no Graph or vendor scopes, not even the sign-in scopes) runs without an organization.
 
 4. **No silent failures.** Every error has a designed state with a clear recovery path (see `06-error-states.html`). Generic "something went wrong" messages are forbidden.
 

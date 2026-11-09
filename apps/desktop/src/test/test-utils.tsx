@@ -9,6 +9,7 @@ import { SetupFlowProvider } from "../setup/SetupFlowContext";
 import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   SERVICE_PARTS,
+  resolveOrganizations,
   DEFAULT_DRIFT_RETENTION_SETTINGS,
   DEFAULT_RUN_HISTORY_RETENTION_SETTINGS,
   deriveTrustState,
@@ -63,7 +64,7 @@ export const mockProviders: ProviderSummary[] = [
   },
   {
     id: "apple-foundation",
-    name: "Apple Foundation",
+    name: "Apple Intelligence",
     description: "Use Apple's on-device Foundation Models framework on compatible Macs.",
     isLocal: true,
     status: "available",
@@ -82,7 +83,7 @@ export const mockProviders: ProviderSummary[] = [
   },
   {
     id: "openai",
-    name: "OpenAI",
+    name: "Codex",
     description: "Use OpenAI through the locally installed Codex CLI.",
     isLocal: false,
     status: "connected",
@@ -92,7 +93,7 @@ export const mockProviders: ProviderSummary[] = [
   },
   {
     id: "anthropic",
-    name: "Anthropic",
+    name: "Claude Code",
     description: "Use Anthropic through the locally installed Claude Code CLI.",
     isLocal: false,
     status: "not-installed",
@@ -303,6 +304,7 @@ export function makeMockBridge(
       skippedWrite: 0,
       skippedInFlight: 0,
       skippedNotDue: 0,
+      waitingOtherOrganization: 0,
       errors: [],
     })),
     setCompanionLaunchEnabled: vi.fn(async (enabled: boolean) =>
@@ -715,12 +717,46 @@ export function makeMockBridge(
     setActiveTenant: vi.fn(async (id: string) =>
       updateState({ ...appState, activeTenantId: id }),
     ),
+    setActiveOrganization: vi.fn(async (id: string | null) => {
+      const tenantId = id === null
+        ? undefined
+        : resolveOrganizations(appState).find((organization) => organization.id === id)?.connections.microsoft365?.tenantId;
+      const { activeTenantId: _previous, ...rest } = appState;
+      return updateState(tenantId ? { ...rest, activeTenantId: tenantId } : rest);
+    }),
+    renameOrganization: vi.fn(async (id: string, name: string) =>
+      updateState({
+        ...appState,
+        organizations: resolveOrganizations(appState).map((organization) =>
+          organization.id === id ? { ...organization, name } : organization,
+        ),
+      }),
+    ),
+    assignAgentSchedule: vi.fn(async (slug: string, organizationId: string) =>
+      updateState({
+        ...appState,
+        installedAgents: appState.installedAgents.map((agent) =>
+          agent.slug === slug && agent.schedule
+            ? { ...agent, schedule: { ...agent.schedule, organizationId } }
+            : agent,
+        ),
+      }),
+    ),
+    dismissOrganizationMigrationNotice: vi.fn(async () => {
+      const { organizationMigration: _notice, ...rest } = appState;
+      return updateState(rest);
+    }),
     disconnectTenant: vi.fn(async (id: string) =>
       updateState({
         ...appState,
         tenants: appState.tenants.filter((tenant) => tenant.id !== id),
       }),
     ),
+    retryTenantCleanup: vi.fn(async (id: string) => {
+      const { tenantCleanups, ...rest } = appState;
+      const remaining = (tenantCleanups ?? []).filter((cleanup) => cleanup.tenantId !== id);
+      return updateState(remaining.length > 0 ? { ...rest, tenantCleanups: remaining } : rest);
+    }),
     removeSavedAppRegistration: vi.fn(async (clientId: string, directoryTenantId?: string) =>
       updateState({
         ...appState,

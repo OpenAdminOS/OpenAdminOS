@@ -84,7 +84,7 @@ export const discordConnector: ConnectorFactory<DiscordConnectorCapabilities> =
           { connectorId: DISCORD_CONNECTOR_ID },
         );
       }
-      const client = createDiscordWebhookClient({ webhookUrl });
+      const client = createDiscordWebhookClient({ webhookUrl, ...(ctx.fetch ? { fetchImpl: ctx.fetch } : {}) });
       return {
         descriptor: discordDescriptor,
         status: "connected",

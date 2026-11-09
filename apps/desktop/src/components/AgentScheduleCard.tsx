@@ -9,6 +9,10 @@ import {
   Switch,
 } from "./ui";
 import { SchedulesPausedNotice } from "./SchedulesPausedNotice";
+import { useAppState } from "../state";
+import { SCHEDULE_ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
+import { resolveOrganizations } from "../shared/openAdminOS";
+import { useToast } from "./Toast";
 
 const PRESETS = [
   { id: "900", label: "15m", seconds: 15 * 60 },
@@ -86,6 +90,7 @@ export function AgentScheduleCard({
   return (
     <div className="space-y-4">
       <SchedulesPausedNotice />
+      {schedule ? <ScheduleOrganizationRow agent={agent} /> : null}
       <Switch
         checked={enabled}
         disabled={busy || (!enabled && draftSeconds < 60)}
@@ -271,4 +276,80 @@ function formatRelative(iso: string): string {
   if (ms < 60 * 60 * 1000) return `${Math.floor(ms / 60_000)}m ago`;
   if (ms < 24 * 60 * 60 * 1000) return `${Math.floor(ms / (60 * 60_000))}h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+/** Which organization the schedule runs in, with Assign for an unassigned one. */
+function ScheduleOrganizationRow({ agent }: { agent: AgentSummary }) {
+  const { state, assignAgentSchedule } = useAppState();
+  const toast = useToast();
+  // Only organizations this version can make active: not the sample, and with Microsoft 365.
+  const choices = resolveOrganizations(state).filter(
+    (organization) => organization.kind !== "sample" && organization.connections.microsoft365 !== undefined,
+  );
+  const current = choices.find((organization) => organization.id === agent.schedule?.organizationId);
+  const [selected, setSelected] = useState(choices[0]?.id ?? "");
+  // Organizations can be connected or removed while the card stays open:
+  // keep a selection that is still offered, otherwise take the first.
+  const choiceIds = choices.map((organization) => organization.id).join("\n");
+  useEffect(() => {
+    const ids = choiceIds ? choiceIds.split("\n") : [];
+    setSelected((current) => (ids.includes(current) ? current : ids[0] ?? ""));
+  }, [choiceIds]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]">
+      <div className="text-sm font-medium text-[var(--color-text)]">{SCHEDULE_ORGANIZATION_COPY.rowLabel}</div>
+      {current ? (
+        <p className="mt-0.5 text-sm text-[var(--color-text-soft)]">
+          {current.name}. {SCHEDULE_ORGANIZATION_COPY.runsIn(current.name)}
+        </p>
+      ) : (
+        <>
+          <p className="mt-0.5 text-sm text-[var(--color-warning)]">{SCHEDULE_ORGANIZATION_COPY.unassigned}</p>
+          {choices.length === 0 ? (
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">{SCHEDULE_ORGANIZATION_COPY.noOrganizations}</p>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <select
+                aria-label={`${SCHEDULE_ORGANIZATION_COPY.assignLabel} for ${agent.name}`}
+                name="schedule-organization"
+                value={selected}
+                disabled={busy}
+                onChange={(event) => setSelected(event.target.value)}
+                className="h-8 rounded-md bg-[var(--color-surface)] px-2.5 text-sm text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+              >
+                {choices.map((organization) => (
+                  <option key={organization.id} value={organization.id}>{organization.name}</option>
+                ))}
+              </select>
+              <Button
+                size="sm"
+                variant="secondary"
+                disabled={busy || !selected}
+                onClick={() => {
+                  setBusy(true);
+                  setError(null);
+                  const name = choices.find((organization) => organization.id === selected)?.name ?? "";
+                  void assignAgentSchedule(agent.slug, selected)
+                    .then(() => toast.success(SCHEDULE_ORGANIZATION_COPY.assigned(name)))
+                    .catch((caught) =>
+                      setError(
+                        SCHEDULE_ORGANIZATION_COPY.failed(
+                          userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
+                        ),
+                      ),
+                    )
+                    .finally(() => setBusy(false));
+                }}
+              >
+                {SCHEDULE_ORGANIZATION_COPY.assignAction}
+              </Button>
+            </div>
+          )}
+        </>
+      )}
+      {error ? <p role="alert" className="mt-1 text-sm text-[var(--color-danger)]">{error}</p> : null}
+    </div>
+  );
 }

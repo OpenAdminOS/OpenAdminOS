@@ -89,7 +89,7 @@ describe("multi-tenant Chat and connected services", () => {
       assert.equal(row.status, "missing-scopes");
       assert.ok(row.missingScopes.includes("DeviceManagementManagedDevices.Read.All"));
       assert.ok(!row.missingScopes.includes("User.Read"));
-      assert.match(row.recovery, /Intune and Entra are not connected for this tenant\. Add them in Settings, Tenants\./);
+      assert.match(row.recovery, /Intune and Entra are not connected for this tenant\. Add them in Connections\./);
       assert.match(row.warnings[0] ?? "", /^Not included: .*Intune managed devices/);
       assert.deepEqual(row.staleResources, []);
       assert.equal(preflight.canRun, false);

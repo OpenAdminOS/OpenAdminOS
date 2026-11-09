@@ -1112,6 +1112,29 @@ JSON records the start and final hash in `hashChain`, and CSV includes the hash
 and chain metadata columns. Signed or third-party cryptographic timestamps are
 deferred.
 
+The export also includes configuration changes, with source
+`configuration-change`: Microsoft 365 connected (including a reconnect) and
+disconnected, access added or removed (the scope names and service parts),
+organization created, renamed, switched (including to No organization) and
+removed, provider changed, model changed per provider, public reference
+installed, enabled, disabled and removed, schedule assigned to an
+organization or left unassigned, Azure OpenAI settings changed (endpoint,
+deployment and API version, and whether the key was set or removed, never the
+key), and the move to organizations itself (the organizations created and the
+schedules moved), recorded once on the first write after it. Each event type
+keeps only its allowed detail fields. The CSV export has an `id` column, so the
+hash chain can be verified from it, and the same retention note as the JSON
+export. Writes are serialized, and the state file and its folder are flushed to
+disk whenever audit events are written. Each event carries its id, timestamp, kind,
+organization id and name and tenant id where they apply, and only the
+identifiers and names needed to see what changed. Events are derived in the host
+by comparing the state before and after each write to `state.json`, so every
+flow records them, including organizations created and removed with their
+tenant. They are stored in `state.json` under `configurationAudit`, apart from
+run history, so run retention never prunes them; the newest 10,000 are kept.
+They never contain tokens, secrets, prompts or tenant content. Recording and
+export are free features.
+
 Linux tenant sign-in requires a real OS secret-store backend. OpenAdminOS uses
 Electron `safeStorage` for the MSAL token cache, hosted-provider credentials,
 and connector credentials, and refuses Electron's
@@ -1753,8 +1776,62 @@ confirmation, the host removes the tenant record, tenant-pinned runs and queued
 deliveries, Graph cache/status, conversations and messages, workspaces and
 evidence, drift history, self-training/audit records, saved-query tenant
 references, tenant-group membership, multi-tenant jobs/batches that include the
-tenant, and its cache schedule before removing the MSAL account. Failure is
-surfaced and never presented as a successful disconnect.
+tenant, its cache schedule and the MSAL account. A failure is surfaced and never
+presented as a successful disconnect.
+
+**Disconnect design (PR #174 Disconnect redesign, 2026-11-09).** The guarantee
+that no work for a disconnecting organization reaches the network or persists is
+enforced at choke points, not by each caller.
+
+- **Tenant lease** (`apps/desktop/electron/tenant-lifecycle.ts`). One module owns
+  each tenant's lifecycle: `open`, `closing` (Disconnect began, or its cleanup is
+  pending), `removed` (cleanup finished), with a generation number. All tenant work
+  runs inside `withTenantLease(tenantId, work)`: refused when the tenant is not
+  open, registered so Disconnect can drain it, and handed an AbortSignal that fires
+  when closing begins. The lease is also kept in async context, so a choke point
+  knows the generation of the work that calls it. Routed through it: runs (and so
+  schedules, rollbacks, gateway proposals and Nova run actions), cache refreshes and
+  preloads, single and multi-tenant Chat sends, multi-tenant agent batches, report
+  deliveries, Nova actions and sends, gateway reads, and Agent Team save, start,
+  tick and ask.
+- **Egress choke points.** The Graph adapter gets a guarded fetch; the MSAL client
+  of a tenant is wrapped so every token acquisition is refused once the tenant is
+  closing, and a token that arrives after closing began is withheld; tenant
+  sessions for connectors go through the same check; the license probe uses the
+  guarded fetch. Connectors receive the host transport in
+  `ConnectorBuildContext.fetch` (every request and retry) and
+  `ConnectorBuildContext.assertEgress` (called right before a send over a
+  transport that is not fetch: the WhatsApp socket and the Signal CLI). Model
+  requests that carry tenant data are a choke point too: Chat gets its model
+  through a tenant-scoped wrapper and Agent Team through its host, so every
+  `complete` or `stream` is refused once one of the tenants in its prompt is
+  closing and one in flight is aborted with the lease signal; runs stop through
+  their lease-cancelled controller. A forgotten caller still cannot reach the
+  network for a closing tenant.
+- **Persistence choke points.** Tenant-scoped writes in the SQLite store
+  (conversations, messages, tool calls, graph cache, drift baselines, multi-tenant
+  jobs and batches, workspaces, learning events, the refresh schedule) and in
+  `office.db` check the tenant first; in `state.json`, a write may remove anything
+  but never adds or changes a record (tenant, run, delivery, Nova connector audit,
+  active tenant, gateway binding) of a tenant that is not writable. Writes from a
+  closing tenant, or from work of an older generation, are dropped and logged.
+- **Two phases, persisted.** Phase 1, under the state lock: the tenant closes (every
+  lease signal fires) and one write removes the tenant with its runs, deliveries,
+  active selection and gateway binding, and stores a removal record
+  (`tenantRemovals`). From here the organization is gone in the UI. Phase 2: drain
+  leased work with a bounded wait (15 seconds; past it, cleanup goes on because the
+  choke points refuse anything the work could still do), remove the Microsoft
+  sign-in, delete Agent Team and Chat data, then drop the record. If phase 2 fails
+  or the app quits, the record stays, the tenant stays closed, and cleanup resumes
+  at the next launch before any scheduler, Agent Team tick, gateway or delivery
+  worker starts, or from Retry cleanup on Connections.
+- **Reconnect.** The same tenant connects again only after its cleanup finished;
+  that opens a new generation. While cleanup is pending, the connect flow shows
+  "Disconnecting <name> has not finished on this device: <why>. Retry cleanup on
+  Connections, then connect again." with Retry cleanup.
+- **Outcome.** The dialog reports the truth: disconnected, or removed with cleanup
+  pending and why, as a warning rather than a failure. `AppState.tenantCleanups`
+  lists pending cleanups; Connections shows them with Retry cleanup.
 
 Verification for the chat surface includes `npm run smoke:intune-chat`. The smoke
 test launches Electron in a dev-only fixture mode, seeds a local tenant, drives
@@ -2019,6 +2096,33 @@ Semantic success, warning, danger, information, and reasoning colors remain
 separate from the brand accent. Destructive approval uses danger; typed
 confirmation and tenant/provider trust behavior are unchanged.
 
+### Colour meaning, DeviceTile and motion (2026-11-09, PR #174)
+
+Colour means one thing each. Green means it stays on this device. Amber means
+it leaves this device: a hosted provider's prompts line and where line, words
+sent to a reference host, hosted voice. Missing access is neutral and dashed,
+never amber: a service that is not connected is a dashed `ServiceMark`
+(`data-off`), a missing service or part is a dashed chip ("Defender, not
+connected", "Sign-in logs, not granted"), and "Partial" reads "4 of 6 parts"
+with a hollow dot. The one other amber use is an operational warning with its
+fix (background runs off). A view has one filled button, and it is the next
+step: in the run review that is the blocker's fix, and Start run stays a
+disabled secondary while blocked.
+
+`DeviceTile` (`apps/desktop/src/components/DeviceTile.tsx`) draws this device in
+every reach figure: the accent fill with the `oa` mark in `--color-on-accent`,
+at 104 px (`xl`, radius 28, the first launch scan), 72 px (`lg`, radius 20, the
+Connections reach map) and 40 px (`sm`, radius 12, rows and the stacked map).
+Reach lines are 1.25 px `--color-text-faint`, incoming solid and outgoing
+dashed 3/4; a missing service uses `--color-border`; only the line carrying
+prompts to a hosted provider is `--color-warning`.
+
+Motion tokens name the values the app already uses: `--ease-out`
+(0.2, 0.8, 0.2, 1), `--ease-in-out` (0.65, 0, 0.35, 1), `--ease-spring`
+(0.34, 1.36, 0.64, 1), and `--dur-fast` 140 ms, `--dur-state` 240 ms,
+`--dur-enter` 420 ms. Reduced motion keeps the global 0.01 ms rule, and every
+orchestrated sequence renders its final state directly.
+
 ### Tokens
 
 `apps/desktop/src/styles/globals.css` is the production source of truth for the
@@ -2048,7 +2152,7 @@ class strings for buttons, eyebrows, and section titles live in `web/src/app/ui.
   the sidebar toggle, while the persistent 52px top bar exposes the toggle and
   New chat whenever the sidebar is collapsed. Shared page padding is 24px
   vertically and 32px horizontally.
-- The top bar always keeps the active tenant switcher and data boundary visible.
+- The top bar always keeps the organization switcher (the active organization or "No organization") and data boundary visible.
   Page titles occupy its center and route-specific actions sit before the
   boundary chip on the right. Dialog and drawer scrims begin below this bar,
   except for Office fullscreen and presentation modes.
@@ -2119,7 +2223,7 @@ These are visible in the mockups and need to be built as proper React components
 
 ### Trust messaging consistency
 
-The phrase "Local-only · No data leaves this device" appears in multiple places. It is a **single source of truth**: when the user selects a hosted LLM, every instance of this messaging must flip simultaneously to honestly state where data goes (e.g., "Anthropic API · US"). Implement this as a single derived state, not as duplicated copy.
+The phrase "Local-only · No data leaves this device" appears in multiple places. It is a **single source of truth**: when the user selects a hosted LLM, every instance of this messaging must flip simultaneously to honestly state where data goes (e.g., "Claude Code · location set by your account", from `providerDataLocation`). Implement this as a single derived state, not as duplicated copy.
 
 The cost cell follows the same pattern: green `$0.00 local` for local providers, real cost numbers for hosted.
 
@@ -2177,11 +2281,12 @@ The shell sidebar presents these primary actions and destinations in this order:
 | Agent Team | `/office` | Persistent teammates, assignments, evidence review, conversations, and the Office and List views |
 | Agents | `/agents` | Installed agents, schedules, and agent details |
 | Marketplace | `/marketplace` | Registry agents and MCP servers to install (added 2026-11-03, replaces the Hub tab) |
+| Connections | `/connections` | The active organization's reach map, services, public references, result connectors, organizations and saved app registrations (added 2026-11-08, replaces Settings, Tenants and Settings, Connectors) |
 | Runs | `/runs` | Run history, approvals, and external proposals |
 | Changes | `/changes` | Tenant timeline, baselines, comparison, all-tenant drift status (formerly Fleet), and data freshness |
 
 Pinned conversations, Workspaces, and grouped recent conversations follow the
-primary navigation. Settings, Tenants, Voice, Keyboard shortcuts, and About and
+primary navigation. Settings, Connections, Voice, Keyboard shortcuts, and About and
 updates live in the tenant-aware account menu at the bottom of the sidebar.
 Conversation and workspace state is shared by the shell and Chat so first-send
 pending insertion, search, reload reconciliation, rename, pin, export, move,
@@ -2208,8 +2313,8 @@ Installed agents and Hub share the Agents Library section;
 schedule filtering and controls live there and in each agent drawer. Legacy
 `/agents/office` and `/agents/team/:personaId` URLs redirect to `/office`, while
 `/hub`, `/agents/hub`, and `/agents/schedules` redirect into Agents query filters.
-Cache and Connectors now live in Settings;
-legacy `/cache` and `/connectors` URLs redirect to their Settings sections,
+Cache lives in Settings and Connectors live in Connections (2026-11-08);
+legacy `/cache` and `/connectors` URLs redirect there,
 including connector drawer deep links. `/fleet` redirects to the all-tenant
 Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
 
@@ -2221,7 +2326,8 @@ Changes scope at `/changes?scope=all`, and `/activity` redirects to `/runs`.
 | `/hub`, `/agents/hub` | `/agents?source=hub` |
 | `/agents/schedules` | `/agents?filter=scheduled` |
 | `/cache` | `/settings/data` |
-| `/connectors`, `/connectors/:connectorId` | `/settings/connectors`, with the connector drawer preserved |
+| `/connectors`, `/connectors/:connectorId` | `/connections`, with the connector drawer preserved |
+| `/settings/tenants`, `/settings/connectors`, `/settings?section=tenants` or `connectors` | `/connections`, keeping `?connector=` (2026-11-08) |
 | `/fleet` | `/changes?scope=all` |
 | `/workspaces`, `/workspaces/:workspaceId` | Chat's Workspaces panel or `/chat/workspaces/:workspaceId` |
 
@@ -2240,20 +2346,26 @@ Removed from navigation:
 
 ### First run and contextual activation (updated 2026-10-26)
 
-**Decided 2026-11-08: model first, services as connections. Approved direction, not built yet.** Design reference: `docs/mockups/32-connections-first-run.html`. Where this block disagrees with other rules in this SPEC, this block is the target and those rules describe the shipped app until the implementation lands. Known conflicts: §2a (the connect dialog preselects no service), the Chat rules in §2 that Chat does not run without an active tenant and that the hosted-send acknowledgement is bound to a tenant and provider pair, the first-launch welcome and automatic setup dialog below, the navigation table in §4a (Connections joins the sidebar), the guided first run and the manual-run preflight that blocks without a tenant in §5, and hard constraint 3 in `CLAUDE.md` and `AGENTS.md`.
+**Decided 2026-11-08: model first, services as connections. Organizations, Connections, agent service needs, schedule ownership and the manual-run preflight are built (2026-11-09, branch `organizations/connections`); the first run, Chat without an organization, reference suggestions and the hosted no-organization confirmation are built separately.** Design reference: `docs/mockups/32-connections-first-run.html`. Where this block disagrees with other rules in this SPEC, this block is the target and those rules describe the shipped app until the implementation lands. Known conflicts: §2a (the connect dialog preselects no service), the Chat rules in §2 that Chat does not run without an active tenant and that the hosted-send acknowledgement is bound to a tenant and provider pair, the first-launch welcome and automatic setup dialog below, and the guided first run in §5. Resolved by the built part: the navigation table in §4a (Connections is in the sidebar), the manual-run preflight in §5, the schedule rules under pilot mode below, and hard constraint 3 in `CLAUDE.md` and `AGENTS.md`.
 
 A fresh install offered three ways forward: sign in to Microsoft, use sample data, or skip into an app that could not answer anything. Since the Marketplace, Chat can answer from public reference servers that need no sign-in, and Microsoft 365 is one service among several an admin runs (SPEC §1 already calls the product service-agnostic). The first run follows that.
 
-- **First launch.** No welcome screen and no setup dialog that opens on its own. Chat opens. The only required step is a model: when none is ready, Chat shows an inline model choice (install OpenAdmin 8B through the model explorer, a detected hosted CLI that needs one click, or all providers). Provider detection rules are unchanged. "Preview with sample data" is a link there and in the organization switcher; pilot mode behaves as described below once opened.
+- **First launch.** No welcome screen and no setup dialog that opens on its own. Chat opens. The only required step is a model: when none is ready, Chat shows an inline model choice (install OpenAdmin 8B through the model explorer, a detected hosted CLI that needs one click, or all providers). Provider detection rules are unchanged. No sample data entry point: the maintainer decided (2026-11-09) that the product has no sample data, and pilot mode is removed entirely in PR #175. PR #174 removes "Preview with sample data" from the organization switcher and the Connections empty state and keeps the sample organization handling code until #175 removes it.
 - **Chat without an organization.** Chat sends with a model and no organization. Docs questions are answered from the model, the local docs index and enabled public references. A tenant or mixed question gets the not-connected card instead of a setup dialog: the service and part it needs, the exact read permissions including the sign-in scopes, a Connect action named for the service (the connect dialog with that service and part preselected, app choice still open; a new exception to the no-preselection rule in §2a), Use our own app registration, and Ask an admin to approve (a message with the admin consent link; at least Cloud Application Administrator can grant delegated Graph consent). No Graph call is made, the question is kept, and after connecting the admin resumes explicitly. Empty-state starters are labeled Works now or Needs plus the service name. Service starters come from the service registry's `chatExamples`; Works now starters are a fixed list in the Chat copy until the reference catalog carries examples.
 - **Hosted model without an organization.** The first hosted send with no organization pauses for confirmation like today's tenant-bound one. It names the provider, model and region, says that the question, the conversation and reference results leave the device, and that no tenant data is included. The acknowledgement is bound to "no organization" and the provider, and the host never accepts it for a send that includes tenant context; the first send in an organization asks again with today's tenant-bound confirmation.
 - **Public references.** The no-sign-in MCP servers are suggested on the empty Chat with the host each one sends question words to, never preinstalled, so with a local model nothing leaves the device until the admin adds one; a hosted model sends prompts to its provider from the first message, and the strip says so as today. The install review and trust copy are unchanged. References are global, not per organization, because they receive no Graph or cache data; private details an admin types into a question can still reach them, which the existing disclosure states.
 - **Organization.** The shell scope becomes an organization: the company the admin manages. It holds at most one Microsoft 365 tenant and one instance per other vendor service, is created by its first connection (named after the tenant display name or vendor instance, renamable), and keeps runs, conversations, cache, drift and vendor credentials separate, as tenants do today. Schedules are different today: they belong to the installed agent and run against whichever tenant is active. With organizations, each schedule belongs to one organization and never runs against another; at migration a schedule moves to the organization of the real tenant that was active, and the schedules surface says so. When no real tenant is active at migration (no tenant, or pilot mode alongside real tenants), schedules stay paused and unassigned until the admin assigns each one to an organization; they are never assigned to the sample organization. A manual run without an organization opens the same preflight, which names the services the agent needs instead of blocking on a tenant. The sample tenant becomes a labeled sample organization and is still removed after the first real connect, as below. "No organization" is a valid, visible state.
-- **Connections page.** Its own sidebar item after Marketplace (decided 2026-11-08) at `/connections`, also opened from the organization chip. One page per organization; it replaces Settings, Tenants and Settings, Connectors, whose routes and the legacy `/connectors` redirects point here. It merges Settings, Tenants (service rows with Connected, Partial and Not connected) and Settings, Connectors (where results go). A reach map at the top shows services read into this device and everything that leaves it (words from questions to public references, run reports to result connectors under saved delivery rules, prompts and tenant data to a hosted provider with its region), built from the same lists as the status strip. Planned services still appear only in the docs.
+- **Connections page.** Its own sidebar item after Marketplace (decided 2026-11-08) at `/connections`, also opened from the organization chip. One page per organization; it replaces Settings, Tenants and Settings, Connectors, whose routes and the legacy `/connectors` redirects point here. It merges Settings, Tenants (service rows with Connected, Partial and Not connected) and Settings, Connectors (where results go). A reach map at the top shows services read into this device and everything that leaves it (words from questions to public references, run reports to result connectors under saved delivery rules, prompts and tenant data to a hosted provider with who sets its location), built from the same lists as the status strip. Planned services still appear only in the docs. Design round (2026-11-09, mockup 32 revision 2 and `docs/mockups/32-connections-first-run-spec.md`, frames F and G): the page has two tabs, the active organization's connections and "Organizations", which holds the organizations on this device and the saved app registrations; the header has no Add organization button. The reach map is one surface around `DeviceTile lg` with computed connector lines, and stacks below 760 px of content width with `DeviceTile sm` and no lines. The Microsoft 365 line has a Manage menu (Permissions, Rename organization, Disconnect). With No organization the page is an empty state with Connect Microsoft 365 above the fold, then what leaves the device now. Disconnecting first stops the organization's running agents, cache refresh and Agent Team, then lists and deletes its local data (sign-in tokens, Graph cache and change history, run history, chats and workspaces, Agent Team data, multi-tenant chats and jobs that include it, deleted whole with the other organizations' results; configuration audit entries are kept), says which app registration and admin consent stay in the tenant (the shared OpenAdminOS enterprise application, or the admin's own registration by name and client ID) with the matching revoke steps, and says when No organization will be active afterwards. Decided 2026-11-09: disconnecting always deletes the local data, after an explicit check in the dialog. Each row of the Organizations tab also offers Disconnect, and Permissions in the Manage menu shows what this organization granted. Planned connectors are no longer listed under Results go to.
+- **Organization switcher (design round 2026-11-09).** A 320 px menu: the most recently used organization first, a capped list that scrolls, a filter on name and domain from six organizations, neutral two-letter avatars with the services in words, No organization as a dashed tile, then Add organization and Manage connections (Leave pilot mode instead of a way in while a sample organization from earlier is active). Rows have no Disconnect; removal lives on Connections.
+- **Agents, run review and Schedules (design round 2026-11-09, frames I, J, K).** Agent rows have no icon tile; meta reads as a sentence, needs are neutral chips with dashed ones for what is missing, and the action is the fix or Run; the usage forecast stays on the agent page. The run review shows one blocker block whose fix is the only filled button and the facts as a hairline definition list (organization, reads, model with where prompts go, permissions, changes). Schedules lead with the background runs warning and Turn on, then the one-time move note as plain text, and each row says how often, its organization, the next run and where results can go.
 - **Agents.** Each agent shows the services it reads. The action names what is missing (Connect Defender, Add sign-in logs). An agent that calls no service API at all (no Graph or vendor scopes, not even the sign-in scopes, so `services: []` alone is not enough) runs without an organization and is labeled so.
 - **Hard constraint 3** becomes: no agent reads or writes a service unless that service is connected in the active organization; the active organization, or "No organization", is shown at all times; if its context is ambiguous or expired, agents that need it cannot start. `CLAUDE.md` and `AGENTS.md` change with the implementation.
 - **Services outside Microsoft.** Jamf Pro is the first: an API client ID and secret exchanged for a short-lived access token with OAuth client credentials at the Jamf Pro token endpoint; the secret is stored in the OS keychain like the API key method of the vendor MCP authentication design in `tasks/todo.md` (2026-11-03), the token stays in memory, and both are sent only to the declared Jamf host, read privileges only, and each part on only when a check proves its privileges. Google Workspace (#129) follows the same pattern with the admin's own OAuth sign-in.
-- **Open.** The internal `TenantRecord` rename and its state migration are decided in the implementation plan.
+- **Data model (decided 2026-11-09).** `TenantRecord` is not renamed: it stays the Microsoft 365 connection. `OrganizationRecord` (`packages/agent-sdk/src/organizations.ts`) sits above it with an id, a name, an optional `kind: "sample"` and `connections.microsoft365.tenantId`; each other vendor service adds one optional key to `connections` later. The active organization is the one that holds `activeTenantId`, so `activeTenantId` stays the single source and every store keyed by tenant id (runs, conversations, cache, drift, Agent Team, app registrations) is unchanged. An organization created by a tenant has the id `org-<tenantId>` and the tenant's `addedAt`, so reconciling is deterministic: `read()` validates and reconciles organizations on every read without writing, and `write()` reconciles again, so a removed tenant's organization and its schedule assignments never outlive it. A stored record is kept only when it is well formed and its tenant exists; a tenant claimed twice keeps the first; names are trimmed, collapsed and cut at 80 characters; the sample kind always follows the tenant. Reconnecting the same tenant reuses its organization. Removing an organization's last connection removes the organization. Renaming the sample organization is refused.
+- **Schedule ownership (built 2026-11-09).** `AgentSchedule.organizationId` names the schedule's organization; absent means unassigned and paused. A new schedule takes the active organization, edits keep it, and the renderer cannot set it except with `assignAgentSchedule`, which refuses the sample organization. `fireDueSchedules` starts only schedules of the active organization, and `startRun` refuses a scheduled start whose organization is not active, so a switch between the two cannot run it elsewhere. A state file without an `organizations` list is migrated on read: every schedule moves to the organization of the real tenant that was active, or stays unassigned when none or the pilot tenant was active, and `organizationMigration` records the counts and reason for a dismissible notice on the schedules surfaces. A schedule whose organization is removed becomes unassigned. Run due now and Run all scheduled run only the active organization's schedules. Agent Team persona schedules keep their own tenant binding and are not part of this change.
+- **Where reports may go (2026-11-09, review round 4).** One function decides whether a saved delivery rule sends a report, and the host uses it before sending while the reach map, Results go to and the run review use it to list destinations. Only the host's own refusals count as nothing sent: the rule is off, Teams or Outlook for a run with no organization, or no destination set (no channel, recipient, or Teams team and channel on the rule, and none saved as the default; updated in Muse round 5 for Teams and Outlook defaults). Two cases always count as may send: Discord, whose webhook is a secret the renderer cannot see, and declared connector steps, which can set their target at run time. A connector's health status is never one of them, because the host sends with saved credentials whatever the last test said, so the copy says reports can go there.
+- **Where a hosted provider sends prompts (decided 2026-11-09, revised in the design round review).** The app cannot see the account, workspace or deployment settings that decide where prompts are processed, and the CLI decides the channel (Claude Code can use Amazon Bedrock or Google Vertex, Codex a configured endpoint). So one function, `providerDataLocation` in `apps/desktop/src/copy/trust.ts`, gives a short label that says who sets the location, and `providerDataLocationDetail` gives the vendor's documented default: "Claude Code · location set by your account" (Anthropic, or Bedrock or Vertex if its settings select them; on Anthropic's API inference can run in any region by default and data at rest stays in the US, and a workspace can restrict inference to the US), "Codex · location set by your account" (OpenAI or the configured endpoint; processing follows the workspace's data residency setting), "Azure OpenAI · location set by your deployment type" (Global any Azure region, Data Zone within the US, EU or Asia Pacific, Standard within the resource's geography), and "GitHub Copilot CLI · location not stated" and "Gemini CLI · location not stated" with no detail; an unknown provider reads "<name> · location not stated". `promptsGoTo` gives the sentence: the four CLIs read "Prompts leave this device through <CLI>; <who sets it>", and only Azure OpenAI reads "Prompts go to <label>". The status strip and composer use the label; tooltips, the reach map, the run review and the hosted confirmation also show the detail. No surface names a fixed region. PR #175 adopts the same values.
+- **Service-free runs (built 2026-11-09).** `agentCallsNoServiceApi` is true only for a read agent with no scopes at all, no services, no connectors and no Graph operations. Only such an agent starts with no organization: manually, never from a schedule, Agent Team or a retry, with no tenant session and a Graph client that refuses every call. Teams and Outlook delivery of its report is skipped with a logged reason, because they post with an organization's sign-in.
 
 
 Chat is the first-run surface, and the full shell remains browsable without a tenant. A fresh install opens `/chat`; `/onboarding` is a compatibility redirect to `/chat`.
@@ -2278,8 +2390,8 @@ Chat is the first-run surface, and the full shell remains browsable without a te
 - **Agents**: three are runnable: Find inactive devices (read), Conditional Access explainer (read), and Stale guest cleanup (write). Their model steps return prepared text built from the same computed facts, labeled as prepared, and run reports say no model was used. Every other agent, including future ones, is listed as available in production and refused on the pilot tenant.
 - Stale guest cleanup keeps the full diff review, typed confirmation, risk review, and dry run. Confirmed changes apply to the pilot data only and the result says the change was simulated.
 - Connecting a real tenant from pilot mode removes the pilot tenant after a successful connect and says so. Pilot mode can be opened again later from the tenant switcher or Settings.
-- Agent schedules follow the active tenant, so scheduled runs are skipped while pilot mode is active alongside real tenants. The schedules surface says so and offers to switch back.
-- The same applies when no tenant is active: due schedules wait instead of recording a "No tenant connected" failure, and the schedules surface says so. A scheduled run that fails to start records the tenant it fired against, so removing that tenant (including the pilot tenant) removes it. Tenant-less scheduled failures saved by earlier versions are dropped when the state is read.
+- Agent schedules belong to an organization (2026-11-09, see the organization block above) and never run in the sample organization, so scheduled runs wait while pilot mode is active. The schedules surface says so and offers to switch back.
+- The same applies when no organization is active: due schedules wait instead of recording a "No tenant connected" failure, and the schedules surface says so. A scheduled run that fails to start records the tenant it fired against, so removing that tenant (including the pilot tenant) removes it. Tenant-less scheduled failures saved by earlier versions are dropped when the state is read.
 
 **Provider detection (production).** When the user has not chosen a provider and the default is not ready, the app selects a ready local provider automatically. A detected hosted provider (a signed-in Claude Code, Codex, or similar CLI) is only pre-selected in the provider step with its data-residency line, and needs one explicit click: a silent hosted default would send tenant data off the device.
 
@@ -2324,8 +2436,16 @@ North-star metric: time from install to first successful result, target under 5 
 | Schedules | Filter and columns inside Agents, plus an agent drawer section | Recurring agent runs and their latest outcome |
 | Workspace | Chat panel and palette destination | Tenant-scoped evidence, notes, linked chats, runs, and local instructions; Workspaces live in Chat |
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls; Connectors live in Settings |
-| Tenant | Unchanged | The Microsoft 365 tenant |
-| Provider | Unchanged | LLM backend |
+| Organization | Concept | One company you manage; it contains connections to services |
+| Connection | Concept | An organization's link to one service, such as its Microsoft 365 tenant |
+| Service | Concept | A product an organization connects, such as Intune, Entra or Defender |
+| Part | Concept | A piece of a service with its own scopes, such as Intune devices, that is added on its own |
+| Tenant | Unchanged | Only the Microsoft 365 connection of an organization |
+| No organization | Organization switcher state | No organization is active; only agents that call no service API can run |
+| Public reference | Marketplace item | A public MCP server that Chat can consult, installed, enabled, disabled and removed in the Marketplace |
+| Result connector | Connections, Results go to | Where run results are sent, such as Teams, Outlook or Slack |
+| Provider | Unchanged | The model runtime or tool, named as admins know it: Claude Code, Codex, Apple Intelligence, Ollama, LM Studio, GitHub Copilot CLI, Gemini CLI, Azure OpenAI |
+| Data location | Status strip and provider rows | Where a hosted provider sends prompts, from `providerDataLocation`, for example "Claude Code · location set by your account", with the documented default from `providerDataLocationDetail` |
 | Theme | Appearance setting | Device-local System, Light, Dark, or Midnight preference shared by renderer windows and native chrome |
 
 ### Quality implementation decisions (locked for v0.4)
@@ -2645,7 +2765,7 @@ These must exist and work well before any public release.
 - A macOS-only menu bar companion is planned as an optional bundled surface inside the signed OpenAdminOS app package. It shows active tenant, provider trust, cache freshness, scheduler state, upcoming schedules, recent activity when there is actual work to inspect, and a compact read-only Intune Chat prompt entry point. It is not an error center: passive run failures, cache refresh errors, provider failures, and scheduler diagnostics stay in the full desktop app instead of being reported as issue cards in the popover. It must call the same host-owned services as the full app, persist to the same local SQLite store, and route write confirmations, hosted-provider first-use confirmation, tenant setup, provider setup, and long investigations to the full desktop window. The current implementation uses a monochrome template image of the oa mark (`build/menu-bar-iconTemplate.png` plus `@2x`) as the Electron Tray status item, so macOS tints it like other status items, a frameless `#/companion` renderer route with Ask as the primary flow plus compact schedule/activity sections, shared preload IPC, a `--menu-bar` launch mode, Settings -> General launch-at-login controls, and a generated nested Swift helper bundle at `OpenAdminOS.app/Contents/Library/LoginItems/OpenAdminOS Menu Bar Helper.app`. Packaged builds register that helper through Electron's macOS `loginItemService` settings so the helper starts OpenAdminOS in tray-only mode; development builds fall back to the main-app login item path. See `../vision.md`.
 - Notification routing (per-agent: OS notification / email / connector). Built on the Connector abstraction; Teams, WhatsApp Web, Outlook, Slack, Discord, and Signal are wired through this surface. Agents can save delivery rules that post terminal run reports to either the connector default target or a per-agent target where that connector supports one, with manual/scheduled, success/failure, and changed-only controls. Per-agent delivery rules autosave when the admin enables a connector, changes a target, or changes delivery checkboxes; starting a run waits for any in-flight delivery save so the run uses the latest rule. Saved delivery rules are explicit approval to post without another prompt. Connector delivery appends post-run activity steps so the run timeline shows sent, failed, or skipped delivery outcomes after the agent result is created. Connector delivery is queued locally when a run reaches a terminal state, retried with bounded backoff for transient failures, and processed again on app reopen or scheduler ticks. Basic OS run-completion/failure notifications already exist. Each schedule can opt into success notifications, failure notifications, and "only when findings change." Scheduled run records are stamped with `changeState: new | changed | unchanged` by comparing the latest scheduled output to the prior successful scheduled output for the same agent.
 - Agents should not hard-code routine Teams, WhatsApp, Outlook, Slack, Discord, or Signal posting when per-agent delivery rules can handle it. Connector steps remain appropriate when the connector call is the agent's core behavior; recurring report delivery belongs to the installed-agent delivery settings so admins can route the same result locally, to one connector, or to multiple targets.
-- Manual agent runs open a preflight review before queueing. It shows the active tenant, provider residency, model, mode, and Graph scopes. It blocks when no tenant is active, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
+- Manual agent runs open a preflight review before queueing. It shows the active organization, the services the agent reads, provider residency, model, mode, and Graph scopes. With no organization it names the services the agent needs with Connect and Choose an organization, and starts only an agent that calls no service API (updated 2026-11-09; it no longer opens setup first). It blocks when a needed service is not connected, warns when hosted providers are selected, and flags scopes that may trigger Microsoft incremental consent.
 - Provider trust messaging is scoped to the surface: overview/settings/chat/status surfaces use the current active tenant/provider/default model, while queued run reports use the run's pinned tenant, provider, and model rather than the current global tenant/provider selection.
 - Settings -> About includes a local release-readiness panel for support and demo prep: app version/build mode, notification availability, OS scheduler registration, menu bar launch state, active tenant, active LLM, Codex/Ollama detection, and registry state. These diagnostics are local UI state, not telemetry.
 - Support issue reporting is visible from failed-run remediation cards and Settings → About, not as permanent sidebar navigation. It creates a public GitHub issue only after the admin reviews the form and explicitly confirms public submission; the desktop posts to the OpenAdminOS web API, and only the server holds the repo-scoped GitHub token. The same flow can export a local diagnostics JSON file for separate review. No background upload, desktop GitHub token storage, session replay, screenshot capture, or crash-triggered issue submission.

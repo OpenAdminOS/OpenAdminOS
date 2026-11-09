@@ -12,7 +12,7 @@ export interface TrustAttachments {
 }
 
 export interface TrustCopyInput {
-  provider?: Pick<ProviderSummary, "name" | "isLocal">;
+  provider?: Pick<ProviderSummary, "name" | "isLocal"> & Partial<Pick<ProviderSummary, "id">>;
   model?: string;
   scope?: TrustScope;
   attachments?: TrustAttachments;
@@ -34,6 +34,70 @@ export const LOCAL_BOUNDARY_COPY = {
   plain: "Local model. Tenant data stays on this device.",
   withTools: "Local model. Graph and cache data stay on this device.",
 } as const;
+
+/**
+ * Where a hosted provider sends prompts, as the status strip, the composer
+ * and the hosted confirmation name it, with a detail line for tooltips.
+ */
+// Decided by the maintainer on 2026-11-09 (second decision, refined): where
+// prompts are processed depends on the admin's own account, workspace or
+// deployment, so the label says who sets it and the detail says what the
+// options are. For a CLI the CLI decides the channel: Claude Code can use
+// Anthropic, Amazon Bedrock or Google Vertex, and Codex the endpoint its
+// configuration selects. PR #174 uses the same values.
+const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: string; through?: true }>> = {
+  anthropic: {
+    label: "Claude Code · location set by your account",
+    detail:
+      "Claude Code sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex if its settings select them. On Anthropic's API, inference can run in any region by default and data at rest stays in the US; a workspace can restrict inference to the US.",
+    through: true,
+  },
+  openai: {
+    label: "Codex · location set by your account",
+    detail: "Codex sends prompts to OpenAI, or to the endpoint its configuration selects. Processing follows your workspace's data residency setting.",
+    through: true,
+  },
+  "azure-openai": {
+    label: "Azure OpenAI · location set by your deployment type",
+    detail:
+      "Global deployments can process in any Azure region, Data Zone deployments within the US, EU or Asia Pacific, Standard deployments within your resource's geography.",
+  },
+  // Labels name the tool, not the vendor API; a CLI is the way prompts leave.
+  copilot: { label: "GitHub Copilot CLI · location not stated", through: true },
+  gemini: { label: "Gemini CLI · location not stated", through: true },
+};
+
+/** The short label: the status strip, the composer model chip and the confirmation's "Goes to". */
+export function providerDataLocation(provider: Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>): string {
+  return (provider.id && HOSTED_DATA_LOCATIONS[provider.id]?.label) || `${provider.name} · location not stated`;
+}
+
+/**
+ * The sentence that says where prompts go, for the scan rows, the composer
+ * and the boundary line. A CLI is named as the way prompts leave this device
+ * ("Prompts leave this device through Claude Code; location set by your
+ * account"); an API is named as the place ("Prompts go to Azure OpenAI ·
+ * location set by your deployment type").
+ */
+export function promptsGoTo(provider: Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>, withTenantData = false): string {
+  const entry = provider.id ? HOSTED_DATA_LOCATIONS[provider.id] : undefined;
+  const what = withTenantData ? "Prompts and tenant data" : "Prompts";
+  if (entry?.through) {
+    const [through, where] = entry.label.split(" · ");
+    return `${what} leave this device through ${through}; ${where}`;
+  }
+  return `${what} go to ${providerDataLocation(provider)}`;
+}
+
+/** A CLI that decides its own channel: name the tool, not a company, as where prompts go. */
+export function sendsThroughTool(provider: Partial<Pick<ProviderSummary, "id">>): boolean {
+  return Boolean(provider.id && HOSTED_DATA_LOCATIONS[provider.id]?.through);
+}
+
+/** The detail behind the label: tooltips, the hosted send confirmation and "What ran". */
+export function providerDataLocationDetail(provider: Partial<Pick<ProviderSummary, "id">>): string | undefined {
+  return provider.id ? HOSTED_DATA_LOCATIONS[provider.id]?.detail : undefined;
+}
 
 export interface DerivedTrustCopy {
   strip: string;
@@ -123,12 +187,14 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
     };
   }
 
+  const location = providerDataLocation(input.provider);
   return {
-    strip: `hosted · tenant context sent to ${providerName}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
+    // Each line names where prompts are processed, not just the provider (hard constraint 1).
+    strip: `hosted · tenant context sent to ${location}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
     ...(toolHosts ? { toolHosts } : {}),
-    boundary: `Tenant context will be sent to ${providerName}${attachments ? ` with ${attachments}` : ""}.`,
+    boundary: `${promptsGoTo(input.provider, true)}${attachments ? `, with ${attachments}` : ""}.`,
     confirmTitle: "Send tenant context to hosted provider",
-    confirmBody: `${providerName}${modelDetail} will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,
+    confirmBody: `${providerName}${modelDetail} (${location}) will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,
     storage: "Chat history and the Graph cache stay on this device.",
     isLocal: false,
   };

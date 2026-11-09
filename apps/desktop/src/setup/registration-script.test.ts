@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { grantedScopeSet, partIdsFor } from "../shared/openAdminOS";
 import {
@@ -98,6 +98,11 @@ describe("registration setup generator", () => {
 });
 
 const HAS_PWSH = spawnSync("pwsh", ["-NoProfile", "-Command", "exit 0"]).status === 0;
+
+// Tests here start PowerShell, often several times. Each start can take
+// seconds under a full parallel run, past the 5 second default, so this
+// file allows more time. The tests themselves are unchanged.
+vi.setConfig({ testTimeout: 60_000 });
 
 // Runs the script header and the display name assignment, then prints the
 // value PowerShell parsed. Nothing after the assignment runs.

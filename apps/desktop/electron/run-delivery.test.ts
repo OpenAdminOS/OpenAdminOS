@@ -461,3 +461,296 @@ describe("post-run WhatsApp delivery", () => {
     }
   });
 });
+
+describe("reports of a run with no organization (review round 1)", () => {
+  const customerB = {
+    id: "tenant-b",
+    displayName: "Customer B",
+    username: "admin@customer-b.example",
+    homeAccountId: "home-b",
+    addedAt: now,
+  };
+  const sample = {
+    id: "openadminos-sample-tenant",
+    kind: "sample",
+    displayName: "Contoso (pilot)",
+    username: "admin@contoso.invalid",
+    homeAccountId: "sample",
+    addedAt: now,
+  };
+
+  it("labels a Slack report No organization even when another organization is active now", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-noorg-"));
+    const statePath = join(dir, "state.json");
+    const posted: string[] = [];
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      posted.push(String(body.text));
+      return new Response(JSON.stringify({ ok: true, channel: body.channel, ts: "1.2" }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [deliveryAgentWith({ slack: { enabled: true, useDefaultChannel: true } })],
+      runs: [completedRun("run-noorg")],
+      tenants: [customerB],
+      activeTenantId: customerB.id,
+      connectors: { slack: { config: { defaultChannel: "C123", defaultChannelLabel: "#alerts" } } },
+      runDeliveryQueue: [connectorQueueItem("run-noorg", "slack")],
+    });
+    const store = new AppStateStore({
+      filePath: statePath,
+      tokenStore,
+      userDataPath: dir,
+      statsApiUrl: "",
+      connectorSecretsFor: () => ({
+        get: async (key) => (key === "botToken" ? "xoxb-test" : undefined),
+        set: async () => undefined,
+        remove: async () => undefined,
+      }),
+    });
+    try {
+      await store.processPendingRunDeliveries();
+      assert.equal(posted.length, 1);
+      assert.match(posted[0]!, /\*Organization:\* none/);
+      assert.doesNotMatch(posted[0]!, /Tenant:/);
+      assert.doesNotMatch(posted[0]!, /Customer B/);
+    } finally {
+      globalThis.fetch = originalFetch;
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("delivers a WhatsApp report while the sample organization is active instead of refusing it", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-noorg-sample-"));
+    const statePath = join(dir, "state.json");
+    const sent: string[] = [];
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [deliveryAgent({ enabled: true })],
+      runs: [completedRun("run-noorg")],
+      tenants: [sample],
+      activeTenantId: sample.id,
+      connectors: { "whatsapp-web": { config: { defaultTargetType: "self" } } },
+      runDeliveryQueue: [queueItem("run-noorg")],
+    });
+    const store = createStore({
+      statePath,
+      sendMessage: async ({ text }) => {
+        sent.push(text);
+        return { messageId: "m1" };
+      },
+    });
+    try {
+      await store.processPendingRunDeliveries();
+      const state = await readJson(statePath);
+      const run = (state.runs as RunRecord[])[0];
+      assert.equal(sent.length, 1);
+      assert.match(sent[0]!, /Organization: none/);
+      assert.doesNotMatch(sent[0]!, /Contoso|sample data/i);
+      assert.equal(run?.logs.some((log) => /available in production/i.test(log.message)), false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  for (const connectorId of ["teams", "outlook"] as const) {
+    it(`skips ${connectorId} delivery for a run with no organization and says why`, async () => {
+      const dir = await mkdtemp(join(tmpdir(), `openadminos-delivery-noorg-${connectorId}-`));
+      const statePath = join(dir, "state.json");
+      const originalFetch = globalThis.fetch;
+      let calls = 0;
+      globalThis.fetch = (async () => {
+        calls += 1;
+        throw new Error("No request may be sent.");
+      }) as typeof fetch;
+      await writeJson(statePath, {
+        activeProviderId: "ollama",
+        installedAgents: [deliveryAgentWith({ [connectorId]: { enabled: true, useDefaultTarget: true, useDefaultRecipients: true } })],
+        runs: [completedRun("run-noorg")],
+        tenants: [customerB],
+        activeTenantId: customerB.id,
+        runDeliveryQueue: [{ id: `run-noorg:${connectorId}`, runId: "run-noorg", connectorId, attempts: 0, createdAt: now, nextAttemptAt: now }],
+      });
+      const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+      try {
+        await store.processPendingRunDeliveries();
+        const state = await readJson(statePath);
+        const run = (state.runs as RunRecord[])[0];
+        assert.equal(calls, 0);
+        assert.equal(state.runDeliveryQueue, undefined);
+        assert.ok(run?.logs.some((log) => log.message.startsWith("Report delivery skipped. This run had no organization")));
+      } finally {
+        globalThis.fetch = originalFetch;
+        store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});
+
+describe("direct Teams and Outlook delivery of a run with no organization (Muse round 2)", () => {
+  it("uses the designed skip instead of a failed step", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-direct-"));
+    const statePath = join(dir, "state.json");
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [deliveryAgentWith({ teams: { enabled: true, useDefaultTarget: true }, outlook: { enabled: true, useDefaultRecipients: true } })],
+      runs: [completedRun("run-noorg")],
+      tenants: [],
+    });
+    const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    const internal = (store as unknown as { runDeliveryService: {
+      deliverRunToTeams(run: RunRecord): Promise<{ retryable: boolean; error?: string }>;
+      deliverRunToOutlook(run: RunRecord): Promise<{ retryable: boolean; error?: string }>;
+    } }).runDeliveryService;
+    try {
+      for (const deliver of [internal.deliverRunToTeams.bind(internal), internal.deliverRunToOutlook.bind(internal)]) {
+        const result = await deliver(completedRun("run-noorg"));
+        assert.equal(result.retryable, false);
+        assert.match(result.error ?? "", /^Report delivery skipped\. This run had no organization/);
+      }
+      const run = ((await readJson(statePath)).runs as RunRecord[])[0];
+      assert.equal(run?.steps.some((step) => step.status === "failed"), false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("delivery decision parity with the destination list (review round 4)", () => {
+  type Fixture = {
+    name: string;
+    delivery: NonNullable<AgentSummary["delivery"]>;
+    connectorId: "slack" | "discord" | "teams" | "outlook";
+    connectorName: string;
+    config: Record<string, unknown>;
+    /** The health status the renderer shows; the host never reads it. */
+    status: "unknown" | "error" | "needs-setup" | "connected";
+    tenantless?: boolean;
+    /** The run belongs to an organization, so Teams and Outlook reach their own checks. */
+    tenantId?: string;
+    /** The designed step message when the host refuses before sending. */
+    stepDetail?: RegExp;
+  };
+  const fixtures: Fixture[] = [
+    {
+      name: "a saved Slack token with no global configuration and a channel on the agent rule",
+      delivery: { slack: { enabled: true, useDefaultChannel: false, channel: "C999" } },
+      connectorId: "slack", connectorName: "Slack", config: {}, status: "unknown",
+    },
+    {
+      name: "Slack with a stale error status and a default channel",
+      delivery: { slack: { enabled: true, useDefaultChannel: true } },
+      connectorId: "slack", connectorName: "Slack", config: { defaultChannel: "C123" }, status: "error",
+    },
+    {
+      name: "Slack whose rule uses the default channel when none is saved",
+      delivery: { slack: { enabled: true, useDefaultChannel: true } },
+      connectorId: "slack", connectorName: "Slack", config: {}, status: "connected",
+    },
+    {
+      name: "Slack whose rule names an empty channel",
+      delivery: { slack: { enabled: true, useDefaultChannel: false, channel: "  " } },
+      connectorId: "slack", connectorName: "Slack", config: { defaultChannel: "C123" }, status: "connected",
+    },
+    {
+      name: "a Discord webhook saved without a test",
+      delivery: { discord: { enabled: true } },
+      connectorId: "discord", connectorName: "Discord", config: {}, status: "needs-setup",
+    },
+    {
+      name: "Teams for a run with no organization",
+      delivery: { teams: { enabled: true } },
+      connectorId: "teams", connectorName: "Microsoft Teams", config: {}, status: "connected", tenantless: true,
+    },
+    {
+      name: "Teams whose rule uses the default target when no team and channel are saved (Muse round 5)",
+      delivery: { teams: { enabled: true } },
+      connectorId: "teams", connectorName: "Microsoft Teams", config: { defaultTeamId: "team-1" }, status: "connected",
+      tenantId: "tenant-parity", stepDetail: /No default Microsoft Teams team and channel are configured\./,
+    },
+    {
+      name: "Teams whose rule names a team but no channel (Muse round 5)",
+      delivery: { teams: { enabled: true, useDefaultTarget: false, teamId: "team-1" } },
+      connectorId: "teams", connectorName: "Microsoft Teams", config: { defaultTeamId: "team-1", defaultChannelId: "channel-1" }, status: "connected",
+      tenantId: "tenant-parity", stepDetail: /No Microsoft Teams team and channel are set on this delivery rule\./,
+    },
+    {
+      name: "Outlook whose rule uses default recipients when none are saved (Muse round 5)",
+      delivery: { outlook: { enabled: true } },
+      connectorId: "outlook", connectorName: "Outlook", config: { defaultRecipients: " ; " }, status: "connected",
+      tenantId: "tenant-parity", stepDetail: /No default Outlook notification recipients are configured\./,
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    it(`sends exactly when the list says it may: ${fixture.name}`, async () => {
+      const { manualRunReportDestinations, reportDestinations, resultDestinations } = await import(
+        "../src/shared/delivery-destinations.js"
+      );
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-parity-"));
+      const statePath = join(dir, "state.json");
+      const requests: string[] = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push(String(input instanceof Request ? input.url : input));
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return new Response(JSON.stringify({ ok: true, channel: body.channel, ts: "1.2", id: "1", channel_id: "2" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+      const agent = deliveryAgentWith(fixture.delivery);
+      await writeJson(statePath, {
+        activeProviderId: "ollama",
+        installedAgents: [agent],
+        runs: [{ ...completedRun("run-parity"), ...(fixture.tenantId ? { tenantId: fixture.tenantId } : {}) }],
+        tenants: [],
+        connectors: { [fixture.connectorId]: { config: fixture.config } },
+        runDeliveryQueue: [{ ...connectorQueueItem("run-parity", "slack"), id: `run-parity:${fixture.connectorId}`, connectorId: fixture.connectorId }],
+      });
+      const store = new AppStateStore({
+        filePath: statePath,
+        tokenStore,
+        userDataPath: dir,
+        statsApiUrl: "",
+        connectorSecretsFor: () => ({
+          get: async (key) =>
+            key === "botToken" ? "xoxb-test" : key === "webhookUrl" ? "https://discord.com/api/webhooks/123/abc" : undefined,
+          set: async () => undefined,
+          remove: async () => undefined,
+        }),
+      });
+      try {
+        await store.processPendingRunDeliveries();
+        const summary = {
+          descriptor: { id: fixture.connectorId, name: fixture.connectorName },
+          config: fixture.config,
+          status: fixture.status,
+        } as never;
+        const listed = fixture.tenantless
+          ? manualRunReportDestinations(agent, false, [summary]).mayGo.includes(fixture.connectorName)
+          : reportDestinations(resultDestinations([agent], [summary])).includes(fixture.connectorName);
+        assert.equal(requests.length > 0, listed, `host sent ${requests.length} request(s), list says ${listed ? "may send" : "nothing is sent"}`);
+        if (fixture.stepDetail) {
+          const stored = (JSON.parse(await readFile(statePath, "utf8")) as { runs: RunRecord[] }).runs[0];
+          const step = stored?.steps.at(-1);
+          assert.equal(step?.status, "failed");
+          assert.match(step?.detail ?? "", fixture.stepDetail);
+          assert.equal((JSON.parse(await readFile(statePath, "utf8")) as { runDeliveryQueue?: unknown }).runDeliveryQueue, undefined);
+        }
+      } finally {
+        globalThis.fetch = originalFetch;
+        store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});

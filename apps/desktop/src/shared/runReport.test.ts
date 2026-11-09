@@ -54,3 +54,19 @@ describe("run report AI-generated note", () => {
     expect(runReportMarkdown(withModel).split("\n").at(-1)).toBe(`_${aiGeneratedNote(withModel)}_`);
   });
 });
+
+describe("copied and exported reports of a run with no organization (Muse round 3)", () => {
+  const tenantless = { id: "run-x", agentSlug: "draft", status: "completed", queuedAt: "2026-11-09T00:00:00.000Z", steps: [], logs: [] } as unknown as RunRecord;
+  it("say Organization: none instead of a tenant", () => {
+    const plain = runReportPlaintext(tenantless, { agentName: "Script draft", tenantName: "No organization" });
+    expect(plain).toContain("Organization: none");
+    expect(plain).not.toContain("Tenant:");
+    const markdown = runReportMarkdown(tenantless, { agentName: "Script draft", tenantName: "No organization" });
+    expect(markdown).toContain("**Organization:** none");
+    expect(markdown).not.toContain("**Tenant:**");
+  });
+
+  it("keep the tenant line for a run with a tenant", () => {
+    expect(runReportPlaintext({ ...tenantless, tenantId: "tenant-1" }, { tenantName: "Contoso IT" })).toContain("Tenant: Contoso IT");
+  });
+});

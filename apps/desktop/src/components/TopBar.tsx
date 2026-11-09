@@ -1,8 +1,8 @@
 import { useNavigate } from "react-router";
 
-import { useDataBoundary, useShellChrome } from "../state";
+import { chatToolHosts, useAppState, useDataBoundary, useShellChrome } from "../state";
 import { IconChat, IconChevronRight, IconCloud, IconLock, IconSettings } from "./icons";
-import { TenantSwitcher } from "./TenantSwitcher";
+import { OrganizationSwitcher } from "./OrganizationSwitcher";
 import { Tooltip } from "./ui";
 
 export function TopBar() {
@@ -10,6 +10,10 @@ export function TopBar() {
   const platform = window.openAdminOS?.platform;
   const { collapsed, toggleSidebar, setTitleTarget, setActionsTarget } = useShellChrome();
   const { boundary } = useDataBoundary();
+  const { state } = useAppState();
+  // The chip is one short line at every width: where prompts go and how
+  // many references receive words from questions, never cut off.
+  const referenceCount = boundary.kind !== "none" && boundary.toolHosts ? chatToolHosts(state).length : 0;
   const draggable = platform === "macos" || platform === "windows";
 
   const newConversation = () => {
@@ -18,7 +22,7 @@ export function TopBar() {
 
   return (
     <header
-      aria-label="Current tenant, provider, and data boundary"
+      aria-label="Current organization, provider, and data boundary"
       className={`app-topbar relative flex h-[52px] shrink-0 items-center border-b border-[var(--color-border-soft)] bg-[var(--color-bg)] px-3 ${draggable ? "app-region-drag" : ""}`}
       style={platform === "windows" ? { paddingRight: 140 } : undefined}
     >
@@ -47,7 +51,7 @@ export function TopBar() {
             </Tooltip>
           </>
         ) : null}
-        <TenantSwitcher />
+        <OrganizationSwitcher />
       </div>
       <div ref={setTitleTarget} className="app-region-no-drag pointer-events-auto min-w-0 flex-1 truncate px-4 text-center text-sm font-medium text-[var(--color-text-soft)]" />
       <div className="flex min-w-0 shrink items-center gap-2">
@@ -75,8 +79,12 @@ export function TopBar() {
             >
               {boundary.kind === "local" ? <IconLock size={11} className="shrink-0" /> : <IconCloud size={11} className="shrink-0" />}
               <span className="truncate">{boundary.label}</span>
-              {boundary.model ? <span className="truncate text-[var(--color-text-muted)]">· {boundary.model}</span> : null}
-              {boundary.toolHosts ? <span className="truncate text-[var(--color-warning)]">· {boundary.toolHosts}</span> : null}
+              {/* One short line at every width: the model and the host list are in the name and tooltip. */}
+              {referenceCount > 0 ? (
+                <span data-testid="boundary-reference-count" className="shrink-0 whitespace-nowrap text-[var(--color-text-muted)]">
+                  {`+${referenceCount} reference${referenceCount === 1 ? "" : "s"}`}
+                </span>
+              ) : null}
             </span>
           )}
         </Tooltip>

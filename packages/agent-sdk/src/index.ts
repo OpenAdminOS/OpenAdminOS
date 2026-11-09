@@ -1,6 +1,7 @@
 import type { NotGrantedService, ServiceId } from "./services.js";
 
 export * from "./services.js";
+export * from "./organizations.js";
 
 export type ProviderId =
   | "ollama"
@@ -439,6 +440,14 @@ export interface AgentSchedule {
   notifyOnChangeOnly?: boolean;
   /** When the scheduler last fired this agent. Updated by the host. */
   lastScheduledRunAt?: string;
+  /**
+   * The organization this schedule runs in. A schedule never runs while
+   * another organization is active. Absent means unassigned: the schedule
+   * waits until the admin assigns it, and is never assigned to the sample
+   * organization. Set by the host; the renderer assigns with
+   * `assignAgentSchedule`.
+   */
+  organizationId?: string;
 }
 
 export interface AgentDeliverySettings {
@@ -691,7 +700,7 @@ export interface TenantRecord {
    * `/subscribedSkus` probe that produces `entraTier`. Filtered to
    * the SKUs an admin would actually think about — Microsoft 365
    * Business / Enterprise tiers, EMS, standalone Azure AD Premium.
-   * Surfaced in Settings → Tenants. Absent when the probe has not
+   * Surfaced in Connections. Absent when the probe has not
    * run yet or returned no relevant SKUs.
    */
   relevantLicenses?: TenantLicense[];
@@ -739,6 +748,53 @@ export interface TenantAppRegistration {
 }
 
 /**
+ * The company an admin manages: the shell scope. It holds at most one
+ * Microsoft 365 tenant, kept as a `TenantRecord`, and later one instance
+ * per other vendor service, each as its own key in `connections`. It is
+ * created by its first connection and named after it, and it is removed
+ * when its last connection is removed. Runs, conversations, cache and
+ * drift stay keyed by the tenant id, so they belong to the organization
+ * that holds the tenant.
+ */
+export interface OrganizationRecord {
+  /** `org-<tenantId>` for an organization created by a Microsoft 365 connection. */
+  id: string;
+  /** Admin-visible name. Defaults to the tenant display name; renamable. */
+  name: string;
+  /** The built-in sample organization that holds the pilot tenant. */
+  kind?: "sample";
+  createdAt: string;
+  connections: OrganizationConnections;
+}
+
+/**
+ * One connection per service vendor. Microsoft 365 is the only one today;
+ * a vendor service such as Jamf Pro adds its own optional key.
+ */
+export interface OrganizationConnections {
+  microsoft365?: { tenantId: string };
+  /**
+   * Connections of services this version does not know, kept as they were
+   * so a connection made by a newer version survives a downgrade.
+   */
+  [vendorService: string]: unknown;
+}
+
+/**
+ * What the move to organizations did with existing schedules, shown once
+ * on the schedules surfaces until the admin dismisses it.
+ */
+export interface OrganizationMigrationNotice {
+  /** Schedules moved to the organization of the real tenant that was active. */
+  assignedCount: number;
+  assignedOrganizationId?: string;
+  /** Schedules left unassigned and paused because no real tenant was active. */
+  unassignedCount: number;
+  /** Why schedules were left unassigned. */
+  unassignedReason?: "no-active-tenant" | "pilot-active";
+}
+
+/**
  * Application (client) ID of the published OpenAdminOS multi-tenant app
  * registration. A client id is a public identifier, not a secret: it is
  * part of every authorization URL the browser sees.
@@ -773,7 +829,7 @@ export interface ConnectTenantOptions {
   partIds?: string[];
 }
 
-/** A subscribed SKU surfaced in the Settings → Tenants license panel. */
+/** A subscribed SKU surfaced in the Connections license panel. */
 export interface TenantLicense {
   /** Microsoft SKU part number, e.g. `SPE_E5`, `SPB`, `EMSPREMIUM`. */
   skuPartNumber: string;
@@ -1040,6 +1096,15 @@ export interface ResolvedProviderModel {
   source: ProviderModelSource;
 }
 
+/** A disconnect whose cleanup is pending. */
+export interface TenantCleanupSummary {
+  tenantId: string;
+  displayName: string;
+  removedAt: string;
+  /** Why the last cleanup attempt did not finish. */
+  error?: string;
+}
+
 export interface AppState {
   appVersion: string;
   activeProviderId: ProviderId;
@@ -1060,6 +1125,23 @@ export interface AppState {
   trust: TrustState;
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /**
+   * Organizations, one per connected tenant today. The active organization
+   * is the one that holds `activeTenantId`; none means "No organization".
+   * The host always sends it; renderer code reads it through
+   * `resolveOrganizations`, which also covers tenants without a record.
+   */
+  organizations?: OrganizationRecord[];
+  /** The organization that holds the active tenant, when one is active. */
+  activeOrganizationId?: string;
+  /** Present until the admin dismisses the schedule migration notice. */
+  organizationMigration?: OrganizationMigrationNotice;
+  /**
+   * Disconnected organizations whose cleanup (sign-in removal, local data)
+   * has not finished. Cleanup resumes at the next launch or with
+   * `retryTenantCleanup`; the same tenant connects again only after it.
+   */
+  tenantCleanups?: TenantCleanupSummary[];
   /** Custom app registrations remembered on this device, most recently used first. */
   savedAppRegistrations?: SavedAppRegistration[];
   /** ISO timestamp of the last successful registry index refresh. Null until first fetch. */
@@ -2638,6 +2720,11 @@ export interface CompanionRunDueReadSchedulesResult {
   skippedWrite: number;
   skippedInFlight: number;
   skippedNotDue: number;
+  /**
+   * Due schedules that belong to another organization or are unassigned.
+   * They wait for their organization; they are not errors.
+   */
+  waitingOtherOrganization: number;
   errors: Array<{
     agentSlug: string;
     message: string;
@@ -3162,7 +3249,27 @@ export interface OpenAdminOSApi {
   addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
+  /**
+   * Make an organization active, or choose "No organization" with null.
+   * The organization's Microsoft 365 tenant becomes the active tenant.
+   */
+  setActiveOrganization(id: string | null): Promise<AppState>;
+  /** Rename an organization. The sample organization keeps its name. */
+  renameOrganization(id: string, name: string): Promise<AppState>;
+  /**
+   * Assign an agent's schedule to an organization. The sample organization
+   * is refused: schedules never run in pilot mode.
+   */
+  assignAgentSchedule(slug: string, organizationId: string): Promise<AppState>;
+  /** Hide the schedule migration notice. */
+  dismissOrganizationMigrationNotice(): Promise<AppState>;
+  /**
+   * Disconnect a tenant. The organization is removed at once; if its
+   * cleanup could not finish, the state lists it in `tenantCleanups`.
+   */
   disconnectTenant(id: string): Promise<AppState>;
+  /** Retry the cleanup of a disconnected organization listed in `tenantCleanups`. */
+  retryTenantCleanup(id: string): Promise<AppState>;
   /**
    * Forget a remembered custom app registration. Tenants already
    * connected with it keep working.
@@ -4094,7 +4201,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "apple-foundation",
-    name: "Apple Foundation",
+    name: "Apple Intelligence",
     description:
       "Use Apple's on-device Foundation Models framework on compatible Macs.",
     isLocal: true,
@@ -4114,7 +4221,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "anthropic",
-    name: "Anthropic",
+    name: "Claude Code",
     description:
       "Use Claude models through the local Claude Code CLI. Tenant prompts are sent to Anthropic's API when active.",
     isLocal: false,
@@ -4124,7 +4231,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "openai",
-    name: "OpenAI Codex",
+    name: "Codex",
     description:
       "Hosted OpenAI models through the local Codex CLI. Tenant prompts leave this device when active.",
     isLocal: false,
@@ -4134,7 +4241,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "copilot",
-    name: "GitHub Copilot",
+    name: "GitHub Copilot CLI",
     description: "Use models through the GitHub Copilot CLI and your existing account. Tenant prompts leave this device and are processed through GitHub Copilot when active.",
     isLocal: false,
     status: "available",
@@ -4143,7 +4250,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "gemini",
-    name: "Google Gemini",
+    name: "Gemini CLI",
     description: "Use Gemini through the installed Gemini CLI. Tenant prompts are sent to Google's service when active.",
     isLocal: false,
     status: "available",
@@ -4407,6 +4514,18 @@ export interface ConnectorBuildContext {
    * recoverable failure.
    */
   idempotencyKeyFor(stepId: string, iteration: number): string;
+  /**
+   * Host transport for every HTTP request the connector makes, including
+   * retries. The desktop host passes one that refuses a request once the
+   * organization the work runs for is being disconnected. Defaults to the
+   * global fetch.
+   */
+  fetch?: typeof fetch;
+  /**
+   * Called immediately before a send over a transport that is not
+   * `fetch`, such as a local CLI or a socket. Throws to refuse the send.
+   */
+  assertEgress?: () => void;
 }
 
 export interface ConnectorFactory<TCapabilities> {

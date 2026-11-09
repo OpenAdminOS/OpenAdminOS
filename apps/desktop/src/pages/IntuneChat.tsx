@@ -39,6 +39,7 @@ import {
   useConversationsOptional,
   ConversationWorkspaceProvider,
   chatToolHosts,
+  novaVoiceSentence,
   useDataBoundaryOptional,
   useShellChromeOptional,
   useUpdateStateOptional,
@@ -74,7 +75,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocationDetail, sendsThroughTool } from "../copy";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -2007,6 +2008,7 @@ function IntuneChatContent() {
                         tenant={messageTenant}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
+                        editDisabled={sending}
                         onCopy={() => void handleCopyMessage(message)}
                         onEditPrompt={() => handleEditPrompt(message)}
                         onRegenerate={() => void handleRegenerateResponse(message)}
@@ -2306,7 +2308,7 @@ function ChatComposer({
       : "Ask a follow-up, or type / to run an agent"
     : SETUP_COPY.guestComposerPlaceholder;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-  const hostedSentence = `Prompts and tenant data go to ${activeProvider?.name ?? "the selected provider"} while this model is selected.${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
+  const hostedSentence = hostedComposerSentence(dataBoundary, activeProvider, Boolean(activeTenant));
 
   return (
     <div className="relative">
@@ -3965,7 +3967,7 @@ function HostedChatConsentModal({
 }) {
   const trustCopy = deriveTrustCopy({
     provider: prompt
-      ? { name: prompt.providerName, isLocal: false }
+      ? { id: prompt.providerId, name: prompt.providerName, isLocal: false }
       : { name: "Hosted provider", isLocal: false },
     ...(prompt?.model ? { model: prompt.model } : {}),
     scope: { tenantNames: prompt ? [prompt.tenantName] : [] },
@@ -3981,17 +3983,34 @@ function HostedChatConsentModal({
         }
       : {}),
   });
+  // A CLI decides where it sends prompts, so the tool is named; an API is
+  // named by its company (the same wording as PR #175).
+  const tool = prompt?.providerName ?? "Hosted provider";
+  const through = prompt ? sendsThroughTool({ id: prompt.providerId }) : false;
+  const company = (prompt && PROVIDER_COMPANIES[prompt.providerId]) ?? tool;
+  const title = through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company);
+  const lead = through
+    ? HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, prompt?.tenantName ?? "the active tenant")
+    : HOSTED_CONFIRM_COPY.bodyTenant(
+        tool,
+        // An API named like its product answers through that API, not through itself.
+        company === tool ? `the ${company} API` : company,
+        prompt?.tenantName ?? "the active tenant",
+      );
+  const locationDetail = prompt ? providerDataLocationDetail({ id: prompt.providerId }) : undefined;
   return (
     <Modal open={Boolean(prompt)} onClose={onClose} size="md">
       <ModalHeader
-        title={trustCopy.confirmTitle}
+        title={title}
         subtitle={prompt?.providerName ?? "Hosted provider"}
         badge={<Badge tone="warning">Hosted</Badge>}
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
         <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-          {trustCopy.confirmBody}
+          <p>{lead}</p>
+          <p className="mt-1">{trustCopy.confirmBody}</p>
+          {locationDetail ? <p className="mt-1 text-[var(--color-text-soft)]">{locationDetail}</p> : null}
         </div>
         <div className="grid gap-3 md:grid-cols-2">
           <ConsentFact label="Tenant" value={prompt?.tenantName ?? "Active tenant"} />
@@ -4048,7 +4067,7 @@ function HostedChatConsentModal({
             Cancel
           </Button>
           <Button variant="primary" onClick={onConfirm}>
-            Send
+            {through ? HOSTED_CONFIRM_COPY.sendThrough(tool) : HOSTED_CONFIRM_COPY.send(company)}
           </Button>
         </div>
       </div>
@@ -4236,6 +4255,7 @@ function ChatMessageBubble({
   tenant,
   multiTenant,
   regenerateDisabled,
+  editDisabled,
   onCopy,
   onEditPrompt,
   onRegenerate,
@@ -4251,6 +4271,8 @@ function ChatMessageBubble({
   tenant?: TenantRecord;
   multiTenant: boolean;
   regenerateDisabled: boolean;
+  /** A send is still finishing, so Edit would be ignored; it waits instead. */
+  editDisabled: boolean;
   onCopy: () => void;
   onEditPrompt: () => void;
   onRegenerate: () => void;
@@ -4289,6 +4311,7 @@ function ChatMessageBubble({
               label="Edit and resend prompt"
               tooltip={`Edit · ${timestamp}`}
               icon={<IconPencil size={12} />}
+              disabled={editDisabled}
               onClick={onEditPrompt}
             />
           </div>
@@ -4977,4 +5000,24 @@ function scrollLatestUserNearTop(
   if (typeof scrollRoot.scrollTo === "function") scrollRoot.scrollTo({ top, behavior: "auto" });
   else scrollRoot.scrollTop = top;
   return scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight >= 56;
+}
+
+/**
+ * The composer's hosted sentence. Hosted voice names its own destination,
+ * keeps a local chat model local and still names a hosted chat model;
+ * without an organization no tenant data is sent; references stay named.
+ */
+export function hostedComposerSentence(
+  boundary: DataBoundary,
+  provider: Pick<ProviderSummary, "id" | "name" | "isLocal"> | undefined,
+  hasOrganization: boolean,
+): string {
+  const toolNote = boundary.kind !== "none" && boundary.toolHostsNote ? ` ${boundary.toolHostsNote}` : "";
+  if (boundary.kind === "hosted" && boundary.isVoiceHosted) {
+    const chat = provider && !provider.isLocal ? ` ${promptsGoTo(provider, hasOrganization)} while this model is selected.` : "";
+    return `${novaVoiceSentence(hasOrganization, provider?.isLocal ? provider.name : undefined)}${chat}${toolNote}`;
+  }
+  return hasOrganization
+    ? `${provider ? promptsGoTo(provider, true) : "Prompts and tenant data go to the selected provider"} while this model is selected.${toolNote}`
+    : `${provider ? promptsGoTo(provider) : "Prompts go to the selected provider"} while this model is selected. No organization is active, so no tenant data is included.${toolNote}`;
 }

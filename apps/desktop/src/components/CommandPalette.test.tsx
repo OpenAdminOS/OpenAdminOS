@@ -69,6 +69,7 @@ it("lists the shell destinations and every Settings section", async () => {
     "Go to Chat",
     "Agents",
     "Marketplace",
+    "Connections",
     "Runs",
     "Runs: Needs review",
     "Runs: Failed",
@@ -100,10 +101,8 @@ it("lists the shell destinations and every Settings section", async () => {
 
   for (const section of [
     "Providers",
-    "Tenants",
     "Data",
     "Chat",
-    "Connectors",
     "Gateway",
     "General",
     "Appearance",
@@ -117,6 +116,8 @@ it("lists the shell destinations and every Settings section", async () => {
 
   expect(screen.queryByRole("option", { name: /Go to Cache/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /Go to Connectors/ })).not.toBeInTheDocument();
+  // Tenants and Connectors moved out of Settings into Connections.
+  expect(screen.queryByRole("option", { name: /Settings: (Tenants|Connectors)/ })).not.toBeInTheDocument();
   expect(screen.queryByRole("option", { name: /Team office/ })).not.toBeInTheDocument();
 });
 
@@ -319,3 +320,21 @@ function LocationProbe() {
   const location = useLocation();
   return <div data-testid="palette-location">{location.pathname + location.search}</div>;
 }
+
+it("opens the agent preflight instead of setup when no organization is active", async () => {
+  const user = userEvent.setup();
+  const { activeTenantId: _none, ...state } = createMockAppState();
+  const bridge = makeMockBridge({}, { ...state, tenants: [] });
+  const agent = state.installedAgents[0]!;
+  renderRoute(
+    <>
+      <CommandPalette open onClose={vi.fn()} />
+      <LocationProbe />
+    </>,
+    { path: "*", route: "/", bridge },
+  );
+  await user.click(await screen.findByRole("option", { name: new RegExp(`^Run ${agent.name}`) }));
+  await waitFor(() => expect(screen.getByTestId("palette-location")).toHaveTextContent(`/agents/${agent.slug}/confirm`));
+  expect(bridge.startRun).not.toHaveBeenCalled();
+  expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
+});

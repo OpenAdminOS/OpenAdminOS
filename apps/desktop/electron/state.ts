@@ -2,7 +2,15 @@ import { OfficeService } from "./office.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { syncDirectory, writeFileDurably } from "./durable-file.js";
 import { atomicRename } from "./atomic-rename.js";
+import {
+  appendConfigurationAudit,
+  diffConfigurationAudit,
+  sanitizeConfigurationAudit,
+  CONFIGURATION_AUDIT_MAX_EVENTS,
+  type ConfigurationAuditEvent,
+} from "./configuration-audit.js";
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
@@ -82,6 +90,8 @@ import type {
   SavedAppRegistration,
   TenantAppRegistration,
   ConnectTenantOptions,
+  OrganizationMigrationNotice,
+  OrganizationRecord,
   TenantRecord,
   TenantSession,
   AzureOpenAIProviderConfig,
@@ -160,6 +170,11 @@ import {
   invalidAgentManifestCopy,
   mergeGrantedScopes,
   missingServiceCopy,
+  normalizeOrganizationName,
+  ORGANIZATION_NAME_MAX_LENGTH,
+  organizationNameLength,
+  organizationForTenant,
+  reconcileOrganizations,
   qualifyScope,
   normalizeGraphScopeName,
   providerCatalog,
@@ -252,7 +267,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { RunService } from "./runs.js";
+import { OrganizationBoundaryError, RunService } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -313,6 +328,8 @@ import {
   tokenCachePartition,
 } from "./state-helpers.js";
 import { lookupEndpoint } from "./graph-catalog.js";
+import { TenantLifecycle } from "./tenant-lifecycle.js";
+import { filterClosedTenantChanges, sanitizeTenantRemovals, tenantCleanupPendingMessage, tenantRemovalFor, type TenantRemovalRecord } from "./tenant-removal.js";
 export { __agentDraftTestUtils } from "./agent-draft-helpers.js";
 
 
@@ -344,6 +361,14 @@ interface PersistedState {
   runs: RunRecord[];
   tenants: TenantRecord[];
   activeTenantId?: string;
+  /**
+   * Organizations above the tenants, reconciled on every read (see
+   * `organizations.ts`). Absent only in state files written before
+   * organizations; reading one migrates it, and the next write saves it.
+   */
+  organizations?: OrganizationRecord[];
+  /** What the move to organizations did with schedules, until dismissed. */
+  organizationMigration?: OrganizationMigrationNotice;
   /**
    * Custom app registrations used for a successful connect, most recent
    * first. Public identifiers only, never secrets. Bounded and validated
@@ -409,6 +434,19 @@ interface PersistedState {
    * Connectors page can render status without re-testing on every load.
    */
   novaConnectorAudit?: Array<{ tenantId: string; timestamp: string; entry: ConnectorAuditEntry }>;
+  /**
+   * Connection, organization, provider, model, public reference and
+   * schedule assignment changes, recorded by `write()`. Kept apart from
+   * run history, so run retention never prunes them. Identifiers and
+   * names only, never tokens, secrets, prompts or tenant content.
+   */
+  configurationAudit?: ConfigurationAuditEvent[];
+  /**
+   * Disconnects whose cleanup has not finished (see tenant-removal.ts). The
+   * tenant is gone from `tenants` and refused everywhere; cleanup resumes
+   * at the next launch, before any background work starts.
+   */
+  tenantRemovals?: TenantRemovalRecord[];
   connectors?: Record<
     string,
     {
@@ -523,6 +561,7 @@ const defaultState: PersistedState = {
   installedAgents: [],
   runs: [],
   tenants: [],
+  organizations: [],
 };
 
 function sanitizeRunHistoryRetentionInteger(
@@ -660,6 +699,10 @@ function driftPruneReason(
 /** OpenID Connect scopes MSAL adds to every sign-in; never admin-consent permissions. */
 const OIDC_SCOPES = new Set(["openid", "profile", "offline_access", "email"]);
 
+/** Said when no organization with a Microsoft 365 tenant is active, including No organization. */
+export const NO_MICROSOFT_365_ORGANIZATION = (action: string) =>
+  `No organization with Microsoft 365 is active. Choose one in the organization switcher, or connect a Microsoft 365 tenant in Connections, before ${action}.`;
+
 const AUDIT_LOG_SCHEMA_VERSION = 1;
 const AUDIT_CHAIN_START_HASH = "0".repeat(64);
 
@@ -683,7 +726,8 @@ function sampleRelevantLicenses(): NonNullable<TenantRecord["relevantLicenses"]>
 type AuditLogEventSource =
   | "run-history"
   | "connector-audit"
-  | "hosted-provider-consent";
+  | "hosted-provider-consent"
+  | "configuration-change";
 
 interface AuditLogActor {
   kind: "connected-admin" | "local-admin";
@@ -709,6 +753,7 @@ type AuditLogEvent = AuditLogEventSeed & { sha256: string };
 
 interface AuditLogBuildInput {
   novaConnectorAudit?: PersistedState["novaConnectorAudit"];
+  configurationAudit?: PersistedState["configurationAudit"];
   runs: RunRecord[];
   tenants: TenantRecord[];
   installedAgents: AgentSummary[];
@@ -852,6 +897,21 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
       details: {
         source: consent.source,
         ...consent.payload,
+      },
+    });
+  }
+
+  for (const change of input.configurationAudit ?? []) {
+    events.push({
+      id: `configuration:${change.id}`,
+      timestamp: change.timestamp,
+      type: change.type,
+      source: "configuration-change",
+      ...(change.tenantId ? { tenantId: change.tenantId } : {}),
+      details: {
+        ...(change.organizationId ? { organizationId: change.organizationId } : {}),
+        ...(change.organizationName ? { organizationName: change.organizationName } : {}),
+        ...change.details,
       },
     });
   }
@@ -1011,9 +1071,13 @@ function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): 
     "run-history": 0,
     "connector-audit": 1,
     "hosted-provider-consent": 2,
+    "configuration-change": 3,
   };
   const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
   if (sourceDiff !== 0) return sourceDiff;
+  // Configuration changes recorded together keep the order they were
+  // recorded in; the sort is stable.
+  if (left.source === "configuration-change") return 0;
   return left.id.localeCompare(right.id);
 }
 
@@ -1361,8 +1425,7 @@ function serializeAuditLogJson(input: {
       retention: {
         policy: input.retentionPolicy,
         ...(input.lastPruneResult ? { lastPruneResult: input.lastPruneResult } : {}),
-        note:
-          "Run history may omit records removed by the local retention policy.",
+        note: AUDIT_RETENTION_NOTE,
       },
       hashChain: {
         algorithm: "sha256",
@@ -1399,6 +1462,8 @@ function serializeAuditLogCsv(input: {
     "chainAlgorithm",
     "chainStartHash",
     "chainFinalHash",
+    "retentionNote",
+    "id",
     "sha256",
     "timestamp",
     "type",
@@ -1420,6 +1485,10 @@ function serializeAuditLogCsv(input: {
       "sha256",
       AUDIT_CHAIN_START_HASH,
       input.finalHash,
+      // The same note as the JSON export, so a CSV recipient knows what may be missing.
+      AUDIT_RETENTION_NOTE,
+      // The id is part of each hashed event, so the chain can be verified from the CSV.
+      event.id,
       event.sha256,
       event.timestamp,
       event.type,
@@ -1433,6 +1502,8 @@ function serializeAuditLogCsv(input: {
   );
   return `${columns.join(",")}\n${rows.join("\n")}${rows.length > 0 ? "\n" : ""}`;
 }
+
+const AUDIT_RETENTION_NOTE = `Run history may omit records removed by the local retention policy. Configuration changes are kept independently of run retention, up to the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")}.`;
 
 function csvCell(value: unknown): string {
   const text = String(value ?? "");
@@ -1557,11 +1628,29 @@ export interface AppStateStoreOptions {
   interactiveSignIn?: typeof runInteractiveFlow;
   /** Test hook for the tenant check deadline. Defaults to five minutes. */
   tenantCheckDeadlineMs?: number;
+  /** Test hook: how long Disconnect waits for an organization's work to stop. Defaults to 15 seconds. */
+  tenantDrainMs?: number;
   /** Test hook: MCP servers to offer instead of the built-in catalog. */
   mcpCatalog?: readonly McpCatalogEntry[];
 }
 
+/** How long Disconnect waits for an organization's work to stop before cleanup goes on. */
+const TENANT_DRAIN_MS = 15_000;
+
+function errorText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
 export class AppStateStore {
+  /**
+   * The lifecycle of each tenant (open, closing, removed) and the one place
+   * that decides whether its work may start, reach the network or persist.
+   */
+  private readonly tenantLifecycle = new TenantLifecycle();
+  /** Writes run one after another; see write(). */
+  private writeTail: Promise<void> = Promise.resolve();
+  /** The move to organizations, recorded on the first write after it. */
+  private pendingMigrationAudit: Record<string, string | number | string[]> | undefined;
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
   private readonly tokenStore: TokenCacheStorage;
@@ -1626,6 +1715,7 @@ export class AppStateStore {
     }
   >();
   private readonly tenantCheckDeadlineMs: number;
+  private readonly tenantDrainMs: number;
   private tenantCheckSeq = 0;
   /** The `seq` of the last license result saved, by tenant ID. */
   private readonly savedTierProbeSeq = new Map<string, number>();
@@ -1666,6 +1756,7 @@ export class AppStateStore {
       this.clock = () => new Date();
       this.interactiveSignIn = runInteractiveFlow;
       this.tenantCheckDeadlineMs = TENANT_CHECK_DEADLINE_MS;
+      this.tenantDrainMs = TENANT_DRAIN_MS;
     } else {
       this.filePath = options.filePath;
       this.tokenStore = options.tokenStore;
@@ -1692,6 +1783,7 @@ export class AppStateStore {
       this.intelligenceStore = options.userDataPath
         ? new IntelligenceSqliteStore(join(options.userDataPath, "openadminos.db"))
         : undefined;
+      this.intelligenceStore?.setTenantWriteGuard((tenantId, what) => this.tenantLifecycle.assertWritable(tenantId, what));
       this.graphFactory = options.graphFactory;
       this.providerListFactory = options.providerListFactory;
       this.llmFactory = options.llmFactory;
@@ -1712,6 +1804,7 @@ export class AppStateStore {
       this.clock = options.clock ?? (() => new Date());
       this.interactiveSignIn = options.interactiveSignIn ?? runInteractiveFlow;
       this.tenantCheckDeadlineMs = options.tenantCheckDeadlineMs ?? TENANT_CHECK_DEADLINE_MS;
+      this.tenantDrainMs = options.tenantDrainMs ?? TENANT_DRAIN_MS;
     }
     this.sampleGraph = createSampleGraph({ clock: this.clock });
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
@@ -1727,6 +1820,9 @@ export class AppStateStore {
     });
     const host = this;
     this.chatService = new IntuneChatService({
+      tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
+      tenantLease: (tenantId, work) => this.withTenantLease(tenantId, work),
+      tenantSignal: (tenantId) => this.tenantLifecycle.signal(tenantId),
       read: () => host.read(),
       requireIntelligenceStore: () => host.requireIntelligenceStore(),
       resolveTenant: (persisted, tenantId) =>
@@ -1806,6 +1902,9 @@ export class AppStateStore {
         host.requireIntelligenceStore().listDriftBaselinePinnedObjects(input),
     });
     this.runService = new RunService({
+      tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
+      tenantLease: (tenantId, work) => this.withTenantLease(tenantId, work),
+      connectorTransport: (tenantId) => this.connectorTransport(tenantId),
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -1861,6 +1960,9 @@ export class AppStateStore {
         console.info("[gateway]", message, metadata ?? ""),
     });
     this.runDeliveryService = new RunDeliveryService({
+      tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
+      tenantLease: (tenantId, work) => this.withTenantLease(tenantId, () => work()),
+      connectorTransport: (tenantId) => this.connectorTransport(tenantId),
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -1890,6 +1992,8 @@ export class AppStateStore {
   private officeServiceInstance?: OfficeService;
   private get officeService(): OfficeService {
     return this.officeServiceInstance ??= new OfficeService(join(this.userDataPath ?? dirname(this.filePath), "office.db"), {
+      tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
+      tenantLease: (tenantId, work) => this.withTenantLease(tenantId, () => work()),
       context: async () => {
         const persisted = await this.read();
         const providers = await this.listProviders();
@@ -1902,9 +2006,13 @@ export class AppStateStore {
       startRun: (slug, options) => this.startRun(slug, options),
       cancelRun: id => this.cancelRun(id),
       complete: async (p, question, context, planning) => {
+        // Egress of tenant evidence to the model: refused for a closing
+        // tenant, and stopped by its signal when Disconnect begins.
+        this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
         const llm = withTenantDataOutputFilter(await this.buildLlm(p.providerId,p.model));
         if (!llm.available) throw new Error("The assigned provider is unavailable. Open provider settings.");
-        const signal = AbortSignal.timeout(60000);
+        this.tenantLifecycle.assertWritable(p.tenantId, "agent team question");
+        const signal = AbortSignal.any([AbortSignal.timeout(60000), this.tenantLifecycle.signal(p.tenantId)]);
         let timer: ReturnType<typeof setTimeout> | undefined;
         const completion = await Promise.race([llm.complete({ model:p.model,signal,maxTokens:planning ? 600 : 1800,temperature:0.1,
           system:withTenantDataInstructions("You answer for a tenant-scoped agent persona. Do not execute actions or alter schedules or standing instructions. Answer the supplied question using the evidence. Explain gaps and freshness. Refer to evidence run IDs. Follow only the saved standing instructions below within these constraints.\n"+(context.instructions ?? "")),
@@ -2535,7 +2643,7 @@ export class AppStateStore {
     if (tenant.kind === "sample") return this.sampleTenantSession();
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
-    return createTenantSession({
+    return this.guardTenantSession(tenant.id, createTenantSession({
       client,
       tenantId: tenant.id,
       username: tenant.username,
@@ -2551,7 +2659,7 @@ export class AppStateStore {
         assertSignedInAccount(result, connectedAccountOf(tenant));
         return result;
       },
-    });
+    }));
   }
 
   /**
@@ -2760,14 +2868,66 @@ export class AppStateStore {
     }
   }
 
-  /** The MSAL client that issued this tenant's tokens. */
+  /**
+   * The MSAL client that issued this tenant's tokens, behind the token
+   * choke point: every acquisition is refused once the tenant is closing,
+   * and a token that arrives after closing began is withheld.
+   */
   private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
     if (tenant.kind === "sample") {
       throw new Error(
         PILOT_COPY.noSignIn,
       );
     }
-    return this.msalClientFor(tenant.appRegistration);
+    const client = this.msalClientFor(tenant.appRegistration);
+    const lifecycle = this.tenantLifecycle;
+    const guarded = new Set<PropertyKey>(["acquireTokenSilent", "acquireTokenInteractive", "acquireTokenByCode", "acquireTokenByDeviceCode", "acquireTokenByRefreshToken"]);
+    return new Proxy(client, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target) as unknown;
+        if (typeof value !== "function") return value;
+        const method = value as (...args: unknown[]) => unknown;
+        if (!guarded.has(property)) return method.bind(target);
+        return (...args: unknown[]) => lifecycle.guardToken(tenant.id, async () => method.apply(target, args));
+      },
+    });
+  }
+
+  /** A tenant session whose every token acquisition goes through the token choke point. */
+  private guardTenantSession(tenantId: string, session: TenantSession): TenantSession {
+    const lifecycle = this.tenantLifecycle;
+    const withScopes = session.acquireTokenWithScopes?.bind(session);
+    return {
+      tenantId: session.tenantId,
+      username: session.username,
+      acquireTokenForScopes: (scopes) => lifecycle.guardToken(tenantId, () => session.acquireTokenForScopes(scopes)),
+      ...(withScopes ? { acquireTokenWithScopes: (scopes: string[]) => lifecycle.guardToken(tenantId, () => withScopes(scopes)) } : {}),
+    };
+  }
+
+  /**
+   * The connector transport for a tenant: a fetch that refuses every
+   * request and retry once the tenant is closing, and the check a
+   * connector runs right before a send that does not use fetch.
+   */
+  private connectorTransport(tenantId: string): { fetch: typeof fetch; assertEgress: () => void } {
+    return {
+      fetch: this.tenantLifecycle.guardedFetch(tenantId),
+      assertEgress: () => this.tenantLifecycle.assertWritable(tenantId, "connector send"),
+    };
+  }
+
+  /** The tenant's lifecycle phase: open, closing (Disconnect or its cleanup pending) or removed. */
+  tenantPhase(id: string): import("./tenant-lifecycle.js").TenantPhase {
+    return this.tenantLifecycle.phase(id);
+  }
+
+  /**
+   * Run tenant work under its lease (see tenant-lifecycle.ts). Every entry
+   * point that starts work for a tenant goes through here.
+   */
+  withTenantLease<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+    return this.tenantLifecycle.withTenantLease(tenantId, (lease) => work(lease.signal));
   }
 
   private sampleTenantSession(): TenantSession {
@@ -3057,6 +3217,7 @@ export class AppStateStore {
         model: activeModel,
       }),
       tenants: persisted.tenants,
+      organizations: persisted.organizations ?? [],
       savedAppRegistrations: persisted.savedAppRegistrations ?? [],
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
@@ -3078,6 +3239,16 @@ export class AppStateStore {
     }
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
+      const activeOrganization = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
+      if (activeOrganization) state.activeOrganizationId = activeOrganization.id;
+    }
+    if (persisted.organizationMigration) {
+      state.organizationMigration = persisted.organizationMigration;
+    }
+    if (persisted.tenantRemovals?.length) {
+      state.tenantCleanups = persisted.tenantRemovals.map(({ tenantId, displayName, removedAt, error }) => ({
+        tenantId, displayName, removedAt, ...(error ? { error } : {}),
+      }));
     }
     if (this.tenantChecks.size > 0) {
       state.tenantChecks = [...this.tenantChecks.values()].map((entry) => entry.progress);
@@ -3196,20 +3367,27 @@ export class AppStateStore {
     const apiVersion =
       input.apiVersion.trim() || DEFAULT_AZURE_OPENAI_API_VERSION;
     const hasApiKeyInput = Object.prototype.hasOwnProperty.call(input, "apiKey");
-    if (hasApiKeyInput) {
-      const normalized =
-        typeof input.apiKey === "string" ? input.apiKey.trim() : null;
-      const accessor = this.providerSecretsFor("azure-openai");
-      if (normalized && normalized.length > 0) {
-        await accessor.set("api-key", normalized);
-      } else {
-        await accessor.remove("api-key");
-      }
-    }
 
+    // The key change and the settings write happen together under the lock,
+    // and the audit event for the key travels with this write only.
+    // A folder sync failure after the rename rejects this call although the
+    // settings and the key were saved: the admin sees an error for a change
+    // that took effect, and the next successful write flushes it.
     await this.serialize(async () => {
+      let azureOpenAIKey: "set" | "removed" | undefined;
+      if (hasApiKeyInput) {
+        const normalized =
+          typeof input.apiKey === "string" ? input.apiKey.trim() : null;
+        const accessor = this.providerSecretsFor("azure-openai");
+        if (normalized && normalized.length > 0) {
+          await accessor.set("api-key", normalized);
+        } else {
+          await accessor.remove("api-key");
+        }
+        azureOpenAIKey = normalized ? "set" : "removed";
+      }
       const current = await this.read();
-      await this.write({
+      await this.writeWithAudit({
         ...current,
         providerConfigs: {
           ...(current.providerConfigs ?? {}),
@@ -3219,7 +3397,7 @@ export class AppStateStore {
             apiVersion,
           },
         },
-      });
+      }, azureOpenAIKey ? { azureOpenAIKey } : {});
     });
 
     return this.getAzureOpenAIConfig();
@@ -3663,6 +3841,7 @@ export class AppStateStore {
     const allEvents = buildAuditLogEvents({
       runs: persisted.runs,
       novaConnectorAudit: persisted.novaConnectorAudit,
+      configurationAudit: persisted.configurationAudit,
       tenants: persisted.tenants,
       installedAgents: persisted.installedAgents,
       hostedProviderConsentEvents:
@@ -4055,8 +4234,12 @@ export class AppStateStore {
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
     const run = persisted.runs.find((entry) => entry.id === runId);
     if (!run) throw new Error(`Run not found: ${runId}`);
-    if (run.tenantId && run.tenantId !== workspace.tenantId) {
-      throw new Error("Run tenant does not match the workspace tenant.");
+    if (run.tenantId !== workspace.tenantId) {
+      throw new Error(
+        run.tenantId
+          ? "Run tenant does not match the workspace tenant."
+          : "This run had no organization, so it cannot be linked to a workspace. Link a run from the workspace's organization.",
+      );
     }
     return store.linkWorkspaceRun({
       id: `wlink_${randomUUID()}`,
@@ -4160,7 +4343,7 @@ export class AppStateStore {
     }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before testing connectors.",
+        NO_MICROSOFT_365_ORGANIZATION("testing this connector"),
       );
     }
     const tenantSession = tenant
@@ -4175,6 +4358,7 @@ export class AppStateStore {
       tenant: tenantSession,
       config: runtimeConfig,
       secrets: this.connectorSecretsFor(connectorId),
+      ...(tenant ? this.connectorTransport(tenant.id) : {}),
       log: () => undefined,
       idempotencyKeyFor: (stepId: string, iteration: number) =>
         `test:${connectorId}:${stepId}:${iteration}`,
@@ -4384,7 +4568,7 @@ export class AppStateStore {
     }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before invoking connectors.",
+        NO_MICROSOFT_365_ORGANIZATION("invoking connectors"),
       );
     }
     const tenantSession = tenant
@@ -4398,6 +4582,7 @@ export class AppStateStore {
       tenant: tenantSession,
       config,
       secrets: this.connectorSecretsFor(connectorId),
+      ...(tenant ? this.connectorTransport(tenant.id) : {}),
       log: () => undefined,
       idempotencyKeyFor: (stepId, iteration) =>
         `picker:${connectorId}:${stepId}:${iteration}`,
@@ -4451,8 +4636,11 @@ export class AppStateStore {
     }
     const config = persisted.connectors?.[input.connectorId]?.config ?? {};
     if (JSON.stringify(config) !== JSON.stringify(input.config)) throw new Error("Connector settings changed. Review a new preview before sending.");
+    // The connector transport refuses every request once the organization
+    // is being disconnected, so a part released after closure never posts.
     const instance = await factory.build({ tenant: this.createTenantSessionForRecord(tenant),
       config: this.connectorRuntimeConfig(input.connectorId, config), secrets: this.connectorSecretsFor(input.connectorId),
+      ...this.connectorTransport(tenant.id),
       log: () => undefined, idempotencyKeyFor: () => input.actionId });
     const entries: ConnectorAuditEntry[] = [];
     try {
@@ -4733,9 +4921,20 @@ export class AppStateStore {
           schedule.enabled && existing.schedule?.enabled !== true
             ? updatedAt
             : undefined;
+        // Ownership is decided once, when the schedule is created: it
+        // belongs to the active organization, or waits unassigned with
+        // none active. An edit keeps it, including unassigned, so changing
+        // an interval never activates a paused schedule. Only Assign
+        // (`assignAgentSchedule`) assigns. The renderer never sets it here.
+        const organizationId = existing.schedule
+          ? existing.schedule.organizationId
+          : activeTenant && activeTenant.kind !== "sample"
+            ? organizationForTenant(persisted.organizations ?? [], activeTenant.id)?.id
+            : undefined;
         next[idx] = {
           ...existing,
           schedule: {
+            ...(organizationId ? { organizationId } : {}),
             enabled: schedule.enabled,
             intervalSeconds: Math.floor(schedule.intervalSeconds),
             notifyOnSuccess: schedule.notifyOnSuccess ?? existing.schedule?.notifyOnSuccess ?? true,
@@ -4854,11 +5053,19 @@ export class AppStateStore {
       }
       return;
     }
+    // Each schedule belongs to one organization and never runs while
+    // another one is active. Unassigned schedules wait for the admin.
+    const activeOrganization = organizationForTenant(persisted.organizations ?? [], activeTenant!.id);
+    let waiting = 0;
 
     for (const agent of persisted.installedAgents) {
       const schedule = agent.schedule;
       if (!schedule?.enabled) continue;
       if (nowMs < scheduleDueAtMs(agent, nowMs)) continue;
+      if (!activeOrganization || schedule.organizationId !== activeOrganization.id) {
+        waiting += 1;
+        continue;
+      }
       // The Agents page shows an invalid manifest as unavailable; its
       // schedule waits until the manifest is fixed.
       if (this.agentManifestError(agent)) {
@@ -4888,12 +5095,24 @@ export class AppStateStore {
           lastScheduledRunAt: new Date(nowMs).toISOString(),
         });
       } catch (error) {
+        // The organization changed after this tick read the state, or the
+        // schedule lost its assignment: it waits for its organization. No
+        // failure is recorded and the due slot is kept.
+        if (error instanceof OrganizationBoundaryError) {
+          waiting += 1;
+          continue;
+        }
         await this.persistScheduledRunFailure(agent, schedule, error, nowMs);
         console.error(
           `[scheduler] agent "${agent.slug}" failed to start:`,
           error,
         );
       }
+    }
+    if (waiting > 0) {
+      console.info(
+        `[scheduler] ${waiting} due schedule${waiting === 1 ? " waits" : "s wait"} for another organization or an assignment`,
+      );
     }
   }
 
@@ -6089,7 +6308,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const scheduledAgents = persisted.installedAgents.filter(
       (agent) => agent.schedule?.enabled === true,
     );
+    // The next due schedule is one that can run now: it belongs to the
+    // active organization.
+    const activeOrganizationId = organizationForTenant(
+      persisted.organizations ?? [],
+      persisted.activeTenantId,
+    )?.id;
     const next = [...scheduledAgents
+      .filter((agent) => activeOrganizationId !== undefined && agent.schedule?.organizationId === activeOrganizationId)
       .map((agent) => {
         const schedule = agent.schedule;
         const last = schedule?.lastScheduledRunAt
@@ -6185,7 +6411,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     if (!result.account) {
       throw new Error(
-        "Microsoft sign-in did not return an account. Try connecting again from Settings → Tenants.",
+        "Microsoft sign-in did not return an account. Try connecting again from Connections.",
       );
     }
     const account = result.account;
@@ -6214,6 +6440,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     let replaced: TenantRecord | undefined;
     await this.serialize(async () => {
       const persisted = await this.read();
+      this.openTenantForConnection(persisted, tenant.id);
       const existingIdx = persisted.tenants.findIndex((t) => t.id === tenant.id);
       const nextTenants = [...persisted.tenants];
       if (existingIdx >= 0) {
@@ -6352,7 +6579,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     if (tenant.appRegistration?.kind !== "custom") {
       throw new Error(
-        "Check again applies to your own app registration. Use Add access in Settings, Tenants for the OpenAdminOS app.",
+        "Check again applies to your own app registration. Use Add access in Connections for the OpenAdminOS app.",
       );
     }
     return this.runTenantCheck(tenant, "permissions", async (operation) => {
@@ -6595,6 +6822,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     await this.serialize(async () => {
       const persisted = await this.read();
+      this.openTenantForConnection(persisted, SAMPLE_TENANT_ID);
       const existing = persisted.tenants.find((tenant) => tenant.id === SAMPLE_TENANT_ID);
       created = !existing;
       if (created) this.sampleGraph = createSampleGraph({ clock: this.clock });
@@ -6824,9 +7052,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // Any failure throws, including another account signing in, so what
     // is stored is never replaced by a guess.
     const result = await probeSubscribedSkus(
-      (scopes) => session.acquireTokenForScopes(scopes),
+      (scopes) => this.tenantLifecycle.guardToken(tenant.id, () => session.acquireTokenForScopes(scopes)),
       undefined,
-      undefined,
+      this.tenantLifecycle.guardedFetch(tenant.id),
       { signal: operation.signal },
     );
     // Surface SKUs we recognise but couldn't map to a friendly name.
@@ -6869,59 +7097,275 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return this.getAppState();
   }
 
-  async disconnectTenant(id: string): Promise<AppState> {
-    await this.cancelGraphCachePreload(id).catch(() => undefined);
-    for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
+  /** The active organization's tenant right now, for checks at the moment an action runs. */
+  async activeTenantId(): Promise<string | undefined> {
+    // A tenant being disconnected is not active for Nova actions.
+    const active = (await this.read()).activeTenantId;
+    return active && !this.tenantLifecycle.isWritable(active) ? undefined : active;
+  }
+
+  async setActiveOrganization(id: string | null): Promise<AppState> {
     await this.serialize(async () => {
       const persisted = await this.read();
-      const target = persisted.tenants.find((tenant) => tenant.id === id);
-      if (target && target.kind !== "sample") {
-        try {
-          await this.removeCachedAccount(target.appRegistration, target.homeAccountId);
-        } catch (cause) {
-          const detail = cause instanceof Error ? cause.message : String(cause);
-          throw new Error(
-            `The Microsoft sign-in connection could not be removed, so local tenant deletion was not started. ${detail}`,
-            { cause },
-          );
-        }
+      if (id === null) {
+        const next = { ...persisted };
+        delete next.activeTenantId;
+        await this.write(next);
+        return;
       }
-      const nextTenants = persisted.tenants.filter((tenant) => tenant.id !== id);
-      const removedRunIds = new Set(
-        persisted.runs.filter((run) => run.tenantId === id).map((run) => run.id),
-      );
+      const organization = (persisted.organizations ?? []).find((entry) => entry.id === id);
+      const tenantId = organization?.connections.microsoft365?.tenantId;
+      if (!organization || !tenantId || !persisted.tenants.some((tenant) => tenant.id === tenantId)) {
+        throw new Error("That organization is no longer on this device. Choose another one from the organization menu.");
+      }
+      const lastUsedAt = new Date().toISOString();
+      await this.write({
+        ...persisted,
+        tenants: persisted.tenants.map((tenant) =>
+          tenant.id === tenantId ? { ...tenant, lastUsedAt } : tenant,
+        ),
+        activeTenantId: tenantId,
+      });
+    });
+    return this.getAppState();
+  }
+
+  async renameOrganization(id: string, name: string): Promise<AppState> {
+    const normalized = normalizeOrganizationName(name);
+    if (!normalized) {
+      throw new Error("Enter a name for the organization.");
+    }
+    // A new name over the limit is refused, not cut: the admin sees the name kept.
+    const collapsed = name.replace(/\s+/g, " ").trim();
+    if (organizationNameLength(collapsed) > ORGANIZATION_NAME_MAX_LENGTH) {
+      throw new Error(`Use at most ${ORGANIZATION_NAME_MAX_LENGTH} characters for the organization name.`);
+    }
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const organizations = persisted.organizations ?? [];
+      const target = organizations.find((entry) => entry.id === id);
+      if (!target) {
+        throw new Error("That organization is no longer on this device. Reopen Connections and try again.");
+      }
+      if (target.kind === "sample") {
+        throw new Error("The sample organization keeps its name. Rename an organization you connected.");
+      }
+      await this.write({
+        ...persisted,
+        organizations: organizations.map((entry) => (entry.id === id ? { ...entry, name: normalized } : entry)),
+      });
+    });
+    return this.getAppState();
+  }
+
+  async assignAgentSchedule(slug: string, organizationId: string): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);
+      if (!organization) {
+        throw new Error("That organization is no longer on this device. Choose another one for this schedule.");
+      }
+      if (organization.kind === "sample") {
+        throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
+      }
+      if (!organization.connections.microsoft365) {
+        throw new Error("This version of OpenAdminOS cannot run schedules in that organization. Choose another one, or update OpenAdminOS.");
+      }
+      const index = persisted.installedAgents.findIndex((agent) => agent.slug === slug || agent.id === slug);
+      const agent = index >= 0 ? persisted.installedAgents[index] : undefined;
+      if (!agent?.schedule) {
+        throw new Error("This agent has no schedule to assign. Add a schedule from the agent page first.");
+      }
+      const installedAgents = [...persisted.installedAgents];
+      installedAgents[index] = { ...agent, schedule: { ...agent.schedule, organizationId } };
+      await this.write({ ...persisted, installedAgents });
+    });
+    return this.getAppState();
+  }
+
+  async dismissOrganizationMigrationNotice(): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      if (!persisted.organizationMigration) return;
+      const next = { ...persisted };
+      delete next.organizationMigration;
+      await this.write(next);
+    });
+    return this.getAppState();
+  }
+
+  /**
+   * Disconnect in two phases (SPEC "Disconnecting an organization").
+   *
+   * Phase 1, under the state lock: the tenant closes (every lease's signal
+   * fires and the choke points refuse it) and one write removes the tenant
+   * with its runs, report deliveries, active selection and gateway binding,
+   * and stores a removal record. From here the organization is gone.
+   *
+   * Phase 2 (`cleanupTenant`): drain the tenant's leased work with a bounded
+   * wait, remove the Microsoft sign-in, delete Agent Team and Chat data,
+   * then drop the removal record. If it fails or the app quits, the record
+   * stays, the tenant stays closed, and cleanup resumes at the next launch
+   * or from Retry cleanup. The returned state lists pending cleanups.
+   */
+  async disconnectTenant(id: string): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const current = persisted.tenants.find((tenant) => tenant.id === id);
+      if (!current) {
+        throw new Error("That Microsoft 365 connection is no longer on this device. Reopen Connections and try again.");
+      }
+      const removedRunIds = persisted.runs.filter((run) => run.tenantId === id).map((run) => run.id);
+      const removed = new Set(removedRunIds);
       const next: PersistedState = {
         ...persisted,
-        tenants: nextTenants,
+        tenants: persisted.tenants.filter((tenant) => tenant.id !== id),
         runs: persisted.runs.filter((run) => run.tenantId !== id),
+        tenantRemovals: [
+          ...(persisted.tenantRemovals ?? []).filter((removal) => removal.tenantId !== id),
+          tenantRemovalFor(current, new Date().toISOString(), removedRunIds),
+        ],
       };
-      const deliveryQueue = (persisted.runDeliveryQueue ?? []).filter(
-        (item) => !removedRunIds.has(item.runId),
-      );
+      const deliveryQueue = (persisted.runDeliveryQueue ?? []).filter((item) => !removed.has(item.runId));
       if (deliveryQueue.length > 0) next.runDeliveryQueue = deliveryQueue;
       else delete next.runDeliveryQueue;
-      if (persisted.activeTenantId === id) {
-        delete next.activeTenantId;
+      if (persisted.activeTenantId === id) delete next.activeTenantId;
+      // The write gateway was bound to this tenant; it is not bound to any now.
+      if (persisted.gateway?.boundTenantId === id) {
+        const { boundTenantId: _removed, ...gateway } = persisted.gateway;
+        next.gateway = gateway;
       }
-      this.intelligenceStore?.purgeTenant(id);
-      await this.write(next);
-      if (target?.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
+      // Close before the write, so no work of the tenant can slip a change
+      // in between. If the write fails, nothing was removed: reopen.
+      this.tenantLifecycle.close(id);
+      try {
+        await this.write(next);
+      } catch (cause) {
+        this.tenantLifecycle.abortClose(id);
+        throw cause;
+      }
     });
+    // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
-    await this.officeService.purgeTenant(id);
+    this.emitStateChanged("tenant-removed");
+    await this.runTenantCleanup(id);
+    return this.getAppState();
+  }
 
+  /**
+   * A tenant may be connected again only after its earlier disconnect
+   * finished cleaning up; connecting opens a new generation, so work of
+   * the earlier connection can never write into this one.
+   */
+  private openTenantForConnection(persisted: PersistedState, tenantId: string): void {
+    const pending = persisted.tenantRemovals?.find((removal) => removal.tenantId === tenantId);
+    if (pending) throw new Error(tenantCleanupPendingMessage(pending));
+    this.tenantLifecycle.open(tenantId);
+  }
+
+  /** Cleanups running now, by tenant, so one tenant is never cleaned twice at once. */
+  private readonly tenantCleanups = new Map<string, Promise<void>>();
+
+  private runTenantCleanup(id: string): Promise<void> {
+    const running = this.tenantCleanups.get(id);
+    if (running) return running;
+    const cleanup = this.cleanupTenant(id).finally(() => this.tenantCleanups.delete(id));
+    this.tenantCleanups.set(id, cleanup);
+    return cleanup;
+  }
+
+  /**
+   * Phase 2 of Disconnect. Every step is idempotent, so a resumed cleanup
+   * runs them all again. A failure is recorded on the removal record with
+   * the step that failed; the record is dropped only when all succeeded.
+   */
+  private async cleanupTenant(id: string): Promise<void> {
+    const removal = (await this.read()).tenantRemovals?.find((entry) => entry.tenantId === id);
+    if (!removal) return;
+    this.tenantLifecycle.close(id);
+    let failure: string | undefined;
+    try {
+      // 1. Drain leased work. Past the bound, cleanup goes on: the choke
+      //    points refuse anything that work could still send or write.
+      const drain = await this.tenantLifecycle.drain(id, this.tenantDrainMs);
+      if (!drain.drained) {
+        console.warn("[tenant-lifecycle] work was still stopping when cleanup went on", { tenantId: id, pending: drain.pending });
+      }
+      await this.chatService.stopGraphCachePreload(id).catch(() => undefined);
+      // 2. The Microsoft sign-in.
+      if (removal.kind !== "sample" && removal.homeAccountId) {
+        try {
+          await this.removeCachedAccount(removal.appRegistration, removal.homeAccountId);
+        } catch (cause) {
+          throw new Error(`The Microsoft sign-in could not be removed. ${errorText(cause)}`, { cause });
+        }
+      }
+      // 3. Local data: Agent Team, then Chat, cache, drift and workspaces.
+      try {
+        await this.officeService.purgeTenant(id);
+      } catch (cause) {
+        throw new Error(`Its Agent Team data could not be deleted. ${errorText(cause)}`, { cause });
+      }
+      try {
+        this.intelligenceStore?.purgeTenant(id);
+      } catch (cause) {
+        throw new Error(`Its Chat and cache data could not be deleted. ${errorText(cause)}`, { cause });
+      }
+    } catch (cause) {
+      failure = errorText(cause);
+    }
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const removals = persisted.tenantRemovals ?? [];
+      const nextRemovals = failure === undefined
+        ? removals.filter((entry) => entry.tenantId !== id)
+        : removals.map((entry) => entry.tenantId === id ? { ...entry, error: failure } : entry);
+      const next: PersistedState = { ...persisted };
+      if (nextRemovals.length > 0) next.tenantRemovals = nextRemovals;
+      else delete next.tenantRemovals;
+      await this.write(next);
+    });
+    if (failure === undefined) {
+      this.tenantLifecycle.markRemoved(id);
+      if (removal.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
+    } else {
+      console.warn("[tenant-lifecycle] cleanup is pending", { tenantId: id, error: failure });
+    }
+    this.emitStateChanged("tenant-cleanup");
+  }
+
+  /**
+   * Resume every pending cleanup. Called at launch before any scheduler,
+   * Agent Team tick, gateway or delivery worker starts.
+   */
+  async resumeTenantCleanups(): Promise<void> {
+    const removals = (await this.read()).tenantRemovals ?? [];
+    for (const removal of removals) await this.runTenantCleanup(removal.tenantId);
+  }
+
+  /** Retry cleanup of a disconnected organization (Connections, or the connect flow). */
+  async retryTenantCleanup(id: string): Promise<AppState> {
+    if (!(await this.read()).tenantRemovals?.some((removal) => removal.tenantId === id)) {
+      throw new Error("Cleanup of that organization already finished. Reopen Connections.");
+    }
+    await this.runTenantCleanup(id);
     return this.getAppState();
   }
 
   async startRun(
     agentSlug: string,
     options: StartRunOptions = {},
+    boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
-    return this.runService.startRun(agentSlug, options);
+    return this.runService.startRun(agentSlug, options, boundary);
   }
 
-  async confirmRun(runId: string, phrase: string): Promise<RunRecord> {
-    return this.runService.confirmRun(runId, phrase);
+  async confirmRun(
+    runId: string,
+    phrase: string,
+    boundary: { activeOrganizationOnly?: boolean } = {},
+  ): Promise<RunRecord> {
+    return this.runService.confirmRun(runId, phrase, boundary);
   }
 
   async rejectRun(runId: string): Promise<RunRecord> {
@@ -7039,7 +7483,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       : undefined;
     if (!tenant) {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
+        NO_MICROSOFT_365_ORGANIZATION("running agents"),
       );
     }
     const scopes = (agentScopes ?? []).filter((scope) => scope.length > 0);
@@ -7056,7 +7500,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     }
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
-    const tenantSession = createTenantSession({
+    const tenantSession = this.guardTenantSession(tenant.id, createTenantSession({
       client,
       tenantId: tenant.id,
       username: tenant.username,
@@ -7080,7 +7524,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           if (ungranted.length > 0) {
             throw new Error(
               missingServiceCopy(tenant, ungranted) ??
-                `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Settings, Tenants.`,
+                `This needs ${ungranted.join(", ")}, which was not granted for ${tenant.displayName}. Add the access in Connections.`,
             );
           }
         }
@@ -7099,7 +7543,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         assertSignedInAccount(result, connectedAccountOf(tenant));
         return result;
       },
-    });
+    }));
     // When the agent declares Graph scopes, route the tokenProvider
     // through `tenantSession.acquireTokenForScopes` so the silent
     // acquisition asks MSAL for those exact scopes and falls through to
@@ -7143,6 +7587,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       createGraph: (log) => this.graphFactory
         ? this.graphFactory({ tenantId: tenant.id, scopes, log })
         : createGraphAdapter({ tokenProvider, log, signal: execution?.signal,
+            // The Graph egress choke point: every request and retry for a
+            // closing tenant is refused and aborted with its signal.
+            fetchImpl: this.tenantLifecycle.guardedFetch(tenant.id),
             accessContext: (method, path) => ({
               requiredScopes: lookupEndpoint(method, path)?.scopesDelegated,
               entraTier: tenant.entraTier,
@@ -7193,6 +7640,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   private async enqueueRunDeliveries(run: RunRecord): Promise<void> {
     const persisted = await this.read();
+    // A run of a tenant that was disconnected meanwhile sends no report.
+    if (run.tenantId && !persisted.tenants.some((tenant) => tenant.id === run.tenantId)) return;
     if (
       run.tenantId &&
       persisted.tenants.some(
@@ -7235,16 +7684,25 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * robust against any future read-side surprises.
    */
   private lastReadSnapshot: PersistedState | undefined;
+  /**
+   * Counts completed writes. A read that started before a write finished
+   * does not replace the snapshot that write left, so the snapshot is
+   * always the latest state on disk that this process knows.
+   */
+  private writeGeneration = 0;
 
   private async read(): Promise<PersistedState> {
+    const generation = this.writeGeneration;
     let raw: string;
     try {
       raw = await readFile(this.filePath, "utf8");
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
-        await this.write(defaultState);
-        this.lastReadSnapshot = defaultState;
-        return defaultState;
+        // A fresh copy: the bootstrap state is written through the same chain
+        // as every other write and is never shared with later mutations.
+        const fresh = structuredClone(defaultState);
+        await this.write(fresh);
+        return this.lastReadSnapshot ?? fresh;
       }
       // The file exists but couldn't be read (permission, IO error).
       // Return the last-known-good snapshot rather than fabricating
@@ -7356,6 +7814,29 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (activeTenantId) {
         state.activeTenantId = activeTenantId;
       }
+      const reconciled = reconcileOrganizations({
+        rawOrganizations: (parsed as { organizations?: unknown }).organizations,
+        rawNotice: (parsed as { organizationMigration?: unknown }).organizationMigration,
+        tenants: state.tenants,
+        activeTenantId: state.activeTenantId,
+        installedAgents: state.installedAgents,
+      });
+      state.organizations = reconciled.organizations;
+      state.installedAgents = reconciled.installedAgents;
+      if (reconciled.notice) state.organizationMigration = reconciled.notice;
+      // The move to organizations is recorded once, on the first write
+      // after the read that performed it.
+      // A read that started before a write finished saw the old file; it
+      // must not queue the move again after that write recorded it.
+      if (reconciled.migrated && !this.pendingMigrationAudit && generation === this.writeGeneration) {
+        this.pendingMigrationAudit = {
+          organizationIds: reconciled.organizations.map((organization) => organization.id),
+          organizationNames: reconciled.organizations.map((organization) => organization.name),
+          schedulesAssigned: reconciled.notice?.assignedCount ?? 0,
+          schedulesUnassigned: reconciled.notice?.unassignedCount ?? 0,
+          ...(reconciled.notice?.assignedOrganizationId ? { assignedOrganizationId: reconciled.notice.assignedOrganizationId } : {}),
+        };
+      }
       const savedAppRegistrations = sanitizeSavedAppRegistrations(
         (parsed as { savedAppRegistrations?: unknown }).savedAppRegistrations,
       );
@@ -7446,6 +7927,21 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         }
         if (Object.keys(sanitized).length > 0) {
           state.activeModelByProviderId = sanitized;
+        }
+      }
+      const configurationAudit = sanitizeConfigurationAudit(
+        (parsed as { configurationAudit?: unknown }).configurationAudit,
+      );
+      if (configurationAudit) state.configurationAudit = configurationAudit;
+      const tenantRemovals = sanitizeTenantRemovals((parsed as { tenantRemovals?: unknown }).tenantRemovals);
+      if (tenantRemovals) {
+        state.tenantRemovals = tenantRemovals;
+        // A disconnect whose cleanup is pending keeps its tenant closed,
+        // also after a restart, until the cleanup finishes. Only an open
+        // tenant is closed here, so a read that raced the write dropping
+        // the record never closes a tenant whose cleanup just finished.
+        for (const removal of tenantRemovals) {
+          if (this.tenantLifecycle.phase(removal.tenantId) === "open") this.tenantLifecycle.close(removal.tenantId);
         }
       }
       if (Array.isArray(parsed.novaConnectorAudit)) {
@@ -7687,9 +8183,38 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           };
         }
       }
-      this.lastReadSnapshot = state;
+      if (generation === this.writeGeneration) this.lastReadSnapshot = state;
       return state;
     }
+  }
+
+  /**
+   * Records what changed against the last state read or written, so every
+   * flow is covered without each one recording itself. The stored events
+   * come from that state too: only this method changes them, and a writer
+   * holding an older copy cannot drop events written since.
+   */
+  private recordConfigurationChanges(state: PersistedState, audit: WriteAudit = {}): number {
+    const previous = this.lastReadSnapshot;
+    const existing = previous ? previous.configurationAudit : state.configurationAudit;
+    const timestamp = this.clock().toISOString();
+    const { azureOpenAIKey } = audit;
+    const recorded = previous
+      ? diffConfigurationAudit(previous, state, {
+          timestamp,
+          newId: () => randomUUID(),
+          publicReferenceName: (serverId) => this.mcpCatalog.find((entry) => entry.id === serverId)?.name,
+          ...(azureOpenAIKey ? { azureOpenAIKey } : {}),
+        })
+      : [];
+    if (this.pendingMigrationAudit && (state.organizations?.length ?? 0) > 0) {
+      recorded.unshift({ id: randomUUID(), timestamp, type: "organizations.migrated", details: this.pendingMigrationAudit });
+      this.pendingMigrationAudit = undefined;
+    }
+    const configurationAudit = appendConfigurationAudit(existing, recorded);
+    if (configurationAudit) state.configurationAudit = configurationAudit;
+    else delete state.configurationAudit;
+    return recorded.length;
   }
 
   /**
@@ -7700,16 +8225,68 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * half-flushed JSON. Plain `writeFile` truncated first and was the
    * root cause of the "redirected to onboarding mid-action" bug.
    */
-  private async write(state: PersistedState): Promise<void> {
+  private async write(input: PersistedState): Promise<void> {
+    return this.writeWithAudit(input, {});
+  }
+
+  /** A write that carries audit facts of its own operation, such as a key change. */
+  private async writeWithAudit(input: PersistedState, audit: WriteAudit): Promise<void> {
+    // One write at a time, in call order, so audit events derived from the
+    // last state written are never lost to an interleaved writer.
+    const run = this.writeTail.then(() => this.writeNow(input, audit));
+    this.writeTail = run.catch(() => undefined);
+    return run;
+  }
+
+  private async writeNow(unfiltered: PersistedState, audit: WriteAudit): Promise<void> {
+    // The persistence choke point of the state file: a write may remove
+    // anything, but never adds or changes a record of a tenant that is
+    // being disconnected, or one written by work of an older generation.
+    const { state: input, dropped } = filterClosedTenantChanges(
+      unfiltered,
+      this.lastReadSnapshot,
+      (tenantId) => this.tenantLifecycle.isWritable(tenantId),
+    );
+    if (dropped.length > 0) console.warn("[tenant-lifecycle] dropped state changes for an organization being disconnected", { dropped });
+    // Keep organizations consistent with the tenants being written, so a
+    // removed tenant's organization and its schedule assignments never
+    // outlive it in the file.
+    const reconciled = reconcileOrganizations({
+      rawOrganizations: input.organizations ?? [],
+      rawNotice: input.organizationMigration,
+      tenants: input.tenants,
+      activeTenantId: input.activeTenantId,
+      installedAgents: input.installedAgents,
+    });
+    const state: PersistedState = {
+      ...input,
+      organizations: reconciled.organizations,
+      installedAgents: reconciled.installedAgents,
+    };
+    if (reconciled.notice) state.organizationMigration = reconciled.notice;
+    else delete state.organizationMigration;
+    this.recordConfigurationChanges(state, audit);
+    // Every file that holds audit history is flushed, not only the write
+    // that added events: a later unflushed replacement could lose them.
+    const durable = (state.configurationAudit?.length ?? 0) > 0;
     await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     try {
-      await writeFile(tmpPath, serialized, { encoding: "utf8", mode: 0o600 });
+      // Flushed through the handle that wrote it: Windows needs write access to flush.
+      await writeFileDurably(tmpPath, serialized, { durable, mode: 0o600 });
       await atomicRename(tmpPath, this.filePath);
+      this.writeGeneration += 1;
       this.lastReadSnapshot = state;
+      // A no-op on Windows; an unexpected failure is reported, not swallowed.
+      if (durable) await syncDirectory(dirname(this.filePath));
     } finally {
       await rm(tmpPath, { force: true });
     }
   }
+}
+
+/** Audit facts that belong to one write and are not visible in state, such as a key change. */
+interface WriteAudit {
+  azureOpenAIKey?: "set" | "removed";
 }

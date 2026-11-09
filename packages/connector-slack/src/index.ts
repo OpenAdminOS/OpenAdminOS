@@ -86,7 +86,7 @@ export const slackConnector: ConnectorFactory<SlackConnectorCapabilities> =
           { connectorId: SLACK_CONNECTOR_ID },
         );
       }
-      const client = createSlackClient({ botToken });
+      const client = createSlackClient({ botToken, ...(ctx.fetch ? { fetchImpl: ctx.fetch } : {}) });
       return {
         descriptor: slackDescriptor,
         status: "connected",

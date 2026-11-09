@@ -64,6 +64,8 @@ export interface PreflightConnectorsInput {
   tenant: TenantSession;
   configFor: (connectorId: string) => Record<string, unknown>;
   secretsFor: (connectorId: string) => ConnectorBuildContext["secrets"];
+  /** Host transport handed to every connector (see `ConnectorBuildContext.fetch`). */
+  transport?: Pick<ConnectorBuildContext, "fetch" | "assertEgress">;
   log: (
     level: RunLogLevel,
     message: string,
@@ -129,6 +131,8 @@ export async function preflightConnectors(
       tenant: input.tenant,
       config: input.configFor(requirement.id),
       secrets: input.secretsFor(requirement.id),
+      ...(input.transport?.fetch ? { fetch: input.transport.fetch } : {}),
+      ...(input.transport?.assertEgress ? { assertEgress: input.transport.assertEgress } : {}),
       log: input.log,
       idempotencyKeyFor: (stepId, iteration) =>
         `${input.runId}:${stepId}:${iteration}`,

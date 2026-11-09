@@ -46,6 +46,7 @@ import {
   type ScopeGroup,
 } from "./scope-groups";
 import { PILOT_COPY } from "../shared/pilot-mode";
+import { TenantCleanupNotice } from "../components/TenantCleanupNotice";
 import {
   DEFAULT_REGISTRATION_DISPLAY_NAME,
   generateRegistrationSetup,
@@ -1008,6 +1009,8 @@ function ErrorStep({
         <p role="alert" className="mt-2 max-w-[480px] break-words text-base leading-6 text-[var(--color-text-soft)]">
           {error ?? "Review the browser sign-in, then try again."}
         </p>
+        {/* Connecting an organization whose disconnect is still cleaning up: retry it here. */}
+        <TenantCleanupNotice className="mt-5 w-full max-w-[520px] text-left" />
       </div>
       <DialogFooter>
         <Button variant="ghost" onClick={onCancel}>Cancel</Button>

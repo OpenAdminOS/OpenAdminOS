@@ -96,7 +96,7 @@ export async function runOfficeVisualChecks(
   measurements.push(
     await evaluate(`(()=>{
     const stage=document.querySelector('.office-stage').getBoundingClientRect();
-    const scope=document.querySelector('header[aria-label="Current tenant, provider, and data boundary"]');
+    const scope=document.querySelector('header[aria-label="Current organization, provider, and data boundary"]');
     const exit=[...document.querySelectorAll('button')].find(b=>b.getAttribute('aria-label')==='Exit full screen').getBoundingClientRect();
     if(stage.top<0||stage.bottom>innerHeight||stage.right>innerWidth)throw new Error('Fullscreen room is clipped');
     if(!(scope instanceof Element))throw new Error('Fullscreen lost the tenant boundary');

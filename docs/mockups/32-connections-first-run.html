@@ -3,692 +3,1094 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>32 · Connections and first run · OpenAdminOS</title>
+  <title>32 Connections and first run, OpenAdminOS</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500&family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&display=swap" rel="stylesheet">
   <!--
-    First run without a sign-in anywhere, and services as connections.
+    Mockup 32, revision 2 (2026-11-09): first run without sign-in (PR #175)
+    and organizations with Connections (PR #174) as one product.
 
-    Problem: the first launch offered three ways forward: sign in to Microsoft,
-    use sample data, or skip and look at an inert app. Since the Marketplace,
-    Chat can answer from six public reference servers that need no sign-in,
-    and Microsoft is not the only service admins run (Jamf, Google Workspace).
+    What changed from revision 1, in one line each:
+      - One shared figure: the device tile in the center with things around it.
+        The scan orbit and the Connections reach map use the same tile, the
+        same node marks, the same connector lines and the same draw motion.
+      - The scan result is one choice list with one filled action, not nine
+        buttons and links. Hosted tools are listed, never preselected.
+      - The scan list is compact during the scan and folds into "What ran"
+        after it, so nothing repeats the orbit at full size.
+      - Connections draws connectors from each service into the device and
+        from the device to everything that leaves. The no-organization state
+        is an empty state with its action above the fold.
+      - Amber only means "leaves this device". Missing access is neutral with
+        a dashed mark; the fix is the button beside it.
+      - Only production tokens from apps/desktop/src/styles/globals.css,
+        plus motion tokens that name values the code already uses.
 
-    Decisions shown here (2026-11-08):
-      - The only required step is an AI model. Chat opens directly; there is
-        no welcome screen.
-      - The scope in the top bar is an organization. An organization holds its
-        connections: one Microsoft 365 tenant (Intune, Entra, Defender), and
-        later one Jamf Pro instance or one Google Workspace domain.
-      - Chat works with no organization for questions that need no tenant data.
-      - Public references are suggested on the empty Chat, never preinstalled,
-        because each one receives words from questions.
-      - A question or agent that needs a service asks for exactly that service,
-        inline, at that moment.
-      - Sample data moves to a link: it is the only path that works without a model.
-
-    Sections:
-      A. First launch with a model on this device
-      B. First launch with no model
-      C. Answer from a public reference, no organization
-      D. A question that needs a service
-      E. Connections page (sidebar item) with the reach map
-      F. Organization switcher
-      G. Agents with service needs
-      H. Connecting Jamf Pro, for when Jamf support ships
-
-    Uses the calm-shell tokens from 27-calm-shell.html and 29-first-run.html.
-    The mockbar at the top is not part of the app.
+    The full redesign spec lives beside this file as design-spec.md.
+    The doc bar at the top is not part of the app.
   -->
   <style>
+    /* Production tokens, copied from apps/desktop/src/styles/globals.css. */
     :root {
-      --font-ui: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
       --font-serif: "Newsreader", "Iowan Old Style", Charter, Georgia, serif;
-      --font-code: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-      --fs-small: 13px; --fs-ui: 14px; --fs-read: 16px; --fs-answer: 17.5px; --fs-title: 24px;
-      --svc-intune: #4E6E9E; --svc-entra: #3D7C83; --svc-defender: #6A5C90; --svc-jamf: #5D7653; --svc-google: #806426;
+      --font-mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --text-xs: 12px; --lh-xs: 18px;
+      --text-sm: 13px; --lh-sm: 19.5px;
+      --text-base: 14px; --lh-base: 21px;
+      --text-md: 16px; --lh-md: 24px;
+      --text-lg: 24px; --lh-lg: 32px;
+      --text-answer: 17.5px;
+      --text-display: 34px; --lh-display: 42px;
+      --radius-sm: 8px; --radius-md: 10px; --radius-lg: 14px; --radius-xl: 18px;
+      --color-svc-intune: #4e6e9e; --color-svc-entra: #3d7c83; --color-svc-defender: #6a5c90;
+      /* Proposed motion tokens: names for values the code already uses. */
+      --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+      --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+      --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
+      --dur-fast: 140ms; --dur-state: 240ms; --dur-enter: 420ms;
     }
-    [data-theme="light"] {
-      --bg: #FAF9F6; --sidebar: #F2F0EB; --surface: #FFFFFF; --raised: #FFFFFF; --bubble: #EEEBE5;
-      --hover: rgba(31,29,26,.05); --active: rgba(31,29,26,.085);
-      --line: rgba(31,29,26,.12); --line-soft: rgba(31,29,26,.065); --line-dash: rgba(31,29,26,.28);
-      --text: #1F1D1A; --text-2: #5C5852; --text-3: #78736B;
-      --ink: #1F1D1A; --on-ink: #FAF9F6; --focus: #2F6FEB;
-      --ok: #3E7A4B; --ok-soft: rgba(62,122,75,.09); --warn: #8A5B05; --warn-soft: rgba(138,91,5,.08);
-      --code-bg: rgba(31,29,26,.045); --scrim: rgba(28,25,22,.26);
-      --shadow-composer: 0 0 0 1px rgba(31,29,26,.09), 0 2px 4px rgba(31,29,26,.03), 0 10px 30px rgba(31,29,26,.06);
-      --shadow-pop: 0 0 0 1px rgba(31,29,26,.07), 0 10px 32px rgba(31,29,26,.14);
-      --shadow-dialog: 0 0 0 1px rgba(31,29,26,.06), 0 24px 64px rgba(31,29,26,.2);
+    :root, [data-theme="light"] {
+      --color-bg: #faf9f6; --color-bg-elevated: #ffffff; --color-bg-raised: #eeebe5;
+      --color-sidebar-solid: #f2f0eb; --color-surface: #ffffff; --color-bubble: #eeebe5;
+      --color-hover: rgba(31, 29, 26, 0.05); --color-active: rgba(31, 29, 26, 0.085);
+      --color-border: rgba(31, 29, 26, 0.12); --color-border-strong: rgba(31, 29, 26, 0.22); --color-border-soft: rgba(31, 29, 26, 0.065);
+      --color-text: #1f1d1a; --color-text-soft: #5c5852; --color-text-muted: #6f6a63; --color-text-faint: #938d84;
+      --color-accent: #1f1d1a; --color-accent-hover: #37342f; --color-on-accent: #faf9f6; --color-focus: #2f6feb;
+      --color-success: #3a7246; --color-success-soft: #3a72460c;
+      --color-warning: #895a05; --color-warning-soft: #8a5b0514;
+      --color-danger: #a8382b; --color-danger-soft: #a8382b12;
+      --color-code-bg: rgba(31, 29, 26, 0.045); --color-scrim: rgba(28, 25, 22, 0.26);
+      --shadow-composer: 0 0 0 1px rgba(31, 29, 26, 0.09), 0 2px 4px rgba(31, 29, 26, 0.03), 0 10px 30px rgba(31, 29, 26, 0.06);
+      --shadow-pop: 0 0 0 1px rgba(31, 29, 26, 0.07), 0 10px 32px rgba(31, 29, 26, 0.14);
+      --shadow-dialog: 0 0 0 1px rgba(31, 29, 26, 0.06), 0 24px 64px rgba(31, 29, 26, 0.2);
       color-scheme: light;
     }
     [data-theme="dark"] {
-      --bg: #17191D; --sidebar: #121418; --surface: #1E2126; --raised: #22262C; --bubble: #262A31;
-      --hover: rgba(255,255,255,.05); --active: rgba(255,255,255,.085);
-      --line: rgba(255,255,255,.12); --line-soft: rgba(255,255,255,.065); --line-dash: rgba(255,255,255,.3);
-      --text: #F4F5F7; --text-2: #C2C7CE; --text-3: #98A0AB;
-      --ink: #F4F5F7; --on-ink: #17191D; --focus: #8FB4FF;
-      --ok: #9CC88F; --ok-soft: rgba(156,200,143,.1); --warn: #E5C678; --warn-soft: rgba(229,198,120,.1);
-      --code-bg: rgba(255,255,255,.055); --scrim: rgba(0,0,0,.55);
-      --shadow-composer: 0 0 0 1px rgba(255,255,255,.1), 0 8px 24px rgba(0,0,0,.25);
-      --shadow-pop: 0 0 0 1px rgba(255,255,255,.09), 0 12px 36px rgba(0,0,0,.45);
-      --shadow-dialog: 0 0 0 1px rgba(255,255,255,.09), 0 24px 70px rgba(0,0,0,.55);
+      --color-bg: #17191d; --color-bg-elevated: #22262c; --color-bg-raised: #262a31;
+      --color-sidebar-solid: #121418; --color-surface: #1e2126; --color-bubble: #262a31;
+      --color-hover: rgba(255, 255, 255, 0.05); --color-active: rgba(255, 255, 255, 0.085);
+      --color-border: rgba(255, 255, 255, 0.12); --color-border-strong: rgba(255, 255, 255, 0.24); --color-border-soft: rgba(255, 255, 255, 0.065);
+      --color-text: #f4f5f7; --color-text-soft: #c2c7ce; --color-text-muted: #98a0ab; --color-text-faint: #737c89;
+      --color-accent: #f4f5f7; --color-accent-hover: #ffffff; --color-on-accent: #17191d; --color-focus: #8fb4ff;
+      --color-success: #9cc88f; --color-success-soft: #9cc88f1a;
+      --color-warning: #e5c678; --color-warning-soft: #e5c6781a;
+      --color-danger: #f1a0a0; --color-danger-soft: #f1a0a01a;
+      --color-code-bg: rgba(255, 255, 255, 0.055); --color-scrim: rgba(0, 0, 0, 0.55);
+      --shadow-composer: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 8px 24px rgba(0, 0, 0, 0.25);
+      --shadow-pop: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 12px 36px rgba(0, 0, 0, 0.45);
+      --shadow-dialog: 0 0 0 1px rgba(255, 255, 255, 0.09), 0 24px 70px rgba(0, 0, 0, 0.55);
       color-scheme: dark;
     }
 
     * { box-sizing: border-box; }
-    body { margin: 0; background: var(--bg); color: var(--text); font: 400 var(--fs-ui)/1.5 var(--font-ui); -webkit-font-smoothing: antialiased; }
-    code, .mono { font-family: var(--font-code); font-size: .92em; }
-    code { background: var(--code-bg); padding: 1px 5px; border-radius: 5px; }
+    html, body { margin: 0; }
+    body {
+      background: var(--color-bg-raised);
+      color: var(--color-text);
+      font: 400 var(--text-base)/var(--lh-base) var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+    }
     button { font: inherit; color: inherit; }
-    :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+    :focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+    code, .mono { font-family: var(--font-mono); font-size: var(--text-xs); }
 
-    .mockbar { position: sticky; top: 0; z-index: 10; display: flex; gap: 8px; align-items: center; padding: 10px 24px; background: var(--sidebar); border-bottom: 1px solid var(--line); font-size: var(--fs-small); color: var(--text-2); }
-    .mockbar strong { color: var(--text); font-weight: 600; margin-right: auto; }
-    .mockbar button { color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 4px 10px; cursor: pointer; }
-
-    .page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 80px; }
-    .intro { max-width: 760px; margin: 0 0 48px; }
-    .intro h1 { font: 500 34px/1.15 var(--font-serif); margin: 0 0 10px; letter-spacing: -.01em; }
-    .intro p { margin: 0 0 10px; color: var(--text-2); font-size: var(--fs-read); }
-    .section { margin: 0 0 64px; }
-    .section > h2 { font: 500 var(--fs-title)/1.25 var(--font-serif); margin: 0 0 4px; }
-    .section > p.lede { margin: 0 0 18px; color: var(--text-2); max-width: 760px; }
-    .notes { margin: 14px 0 0; padding-left: 18px; font-size: var(--fs-small); color: var(--text-2); max-width: 820px; }
-    .notes li { margin-bottom: 4px; }
-    .todo { color: var(--warn); }
-
-    /* App frame */
-    .frame { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--bg); box-shadow: var(--shadow-pop); }
-    .app { display: grid; grid-template-columns: 232px minmax(0, 1fr); min-height: 640px; position: relative; }
-    .side { background: var(--sidebar); border-right: 1px solid var(--line-soft); padding: 14px 10px; display: flex; flex-direction: column; gap: 2px; }
-    .brand { display: flex; align-items: center; gap: 8px; padding: 4px 8px 14px; font-weight: 600; }
-    .brand .mark { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; font: 600 11px var(--font-ui); letter-spacing: -.5px; }
-    .nav { display: flex; align-items: center; gap: 10px; height: 34px; padding: 0 10px; border-radius: 8px; color: var(--text-2); }
-    .nav.on { background: var(--active); color: var(--text); font-weight: 500; }
-    .side .spacer { flex: 1; }
-    .side .recent { margin: 14px 10px 4px; font-size: 12px; color: var(--text-3); }
-
-    .org-chip { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line-soft); background: var(--surface); }
-    .org-chip .name { font-weight: 500; line-height: 1.2; }
-    .org-chip .sub { font-size: 12px; color: var(--text-3); line-height: 1.3; }
-    .org-tile { width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font: 600 12px var(--font-ui); color: #fff; flex: none; background: #44505F; }
-    .org-tile.none { background: transparent; border: 1px dashed var(--line-dash); color: var(--text-3); }
-    .org-tile.alt { background: #6B5546; }
-
-    .main { display: flex; flex-direction: column; min-width: 0; }
-    .topline { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 6px 20px; border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-small); flex-wrap: wrap; }
-    .topline .grow { flex: 1; }
-    .topline .title { color: var(--text); font-weight: 500; }
-    .boundary { display: inline-flex; align-items: center; gap: 7px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); font-size: 12.5px; color: var(--text-2); }
-    .boundary .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
-    .boundary.out .dot { background: var(--warn); }
-    .boundary.none .dot { background: var(--text-3); }
-
-    .col { width: 100%; max-width: 720px; margin: 0 auto; padding: 28px 24px 0; flex: 1; }
-    .col.center { display: flex; flex-direction: column; justify-content: center; }
-
-    /* Service and reference marks */
-    .svc { width: 22px; height: 22px; border-radius: 6px; display: inline-grid; place-items: center; font: 600 10.5px var(--font-ui); color: #fff; flex: none; letter-spacing: -.2px; }
-    .svc.lg { width: 30px; height: 30px; border-radius: 8px; font-size: 12px; }
-    .svc.intune { background: var(--svc-intune); }
-    .svc.entra { background: var(--svc-entra); }
-    .svc.defender { background: var(--svc-defender); }
-    .svc.jamf { background: var(--svc-jamf); }
-    .svc.google { background: var(--svc-google); }
-    .svc.ref { background: var(--surface); color: var(--text-2); border: 1px solid var(--line); }
-    .svc.off { background: transparent !important; color: var(--text-3); border: 1px dashed var(--line-dash); }
-
-    .need { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-2); padding: 2px 8px 2px 3px; border-radius: 999px; background: var(--bubble); white-space: nowrap; }
-    .need .svc { width: 17px; height: 17px; border-radius: 5px; font-size: 9px; }
-    .need.ok { background: var(--ok-soft); color: var(--ok); }
-    .need.none { padding-left: 8px; }
-
-    /* Empty Chat */
-    .empty h3 { font: 500 30px/1.2 var(--font-serif); margin: 0 0 6px; letter-spacing: -.01em; }
-    .empty .sub { color: var(--text-2); margin: 0 0 22px; font-size: var(--fs-read); }
-    .starters { display: grid; gap: 0; border-top: 1px solid var(--line-soft); margin: 0 0 22px; }
-    .starter { display: flex; align-items: center; gap: 12px; padding: 10px 2px; border-bottom: 1px solid var(--line-soft); }
-    .starter .q { flex: 1; min-width: 0; }
-    .starter.locked .q { color: var(--text-2); }
-
-    .model-line { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; font-size: var(--fs-small); color: var(--text-2); margin: 0 0 18px; }
-    .model-line strong { color: var(--text); font-weight: 500; }
-
-    .suggest { border-radius: 12px; background: var(--code-bg); padding: 12px 14px; margin: 0 0 16px; }
-    .suggest .head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
-    .suggest .head strong { font-weight: 600; }
-    .suggest .head span { color: var(--text-2); font-size: var(--fs-small); }
-    .suggest .row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; border-top: 1px solid var(--line-soft); }
-    .suggest .row:first-of-type { border-top: 0; }
-    .suggest .row .t { font-weight: 500; }
-    .suggest .row .h { font-size: 12.5px; color: var(--text-2); }
-    .suggest .more { margin-top: 6px; font-size: var(--fs-small); color: var(--text-2); }
-
-    .composer { max-width: 720px; width: calc(100% - 48px); margin: 14px auto 10px; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-composer); padding: 12px 14px 10px; }
-    .composer .ph { color: var(--text-3); min-height: 24px; }
-    .composer .typed { color: var(--text); min-height: 24px; }
-    .composer .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12.5px; color: var(--text-2); flex-wrap: wrap; }
-    .composer .row .grow { flex: 1; }
-    .send { width: 30px; height: 30px; border-radius: 9px; background: var(--ink); color: var(--on-ink); display: grid; place-items: center; border: 0; }
-    .send svg { width: 14px; height: 14px; }
-    .trust { text-align: center; font-size: 12px; color: var(--text-3); margin: 0 auto 14px; max-width: 640px; padding: 0 24px; }
-
-    /* Buttons */
-    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 9px; font: 500 var(--fs-small) var(--font-ui); border: 1px solid var(--line); background: var(--surface); color: var(--text); cursor: pointer; white-space: nowrap; }
-    .btn.primary { background: var(--ink); color: var(--on-ink); border-color: var(--ink); }
-    .btn.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
-    .btn.small { height: 26px; padding: 0 9px; font-size: 12.5px; }
-    a.link { color: var(--text); text-decoration: underline; text-decoration-color: var(--line-dash); text-underline-offset: 3px; }
-
-    /* Model setup inline */
-    .model-setup { background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-composer); padding: 18px 18px 10px; margin-bottom: 14px; }
-    .model-setup h4 { margin: 0 0 2px; font: 500 20px/1.3 var(--font-serif); }
-    .model-setup > p { margin: 0 0 12px; color: var(--text-2); font-size: var(--fs-small); }
-    .option { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 12px 0; border-top: 1px solid var(--line-soft); }
-    .option .t { font-weight: 500; }
-    .option .d { color: var(--text-2); font-size: var(--fs-small); }
-    .option .where { font-size: 12px; color: var(--text-3); margin-top: 2px; }
-    .escape { text-align: center; font-size: var(--fs-small); color: var(--text-2); margin: 6px 0 0; }
-
-    /* Answers */
-    .user-msg { margin-left: auto; max-width: 78%; background: var(--bubble); padding: 10px 14px; border-radius: 14px; width: fit-content; }
-    .answer { margin-top: 22px; font: 400 var(--fs-answer)/1.6 var(--font-serif); }
-    .answer p { margin: 0 0 12px; }
-    .steps { font: 400 12.5px/1.45 var(--font-ui); color: var(--text-2); margin: 0 0 12px; border-left: 2px solid var(--line); padding: 2px 0 2px 12px; }
-    .steps div { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-    .steps .host { color: var(--text-3); }
-    pre { font: 400 12.5px/1.55 var(--font-code); background: var(--code-bg); border-radius: 10px; padding: 12px 14px; margin: 0 0 12px; overflow-x: auto; white-space: pre; }
-    .cite { font: 400 12.5px/1.4 var(--font-ui); color: var(--text-3); }
-
-    .gate { font: 400 var(--fs-ui)/1.5 var(--font-ui); border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: var(--surface); margin-top: 6px; }
-    .gate .top { display: flex; gap: 12px; align-items: flex-start; }
-    .gate .t { font-weight: 600; }
-    .gate .d { color: var(--text-2); font-size: var(--fs-small); margin-top: 2px; }
-    .gate ul { margin: 10px 0 0; padding: 0; list-style: none; font-size: var(--fs-small); color: var(--text-2); }
-    .gate li { padding: 5px 0; border-top: 1px solid var(--line-soft); display: flex; gap: 10px; }
-    .gate li code { font-size: 12px; }
-    .gate .acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-    .gate .fine { font-size: 12.5px; color: var(--text-3); margin-top: 10px; }
-
-    /* Reach map: the one memorable element */
-    .reach { display: grid; grid-template-columns: minmax(0, 1fr) 118px minmax(180px, .8fr) 118px minmax(0, 1fr); align-items: center; padding: 22px 24px; border-bottom: 1px solid var(--line-soft); }
-    .reach .zone h5 { margin: 0 0 8px; font: 500 13px/1.3 var(--font-ui); color: var(--text-2); }
-    .reach .zone h6 { margin: 10px 0 6px; font: 400 12px/1.3 var(--font-ui); color: var(--text-2); }
-    .reach .zone h6:first-of-type { margin-top: 0; }
-    .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-    .reach .zone.right h5 { text-align: left; }
-    .reach .items { display: flex; flex-direction: column; gap: 6px; }
-    .reach .item { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-radius: 9px; border: 1px solid var(--line); background: var(--surface); font-size: var(--fs-small); }
-    .reach .item.off { border-style: dashed; border-color: var(--line-dash); background: transparent; color: var(--text-3); }
-    .reach .item .st { margin-left: auto; font-size: 12px; color: var(--text-2); white-space: nowrap; }
-    .reach .item .st.ok { color: var(--ok); }
-    .lane { position: relative; height: 100%; min-height: 120px; display: grid; place-items: center; }
-    .lane::before { content: ""; position: absolute; left: 8px; right: 8px; top: 50%; border-top: 1.5px solid var(--text-3); }
-    .lane.out::before { border-top: 1.5px dashed var(--text-3); }
-    .lane::after { content: ""; position: absolute; top: calc(50% - 4.5px); width: 0; height: 0; border-top: 5px solid transparent; border-bottom: 5px solid transparent; }
-    .lane.in::after { right: 4px; border-left: 7px solid var(--text-3); }
-    .lane.out::after { right: 4px; border-left: 7px solid var(--text-3); }
-    .lane span { position: absolute; left: 4px; right: 4px; bottom: calc(50% + 6px); font-size: 11.5px; color: var(--text-3); text-align: center; line-height: 1.3; }
-    .device { border-radius: 16px; background: var(--ink); color: var(--on-ink); padding: 16px 16px 14px; }
-    .device .t { font: 500 18px/1.25 var(--font-serif); margin-bottom: 8px; }
-    .device ul { margin: 0; padding: 0; list-style: none; font-size: 12.5px; opacity: .82; }
-    .device li { padding: 2px 0; }
-
-    .list-wrap { max-width: 860px; margin: 0 auto; padding: 8px 24px 28px; width: 100%; }
-    .list-wrap h4 { margin: 22px 0 2px; font: 500 19px/1.3 var(--font-serif); }
-    .list-wrap .lede { margin: 0 0 8px; color: var(--text-2); font-size: var(--fs-small); }
-    .rows { border-top: 1px solid var(--line-soft); }
-    .r { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--line-soft); }
-    .r .t { font-weight: 500; }
-    .r .d { color: var(--text-2); font-size: 12.5px; }
-    .r .state { font-size: 12.5px; color: var(--text-3); white-space: nowrap; }
-    .r .state.ok { color: var(--ok); }
-    .r .state.partial { color: var(--warn); }
-    .r .state.off { color: var(--text-2); }
-    .r.sub { grid-template-columns: 30px minmax(0, 1fr) auto auto; padding-left: 0; }
-    .group-head { display: flex; align-items: center; gap: 10px; padding: 12px 0 6px; font-size: var(--fs-small); color: var(--text-2); flex-wrap: wrap; }
-    .group-head strong { color: var(--text); font-weight: 500; }
-
-    /* Switcher */
-    .pop { position: absolute; left: 12px; bottom: 74px; width: 330px; background: var(--raised); border-radius: 12px; box-shadow: var(--shadow-pop); padding: 6px; z-index: 2; }
-    .pop .item { display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: 8px; }
-    .pop .item.on { background: var(--active); }
-    .pop .item .grow { flex: 1; min-width: 0; }
-    .pop .item .sub { font-size: 12px; color: var(--text-3); display: flex; gap: 4px; margin-top: 3px; flex-wrap: wrap; }
-    .pop .item .sub .svc { width: 17px; height: 17px; border-radius: 5px; font-size: 9px; }
-    .pop hr { border: 0; border-top: 1px solid var(--line-soft); margin: 6px 4px; }
-    .pop .act { padding: 7px 8px; border-radius: 8px; color: var(--text-2); font-size: var(--fs-small); }
-
-    /* Agents */
-    .agent-list { max-width: 820px; margin: 0 auto; padding: 18px 24px; width: 100%; }
-    .agent { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: center; padding: 13px 0; border-bottom: 1px solid var(--line-soft); }
-    .agent .t { font-weight: 500; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .agent .d { color: var(--text-2); font-size: 12.5px; margin-top: 2px; }
-    .agent .needs { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
-    .mode { font-size: 11.5px; padding: 1px 7px; border-radius: 999px; background: var(--bubble); color: var(--text-2); font-weight: 400; }
-    .filters { display: flex; gap: 8px; flex-wrap: wrap; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }
-    .filter { font-size: 12.5px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--text-2); }
-    .filter.on { background: var(--active); color: var(--text); border-color: transparent; }
-
-    /* Dialogs */
-    .solo { background: var(--bg); padding: 28px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 14px; }
-    .dialog { width: 100%; max-width: 560px; background: var(--raised); border-radius: 16px; box-shadow: var(--shadow-pop); overflow: hidden; }
-    .dialog header { padding: 20px 22px 6px; display: flex; gap: 12px; align-items: flex-start; }
-    .dialog h3 { margin: 0; font: 500 21px/1.3 var(--font-serif); }
-    .dialog header p { margin: 4px 0 0; color: var(--text-2); font-size: var(--fs-small); }
-    .dialog .body { padding: 12px 22px 6px; }
-    .dialog footer { display: flex; align-items: center; gap: 8px; padding: 14px 22px 18px; border-top: 1px solid var(--line-soft); margin-top: 10px; flex-wrap: wrap; }
-    .dialog footer .grow { flex: 1; }
-    .field { margin-bottom: 12px; }
-    .field label { display: block; font-size: var(--fs-small); font-weight: 500; margin-bottom: 4px; }
-    .field .input { height: 34px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); padding: 0 10px; display: flex; align-items: center; color: var(--text-2); font-size: var(--fs-small); }
-    .field .hint { font-size: 12px; color: var(--text-3); margin-top: 4px; }
-    .callout { border-radius: 10px; padding: 10px 12px; font-size: var(--fs-small); color: var(--text-2); background: var(--code-bg); margin: 4px 0 10px; }
-    .callout strong { color: var(--text); font-weight: 600; }
-    .privs { font-size: 12.5px; color: var(--text-2); columns: 2; column-gap: 18px; margin: 6px 0 0; padding-left: 16px; }
-
-    .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
-
-    @media (max-width: 1180px) {
-      .reach { grid-template-columns: 1fr; gap: 10px; }
-      .lane { min-height: 44px; }
-      .lane::before { left: 50%; right: auto; top: 4px; bottom: 4px; border-top: 0; border-left: 1.5px solid var(--text-3); }
-      .lane.out::before { border-left-style: dashed; }
-      .lane::after { top: auto; bottom: 0; right: auto !important; left: calc(50% - 4.25px); border-left: 5px solid transparent !important; border-right: 5px solid transparent; border-top: 7px solid var(--text-3); border-bottom: 0; }
-      .lane span { left: calc(50% + 12px); right: auto; bottom: auto; top: 50%; transform: translateY(-50%); text-align: left; white-space: nowrap; }
-      .lane.out::before { border-top: 0; border-left: 1.5px dashed var(--text-3); }
+    /* ---------- Doc chrome (not the app) ---------- */
+    .docbar {
+      position: relative; z-index: 50;
+      display: flex; align-items: center; gap: 12px;
+      padding: 10px 16px; background: var(--color-bg-raised);
+      border-bottom: 1px solid var(--color-border-soft);
+      font-size: var(--text-sm);
     }
-    @media (max-width: 900px) {
-      .grid2 { grid-template-columns: 1fr; }
-      .app { grid-template-columns: minmax(0, 1fr); }
-      .side { display: none; }
-      .pop { left: 12px; bottom: 16px; }
-      .privs { columns: 1; }
+    .docbar b { font-weight: 500; }
+    .docbar nav { display: flex; gap: 2px; margin-left: auto; flex-wrap: wrap; }
+    .docbar nav a { color: var(--color-text-soft); text-decoration: none; padding: 2px 6px; border-radius: 6px; }
+    .docbar nav a:hover { background: var(--color-hover); color: var(--color-text); }
+    .seg { display: inline-flex; padding: 2px; border-radius: 8px; background: var(--color-hover); }
+    .seg button { border: 0; background: none; padding: 2px 10px; border-radius: 6px; cursor: pointer; color: var(--color-text-soft); }
+    .seg button[aria-pressed="true"] { background: var(--color-surface); color: var(--color-text); box-shadow: 0 0 0 1px var(--color-border-soft); }
+    .doc { max-width: 1320px; margin: 0 auto; padding: 32px 16px 80px; }
+    .doc > header { max-width: 72ch; margin-bottom: 40px; }
+    .doc h1 { font: 500 var(--text-display)/var(--lh-display) var(--font-serif); margin: 0 0 8px; }
+    .doc > header p { color: var(--color-text-soft); margin: 0; }
+    .sect { margin: 0 0 64px; }
+    .sect > h2 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0 0 4px; }
+    .sect > p { color: var(--color-text-soft); margin: 0 0 16px; max-width: 76ch; }
+    .notes { margin: 16px 0 0; padding-left: 18px; color: var(--color-text-soft); font-size: var(--text-sm); line-height: var(--lh-sm); max-width: 92ch; }
+    .notes li + li { margin-top: 4px; }
+    .tag { font-size: var(--text-xs); color: var(--color-text-muted); }
+
+    /* ---------- App window ---------- */
+    .win {
+      container-type: inline-size;
+      position: relative; display: flex; flex-direction: column;
+      height: 760px; overflow: hidden;
+      border-radius: 12px; background: var(--color-bg);
+      box-shadow: 0 0 0 1px var(--color-border), 0 20px 50px -20px rgba(0,0,0,.25);
     }
-    @media (max-width: 560px) {
-      .page { padding: 20px 16px 60px; }
-      .col, .list-wrap, .agent-list { padding-left: 16px; padding-right: 16px; }
-      .composer { width: calc(100% - 32px); }
-      .r { grid-template-columns: 30px minmax(0, 1fr); }
-      .r .state, .r .btn { grid-column: 2; justify-self: start; }
-      .pop { width: calc(100% - 24px); }
+    .win.short { height: 620px; }
+    .shell { display: grid; grid-template-columns: 268px minmax(0, 1fr); height: 100%; min-height: 0; }
+    .side { background: var(--color-sidebar-solid); display: flex; flex-direction: column; padding: 0 8px 8px; min-height: 0; }
+    .side-top { height: 52px; display: flex; align-items: center; padding: 0 8px 0 72px; }
+    .lights { position: absolute; left: 18px; top: 20px; display: flex; gap: 8px; }
+    .lights i { width: 12px; height: 12px; border-radius: 50%; background: var(--color-border-strong); }
+    .brand { display: flex; align-items: center; gap: 8px; padding: 6px 8px 10px; font-weight: 600; }
+    .nav a { display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: var(--radius-sm); color: var(--color-text-soft); text-decoration: none; }
+    .nav a[aria-current] { background: var(--color-active); color: var(--color-text); }
+    .nav svg { width: 15px; height: 15px; opacity: .75; }
+    .side-foot { margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 8px; border-radius: var(--radius-md); }
+    .side-foot .who { min-width: 0; font-size: var(--text-sm); line-height: 18px; }
+    .side-foot .who span { display: block; color: var(--color-text-muted); font-size: var(--text-xs); }
+    .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+    .topbar { height: 52px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 16px; border-bottom: 1px solid var(--color-border-soft); }
+    .orgchip { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 8px 0 6px; border-radius: var(--radius-sm); border: 0; background: none; cursor: pointer; font-weight: 500; }
+    .orgchip:hover, .orgchip[aria-expanded="true"] { background: var(--color-hover); }
+    .orgchip .chev { width: 12px; height: 12px; color: var(--color-text-muted); }
+    .boundary { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 10px; border-radius: 999px; font-size: var(--text-xs); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); white-space: nowrap; max-width: 60%; overflow: hidden; }
+    .boundary .bs { display: none; }
+    @container (max-width: 1100px) { .boundary .bw { display: none; } .boundary .bs { display: inline; } }
+    .boundary[data-where="hosted"] { color: var(--color-warning); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-warning) 35%, transparent); background: var(--color-warning-soft); }
+    .boundary[data-where="local"] { color: var(--color-success); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: none; }
+    .page { flex: 1; min-height: 0; overflow: auto; container-type: inline-size; }
+    .chat-scroll, .chat > .chat-col { container-type: inline-size; }
+    .page-in { max-width: 920px; margin: 0 auto; padding: 24px 32px 48px; }
+    .page-head { display: flex; align-items: flex-end; gap: 16px; margin-bottom: 20px; }
+    .page-head h1 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0; }
+    .page-head p { margin: 2px 0 0; color: var(--color-text-soft); font-size: var(--text-sm); }
+    .page-head .act { margin-left: auto; }
+
+    /* ---------- Primitives ---------- */
+    .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: var(--radius-sm); border: 0; cursor: pointer; font-size: var(--text-base); font-weight: 500; white-space: nowrap; transition: background-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease; }
+    .btn.lg { height: 36px; padding: 0 16px; }
+    .btn.sm { height: 28px; padding: 0 10px; font-size: var(--text-sm); }
+    .btn.primary { background: var(--color-accent); color: var(--color-on-accent); }
+    .btn.primary:hover { background: var(--color-accent-hover); }
+    .btn.secondary { background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .btn.secondary:hover { background: var(--color-hover); }
+    .btn.ghost { background: none; color: var(--color-text-soft); }
+    .btn.ghost:hover { background: var(--color-hover); color: var(--color-text); }
+    .btn[disabled] { opacity: .45; cursor: not-allowed; }
+    .link { border: 0; background: none; padding: 0; cursor: pointer; color: var(--color-text-soft); text-decoration: underline; text-decoration-color: var(--color-border-strong); text-underline-offset: 3px; }
+    .link:hover { color: var(--color-text); text-decoration-color: currentColor; }
+    .muted { color: var(--color-text-muted); }
+    .soft { color: var(--color-text-soft); }
+    .ok { color: var(--color-success); }
+    .leaves { color: var(--color-warning); }
+    .sm { font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .xs { font-size: var(--text-xs); line-height: var(--lh-xs); }
+    .rows { list-style: none; margin: 0; padding: 0; }
+    .rows > li + li { border-top: 1px solid var(--color-border-soft); }
+    .sec-h { display: flex; align-items: baseline; gap: 12px; margin: 32px 0 4px; }
+    .sec-h h2 { font-size: var(--text-md); line-height: var(--lh-md); font-weight: 500; margin: 0; }
+    .sec-h .act { margin-left: auto; }
+    .sec-sub { margin: 0 0 8px; color: var(--color-text-muted); font-size: var(--text-sm); }
+
+    /* Service and reference marks (production .svc-mark) */
+    .mk { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 6px; font-size: 10px; font-weight: 600; color: #fff; letter-spacing: 0; }
+    .mk.sm { width: 17px; height: 17px; border-radius: 5px; font-size: 9px; }
+    .mk.lg { width: 30px; height: 30px; border-radius: 8px; font-size: 12px; }
+    .mk[data-s="intune"] { background: var(--color-svc-intune); }
+    .mk[data-s="entra"] { background: var(--color-svc-entra); }
+    .mk[data-s="defender"] { background: var(--color-svc-defender); }
+    .mk[data-s="ref"] { background: var(--color-surface); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .mk[data-off] { background: transparent; color: var(--color-text-muted); box-shadow: inset 0 0 0 1px var(--color-border-strong); outline: 1px dashed transparent; }
+    .mk[data-off] { box-shadow: none; border: 1px dashed var(--color-border-strong); }
+
+    /* Status: dot plus words. Colour only for local (green) and leaves (amber). */
+    .st { display: inline-flex; align-items: center; gap: 6px; font-size: var(--text-sm); color: var(--color-text-soft); white-space: nowrap; }
+    .st .dot { background: var(--color-text-faint); }
+    .st[data-t="ok"] .dot { background: var(--color-success); }
+    .st[data-t="part"] .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--color-text-muted); }
+    .st[data-t="off"] { color: var(--color-text-muted); }
+    .st[data-t="off"] .dot { background: transparent; box-shadow: inset 0 0 0 1px var(--color-text-faint); }
+    .st[data-t="leaves"] { color: var(--color-warning); }
+    .st[data-t="leaves"] .dot { background: var(--color-warning); }
+
+    /* Device tile: the one shared figure. Accent fill, on-accent mark. */
+    .device { display: grid; place-items: center; background: var(--color-accent); color: var(--color-on-accent); flex: none; }
+    .device svg { width: 46%; height: auto; }
+    .device.xl { width: 104px; height: 104px; border-radius: 28px; box-shadow: 0 18px 40px -18px rgba(0,0,0,.45); }
+    .device.lg { width: 72px; height: 72px; border-radius: 20px; box-shadow: 0 12px 28px -14px rgba(0,0,0,.4); }
+    .device.sm { width: 40px; height: 40px; border-radius: 12px; }
+
+    /* ---------- Scan (sections A and B) ---------- */
+    .scan { display: flex; flex-direction: column; height: 100%; }
+    .scan-top { height: 52px; flex: none; display: flex; align-items: center; gap: 8px; padding: 0 16px 0 92px; }
+    .scan-top .wm { font: 500 var(--text-md)/1 var(--font-serif); }
+    .scan-body { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 48px; align-items: center; padding: 0 48px 24px; max-width: 1180px; width: 100%; margin: 0 auto; }
+    @container (max-width: 1000px) { .scan-body { gap: 32px; padding: 0 32px 20px; } }
+    .stage { position: relative; width: min(100%, 520px, calc(100cqh - 100px)); aspect-ratio: 1; margin: 0 auto; }
+    .stage svg.orbit { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .orbit circle.o { fill: none; stroke: var(--color-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+    .orbit circle.o2 { fill: none; stroke: var(--color-border-soft); stroke-dasharray: 2 4; vector-effect: non-scaling-stroke; }
+    .orbit .ring { fill: none; stroke: var(--color-text-faint); stroke-width: 1; vector-effect: non-scaling-stroke; transform-origin: 50px 50px; opacity: 0; }
+    .scan[data-phase="scanning"] .orbit .ring { animation: ring-out 1.8s var(--ease-out) infinite; }
+    .scan[data-phase="scanning"] .orbit .ring + .ring { animation-delay: .9s; }
+    @keyframes ring-out { from { transform: scale(.32); opacity: .5; } to { transform: scale(1.08); opacity: 0; } }
+    .sweep { position: absolute; inset: 11%; border-radius: 50%; background: conic-gradient(from 0deg, transparent 0deg 320deg, color-mix(in srgb, var(--color-text) 9%, transparent) 360deg); transition: opacity 300ms ease; }
+    .scan[data-phase="scanning"] .sweep { animation: turn 2.2s linear infinite; }
+    .scan[data-phase="settled"] .sweep { opacity: 0; }
+    @keyframes turn { to { transform: rotate(360deg); } }
+    .orbit path.ln { fill: none; stroke-width: .3; stroke-linecap: round; stroke-dasharray: 1 1; stroke-dashoffset: 1; transition: stroke-dashoffset var(--dur-enter) var(--ease-in-out), stroke-width var(--dur-state) ease, opacity var(--dur-state) ease; opacity: 0; }
+    .orbit path.ln[data-on] { stroke-dashoffset: 0; opacity: .5; }
+    .orbit path.ln[data-where="local"] { stroke: var(--color-success); }
+    .orbit path.ln[data-where="hosted"] { stroke: var(--color-warning); }
+    .orbit path.ln[data-sel] { opacity: 1; stroke-width: .45; }
+    .stage .device { position: absolute; left: 50%; top: 50%; translate: -50% -50%; z-index: 2; }
+    .scan .device.xl { width: 21%; height: 21%; border-radius: 27%; }
+    .scan[data-phase="intro"] .stage .device { scale: .92; opacity: 0; }
+    .stage .device { transition: scale 360ms var(--ease-spring), opacity 240ms ease; }
+    .node { position: absolute; z-index: 3; display: flex; flex-direction: column; align-items: center; width: 132px; translate: -50% -22px; opacity: 0; scale: .8; transition: opacity 240ms ease, scale 320ms var(--ease-spring); border: 0; background: none; padding: 0; cursor: default; }
+    .node[data-in] { opacity: 1; scale: 1; }
+    .node .nd { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font-size: var(--text-sm); font-weight: 600; background: var(--color-bg); color: var(--color-text-muted); box-shadow: inset 0 0 0 1.5px var(--color-border-strong); transition: background-color var(--dur-state) ease, color var(--dur-state) ease, box-shadow var(--dur-state) ease; }
+    .node .lb { margin-top: 6px; padding: 0 6px; border-radius: 6px; background: var(--color-bg); font-size: var(--text-sm); line-height: 18px; font-weight: 500; white-space: nowrap; }
+    .node .ss { padding: 0 6px; border-radius: 6px; background: var(--color-bg); font-size: var(--text-xs); line-height: 16px; color: var(--color-text-muted); white-space: nowrap; }
+    .node[data-t="checking"] .nd { box-shadow: inset 0 0 0 1.5px var(--color-border-strong); animation: breathe 1.1s ease-in-out infinite; }
+    .node[data-t="checking"] .nd { background: var(--color-bg) radial-gradient(circle, transparent 60%, transparent 61%); }
+    @keyframes breathe { 50% { opacity: .5; } }
+    .node[data-t="installed"] .nd { color: var(--color-success); box-shadow: inset 0 0 0 1.5px var(--color-success); }
+    .node[data-t="ready-local"] .nd { background: var(--color-success); color: var(--color-bg); box-shadow: none; }
+    .node[data-t="ready-hosted"] .nd { background: var(--color-warning-soft); color: var(--color-warning); box-shadow: inset 0 0 0 1.5px var(--color-warning); }
+    .node[data-t="none"] .nd { color: var(--color-text-faint); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .node[data-t="none"] .lb { color: var(--color-text-muted); font-weight: 400; }
+    .scan[data-phase="settled"] .node[data-t="none"] .ss { display: none; }
+    .scan[data-phase="settled"] .node[data-t="none"] .nd { width: 32px; height: 32px; font-size: var(--text-xs); margin: 6px 0; }
+    .node[data-pop] .nd { animation: pop 280ms var(--ease-spring); }
+    @keyframes pop { 40% { transform: scale(1.1); } }
+    .node[data-pick] { cursor: pointer; }
+    .node[data-sel] .nd { outline: 2px solid var(--color-text); outline-offset: 3px; }
+    .scan-col { min-width: 0; max-width: 440px; align-self: center; }
+    .scan-col h1 { font: 500 var(--text-display)/var(--lh-display) var(--font-serif); margin: 0; letter-spacing: 0; text-wrap: balance; }
+    .scan-col .lead { margin: 0 0 6px; font-size: var(--text-sm); color: var(--color-text-muted); }
+    .scan-col .intro { margin: 10px 0 0; color: var(--color-text-soft); max-width: 44ch; }
+    .progress { margin: 24px 0 8px; display: flex; align-items: center; gap: 12px; font-size: var(--text-sm); color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+    .segs { display: grid; grid-template-columns: repeat(8, 1fr); gap: 3px; flex: 1; max-width: 200px; }
+    .segs i { height: 3px; border-radius: 2px; background: var(--color-border); transition: background-color var(--dur-state) ease; }
+    .segs i[data-d] { background: var(--color-text-muted); }
+    .checks li { display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: center; gap: 10px; height: 32px; font-size: var(--text-sm); }
+    .checks .m { width: 8px; height: 8px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--color-border-strong); }
+    .checks li[data-t="checking"] .m { animation: breathe 1.1s ease-in-out infinite; }
+    .checks li[data-t="installed"] .m { box-shadow: inset 0 0 0 1.5px var(--color-success); }
+    .checks li[data-t="ready-local"] .m { background: var(--color-success); box-shadow: none; }
+    .checks li[data-t="ready-hosted"] .m { background: var(--color-warning); box-shadow: none; }
+    .checks li[data-t="none"] .m { box-shadow: inset 0 0 0 1px var(--color-border); }
+    .checks .s { color: var(--color-text-soft); }
+    .checks li[data-t="none"] .s, .checks li[data-t="checking"] .s { color: var(--color-text-muted); }
+    .result > * { animation: rise var(--dur-enter) var(--ease-out) both; }
+    .result > *:nth-child(2) { animation-delay: 60ms; } .result > *:nth-child(3) { animation-delay: 120ms; } .result > *:nth-child(4) { animation-delay: 180ms; } .result > *:nth-child(5) { animation-delay: 240ms; } .result > *:nth-child(6) { animation-delay: 300ms; }
+    @keyframes rise { from { opacity: 0; transform: translateY(8px); } }
+    .choices { margin: 20px 0 0; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); padding: 4px; }
+    .choice { display: grid; grid-template-columns: 18px minmax(0, 1fr) auto; gap: 12px; align-items: start; width: 100%; padding: 10px 12px; border: 0; border-radius: var(--radius-md); background: none; text-align: left; cursor: pointer; }
+    .choice:hover { background: var(--color-hover); }
+    .choice[aria-checked="true"] { background: var(--color-active); }
+    .radio { width: 16px; height: 16px; margin-top: 2px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--color-border-strong); }
+    .choice[aria-checked="true"] .radio { box-shadow: inset 0 0 0 5px var(--color-accent); }
+    .choice .n { font-weight: 500; }
+    .choice .w { display: block; font-size: var(--text-sm); line-height: var(--lh-sm); color: var(--color-text-soft); }
+    .choice .w.leaves { color: var(--color-warning); }
+    .choice .r { font-size: var(--text-xs); color: var(--color-text-muted); padding-top: 2px; }
+    .scan-act { margin-top: 16px; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+    .scan-act .note { flex-basis: 100%; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .scan-alt { margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--color-border-soft); display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--text-sm); }
+    .scan-foot { display: flex; gap: 16px; margin-top: 10px; font-size: var(--text-xs); color: var(--color-text-muted); }
+    details.ran summary { cursor: pointer; list-style: none; color: var(--color-text-muted); }
+    details.ran summary::-webkit-details-marker { display: none; }
+    details.ran summary::after { content: " +"; }
+    details.ran[open] summary::after { content: " \2212"; }
+
+    /* ---------- Chat (C, D, E) ---------- */
+    .chat { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+    .chat-scroll { flex: 1; min-height: 0; overflow: auto; }
+    .chat-col { max-width: 720px; margin: 0 auto; padding: 0 32px; }
+    .home { padding-top: 9vh; padding-top: min(96px, 12cqh); }
+    .home h1 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0; }
+    .home .sub { margin: 4px 0 20px; color: var(--color-text-soft); }
+    .composer { border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-composer); padding: 12px 12px 8px 14px; }
+    .composer .ph { color: var(--color-text-muted); min-height: 24px; }
+    .composer .ph.typed { color: var(--color-text); }
+    .composer .bar { display: flex; align-items: center; gap: 8px; margin-top: 10px; font-size: var(--text-sm); color: var(--color-text-soft); }
+    .composer .send { margin-left: auto; width: 28px; height: 28px; border-radius: 8px; border: 0; background: var(--color-accent); color: var(--color-on-accent); display: grid; place-items: center; }
+    .composer .send[disabled] { background: var(--color-active); color: var(--color-text-muted); }
+    .composer .model { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 8px; border-radius: 7px; }
+    .composer .model:hover { background: var(--color-hover); }
+    .boundary-line { margin: 8px 0 0; font-size: var(--text-xs); color: var(--color-text-muted); text-align: center; }
+    .boundary-line.leaves { color: var(--color-warning); }
+    .starters { margin-top: 28px; display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+    @container (max-width: 600px) { .starters { grid-template-columns: 1fr; gap: 16px; } }
+    .starters h3 { display: flex; align-items: center; gap: 8px; margin: 0 0 4px; font-size: var(--text-sm); font-weight: 500; color: var(--color-text-soft); }
+    .starter { display: block; width: 100%; padding: 9px 10px; margin: 0 -10px; border: 0; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; line-height: 20px; }
+    .starter:hover { background: var(--color-hover); }
+    .starter + .starter { margin-top: 0; }
+    .refs { margin-top: 28px; padding-top: 16px; border-top: 1px solid var(--color-border-soft); }
+    .refs .sec-h { margin: 0 0 2px; }
+    .refs .sec-h h2 { font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .ref { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 8px 0; }
+    .ref .h { display: block; font-size: var(--text-xs); color: var(--color-text-muted); line-height: 16px; }
+    .bubble { margin: 24px 0 0 auto; width: fit-content; max-width: 80%; padding: 8px 14px; border-radius: 16px; background: var(--color-bubble); }
+    .ans-meta { margin: 24px 0 8px; display: flex; align-items: center; gap: 8px; font-size: var(--text-sm); color: var(--color-text-muted); }
+    .needs { border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border); padding: 16px 18px; }
+    .needs-h { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; }
+    .needs h3 { margin: 4px 0 2px; font-size: var(--text-md); line-height: var(--lh-md); font-weight: 500; }
+    .needs p { margin: 0; color: var(--color-text-soft); }
+    .needs .perm { margin: 14px 0 0 42px; font-size: var(--text-sm); }
+    .needs .perm summary { cursor: pointer; color: var(--color-text-soft); }
+    .needs .perm ul { margin: 8px 0 0; padding: 0; list-style: none; display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 6px 12px; }
+    .needs .perm code { color: var(--color-text-soft); }
+    .needs .acts { margin: 16px 0 0 42px; display: flex; flex-wrap: wrap; gap: 8px; }
+    .needs .fine { margin: 12px 0 0 42px; font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); }
+    .confirm { border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-pop); padding: 16px 18px 14px; margin-bottom: 10px; animation: rise var(--dur-state) var(--ease-out) both; }
+    .confirm h3 { margin: 0; font-size: var(--text-base); font-weight: 500; }
+    .confirm p { margin: 4px 0 0; color: var(--color-text-soft); font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .confirm .where { display: grid; grid-template-columns: auto 1fr; gap: 4px 16px; margin: 12px 0 0; font-size: var(--text-sm); }
+    .confirm .where dt { color: var(--color-text-muted); }
+    .confirm .where dd { margin: 0; }
+    .confirm .acts { display: flex; align-items: center; gap: 8px; margin-top: 14px; }
+    .confirm .acts .link { margin-left: auto; font-size: var(--text-sm); }
+
+    /* ---------- Reach map (F, G) ---------- */
+    .reach { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 168px minmax(0, 1fr); column-gap: 56px; align-items: center; padding: 20px 24px 28px; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .reach svg.links { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+    .reach svg.links path { fill: none; stroke: var(--color-text-faint); stroke-width: 1.25; stroke-linecap: round; }
+    .reach svg.links path[data-dir="out"] { stroke-dasharray: 3 4; }
+    .reach svg.links path[data-off] { stroke: var(--color-border); }
+    .reach svg.links path[data-where="hosted"] { stroke: var(--color-warning); stroke-dasharray: none; }
+    .reach svg.links path.draw { animation: draw var(--dur-enter) var(--ease-in-out) both; }
+    @keyframes draw { from { stroke-dashoffset: var(--len); } }
+    .reach .grp h3 { margin: 0 0 4px; font-size: var(--text-xs); line-height: var(--lh-xs); font-weight: 400; color: var(--color-text-muted); }
+    .reach .grp + .grp { margin-top: 12px; }
+    .reach .zone > h2 { margin: 0 0 8px; font-size: var(--text-sm); font-weight: 500; }
+    .ri { position: relative; display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: center; height: 32px; font-size: var(--text-sm); }
+    .ri .t { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ri[data-off] .t { color: var(--color-text-muted); }
+    .zone.in .ri { padding-right: 0; }
+    .hub { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
+    .hub > .cap { position: absolute; top: 100%; left: 50%; translate: -50% 0; width: 168px; margin-top: 10px; }
+    .hub .hn { font-size: var(--text-sm); font-weight: 500; }
+    .hub .hm { font-size: var(--text-xs); line-height: var(--lh-xs); color: var(--color-text-muted); max-width: 168px; }
+    .hub code { color: var(--color-text-soft); }
+    @container (max-width: 760px) {
+      .reach { grid-template-columns: 1fr; row-gap: 0; padding: 16px 18px; }
+      .reach svg.links { display: none; }
+      .hub { flex-direction: row; text-align: left; align-items: center; gap: 12px; margin: 14px 0; padding: 12px 0; border-block: 1px solid var(--color-border-soft); }
+      .hub > .cap { position: static; translate: none; width: auto; margin: 0; }
+      .hub .device.lg { width: 40px; height: 40px; border-radius: 12px; }
+      .hub .hm { max-width: none; }
+      .zone.in .ri { padding-left: 0; }
     }
+    .svc { display: grid; grid-template-columns: 30px minmax(0, 1fr) 132px 120px; gap: 4px 14px; align-items: center; padding: 14px 0; }
+    @container (max-width: 760px) { .svc { grid-template-columns: 30px minmax(0, 1fr) auto; } .svc .st { grid-column: 2; grid-row: 2; } .svc .a { grid-column: 3; grid-row: 1 / span 2; } }
+    .svc .nm { font-weight: 500; }
+    .svc .ds { font-size: var(--text-sm); color: var(--color-text-muted); }
+    .svc .a { justify-self: end; }
+    .svc .ds.leaves { color: var(--color-warning); }
+    .parts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: var(--text-xs); color: var(--color-text-soft); }
+    .parts span { display: inline-flex; align-items: center; gap: 6px; }
+    .parts span::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-faint); }
+    .parts span[data-off] { color: var(--color-text-muted); }
+    .parts span[data-off]::before { background: transparent; box-shadow: inset 0 0 0 1px var(--color-text-faint); }
+    .m365 { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--color-border-soft); font-size: var(--text-sm); }
+    .m365 b { font-weight: 500; font-size: var(--text-base); }
+    .m365 .soft { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .m365 .a { margin-left: auto; }
+    .empty { display: grid; justify-items: center; text-align: center; padding: 48px 24px 40px; border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .empty-fig { display: flex; align-items: center; gap: 20px; margin-bottom: 24px; }
+    .empty-fig .col { display: grid; gap: 8px; }
+    .empty-fig .wire { width: 40px; border-top: 1.25px dashed var(--color-border-strong); }
+    .empty h2 { font: 500 var(--text-lg)/var(--lh-lg) var(--font-serif); margin: 0; }
+    .empty p { margin: 6px 0 0; max-width: 52ch; color: var(--color-text-soft); }
+    .empty .acts { margin-top: 20px; display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+
+    /* ---------- Switcher (H) ---------- */
+    .menu { position: absolute; z-index: 20; width: 320px; padding: 6px; border-radius: var(--radius-lg); background: var(--color-bg-elevated); box-shadow: var(--shadow-pop); }
+    .menu .search { display: flex; align-items: center; gap: 8px; height: 32px; margin: 0 0 4px; padding: 0 10px; border-radius: var(--radius-sm); background: var(--color-hover); color: var(--color-text-muted); font-size: var(--text-sm); }
+    .menu .lbl { padding: 6px 10px 4px; font-size: var(--text-xs); color: var(--color-text-muted); }
+    .mi { display: grid; grid-template-columns: 24px minmax(0, 1fr) 16px; gap: 10px; align-items: center; width: 100%; padding: 7px 10px; border: 0; border-radius: var(--radius-sm); background: none; text-align: left; cursor: pointer; }
+    .mi:hover, .mi[data-hl] { background: var(--color-hover); }
+    .mi .d { display: block; font-size: var(--text-xs); line-height: 16px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .av { width: 24px; height: 24px; border-radius: 7px; display: grid; place-items: center; font-size: 10px; font-weight: 600; background: var(--color-bg-raised); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .av.none { background: none; box-shadow: none; border: 1px dashed var(--color-border-strong); }
+    .menu hr { border: 0; border-top: 1px solid var(--color-border-soft); margin: 6px 4px; }
+    .mi.plain { grid-template-columns: 24px 1fr; font-size: var(--text-sm); color: var(--color-text-soft); }
+    .mi.plain svg { width: 14px; height: 14px; justify-self: center; }
+
+    /* ---------- Agents, review, schedules (I, J, K) ---------- */
+    .tabs { display: flex; align-items: center; gap: 4px; margin-bottom: 12px; }
+    .tabs .t { height: 28px; padding: 0 10px; border-radius: var(--radius-sm); font-size: var(--text-sm); color: var(--color-text-soft); display: inline-flex; align-items: center; }
+    .tabs .t[aria-selected="true"] { background: var(--color-active); color: var(--color-text); font-weight: 500; }
+    .tabs .search { margin-left: auto; width: 220px; height: 30px; border-radius: var(--radius-sm); box-shadow: inset 0 0 0 1px var(--color-border); display: flex; align-items: center; padding: 0 10px; color: var(--color-text-muted); font-size: var(--text-sm); }
+    .agent { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 14px 0; }
+    .agent .nm { font-weight: 500; }
+    .agent .meta { margin-left: 8px; font-size: var(--text-sm); color: var(--color-text-muted); }
+    .agent .ds { grid-column: 1; font-size: var(--text-sm); color: var(--color-text-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .agent .needs-row { grid-column: 1; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+    .agent .a { grid-column: 2; grid-row: 1 / span 3; display: flex; align-items: center; gap: 6px; }
+    .chip { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px 0 3px; border-radius: 6px; font-size: var(--text-xs); color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-border-soft); }
+    .chip.plain { padding-left: 8px; }
+    .chip[data-off] { color: var(--color-text-muted); box-shadow: none; border: 1px dashed var(--color-border-strong); }
+    .rw { font-size: var(--text-xs); color: var(--color-text-muted); }
+    .notice { display: flex; align-items: center; gap: 12px; padding: 10px 14px; border-radius: var(--radius-md); font-size: var(--text-sm); background: var(--color-surface); box-shadow: inset 0 0 0 1px var(--color-border-soft); color: var(--color-text-soft); }
+    .notice .a { margin-left: auto; display: flex; gap: 4px; }
+    .scrim { position: absolute; inset: 52px 0 0 0; background: var(--color-scrim); z-index: 30; display: grid; place-items: center; padding: 24px; }
+    .dialog { width: min(560px, 100%); max-height: 100%; overflow: auto; border-radius: var(--radius-xl); background: var(--color-bg-elevated); box-shadow: var(--shadow-dialog); }
+    .dialog header { padding: 20px 24px 0; }
+    .dialog header h2 { margin: 0; font-size: var(--text-md); line-height: var(--lh-md); font-weight: 500; }
+    .dialog header p { margin: 0; color: var(--color-text-muted); font-size: var(--text-sm); }
+    .dialog .body { padding: 16px 24px 4px; }
+    .dialog footer { display: flex; align-items: center; gap: 8px; padding: 16px 24px 20px; }
+    .dialog footer .hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-right: auto; }
+    .block { display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 12px; padding: 14px 16px; border-radius: var(--radius-lg); background: var(--color-bg); box-shadow: inset 0 0 0 1px var(--color-border); }
+    .block h3 { margin: 4px 0 2px; font-size: var(--text-base); font-weight: 500; }
+    .block p { margin: 0; color: var(--color-text-soft); font-size: var(--text-sm); line-height: var(--lh-sm); }
+    .block .acts { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+    .facts { display: grid; grid-template-columns: 120px minmax(0, 1fr); margin: 16px 0 0; font-size: var(--text-sm); }
+    .facts dt, .facts dd { padding: 9px 0; border-top: 1px solid var(--color-border-soft); margin: 0; }
+    .facts dt { color: var(--color-text-muted); }
+    .facts dd .xs { display: block; }
+    .settings-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 16px; align-items: center; padding: 14px 0; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+      .sweep, .orbit .ring { display: none; }
+    }
+    @media (max-width: 720px) { .shell { grid-template-columns: 0 1fr; } .side { display: none; } }
   </style>
 </head>
 <body>
-  <div class="mockbar">
-    <strong>32 · Connections and first run</strong>
-    <button type="button" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'light' ? 'dark' : 'light'">Light / dark</button>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <symbol id="oa" viewBox="0 0 64 64"><g fill="none" stroke="currentColor" stroke-width="7" stroke-linecap="round"><circle cx="17" cy="32" r="11.5"/><circle cx="46" cy="32" r="11.5"/><path d="M57.5 20.5v23"/></g></symbol>
+    <symbol id="i-chat" viewBox="0 0 16 16"><path d="M2.5 3.5h11v7h-6l-3 2.5v-2.5h-2z" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-agents" viewBox="0 0 16 16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="8" cy="8" r="2" fill="currentColor"/></symbol>
+    <symbol id="i-market" viewBox="0 0 16 16"><path d="M2.5 6.5h11v7h-11zM2 6.5l1.5-3.5h9L14 6.5" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+    <symbol id="i-conn" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="5" height="5" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M1.5 4.5h3M1.5 11.5h3M11.5 8h3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-runs" viewBox="0 0 16 16"><path d="M1.5 8.5h3l2-5 3 9 2-4h3" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" stroke-linecap="round"/></symbol>
+    <symbol id="i-changes" viewBox="0 0 16 16"><circle cx="4.5" cy="4" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="4.5" cy="12" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.5" cy="6" r="1.6" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M4.5 5.6v4.8M11.5 7.6c0 2-2 2.4-5.4 3.4" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 12 12"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-up" viewBox="0 0 16 16"><path d="M8 13V3.5M4 7.5l4-4 4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 16 16"><path d="M8 3v10M3 8h10" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+    <symbol id="i-search" viewBox="0 0 16 16"><circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M10.5 10.5l3 3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-gear" viewBox="0 0 16 16"><circle cx="8" cy="8" r="2.2" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M8 1.8v2M8 12.2v2M1.8 8h2M12.2 8h2M3.6 3.6l1.4 1.4M11 11l1.4 1.4M3.6 12.4L5 11M11 5l1.4-1.4" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 16 16"><path d="M6 2.5h4M6.8 2.5v4L3 12.6c-.4.7.1 1.4.9 1.4h8.2c.8 0 1.3-.7.9-1.4L9.2 6.5v-4" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></symbol>
+  </svg>
+
+  <div class="docbar">
+    <b>Mockup 32, revision 2</b>
+    <span class="seg" role="group" aria-label="Theme">
+      <button type="button" data-theme-set="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme-set="dark" aria-pressed="false">Dark</button>
+    </span>
+    <nav aria-label="Sections">
+      <a href="#a">A Scan</a><a href="#b">B Result</a><a href="#c">C Chat</a><a href="#d">D Hosted</a><a href="#e">E Needs</a><a href="#f">F Connections</a><a href="#g">G None</a><a href="#h">H Switcher</a><a href="#i">I Agents</a><a href="#j">J Review</a><a href="#k">K Schedules</a><a href="#l">L Settings</a>
+    </nav>
   </div>
 
-  <div class="page">
-    <header class="intro">
+  <main class="doc">
+    <header>
       <h1>Start with a model. Connect services when a question needs them.</h1>
-      <p>A fresh install no longer asks the admin to sign in, pick sample data, or skip. Chat opens and works for anything that needs no tenant data: docs, KQL, scripts, release notes, end-of-life dates. Microsoft 365 is one connection among several, asked for at the moment a question or agent needs it.</p>
-      <p>The scope in the top bar becomes an organization: the company the admin manages, with whatever services it runs.</p>
+      <p>One figure carries both pull requests: this device in the center, with the models it can use around it on first launch, and the services it reads and the places data goes on Connections. Frames are drawn at the window width you view them at; check them at 1280 and 960 px.</p>
     </header>
 
-    <!-- A -->
-    <section class="section" id="a">
-      <h2>A. First launch with a model on this device</h2>
-      <p class="lede">Ollama is running with OpenAdmin 8B, so it is selected and Chat is ready. The empty state shows what works now, which public references can ground answers, and which services unlock the rest. Nothing is installed or connected yet.</p>
-      <div class="frame">
-        <div class="app">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile none">+</span><div><div class="name">No organization</div><div class="sub">Nothing connected</div></div></div>
-          </aside>
-          <div class="main">
-            <div class="topline"><span class="title">New chat</span><span class="grow"></span><span class="boundary"><span class="dot"></span>local-only · no data leaves this device</span></div>
-            <div class="col empty">
-              <h3>What are you working on?</h3>
-              <p class="sub">Ask about Intune, Entra, Defender, macOS management, KQL or PowerShell. Questions about your own devices and users need a connected service.</p>
-
-              <div class="model-line"><span>Answering with <strong>OpenAdmin 8B</strong> in Ollama on this device.</span><a class="link" href="#">Change model</a></div>
-
-              <div class="starters">
-                <div class="starter"><span class="q">Write a KQL query for failed sign-ins in the last 24 hours</span><span class="need none">Works now</span></div>
-                <div class="starter"><span class="q">Explain Windows Autopatch rings and how they differ from update rings</span><span class="need none">Works now</span></div>
-                <div class="starter locked"><span class="q">Which devices have not synced in 30 days?</span><span class="need"><span class="svc intune">In</span>Needs Intune</span></div>
-                <div class="starter locked"><span class="q">Which guests have not signed in for 90 days?</span><span class="need"><span class="svc entra">En</span>Needs Entra</span></div>
-              </div>
-
-              <div class="suggest">
-                <div class="head"><strong>Ground answers in public references</strong><span>No sign-in. Each one receives words from your questions.</span></div>
-                <div class="row"><span class="svc ref">ML</span><div><div class="t">Microsoft Learn</div><div class="h">Questions go to learn.microsoft.com</div></div><button class="btn small">Add</button></div>
-                <div class="row"><span class="svc ref">KQ</span><div><div class="t">KQL Search</div><div class="h">Questions go to www.kqlsearch.com</div></div><button class="btn small">Add</button></div>
-                <div class="row"><span class="svc ref">IA</span><div><div class="t">IntuneAutomation</div><div class="h">Questions go to www.intuneautomation.com</div></div><button class="btn small">Add</button></div>
-                <div class="more">Three more in the <a class="link" href="#">Marketplace</a>.</div>
-              </div>
-            </div>
-            <div class="composer"><div class="ph">Ask a question</div><div class="row"><span>OpenAdmin 8B · local</span><span class="grow"></span><button class="send" aria-label="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button></div></div>
-            <p class="trust">No organization connected. Chat answers from the model and the references you add.</p>
+    <!-- A + B: the scan -->
+    <section class="sect" id="a">
+      <h2>A. First launch: the model scan</h2>
+      <p>The orbit is the one bold moment of the first launch. The column beside it stays quiet: a title, one sentence, progress, and a compact check list that the screen reader announces. <button class="link" type="button" id="replay">Replay the scan</button></p>
+      <div class="win" id="scan-a">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="scan" data-phase="intro">
+          <div class="scan-top"><svg width="22" height="22"><use href="#oa"/></svg><span class="wm">OpenAdminOS</span><span style="flex:1"></span><button class="btn ghost sm" type="button" data-skip>Skip scan</button></div>
+          <div class="scan-body">
+            <div class="stage" data-stage></div>
+            <div class="scan-col" data-col></div>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>No welcome screen. A launch with nothing configured opens <code>/chat</code> directly; the setup dialog no longer opens on its own.</li>
-        <li>"Works now" starters send immediately. "Needs Intune" starters can be sent too; the answer asks for that service (section D).</li>
-        <li>The reference list hides after the admin adds one or dismisses it. Adding opens the existing Marketplace install review with its acknowledgement; nothing is added by default.</li>
-        <li>Starters come from the service registry's example questions, so new services bring their own.</li>
+        <li>Sequence, about 2.4 s: device tile settles (360 ms spring), orbit and two radiating rings start, the sweep turns once every 2.2 s, nodes enter staggered 60 ms as their check starts, each node resolves with a 280 ms pop and, when found, a 420 ms link draw. Settle: sweep and rings fade in 300 ms, not-found nodes shrink to 32 px and drop their status line, the result column rises in 60 ms steps.</li>
+        <li>Skip scan, a click on the stage, or any key settles at once. Reduced motion: no rings, sweep, scale or draw; nodes and the result appear in their final state, progress text still updates.</li>
+        <li>Labels sit on a background plate so the orbit line never crosses text. Not-found labels use text-muted, never opacity.</li>
       </ul>
     </section>
 
-    <!-- B -->
-    <section class="section" id="b">
-      <h2>B. First launch with no model</h2>
-      <p class="lede">The model is the only thing Chat cannot work without, so it is the only setup shown up front. A signed-in Claude Code is detected but needs a click, because it sends prompts off the device. Sample data is the escape hatch: it is the one path that needs no model.</p>
-      <div class="frame">
-        <div class="app" style="min-height: 600px;">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile none">+</span><div><div class="name">No organization</div><div class="sub">Nothing connected</div></div></div>
-          </aside>
-          <div class="main">
-            <div class="topline"><span class="title">New chat</span><span class="grow"></span><span class="boundary none"><span class="dot"></span>No model selected</span></div>
-            <div class="col center">
-              <div class="model-setup">
-                <h4>Choose a model to answer with</h4>
-                <p>OpenAdminOS runs the conversation; the model writes the answers. You can change it at any time.</p>
-                <div class="option"><div><div class="t">OpenAdmin 8B on this device</div><div class="d">Installs Ollama and OpenAdmin 8B, a model trained for Intune and Entra work.</div><div class="where">Nothing leaves this device</div></div><button class="btn primary">Install</button></div>
-                <div class="option"><div><div class="t">Claude Code, signed in as admin@woodgrove.com</div><div class="d">Uses your existing Claude Code sign-in. No API key is stored.</div><div class="where">Prompts go to Anthropic API · US</div></div><button class="btn">Use Claude Code</button></div>
-                <div class="option"><div><div class="t">Another provider</div><div class="d">LM Studio, Codex, Azure OpenAI and others.</div></div><button class="btn ghost">Show all</button></div>
-              </div>
-              <p class="escape">Not ready to set up a model? <a class="link" href="#">Preview with sample data</a> from a fictional company.</p>
-            </div>
-            <div class="composer"><div class="ph">Choose a model to start asking</div><div class="row"><span>No model</span><span class="grow"></span></div></div>
-            <p class="trust">Read-only by default. Write actions always ask for your confirmation.</p>
+    <section class="sect" id="b">
+      <h2>B. First launch: choose what answers</h2>
+      <p>One question, one filled action. Models on this device come first and the first one that can answer is preselected; signed-in tools are listed with where prompts go and are never preselected. Picking a row highlights its link in the orbit; picking a node selects the row.</p>
+      <div class="win" id="scan-b">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="scan" data-phase="settled">
+          <div class="scan-top"><svg width="22" height="22"><use href="#oa"/></svg><span class="wm">OpenAdminOS</span></div>
+          <div class="scan-body">
+            <div class="stage" data-stage></div>
+            <div class="scan-col" data-col></div>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>Provider detection is unchanged: a ready local model is selected automatically; a hosted one is preselected and needs one click.</li>
-        <li>The install row opens the model explorer (#102) with OpenAdmin 8B preselected.</li>
-        <li>Sample data keeps today's pilot behavior: prepared prompts, three agents, a banner on every screen. It becomes a sample organization in the switcher instead of a first-launch choice.</li>
+        <li>Outcome titles: one local model ready, "OpenAdmin 8B is ready on this device" with Open Chat. Several options, as here, "Choose what answers in Chat". Nothing found, "No model on this device yet" with the Ollama command and Show all providers.</li>
+        <li>The action label follows the selection: "Start Ollama and open Chat", "Start LM Studio and open Chat", "Use Claude Code", "Use Codex". Starting shows a 16 px spinner in the button and keeps the label; a failed start puts the reason under the row, not in a banner.</li>
+        <li>"What ran" holds every target and command for review. Scan again lives beside it and in Settings, Providers.</li>
       </ul>
     </section>
 
-    <!-- C -->
-    <section class="section" id="c">
-      <h2>C. Answer from a public reference, no organization</h2>
-      <p class="lede">The admin added KQL Search and Microsoft Learn. The answer shows each lookup and the host it went to. The status strip names the hosts, as it does today whenever a reference is enabled.</p>
-      <div class="frame">
-        <div class="app" style="min-height: 560px;">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
-            <div class="recent">Today</div>
-            <div class="nav on">Failed sign-ins KQL</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile none">+</span><div><div class="name">No organization</div><div class="sub">Nothing connected</div></div></div>
-          </aside>
+    <!-- C: empty chat -->
+    <section class="sect" id="c">
+      <h2>C. Empty Chat, no organization</h2>
+      <p>A title, the composer, then two short columns of starters that say up front which ones work now. Public references sit below as a divided list, never as cards.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
           <div class="main">
-            <div class="topline"><span class="title">Failed sign-ins KQL</span><span class="grow"></span><span class="boundary out"><span class="dot"></span>local model · tool queries to www.kqlsearch.com +1</span></div>
-            <div class="col">
-              <div class="user-msg">Write a KQL query for failed sign-ins in the last 24 hours, grouped by user and error code</div>
-              <div class="answer">
-                <div class="steps">
-                  <div>Searched KQL Search for "failed sign-ins by user and result type" <span class="host">www.kqlsearch.com</span></div>
-                  <div>Read SigninLogs schema on Microsoft Learn <span class="host">learn.microsoft.com</span></div>
-                </div>
-                <p>Failed sign-ins are rows in <code>SigninLogs</code> with a non-zero <code>ResultType</code>. This groups them per user and error, largest groups first:</p>
-<pre>SigninLogs
-| where TimeGenerated > ago(24h)
-| where ResultType != "0"
-| summarize Failures = count(), LastFailure = max(TimeGenerated)
-    by UserPrincipalName, ResultType, ResultDescription
-| sort by Failures desc</pre>
-                <p>Error 50126 is a wrong password and 50074 means MFA was required, so filter those out if you only want sign-ins that were blocked.</p>
-                <div class="cite">Sources: kqlsearch.com community query, learn.microsoft.com SigninLogs reference</div>
-              </div>
-            </div>
-            <div class="composer"><div class="ph">Ask a follow-up</div><div class="row"><span>OpenAdmin 8B · local</span><span class="grow"></span><button class="send" aria-label="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button></div></div>
-            <p class="trust">Local model. MCP queries are written from your current question only. Words from that question can be sent to www.kqlsearch.com and learn.microsoft.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.</p>
-          </div>
-        </div>
-      </div>
-      <ul class="notes">
-        <li>With no organization, the tenant egress filter has no tenant names to block. The query writer still sees only the current question, so anything private the admin types into it can reach the reference host; the shipped disclosure under the composer says so. The install review copy stays as shipped.</li>
-        <li>Running the query against a workspace is a later service (Log Analytics). Today the answer stops at the query text.</li>
-      </ul>
-    </section>
-
-    <!-- D -->
-    <section class="section" id="d">
-      <h2>D. A question that needs a service</h2>
-      <p class="lede">Instead of opening a setup dialog before sending, Chat answers with what it needs: one service, the exact read permissions, and who can approve them. The question is kept, and nothing is asked again until the admin chooses to.</p>
-      <div class="frame">
-        <div class="app" style="min-height: 600px;">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
-            <div class="recent">Today</div>
-            <div class="nav on">Devices not synced</div>
-            <div class="nav">Failed sign-ins KQL</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile none">+</span><div><div class="name">No organization</div><div class="sub">Nothing connected</div></div></div>
-          </aside>
-          <div class="main">
-            <div class="topline"><span class="title">Devices not synced</span><span class="grow"></span><span class="boundary out"><span class="dot"></span>local model · tool queries to www.kqlsearch.com +1</span></div>
-            <div class="col">
-              <div class="user-msg">Which devices have not synced in 30 days?</div>
-              <div class="answer">
-                <div class="gate">
-                  <div class="top"><span class="svc lg intune">In</span><div><div class="t">This needs Intune</div><div class="d">Chat reads your managed devices from Microsoft Intune. Connect Intune to answer this. Your question is kept.</div></div></div>
-                  <ul>
-                    <li><strong style="font-weight: 500; color: var(--text); flex: none; width: 150px;">Devices and configuration</strong><span><code>DeviceManagementManagedDevices.Read.All</code> <code>DeviceManagementConfiguration.Read.All</code> <code>DeviceManagementServiceConfig.Read.All</code> <code>DeviceManagementScripts.Read.All</code> <code>DeviceManagementRBAC.Read.All</code> <code>Device.Read.All</code></span></li>
-                    <li><strong style="font-weight: 500; color: var(--text); flex: none; width: 150px;">Sign-in</strong><span><code>openid</code> <code>profile</code> <code>offline_access</code> <code>User.Read</code></span></li>
-                    <li><span>Other Intune parts (people, apps) can be added now or later.</span></li>
-                  </ul>
-                  <div class="acts"><button class="btn primary">Connect Intune</button><button class="btn">Use our own app registration</button><button class="btn ghost">Ask an admin to approve</button></div>
-                  <div class="fine">Read-only and delegated: OpenAdminOS can only read what these permissions and your own Intune role allow. An admin with at least the Cloud Application Administrator role approves them once for the tenant.</div>
+            <div class="topbar" data-top="none-hosted"></div>
+            <div class="chat">
+              <div class="chat-scroll">
+                <div class="chat-col home">
+                  <h1>What are you working on?</h1>
+                  <p class="sub">Ask about Intune, Entra, Defender, KQL or PowerShell. Questions about your own devices and users need a connected service.</p>
+                  <div class="composer">
+                    <div class="ph">Ask a question</div>
+                    <div class="bar"><span class="model"><span class="dot leaves" style="color:var(--color-warning)"></span>Claude Code<svg width="12" height="12"><use href="#i-chev"/></svg></span><button class="send" disabled aria-label="Send"><svg width="14" height="14"><use href="#i-up"/></svg></button></div>
+                  </div>
+                  <p class="boundary-line leaves">Prompts go to Anthropic API · US. Nothing is connected, so no tenant data is sent.</p>
+                  <div class="starters">
+                    <div>
+                      <h3>Works now</h3>
+                      <button class="starter" type="button">Write a KQL query for failed sign-ins in the last 24 hours</button>
+                      <button class="starter" type="button">Write a PowerShell script that exports Intune compliance policies</button>
+                    </div>
+                    <div>
+                      <h3><span class="mk sm" data-s="intune" data-off>In</span>Needs Intune</h3>
+                      <button class="starter" type="button">Which managed devices have not synced in the last 7 days?</button>
+                      <button class="starter" type="button">Which devices are noncompliant, and why?</button>
+                    </div>
+                  </div>
+                  <div class="refs">
+                    <div class="sec-h"><h2>Ground answers in public references</h2><button class="btn ghost sm act" type="button">Hide</button></div>
+                    <p class="sec-sub xs" style="margin:0 0 4px">No sign-in. Each one receives words from your questions.</p>
+                    <ul class="rows">
+                      <li class="ref"><span class="mk" data-s="ref">ML</span><span>Microsoft Learn<span class="h">Questions go to learn.microsoft.com</span></span><button class="btn secondary sm" type="button">Add</button></li>
+                      <li class="ref"><span class="mk" data-s="ref">KQ</span><span>KQL Search<span class="h">Questions go to www.kqlsearch.com</span></span><button class="btn secondary sm" type="button">Add</button></li>
+                    </ul>
+                    <p class="xs muted" style="margin:6px 0 24px">4 more in the <button class="link" type="button">Marketplace</button></p>
+                  </div>
                 </div>
               </div>
             </div>
-            <div class="composer"><div class="ph">Ask a follow-up</div><div class="row"><span>OpenAdmin 8B · local</span><span class="grow"></span><button class="send" aria-label="Send"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5"/></svg></button></div></div>
-            <p class="trust">No organization connected. Connecting Intune creates one from your Microsoft 365 tenant.</p>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>Extends the not-connected state in 31-service-not-connected.html, which today covers a connected tenant missing a service, to the case with no organization at all.</li>
-        <li>The service card replaces the automatic setup dialog for Chat. Connect Intune opens the existing connect dialog with Intune and its Devices and configuration part preselected, and the app choice still open. Today the dialog preselects no service. An entry point that names a service becomes a new exception, the way the own-registration link already presets the app choice.</li>
-        <li>After a successful connect, the card turns into "Intune connected for Woodgrove. Ask again" (an explicit resume, as today).</li>
-        <li>"Ask an admin to approve" copies a message with the admin consent link for the OpenAdminOS app and the permissions listed, for admins who cannot consent themselves. The own-registration path keeps its script and message.</li>
-        <li>The model decides the question needs tenant data with the same source routing Chat uses today; the host names the service from the registry, without calling Graph.</li>
+        <li>Starters are plain 40 px rows with a hover fill, not bordered cards; a starter in "Needs Intune" still sends, and the answer is the card in E. The service mark is dashed because Intune is not connected.</li>
+        <li>The boundary line under the composer is the single trust sentence on this screen; the long hosted paragraph that sat above the starters is removed.</li>
       </ul>
     </section>
 
-    <!-- E -->
-    <section class="section" id="e">
-      <h2>E. Connections page with the reach map</h2>
-      <p class="lede">One page per organization lists what Chat and agents can read, and where question words go. The map at the top is the trust story in one picture: services feed data in, this device does the work, and everything that leaves it is named: words from questions, run reports, and prompts when the model is hosted.</p>
-      <div class="frame">
-        <div class="app" style="min-height: 820px;">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav on">Connections</div><div class="nav">Runs</div><div class="nav">Changes</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile">C</span><div><div class="name">Woodgrove</div><div class="sub">Intune, Entra</div></div></div>
-          </aside>
+    <!-- D: hosted confirm -->
+    <section class="sect" id="d">
+      <h2>D. First send to a hosted model, no organization</h2>
+      <p>The confirmation opens above the composer, not as a modal, so the typed question stays in view. It names the destination once and lists what goes there.</p>
+      <div class="win short">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
           <div class="main">
-            <div class="topline"><span class="title">Woodgrove connections</span><span class="grow"></span><span class="boundary out"><span class="dot"></span>local model · tool queries to www.kqlsearch.com +1</span></div>
+            <div class="topbar" data-top="none-hosted"></div>
+            <div class="chat">
+              <div class="chat-scroll"></div>
+              <div class="chat-col" style="width:100%;padding-bottom:16px">
+                <div class="confirm" role="dialog" aria-labelledby="cf-t">
+                  <h3 id="cf-t">Send this question to Anthropic?</h3>
+                  <p>Claude Code answers through Anthropic. Nothing is connected, so no tenant data is included.</p>
+                  <dl class="where">
+                    <dt>Goes to</dt><dd class="leaves">Anthropic API · US</dd>
+                    <dt>What is sent</dt><dd>Your question and this conversation</dd>
+                    <dt>Stays here</dt><dd>Chat history</dd>
+                  </dl>
+                  <label class="sm soft" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px"><input type="checkbox" style="margin-top:3px"> Do not ask again for questions without an organization on claude-sonnet-5</label>
+                  <div class="acts"><button class="btn primary" type="button">Send to Anthropic</button><button class="btn ghost" type="button">Cancel</button><button class="link" type="button">Use a model on this device</button></div>
+                </div>
+                <div class="composer">
+                  <div class="ph typed">Which managed devices have not synced in the last 7 days?</div>
+                  <div class="bar"><span class="model"><span class="dot" style="color:var(--color-warning)"></span>Claude Code<svg width="12" height="12"><use href="#i-chev"/></svg></span><button class="send" aria-label="Send"><svg width="14" height="14"><use href="#i-up"/></svg></button></div>
+                </div>
+                <p class="boundary-line leaves">Prompts go to Anthropic API · US. Nothing is connected, so no tenant data is sent.</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Enter on the focused primary sends; Escape cancels and returns focus to the composer. It appears once per conversation and model, as today.</li>
+        <li>With references on, "What is sent" adds "and results from the references you added".</li>
+      </ul>
+    </section>
 
-            <figure class="reach" style="margin: 0;" aria-describedby="reach-desc">
-              <figcaption id="reach-desc" class="sr">Woodgrove reads from Intune, connected, and Entra, 5 of 6 parts, into this device. Defender is not connected. The model runs on this device. Words from questions go to www.kqlsearch.com and learn.microsoft.com. Run reports go to Microsoft Teams under saved delivery rules.</figcaption>
-              <div class="zone">
-                <h5>Read from your services</h5>
-                <div class="items">
-                  <div class="item"><span class="svc intune">In</span>Intune<span class="st ok">Connected</span></div>
-                  <div class="item"><span class="svc entra">En</span>Entra<span class="st">5 of 6 parts</span></div>
-                  <div class="item off"><span class="svc off">De</span>Defender<span class="st">Not connected</span></div>
+    <!-- E: needs a service -->
+    <section class="sect" id="e">
+      <h2>E. A question that needs a service</h2>
+      <p>The answer is the card. Permissions fold behind a count; the three ways forward are ranked by weight.</p>
+      <div class="win short">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat-hist"></aside>
+          <div class="main">
+            <div class="topbar" data-top="none-hosted"></div>
+            <div class="chat">
+              <div class="chat-scroll">
+                <div class="chat-col">
+                  <div class="bubble">Which managed devices have not synced in the last 7 days?</div>
+                  <div class="ans-meta"><svg width="14" height="14"><use href="#oa"/></svg>Chat</div>
+                  <section class="needs" aria-labelledby="nd-t">
+                    <div class="needs-h"><span class="mk lg" data-s="intune" data-off>In</span><div><h3 id="nd-t">This needs Intune</h3><p>Chat reads managed devices from Intune, and nothing is connected yet. Your question is kept and no tenant data was read.</p></div></div>
+                    <details class="perm"><summary>7 read-only Microsoft Graph permissions</summary>
+                      <ul><li class="muted">Devices and configuration</li><li><code>DeviceManagementManagedDevices.Read.All</code>, <code>DeviceManagementConfiguration.Read.All</code>, <code>Device.Read.All</code> and 2 more</li><li class="muted">Sign-in</li><li><code>openid</code> <code>profile</code> <code>offline_access</code> <code>User.Read</code></li></ul>
+                    </details>
+                    <div class="acts"><button class="btn primary" type="button">Connect Intune</button><button class="btn secondary" type="button">Use our own app registration</button><button class="btn ghost" type="button">Ask an admin to approve</button></div>
+                    <p class="fine">Delegated and read-only. OpenAdminOS reads only what these permissions and your own Intune role allow. A Cloud Application Administrator approves them once for the tenant.</p>
+                  </section>
                 </div>
               </div>
-              <div class="lane in"><span>Tenant data</span></div>
-              <div class="device">
-                <div class="t">This device</div>
-                <ul><li>OpenAdmin 8B, local</li><li>Chat history and cache</li><li>Sign-in tokens, encrypted</li></ul>
-              </div>
-              <div class="lane out"><span>Sent out</span></div>
-              <div class="zone right">
-                <h5>Leaves this device</h5>
-                <h6>Words from your questions</h6>
-                <div class="items">
-                  <div class="item"><span class="svc ref">KQ</span>www.kqlsearch.com</div>
-                  <div class="item"><span class="svc ref">ML</span>learn.microsoft.com</div>
-                </div>
-                <h6>Run reports, by delivery rule</h6>
-                <div class="items"><div class="item"><span class="svc ref">T</span>Microsoft Teams</div></div>
-                <h6>Prompts and tenant data</h6>
-                <div class="items"><div class="item off"><span class="svc off"></span>Nowhere, the model is local</div></div>
-              </div>
-            </figure>
-
-            <div class="list-wrap">
-              <h4>Services</h4>
-              <p class="lede">Each service is consented on its own. Agents and Chat use only what is connected here.</p>
-              <div class="group-head"><strong>Microsoft 365</strong><span>woodgrove.onmicrosoft.com · OpenAdminOS app · signed in as admin@woodgrove.com</span></div>
-              <div class="rows">
-                <div class="r"><span class="svc lg intune">In</span><div><div class="t">Intune</div><div class="d">Devices, apps, compliance and configuration</div></div><span class="state ok">Connected</span><button class="btn small ghost">Manage</button></div>
-                <div class="r"><span class="svc lg entra">En</span><div><div class="t">Entra</div><div class="d">Sign-in logs not connected</div></div><span class="state partial">Partial</span><button class="btn small">Add sign-in logs</button></div>
-                <div class="r"><span class="svc lg defender">De</span><div><div class="t">Defender</div><div class="d">Incidents, alerts and Secure Score</div></div><span class="state">Not connected</span><button class="btn small">Connect</button></div>
-              </div>
-              <div class="group-head" style="margin-top: 10px;"><strong>Other services</strong><span>Each one has its own sign-in and is stored for this organization only.</span></div>
-              <div class="rows">
-                <div class="r"><span class="svc lg off">+</span><div><div class="t">Add a service</div><div class="d">Services from vendors appear in the Marketplace when they ship.</div></div><span class="state"></span><button class="btn small">Open Marketplace</button></div>
-              </div>
-
-              <h4>Public references</h4>
-              <p class="lede">No sign-in. Used by Chat in every organization. Words from questions go to the host shown.</p>
-              <div class="rows">
-                <div class="r"><span class="svc lg ref">KQ</span><div><div class="t">KQL Search</div><div class="d">www.kqlsearch.com</div></div><span class="state ok">On</span><button class="btn small ghost">Turn off</button></div>
-                <div class="r"><span class="svc lg ref">ML</span><div><div class="t">Microsoft Learn</div><div class="d">learn.microsoft.com</div></div><span class="state ok">On</span><button class="btn small ghost">Turn off</button></div>
-              </div>
-
-              <h4>Results go to</h4>
-              <p class="lede">Where agents send finished run reports. Saved delivery rules post automatically, including for scheduled runs; agent steps that send a message show a preview first.</p>
-              <div class="rows">
-                <div class="r"><span class="svc lg ref">T</span><div><div class="t">Microsoft Teams</div><div class="d">IT Ops, Device alerts channel</div></div><span class="state ok">Connected</span><button class="btn small ghost">Manage</button></div>
+              <div class="chat-col" style="width:100%;padding-bottom:16px;padding-top:12px">
+                <div class="composer"><div class="ph">Ask a follow-up</div><div class="bar"><span class="model"><span class="dot" style="color:var(--color-warning)"></span>Claude Code<svg width="12" height="12"><use href="#i-chev"/></svg></span><button class="send" disabled aria-label="Send"><svg width="14" height="14"><use href="#i-up"/></svg></button></div></div>
               </div>
             </div>
           </div>
         </div>
       </div>
-      <ul class="notes">
-        <li>Connections is its own sidebar item after Marketplace (decided 2026-11-08) at <code>/connections</code>, and the organization chip opens it too. It replaces Settings, Tenants (per service) and Settings, Connectors (results), which redirect here.</li>
-        <li>Public references stay global, not per organization, because they receive no Graph or cache data. Private details typed into a question can still reach them, as the composer disclosure states. Vendor services with credentials are per organization, as decided for vendor MCP authentication.</li>
-        <li>Planned services are not listed here, per the 2026-11-04 decision that planned services appear only in the docs.</li>
-        <li>The map is generated from the same lists as the status strip and the result connectors, so they cannot disagree. With a hosted model the device box names the provider model and "Prompts and tenant data" shows the provider with its region, for example Anthropic API · US.</li>
-      </ul>
     </section>
 
-    <!-- F -->
-    <section class="section" id="f">
-      <h2>F. Organization switcher</h2>
-      <p class="lede">An admin who manages several companies sees each one with the services it runs. A company with only Jamf is as valid as one with only Microsoft 365. Sample data is a labeled organization here, not a mode chosen at first launch.</p>
-      <div class="frame">
-        <div class="app" style="min-height: 460px;">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav on">New chat</div><div class="nav">Search</div><div class="nav">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile">C</span><div><div class="name">Woodgrove</div><div class="sub">Intune, Entra</div></div></div>
-          </aside>
-          <div class="main"><div class="topline"><span class="title">New chat</span><span class="grow"></span><span class="boundary out"><span class="dot"></span>local model · tool queries to www.kqlsearch.com +1</span></div><div class="col"></div></div>
-          <div class="pop">
-            <div class="item on"><span class="org-tile">C</span><div class="grow"><div>Woodgrove</div><div class="sub"><span class="svc intune">In</span><span class="svc entra">En</span></div></div><span aria-label="Active">&#10003;</span></div>
-            <div class="item"><span class="org-tile alt">F</span><div class="grow"><div>Fabrikam</div><div class="sub"><span class="svc intune">In</span><span class="svc entra">En</span><span class="svc defender">De</span><span class="svc jamf">Jf</span></div></div></div>
-            <div class="item"><span class="org-tile" style="background: var(--svc-jamf);">N</span><div class="grow"><div>Northwind Studio</div><div class="sub"><span class="svc jamf">Jf</span>Jamf Pro only</div></div></div>
-            <hr>
-            <div class="act">Add organization</div>
-            <div class="act">Preview with sample data</div>
-            <div class="act">Manage connections</div>
-          </div>
-        </div>
-      </div>
-      <ul class="notes">
-        <li>An organization is created by its first connection: connecting Intune from section D creates "Woodgrove" from the tenant's display name. It can be renamed.</li>
-        <li>Each organization holds at most one Microsoft 365 tenant and one instance per other vendor. Runs, conversations, cache and drift stay per organization, as they are per tenant today. Schedules today belong to the agent and follow the active tenant; with organizations each schedule belongs to one organization and never runs against another.</li>
-        <li>Fabrikam and Northwind show Jamf for illustration. Jamf support is not built yet.</li>
-      </ul>
-    </section>
-
-    <!-- G -->
-    <section class="section" id="g">
-      <h2>G. Agents with service needs</h2>
-      <p class="lede">Every agent shows the services it reads before it runs. With everything connected the button says Run; otherwise it names what is missing, and agents that need no service run anywhere.</p>
-      <div class="frame">
-        <div class="app" style="min-height: 520px;">
-          <aside class="side">
-            <div class="brand"><span class="mark">oa</span> OpenAdminOS</div>
-            <div class="nav">New chat</div><div class="nav">Search</div><div class="nav on">Agents</div><div class="nav">Marketplace</div><div class="nav">Connections</div><div class="nav">Runs</div>
-            <div class="spacer"></div>
-            <div class="org-chip"><span class="org-tile">C</span><div><div class="name">Woodgrove</div><div class="sub">Intune, Entra</div></div></div>
-          </aside>
+    <!-- F: connections -->
+    <section class="sect" id="f">
+      <h2>F. Connections with an organization</h2>
+      <p>The reach map uses the scan's figure: the same device tile in the center, services drawn in with solid connectors, everything that leaves drawn out with dashed ones. Only the prompt line to a hosted provider is amber.</p>
+      <div class="win" style="height:900px">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="conn"></aside>
           <div class="main">
-            <div class="topline"><span class="title">Agents</span><span class="grow"></span><span class="boundary out"><span class="dot"></span>local model · tool queries to www.kqlsearch.com +1</span></div>
-            <div class="agent-list">
-              <div class="filters"><span class="filter on">All installed</span><span class="filter">Ready for Woodgrove</span><span class="filter">Intune</span><span class="filter">Entra</span><span class="filter">Defender</span><span class="filter">No service needed</span></div>
-              <div class="agent"><div><div class="t">Find inactive devices <span class="mode">Read</span></div><div class="d">Groups stale Intune devices by age, OS and compliance, with review-first next steps.</div><div class="needs"><span class="need ok"><span class="svc intune">In</span>Intune</span></div></div><button class="btn primary small">Run</button></div>
-              <div class="agent"><div><div class="t">Risky sign-in review <span class="mode">Read</span></div><div class="d">Summarizes risky sign-ins and the Conditional Access policies that applied.</div><div class="needs"><span class="need ok"><span class="svc entra">En</span>Entra</span><span class="need">Entra sign-in logs</span></div></div><button class="btn small">Add sign-in logs</button></div>
-              <div class="agent"><div><div class="t">Secure Score prioritizer <span class="mode">Read</span></div><div class="d">Ranks open Secure Score actions by effort and impact.</div><div class="needs"><span class="need"><span class="svc defender">De</span>Defender</span></div></div><button class="btn small">Connect Defender</button></div>
-              <div class="agent"><div><div class="t">Retirements briefing <span class="mode">Read</span></div><div class="d">Lists Microsoft 365 and Azure features retiring in the next 90 days, from Microsoft Release Communications.</div><div class="needs"><span class="need none">No service needed</span><span class="need">Release Communications</span></div></div><button class="btn small">Run</button></div>
-            </div>
+            <div class="topbar" data-top="wb-hosted"></div>
+            <div class="page"><div class="page-in">
+              <div class="page-head"><div><h1>Woodgrove Bank connections</h1><p>What Chat and agents can read for this organization, and everything that leaves this device.</p></div></div>
+              <figure class="reach" data-reach style="margin:0" aria-describedby="reach-sr">
+                <figcaption id="reach-sr" hidden>Woodgrove Bank reads from Intune, connected, and Entra, 4 of 6 parts. Defender is not connected. Prompts and tenant data go to Anthropic API, US. Words from questions go to learn.microsoft.com and www.kqlsearch.com. Run reports go to Microsoft Teams.</figcaption>
+                <div class="zone in">
+                  <h2>Reads from</h2>
+                  <div class="ri" data-from><span class="mk" data-s="intune">In</span><span class="t">Intune</span><span class="st" data-t="ok"><span class="dot"></span>Connected</span></div>
+                  <div class="ri" data-from><span class="mk" data-s="entra">En</span><span class="t">Entra</span><span class="st" data-t="part"><span class="dot"></span>4 of 6 parts</span></div>
+                  <div class="ri" data-from data-off><span class="mk" data-s="defender" data-off>De</span><span class="t">Defender</span><span class="st" data-t="off"><span class="dot"></span>Not connected</span></div>
+                </div>
+                <div class="hub" data-hub>
+                  <div class="device lg"><svg viewBox="0 0 64 64"><use href="#oa"/></svg></div>
+                  <div class="cap"><div class="hn">This device</div><div class="hm">History, cache and sign-in tokens stay here</div></div>
+                </div>
+                <div class="zone out">
+                  <h2>Leaves this device</h2>
+                  <div class="grp"><h3>Prompts and tenant data</h3>
+                    <div class="ri" data-to data-where="hosted"><span class="mk" data-s="ref">An</span><span class="t">Anthropic API · US</span><span class="st" data-t="leaves">claude-sonnet-5</span></div>
+                  </div>
+                  <div class="grp"><h3>Words from questions</h3>
+                    <div class="ri" data-to><span class="mk" data-s="ref">ML</span><span class="t">learn.microsoft.com</span><span></span></div>
+                    <div class="ri" data-to><span class="mk" data-s="ref">KQ</span><span class="t">www.kqlsearch.com</span><span></span></div>
+                  </div>
+                  <div class="grp"><h3>Run reports, by delivery rule</h3>
+                    <div class="ri" data-to><span class="mk" data-s="ref">T</span><span class="t">Microsoft Teams</span><span class="xs muted">IT Ops</span></div>
+                  </div>
+                </div>
+              </figure>
+
+              <div class="sec-h"><h2>Services</h2></div>
+              <p class="sec-sub">Each service is consented on its own. Chat and agents use only what is connected here.</p>
+              <div class="m365"><b>Microsoft 365</b><span class="soft">woodgrove.example, signed in as admin@woodgrove.example</span><button class="btn ghost sm a" type="button">Manage<svg width="12" height="12"><use href="#i-chev"/></svg></button></div>
+              <ul class="rows">
+                <li class="svc"><span class="mk lg" data-s="intune">In</span><div><div class="nm">Intune</div><div class="ds">Managed devices, policies, apps, scripts and Autopilot</div><div class="parts"><span>Users and groups</span><span>Devices and configuration</span><span>Apps</span></div></div><span class="st" data-t="ok"><span class="dot"></span>Connected</span><span class="a"><button class="btn ghost sm" type="button">Permissions</button></span></li>
+                <li class="svc"><span class="mk lg" data-s="entra">En</span><div><div class="nm">Entra</div><div class="ds">Users, groups, roles, Conditional Access and sign-in logs</div><div class="parts"><span>Users and groups</span><span>Devices</span><span>App registrations</span><span>Conditional Access</span><span data-off>Roles and domains</span><span data-off>Sign-in logs</span></div></div><span class="st" data-t="part"><span class="dot"></span>4 of 6 parts</span><span class="a"><button class="btn secondary sm" type="button">Add access</button></span></li>
+                <li class="svc"><span class="mk lg" data-s="defender" data-off>De</span><div><div class="nm">Defender</div><div class="ds">Alerts, incidents and Secure Score</div></div><span class="st" data-t="off"><span class="dot"></span>Not connected</span><span class="a"><button class="btn secondary sm" type="button">Connect</button></span></li>
+              </ul>
+
+              <div class="sec-h"><h2>Public references</h2></div>
+              <p class="sec-sub">No sign-in. Used by Chat in every organization. Words from questions go to the host shown.</p>
+              <ul class="rows">
+                <li class="svc"><span class="mk lg" data-s="ref">ML</span><div><div class="nm">Microsoft Learn</div><div class="ds">learn.microsoft.com</div></div><span class="st" data-t="ok"><span class="dot"></span>On</span><span class="a"><button class="btn ghost sm" type="button">Turn off</button></span></li>
+                <li class="svc"><span class="mk lg" data-s="ref">KQ</span><div><div class="nm">KQL Search</div><div class="ds">www.kqlsearch.com</div></div><span class="st" data-t="ok"><span class="dot"></span>On</span><span class="a"><button class="btn ghost sm" type="button">Turn off</button></span></li>
+              </ul>
+
+              <div class="sec-h"><h2>Results go to</h2></div>
+              <p class="sec-sub">Saved delivery rules post finished run reports, scheduled runs included. Agent steps that send a message show a preview first.</p>
+              <ul class="rows">
+                <li class="svc"><span class="mk lg" data-s="ref">T</span><div><div class="nm">Microsoft Teams</div><div class="ds">IT Ops, Device alerts channel</div></div><span class="st" data-t="ok"><span class="dot"></span>Connected</span><span class="a"><button class="btn ghost sm" type="button">Manage</button></span></li>
+              </ul>
+            </div></div>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>Hard constraint 3 changes from "no agent runs without an active tenant scope" to "no agent reads or writes a service unless it is connected in the active organization". An agent that calls no service API at all (no Graph or vendor scopes, not even the sign-in scopes) runs without an organization and is labeled so. <code>services: []</code> is not enough, because it still allows the sign-in scopes.</li>
-        <li>Agents that use a public reference declare it, so the run review names the host before the run. MCP tools in agents are a separate change: today they are Chat only.</li>
-        <li>Retirements briefing is an example of a service-free agent, not an existing one.</li>
+        <li>Connectors are computed from row positions: a cubic curve from each row's edge to the tile's edge, 1.25 px, text-faint; outgoing dashed 3/4; missing services use the border colour; the hosted prompt line is warning and solid. They draw once on page open (420 ms, 40 ms stagger) and again only for a row whose state changes.</li>
+        <li>Below 860 px of content width the map stacks: Reads from, a 40 px device row, Leaves this device; connectors are dropped, the order carries the direction.</li>
+        <li>"Manage" on Microsoft 365 opens a menu: Permissions, Rename organization, Disconnect (danger, at the bottom, opens the existing dialog). Disconnect no longer sits as a text button beside Permissions.</li>
       </ul>
     </section>
 
-    <!-- H -->
-    <section class="section" id="h">
-      <h2>H. Connecting Jamf Pro, for when Jamf support ships</h2>
-      <p class="lede">The first service outside Microsoft. Jamf Pro uses API clients: the client ID and secret are exchanged for a short-lived access token with OAuth client credentials. The secret is stored in the OS keychain like the API key method of the vendor MCP authentication design (tasks/todo.md, 2026-11-03), the token stays in memory, and both are sent only to the declared host. Shown to fix the pattern, not as a release commitment.</p>
-      <div class="grid2">
-        <div class="solo">
-          <div class="dialog">
-            <header><span class="svc lg jamf">Jf</span><div><h3>Connect Jamf Pro to Fabrikam</h3><p>Read access to computers, mobile devices and inventory.</p></div></header>
-            <div class="body">
-              <div class="field"><label>Jamf Pro URL</label><div class="input mono">https://fabrikam.jamfcloud.com</div></div>
-              <div class="field"><label>API client ID</label><div class="input mono">5f1c9a7e-…</div><div class="hint">Created in Jamf Pro under Settings, System, API roles and clients.</div></div>
-              <div class="field"><label>Client secret</label><div class="input">Paste the client secret</div><div class="hint">Saved to the OS keychain after the check succeeds.</div></div>
-              <div class="callout"><strong>Give the API role read privileges only:</strong>
-                <ul class="privs"><li>Read Computers</li><li>Read Mobile Devices</li><li>Read Computer Inventory Collection</li><li>Read Smart Computer Groups</li><li>Read Policies</li><li>Read macOS Configuration Profiles</li></ul>
+    <!-- G: connections none -->
+    <section class="sect" id="g">
+      <h2>G. Connections with no organization</h2>
+      <p>An empty state with the action above the fold. The same figure, with the slots it will fill drawn dashed.</p>
+      <div class="win short">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="conn-none"></aside>
+          <div class="main">
+            <div class="topbar" data-top="none-hosted"></div>
+            <div class="page"><div class="page-in">
+              <div class="page-head"><div><h1>Connections</h1><p>What Chat and agents can read, and everything that leaves this device.</p></div></div>
+              <div class="empty">
+                <div class="empty-fig" aria-hidden="true">
+                  <div class="col"><span class="mk" data-s="intune" data-off>In</span><span class="mk" data-s="entra" data-off>En</span><span class="mk" data-s="defender" data-off>De</span></div>
+                  <span class="wire"></span>
+                  <div class="device lg"><svg viewBox="0 0 64 64"><use href="#oa"/></svg></div>
+                  <span class="wire"></span>
+                  <div class="col"><span class="mk" data-s="ref">ML</span><span class="mk" data-s="ref">KQ</span></div>
+                </div>
+                <h2>No organization connected</h2>
+                <p>Chat answers from the model and public references. Connect Microsoft 365 to read Intune, Entra and Defender for an organization.</p>
+                <div class="acts"><button class="btn primary lg" type="button">Connect Microsoft 365</button><button class="btn secondary lg" type="button">Preview with sample data</button></div>
               </div>
-              <div class="callout">Requests go only to fabrikam.jamfcloud.com. Jamf data stays on this device; with a hosted model it goes to that provider like any tenant data.</div>
-            </div>
-            <footer><button class="btn ghost">Cancel</button><span class="grow"></span><button class="btn primary">Check and connect</button></footer>
+              <div class="sec-h"><h2>Leaves this device now</h2></div>
+              <ul class="rows">
+                <li class="svc"><span class="mk lg" data-s="ref">An</span><div><div class="nm">Prompts and agent context</div><div class="ds leaves">Anthropic API · US, through Claude Code</div></div><span></span><span class="a"><button class="btn ghost sm" type="button">Change model</button></span></li>
+                <li class="svc"><span class="mk lg" data-s="ref">ML</span><div><div class="nm">Words from questions</div><div class="ds">learn.microsoft.com, www.kqlsearch.com</div></div><span></span><span class="a"><button class="btn ghost sm" type="button">References</button></span></li>
+              </ul>
+            </div></div>
           </div>
         </div>
-        <div class="solo">
-          <div class="dialog">
-            <header><span class="svc lg jamf">Jf</span><div><h3>Jamf Pro connected, 2 of 3 parts</h3><p>Fabrikam now reads from fabrikam.jamfcloud.com.</p></div></header>
-            <div class="body">
-              <div class="rows">
-                <div class="r"><span></span><div><div class="t">Computers</div><div class="d">Read Computers, Read Computer Inventory Collection</div></div><span class="state ok">On</span><span></span></div>
-                <div class="r"><span></span><div><div class="t">Mobile devices</div><div class="d">Read Mobile Devices</div></div><span class="state ok">On</span><span></span></div>
-                <div class="r"><span></span><div><div class="t">Policies and profiles</div><div class="d">Read Policies is missing from the API role</div></div><span class="state off">Off</span><span></span></div>
-              </div>
-              <p class="cite" style="margin-top: 10px;">The check called each read endpoint once. Add the missing privilege in Jamf Pro, then choose Check again.</p>
+      </div>
+    </section>
+
+    <!-- H: switcher -->
+    <section class="sect" id="h">
+      <h2>H. Organization switcher</h2>
+      <p>Search first, one line of services in words, and no remove buttons in the menu. Removing an organization lives on Connections, behind its dialog.</p>
+      <div class="win short">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="chat"></aside>
+          <div class="main" style="position:relative">
+            <div class="topbar" data-top="wb-hosted-open"></div>
+            <div class="menu" style="left:12px;top:46px" role="menu" aria-label="Organizations">
+              <div class="search"><svg width="14" height="14"><use href="#i-search"/></svg>Find an organization</div>
+              <button class="mi" data-hl role="menuitemradio" aria-checked="true"><span class="av">WB</span><span>Woodgrove Bank<span class="d">Intune, Entra</span></span><svg width="16" height="16"><use href="#i-check"/></svg></button>
+              <button class="mi" role="menuitemradio" aria-checked="false"><span class="av">FA</span><span>Fabrikam<span class="d">Intune, Entra, Defender. Own app registration</span></span><span></span></button>
+              <button class="mi" role="menuitemradio" aria-checked="false"><span class="av none"></span><span>No organization<span class="d">Chat answers from the docs and references</span></span><span></span></button>
+              <hr>
+              <button class="mi plain" role="menuitem"><svg><use href="#i-plus"/></svg>Add organization</button>
+              <button class="mi plain" role="menuitem"><svg><use href="#i-flask"/></svg>Preview with sample data</button>
+              <button class="mi plain" role="menuitem"><svg><use href="#i-conn"/></svg>Manage connections</button>
             </div>
-            <footer><button class="btn ghost">Check again</button><span class="grow"></span><button class="btn primary">Done</button></footer>
+            <div class="chat"><div class="chat-scroll"><div class="chat-col home"><h1 style="opacity:.35">What are you working on in Woodgrove Bank?</h1></div></div></div>
           </div>
         </div>
       </div>
       <ul class="notes">
-        <li>Jamf parts mirror Microsoft parts: a part is on only when the check proves its privileges. No write privileges are requested; write agents would ask for them at run time, as Graph write scopes do.</li>
-        <li>Google Workspace (#129) follows the same pattern with the admin's own OAuth sign-in instead of a secret.</li>
+        <li>Search shows from 6 organizations; it filters by name and tenant domain. Arrow keys move, Enter switches, the check marks the active one.</li>
+        <li>The organization avatar is a neutral 24 px tile with two letters. Service colour stays on service marks, so a list of 40 tenants does not turn into confetti.</li>
       </ul>
     </section>
-  </div>
+
+    <!-- I: agents -->
+    <section class="sect" id="i">
+      <h2>I. Agents with service needs</h2>
+      <p>One row per agent: name and mode, one line of description, what it reads. A missing service is a dashed chip and the fix is the button on the row. Usage notes move to the agent page.</p>
+      <div class="win short">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="agents"></aside>
+          <div class="main">
+            <div class="topbar" data-top="wb-hosted"></div>
+            <div class="page"><div class="page-in">
+              <div class="page-head"><h1>Agents</h1><button class="btn primary act" type="button"><svg width="14" height="14"><use href="#i-plus"/></svg>New agent</button></div>
+              <div class="tabs"><span class="t" aria-selected="true">Installed</span><span class="t">Schedules</span><span class="search"><svg width="14" height="14" style="margin-right:8px"><use href="#i-search"/></svg>Search agents</span></div>
+              <ul class="rows">
+                <li class="agent"><div><span class="nm">Find inactive devices</span> <span class="meta">Read-only. Every day</span></div><div class="ds">Reviews Intune device inactivity by sync age, compliance, OS, ownership and enrollment.</div><div class="needs-row"><span class="chip"><span class="mk sm" data-s="intune">In</span>Intune</span></div><div class="a"><button class="btn secondary sm" type="button">Run</button></div></li>
+                <li class="agent"><div><span class="nm">Secure Score prioritizer</span> <span class="meta">Read-only. Last run 3 days ago</span></div><div class="ds">Prioritizes Secure Score controls by category, action type, effort and user impact.</div><div class="needs-row"><span class="chip" data-off><span class="mk sm" data-s="defender" data-off>De</span>Defender, not connected</span></div><div class="a"><button class="btn secondary sm" type="button">Connect Defender</button></div></li>
+                <li class="agent"><div><span class="nm">Sign-in failure explainer</span> <span class="meta">Read-only. Never run</span></div><div class="ds">Clusters failed sign-ins by error, app, client and Conditional Access status.</div><div class="needs-row"><span class="chip"><span class="mk sm" data-s="entra">En</span>Entra</span><span class="chip" data-off>Sign-in logs, not granted</span></div><div class="a"><button class="btn secondary sm" type="button">Add sign-in logs</button></div></li>
+                <li class="agent"><div><span class="nm">Team PowerShell draft</span> <span class="meta">Read-only. Last run 34 minutes ago</span></div><div class="ds">Prepares a PowerShell script for review from an Agent Team task.</div><div class="needs-row"><span class="chip plain">No service needed</span></div><div class="a"><button class="btn secondary sm" type="button">Run</button></div></li>
+              </ul>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- J: review -->
+    <section class="sect" id="j">
+      <h2>J. Run review without an organization</h2>
+      <p>One blocker at the top with its fix as the only filled button. The facts read as a list, not five filled tiles. Start run stays visible but disabled, with the reason beside it.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="agents"></aside>
+          <div class="main" style="position:relative">
+            <div class="topbar" data-top="none-hosted"></div>
+            <div class="scrim">
+              <div class="dialog" role="dialog" aria-labelledby="rv-t">
+                <header><h2 id="rv-t">Review run</h2><p>Find inactive devices</p></header>
+                <div class="body">
+                  <div class="block"><span class="mk lg" data-s="intune" data-off>In</span><div><h3>Needs Intune in an active organization</h3><p>No organization is active, so this agent has nothing to read. Connect Intune, or switch to an organization that has it.</p><div class="acts"><button class="btn primary" type="button">Connect Intune</button><button class="btn secondary" type="button">Choose organization</button></div></div></div>
+                  <dl class="facts">
+                    <dt>Organization</dt><dd class="muted">None active</dd>
+                    <dt>Reads</dt><dd>Intune, read-only</dd>
+                    <dt>Model</dt><dd>claude-sonnet-5<span class="xs leaves">Prompts and agent context go to Anthropic API · US</span></dd>
+                    <dt>Permissions</dt><dd><code>DeviceManagementManagedDevices.Read.All</code></dd>
+                    <dt>Changes</dt><dd>None. This agent cannot change tenant state.</dd>
+                  </dl>
+                </div>
+                <footer><span class="hint">Connect Intune to start this run.</span><button class="btn ghost" type="button">Cancel</button><button class="btn secondary" type="button" disabled>Start run</button></footer>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- K: schedules -->
+    <section class="sect" id="k">
+      <h2>K. Schedules after the move to organizations</h2>
+      <p>One persistent warning, one dismissible note, in that order of weight. Each schedule row names its organization once.</p>
+      <div class="win short">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="agents"></aside>
+          <div class="main">
+            <div class="topbar" data-top="wb-hosted"></div>
+            <div class="page"><div class="page-in">
+              <div class="page-head"><h1>Agents</h1><button class="btn primary act" type="button"><svg width="14" height="14"><use href="#i-plus"/></svg>New agent</button></div>
+              <div class="tabs"><span class="t">Installed</span><span class="t" aria-selected="true">Schedules</span></div>
+              <div class="notice" style="color:var(--color-warning);background:var(--color-warning-soft);box-shadow:none">Background runs are off. Schedules run only while OpenAdminOS is open.<span class="a"><button class="btn secondary sm" type="button">Turn on</button></span></div>
+              <p class="sm muted" style="margin:10px 2px 4px">Schedules now belong to an organization. 2 moved to Woodgrove Bank and run only while it is active. <button class="link" type="button">Dismiss</button></p>
+              <ul class="rows">
+                <li class="agent"><div><span class="nm">Find inactive devices</span> <span class="meta">Every day at 07:00. Woodgrove Bank</span></div><div class="ds">Next run tomorrow at 07:00. Results go to Microsoft Teams, IT Ops.</div><div class="a"><button class="btn ghost sm" type="button">Edit</button></div></li>
+                <li class="agent"><div><span class="nm">Compliance overview</span> <span class="meta">Every Monday at 08:00. Woodgrove Bank</span></div><div class="ds">Next run Monday at 08:00. Results stay in Runs.</div><div class="a"><button class="btn ghost sm" type="button">Edit</button></div></li>
+              </ul>
+            </div></div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes"><li>The background warning is amber here because it is an operational warning, not a data destination; it is the only other use of warning on these screens and it has an action that fixes it.</li></ul>
+    </section>
+
+    <!-- L: settings -->
+    <section class="sect" id="l">
+      <h2>L. Settings, Providers: scan again</h2>
+      <p>The same compact check list as the scan, in place, with the device tile at 40 px as the section's figure.</p>
+      <div class="win short">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="shell">
+          <aside class="side" data-side="settings"></aside>
+          <div class="main">
+            <div class="topbar" data-top="wb-hosted"></div>
+            <div class="page"><div class="page-in" style="max-width:720px">
+              <div class="page-head"><h1>Providers</h1></div>
+              <div class="settings-row" style="grid-template-columns:40px minmax(0,1fr) auto;border-bottom:1px solid var(--color-border-soft)"><div class="device sm"><svg viewBox="0 0 64 64"><use href="#oa"/></svg></div><div><div style="font-weight:500">On this device</div><div class="sm muted">Last checked today at 09:14. 4 of 8 found.</div></div><button class="btn secondary sm" type="button" id="settings-scan">Scan again</button></div>
+              <ul class="rows checks" id="settings-checks" style="margin-top:4px"></ul>
+            </div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    // Theme
+    const setTheme = (t) => {
+      document.documentElement.dataset.theme = t;
+      document.querySelectorAll("[data-theme-set]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeSet === t)));
+      requestAnimationFrame(drawReach);
+    };
+    document.querySelectorAll("[data-theme-set]").forEach((b) => b.addEventListener("click", () => setTheme(b.dataset.themeSet)));
+    if (matchMedia("(prefers-color-scheme: dark)").matches) setTheme("dark");
+    new MutationObserver(() => {
+      const t = document.documentElement.dataset.theme;
+      document.querySelectorAll("[data-theme-set]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.themeSet === t)));
+    }).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    // Shell pieces
+    const navItems = [
+      ["chat", "New chat", "i-chat"], ["agents", "Agents", "i-agents"], ["market", "Marketplace", "i-market"],
+      ["conn", "Connections", "i-conn"], ["runs", "Runs", "i-runs"], ["changes", "Changes", "i-changes"],
+    ];
+    document.querySelectorAll("[data-side]").forEach((el) => {
+      const kind = el.dataset.side;
+      const current = kind.startsWith("conn") ? "conn" : kind === "agents" ? "agents" : kind === "settings" ? "" : "chat";
+      const none = ["conn-none", "chat", "chat-hist"].includes(kind) && !el.closest("#h");
+      el.innerHTML = `<div class="side-top"></div><div class="brand"><svg width="20" height="20"><use href="#oa"/></svg>OpenAdminOS</div><nav class="nav">${navItems
+        .map(([k, l, i]) => `<a href="#" ${k === current ? 'aria-current="page"' : ""}><svg><use href="#${i}"/></svg>${l}</a>`).join("")}</nav>
+        ${kind === "chat-hist" ? '<div class="xs muted" style="padding:16px 10px 4px">Today</div><nav class="nav"><a href="#" aria-current="page">Devices not synced in 7 days</a></nav>' : ""}
+        <div class="side-foot"><span class="av ${none ? "none" : ""}">${none ? "" : "A"}</span><div class="who">${none ? "Not signed in" : "admin@woodgrove.example"}<span>${none ? "Nothing connected" : "2 organizations"}</span></div><svg width="14" height="14" style="margin-left:auto;color:var(--color-text-muted)"><use href="#i-gear"/></svg></div>`;
+    });
+    document.querySelectorAll("[data-top]").forEach((el) => {
+      const k = el.dataset.top;
+      const org = k.startsWith("wb") ? '<span class="av">WB</span>Woodgrove Bank' : '<span class="av none"></span>No organization';
+      const open = k.endsWith("open") ? 'aria-expanded="true"' : 'aria-expanded="false"';
+      const where = k.startsWith("wb") ? "Prompts and tenant data go to Anthropic API · US" : "Prompts go to Anthropic API · US";
+      el.innerHTML = `<button class="orgchip" ${open}>${org}<svg class="chev"><use href="#i-chev"/></svg></button><span class="boundary" data-where="hosted"><span class="dot"></span><span class="bw">${where}</span><span class="bs">Anthropic API · US</span>${k.startsWith("wb") ? '<span style="color:var(--color-text-soft)">+2 references</span>' : ""}</span>`;
+    });
+
+    // Scan model
+    const PROBES = [
+      { id: "ollama", name: "Ollama", mk: "Ol", a: -90, where: "local", end: "installed", status: "Installed, not running", at: 700 },
+      { id: "apple", name: "Apple Intelligence", mk: "Ai", a: -45, where: "local", end: "none", status: "Not available", at: 520 },
+      { id: "lms", name: "LM Studio", mk: "LM", a: 0, where: "local", end: "installed", status: "Installed, not running", at: 900 },
+      { id: "claude", name: "Claude Code", mk: "Cc", a: 45, where: "hosted", end: "ready-hosted", status: "Signed in", at: 1500, dest: "Anthropic API · US" },
+      { id: "codex", name: "Codex", mk: "Cx", a: 90, where: "hosted", end: "ready-hosted", status: "Signed in", at: 1700, dest: "OpenAI API · US" },
+      { id: "copilot", name: "GitHub Copilot CLI", mk: "Gh", a: 135, where: "hosted", end: "none", status: "Not installed", at: 1100 },
+      { id: "gemini", name: "Gemini CLI", mk: "Ge", a: 180, where: "hosted", end: "none", status: "Not installed", at: 1950 },
+      { id: "azure", name: "Azure OpenAI", mk: "Az", a: 225, where: "hosted", end: "none", status: "Not configured", at: 2200 },
+    ];
+    const R = 38;
+    const pos = (a) => ({ x: 50 + R * Math.cos((a * Math.PI) / 180), y: 50 + R * Math.sin((a * Math.PI) / 180) });
+
+    function buildStage(stage) {
+      const links = PROBES.map((p) => {
+        const { x, y } = pos(p.a);
+        const dx = x - 50, dy = y - 50, len = Math.hypot(dx, dy);
+        const sx = 50 + (dx / len) * 12.5, sy = 50 + (dy / len) * 12.5;
+        const ex = x - (dx / len) * 5.2, ey = y - (dy / len) * 5.2;
+        return `<path class="ln" pathLength="1" data-id="${p.id}" data-where="${p.where}" d="M${sx.toFixed(2)} ${sy.toFixed(2)} L${ex.toFixed(2)} ${ey.toFixed(2)}"/>`;
+      }).join("");
+      stage.innerHTML = `<div class="sweep"></div><svg class="orbit" viewBox="0 0 100 100"><circle class="o" cx="50" cy="50" r="${R}"/><circle class="o2" cx="50" cy="50" r="22"/><circle class="ring" cx="50" cy="50" r="${R}"/><circle class="ring" cx="50" cy="50" r="${R}"/>${links}</svg>
+        <div class="device xl"><svg viewBox="0 0 64 64"><use href="#oa"/></svg></div>
+        ${PROBES.map((p) => { const { x, y } = pos(p.a); return `<button type="button" tabindex="-1" class="node" data-id="${p.id}" data-t="checking" style="left:${x}%;top:${y}%"><span class="nd">${p.mk}</span><span class="lb">${p.name}</span><span class="ss">checking</span></button>`; }).join("")}`;
+    }
+    const checksHtml = (states) => PROBES.map((p) => {
+      const t = states[p.id] || "checking";
+      return `<li data-t="${t}"><span class="m"></span><span>${p.name}</span><span class="s">${t === "checking" ? "Checking" : p.status}</span></li>`;
+    }).join("");
+
+    // A: scanning loop
+    const scanA = document.querySelector("#scan-a .scan");
+    const colA = scanA.querySelector("[data-col]");
+    const stageA = scanA.querySelector("[data-stage]");
+    let timers = [];
+    function runScan() {
+      timers.forEach(clearTimeout); timers = [];
+      buildStage(stageA);
+      scanA.dataset.phase = "intro";
+      const states = {};
+      colA.innerHTML = `<h1 id="scan-h">Looking for models on this device</h1><p class="intro">Checks the model runtimes and AI tools on this device, and whether you are signed in to them. Nothing is sent to a model.</p>
+        <div class="progress"><span data-count>0 of 8 checked</span><span class="segs">${"<i></i>".repeat(8)}</span></div>
+        <ul class="rows checks" aria-live="polite" data-checks>${checksHtml(states)}</ul>`;
+      const t = (ms, fn) => timers.push(setTimeout(fn, reduced ? 0 : ms));
+      t(60, () => { scanA.dataset.phase = "scanning"; });
+      PROBES.forEach((p, i) => t(240 + i * 60, () => stageA.querySelector(`.node[data-id="${p.id}"]`).setAttribute("data-in", "")));
+      let done = 0;
+      [...PROBES].sort((a, b) => a.at - b.at).forEach((p) => t(p.at, () => {
+        states[p.id] = p.end; done += 1;
+        const n = stageA.querySelector(`.node[data-id="${p.id}"]`);
+        n.dataset.t = p.end; n.querySelector(".ss").textContent = p.status; n.setAttribute("data-pop", "");
+        if (p.end !== "none") stageA.querySelector(`.ln[data-id="${p.id}"]`).setAttribute("data-on", "");
+        colA.querySelector("[data-checks]").innerHTML = checksHtml(states);
+        colA.querySelector("[data-count]").textContent = `${done} of 8 checked`;
+        colA.querySelectorAll(".segs i").forEach((s, i) => i < done && s.setAttribute("data-d", ""));
+      }));
+      t(2500, () => { scanA.dataset.phase = "settled"; timers.push(setTimeout(runScan, 2600)); });
+    }
+    document.getElementById("replay").addEventListener("click", runScan);
+    scanA.querySelector("[data-skip]").addEventListener("click", () => { timers.forEach(clearTimeout); runScanSettled(scanA, colA, stageA); });
+    runScan();
+
+    // B: settled result with choice
+    const CHOICES = [
+      { id: "ollama", name: "Ollama", w: "On this device. OpenAdminOS starts it for you.", r: "Not running", act: "Start Ollama and open Chat", note: "Ollama keeps running after you quit OpenAdminOS." },
+      { id: "lms", name: "LM Studio", w: "On this device. OpenAdminOS starts its server.", r: "Not running", act: "Start LM Studio and open Chat", note: "LM Studio keeps running after you quit OpenAdminOS." },
+      { id: "claude", name: "Claude Code", w: "Prompts go to Anthropic API · US", leaves: true, r: "Signed in", act: "Use Claude Code", note: "Uses your Claude Code sign-in. No API key is stored." },
+      { id: "codex", name: "Codex", w: "Prompts go to OpenAI API · US", leaves: true, r: "Signed in", act: "Use Codex", note: "Uses your Codex sign-in. No API key is stored." },
+    ];
+    function runScanSettled(scan, col, stage) {
+      buildStage(stage);
+      scan.dataset.phase = "settled";
+      PROBES.forEach((p) => {
+        const n = stage.querySelector(`.node[data-id="${p.id}"]`);
+        n.setAttribute("data-in", ""); n.dataset.t = p.end; n.querySelector(".ss").textContent = p.status;
+        if (p.end !== "none") { stage.querySelector(`.ln[data-id="${p.id}"]`).setAttribute("data-on", ""); n.setAttribute("data-pick", ""); }
+      });
+      col.innerHTML = `<div class="result"><p class="lead">4 of 8 found on this device</p><h1>Choose what answers in Chat</h1>
+        <p class="intro">Models on this device keep prompts here. Signed-in tools send prompts to their provider.</p>
+        <div class="choices" role="radiogroup" aria-label="Model">${CHOICES.map((c) => `<button type="button" class="choice" role="radio" aria-checked="false" data-id="${c.id}"><span class="radio"></span><span><span class="n">${c.name}</span><span class="w ${c.leaves ? "leaves" : ""}">${c.w}</span></span><span class="r">${c.r}</span></button>`).join("")}</div>
+        <div class="scan-act"><button class="btn primary lg" type="button" data-act></button><span class="note" data-note></span></div>
+        <div class="scan-alt"><button class="link" type="button">Continue without a model</button><button class="link" type="button">Preview with sample data</button></div>
+        <div class="scan-foot"><details class="ran"><summary>What ran</summary><p class="xs" style="margin:6px 0 0;max-width:46ch">Loopback ports <code>localhost:11434</code> and <code>localhost:1234</code>, the Apple Foundation helper, saved Azure settings, and each tool's version command plus <code>claude auth status</code> and <code>codex login status</code>, which may check with the provider. No prompt was sent.</p></details><button class="link" type="button" style="font-size:inherit">Scan again</button></div></div>`;
+      const select = (id) => {
+        const c = CHOICES.find((x) => x.id === id);
+        col.querySelectorAll(".choice").forEach((b) => b.setAttribute("aria-checked", String(b.dataset.id === id)));
+        stage.querySelectorAll(".ln").forEach((l) => l.toggleAttribute("data-sel", l.dataset.id === id));
+        stage.querySelectorAll(".node").forEach((n) => n.toggleAttribute("data-sel", n.dataset.id === id));
+        col.querySelector("[data-act]").textContent = c.act;
+        col.querySelector("[data-note]").textContent = c.note;
+      };
+      col.querySelectorAll(".choice").forEach((b) => b.addEventListener("click", () => select(b.dataset.id)));
+      stage.querySelectorAll(".node[data-pick]").forEach((n) => n.addEventListener("click", () => select(n.dataset.id)));
+      select("ollama");
+    }
+    const scanB = document.querySelector("#scan-b .scan");
+    runScanSettled(scanB, scanB.querySelector("[data-col]"), scanB.querySelector("[data-stage]"));
+
+    // L: settings checks
+    const settingsStates = Object.fromEntries(PROBES.map((p) => [p.id, p.end]));
+    const sc = document.getElementById("settings-checks");
+    sc.innerHTML = checksHtml(settingsStates);
+    document.getElementById("settings-scan").addEventListener("click", () => {
+      const st = {}; sc.innerHTML = checksHtml(st);
+      PROBES.forEach((p) => setTimeout(() => { st[p.id] = p.end; sc.innerHTML = checksHtml(st); }, reduced ? 0 : p.at));
+    });
+
+    // F: reach connectors
+    function drawReach() {
+      document.querySelectorAll("[data-reach]").forEach((map) => {
+        map.querySelector("svg.links")?.remove();
+        const box = map.getBoundingClientRect();
+        const tile = map.querySelector("[data-hub] .device").getBoundingClientRect();
+        if (getComputedStyle(map).gridTemplateColumns.split(" ").length < 3) return;
+        const svgNS = "http://www.w3.org/2000/svg";
+        const svg = document.createElementNS(svgNS, "svg");
+        svg.setAttribute("class", "links"); svg.setAttribute("aria-hidden", "true");
+        const cy = tile.top + tile.height / 2 - box.top;
+        const add = (row, dir, i, n) => {
+          const r = row.getBoundingClientRect();
+          const y = r.top + r.height / 2 - box.top;
+          const ty = cy + (i - (n - 1) / 2) * 9;
+          let d;
+          if (dir === "in") {
+            const x1 = r.right - box.left + 10, x2 = tile.left - box.left - 6;
+            d = `M${x1} ${y} C${(x1 + x2) / 2} ${y}, ${(x1 + x2) / 2} ${ty}, ${x2} ${ty}`;
+          } else {
+            const x1 = tile.right - box.left + 6, x2 = r.left - box.left - 10;
+            d = `M${x1} ${ty} C${(x1 + x2) / 2} ${ty}, ${(x1 + x2) / 2} ${y}, ${x2} ${y}`;
+          }
+          const p = document.createElementNS(svgNS, "path");
+          p.setAttribute("d", d); p.dataset.dir = dir;
+          if (row.hasAttribute("data-off")) p.setAttribute("data-off", "");
+          if (row.dataset.where) p.dataset.where = row.dataset.where;
+          svg.appendChild(p);
+        };
+        const ins = [...map.querySelectorAll("[data-from]")], outs = [...map.querySelectorAll("[data-to]")];
+        ins.forEach((r, i) => add(r, "in", i, ins.length));
+        outs.forEach((r, i) => add(r, "out", i, outs.length));
+        map.prepend(svg);
+        if (!map.dataset.drawn && !reduced) {
+          map.dataset.drawn = "1";
+          [...svg.querySelectorAll("path")].forEach((p, i) => {
+            const len = p.getTotalLength();
+            const dash = p.dataset.dir === "out" && p.dataset.where !== "hosted";
+            if (!dash) { p.style.strokeDasharray = len; p.style.setProperty("--len", len); p.style.animationDelay = `${i * 40}ms`; p.classList.add("draw"); }
+          });
+        }
+      });
+    }
+    addEventListener("resize", drawReach);
+    document.fonts.ready.then(drawReach);
+    drawReach();
+  </script>
 </body>
 </html>

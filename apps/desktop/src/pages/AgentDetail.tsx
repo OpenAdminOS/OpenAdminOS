@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { ServiceMark } from "../components/ServiceMark";
 import { Select } from "../components/Select";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Card } from "../components/Card";
 import { Pill } from "../components/Pill";
 import { AgentScheduleCard } from "../components/AgentScheduleCard";
 import { InvalidAgentNotice } from "../components/InvalidAgentNotice";
-import { AGENT_COPY } from "../copy";
+import { AGENT_COPY, promptsGoTo, providerDataLocationDetail } from "../copy";
 import {
   DeclaredGraphOperations,
   ManifestPreview,
@@ -41,11 +42,20 @@ import {
   Skeleton,
 } from "../components/ui";
 import { useAppState } from "../state";
+import { agentNeeds } from "../shared/agent-needs";
+import { manualRunReportDestinations } from "../shared/delivery-destinations";
+import { AgentNeedChips } from "../components/AgentNeedChips";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
+import { isProviderImplemented } from "../shared/providers";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
+  agentCallsNoServiceApi,
+  organizationForTenant,
+  formatServiceList,
+  resolveOrganizations,
+  serviceById,
   agentServiceIds,
   availableScopeSet,
   missingPartsForScopes,
@@ -56,6 +66,7 @@ import {
   type ServiceId,
   resolveRunModel,
   type AgentManifestPreview,
+  type AgentSummary,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSignalDelivery,
@@ -215,6 +226,14 @@ export default function AgentDetail({
       setRunError(PILOT_COPY.agentRefused(agent.name));
       return;
     }
+    // With no organization the preflight opens instead of setup: it names
+    // the services the agent needs, and starts an agent that calls no
+    // service API. Its Connect action opens setup with this run kept.
+    if (agent && !activeTenant && !choice?.tenantId) {
+      setRunError(null);
+      setPendingRunChoice(choice ?? {});
+      return;
+    }
     if (
       agent &&
       !requireTenantAndProvider(
@@ -235,7 +254,7 @@ export default function AgentDetail({
     }
     setRunError(null);
     setPendingRunChoice(choice ?? {});
-  }, [agent, pilot, requireTenantAndProvider]);
+  }, [activeTenant, agent, pilot, requireTenantAndProvider]);
 
   const trackDeliverySave = (save: Promise<void>): Promise<void> => {
     const tracked = save.finally(() => {
@@ -256,7 +275,14 @@ export default function AgentDetail({
   useEffect(() => {
     if (!startRunOnOpen || consumedStartRunOnOpen.current || !agent) return;
     consumedStartRunOnOpen.current = true;
-    queueRunPreflight();
+    // Run again passes the original run's provider and model.
+    const runChoice = (location.state as { runChoice?: RerunChoice } | null)?.runChoice;
+    queueRunPreflight({
+      ...(runChoice?.providerId ? { providerId: runChoice.providerId } : {}),
+      ...(typeof runChoice?.model === "string" ? { model: runChoice.model } : {}),
+    });
+    // Only the first open reads the route state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agent, queueRunPreflight, startRunOnOpen]);
 
   useEffect(() => {
@@ -631,8 +657,8 @@ export default function AgentDetail({
           ) : null}
           {agent.manifestError ? <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge> : null}
           {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
-          <ServiceChips services={agentServiceIds(agent)} />
         </div>
+        <AgentNeedChips needs={agentNeeds(agent, activeTenant, resolveOrganizations(state).length > 0)} />
         {activeTenant && !pilot && missingAgentServices.length > 0 ? (
           <ServiceNotConnectedNotice
             tenant={activeTenant}
@@ -691,7 +717,8 @@ export default function AgentDetail({
             </Button>
           </div>
         )}
-        {runError && (
+        {/* While the run review is open, it shows the error itself. */}
+        {runError && pendingRunChoice === null && (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 ring-1 ring-[var(--color-danger)]/30">
             <div className="text-sm leading-relaxed text-[var(--color-danger)]">
               {runError}
@@ -763,7 +790,7 @@ export default function AgentDetail({
           >
             <AgentTeamsDeliveryCard
               delivery={agent.delivery?.teams}
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(updateAgentTeamsDelivery(agent.slug, next));
               }}
@@ -771,7 +798,7 @@ export default function AgentDetail({
 
             <AgentWhatsAppWebDeliveryCard
               delivery={agent.delivery?.whatsappWeb}
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentWhatsAppWebDelivery(agent.slug, next),
@@ -784,7 +811,7 @@ export default function AgentDetail({
               connectorName="Outlook"
               delivery={agent.delivery?.outlook}
               defaultFlag="useDefaultRecipients"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentOutlookDelivery(
@@ -800,7 +827,7 @@ export default function AgentDetail({
               connectorName="Slack"
               delivery={agent.delivery?.slack}
               defaultFlag="useDefaultChannel"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentSlackDelivery(
@@ -816,7 +843,7 @@ export default function AgentDetail({
               connectorName="Discord"
               delivery={agent.delivery?.discord}
               defaultFlag="useDefaultWebhook"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentDiscordDelivery(
@@ -832,7 +859,7 @@ export default function AgentDetail({
               connectorName="Signal"
               delivery={agent.delivery?.signal}
               defaultFlag="useDefaultRecipient"
-              onOpenConnectors={() => navigate("/settings/connectors")}
+              onOpenConnectors={() => navigate("/connections")}
               onChange={async (next) => {
                 await trackDeliverySave(
                   updateAgentSignalDelivery(
@@ -1062,11 +1089,49 @@ export default function AgentDetail({
           agent={agent}
           activeTenant={pendingTenant}
           providerName={pendingTenant?.kind === "sample" ? PILOT_COPY.providerName : pendingProvider?.name ?? pendingProviderId}
+          providerId={pendingProviderId}
           providerIsLocal={pendingTenant?.kind === "sample" || pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
           pilot={pendingTenant?.kind === "sample"}
+          organizationName={organizationForTenant(resolveOrganizations(state), pendingTenant?.id)?.name}
+          organizationInactive={pendingTenant !== undefined && pendingTenant.id !== state.activeTenantId}
+          hasOrganizations={resolveOrganizations(state).length > 0}
           model={pendingTenant?.kind === "sample" ? "Prepared sample text" : pendingModel}
           deliverySaving={pendingDeliverySaveCount > 0}
+          // Provider readiness is checked on its own, whatever the
+          // organization state; pilot runs use prepared text.
+          providerReady={
+            pendingTenant?.kind === "sample" ||
+            Boolean(
+              pendingProvider &&
+                isProviderImplemented(pendingProvider.id) &&
+                (pendingProvider.status === "connected" || pendingProvider.status === "available"),
+            )
+          }
+          providerStatusDetail={pendingProvider?.detail}
+          startError={runError}
+          onOpenProviderSettings={() => {
+            setPendingRunChoice(null);
+            navigate("/settings/providers");
+          }}
+          onConnect={() => {
+            const choice = pendingRunChoice ?? {};
+            setPendingRunChoice(null);
+            requireTenantAndProvider(
+              createPendingIntent({
+                kind: "agent-run",
+                slug: agent.slug,
+                ...(choice.dryRun ? { dryRun: true } : {}),
+                ...(choice.providerId ? { providerId: choice.providerId } : {}),
+                ...(choice.model ? { model: choice.model } : {}),
+                returnTo: `/agents/${encodeURIComponent(agent.slug)}`,
+              }),
+            );
+          }}
+          onOpenConnections={() => {
+            setPendingRunChoice(null);
+            navigate("/connections");
+          }}
           onClose={() => setPendingRunChoice(null)}
           onConfirm={() => {
             void handleStartRun(pendingRunChoice ?? undefined);
@@ -2630,26 +2695,71 @@ function ChoiceButton({
   );
 }
 
+/** Where the report of a run with no organization goes, from the agent's saved delivery rules. */
+function noOrganizationReportLine(destinations: { mayGo: string[]; skipped: string[]; noTarget: string[] }): string {
+  const list = (names: string[]) =>
+    names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  const sent = destinations.mayGo.length > 0
+    ? `Saved delivery rules can send its report to ${list(destinations.mayGo)}.`
+    : "No saved delivery rule sends its report.";
+  const skipped = destinations.skipped.length > 0
+    ? ` ${list(destinations.skipped)} ${destinations.skipped.length === 1 ? "is" : "are"} skipped: ${destinations.skipped.length === 1 ? "it posts" : "they post"} with an organization's Microsoft sign-in.`
+    : "";
+  const notSetUp = destinations.noTarget.length > 0
+    ? ` ${list(destinations.noTarget)} ${destinations.noTarget.length === 1 ? "has" : "have"} no destination set, so nothing is sent there.`
+    : "";
+  return `${sent}${skipped}${notSetUp}`;
+}
+
+/** What Run again keeps from the original run when it opens the preflight. */
+export interface RerunChoice {
+  providerId?: ProviderId;
+  model?: string;
+}
+
 function RunPreflightModal({
   dryRun,
   open,
   agent,
   activeTenant,
   providerName,
+  providerId,
   providerIsLocal,
   requestedScopes,
   pilot = false,
+  organizationName,
+  organizationInactive = false,
+  hasOrganizations = false,
   model,
   deliverySaving,
+  onConnect,
+  onOpenConnections,
+  providerReady = true,
+  providerStatusDetail,
+  startError,
+  onOpenProviderSettings,
   onClose,
   onConfirm,
 }: {
+  /** The run's provider can start a run now. */
+  providerReady?: boolean;
+  providerStatusDetail?: string | undefined;
+  /** Why the last Start was refused; shown inside the review with a recovery action. */
+  startError?: string | null;
+  onOpenProviderSettings?: () => void;
   pilot?: boolean;
+  organizationName?: string | undefined;
+  /** The run is pinned to an organization that is not the active one. */
+  organizationInactive?: boolean;
+  hasOrganizations?: boolean;
+  onConnect?: () => void;
+  onOpenConnections?: () => void;
   dryRun: boolean;
   open: boolean;
-  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown };
+  agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown; connectors?: readonly unknown[]; graphOperations?: readonly unknown[]; delivery?: AgentSummary["delivery"] };
   activeTenant: TenantRecord | undefined;
   providerName: string;
+  providerId: ProviderId;
   providerIsLocal: boolean;
   requestedScopes: RequestedScope[];
   model: string | undefined;
@@ -2670,101 +2780,209 @@ function RunPreflightModal({
     : [];
   // Scopes the services cannot account for block the run, as in preflight.
   const scopeBlockCopy = unmappedScopesCopy(agent.scopes) ?? uncoveredScopesCopy(agent);
+  // Report destinations depend on which connectors are set up.
+  // null while loading, "failed" when the list could not be read: a failed
+  // load is never treated as "nothing is set up".
+  const [connectors, setConnectors] = useState<ConnectorSummary[] | null | "failed">(null);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setConnectors(null);
+    void Promise.resolve(window.openAdminOS?.listConnectors?.() ?? [])
+      .then((list) => {
+        if (!cancelled) setConnectors(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnectors("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+  // Only an agent that calls no service API runs without an organization.
+  const serviceFree = agentCallsNoServiceApi(agent);
+  const neededTitles = agentServiceIds(agent).map((id) => serviceById(id).title);
   const canStart =
-    Boolean(activeTenant) && !deliverySaving && missingServices.length === 0 && !scopeBlockCopy;
+    (Boolean(activeTenant) || serviceFree) &&
+    providerReady &&
+    !organizationInactive &&
+    !deliverySaving &&
+    missingServices.length === 0 &&
+    !scopeBlockCopy;
+  const firstNeeded = agentServiceIds(agent)[0];
+  const neededText = neededTitles.length > 0 ? formatServiceList(neededTitles) : "Microsoft 365";
+  // One blocker at a time, the first that stops this run. Its fix is the
+  // only filled button in the review.
+  const blocker: PreflightBlocker | null = startError
+    ? {
+        tone: "danger",
+        title: "The run did not start.",
+        body: startError,
+        primary: { label: "Try again", onClick: onConfirm },
+        ...(onOpenProviderSettings ? { secondary: { label: "Open provider settings", onClick: onOpenProviderSettings } } : {}),
+        hint: "Fix the reason above, then try again.",
+      }
+    : !activeTenant && !serviceFree
+      ? {
+          tone: "neutral",
+          ...(firstNeeded ? { serviceId: firstNeeded } : {}),
+          title: `Needs ${neededText} in an active organization`,
+          body: hasOrganizations
+            ? `No organization is active, so this agent has nothing to read. Connect ${neededTitles[0] ?? "Microsoft 365"}, or switch to an organization that has it.`
+            : `No organization is active, so this agent has nothing to read. Connect ${neededTitles[0] ?? "Microsoft 365"} to add an organization.`,
+          ...(onConnect ? { primary: { label: `Connect ${neededTitles[0] ?? "Microsoft 365"}`, onClick: onConnect } } : {}),
+          ...(hasOrganizations && onOpenConnections ? { secondary: { label: "Choose organization", onClick: onOpenConnections } } : {}),
+          hint: `Connect ${neededTitles[0] ?? "Microsoft 365"} to start this run.`,
+        }
+      : activeTenant && organizationInactive
+        ? {
+            tone: "neutral",
+            title: `Set up for ${organizationName ?? activeTenant.displayName}`,
+            body: `This run is set up for ${organizationName ?? activeTenant.displayName}, which is not the active organization. Switch to it in the organization menu to start it there.`,
+            ...(onOpenConnections ? { primary: { label: "Choose an organization", onClick: onOpenConnections } } : {}),
+            hint: `Switch to ${organizationName ?? activeTenant.displayName} to start this run.`,
+          }
+        : !providerReady
+          ? {
+              tone: "neutral",
+              title: `${providerName} is not ready to run this agent.`,
+              body: `${providerStatusDetail ? `${providerStatusDetail} ` : ""}Choose or start a model in provider settings, then start the run.`,
+              ...(onOpenProviderSettings ? { primary: { label: "Open provider settings", onClick: onOpenProviderSettings } } : {}),
+              hint: "Start a model to start this run.",
+            }
+          : scopeBlockCopy
+            ? { tone: "danger", title: "This agent cannot start as declared.", body: scopeBlockCopy, hint: "Fix the agent's declared permissions to start it." }
+            : null;
+  const missingServicesBlock = !blocker && activeTenant && missingServices.length > 0;
+  const hint = blocker?.hint ?? (missingServicesBlock ? `Connect ${formatServiceList(missingServices.map((service) => service.title))} to start this run.` : deliverySaving ? "Saving connector delivery changes before the run starts." : undefined);
+  const locationDetail = providerDataLocationDetail({ id: providerId });
+  const changes = dryRun
+    ? "None. This run only prepares a plan. Graph writes, connector changes and automatic result delivery are blocked."
+    : agent.mode === "write"
+      ? "Pauses for a diff and typed confirmation before anything is applied."
+      : "None. This agent cannot change tenant state.";
   return (
-    <Modal open={open} onClose={onClose} size="md">
+    <Modal open={open} onClose={onClose} size="md" {...(blocker || missingServicesBlock ? { ariaDescribedBy: PREFLIGHT_BLOCKER_ID } : {})}>
       <ModalHeader
         title={dryRun ? "Review dry run" : "Review run"}
         subtitle={agent.name}
         onClose={onClose}
       />
-      <div className="space-y-4 p-6">
-        {!activeTenant && (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-            Connect or select a Microsoft 365 tenant before starting this run.
-            OpenAdminOS never runs an agent without an active tenant scope.
-          </div>
-        )}
-        {!providerIsLocal && (
-          <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-            Hosted provider selected. Tenant prompts and agent context are sent
-            through {providerName}'s local CLI and leave this device.
-          </div>
-        )}
-        {scopeBlockCopy && (
-          <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
-            {scopeBlockCopy}
-          </div>
-        )}
-        {activeTenant && missingServices.length > 0 ? (
-          <ServiceNotConnectedNotice
-            tenant={activeTenant}
-            serviceIds={missingServices.map((service) => service.id)}
-          />
+      <div className="space-y-4 px-6 pb-6 pt-4">
+        {blocker ? <PreflightBlockerBlock blocker={blocker} /> : null}
+        {missingServicesBlock ? (
+          <ServiceNotConnectedNotice id={PREFLIGHT_BLOCKER_ID} tenant={activeTenant} serviceIds={missingServices.map((service) => service.id)} primary />
         ) : null}
-        {missingParts.length > 0 && activeTenant && (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            This agent needs {missingParts.map(partLabel).join(", ")} access,
-            which was not granted for {activeTenant.displayName}. Starting it asks
-            Microsoft for consent before the run continues.
-          </div>
-        )}
-        {deliverySaving && (
-          <div className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-            Saving connector delivery changes before the run starts.
-          </div>
-        )}
-        <div className="grid gap-3 md:grid-cols-2">
-          <PreflightFact label="Tenant" value={activeTenant?.displayName ?? "No tenant selected"} />
-          <PreflightFact
-            label="Provider"
-            value={`${providerName}${providerIsLocal ? " · local" : " · hosted"}`}
-          />
-          <PreflightFact label="Model" value={model ?? "Provider default"} />
-          <PreflightFact
-            label="Mode"
-            value={dryRun ? "Dry run: plan only" : agent.mode === "write" ? "Write with confirmation" : "Read-only"}
-          />
-        </div>
-        <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
-          <div className="text-xs font-medium text-[var(--color-text-muted)]">
-            What happens
-          </div>
-          <p className="mt-2 text-base leading-relaxed text-[var(--color-text-soft)]">
-            {pilot ? "Pilot mode runs this agent on the fictional sample tenant with prepared text instead of a model. Changes only touch the in-memory sample data. " : null}
-            OpenAdminOS runs this agent against the active tenant and saves the
-            result to local run history. {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
-              ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."
-              : "This agent cannot change tenant state."}
-          </p>
-        </div>
-        {agent.scopes.length > 0 && (
-          <div>
-            <div className="text-xs font-medium text-[var(--color-text-muted)]">
-              Graph scopes
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {agent.scopes.map((scope) => (
-                <Pill key={scope}>
-                  <span className="font-mono text-xs">
-                    {scopeLabel(scope, requestedScopes)}
-                  </span>
-                </Pill>
-              ))}
-            </div>
-          </div>
-        )}
-        <div className="flex justify-end gap-2 pt-2">
+        <dl className="preflight-facts" aria-label="What this run uses">
+          <PreflightFact label="Organization">
+            {activeTenant ? organizationName ?? activeTenant.displayName : serviceFree ? "None needed" : "None active"}
+          </PreflightFact>
+          <PreflightFact label="Reads">
+            {serviceFree
+              ? "Nothing. It reads no service data."
+              : `${neededTitles.length > 0 ? formatServiceList(neededTitles) : "Microsoft 365 sign-in"}, ${agent.mode === "write" ? "read and write" : "read-only"}`}
+            {pilot ? (
+              <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
+                Pilot mode runs this agent on the fictional sample tenant with prepared text instead of a model. Changes only touch the in-memory sample data.
+              </span>
+            ) : null}
+          </PreflightFact>
+          <PreflightFact label="Model">
+            {model ?? "Provider default"}
+            {pilot ? null : providerIsLocal ? (
+              <span className="mt-0.5 block text-xs text-[var(--color-success)]">{`${providerName}. Prompts stay on this device.`}</span>
+            ) : (
+              <>
+                <span className="mt-0.5 block text-xs text-[var(--color-warning)]">
+                  {activeTenant
+                    ? `${promptsGoTo({ id: providerId, name: providerName }, true)}, with agent context.`
+                    : `${promptsGoTo({ id: providerId, name: providerName })}, with agent context. No organization is active, so no tenant data is included.`}
+                </span>
+                {locationDetail ? <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">{locationDetail}</span> : null}
+              </>
+            )}
+          </PreflightFact>
+          {agent.scopes.length > 0 ? (
+            <PreflightFact label="Permissions">
+              <span className="block space-y-0.5 font-mono text-sm">
+                {agent.scopes.map((scope) => (
+                  <span key={scope} className="block break-all">{scopeLabel(scope, requestedScopes)}</span>
+                ))}
+              </span>
+              {missingParts.length > 0 && activeTenant ? (
+                <span className="mt-1 block text-xs text-[var(--color-text-muted)]">
+                  {`${missingParts.map(partLabel).join(", ")} was not granted for ${activeTenant.displayName}. Starting the run asks Microsoft for consent first.`}
+                </span>
+              ) : null}
+            </PreflightFact>
+          ) : null}
+          {!activeTenant && serviceFree ? (
+            <PreflightFact label="Report">
+              {connectors === "failed"
+                ? "Where its report goes could not be checked: saved delivery rules may still send it. Review them in Connections, under Results go to."
+                : connectors
+                  ? noOrganizationReportLine(manualRunReportDestinations(agent, false, connectors))
+                  : "Checking where its report goes."}
+            </PreflightFact>
+          ) : null}
+          <PreflightFact label="Changes">{changes}</PreflightFact>
+        </dl>
+        <div className="flex items-center justify-end gap-2 pt-1">
+          {hint && !canStart ? <p className="mr-auto text-sm text-[var(--color-text-muted)]">{hint}</p> : null}
           <Button variant="ghost" onClick={onClose}>
             Cancel
           </Button>
-          <Button variant="primary" disabled={!canStart} onClick={onConfirm}>
+          <Button variant={canStart ? "primary" : "secondary"} disabled={!canStart} onClick={onConfirm}>
             {deliverySaving ? "Saving delivery…" : dryRun ? "Start dry run" : "Start run"}
           </Button>
         </div>
       </div>
     </Modal>
+  );
+}
+
+interface PreflightBlocker {
+  tone: "neutral" | "danger";
+  serviceId?: ServiceId;
+  title: string;
+  body: string;
+  primary?: { label: string; onClick: () => void };
+  secondary?: { label: string; onClick: () => void };
+  hint: string;
+}
+
+const PREFLIGHT_BLOCKER_ID = "preflight-blocker";
+
+/**
+ * The one thing that stops this run, with its fix as the only filled
+ * button. Not an alert: the dialog names it as its description, and its
+ * fix takes focus when the dialog opens.
+ */
+function PreflightBlockerBlock({ blocker }: { blocker: PreflightBlocker }) {
+  return (
+    <div
+      id={PREFLIGHT_BLOCKER_ID}
+      // A refused start is announced; a standing blocker is the dialog's description.
+      role={blocker.tone === "danger" && blocker.title === "The run did not start." ? "alert" : undefined}
+      data-tone={blocker.tone}
+      className={`flex gap-3 rounded-lg px-4 py-3.5 ${
+        blocker.tone === "danger"
+          ? "bg-[var(--color-danger-soft)] ring-1 ring-inset ring-[var(--color-danger)]/25"
+          : "bg-[var(--color-bg-raised)] ring-1 ring-inset ring-[var(--color-border-soft)]"
+      }`}
+    >
+      {blocker.serviceId ? <ServiceMark serviceId={blocker.serviceId} size="lg" off /> : null}
+      <div className="min-w-0 flex-1">
+        <div className={`text-md font-medium ${blocker.tone === "danger" ? "text-[var(--color-danger)]" : "text-[var(--color-text)]"}`}>{blocker.title}</div>
+        <p className="mt-0.5 text-sm leading-relaxed text-[var(--color-text-soft)]">{blocker.body}</p>
+        {blocker.primary || blocker.secondary ? (
+          <div className="mt-3 flex flex-wrap gap-2">
+            {blocker.primary ? <Button size="sm" variant="primary" data-autofocus onClick={blocker.primary.onClick}>{blocker.primary.label}</Button> : null}
+            {blocker.secondary ? <Button size="sm" variant="secondary" onClick={blocker.secondary.onClick}>{blocker.secondary.label}</Button> : null}
+          </div>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -2791,15 +3009,12 @@ const GRAPH_SCOPE_LABELS: Record<string, string> = {
   "User.ReadWrite.All": "Read and write users",
 };
 
-function PreflightFact({ label, value }: { label: string; value: string }) {
+/** One fact of the run review: a term and its value on a hairline row. */
+function PreflightFact({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="rounded-lg bg-[var(--color-bg-raised)] p-3 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-xs font-medium text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className="mt-1 truncate text-base text-[var(--color-text)]">
-        {value}
-      </div>
+    <div className="preflight-fact">
+      <dt>{label}</dt>
+      <dd>{children}</dd>
     </div>
   );
 }

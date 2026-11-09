@@ -1179,8 +1179,8 @@ export default function Changes() {
           ) : !activeTenant ? (
             <EmptyState
               icon={<IconWarning size={18} />}
-              title="No active tenant"
-              description="Connect a Microsoft 365 tenant before reviewing tenant changes."
+              title="No organization is active"
+              description="Changes reads Intune and Entra configuration for the active organization. Choose an organization in the organization menu, or connect Microsoft 365 to add one."
               action={
                 <Button
                   variant="primary"
@@ -1193,7 +1193,7 @@ export default function Changes() {
                     )
                   }
                 >
-                  Connect tenant
+                  Connect Microsoft 365
                 </Button>
               }
             />
@@ -1265,7 +1265,7 @@ export default function Changes() {
               }}
               onRunTenantCompare={() => void handleTenantCompare()}
               onSelectTenantEntry={setSelectedTenantCompareEntry}
-              onOpenTenantSettings={() => navigate("/settings/tenants")}
+              onOpenTenantSettings={() => navigate("/connections")}
             />
           ) : error ? (
             <EmptyState
@@ -1505,7 +1505,7 @@ function TimelineView({
       <EmptyState
         icon={<IconWarning size={18} />}
         title="No current change history"
-        description={`${omittedNotice} Add it in Settings, Tenants to track changes again.`}
+        description={`${omittedNotice} Add it in Connections to track changes again.`}
         action={
           <Button variant="secondary" onClick={onClearFilters}>
             Show all resources
@@ -1520,7 +1520,7 @@ function TimelineView({
         icon={<IconClock size={18} />}
         title="No change history yet"
         description={`Refresh the tenant cache to capture a baseline, then refresh again to detect changes.${
-          omittedNotice ? ` ${omittedNotice} Add it in Settings, Tenants to track its changes again.` : ""
+          omittedNotice ? ` ${omittedNotice} Add it in Connections to track its changes again.` : ""
         }`}
         action={
           <Button variant="primary" onClick={onRefresh}>
@@ -2462,7 +2462,7 @@ function TenantCompareResults({
       <EmptyState
         icon={<IconWarning size={18} />}
         title="Nothing to compare"
-        description={`${omittedNotice} Add it in Settings, Tenants to compare it again.`}
+        description={`${omittedNotice} Add it in Connections to compare it again.`}
       />
     );
   }

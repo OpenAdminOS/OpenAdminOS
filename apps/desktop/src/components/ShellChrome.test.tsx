@@ -31,7 +31,7 @@ function pilotState() {
 }
 
 describe("shell chrome", () => {
-  it("keeps tenant, model boundary, and running work visible without a status strip", async () => {
+  it("keeps the organization, model boundary, and running work visible without a status strip", async () => {
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
@@ -50,10 +50,10 @@ describe("shell chrome", () => {
       ),
     });
 
-    expect(await screen.findByRole("button", { name: /Switch tenant, Contoso IT/ })).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Switch organization, Contoso IT/ })).toBeInTheDocument();
     expect(screen.getByRole("status", { name: /Local · Ollama.*llama3.1/ })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "1 run in progress" })).toHaveAttribute("href", "/runs");
-    expect(screen.queryByRole("contentinfo", { name: /Current tenant/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("contentinfo", { name: /Current organization/ })).not.toBeInTheDocument();
   });
 
   it("shows an honest hosted destination and the nightly brand tag", async () => {
@@ -70,7 +70,7 @@ describe("shell chrome", () => {
     });
 
     expect(
-      await screen.findByRole("status", { name: /Hosted · OpenAI.*gpt-5/ }),
+      await screen.findByRole("status", { name: /Hosted · Codex · location set by your account.*gpt-5/ }),
     ).toBeInTheDocument();
     expect(screen.getByText("Nightly")).toBeInTheDocument();
   });
@@ -163,27 +163,27 @@ describe("shell chrome", () => {
     expect(checkForUpdatesNow).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps connected tenants selectable when none is active", async () => {
+  it("keeps organizations selectable when none is active", async () => {
     const user = userEvent.setup();
     const state = {
       ...createMockAppState(),
       activeTenantId: undefined,
     };
-    const setActiveTenant = vi.fn(async () => ({ ...state, activeTenantId: "tenant-1" }));
+    const setActiveOrganization = vi.fn(async () => ({ ...state, activeTenantId: "tenant-1" }));
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
-      bridge: makeMockBridge({ setActiveTenant }, state),
+      bridge: makeMockBridge({ setActiveOrganization }, state),
     });
 
     await user.click(
-      await screen.findByRole("button", { name: "Choose an active tenant" }),
+      await screen.findByRole("button", { name: "Choose an organization" }),
     );
     await user.click(screen.getByRole("menuitemradio", { name: /Contoso IT/ }));
-    expect(setActiveTenant).toHaveBeenCalledWith("tenant-1");
+    expect(setActiveOrganization).toHaveBeenCalledWith("org-tenant-1");
   });
 
-  it("shows pilot mode chrome: tenant label, banner, and reduced navigation", async () => {
+  it("shows pilot mode chrome: sample organization label, banner, and reduced navigation", async () => {
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
@@ -191,17 +191,18 @@ describe("shell chrome", () => {
     });
 
     const tenantButton = await screen.findByRole("button", {
-      name: /Switch tenant, Contoso \(pilot\)/,
+      name: /Switch organization, Contoso \(pilot\)/,
     });
-    expect(within(tenantButton).getByText("Pilot mode")).toBeInTheDocument();
+    expect(within(tenantButton).getByText("Sample data")).toBeInTheDocument();
     const banner = screen.getByRole("region", { name: "Pilot mode" });
     expect(banner).toHaveTextContent(PILOT_COPY.banner);
     expect(within(banner).getByRole("button", { name: "Connect your tenant" })).toBeInTheDocument();
     const primary = screen.getByRole("navigation", { name: "Primary" });
     expect(within(primary).getByRole("link", { name: "Agents" })).toBeInTheDocument();
     expect(within(primary).getByRole("link", { name: "Runs" })).toBeInTheDocument();
-    // The Marketplace stays browsable in pilot mode.
+    // The Marketplace and Connections stay browsable in pilot mode.
     expect(within(primary).getByRole("link", { name: "Marketplace" })).toBeInTheDocument();
+    expect(within(primary).getByRole("link", { name: "Connections" })).toHaveAttribute("href", "/connections");
     expect(within(primary).queryByRole("link", { name: "Agent Team" })).not.toBeInTheDocument();
     expect(within(primary).queryByRole("link", { name: "Changes" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Create workspace" })).not.toBeInTheDocument();
@@ -231,7 +232,7 @@ describe("shell chrome", () => {
     expect(screen.queryByText("Team content")).not.toBeInTheDocument();
   });
 
-  it("shows which app registration each tenant is connected with in the tenant menu", async () => {
+  it("names an own app registration in the organization menu (design round)", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();
     const openAdminOSTenant = {
@@ -263,28 +264,19 @@ describe("shell chrome", () => {
       bridge: makeMockBridge({}, state),
     });
 
-    await user.click(await screen.findByRole("button", { name: /Switch tenant/ }));
-    const ours = screen.getByRole("menuitemradio", { name: /Contoso IT/ });
-    expect(within(ours).getByText("OpenAdminOS app")).toHaveAttribute(
-      "title",
-      "OpenAdminOS app, client ID d1de0a94-f67a-421d-8804-a235955ffd69",
-    );
+    await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+    // The switcher names only an own app registration; the Organizations tab on Connections shows the details.
     const custom = screen.getByRole("menuitemradio", { name: /Fabrikam/ });
-    expect(within(custom).getByText("Own app registration · aaaaaaaa…")).toHaveAttribute(
-      "title",
-      "Own app registration, client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee, directory fabrikam.onmicrosoft.com",
-    );
+    expect(custom).toHaveTextContent("Own app registration");
+    const ours = screen.getByRole("menuitemradio", { name: /Contoso IT/ });
+    expect(ours).not.toHaveTextContent(/app registration/i);
     const legacy = screen.getByRole("menuitemradio", { name: /Northwind/ });
-    expect(within(legacy).getByText("Microsoft Graph Command Line Tools")).toHaveAttribute(
-      "title",
-      expect.stringContaining("client ID 14d82eec-204b-4c2f-b7e8-296a70dab67e. Connected before v0.5."),
-    );
-    expect(within(legacy).queryByText("OpenAdminOS app")).not.toBeInTheDocument();
+    expect(legacy).not.toHaveTextContent(/app registration/i);
     const pilot = screen.getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
     expect(within(pilot).queryByText(/app registration|OpenAdminOS app/i)).not.toBeInTheDocument();
   });
 
-  it("opens the unchosen sign-in choice from the tenant menu and the pilot banner", async () => {
+  it("opens the unchosen sign-in choice from the organization menu and the pilot banner", async () => {
     const user = userEvent.setup();
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
@@ -298,13 +290,13 @@ describe("shell chrome", () => {
     expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
     await user.click(screen.getByRole("button", { name: "Cancel" }));
 
-    await user.click(screen.getByRole("button", { name: /Switch tenant/ }));
-    await user.click(screen.getByRole("menuitem", { name: "Connect tenant" }));
+    await user.click(screen.getByRole("button", { name: /Switch organization/ }));
+    await user.click(screen.getByRole("menuitem", { name: "Add organization" }));
     expect(await screen.findByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
     expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
   });
 
-  it("opens pilot mode from the tenant menu", async () => {
+  it("offers no way into sample data from the organization menu", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const addSampleTenant = vi.fn(async () => pilotState());
@@ -314,9 +306,10 @@ describe("shell chrome", () => {
       bridge: makeMockBridge({ addSampleTenant }, emptyState),
     });
 
-    await user.click(await screen.findByRole("button", { name: "Connect a tenant" }));
-    await user.click(screen.getByRole("menuitem", { name: "Open pilot mode" }));
-    expect(addSampleTenant).toHaveBeenCalledOnce();
+    await user.click(await screen.findByRole("button", { name: "Add an organization" }));
+    expect(screen.getByRole("menuitem", { name: "Add organization" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /sample data/i })).not.toBeInTheDocument();
+    expect(addSampleTenant).not.toHaveBeenCalled();
   });
 
   it("leaves pilot mode only after a confirm that says what is deleted", async () => {
@@ -330,8 +323,8 @@ describe("shell chrome", () => {
       bridge: makeMockBridge({ disconnectTenant }, pilotState()),
     });
 
-    await user.click(await screen.findByRole("button", { name: /Switch tenant, Contoso \(pilot\)/ }));
-    expect(screen.getByRole("menuitem", { name: "Connect tenant" })).toBeInTheDocument();
+    await user.click(await screen.findByRole("button", { name: /Switch organization, Contoso \(pilot\)/ }));
+    expect(screen.getByRole("menuitem", { name: "Add organization" })).toBeInTheDocument();
     await user.click(screen.getByRole("menuitem", { name: "Leave pilot mode" }));
     expect(await screen.findByText(/This deletes the fictional Contoso tenant from this device, with its pilot runs, chats/)).toBeInTheDocument();
     expect(disconnectTenant).not.toHaveBeenCalled();
@@ -339,7 +332,7 @@ describe("shell chrome", () => {
     expect(disconnectTenant).toHaveBeenCalledWith("openadminos-sample-tenant");
   });
 
-  it("surfaces tenant switch and updater retry failures", async () => {
+  it("surfaces organization switch and updater retry failures", async () => {
     const user = userEvent.setup();
     const state = {
       ...createMockAppState(),
@@ -350,7 +343,7 @@ describe("shell chrome", () => {
       route: "/chat",
       bridge: makeMockBridge(
         {
-          setActiveTenant: vi.fn(async () => {
+          setActiveOrganization: vi.fn(async () => {
             throw new Error("Tenant activation failed at the host.");
           }),
           getUpdateState: vi.fn(async () => ({
@@ -366,10 +359,10 @@ describe("shell chrome", () => {
     });
 
     await user.click(
-      await screen.findByRole("button", { name: "Choose an active tenant" }),
+      await screen.findByRole("button", { name: "Choose an organization" }),
     );
     await user.click(screen.getByRole("menuitemradio", { name: /Contoso IT/ }));
-    expect(await screen.findByText(/Switching tenants failed.*Try again from the tenant menu/)).toBeInTheDocument();
+    expect(await screen.findByText(/Switching organizations failed.*Try again from the organization menu/)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry" }));
     expect(
@@ -437,3 +430,31 @@ function BoundaryProbe() {
     </>
   );
 }
+
+it("keeps a reference count for the short boundary chip (design round)", async () => {
+  const { createMockMcpServers } = await import("../test/test-utils");
+  renderRoute(<AppShell><div /></AppShell>, {
+    path: "*",
+    route: "/chat",
+    bridge: makeMockBridge({}, createMockAppState({
+      activeProviderId: "openai",
+      mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: true } }),
+    })),
+  });
+  const count = await screen.findByTestId("boundary-reference-count");
+  expect(count).toHaveTextContent("+2 references");
+  // One line at every width: the model and the host list are not drawn, only named.
+  expect(screen.queryByTestId("boundary-tool-hosts")).not.toBeInTheDocument();
+});
+
+it("keeps the reference count muted in the boundary chip at every width (design round review, Muse V)", async () => {
+  const { createMockMcpServers } = await import("../test/test-utils");
+  renderRoute(<AppShell><div /></AppShell>, {
+    path: "*",
+    route: "/chat",
+    bridge: makeMockBridge({}, createMockAppState({ mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }) })),
+  });
+  const count = await screen.findByTestId("boundary-reference-count");
+  expect(count.className).not.toContain("color-warning");
+  expect(count.className).not.toMatch(/hidden/);
+});

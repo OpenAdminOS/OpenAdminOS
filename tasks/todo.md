@@ -1554,7 +1554,29 @@ Jamf Pro and Google Workspace connectors (separate issues; the mockup fixes the 
 - [x] Mockup `32-connections-first-run.html`, checked at desktop and phone widths in light and dark
 - [x] SPEC §4a decision block, mockup table row, CHANGELOG line
 - [x] Public issue #171
-- [ ] Implementation plan with the `TenantRecord` to organization migration
+- [x] Implementation plan with the `TenantRecord` to organization migration (part B, below)
+
+## Part B plan: organizations and Connections (branch `organizations/connections`)
+
+Criteria 5, 6, 7, 8, 11 and 13. Part A (criteria 1 to 4 and 12) is built on `first-run/without-sign-in`.
+
+Data model: `TenantRecord` stays the Microsoft 365 connection. `OrganizationRecord` sits above it in `state.json` with an id, a name, an optional `kind: "sample"`, and `connections.microsoft365.tenantId`; other vendor services each add one keyed connection later. The active organization is the one that holds the active tenant, so `activeTenantId` stays the single source and every tenant-keyed store (runs, conversations, cache, drift, office) keeps working unchanged. Organization ids are derived from the tenant id (`org-<tenantId>`), so the migration is deterministic and idempotent at read time even though `read()` does not persist.
+
+- [x] SDK types: `OrganizationRecord`, `AppState.organizations`, `AgentSchedule.organizationId`, migration notice, `agentCallsNoServiceApi`
+- [x] Host: organization reconcile and migration on read, rename, choose No organization, schedule assignment, schedules gated by organization, service-free runs without a tenant
+- [x] Host tests: migration from current state files (one real tenant active, none active, pilot alongside real tenants), idempotency, invalid records, schedule isolation, `services: []` with `User.Read` still needs an organization
+- [x] Renderer: organization switcher, Connections page with reach map, routes and redirects, sidebar item, account menu, Settings sections removed
+- [x] Renderer: agent service needs and named actions, preflight without an organization, schedules surfaces for unassigned schedules
+- [x] Gates: review every `requireTenant` and `requireTenantAndProvider` call against hard constraint 3, with tests. Agent runs (Agents list, agent drawer, command palette, Run again) no longer gate on a tenant: they open the preflight, which names the services. Cache refresh, Changes, schedules (Run due now, Schedules page) and Chat keep the gate, because they always read a service. Chat is part A.
+- [x] Docs: `CLAUDE.md`, `AGENTS.md`, SPEC, CHANGELOG, GitBook pages, `docs:generate`
+- [x] Verification under Node 22, app launch on a migrated state file, screenshots light and dark
+
+### Part B review (2026-11-09)
+
+- Node 22: typecheck clean; electron `node --test` 1011 pass, 0 fail; runtime 256 pass; scripts 18 pass; renderer 518 pass in 60 files; `npm run qa` 197 pass, 4 warn, 0 fail; `npm run docs:check` clean.
+- Live check: the dev Electron build on a state file in the current-version shape (two tenants, Woodgrove Bank active, two schedules, three runs, a saved custom registration, two references, a Teams delivery rule) with Anthropic through the Claude Code CLI, model `claude-sonnet-5`. Read gave two organizations named after the tenants, both schedules on Woodgrove Bank with the notice, runs on their tenants, and an untouched file; the first write saved it. With No organization, Find inactive devices was refused with the designed message, and Team PowerShell draft completed on `claude-sonnet-5` with no tenant. Screenshots in `docs/screenshots/organizations/`.
+- Not verified here: a real Microsoft sign-in and Graph calls (no tenant tokens on the test profile), and Agent Team persona schedules, which keep their own tenant binding.
+- Open: hosted provider region source for the reach map (`TODO(ugur)` in `apps/desktop/src/copy/connections.ts`).
 
 ## Design review (2026-11-08)
 
@@ -1584,3 +1606,282 @@ Round 2 fixes confirmed. No blocking findings.
 
 1. [x] Schedule migration had no destination when no real tenant is active or pilot mode is active. Such schedules now stay paused and unassigned until the admin assigns them, never to the sample organization; criterion 11 requires migration tests for all three states.
 2. [x] The KQL example said "newest first" but sorts by failure count. Copy now says "largest groups first".
+
+## PR #174 review round 1 (Claude evaluator, GPT-6.1-Sol and Muse Wonder Full, 2026-11-09)
+
+Reviewed head 96eece9. Each fix is its own commit with a regression test.
+
+Blocking:
+
+1. [x] Scheduled batches could run in another organization. Run due now and Run all scheduled start scheduled runs, and the host checks inside the run lock that a scheduled start's schedule belongs to the active organization. Every renderer `start-run` call may only pin the active tenant, including Run for real and Team retries that take the original run's tenant; multi-tenant batches and Agent Team keep pinning their own tenants inside the host. (219e3bf)
+2. [x] Editing an unassigned schedule activated it. Ownership is decided only when a schedule is created; edits keep it, including unassigned; only Assign assigns. (8817ddc)
+3. [x] An explicit tenant bypassed the scheduled-start check. The check now compares the schedule's organization and any pinned tenant with the active organization and tenant. (219e3bf, same lock and check as 1)
+4. [x] No-organization runs were labeled with another organization. Delivery resolves the report context only from the run's own tenant and labels its absence No organization; tests cover Slack, WhatsApp under the sample organization, and the Teams and Outlook skip. (793739a)
+
+Should fix:
+
+5. [x] Run again bypassed the preflight. Ordinary reruns and Re-run against the current tenant open the agent's preflight with the original provider and model; Run for real and Team retries keep their flows. Tests for a tenant-bound and a tenant-less run. (1f6286d)
+6. [x] The service-free preflight said the run cannot reach any service. It now says no service data is read and lists the report destinations that apply to a manual run, naming Teams and Outlook as skipped without an organization. (639eb1c)
+7. [x] The hosted warning used tenant wording with no organization. It now says prompts and agent context go to the provider and no tenant data is included. (999bbb5)
+8. [x] Menu bar Run due reported other organizations' and unassigned schedules as errors. They are skipped and counted as waiting. (3b54f93)
+9. [x] `Schedules.tsx` was unrouted. Deleted; its tests that describe live behavior run against the Agents schedules list. (28a962a)
+
+Test gaps:
+
+10. [x] Tests prove Changes, the Data and Chat settings cache refresh, and scheduled batches refuse without an organization; Changes and the cache say No organization is active. (dc42286)
+11. [x] The status strip parity test covers the provider, model and services as well as reference hosts. (ee5d860)
+
+Muse Wonder Full:
+
+- A. [x] Regression from the first fix: a pilot scheduled start said unassigned. The pilot refusal comes first again; `pilot-mode-state.test.ts` covers it. (9cbdc84)
+- B. [x] Reach map destinations disagreed with Results. One list joins enabled delivery rules and declared connector steps with the connector list Results loads; the map names what is set up, Results says the same and names rules to connectors that are not set up; reference hosts are deduplicated for the map and the strip. Tests on both sides. (d337ef1) The status strip itself names Chat egress (provider and reference hosts) and does not list run report connectors; that is unchanged.
+- C. [x] The menu bar listed other organizations' schedules. Only the active organization's schedules are listed and counted as due (3b54f93), with the list moved into a tested module (1c46ad2).
+- D. [x] Hosted wording said local CLI for API providers. The review and the map name the channel per provider: the vendor CLI for Claude Code, Codex, Copilot and Gemini, the Azure OpenAI API for Azure. (e849512)
+- E. [x] Accessibility: need chips are visually hidden text in the row's accessible name (05c9f7a); the organization switcher focuses the active organization on open, supports arrow keys, Home and End, returns focus to the chip on Escape, Tab and choice, and its row actions are visible menu items (fdefc02).
+- F. [x] Region wording is now "Region not reported to OpenAdminOS"; the `TODO(ugur)` stays. (b1587d7)
+- G. [x] Unknown connection keys and organizations with only such connections survive reconcile; this version does not switch to them or assign schedules to them. (b58fe1c)
+- H. [x] Names are cut by code points; a new name over 80 characters is refused instead of cut; IPC and field limits match. (95ad600)
+- I. [x] Settings search finds tenant and connector topics and opens Connections. (39cbf64)
+- J. [x] No organization uses an empty dashed tile instead of a question mark. (6386e35)
+
+Verification after round 1 (Node 22): typecheck clean; electron 1026 pass, 0 fail; runtime 256 pass; scripts 18 pass; renderer 539 pass in 61 files; `npm run qa` 197 pass, 4 warn, 0 fail; `npm run docs:check` clean. Live on Anthropic through the Claude Code CLI, `claude-sonnet-5`: the real `start-run` IPC refused a start pinned to the inactive organization's tenant and a scheduled start in another organization; the reach map names "Anthropic, through the Claude Code CLI" with "Region not reported to OpenAdminOS". Screenshots refreshed in `docs/screenshots/organizations/`.
+
+## PR #174 review round 2 (GPT-6.1-Sol and Claude evaluator, 2026-11-09)
+
+Reviewed head 8519540; round 1 fixes confirmed. Each fix is its own commit with a regression test.
+
+1. [x] Blocking: Agent Team persona schedules failed and disabled their personas. Persona recurrence starts with trigger schedule and the installed-agent schedule checks treated it as unassigned, or refused the persona's tenant while another organization was active. The organization and pinned-tenant checks now apply only to installed-agent schedules; persona runs are host-owned (the renderer cannot pass `office`) and keep their validated tenant binding. Integration tests drive `OfficeService.tick()` through the real `RunService` with the persona's tenant active and with another organization active; both failed before the fix. Whether personas move to organizations stays open for the maintainer. (662310b)
+2. [x] Assign stayed disabled after the first organization was connected with the card open. The selection keeps a choice that is still offered and otherwise takes the first; the test connects an organization while the card stays mounted. (9f8aba2)
+3. [x] The strip parity test compared with hard-coded values. The strip's boundary is now the pure `deriveDataBoundary`, used by the strip and by the reach model, and the test feeds the same states to both. (7e35952)
+4. [x] The menu bar waiting count had no test. Run due is now built in `companion-schedules.ts`, with tests for waiting schedules of another organization, unassigned ones, and no organization. (a5fd0f4)
+5. [x] Run again for a run whose organization is not active hit the host refusal as a raw error. A dialog names the run's organization and offers Switch to it, and for ordinary reruns Run in the active organization through the run review; a removed organization is named as removed. Agent Team reviews keep their own route. (4c12788)
+
+### Muse Wonder Full round 2 (reviewed 8519540)
+
+Already fixed by the round 2 commits above, confirmed: the Agent Team persona schedule blocker (662310b, integration tests through `OfficeService.tick()` and the real `RunService`), the shared strip derivation (7e35952, `deriveDataBoundary`), and the Assign selection (9f8aba2).
+
+1. [x] An organization switch during a scheduler tick consumed the due slot. Organization refusals throw `OrganizationBoundaryError`; the scheduler counts them as waiting, records no failure and keeps `lastScheduledRunAt`. The test switches organization mid-tick through the real start. (586612ef)
+2. [x] Hosted reach copy said tenant data leaves with no organization. The heading becomes "Prompts and agent context" and the text alternative says no tenant data is included. (4c269144)
+3. [x] The no-organization preflight could promise delivery to a connector that is not set up. `manualRunReportDestinations` takes the connector list; the review lists only set-up connectors and names the rest as not sending. (fe580288)
+4. [x] The second tenant check after a Run for real rewrite now also covers installed-agent scheduled starts, and a pilot Run for real is refused unless its dry run was on the pilot tenant. (6da32312)
+5. [x] A losing duplicate record's vendor connections move to the winning organization and survive the next write. (ecf1f4be)
+6. [x] The preflight names the organization of the run's tenant; when that organization is not active it says so and keeps Start disabled. (5af05ee8)
+7. [x] The reach map shows report destinations as being checked until the connector list resolves, and as not checkable when it fails, instead of saying nowhere. (7fea7d26)
+8. [x] Arrow keys from outside the switcher list go to the first or last item, and a running check's Cancel is a menu item. (b0ed8019)
+9. [x] Menu bar Run due counts only due schedules of other organizations as waiting. (28f3850d)
+10. [x] Workspace run pickers list only the workspace tenant's runs, and the host refuses to link a run with no organization. (25acd403)
+11. [x] Pilot need chips use the pilot tenant, so pilot agents' services show as connected. (47b97f09)
+12. [x] Reports of a run with no organization say "Organization: none", and the direct Teams and Outlook paths use the designed skip instead of a failed step. (0f0e7cbf)
+
+CI on this branch failed the generated docs check on every push since 96eece9: git's automatic short-hash length grew to eight characters in fresh clones. Part A's fix `docs: pin generated short hashes to eight characters` is cherry-picked here so the check passes; it merges cleanly once part A lands. Earlier hand-backs reported CI as pending, not failing.
+
+The CI job then failed in the Intune Chat smoke: it, and the Agent Team presentation checks, still looked for the old Switch tenant button and top bar label. Fixed in the commit after the cherry-pick; the Intune Chat, Office and Support issue smokes pass locally.
+
+## PR #174 review round 3 (GPT-6.1-Sol, 2026-11-09)
+
+Reviewed head 9c244c6; round 2 fixes verified. The earlier CI smoke timeout was traced to the existing send-completion race; the smoke passed on rerun.
+
+1. [x] Blocking: Apply bypassed the active organization. `confirmRun` takes the same boundary as starts, and the `confirm-run` IPC handler always sets it, so every renderer approval is checked inside the confirmation lock: the plan's tenant must be the active tenant. That one path covers agent write plans, baseline rollbacks, external gateway proposals and Agent Team approvals; dry run then Run for real was already held to the active organization in round 1. A refused plan is kept unchanged and never retargeted. The confirmation page names the plan's organization, keeps Apply disabled and offers Switch back; a refusal from a race shows the host's designed message. Host tests cover all four approval kinds with No organization and with another organization active; renderer tests cover both states and the race. (44fc909e)
+2. [x] Start errors were hidden behind the run review. The review checks the provider on its own, whatever the organization state, and disables Start with Open provider settings when it is not ready; a refused start appears inside the review with Try again and Open provider settings, tested with `within(dialog)` for an agent start and for Run again. (02b2ae78)
+
+### Muse Wonder Full round 3 (reviewed 9c244c6, Node 22)
+
+No blocking findings; round 2 fixes verified. Muse confirms the earlier smoke timeout came from the old "Switch tenant" wording, fixed in 622d3a4d. The CI run on 46b8436 failed only in the Intune Chat smoke at "edit prompt loaded into composer", the known send-completion race; the smoke passes locally.
+
+1. [x] Switch then Run for real from No organization opened setup: the rerun ran from the closure taken before the switch. It now waits for the render where that organization is active. Test starts from No organization with a planned dry run. (f3ecc51c)
+2. [x] The run review treated a failed connector load as "nothing set up". A failed load now says the destinations could not be checked. (cc2fa872)
+3. [x] Nova runs and sends kept the tenant captured at preview. Execution checks that organization is still active and otherwise refuses with nothing run or sent; Nova starts also carry the active-organization boundary. (664d2749)
+4. [x] Copied and exported reports of a run with no organization say "Organization: none". (e599af56)
+5. [x] A run without a tenant whose agent now needs a service fails closed with the no-organization message, and write and system applies without a tenant refuse, instead of falling back to the active tenant. (cf01b179)
+6. [x] Menu bar Run due counts a mid-batch `OrganizationBoundaryError` as waiting. (03c67c73)
+7. [x] Reconcile keeps records with a long or duplicate id under a fresh deterministic id with their vendor connections, keeps unknown connection values that are not records, and the migration notice counts only schedules it moved. (73cb2c7e)
+- [x] `registration-script.test.ts` timed out under full-suite load (seen here in round 2 too): its tests start PowerShell several times, so the file allows 60 seconds per test. (commit after 73cb2c7e)
+- [x] The Settings search test read its first result before the page finished loading under full-suite load. It now waits for the result. (test commit after the registration fix)
+
+## PR #174 review round 4 (GPT-6.1-Sol and Muse Wonder Full, reviewed 8f7e47c, 2026-11-09)
+
+### GPT-6.1-Sol
+
+1. [x] Blocking: trust copy could promise no delivery while reports still left. The destination list excluded connectors by health status, so a saved Slack token with no global configuration and a channel on the agent rule was listed nowhere while the host posted. `deliveryBlock` in `src/shared/delivery-destinations.ts` is now the one decision: the host calls it before sending (organization skip, missing channel or recipient), and Connections, Results go to and the run review list a connector whenever it returns no block. Only the rule being off, Teams or Outlook without an organization, or no destination at all count as nothing sent; the copy says reports can go there. Tests: token-only Slack with an agent channel (renderer and host), stale error and needs-setup statuses, and a host parity test that runs six fixtures through `processPendingRunDeliveries` and the destination list and asserts a send exactly where the list says one may happen. (4a7eb47d)
+
+### CI smoke regression (maintainer)
+
+2. [x] Blocking: the Electron Intune Chat smoke failed at "edit prompt loaded into composer" on 46b8436 (both attempts) and 8f7e47c. Reproduced on Linux (node:22-bookworm, xvfb-run): 1 of 3 runs failed at that step on 8f7e47c. Cause: a Chat send stays in progress after the answer is shown, until the conversation list reloads, and Edit and resend ignored clicks in that window without any sign. The smoke clicked Edit as soon as the answer appeared. Edit is now disabled until the send settles, like Regenerate, so the click waits; the smoke needed no change. The PR's Chat-adjacent changes (data boundary refactor, Connections wording in Chat) do not change rendering in that flow; the longer Linux reload window makes the race likely. Test holds the reload and asserts Edit is disabled, then loads the prompt once the send settles; it fails without the fix. (5bb40eb9)
+
+### Muse Wonder Full round 4
+
+No blocking findings; round 3 fixes verified.
+
+3. [x] A tenantless pending plan was not refused inside the confirmation lock under No organization: it moved to running and failed in apply. `confirmRun` now refuses a plan without a tenant from every caller before any transition, with `PLAN_NO_ORGANIZATION_COPY`, and the stored run stays unchanged. The confirmation page shows "This plan has no organization" and keeps Apply disabled instead of "Apply will be simulated". Host test for all four plan kinds, with and without the renderer boundary; renderer test. (fbe2c1cc)
+4. [x] `NovaActionHost.activeTenantId` is required, so `assertStillActive` always runs. (6f96f58f)
+5. [x] The rerun continuation is set in an effect: the run page renders one component per run. A Switch records the pending rerun at once, a failed switch clears it, and closing the page before the switch lands says Run again did not continue. Test closes the page while the switch is pending. (dd5e86b9)
+6. [x] Reconcile moves a schedule that named a replaced over-long id to the kept record; duplicate ids are not remapped. (83e4d553)
+7. [x] Testing a connector or running an agent from No organization says no organization with Microsoft 365 is active and how to choose or connect one; the run failure recovery matches it. (b6be39be)
+
+## PR #174 review round 5 (GPT-6.1-Sol, 2026-11-09)
+
+Reviewed head a068806; round 4 fixes verified.
+
+1. [x] Blocking: the empty public reference line said nothing leaves the device with a local model until a reference is added, while a saved delivery rule still sends run reports. The line now speaks only about question words sent to reference hosts; a renderer test with a token-only Slack rule checks it. (acb3d6f6)
+2. [x] The Connections map ignored hosted Nova voice: the strip showed Voice · OpenAI while the map said prompts go nowhere. The map and its text alternative now list the voice destination from the same boundary state as the strip, with a parity test. (8c9fa904)
+
+### Muse Wonder Full round 5 (reviewed a068806)
+
+Confirms both round 5 findings above. GPT-6.1-Sol round 6 found nothing on 8ee4839.
+
+1. [x] `deliveryBlock` had no destination check for Teams or Outlook's default recipients, so the UI listed Microsoft Teams while the connector refused to post without a team and channel. Teams now needs a team and a channel, on the rule or saved as the default; Outlook on default recipients needs at least one saved recipient (split on commas, semicolons and new lines, like the connector). The Teams and Outlook senders refuse both cases with designed step messages before the tenant session, without retrying. Three Teams and Outlook fixtures join the parity test and check the step message and that nothing is requeued. Discord and declared connector steps stay may send; the SPEC note says why. (b61b2f73)
+2. [x] A plan or run stored with `tenantId: ""` is treated as no organization: the confirmation lock refuses it with the no-organization copy, the run and apply paths fail closed, and the confirmation page shows the no-organization notice with Apply disabled. Host and renderer tests. (b7592474)
+3. [x] Invoking a connector (Teams team and channel lists) with no organization active uses `NO_MICROSOFT_365_ORGANIZATION("invoking connectors")`. Test. (294bf23a)
+4. [x] An over-long id shared by several records is not remapped: both records are kept under fresh ids and a schedule naming it is left unassigned, as the comment says. Test. (68980fd8)
+
+## PR #174 review round 7 (GPT-6.1-Sol, 2026-11-09)
+
+Reviewed head 06949c7; the Muse round 5 fixes were verified.
+
+1. [x] Blocking: saving the first Teams default team and channel did not refresh the connector list the map and Results read, so both still said nothing is sent to Teams while the host could post there. The picker now reloads the connector list after a successful save; a renderer test saves a default and checks both disclosures (fails without the fix).
+
+## PR #174 design and enterprise round (2026-11-09)
+
+Maintainer decisions: design spec and mockup 32 revision 2 (`docs/mockups/32-connections-first-run.html`, `docs/mockups/32-connections-first-run-spec.md`, frames F to K), enterprise items from the Muse review, region wording, Muse round 6 nits. This PR merges before #175 and carries the shared pieces.
+
+### Shared pieces
+- [x] `DeviceTile` (104, 72, 40 px) and motion tokens naming existing values. (257f0f0e)
+- [x] Not connected is a dashed neutral `ServiceMark`; missing access is never amber. (f1af8193)
+- [x] Mockup revision 2 and its spec committed. (cf4a658c)
+
+### Region wording and vocabulary
+- [x] `providerDataLocation` in `copy/trust.ts`, with the same signature as PR #175: Anthropic API · US, OpenAI API · US, region not stated (Copilot, Gemini), your resource's region (Azure OpenAI). "Region not reported to OpenAdminOS" and its TODO(ugur) are gone. PR #175 still has "region set by GitHub" and "region set by Google" and should adopt these values. (0f4f07b4)
+- [x] Provider names as the scan shows them (Claude Code, Codex, Apple Intelligence, GitHub Copilot CLI, Gemini CLI); the strip, Chat composer, Chat confirmation and Settings name the location instead of "Hosted via CLI". (2643d7f2)
+- [x] Glossary in SPEC: organization, connection, service, part, tenant, No organization, public reference, result connector, provider, data location. (ff233ec6)
+
+### Design must items, frames F to K
+- [x] F: reach map around `DeviceTile lg` with computed lines (incoming solid, outgoing dashed, amber only for hosted prompts), stacked below 760 px, service rows on one grid with "4 of 6 parts", Manage menu (Permissions, Rename, Disconnect), planned connectors removed, Organizations tab for all organizations and saved registrations. (cd9a6094, 02fcdd0d, bddc2780, 4744b2a2, c0ca8dfc, e1760195)
+- [x] G: empty state with Connect Microsoft 365 above the fold, then what leaves the device now. (ca3c8320)
+- [x] H: switcher with filter from six organizations, recent first, capped scrolling list, neutral avatars, services in words, no Disconnect in rows, flask icon. (8bf5b5ee)
+- [x] I and K: plain agent rows with dashed chips for what is missing and the fix as the action; Schedules lead with the background runs warning and Turn on, then the move note as plain text, rows with next run and where results can go. (82a07c61, d4bda8e4)
+- [x] J: run review with one blocker block whose fix is the only filled button, facts as a hairline definition list, Start run a disabled secondary while blocked. (221ed212)
+- [x] Top bar chip: one short line up to a 1100 px window ("Hosted · Anthropic API · US +2 references"). (421e9903)
+
+### Enterprise items
+- [x] Audit events kept apart from run retention and included in both export formats: Microsoft 365 connected and disconnected, access added and removed, organization created, renamed, switched and removed, provider and model changed, public reference installed, enabled, disabled and removed, schedule assigned and unassigned. (0416ed50, 447e911b, ff233ec6)
+- [x] Disconnect confirmation names what is deleted and that the Entra enterprise application and admin consent remain, links the revoke steps, and needs an explicit check to delete the local data. Disconnecting always deletes the local data today, so the check confirms it rather than making it optional; TODO(ugur) in the dialog asks whether admins should be able to keep it. (e06970f6)
+
+### Muse round 6 nits
+- [x] `!run.tenantId` for the plan size history. (89884553)
+- [x] A shared over-long id counts only records that are kept. (c1297d8f)
+- [x] The hosted voice provider is structured data on the boundary. (12368ec6)
+
+### Flaky tests
+- [x] Settings search tests failed intermittently: opening a section moved focus to its heading a frame later, so typing in the search lost characters. The heading now takes focus only when focus is not already in a field outside the section; a test focuses the search in the first frame and fails without the fix. (4a850d15)
+
+### Verification
+- Screenshots in `docs/screenshots/organizations/` at 1280 and 960 px in light and dark (28 files), compared with frames F to K. Remaining differences: reference marks read LM and KC (existing ReferenceMark initials), and the large buttons use the app's existing lg size.
+- Live checks on the dev Electron build with Claude Code (`claude-sonnet-5`) as the active provider.
+
+## PR #174 design round review (reviewed 8ab06d8, 2026-11-09)
+
+### GPT-6.1-Sol
+
+1. [x] Blocking: processing locations the app cannot establish. Decided: the label says who sets the location and the detail gives the vendor's documented default. Final wording follows PR #175 at a8ec8b3 (Muse's refinement: the CLI decides the channel): "Claude Code · location set by your account", "Codex · location set by your account", "Azure OpenAI · location set by your deployment type", "GitHub Copilot CLI · location not stated", "Gemini CLI · location not stated", unknown "<name> · location not stated". `providerDataLocation`, `promptsGoTo`, `sendsThroughTool` and `providerDataLocationDetail` and their test block are byte-identical to #175. All four CLIs read "Prompts leave this device through <CLI>; <who sets it>"; only Azure OpenAI reads "Prompts go to <label>". The hosted confirmation asks "Send this question through Claude Code?" with "Send through Claude Code" (Azure OpenAI: "Send this question to Azure OpenAI?"). Tooltips, the reach map, the run review and the confirmation show the detail. Note: #175's source at 1e94f91 still had "GitHub Copilot" and "Google Gemini API" while its tests expected the CLI labels; a8ec8b3 fixes that. (94a49319, f75a87ed, 2ae4a1e2)
+2. [x] Audit differences use the runtime's effective grants: a connection without recorded grants has the default read scopes, so replacing them records access removed with the parts it took away. Legacy-connection test. (7089d5ec)
+3. [x] The disconnect dialog names an own app registration by label and client ID, with its own revoke steps. (87d602be)
+4. [x] Schedules load connector configuration and use the same decision as Connections; loading, failure and a rule with no destination are said as such. (81c542d4)
+5. [x] Reference marks lead with the host's brand: learn.microsoft.com is ML, www.kqlsearch.com is KQ, never LM. (93c7bf0b)
+
+Maintainer decisions: disconnect keeps deleting local data with the explicit tick (TODO removed, SPEC records it); the first tab stays labeled with the organization name; the filter threshold stays at six; Add organization stays in both places.
+
+### Muse Wonder Full
+
+- [x] A (blocking): disconnect cancels the tenant's queued and running runs and waits for their work, stops and waits for its cache preload, stops and deletes Agent Team data first (a failure leaves the connection in place, L), clears a write gateway bound to it (N), refuses an unknown tenant (nit); late snapshots and report deliveries of the tenant's runs are dropped. (b3b2541d)
+- [x] B (blocking): revoke docs branch by registration kind, warn that the shared OpenAdminOS enterprise application serves every OpenAdminOS user in the tenant, and cover revoking sessions; mirrored to the web docs. (87d602be)
+- [x] C: Azure OpenAI settings changes are audited, with the key set or removed, never its value. (ff18e5d9)
+- [x] D (blocking): hosted voice with a local chat model names voice's own destination ("Voice audio and prompts go to OpenAI", workspace data residency, as #175), says the chat model stays local and drops tenant data without an organization; the composer says the same for a hosted model without an organization. (b4ef9007, f75a87ed)
+- [x] E (blocking): switcher items are aria-disabled while busy, focus returns to the picked item on failure, Retry license check hands focus to its Cancel. (8b377d44, 5ee2f0b6)
+- [x] F (blocking): the filter sits outside the menu with its own keys (Home and End stay in the input, Up from the first item returns to it, Enter picks the first match), a polite match count and a focus ring; the chip has aria-controls (nit). (8b377d44)
+- [x] G: writes run through one chain, including the bootstrap write of a fresh state file (cloned); concurrent changes keep both events. (ff18e5d9)
+- [x] H: the move to organizations is recorded once, on the first write after it. (ff18e5d9)
+- [x] I: CSV export has an id column and the retention note. (ff18e5d9)
+- [x] J: the state file is flushed before the rename and its folder after, when audit events are written. (ff18e5d9)
+- [x] K: stored detail fields are allowlisted per event type. (ff18e5d9)
+- [x] L: covered in A (Agent Team purge before commit).
+- [x] M: Permissions in the Manage menu shows this organization's granted parts and permissions instead of the connect flow. (eee06b5f)
+- [x] N: the dialog lists Agent Team data and multi-tenant jobs, counts the runs it deletes, and says configuration audit entries are kept; the gateway binding is cleared (A). (87d602be)
+- [x] O: Disconnect on each Organizations tab row; the dialog says when No organization will be active afterwards. (87d602be)
+- [x] P: an over-long id carried by raw records for different tenants, or for none, is ambiguous and never remapped. (4a56fb2a)
+- [x] Q: the No organization page says report destinations could not be checked. (26555674)
+- [x] R: voice copy mentions web searches and uses the shared wording. (b4ef9007, f75a87ed)
+- [x] S: the run review's blocker is the dialog's description, not an alert, and its fix takes focus; one filled button with several services missing; a refused start is still announced. (33828805)
+- [x] T: a deliberate section choice focuses the heading; typing in the search keeps focus. (97d443ad)
+- [x] U: missing parts say "not granted" in words on a 24 px target. (07e140f6)
+- [x] V: paused schedules are neutral and reference counts muted; the boundary chip is one short line at every width now that labels are longer. (11ab8402, 94ab9dfd)
+- [x] Nits: unknown tenant fails like rename, recovery text kept in the dialog error, tenant domain in the dialog (87d602be, b3b2541d); reach description includes the voice model (b4ef9007); motion tokens used, `--ease-spring` kept for #175's scan (49fbad71); glossary says result connectors live on Connections (91943652); screenshots recaptured without the tooltip (90328897).
+
+## PR #174 design round review 2 (reviewed eadd95e, 2026-11-09)
+
+### GPT-6.1-Sol
+
+1. [x] Windows durability: the state file is written and synced through the handle that wrote it (`durable-file.ts`), and the folder sync is skipped on Windows, where a directory handle cannot be synced; EINVAL, ENOTSUP and EOPNOTSUPP are ignored and any other folder sync error is raised. Tests use a mocked fs that refuses sync on a read-only handle as Windows does. (6d11a560)
+2. [x] to 4. [x] One disconnect lifecycle. Disconnect first marks the tenant closed under the state lock. Every entry point then refuses it: run admission and confirmation, schedule firing, rollback and external proposals, cache refresh starts and every cache write (a generation compare drops a write that started before the close), delivery claim and the check just before each send, Nova actions and gateway proposals. Disconnect then drains in-flight runs, cache refreshes and deliveries, and only then deletes. A tenant that comes back after the close is reopened. Regression tests reproduce GPT's three cases: an overlapping refresh leaves no cached rows, a run started while Disconnect waits is refused, and a claimed Slack delivery never posts. (ed6f60f9)
+5. [x] Multi-tenant chats and jobs that include the organization are deleted whole, with the other organizations' results in them; the dialog, docs and SPEC say so and a two-tenant job test covers it. (cae1bbdd)
+6. [x] The Azure OpenAI key change is recorded with its own settings write inside the write chain, so concurrent set and remove each record their own event and a failed write records nothing. Tests cover both. (d7c50816)
+7. [x] The Microsoft sign-in is removed first. If that fails nothing is deleted and the organization stays connected. A failed Agent Team purge after the local delete is reported as partial, with what stays on the device. Failure-injection tests cover both. (ed6f60f9)
+8. [x] Every replacement of a state file that holds configuration audit history is flushed, not only the write that added an event (chosen over a separate store as the smaller change). A folder sync failure is raised instead of being swallowed. (6d11a560)
+9. [x] The reach map's description is built from the shared `promptsGoTo` sentence; tests assert parity with it for local, hosted and no-organization cases. (af2d734c)
+
+Also: a read racing a write could queue the move to organizations twice; the migration event is only queued when the read saw the latest write (fcc3c45a). The trailing `CLAUDE.md` wording change was withdrawn by the maintainer; `CLAUDE.md` is untouched.
+
+### Muse Wonder Full
+
+- [x] A: hosted voice with a hosted chat model names both (`Voice · OpenAI and <provider>`) and keeps the reference count; the tooltip and the composer give voice's sentence plus the chat model's. Strip and composer tests. (e944bd4c)
+- [x] B: SPEC uses "GitHub Copilot CLI" and "Gemini CLI" in the location labels. (0042f7ef)
+- [x] C: a reach map location with a detail line wraps instead of truncating; screenshots recaptured at 1280 and 960 in both themes. (4ef8d60e, 7c07ea1f)
+- [x] D: the hosted confirmation lead for Azure OpenAI says "the Azure OpenAI API". (b7dd2bcd)
+- [x] E: `pick` returns at once while a switch runs, so Enter in the filter waits too. (40ebea11)
+- [x] F: a legacy reconnect counts its granted scopes through `grantedScopeNames`. (eca07fbc)
+
+### Maintainer decision: no sample data
+
+- [x] The product has no sample data; PR #175 removes pilot mode entirely after this PR merges. This PR removes its own entry points: "Preview with sample data" in the organization switcher, the Connections No organization empty state button, and "You can open it again" in the leave dialogs. A sample organization from an earlier pilot still shows labeled with Leave pilot mode. The sample organization handling code stays for #175. Tests assert there is no way into sample data from the menu or the empty state. SPEC, docs and CHANGELOG updated; switcher and No organization screenshots recaptured. (1f88fa94, 72c684ea)
+- Not changed here: the first-launch welcome's pilot choice comes from main, not this PR, and goes with the rest of pilot mode in #175.
+
+### CI
+
+- [x] CI at ab0f196 failed `buildGraph interactive fallback > uses the token when the connected account signs in`: the test waited five event loop turns for a grant write that is not awaited, and the durable write path from item 1 (open, write, sync, close, with an access added audit event) takes longer on the runner. The test now waits for the recorded grant with a deadline; six parallel runs pass locally.
+
+## PR #174 Disconnect redesign (reviewed 52a41d3, 2026-11-09)
+
+GPT-6.1-Sol reproduced four more Disconnect holes and one should-fix; Muse Wonder Full independently found the Chat and Nova gaps. The per-call-site guards are replaced by a structural design: the guarantee is enforced at choke points, not by callers.
+
+### Design (acceptance criteria)
+
+- [x] A. Tenant lease: `electron/tenant-lifecycle.ts` owns `open`, `closing`, `removed` with a generation. `withTenantLease` refuses a tenant that is not open, registers the work for draining, hands it a signal that fires when closing begins, and keeps the lease in async context. Routed through it: runs (schedules, rollbacks, gateway proposals and Nova run actions via `track`), cache refreshes and preloads (`collectGraphCache`), single and multi-tenant Chat sends and streams, multi-tenant agent batches, report deliveries, Nova actions and sends, gateway reads, Agent Team save, start, tick and ask. The old `closedTenants`, `tenantGenerations`, `removedTenants`, `stopRunsForTenant`, `drainTenantRefreshes`, `drainRuns`, `assertTenantOpen` per send and `guardedSecrets` are gone.
+- [x] B. Egress choke points: guarded fetch into the Graph adapter and the license probe; the tenant's MSAL client is wrapped so every acquisition is refused once closing and a token that arrives after closing began is withheld; tenant sessions for connectors go through the same check; connectors receive `ConnectorBuildContext.fetch` (every request and retry) and `assertEgress` (WhatsApp socket and Signal CLI right before a send), passed by deliveries, Nova sends, connector tests and reads, and agent runs (runtime `connectorTransport`).
+- [x] C. Persistence choke points: every tenant-scoped write in the SQLite store (conversations, messages, tool calls, values, graph cache, stale marks, drift baselines, multi-tenant jobs and batches, workspaces, learning, consent, self-training, refresh schedule) and in `office.db` checks the tenant and the lease generation; the state file filter (`tenant-removal.ts`) lets a write remove anything but drops added or changed tenants, runs, deliveries, Nova connector audit entries, active tenant and gateway binding of a tenant that is not writable. Dropped writes are logged.
+- [x] D. Two phases, persisted: phase 1 under the state lock closes the tenant and in one write removes it (runs, deliveries, active, gateway binding) and stores a removal record; phase 2 drains (bounded, 15 s), removes the sign-in, purges Agent Team and Chat data, drops the record. A failure or a quit keeps the record and the tenant closed; `resumeTenantCleanups` runs at launch before recovery, deliveries, gateway, schedulers and the Agent Team tick; Retry cleanup on Connections and in the connect flow. Reconnecting the same tenant is refused with the designed message until cleanup finished, then opens a new generation. The dialog reports done, or removed with cleanup pending and why.
+- [x] E. Tests: every reproduction, a test that enumerates the egress and persistence choke points with a closed lease, restart with a removal record, reconnect during pending cleanup.
+
+### GPT-6.1-Sol reproductions (each a regression test in `tenant-disconnect.test.ts`)
+
+1. [x] Multi-tenant Chat job waiting for its model answer: refused with the organization being disconnected, no job, conversation or messages left.
+2. [x] Teams report whose token is released after Disconnect began: no Graph request.
+3. [x] Nova multi-part Slack send interrupted by Disconnect (Muse): stops after the accepted part ("1 of 2 messages confirmed"), Disconnect waits for it, one Slack post, no audit entry added for the removed tenant.
+4. [x] Gateway read whose token is released after closure: no `/users` request, and a new gateway read is refused. Agent Team save, start, tick and ask are refused for a closing organization and an answer that arrives after closing is not stored (`office.test.ts`).
+5. [x] Should fix: a failure after the sign-in was removed (SQLite purge) leaves the organization removed with cleanup pending and why; reconnect shows the designed message; Retry cleanup finishes it; reconnect then opens a new generation.
+
+Also: choke point enumeration with a closed lease (Graph, MSAL, session, connector transport, Nova send, runs, Chat send, gateway read, cache refresh, Agent Team save, 13 SQLite writes, state file run write); a multi-tenant agent batch with a closing organization is refused and writes nothing (Muse); restart with a removal record resumes cleanup and keeps the tenant closed until then; lifecycle and write filter unit tests (`tenant-lifecycle.test.ts`).
+
+### Muse Wonder Full items
+
+1. [x] The renderer reloads state after a failed disconnect, and a partial outcome is a warning ("<name> was removed and its work stopped. Cleanup on this device is pending: <why> It resumes at the next launch, or choose Retry cleanup on Connections."), not "Disconnecting failed". Connections and the connect flow show Disconnect cleanup pending with Retry cleanup. Tests in `Connections.test.tsx` and `SetupFlowContext.test.tsx`.
+2. [x] Gateway read tools are leased; covered by reproduction 4 and the enumeration test.
+3. [x] Nits: `stopRunsForTenant` is removed (the bounded lease drain replaces it and logs work still stopping); `refreshDueGraphCaches` skips a closing tenant and does not mark its schedule, also when it starts closing mid-refresh (test); the comment at `setAzureOpenAIConfig` says a folder sync failure after the rename reports failure for a saved change; the sign-in failure now leaves the organization removed with cleanup pending, and the warning says its work stopped.
+
+### Evaluator (separate feature-dev:code-reviewer, 85c88174)
+
+- [x] Important: non-streaming Chat and the multi-tenant summary could still send tenant data to the model after closing began (the lease signal was dropped). Chat now gets its model through `tenantLlm`, the model egress choke point: each `complete` and `stream` is refused once a tenant in its prompt is closing, and a request in flight is aborted with the lease signal. Test: model egress choke point.
+- [x] Below threshold, fixed anyway: when the phase 1 write fails, `abortClose` reopens in the same generation, so work stopped by the close still saves its final state.
+- Found sound: lifecycle, write filter, two phases, launch resume order, read hook, serialize and write chain context, MSAL proxy, every connector build site, the six connectors, SQLite and Agent Team guards; no deadlock between the write chain and the drain, no async context leak that refuses an open tenant.
+
+### Verification
+
+- Node 22: typecheck, electron, runtime, scripts, renderer, qa and docs:check (results in the hand-back).

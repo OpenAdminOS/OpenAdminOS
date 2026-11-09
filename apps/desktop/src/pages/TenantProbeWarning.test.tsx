@@ -2,8 +2,8 @@ import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import Settings from "./Settings";
-import { TenantSwitcher } from "../components/TenantSwitcher";
+import Connections from "./Connections";
+import { OrganizationSwitcher } from "../components/OrganizationSwitcher";
 import { SERVICE_COPY } from "../copy";
 import { createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
 import type { AppState, OpenAdminOSApi, TenantRecord } from "../shared/openAdminOS";
@@ -25,9 +25,9 @@ function ownRegistrationTenant(warned: boolean): TenantRecord {
 }
 
 describe("Entra tier probe warning", () => {
-  it("shows the mismatch on the tenant in Settings, Tenants", async () => {
+  it("shows the mismatch on the tenant in Connections", async () => {
     const state = createMockAppState({ tenants: [ownRegistrationTenant(true)] });
-    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/tenants", bridge: makeMockBridge({}, state) });
+    renderRoute(<Connections />, { path: "/connections", route: "/connections", bridge: makeMockBridge({}, state) });
 
     const warning = await screen.findByRole("alert", { name: "Contoso IT license check" });
     expect(within(warning).getByText(SERVICE_COPY.tierProbeWarningTitle)).toBeInTheDocument();
@@ -40,9 +40,9 @@ describe("Entra tier probe warning", () => {
     const before = createMockAppState({ tenants: [ownRegistrationTenant(false)] });
     const after = createMockAppState({ tenants: [ownRegistrationTenant(true)] });
     const refreshTenantGrants = vi.fn(async () => after);
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
+    renderRoute(<Connections />, {
+      path: "/connections",
+      route: "/connections",
       bridge: makeMockBridge({ refreshTenantGrants }, before),
     });
 
@@ -56,9 +56,9 @@ describe("Entra tier probe warning", () => {
   it("Check again still reports success when the probe finished", async () => {
     const user = userEvent.setup();
     const state = createMockAppState({ tenants: [ownRegistrationTenant(false)] });
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
+    renderRoute(<Connections />, {
+      path: "/connections",
+      route: "/connections",
       bridge: makeMockBridge({ refreshTenantGrants: vi.fn(async () => state) }, state),
     });
 
@@ -67,13 +67,13 @@ describe("Entra tier probe warning", () => {
     expect(await within(services).findByText(SERVICE_COPY.checkedAgain)).toBeInTheDocument();
   });
 
-  it("shows the warning in the tenant switcher", async () => {
+  it("shows the warning in the organization switcher", async () => {
     const user = userEvent.setup();
     const state = createMockAppState({ tenants: [ownRegistrationTenant(true)] });
-    renderRoute(<TenantSwitcher />, { path: "/", route: "/", bridge: makeMockBridge({}, state) });
+    renderRoute(<OrganizationSwitcher />, { path: "/", route: "/", bridge: makeMockBridge({}, state) });
 
-    await user.click(await screen.findByRole("button", { name: /Switch tenant/ }));
-    const menu = screen.getByRole("menu", { name: "Connected tenants" });
+    await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+    const menu = screen.getByRole("menu", { name: "Organizations" });
     expect(within(menu).getByText(`${SERVICE_COPY.tierProbeWarningShort}. ${MISMATCH}`)).toBeInTheDocument();
   });
 });
@@ -140,7 +140,7 @@ describe("tenant checks with cancel", () => {
       pending.reject(remoteError("openadminos:refresh-tenant-grants", "TenantCheckCancelledError", "Check again was cancelled. OpenAdminOS saved nothing."));
     });
     const live = liveBridge(before, { refreshTenantGrants: vi.fn(() => pending.promise), cancelTenantCheck });
-    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/tenants", bridge: live.bridge });
+    renderRoute(<Connections />, { path: "/connections", route: "/connections", bridge: live.bridge });
 
     const services = await screen.findByRole("region", { name: "Contoso IT services" });
     await user.click(within(services).getByRole("button", { name: SERVICE_COPY.checkAgain }));
@@ -168,9 +168,9 @@ describe("tenant checks with cancel", () => {
     const refreshTenantGrants = vi.fn(async () => {
       throw new Error("Error invoking remote method 'openadminos:refresh-tenant-grants': Error: Microsoft could not be reached.");
     });
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
+    renderRoute(<Connections />, {
+      path: "/connections",
+      route: "/connections",
       bridge: makeMockBridge({ refreshTenantGrants }, state),
     });
 
@@ -189,9 +189,9 @@ describe("tenant checks with cancel", () => {
       const after = createMockAppState({ tenants: [tenantFor(false)] });
       const retryTenantLicenseCheck = vi.fn(async () => after);
       const refreshTenantGrants = vi.fn(async () => after);
-      renderRoute(<Settings />, {
-        path: "/settings/:section?",
-        route: "/settings/tenants",
+      renderRoute(<Connections />, {
+        path: "/connections",
+        route: "/connections",
         bridge: makeMockBridge({ retryTenantLicenseCheck, refreshTenantGrants }, before),
       });
 
@@ -214,7 +214,7 @@ describe("tenant checks with cancel", () => {
       pending.reject(remoteError("openadminos:retry-tenant-license-check", "TenantCheckCancelledError", message)),
     );
     const live = liveBridge(before, { retryTenantLicenseCheck: vi.fn(() => pending.promise), cancelTenantCheck });
-    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/tenants", bridge: live.bridge });
+    renderRoute(<Connections />, { path: "/connections", route: "/connections", bridge: live.bridge });
 
     const warning = await screen.findByRole("alert", { name: "Contoso IT license check" });
     await user.click(within(warning).getByRole("button", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
@@ -234,9 +234,9 @@ describe("tenant checks with cancel", () => {
     const before = createMockAppState({ tenants: [sharedTenant(false)] });
     const after = createMockAppState({ tenants: [sharedTenant(true)] });
     const addTenantAccess = vi.fn(async () => after);
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
+    renderRoute(<Connections />, {
+      path: "/connections",
+      route: "/connections",
       bridge: makeMockBridge({ addTenantAccess }, before),
     });
 
@@ -256,7 +256,7 @@ describe("tenant checks with cancel", () => {
       pending.reject(remoteError("openadminos:add-tenant-access", "TenantCheckCancelledError", CANCELLED_AFTER_ACCESS)),
     );
     const live = liveBridge(before, { addTenantAccess: vi.fn(() => pending.promise), cancelTenantCheck });
-    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/tenants", bridge: live.bridge });
+    renderRoute(<Connections />, { path: "/connections", route: "/connections", bridge: live.bridge });
 
     const services = await screen.findByRole("region", { name: "Contoso IT services" });
     await user.click(within(services).getByRole("button", { name: SERVICE_COPY.addAccessTitle("Defender") }));
@@ -271,14 +271,14 @@ describe("tenant checks with cancel", () => {
     expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
   });
 
-  it("offers Retry license check in the tenant switcher", async () => {
+  it("offers Retry license check in the organization switcher", async () => {
     const user = userEvent.setup();
     const before = createMockAppState({ tenants: [sharedTenant(true)] });
     const retryTenantLicenseCheck = vi.fn(async () => createMockAppState({ tenants: [sharedTenant(false)] }));
-    renderRoute(<TenantSwitcher />, { path: "/", route: "/", bridge: makeMockBridge({ retryTenantLicenseCheck }, before) });
+    renderRoute(<OrganizationSwitcher />, { path: "/", route: "/", bridge: makeMockBridge({ retryTenantLicenseCheck }, before) });
 
-    await user.click(await screen.findByRole("button", { name: /Switch tenant/ }));
-    await user.click(screen.getByRole("button", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
+    await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+    await user.click(screen.getByRole("menuitem", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
     expect(retryTenantLicenseCheck).toHaveBeenCalledWith("tenant-1");
     expect(await screen.findByText(SERVICE_COPY.licenseCheckFinished)).toBeInTheDocument();
   });
@@ -295,21 +295,22 @@ describe("tenant checks with cancel", () => {
     const live = liveBridge(before, { retryTenantLicenseCheck: vi.fn(() => pending.promise), cancelTenantCheck });
     renderRoute(
       <>
-        <TenantSwitcher />
-        <Settings />
+        <OrganizationSwitcher />
+        <Connections />
       </>,
-      { path: "/settings/:section?", route: "/settings/tenants", bridge: live.bridge },
+      { path: "/connections", route: "/connections", bridge: live.bridge },
     );
 
-    await user.click(await screen.findByRole("button", { name: /Switch tenant/ }));
-    const menu = screen.getByRole("menu", { name: "Connected tenants" });
-    await user.click(within(menu).getByRole("button", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
+    await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+    const menu = screen.getByRole("menu", { name: "Organizations" });
+    await user.click(within(menu).getByRole("menuitem", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
     live.publish({ ...before, tenantChecks: [{ tenantId: "tenant-1", kind: "license", phase: "licenses" }] });
     // The switcher shows the check with a labelled Cancel, not a second X.
     const inMenu = await within(menu).findByRole("status", { name: SERVICE_COPY.checkRunningFor("Contoso IT") });
-    expect(within(inMenu).getByRole("button", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") })).toHaveTextContent(SERVICE_COPY.cancelCheck);
+    // Inside the menu, Cancel is a menu item so arrow keys reach it.
+    expect(within(inMenu).getByRole("menuitem", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") })).toHaveTextContent(SERVICE_COPY.cancelCheck);
     await user.keyboard("{Escape}");
-    expect(screen.queryByRole("menu", { name: "Connected tenants" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("menu", { name: "Organizations" })).not.toBeInTheDocument();
 
     const settingsWarning = screen.getByRole("alert", { name: "Contoso IT license check" });
     expect(within(settingsWarning).getByRole("button", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") })).toBeDisabled();
@@ -326,7 +327,7 @@ describe("tenant checks with cancel", () => {
     const state = createMockAppState({
       tenants: [{ ...sharedTenant(false, ["graph:DeviceManagementManagedDevices.Read.All"]), entraTier: undefined }],
     });
-    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/tenants", bridge: makeMockBridge({}, state) });
+    renderRoute(<Connections />, { path: "/connections", route: "/connections", bridge: makeMockBridge({}, state) });
 
     expect(await screen.findByText(`${SERVICE_COPY.licensesNotChecked}.`)).toBeInTheDocument();
     expect(screen.getAllByText(new RegExp(SERVICE_COPY.licensesNotChecked))).toHaveLength(1);
