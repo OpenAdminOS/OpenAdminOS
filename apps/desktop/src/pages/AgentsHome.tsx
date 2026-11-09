@@ -8,28 +8,25 @@ import {
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router";
 import { hasLicenseShortfall } from "../components/marketplace/AgentHubList";
 import { NewAgentModal } from "../components/NewAgentModal";
-import { ScheduleUsageForecast } from "../components/ScheduleUsageForecast";
 import { SchedulesPausedNotice } from "../components/SchedulesPausedNotice";
 import { useToast } from "../components/Toast";
 import { ServiceAccessDialog } from "../components/ServiceAccess";
 import { AgentNeedChips } from "../components/AgentNeedChips";
-import { AGENT_COPY, SERVICE_COPY } from "../copy";
+import { AGENT_COPY, SCHEDULE_ORGANIZATION_COPY, SERVICE_COPY } from "../copy";
+import { reportDestinations, resultDestinations } from "../shared/delivery-destinations";
 import {
   IconChevronDown,
-  IconBolt,
   IconClock,
   IconPlay,
   IconSearch,
   IconSettings,
   IconShare,
-  IconShield,
 } from "../components/icons";
 import {
   Badge,
   Button,
   IconButton,
   Menu,
-  StatusDot,
   Tabs,
   type MenuEntry,
 } from "../components/ui";
@@ -74,7 +71,9 @@ export default function AgentsHome() {
   const { requireTenantAndProvider } = useSetupFlow();
   const [query, setQuery] = useState("");
   const [bulkRunning, setBulkRunning] = useState<"due" | "all" | null>(null);
-  const [schedulerRegistered, setSchedulerRegistered] = useState<boolean | null>(null);
+  const [scheduler, setScheduler] = useState<{ enabled: boolean; canTurnOn: boolean } | null>(null);
+  const [schedulerBusy, setSchedulerBusy] = useState(false);
+  const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const resumedBatchRef = useRef<string | null>(null);
   const [editingInvalid, setEditingInvalid] = useState<InvalidAgentManifest | null>(null);
   const invalidAgents = state.invalidAgents ?? [];
@@ -135,10 +134,10 @@ export default function AgentsHome() {
     window.openAdminOS
       ?.getSchedulerLaunchSettings()
       .then((settings) => {
-        if (!cancelled) setSchedulerRegistered(settings.enabled === true);
+        if (!cancelled) setScheduler({ enabled: settings.enabled === true, canTurnOn: settings.supported === true && !settings.requiresTenant });
       })
       .catch(() => {
-        if (!cancelled) setSchedulerRegistered(null);
+        if (!cancelled) setScheduler(null);
       });
     return () => {
       cancelled = true;
@@ -521,18 +520,38 @@ export default function AgentsHome() {
             {serviceFilter !== "all" ? (
               <Badge tone="info">{SERVICE_COPY.filterLabel(serviceById(serviceFilter).title)}</Badge>
             ) : null}
-            {scheduledOnly ? <Badge tone="info">Scheduled only</Badge> : null}
           </span>
         </div>
-        {scheduledOnly ? <SchedulesPausedNotice className="mb-3" /> : null}
-        {scheduledOnly && scheduledAgents.length > 0 && schedulerRegistered === false ? (
-          <div className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-            <span>Background scheduling is off. Schedules run only while OpenAdminOS is open.</span>
-            <Link className="shrink-0 font-medium underline underline-offset-2" to="/settings/general?target=os-scheduler">
-              Open setting
-            </Link>
+        {/* The persistent warning with its fix comes first; one-time notes follow as plain text. */}
+        {scheduledOnly && scheduledAgents.length > 0 && scheduler?.enabled === false ? (
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3.5 py-2.5 text-md text-[var(--color-warning)]">
+            <span>{SCHEDULE_ORGANIZATION_COPY.backgroundOff}</span>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={schedulerBusy}
+              onClick={() => {
+                if (!scheduler.canTurnOn) {
+                  navigate("/settings/general?target=os-scheduler");
+                  return;
+                }
+                setSchedulerBusy(true);
+                setSchedulerError(null);
+                void window.openAdminOS
+                  ?.setSchedulerLaunchEnabled(true)
+                  .then((next) => setScheduler({ enabled: next.enabled === true, canTurnOn: next.supported === true && !next.requiresTenant }))
+                  .catch((caught) => setSchedulerError(caught instanceof Error ? caught.message : String(caught)))
+                  .finally(() => setSchedulerBusy(false));
+              }}
+            >
+              {schedulerBusy ? "Turning on" : scheduler.canTurnOn ? "Turn on" : "Open setting"}
+            </Button>
           </div>
         ) : null}
+        {schedulerError ? (
+          <p role="alert" className="mb-2 text-sm text-[var(--color-danger)]">{SCHEDULE_ORGANIZATION_COPY.backgroundFailed(schedulerError)}</p>
+        ) : null}
+        {scheduledOnly ? <SchedulesPausedNotice className="mb-3" /> : null}
         {scheduledOnly && state.schedulerStatus?.lastError ? (
           <div role="alert" className="mb-3 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             <span>Latest scheduled run failed: {state.schedulerStatus.lastError}</span>
@@ -546,60 +565,67 @@ export default function AgentsHome() {
             const scheduled = row.installed.schedule?.enabled === true;
             const needs = rowNeeds(row);
             const scheduleOrganization = organizations.find(
-              (organization) => organization.id === row.installed.schedule?.organizationId,
+              (organization) => organization.id === row.installed.schedule?.organizationId && organization.kind !== "sample",
             );
-            const meta = scheduled
-              ? `Every ${formatInterval(row.installed.schedule!.intervalSeconds)} · ${
-                  scheduleOrganization ? `in ${scheduleOrganization.name}` : "Unassigned, paused"
-                }`
-              : row.latestRun
-                ? `Last run ${formatRelative(row.latestRun.queuedAt)}`
-                : "Never run";
+            const modeText = row.display.mode === "write" ? "Makes changes" : "Read-only";
+            const every = scheduled ? `Every ${intervalWords(row.installed.schedule!.intervalSeconds)}` : "";
+            // A sentence, not a dotted string: what it does, then when.
+            const meta = scheduledOnly
+              ? `${every}. ${scheduleOrganization ? scheduleOrganization.name : "Unassigned, paused"}`
+              : `${modeText}. ${
+                  scheduled
+                    ? `${every}${scheduleOrganization ? "" : ". Unassigned, paused"}`
+                    : row.latestRun
+                      ? `Last run ${formatRelative(row.latestRun.queuedAt)}`
+                      : "Never run"
+                }`;
             return (
               <div key={row.id} className="calm-list-row group">
-                <span className="calm-row-icon">
-                  {row.display.mode === "write" ? <IconBolt size={16} /> : <IconShield size={16} />}
-                </span>
                 <div className="min-w-0 flex-1">
                   <button type="button" className="block w-full min-w-0 text-left" onClick={() => openAgent(row.slug)}>
-                    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-                      <span className="truncate font-medium text-[var(--color-text)]">{formatAgentDisplayName(row.display)}</span>
-                      <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
-                        <StatusDot tone={row.display.mode === "write" ? "warning" : "success"} />
-                        {row.display.mode === "write" ? "Makes changes" : "Read-only"}
-                        <span aria-hidden="true">·</span>
-                        {meta}
-                      </span>
+                    <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                      <span className="truncate text-md font-medium text-[var(--color-text)]">{formatAgentDisplayName(row.display)}</span>
+                      <span className="text-sm text-[var(--color-text-muted)]">{meta}</span>
                     </span>
-                    <span className="mt-0.5 block truncate text-sm text-[var(--color-text-muted)]">{row.display.description}</span>
-                    <AgentNeedChips needs={rowNeeds(row)} />
-                    {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-warning)]">License required</span> : null}
+                    {scheduledOnly ? (
+                      <span className="mt-0.5 block truncate text-sm text-[var(--color-text-soft)]">
+                        {scheduleLine(row.installed, scheduleOrganization, activeOrganization?.id)}
+                      </span>
+                    ) : (
+                      <>
+                        <span className="mt-0.5 block truncate text-sm text-[var(--color-text-soft)]">{row.display.description}</span>
+                        <AgentNeedChips needs={needs} />
+                      </>
+                    )}
+                    {row.licenseMissing ? <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">License required</span> : null}
                     {row.installed.manifestError ? (
                       <span className="mt-0.5 block truncate text-xs text-[var(--color-danger)]" title={row.installed.manifestError}>
                         {AGENT_COPY.invalidRowHint} {row.installed.manifestError}
                       </span>
                     ) : null}
                   </button>
-                  {scheduled ? (
-                    <ScheduleUsageForecast agent={row.installed} intervalSeconds={row.installed.schedule!.intervalSeconds} compact />
-                  ) : null}
                 </div>
                 <div
                   className="calm-row-actions flex shrink-0 items-center gap-1"
-                  // An action that names what is missing stays visible.
-                  data-persistent={needs.action.kind === "run" ? undefined : "true"}
+                  // The row's action is its next step: the fix, or Run.
+                  data-persistent="true"
                   onClick={(event) => event.stopPropagation()}
                 >
-                  <Button
-                    size="sm"
-                    variant={needs.action.kind === "run" ? "ghost" : "secondary"}
-                    leadingIcon={needs.action.kind === "run" ? <IconPlay size={13} /> : undefined}
-                    disabled={row.display.compatibility?.supported === false || Boolean(row.installed.manifestError)}
-                    title={row.installed.manifestError ? AGENT_COPY.invalidRowHint : undefined}
-                    onClick={() => void runAgent(row.installed, needs)}
-                  >
-                    {needs.action.label}
-                  </Button>
+                  {scheduledOnly ? (
+                    <Button size="sm" variant="ghost" onClick={() => openAgent(row.slug)} aria-label={`Edit the schedule of ${row.display.name}`}>
+                      Edit
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      disabled={row.display.compatibility?.supported === false || Boolean(row.installed.manifestError)}
+                      title={row.installed.manifestError ? AGENT_COPY.invalidRowHint : undefined}
+                      onClick={() => void runAgent(row.installed, needs)}
+                    >
+                      {needs.action.label}
+                    </Button>
+                  )}
                   <Menu
                     ariaLabel={`${row.display.name} actions`}
                     trigger={<IconButton label={`More actions for ${row.display.name}`} icon={<IconChevronDown size={13} />} size="sm" />}
@@ -666,10 +692,45 @@ function nextRunTime(agent: AgentSummary) {
     : Date.parse(agent.installedAt) + schedule.intervalSeconds * 1000;
 }
 
-function formatInterval(seconds: number) {
-  if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
-  if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
-  return `${Math.round(seconds / 86400)}d`;
+/** "day", "week", "6 hours", "15 minutes": how often, in words. */
+export function intervalWords(seconds: number): string {
+  const unit = (count: number, word: string) => (count === 1 ? word : `${count} ${word}s`);
+  if (seconds % 604800 === 0) return unit(seconds / 604800, "week");
+  if (seconds % 86400 === 0) return unit(seconds / 86400, "day");
+  if (seconds >= 3600 && seconds % 3600 === 0) return unit(seconds / 3600, "hour");
+  return unit(Math.max(1, Math.round(seconds / 60)), "minute");
+}
+
+/** "today at 07:00", "tomorrow at 07:00", "Monday at 08:00", or a date. */
+export function nextRunWords(at: number, now = Date.now()): string {
+  const date = new Date(at);
+  const time = date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit", hour12: false });
+  const startOf = (value: number) => new Date(new Date(value).toDateString()).getTime();
+  const days = Math.round((startOf(at) - startOf(now)) / 86400000);
+  if (days <= 0) return `today at ${time}`;
+  if (days === 1) return `tomorrow at ${time}`;
+  if (days < 7) return `${date.toLocaleDateString(undefined, { weekday: "long" })} at ${time}`;
+  return `${date.toLocaleDateString(undefined, { day: "numeric", month: "long" })} at ${time}`;
+}
+
+/** The Schedules row's second line: when it runs next, and where results go. */
+function scheduleLine(
+  agent: AgentSummary,
+  organization: { id: string; name: string } | undefined,
+  activeOrganizationId: string | undefined,
+): string {
+  const when = !organization
+    ? "Paused until it is assigned to an organization."
+    : organization.id !== activeOrganizationId
+      ? `Runs only while ${organization.name} is active.`
+      : `Next run ${nextRunWords(Math.max(nextRunTime(agent), Date.now()))}.`;
+  const destinations = reportDestinations(resultDestinations([agent], undefined));
+  const results = destinations.length > 0 ? `Results can go to ${listWords(destinations)}.` : "Results stay in Runs.";
+  return `${when} ${results}`;
+}
+
+function listWords(names: readonly string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
 }
 
 function formatRelative(iso: string, future = false) {

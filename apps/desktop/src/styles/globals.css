@@ -917,20 +917,24 @@ select { color-scheme: inherit; }
 .device-tile[data-size="xl"] { width: 104px; height: 104px; border-radius: 28px; box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.45); }
 .device-tile[data-size="lg"] { width: 72px; height: 72px; border-radius: 20px; box-shadow: 0 14px 30px -16px rgba(0, 0, 0, 0.4); }
 .device-tile[data-size="sm"] { width: 40px; height: 40px; border-radius: 12px; }
+/* What an agent reads: neutral chips. Anything missing is dashed and
+   neutral, never amber: amber only means data leaves this device. */
 .need-chip {
   display: inline-flex;
+  height: 22px;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   white-space: nowrap;
-  border-radius: 999px;
-  background: var(--color-bubble);
-  padding: 2px 8px 2px 3px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  padding: 0 7px 0 2px;
   color: var(--color-text-soft);
   font-size: 12px;
 }
-.need-chip[data-state="ok"] { background: var(--color-success-soft); color: var(--color-success); }
-.need-chip[data-state="none"] { padding-left: 8px; }
-.need-chip[data-state="missing"] { color: var(--color-warning); background: var(--color-warning-soft); }
+.need-chip[data-state="none"],
+.need-chip[data-kind="part"] { padding-left: 7px; }
+.need-chip[data-state="missing"] { border-style: dashed; border-color: var(--color-border-strong); color: var(--color-text-muted); }
+.need-chip .svc-mark[data-size="sm"] { width: 16px; height: 16px; font-size: 8.5px; }
 
 /* Connections reach map: services in, this device, everything that leaves.
    Wide is three columns with computed connectors; below 760 px of content

@@ -254,7 +254,15 @@ describe("agents with service needs", () => {
     expect(within(row("Secure score prioritizer")).getByRole("button", { name: "Connect Defender" })).toBeInTheDocument();
     expect(within(row("Secure score prioritizer")).getByText("Needs Defender, not connected")).toBeInTheDocument();
     expect(within(row("Sign-in failures")).getByRole("button", { name: "Add sign-in logs" })).toBeInTheDocument();
-    expect(within(row("Sign-in failures")).getByText("Needs Entra; Entra sign-in logs, not connected")).toBeInTheDocument();
+    expect(within(row("Sign-in failures")).getByText("Needs Entra; Entra sign-in logs, not granted")).toBeInTheDocument();
+    // Missing access is a dashed neutral chip, never amber (design round).
+    const missingPart = within(row("Sign-in failures")).getByText("Sign-in logs, not granted");
+    expect(missingPart).toHaveAttribute("data-state", "missing");
+    const missingService = within(row("Secure score prioritizer")).getByText("Defender, not connected");
+    expect(missingService.querySelector(".svc-mark")).toHaveAttribute("data-off", "true");
+    expect(row("Secure score prioritizer").innerHTML).not.toContain("color-warning");
+    // No shield tile and no usage boilerplate on the row.
+    expect(row("Guest review").querySelector(".calm-row-icon")).toBeNull();
     expect(within(row("Guest review")).getByRole("button", { name: "Run" })).toBeInTheDocument();
     expect(within(row("Script draft")).getAllByText("No service needed")[0]).toHaveClass("sr-only");
     expect(within(row("Script draft")).getByRole("button", { name: "Run" })).toBeInTheDocument();

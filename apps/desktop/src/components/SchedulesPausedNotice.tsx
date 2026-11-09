@@ -66,14 +66,6 @@ export function SchedulesPausedNotice({ className = "" }: { className?: string }
 
   return (
     <div className={`space-y-2 ${className}`}>
-      {migration ? (
-        <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2 text-sm text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-          <span className="min-w-0 flex-1">{SCHEDULE_ORGANIZATION_COPY.migrated(migration, migratedTo?.name)}</span>
-          <Button size="sm" variant="ghost" disabled={busy} onClick={() => run(dismissOrganizationMigrationNotice)}>
-            {SCHEDULE_ORGANIZATION_COPY.dismiss}
-          </Button>
-        </div>
-      ) : null}
       {paused || waiting ? (
         <div
           role="status"
@@ -89,6 +81,20 @@ export function SchedulesPausedNotice({ className = "" }: { className?: string }
             </Button>
           ) : null}
         </div>
+      ) : null}
+      {migration ? (
+        // A one-time note: plain text after the warnings, with an inline Dismiss.
+        <p role="status" className="px-0.5 text-sm text-[var(--color-text-muted)]">
+          {SCHEDULE_ORGANIZATION_COPY.migrated(migration, migratedTo?.name)}{" "}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => run(dismissOrganizationMigrationNotice)}
+            className="text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)]"
+          >
+            {SCHEDULE_ORGANIZATION_COPY.dismiss}
+          </button>
+        </p>
       ) : null}
       {error !== null ? (
         <p role="alert" className="text-sm text-[var(--color-danger)]">{SCHEDULE_ORGANIZATION_COPY.failed(error)}</p>

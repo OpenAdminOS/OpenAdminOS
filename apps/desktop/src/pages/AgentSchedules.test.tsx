@@ -14,11 +14,14 @@ import type { AppState } from "../shared/openAdminOS";
 
 describe("Agents schedule actions", () => {
   
-  it("shows the forecast in the current Agents schedules list", async () => {
-    const agent = createMockAgent({ schedule: { enabled: true, intervalSeconds: 86400 } });
+  it("lists a schedule as when it runs and where results go, with the usage forecast on the agent page (design round)", async () => {
+    const agent = createMockAgent({ schedule: { enabled: true, intervalSeconds: 86400, organizationId: "org-tenant-1" } });
     const state = createMockAppState({ installedAgents: [agent] });
     renderRoute(<Agents />, { path: "/agents", route: "/agents?filter=scheduled", bridge: makeMockBridge({}, state) });
-    expect(await screen.findByText(/About 30 runs per 30 days/)).toBeInTheDocument();
+    expect(await screen.findByText("Every day. Contoso IT")).toBeInTheDocument();
+    expect(screen.getByText(/^Next run .+\. Results stay in Runs\.$/)).toBeInTheDocument();
+    expect(screen.queryByText(/runs per 30 days/)).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: `Edit the schedule of ${agent.name}` })).toBeInTheDocument();
   });
 
   it("shows why schedules are paused and switches to the most recently used organization", async () => {
@@ -140,9 +143,11 @@ describe("Agents schedule actions", () => {
         "1 schedule is unassigned and paused. Assign it to an organization on the agent page. 1 schedule belongs to another organization and runs only while that organization is active.",
       ),
     ).toBeInTheDocument();
-    expect(screen.getByText(/Every 15m · in Contoso IT/)).toBeInTheDocument();
-    expect(screen.getByText(/Every 15m · in Fabrikam/)).toBeInTheDocument();
-    expect(screen.getByText(/Every 15m · Unassigned, paused/)).toBeInTheDocument();
+    expect(screen.getByText("Every 15 minutes. Contoso IT")).toBeInTheDocument();
+    expect(screen.getByText("Every 15 minutes. Fabrikam")).toBeInTheDocument();
+    expect(screen.getByText("Every 15 minutes. Unassigned, paused")).toBeInTheDocument();
+    expect(screen.getByText(/^Runs only while Fabrikam is active\./)).toBeInTheDocument();
+    expect(screen.getByText(/^Paused until it is assigned to an organization\./)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Schedule actions" }));
     await user.click(screen.getByRole("menuitem", { name: "Run due now (1)" }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
@@ -218,7 +223,8 @@ describe("Agents schedule actions", () => {
     expect(screen.getByRole("tab", { name: "Installed" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "Browse" })).not.toBeInTheDocument();
     expect(screen.getByPlaceholderText("Search installed agents…")).toBeInTheDocument();
-    expect(screen.getByText("Scheduled only")).toBeInTheDocument();
+    // The tab already says Schedules (design round).
+    expect(screen.queryByText("Scheduled only")).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "Team" })).not.toBeInTheDocument();
   });
 
@@ -303,5 +309,25 @@ describe("assigning a schedule (review round 2)", () => {
     expect(screen.getByRole("combobox", { name: /Assign to organization for Loose/ })).toHaveValue("org-tenant-1");
     await user.click(assign);
     await waitFor(() => expect(bridge.assignAgentSchedule).toHaveBeenCalledWith("loose", "org-tenant-1"));
+  });
+});
+
+describe("schedule words (design round)", () => {
+  it("says how often in words", async () => {
+    const { intervalWords } = await import("./AgentsHome");
+    expect(intervalWords(86400)).toBe("day");
+    expect(intervalWords(604800)).toBe("week");
+    expect(intervalWords(3 * 86400)).toBe("3 days");
+    expect(intervalWords(6 * 3600)).toBe("6 hours");
+    expect(intervalWords(900)).toBe("15 minutes");
+    expect(intervalWords(60)).toBe("minute");
+  });
+
+  it("says when the next run is relative to today", async () => {
+    const { nextRunWords } = await import("./AgentsHome");
+    const now = new Date(2026, 10, 9, 12, 0).getTime();
+    expect(nextRunWords(new Date(2026, 10, 9, 18, 30).getTime(), now)).toBe("today at 18:30");
+    expect(nextRunWords(new Date(2026, 10, 10, 7, 0).getTime(), now)).toBe("tomorrow at 07:00");
+    expect(nextRunWords(new Date(2026, 10, 12, 8, 0).getTime(), now)).toMatch(/^\S+ at 08:00$/);
   });
 });

@@ -146,6 +146,8 @@ export const CONNECTIONS_COPY = {
 
 /** Schedules belong to one organization and run only while it is active. */
 export const SCHEDULE_ORGANIZATION_COPY = {
+  backgroundOff: "Background runs are off. Schedules run only while OpenAdminOS is open.",
+  backgroundFailed: (detail: string) => `Background runs were not turned on. ${detail} Try again from Settings, General.`,
   pausedSample:
     "Schedules are paused while the sample organization is active. Switch to one of your organizations to resume.",
   pausedNone:
