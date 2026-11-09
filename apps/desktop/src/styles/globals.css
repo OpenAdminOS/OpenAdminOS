@@ -116,6 +116,7 @@
   /* Motion: names for the durations and easings the app already uses. */
   --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
   --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  /* The first launch scan's node entrance (PR #175) uses the spring. */
   --ease-spring: cubic-bezier(0.34, 1.36, 0.64, 1);
   --dur-fast: 140ms;
   --dur-state: 240ms;
@@ -406,7 +407,7 @@ button:disabled {
   }
 }
 .animate-fade-in {
-  animation: fade-in 0.25s ease-out;
+  animation: fade-in var(--dur-state) var(--ease-out);
 }
 
 /* Run page: live progress, skeletons and report spacing. */
@@ -845,7 +846,7 @@ select { color-scheme: inherit; }
   min-width: 0;
   border-radius: 14px;
   padding: var(--row-y) 12px;
-  transition: background-color 140ms ease, color 140ms ease;
+  transition: background-color var(--dur-fast) ease, color var(--dur-fast) ease;
 }
 .calm-list-row:hover,
 .calm-list-row:focus-within { background: var(--color-hover); }
@@ -865,7 +866,7 @@ select { color-scheme: inherit; }
 .calm-row-actions {
   opacity: 0;
   transform: translateX(2px);
-  transition: opacity 140ms ease, transform 140ms ease;
+  transition: opacity var(--dur-fast) ease, transform var(--dur-fast) ease;
 }
 .calm-list-row:hover .calm-row-actions,
 .calm-list-row:focus-within .calm-row-actions {
