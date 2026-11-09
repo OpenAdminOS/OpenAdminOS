@@ -2289,6 +2289,8 @@ The shell sidebar presents these primary actions and destinations in this order:
 Pinned conversations, Workspaces, and grouped recent conversations follow the
 primary navigation. Settings, Connections, Voice, Keyboard shortcuts, and About and
 updates live in the tenant-aware account menu at the bottom of the sidebar.
+Every actionable item in this menu has a matching 12px decorative icon, with
+consistent spacing before its label.
 Conversation and workspace state is shared by the shell and Chat so first-send
 pending insertion, search, reload reconciliation, rename, pin, export, move,
 and delete behavior is identical from either surface.
