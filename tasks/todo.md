@@ -1777,3 +1777,41 @@ Maintainer decisions: design spec and mockup 32 revision 2 (`docs/mockups/32-con
 ### Verification
 - Screenshots in `docs/screenshots/organizations/` at 1280 and 960 px in light and dark (28 files), compared with frames F to K. Remaining differences: reference marks read LM and KC (existing ReferenceMark initials), and the large buttons use the app's existing lg size.
 - Live checks on the dev Electron build with Claude Code (`claude-sonnet-5`) as the active provider.
+
+## PR #174 design round review (reviewed 8ab06d8, 2026-11-09)
+
+### GPT-6.1-Sol
+
+1. [x] Blocking: processing locations the app cannot establish. Decided: the label says who sets the location and the detail gives the vendor's documented default. Final wording follows PR #175 at a8ec8b3 (Muse's refinement: the CLI decides the channel): "Claude Code · location set by your account", "Codex · location set by your account", "Azure OpenAI · location set by your deployment type", "GitHub Copilot CLI · location not stated", "Gemini CLI · location not stated", unknown "<name> · location not stated". `providerDataLocation`, `promptsGoTo`, `sendsThroughTool` and `providerDataLocationDetail` and their test block are byte-identical to #175. All four CLIs read "Prompts leave this device through <CLI>; <who sets it>"; only Azure OpenAI reads "Prompts go to <label>". The hosted confirmation asks "Send this question through Claude Code?" with "Send through Claude Code" (Azure OpenAI: "Send this question to Azure OpenAI?"). Tooltips, the reach map, the run review and the confirmation show the detail. Note: #175's source at 1e94f91 still had "GitHub Copilot" and "Google Gemini API" while its tests expected the CLI labels; a8ec8b3 fixes that. (94a49319, f75a87ed, 2ae4a1e2)
+2. [x] Audit differences use the runtime's effective grants: a connection without recorded grants has the default read scopes, so replacing them records access removed with the parts it took away. Legacy-connection test. (7089d5ec)
+3. [x] The disconnect dialog names an own app registration by label and client ID, with its own revoke steps. (87d602be)
+4. [x] Schedules load connector configuration and use the same decision as Connections; loading, failure and a rule with no destination are said as such. (81c542d4)
+5. [x] Reference marks lead with the host's brand: learn.microsoft.com is ML, www.kqlsearch.com is KQ, never LM. (93c7bf0b)
+
+Maintainer decisions: disconnect keeps deleting local data with the explicit tick (TODO removed, SPEC records it); the first tab stays labeled with the organization name; the filter threshold stays at six; Add organization stays in both places.
+
+### Muse Wonder Full
+
+- [x] A (blocking): disconnect cancels the tenant's queued and running runs and waits for their work, stops and waits for its cache preload, stops and deletes Agent Team data first (a failure leaves the connection in place, L), clears a write gateway bound to it (N), refuses an unknown tenant (nit); late snapshots and report deliveries of the tenant's runs are dropped. (b3b2541d)
+- [x] B (blocking): revoke docs branch by registration kind, warn that the shared OpenAdminOS enterprise application serves every OpenAdminOS user in the tenant, and cover revoking sessions; mirrored to the web docs. (87d602be)
+- [x] C: Azure OpenAI settings changes are audited, with the key set or removed, never its value. (ff18e5d9)
+- [x] D (blocking): hosted voice with a local chat model names voice's own destination ("Voice audio and prompts go to OpenAI", workspace data residency, as #175), says the chat model stays local and drops tenant data without an organization; the composer says the same for a hosted model without an organization. (b4ef9007, f75a87ed)
+- [x] E (blocking): switcher items are aria-disabled while busy, focus returns to the picked item on failure, Retry license check hands focus to its Cancel. (8b377d44, 5ee2f0b6)
+- [x] F (blocking): the filter sits outside the menu with its own keys (Home and End stay in the input, Up from the first item returns to it, Enter picks the first match), a polite match count and a focus ring; the chip has aria-controls (nit). (8b377d44)
+- [x] G: writes run through one chain, including the bootstrap write of a fresh state file (cloned); concurrent changes keep both events. (ff18e5d9)
+- [x] H: the move to organizations is recorded once, on the first write after it. (ff18e5d9)
+- [x] I: CSV export has an id column and the retention note. (ff18e5d9)
+- [x] J: the state file is flushed before the rename and its folder after, when audit events are written. (ff18e5d9)
+- [x] K: stored detail fields are allowlisted per event type. (ff18e5d9)
+- [x] L: covered in A (Agent Team purge before commit).
+- [x] M: Permissions in the Manage menu shows this organization's granted parts and permissions instead of the connect flow. (eee06b5f)
+- [x] N: the dialog lists Agent Team data and multi-tenant jobs, counts the runs it deletes, and says configuration audit entries are kept; the gateway binding is cleared (A). (87d602be)
+- [x] O: Disconnect on each Organizations tab row; the dialog says when No organization will be active afterwards. (87d602be)
+- [x] P: an over-long id carried by raw records for different tenants, or for none, is ambiguous and never remapped. (4a56fb2a)
+- [x] Q: the No organization page says report destinations could not be checked. (26555674)
+- [x] R: voice copy mentions web searches and uses the shared wording. (b4ef9007, f75a87ed)
+- [x] S: the run review's blocker is the dialog's description, not an alert, and its fix takes focus; one filled button with several services missing; a refused start is still announced. (33828805)
+- [x] T: a deliberate section choice focuses the heading; typing in the search keeps focus. (97d443ad)
+- [x] U: missing parts say "not granted" in words on a 24 px target. (07e140f6)
+- [x] V: paused schedules are neutral and reference counts muted; the boundary chip is one short line at every width now that labels are longer. (11ab8402, 94ab9dfd)
+- [x] Nits: unknown tenant fails like rename, recovery text kept in the dialog error, tenant domain in the dialog (87d602be, b3b2541d); reach description includes the voice model (b4ef9007); motion tokens used, `--ease-spring` kept for #175's scan (49fbad71); glossary says result connectors live on Connections (91943652); screenshots recaptured without the tooltip (90328897).
