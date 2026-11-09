@@ -230,9 +230,12 @@ export function killCliProcess(child: ChildProcess, ownGroup: boolean): void {
 
 /**
  * Signals a CLI spawned in its own process group and everything it
- * started: the group on macOS and Linux, the process tree through
- * `taskkill /T /F` on Windows (which has no graceful equivalent, so any
- * signal there ends the tree).
+ * started. On macOS and Linux the whole group is signalled, also after the
+ * wrapper itself exited. On Windows `taskkill /T /F` ends the process tree
+ * while the wrapper still runs (any signal ends it; there is no graceful
+ * equivalent); a child whose wrapper already exited is no longer in a tree
+ * Windows can resolve, so it is not reached. A Job Object would close that
+ * gap; it is not used yet.
  */
 export function signalCliTree(child: ChildProcess, signal: NodeJS.Signals): void {
   const pid = child.pid;

@@ -110,9 +110,10 @@ export class CliEvents<T> {
 }
 
 /**
- * Stops a provider CLI and everything it started: SIGTERM to its process
- * group, then SIGKILL after 500 ms for whatever is left, also when the
- * wrapper itself already exited and left a child behind.
+ * Stops a provider CLI and everything it started. macOS and Linux: SIGTERM
+ * to its process group, then SIGKILL after 500 ms for whatever is left,
+ * also when the wrapper itself already exited and left a child behind.
+ * Windows: the process tree while the wrapper runs (see `signalCliTree`).
  */
 export function terminateCli(child: ChildProcessWithoutNullStreams) {
   child.stdin.destroy();
