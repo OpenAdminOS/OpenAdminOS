@@ -268,9 +268,14 @@ async function makeFixture(options: {
 }) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-provider-detection-"));
   const statePath = join(dir, "state.json");
-  if (options.existingState) {
-    await writeFile(statePath, JSON.stringify(options.existingState), "utf8");
-  }
+  // Without an existing state this is a fresh install whose first-launch
+  // model scan has finished: app state then detects providers as before.
+  // (While the scan is pending, app state skips detection; model-scan.test.ts.)
+  await writeFile(
+    statePath,
+    JSON.stringify(options.existingState ?? { activeProviderId: "ollama", providerChosenByUser: false, installedAgents: [], runs: [], tenants: [] }),
+    "utf8",
+  );
   let readiness = options.providers;
   const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
   const stores: AppStateStore[] = [];
