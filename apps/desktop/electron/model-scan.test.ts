@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import { providerCatalog, type ModelScanProbe, type ProviderSummary } from "@openadminos/agent-sdk";
+import { providerCatalog, resolveProviderDefaultModel, type ModelScanProbe, type ProviderSummary } from "@openadminos/agent-sdk";
 
 import {
   buildModelScanChecks,
@@ -569,6 +569,53 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     } finally {
       if (originalPath === undefined) delete process.env.PATH;
       else process.env.PATH = originalPath;
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
+describe("the scan names the model Chat uses (review round 3, item 6)", () => {
+  const ollama = { ...providerCatalog.find((provider) => provider.id === "ollama")!, status: "connected" as const, models: ["qwen3:8b", "openadminos/openadmin-8b:latest", "llama3.1:8b"], defaultModel: "qwen3:8b" };
+
+  it("keeps the saved model for the active provider, also when OpenAdmin 8B is installed", () => {
+    const outcome = scanOutcome([ollama], { activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" } });
+    assert.deepEqual(outcome, { kind: "local-ready", providerId: "ollama", model: "llama3.1:8b" });
+  });
+
+  it("names the provider default when the admin chose the provider but no model", () => {
+    const outcome = scanOutcome([ollama], { activeProviderId: "ollama", providerChosenByUser: true });
+    assert.deepEqual(outcome, { kind: "local-ready", providerId: "ollama", model: "qwen3:8b" });
+  });
+
+  it("prefers OpenAdmin 8B only when no model was chosen and the scan sets it", () => {
+    assert.deepEqual(scanOutcome([ollama], { activeProviderId: "ollama", providerChosenByUser: false }), { kind: "local-ready", providerId: "ollama", model: "openadminos/openadmin-8b:latest" });
+    assert.deepEqual(scanOutcome([ollama], { activeProviderId: "anthropic", providerChosenByUser: false }), { kind: "local-selected", providerId: "ollama", model: "openadminos/openadmin-8b:latest" });
+  });
+
+  it("falls back to the provider default when the saved model is gone, as Chat does", () => {
+    const outcome = scanOutcome([ollama], { activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "removed:7b" } });
+    assert.deepEqual(outcome, { kind: "local-ready", providerId: "ollama", model: "qwen3:8b" });
+  });
+
+  it("applies it in the store: the outcome and Chat name the same saved model", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({
+      activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
+      installedAgents: [], runs: [], tenants: [], firstRunScan: "pending",
+    }));
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: () => providerCatalog.map((provider) => provider.id === "ollama" ? ollama : { ...provider, status: "not-installed" as const, models: [] }),
+    });
+    try {
+      const result = await store.scanModels();
+      assert.equal((result.outcome as { model?: string }).model, "llama3.1:8b");
+      // Chat resolves its model the same way from app state.
+      const state = await store.getAppState();
+      assert.equal(resolveProviderDefaultModel(state.providers.find((provider) => provider.id === "ollama"), state.activeModelByProviderId).model, "llama3.1:8b");
+    } finally {
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }

@@ -3501,6 +3501,7 @@ export class AppStateStore {
         activeProviderId: current.activeProviderId,
         providerChosenByUser: current.providerChosenByUser !== false,
         pilot: this.isPilotModeActive(current),
+        ...(current.activeModelByProviderId ? { activeModelByProviderId: current.activeModelByProviderId } : {}),
       });
       const select = outcome.kind === "local-selected";
       // OpenAdmin 8B is preferred when it is pulled and the admin never chose a provider or model.

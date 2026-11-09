@@ -8,6 +8,7 @@ import type {
   ProviderId,
   ProviderSummary,
 } from "@openadminos/agent-sdk";
+import { resolveProviderDefaultModel } from "@openadminos/agent-sdk";
 import {
   classifyLmStudioEndpoint,
   classifyOllamaEndpoint,
@@ -136,19 +137,32 @@ export function hasOpenAdmin8B(models: readonly string[]): boolean {
  */
 export function scanOutcome(
   providers: readonly ProviderSummary[],
-  input: { activeProviderId: ProviderId; providerChosenByUser: boolean; pilot?: boolean },
+  input: {
+    activeProviderId: ProviderId;
+    providerChosenByUser: boolean;
+    pilot?: boolean;
+    activeModelByProviderId?: Partial<Record<ProviderId, string>>;
+  },
 ): ModelScanOutcome {
   const active = providers.find((provider) => provider.id === input.activeProviderId);
-  const preferredModel = (provider: ProviderSummary) =>
-    provider.models.find((model) => OPENADMIN_8B.test(model)) ?? provider.defaultModel ?? provider.models[0];
+  // The model Chat will use: the admin's saved model when it is installed,
+  // otherwise the provider's default. OpenAdmin 8B is preferred only when
+  // no model was chosen for that provider and the scan sets it (or the
+  // admin switches to it from the scan).
+  const chatModel = (provider: ProviderSummary, prefer8B: boolean) => {
+    const saved = input.activeModelByProviderId?.[provider.id];
+    const openAdmin = !saved && prefer8B ? provider.models.find((model) => OPENADMIN_8B.test(model)) : undefined;
+    return openAdmin ?? resolveProviderDefaultModel(provider, input.activeModelByProviderId).model;
+  };
   if (active && active.isLocal && isProviderReady(active)) {
-    const model = preferredModel(active);
+    // The scan writes a model for the active provider only for an admin who never chose one.
+    const model = chatModel(active, !input.providerChosenByUser);
     return { kind: "local-ready", providerId: active.id, ...(model ? { model } : {}) };
   }
   for (const id of LOCAL_AUTO_SELECT_ORDER) {
     const candidate = providers.find((provider) => provider.id === id);
     if (candidate?.isLocal !== true || !isProviderReady(candidate)) continue;
-    const model = preferredModel(candidate);
+    const model = chatModel(candidate, true);
     // The admin's own choice stays selected: a local model is only offered.
     if (input.providerChosenByUser || input.pilot) {
       return { kind: "local-available", providerId: candidate.id, ...(model ? { model } : {}), selectedProviderId: input.activeProviderId };
