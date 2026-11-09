@@ -255,6 +255,15 @@ describe("Settings provider section", () => {
     expect(search).toHaveFocus();
   });
 
+  it("focuses the chosen section's heading after a deliberate choice (design round review, Muse T)", async () => {
+    const user = userEvent.setup();
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge: makeMockBridge() });
+    const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+    const target = within(nav).getAllByRole("button").find((button) => button.getAttribute("aria-current") !== "location")!;
+    await user.click(target);
+    await waitFor(() => expect(document.activeElement?.id ?? "").toMatch(/^settings-heading-/));
+  });
+
   it("finds a setting from the shared catalog and focuses the rendered row", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge();

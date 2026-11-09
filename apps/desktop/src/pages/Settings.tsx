@@ -163,6 +163,8 @@ export default function Settings() {
   const [settingsQuery, setSettingsQuery] = useState("");
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const settingsSearchInputRef = useRef<HTMLInputElement | null>(null);
+  /** Set when the admin picks a section or result, so its heading takes focus. */
+  const deliberateSelectionRef = useRef(false);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
   // Settings results first, then topics that moved to Connections.
   const settingsResults = useMemo<Array<SettingsSearchResult | SettingsLinkResult>>(
@@ -230,11 +232,14 @@ export default function Settings() {
       scrollWithinSettings(root, sectionElement);
       // Focus moves to the section once, and never away from a field the
       // admin is already using, such as the settings search.
+      // A deliberate choice (a search result or a section in the list)
+      // always moves focus to the section.
       const elsewhere =
         document.activeElement instanceof HTMLElement &&
         document.activeElement !== document.body &&
         !root.contains(document.activeElement);
-      if (!focused && !elsewhere) heading.focus({ preventScroll: true });
+      if (!focused && (deliberateSelectionRef.current || !elsewhere)) heading.focus({ preventScroll: true });
+      deliberateSelectionRef.current = false;
       focused = true;
     };
     const scheduleScroll = () => {
@@ -276,6 +281,7 @@ export default function Settings() {
     section: SettingsSectionId;
     id?: string;
   }) => {
+    deliberateSelectionRef.current = true;
     setSection(target.section);
     navigate(
       target.id
