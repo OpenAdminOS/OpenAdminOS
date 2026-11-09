@@ -1,6 +1,5 @@
 import { OfficeService } from "./office.js";
 import { createHash, randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { atomicRename } from "./atomic-rename.js";
@@ -54,6 +53,7 @@ import {
   type TokenCacheStorage,
   classifyLmStudioEndpoint,
   classifyOllamaEndpoint,
+  cliSpawn,
   resolveLmStudioEndpoint,
   resolveOllamaEndpoint,
 } from "@openadminos/runtime";
@@ -225,6 +225,7 @@ import {
   buildModelScanChecks,
   scanProviderCheck,
   runModelScan,
+  lmStudioAppInstalled,
   runtimeLaunch,
   runtimeReadyUrl,
   startLocalRuntime,
@@ -3484,14 +3485,21 @@ export class AppStateStore {
     const local = (providerId === "ollama" ? classifyOllamaEndpoint(endpoint) : classifyLmStudioEndpoint(endpoint)).isLocal;
     const name = providerId === "ollama" ? "Ollama" : "LM Studio";
     const manualCommand = providerId === "ollama" ? "ollama serve" : "lms server start";
+    const launch = local ? await runtimeLaunch(providerId) : undefined;
     const result = local
       ? await startLocalRuntime({
           name,
           manualCommand,
-          launch: await runtimeLaunch(providerId),
+          launch,
+          appWithoutCommand: !launch && providerId === "lm-studio" && (await lmStudioAppInstalled()),
+          // The shared CLI launcher hides the console window on Windows and refuses a batch launcher it cannot resolve, with a reason.
           spawn: (launch) =>
             new Promise<void>((resolve, reject) => {
-              const child = spawn(launch.command, launch.args, { detached: true, stdio: "ignore" });
+              const { child, error } = cliSpawn(launch.command, launch.args, { detached: true, stdio: "ignore", windowsHide: true });
+              if (!child) {
+                reject(error);
+                return;
+              }
               child.once("error", reject);
               child.once("spawn", () => {
                 child.unref();

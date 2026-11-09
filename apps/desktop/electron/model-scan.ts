@@ -391,13 +391,29 @@ async function exists(path: string): Promise<boolean> {
   }
 }
 
+/** A binary on this device. Windows looks for `.exe` first and then a `.cmd` launcher, as the install check does. */
 async function findBinary(name: string, known: readonly string[], env: NodeJS.ProcessEnv, platform: NodeJS.Platform, check: (path: string) => Promise<boolean>): Promise<string | undefined> {
-  const file = platform === "win32" ? `${name}.exe` : name;
+  const files = platform === "win32" ? [`${name}.exe`, `${name}.cmd`] : [name];
   const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
-  for (const candidate of [...known, ...pathDirs.map((dir) => join(dir, file))]) {
+  for (const candidate of [...known, ...files.flatMap((file) => pathDirs.map((dir) => join(dir, file)))]) {
     if (await check(candidate)) return candidate;
   }
   return undefined;
+}
+
+/** Whether the LM Studio app is installed, from its known app location. */
+export async function lmStudioAppInstalled(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  check: (path: string) => Promise<boolean> = exists,
+): Promise<boolean> {
+  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  const app = platform === "darwin"
+    ? "/Applications/LM Studio.app"
+    : platform === "win32"
+      ? join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "LM Studio", "LM Studio.exe")
+      : undefined;
+  return app ? check(app) : false;
 }
 
 /**
@@ -447,11 +463,16 @@ export async function startLocalRuntime(input: {
   name: string;
   launch: RuntimeLaunch | undefined;
   manualCommand: string;
+  /** The app is installed but the command that starts it was not found (LM Studio without `lms`). */
+  appWithoutCommand?: boolean;
   spawn: (launch: RuntimeLaunch) => Promise<void>;
   isUp: () => Promise<boolean>;
   timeoutMs?: number;
   intervalMs?: number;
 }): Promise<{ started: true } | { started: false; message: string }> {
+  if (!input.launch && input.appWithoutCommand) {
+    return { started: false, message: `${input.name} is installed, but its \`${input.manualCommand.split(" ")[0]}\` command was not found. Start the server in ${input.name}, then scan again.` };
+  }
   if (!input.launch) {
     return { started: false, message: `${input.name} was not found on this device. Start it yourself with \`${input.manualCommand}\`, then scan again.` };
   }

@@ -10,6 +10,7 @@ import {
   buildModelScanChecks,
   checkingProbe,
   runModelScan,
+  lmStudioAppInstalled,
   runtimeLaunch,
   scanOutcome,
   startLocalRuntime,
@@ -236,6 +237,20 @@ describe("starting a local runtime from the scan", () => {
     assert.deepEqual(await runtimeLaunch("ollama", { PATH: "/opt/bin" }, "linux", present(["/opt/bin/ollama"])), { command: "/opt/bin/ollama", args: ["serve"], display: "ollama serve" });
     assert.deepEqual(await runtimeLaunch("lm-studio", { PATH: "", HOME: "/home/a" }, "linux", present(["/home/a/.lmstudio/bin/lms"])), { command: "/home/a/.lmstudio/bin/lms", args: ["server", "start"], display: "lms server start" });
     assert.equal(await runtimeLaunch("lm-studio", { PATH: "", HOME: "/home/a" }, "linux", present([])), undefined);
+  });
+
+  it("finds a Windows .exe before a .cmd launcher, and names a missing lms when only the app is installed (Muse round 2, O)", async () => {
+    // The PATH entry has no drive colon, so the host's delimiter splits it the same on every platform.
+    const win = { PATH: "winbin", LOCALAPPDATA: "Local", USERPROFILE: "Users" };
+    const exe = join("winbin", "ollama.exe");
+    const cmd = join("winbin", "ollama.cmd");
+    assert.equal((await runtimeLaunch("ollama", win, "win32", present([cmd, exe])))?.command, exe);
+    assert.equal((await runtimeLaunch("ollama", win, "win32", present([cmd])))?.command, cmd);
+    const app = join("Local", "Programs", "LM Studio", "LM Studio.exe");
+    assert.equal(await lmStudioAppInstalled(win, "win32", present([app])), true);
+    assert.equal(await lmStudioAppInstalled({ HOME: "/home/a" }, "linux", present([])), false);
+    const missing = await startLocalRuntime({ name: "LM Studio", manualCommand: "lms server start", launch: undefined, appWithoutCommand: true, spawn: async () => undefined, isUp: async () => true });
+    assert.deepEqual(missing, { started: false, message: "LM Studio is installed, but its `lms` command was not found. Start the server in LM Studio, then scan again." });
   });
 
   it("waits for the loopback endpoint and reports success", async () => {
@@ -532,6 +547,40 @@ describe("review round 2: coordination and Start (items 3, 7, B)", () => {
     } finally {
       if (original === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
       else process.env.OPENAGENTS_OLLAMA_URL = original;
+      await cleanup();
+    }
+  });
+
+  it("starts LM Studio through the shared CLI launcher with fixed arguments (Muse round 2, O)", { skip: process.platform === "win32" }, async () => {
+    const { createServer } = await import("node:http");
+    const { store, cleanup } = await fresh();
+    const bin = await mkdtemp(join(tmpdir(), "openadminos-lms-"));
+    const server = createServer((_request, response) => response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ data: [] })));
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const original = { path: process.env.PATH, home: process.env.HOME, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    try {
+      const log = join(bin, "lms.log");
+      await writeFile(join(bin, "lms"), `#!/bin/sh\necho "$*" >> "${log}"\n`);
+      await chmod(join(bin, "lms"), 0o755);
+      process.env.PATH = `${bin}:/usr/bin:/bin`;
+      process.env.HOME = bin;
+      process.env.OPENADMINOS_LM_STUDIO_URL = `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`;
+      const result = await store.startLocalRuntime("lm-studio");
+      assert.equal(result.started, true, result.message);
+      // The runtime is detached, so its first write can land after the endpoint answers.
+      let written = "";
+      for (let attempt = 0; attempt < 40 && !written; attempt += 1) {
+        written = await readFile(log, "utf8").catch(() => "");
+        if (!written) await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      assert.equal(written.trim(), "server start");
+    } finally {
+      for (const [key, value] of [["PATH", original.path], ["HOME", original.home], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(bin, { recursive: true, force: true });
       await cleanup();
     }
   });

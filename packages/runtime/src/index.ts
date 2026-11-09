@@ -1442,3 +1442,4 @@ export { createCopilotLlm, probeCopilotInstallation, probeCopilotLlm } from "./l
 export { createGeminiLlm, GEMINI_DEFAULT_MODEL, probeGeminiLlm } from "./llm-gemini.js";
 export type { CliProbe, CliFailure } from "./cli-provider.js";
 export { discoverCli } from "./cli-provider.js";
+export { cliSpawn } from "./cli-invocation.js";
