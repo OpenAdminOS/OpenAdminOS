@@ -35,7 +35,11 @@ function scanBridge(outcome: ModelScanOutcome, probes: ModelScanProbe[] = PROBES
           resolve(result);
         };
       })),
-      retryModelScanProbe: vi.fn(async (id: ProviderId) => ({ ...probes.find((entry) => entry.providerId === id)!, state: "found" as const, summary: "Signed in", ready: true, facts: [] })),
+      retryModelScanProbe: vi.fn(async (id: ProviderId): Promise<ModelScanResult> => {
+        const retried = probes.map((entry) => (entry.providerId === id ? { ...entry, state: "found" as const, summary: "Signed in", ready: true, facts: [] } : entry));
+        const hosted = retried.filter((entry) => entry.where === "hosted" && entry.ready).map((entry) => entry.providerId);
+        return { ...result, probes: retried, outcome: hosted.length > 0 ? { kind: "hosted-detected", providerIds: hosted } : outcome, finishedAt: "retried" };
+      }),
       completeFirstRunScan: vi.fn(async () => ({ ...state, firstRunScanPending: undefined })),
       startLocalRuntime: vi.fn(async () => ({ started: true, scan: result })),
     },
@@ -196,6 +200,42 @@ describe("first-launch model scan screen", () => {
     await user.click(screen.getByRole("button", { name: "Check GitHub Copilot CLI again" }));
     await waitFor(() => expect(bridge.retryModelScanProbe).toHaveBeenCalledWith("copilot"));
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub Copilot CLI: Signed in."));
+  });
+
+  it("leads with a hosted tool a Retry found, when the first scan found no model", async () => {
+    const user = userEvent.setup();
+    const timedOut = [
+      probe("lm-studio", "LM Studio", "local", "localhost:1234", { state: "not-found", summary: "Not installed", ready: false }),
+      probe("anthropic", "Claude Code", "hosted", "claude auth status", { state: "could-not-check", summary: "Could not check", ready: false, facts: ["Claude Code did not answer within 2.5 seconds. Retry to check again."] }),
+    ];
+    const { bridge, finish } = scanBridge({ kind: "nothing" }, timedOut);
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    expect(await screen.findByRole("heading", { name: MODEL_SCAN_COPY.nothingTitle })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Check Claude Code again" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Use Claude Code" })).toBeInTheDocument();
+  });
+
+  it("does not promise local processing while the admin's own hosted choice stays selected", async () => {
+    const user = userEvent.setup();
+    const both = [
+      probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Running, 1 model", models: ["openadminos/openadmin-8b:latest"], hasOpenAdmin8B: true }),
+      probe("anthropic", "Claude Code", "hosted", "claude auth status"),
+    ];
+    const { bridge, finish } = scanBridge({ kind: "local-available", providerId: "ollama", model: "openadminos/openadmin-8b:latest", selectedProviderId: "anthropic" }, both);
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+
+    expect(await screen.findByRole("heading", { level: 1, name: "OpenAdmin 8B is ready on this device, not selected" })).toBeInTheDocument();
+    expect(screen.getByText("It runs in Ollama. Chat keeps answering with Claude Code, your choice, until you switch.")).toBeInTheDocument();
+    expect(screen.queryByText(MODEL_SCAN_COPY.nothingLeaves)).not.toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Use OpenAdmin 8B" }));
+    await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("ollama"));
+    await waitFor(() => expect(bridge.setActiveModel).toHaveBeenCalledWith("ollama", "openadminos/openadmin-8b:latest"));
   });
 
   it("does not show after the first launch, and opens again from Scan again", async () => {

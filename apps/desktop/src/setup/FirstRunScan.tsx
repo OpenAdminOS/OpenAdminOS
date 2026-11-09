@@ -121,6 +121,7 @@ function modelName(model: string | undefined): string | undefined {
 
 type Recommendation =
   | { kind: "local"; providerId: ProviderId; title: string; runtime: string }
+  | { kind: "switch"; providerId: ProviderId; model?: string; title: string; runtime: string; selectedProviderId: ProviderId }
   | { kind: "hosted"; providerId: ProviderId; title: string; others: ProviderId[]; startable?: ModelScanProbe }
   | { kind: "start"; probe: ModelScanProbe }
   | { kind: "nothing" };
@@ -131,6 +132,10 @@ export function recommend(outcome: ModelScanOutcome, rows: readonly ModelScanPro
   if (outcome.kind === "local-selected" || outcome.kind === "local-ready") {
     const runtime = rows.find((probe) => probe.providerId === outcome.providerId)?.name ?? outcome.providerId;
     return { kind: "local", providerId: outcome.providerId, title: modelName(outcome.model) ?? runtime, runtime };
+  }
+  if (outcome.kind === "local-available") {
+    const runtime = rows.find((probe) => probe.providerId === outcome.providerId)?.name ?? outcome.providerId;
+    return { kind: "switch", providerId: outcome.providerId, ...(outcome.model ? { model: outcome.model } : {}), title: modelName(outcome.model) ?? runtime, runtime, selectedProviderId: outcome.selectedProviderId };
   }
   if (outcome.kind === "hosted-detected") {
     const [first, ...others] = outcome.providerIds;
@@ -280,9 +285,13 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     if (!current) return;
     setShown((all) => ({ ...all, [providerId]: { ...current, state: "checking", summary: "Checking", facts: [] } }));
     try {
-      const probe = await api.retryModelScanProbe(providerId);
-      setShown((all) => ({ ...all, [providerId]: probe }));
-      setAnnouncement(MODEL_SCAN_COPY.announce(probe.name, probe.summary));
+      // The retry returns the whole scan, so a check that now succeeds changes what the result leads with.
+      const scan = await api.retryModelScanProbe(providerId);
+      announcedResult.current = scan;
+      setShown(Object.fromEntries(scan.probes.map((entry) => [entry.providerId, entry])));
+      setResult(scan);
+      const probe = scan.probes.find((entry) => entry.providerId === providerId);
+      if (probe) setAnnouncement(MODEL_SCAN_COPY.announce(probe.name, probe.summary));
       await refresh();
     } catch (caught) {
       setShown((all) => ({
@@ -344,6 +353,21 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     }
   };
 
+  // An explicit switch to a local model the admin did not choose before.
+  const switchLocal = async (providerId: ProviderId, model?: string) => {
+    setBusy(providerId);
+    setActionError(null);
+    try {
+      await setActiveProvider(providerId);
+      if (model) await api?.setActiveModel?.(providerId, model);
+      await finish("/chat");
+    } catch (caught) {
+      setActionError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const preview = async () => {
     setBusy("preview");
     setActionError(null);
@@ -396,6 +420,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                 busy={busy}
                 startError={startError}
                 onUseHosted={(id) => void useHosted(id)}
+                onSwitchLocal={(id, model) => void switchLocal(id, model)}
                 onOpenChat={() => void finish("/chat")}
                 onSetUp={() => void finish("/settings/providers")}
                 onStart={(probe) => void start(probe)}
@@ -630,6 +655,7 @@ const linkClass =
 
 function heroTitle(pick: Recommendation): string {
   if (pick.kind === "local") return MODEL_SCAN_COPY.localTitle(pick.title);
+  if (pick.kind === "switch") return MODEL_SCAN_COPY.availableTitle(pick.title);
   if (pick.kind === "hosted") return MODEL_SCAN_COPY.hostedReady(pick.title);
   if (pick.kind === "start") return MODEL_SCAN_COPY.installedTitle(pick.probe.name);
   return MODEL_SCAN_COPY.nothingTitle;
@@ -642,6 +668,7 @@ function ScanHero({
   busy,
   startError,
   onUseHosted,
+  onSwitchLocal,
   onOpenChat,
   onSetUp,
   onStart,
@@ -651,6 +678,7 @@ function ScanHero({
   busy: string | null;
   startError: { providerId: ProviderId; message: string } | null;
   onUseHosted: (id: ProviderId) => void;
+  onSwitchLocal: (id: ProviderId, model?: string) => void;
   onOpenChat: () => void;
   onSetUp: () => void;
   onStart: (probe: ModelScanProbe) => void;
@@ -672,7 +700,7 @@ function ScanHero({
       <p className="text-sm text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.heroLead(pick.kind)}</p>
       <h1 id="model-scan-heading" className="mt-2 font-serif text-[3.25rem] font-medium leading-[1] tracking-[-0.025em]">
         <span className="sr-only">{heroTitle(pick)}</span>
-        <span aria-hidden="true">{pick.kind === "local" || pick.kind === "hosted" ? pick.title : pick.kind === "start" ? pick.probe.name : MODEL_SCAN_COPY.nothingShort}</span>
+        <span aria-hidden="true">{pick.kind === "local" || pick.kind === "hosted" || pick.kind === "switch" ? pick.title : pick.kind === "start" ? pick.probe.name : MODEL_SCAN_COPY.nothingShort}</span>
       </h1>
       {pick.kind === "local" ? (
         <>
@@ -681,6 +709,18 @@ function ScanHero({
           <div className="mt-6">
             <Button variant="primary" onClick={onOpenChat}>
               {MODEL_SCAN_COPY.openChat}
+            </Button>
+          </div>
+        </>
+      ) : pick.kind === "switch" ? (
+        <>
+          <p className="mt-3 max-w-[44ch] text-md leading-6 text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.availableLine(pick.runtime, name(pick.selectedProviderId))}</p>
+          <div className="mt-6 flex flex-wrap items-center gap-2">
+            <Button variant="primary" disabled={busy !== null} onClick={() => onSwitchLocal(pick.providerId, pick.model)}>
+              {MODEL_SCAN_COPY.useHosted(pick.title)}
+            </Button>
+            <Button variant="secondary" size="sm" onClick={onOpenChat}>
+              {MODEL_SCAN_COPY.keepSelected(name(pick.selectedProviderId))}
             </Button>
           </div>
         </>

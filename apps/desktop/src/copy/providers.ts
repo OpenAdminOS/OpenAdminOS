@@ -33,9 +33,15 @@ export const MODEL_SCAN_COPY = {
     `Checked here: ${targets.join(", ")}. Nothing was sent to a model or a provider.`,
   localTitle: (model: string) => `${model} is ready on this device`,
   hostedReady: (name: string) => `${name} is signed in on this device`,
+  availableTitle: (model: string) => `${model} is ready on this device, not selected`,
+  availableLine: (runtime: string, selected: string) =>
+    `It runs in ${runtime}. Chat keeps answering with ${selected}, your choice, until you switch.`,
+  keepSelected: (name: string) => `Keep ${name}`,
   installedTitle: (name: string) => `${name} is installed on this device`,
-  heroLead: (kind: "local" | "hosted" | "start" | "nothing") =>
-    kind === "local"
+  heroLead: (kind: "local" | "switch" | "hosted" | "start" | "nothing") =>
+    kind === "switch"
+      ? "Found on this device"
+      : kind === "local"
       ? "Ready on this device"
       : kind === "hosted"
         ? "Signed in on this device"
