@@ -15,12 +15,12 @@ OpenAdminOS works with Splashtop in two ways:
 | Reference | Host | Tools | Used for |
 | --- | --- | --- | --- |
 | Splashtop API Reference | docs.splashtop.com | `search-endpoints`, `list-endpoints`, `get-endpoint`, `get-server-variables` | Which Open API endpoint to use, its parameters, authentication and regional hosts |
-| Splashtop Docs | support-splashtopbusiness.splashtop.com | `search_articles`, `get_article` | How to set up, use and troubleshoot Splashtop products |
+| Splashtop Docs MCP | support-splashtopbusiness.splashtop.com | `search_articles`, `get_article` | Questions about setting up, using and troubleshooting Splashtop, answered from the documentation |
 
 Both are public reference sources like the other Marketplace servers: off until you add them, used by Chat in every organization, and words from your question can reach the host shown. The same filter blocks known tenant names, IDs, email addresses and IP addresses before a query is sent, and results are treated as third-party reference material, never as instructions.
 
 - **Splashtop API Reference** is an MCP server that ReadMe hosts for Splashtop. It also lists `execute-request`, which would send any request to the Splashtop API through the server operator. OpenAdminOS never offers it.
-- **Splashtop Docs** is built into OpenAdminOS. There is no MCP server in between: Chat calls the Help Center's public article search and article API directly from this device. An article id is sent only when it appeared in your question or in an earlier search result of the same answer. If the Help Center limits requests (HTTP 429), Chat says how long to wait.
+- **Splashtop Docs MCP** answers questions about Splashtop from its documentation. It is built into OpenAdminOS and offered to Chat like an MCP server, without a separate server in between: Chat calls the Help Center's public article search and article API directly from this device. An article id is sent only when it appeared in your question or in an earlier search result of the same answer. If the Help Center limits requests (HTTP 429), Chat says how long to wait.
 
 ## Connect the Open API
 
