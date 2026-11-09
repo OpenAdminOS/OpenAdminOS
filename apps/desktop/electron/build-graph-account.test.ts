@@ -117,11 +117,19 @@ describe("buildGraph interactive fallback", () => {
       assert.deepEqual(fixture.loginHints, [TENANT.username]);
       assert.equal(fixture.fetches.length, 1);
       assert.equal(fixture.fetches[0]?.authorization, "Bearer interactive-token");
-      const state = await fixture.store.getAppState();
-      assert.deepEqual([...(state.tenants.find((t) => t.id === TENANT.id)?.grantedScopes ?? [])].sort(), [
-        ...(TENANT.grantedScopes ?? []),
-        "graph:Policy.Read.All",
-      ].sort());
+      // The grant write is not awaited by the token provider and goes through
+      // the durable write path, so wait for the state rather than a fixed
+      // number of event loop turns.
+      const expected = [...(TENANT.grantedScopes ?? []), "graph:Policy.Read.All"].sort();
+      const granted = async () =>
+        [...((await fixture.store.getAppState()).tenants.find((t) => t.id === TENANT.id)?.grantedScopes ?? [])].sort();
+      const deadline = Date.now() + 5_000;
+      let actual = await granted();
+      while (JSON.stringify(actual) !== JSON.stringify(expected) && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        actual = await granted();
+      }
+      assert.deepEqual(actual, expected);
     } finally {
       await fixture.close();
     }
