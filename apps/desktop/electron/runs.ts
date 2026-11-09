@@ -771,6 +771,8 @@ export class RunService {
     organizationId: string;
     kind: NonNullable<RunRecord["splashtop"]>["kind"];
     region: NonNullable<RunRecord["splashtop"]>["region"];
+    /** The connection the plan was read through; apply refuses any other. */
+    connectedAt: string;
     plan: NonNullable<RunRecord["plan"]>;
   }): Promise<RunRecord> {
     if (input.plan.actions.length === 0) throw new Error("A Splashtop change needs at least one target.");
@@ -779,7 +781,7 @@ export class RunService {
       id: `run_${randomUUID()}`,
       agentSlug: "splashtop-change",
       origin: "splashtop-change",
-      splashtop: { organizationId: input.organizationId, kind: input.kind, region: input.region },
+      splashtop: { organizationId: input.organizationId, kind: input.kind, region: input.region, connectedAt: input.connectedAt },
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
@@ -1358,6 +1360,22 @@ export class RunService {
       }
       if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
     }
+  }
+
+  /**
+   * Stops every Splashtop change of the organization that is applying and
+   * waits until each has stopped, so a disconnect can delete the token
+   * knowing no apply still holds it. A stopped run is marked failed with
+   * the exact count it applied; the request in flight is aborted.
+   */
+  async stopSplashtopApplies(organizationId: string, reason: string): Promise<void> {
+    const persisted = await this.host.read();
+    const runIds = persisted.runs
+      .filter((run) => run.origin === "splashtop-change" && run.splashtop?.organizationId === organizationId)
+      .filter((run) => run.status === "running" || run.status === "queued" || this.drives.has(run.id))
+      .map((run) => run.id);
+    for (const runId of runIds) this.controllers.get(runId)?.abort(new Error(reason));
+    await Promise.all(runIds.map((runId) => this.drives.get(runId) ?? Promise.resolve()));
   }
 
   /**

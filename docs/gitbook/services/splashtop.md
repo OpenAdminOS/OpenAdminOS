@@ -59,7 +59,7 @@ The **Manage** menu on the Splashtop line:
 - **Plan a change**, see below.
 - **Test** calls `users/basic_info` again with the stored token and updates the parts it reaches.
 - **Rotate token** checks a new token at the same host and replaces the old one only if it works and belongs to the same Splashtop team.
-- **Disconnect** deletes the token from this device and stops Chat from reading Splashtop. Nothing is sent to Splashtop; the token stays valid in my.splashtop.com until you delete it there.
+- **Disconnect** stops any Splashtop change that is applying for this organization (the run says how many actions it applied), then deletes the token from this device and stops Chat from reading Splashtop. Nothing more is sent to Splashtop; the token stays valid in my.splashtop.com until you delete it there.
 
 Connecting, rotating and disconnecting are recorded in the audit log export with the region, host and team, never the token. Disconnecting the organization's Microsoft 365 connection also deletes its Splashtop token.
 
@@ -98,6 +98,7 @@ Chat only reads. It does not reboot, delete, rename, disable or end anything.
 The plan lists one action per target with its current name or state and the change. Nothing happens until you type the confirmation phrase, for example `REBOOT 12 COMPUTERS`, `DELETE 1 COMPUTER`, `DISABLE 3 USERS`, `END 2 SESSIONS` or `RENAME 4 COMPUTERS`. A rename is not destructive; the others cannot be undone from OpenAdminOS.
 
 - A plan applies only in its own organization: while another organization is active, it waits.
+- A plan applies only through the Splashtop connection it was prepared with. After Splashtop is connected again, to the same team or another one, prepare the change again.
 - Actions run in order, through that organization's Splashtop connection only. The first error stops the rest, and the run says how many were applied.
 - Each action is checked again before it is sent: only the request kinds OpenAdminOS plans, for the connected team, can go out with the token.
 

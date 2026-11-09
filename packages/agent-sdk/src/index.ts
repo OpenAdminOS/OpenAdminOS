@@ -994,6 +994,12 @@ export interface RunRecord {
     organizationId: string;
     kind: SplashtopChangeKind;
     region: SplashtopRegion;
+    /**
+     * `connectedAt` of the connection the plan was read through. A plan
+     * applies only through that same connection; one prepared before this
+     * was recorded is refused.
+     */
+    connectedAt?: string;
   };
   status: RunStatus;
   queuedAt: string;

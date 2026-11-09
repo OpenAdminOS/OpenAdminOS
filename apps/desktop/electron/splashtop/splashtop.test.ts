@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -602,6 +603,85 @@ describe("Splashtop connection in app state", () => {
       const done = await settled(store, run.id);
       assert.equal(done.status, "failed");
       assert.match(done.error ?? "", /not a Splashtop change OpenAdminOS plans/);
+      assert.equal(calls.length, 0);
+    });
+  });
+
+  it("disconnecting Splashtop stops an apply in flight and waits for it before the token is deleted", async () => {
+    await withStore(async ({ store, tokens, route, calls }) => {
+      await store.connectSplashtop({ organizationId: WOODGROVE_ORG, region: "global", token: TOKEN_A });
+      const run = await store.prepareSplashtopChange({ organizationId: WOODGROVE_ORG, kind: "reboot-computers", targetIds: [101, 102, 103] });
+      // The first reboot hangs until its request is aborted.
+      let firstWriteStarted!: () => void;
+      const started = new Promise<void>((resolve) => { firstWriteStarted = resolve; });
+      route.current = (call) => {
+        if (call.init.method === "POST" && call.url.pathname.endsWith("/computers/reboot")) {
+          firstWriteStarted();
+          return new Promise<Response>((_resolve, reject) => {
+            call.init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")), { once: true });
+          }) as unknown as Response;
+        }
+        return splashtopTeam(call);
+      };
+      calls.length = 0;
+      await store.confirmRun(run.id, "REBOOT 3 COMPUTERS", { activeOrganizationOnly: true });
+      await started;
+      // The run's stored status at the moment the token is deleted.
+      let statusWhenTokenRemoved: string | undefined;
+      const remove = tokens.remove.bind(tokens);
+      tokens.remove = async (organizationId: string) => {
+        const statePath = (store as unknown as { filePath: string }).filePath;
+        const state = JSON.parse(readFileSync(statePath, "utf8")) as { runs: RunRecord[] };
+        statusWhenTokenRemoved = state.runs.find((entry) => entry.id === run.id)?.status;
+        return remove(organizationId);
+      };
+      await store.disconnectSplashtop(WOODGROVE_ORG);
+      // The apply had stopped before disconnect returned.
+      const stopped = await store.getRun(run.id);
+      assert.equal(stopped?.status, "failed");
+      assert.match(stopped?.error ?? "", /Splashtop was disconnected while this plan applied\. Nothing more was sent/);
+      assert.match(stopped?.summary ?? "", /after applying 0 of 3/);
+      // The apply had stopped and been recorded before the token went, and only one write was ever sent.
+      assert.equal(statusWhenTokenRemoved, "failed");
+      await settled(store, run.id);
+      assert.equal(tokens.tokens.has(WOODGROVE_ORG), false);
+      assert.equal(calls.filter((call) => call.init.method === "POST").length, 1);
+    });
+  });
+
+  it("refuses to apply a plan, end sessions included, after Splashtop was connected again", async () => {
+    await withStore(async ({ store, route, calls }) => {
+      await store.connectSplashtop({ organizationId: WOODGROVE_ORG, region: "eu", token: TOKEN_A });
+      const run = await store.prepareSplashtopChange({ organizationId: WOODGROVE_ORG, kind: "end-sessions", targetIds: [900] });
+      assert.ok(run.splashtop?.connectedAt);
+      // Reconnected to another team in the same region: the end-session path names no team.
+      await store.disconnectSplashtop(WOODGROVE_ORG);
+      route.current = (call) => call.url.pathname.endsWith("basic_info")
+        ? ok({ email: "other@team.example", scopes: { logs: { stb_team_id: 4242 } } })
+        : splashtopTeam(call);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await store.connectSplashtop({ organizationId: WOODGROVE_ORG, region: "eu", token: TOKEN_B });
+      calls.length = 0;
+      await store.confirmRun(run.id, "END 1 SESSION", { activeOrganizationOnly: true });
+      const done = await settled(store, run.id);
+      assert.equal(done.status, "failed");
+      assert.match(done.error ?? "", /connected again after this plan was prepared\. Nothing was sent/);
+      assert.equal(calls.length, 0);
+    });
+  });
+
+  it("refuses a plan that carries no connection binding", async () => {
+    await withStore(async ({ store, calls, file }) => {
+      await store.connectSplashtop({ organizationId: WOODGROVE_ORG, region: "global", token: TOKEN_A });
+      const run = await store.prepareSplashtopChange({ organizationId: WOODGROVE_ORG, kind: "end-sessions", targetIds: [900] });
+      const saved = await file();
+      delete saved.runs.find((entry) => entry.id === run.id)!.splashtop!.connectedAt;
+      await writeFile((store as unknown as { filePath: string }).filePath, JSON.stringify(saved));
+      calls.length = 0;
+      await store.confirmRun(run.id, "END 1 SESSION", { activeOrganizationOnly: true });
+      const done = await settled(store, run.id);
+      assert.equal(done.status, "failed");
+      assert.match(done.error ?? "", /connected again after this plan was prepared/);
       assert.equal(calls.length, 0);
     });
   });

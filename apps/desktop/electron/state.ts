@@ -1767,6 +1767,8 @@ export class AppStateStore {
   private readonly managedPolicy: ManagedPolicyStatus | undefined;
   /** The Splashtop connection of each organization; see splashtop/service.ts. */
   private readonly splashtop: SplashtopService<PersistedState>;
+  /** Organizations whose Splashtop disconnect is running, with how many; no apply starts for them. */
+  private readonly splashtopDisconnecting = new Map<string, number>();
   private retrievalIndexInstance: RetrievalIndex | undefined;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
@@ -2409,8 +2411,24 @@ export class AppStateStore {
     return this.splashtop.rotate(input);
   }
 
+  /**
+   * Disconnect stops the organization's Splashtop changes that are
+   * applying, and waits for them, before the token is deleted. While it
+   * runs, no new apply can pick up the token.
+   */
   async disconnectSplashtop(organizationId: string): Promise<void> {
-    await this.splashtop.disconnect(organizationId);
+    this.splashtopDisconnecting.set(organizationId, (this.splashtopDisconnecting.get(organizationId) ?? 0) + 1);
+    try {
+      await this.runService.stopSplashtopApplies(
+        organizationId,
+        "Splashtop was disconnected while this plan applied. Nothing more was sent.",
+      );
+      await this.splashtop.disconnect(organizationId);
+    } finally {
+      const left = (this.splashtopDisconnecting.get(organizationId) ?? 1) - 1;
+      if (left > 0) this.splashtopDisconnecting.set(organizationId, left);
+      else this.splashtopDisconnecting.delete(organizationId);
+    }
   }
 
   async listSplashtopChangeTargets(organizationId: string, kind: SplashtopChangeKind): Promise<SplashtopChangeTarget[]> {
@@ -2441,6 +2459,7 @@ export class AppStateStore {
       organizationId: binding.organization.id,
       kind: request.kind,
       region: binding.record.region,
+      connectedAt: binding.record.connectedAt,
       plan,
     });
   }
@@ -2455,6 +2474,9 @@ export class AppStateStore {
     if (run.origin !== "splashtop-change" || !run.splashtop || !run.tenantId) {
       throw new Error("This run is not a Splashtop change. Nothing was sent.");
     }
+    if (this.splashtopDisconnecting.has(run.splashtop.organizationId)) {
+      throw new Error("Splashtop is being disconnected for this organization. Nothing was sent.");
+    }
     const persisted = await this.read();
     const binding = await this.splashtop.binding(persisted, run.splashtop.organizationId);
     if (binding.organization.connections.microsoft365?.tenantId !== run.tenantId) {
@@ -2462,6 +2484,12 @@ export class AppStateStore {
     }
     if (binding.record.region !== run.splashtop.region) {
       throw new Error("Splashtop was connected again in another region after this plan was prepared. Nothing was sent; prepare the change again.");
+    }
+    // Binds every action, also end-session ones whose path names no team,
+    // to the connection the plan was read through. A reconnect, to the
+    // same team or another one in the same region, is refused.
+    if (!run.splashtop.connectedAt || binding.record.connectedAt !== run.splashtop.connectedAt) {
+      throw new Error("Splashtop was connected again after this plan was prepared. Nothing was sent; prepare the change again.");
     }
     const teamId = binding.record.teamId;
     return {
