@@ -113,10 +113,21 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     }
     const tenantId = typeof microsoft365?.tenantId === "string" ? microsoft365.tenantId : undefined;
     const tenant = tenantId ? tenantsById.get(tenantId) : undefined;
-    if (!tenant || claimedTenants.has(tenant.id)) {
+    // A second record for a tenant that is already claimed loses, but its
+    // unknown connections move to the winner instead of being dropped.
+    if (tenant && claimedTenants.has(tenant.id)) {
+      const winner = stored.get(tenant.id);
+      if (winner) {
+        for (const [key, value] of Object.entries(unknown)) {
+          if (!(key in winner.connections)) winner.connections[key] = value;
+        }
+      }
+      continue;
+    }
+    if (!tenant) {
       // An organization a newer version made without Microsoft 365 is kept
       // as it was; this version cannot select it.
-      if (!tenant && Object.keys(unknown).length > 0) {
+      if (Object.keys(unknown).length > 0) {
         usedIds.add(id);
         withoutMicrosoft365.push({
           id,

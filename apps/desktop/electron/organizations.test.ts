@@ -771,3 +771,29 @@ describe("tenant checks after a Run for real rewrite (Muse round 2)", () => {
     assert.deepEqual(h.state().runs.map((run) => run.id), ["dry-real"]);
   });
 });
+
+describe("duplicate tenant claims keep unknown connections (Muse round 2)", () => {
+  it("moves the losing record's vendor connection to the winning organization and keeps it on write", async () => {
+    const fixture = await makeStore(currentVersionState({
+      organizations: [
+        { id: "org-first", name: "Woodgrove", createdAt: "2026-09-01T08:00:00.000Z", connections: { microsoft365: { tenantId: woodgrove.id } } },
+        { id: "org-second", name: "Woodgrove copy", createdAt: "2026-09-02T08:00:00.000Z", connections: { microsoft365: { tenantId: woodgrove.id }, jamf: { instanceUrl: "https://woodgrove.jamfcloud.com" } } },
+      ],
+    }));
+    try {
+      const app = await fixture.store.getAppState();
+      const woodgroveOrgs = app.organizations?.filter((organization) => organization.connections.microsoft365?.tenantId === woodgrove.id) ?? [];
+      assert.equal(woodgroveOrgs.length, 1);
+      assert.equal(woodgroveOrgs[0]?.id, "org-first");
+      assert.deepEqual(woodgroveOrgs[0]?.connections.jamf, { instanceUrl: "https://woodgrove.jamfcloud.com" });
+      await fixture.store.setActiveTenant(woodgrove.id);
+      const written = await fixture.file();
+      assert.deepEqual(
+        written.organizations?.find((organization) => organization.id === "org-first")?.connections.jamf,
+        { instanceUrl: "https://woodgrove.jamfcloud.com" },
+      );
+    } finally {
+      await fixture.close();
+    }
+  });
+});
