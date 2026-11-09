@@ -40,6 +40,8 @@ export type DataBoundary =
       toolHostsNote?: string;
       tooltip: string;
       isVoiceHosted: boolean;
+      /** The provider that receives hosted voice audio, when voice is on. */
+      voiceProvider?: string;
     };
 
 interface DataBoundaryContextValue {
@@ -90,6 +92,7 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
       kind: "hosted",
       label: "Voice · OpenAI",
       model: "GPT-Live-1",
+      voiceProvider: "OpenAI",
       tooltip: `${trust.boundary ?? trust.strip} Nova voice audio and shared context are active.`,
       isVoiceHosted: true,
     };

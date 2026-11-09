@@ -119,8 +119,8 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     // reports go; the map says so instead of saying nowhere.
     reportDestinations: sample ? [] : connectors ? reportDestinations(resultDestinations(state.installedAgents, connectors)) : null,
     reportDestinationsState: sample || connectors ? "ready" : connectors === null ? "failed" : "loading",
-    ...(voiceBoundary?.isVoiceHosted
-      ? { voice: { provider: voiceBoundary.label.replace(/^Voice · /, ""), ...(voiceBoundary.model ? { model: voiceBoundary.model } : {}) } }
+    ...(voiceBoundary?.kind === "hosted" && voiceBoundary.isVoiceHosted && voiceBoundary.voiceProvider
+      ? { voice: { provider: voiceBoundary.voiceProvider, ...(voiceBoundary.model ? { model: voiceBoundary.model } : {}) } }
       : {}),
   };
 }

@@ -533,7 +533,9 @@ describe("hosted voice in the map (review round 5)", () => {
     const strip = deriveDataBoundary(state, true);
     expect(strip.isVoiceHosted).toBe(true);
     const model = buildReachModel(state, [], true);
-    expect(model.voice?.provider).toBe(strip.label.replace(/^Voice · /, ""));
+    // The provider is structured data on the boundary, never parsed from its label (Muse round 6).
+    expect(strip.kind === "hosted" ? strip.voiceProvider : undefined).toBe("OpenAI");
+    expect(model.voice?.provider).toBe("OpenAI");
     expect(reachDescription(model)).toContain(CONNECTIONS_COPY.map.voiceSentence(model.voice!.provider));
     const quiet = buildReachModel(state, [], false);
     expect(quiet.voice).toBeUndefined();
