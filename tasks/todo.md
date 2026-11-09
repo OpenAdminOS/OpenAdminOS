@@ -1676,3 +1676,10 @@ Already fixed by the round 2 commits above, confirmed: the Agent Team persona sc
 CI on this branch failed the generated docs check on every push since 96eece9: git's automatic short-hash length grew to eight characters in fresh clones. Part A's fix `docs: pin generated short hashes to eight characters` is cherry-picked here so the check passes; it merges cleanly once part A lands. Earlier hand-backs reported CI as pending, not failing.
 
 The CI job then failed in the Intune Chat smoke: it, and the Agent Team presentation checks, still looked for the old Switch tenant button and top bar label. Fixed in the commit after the cherry-pick; the Intune Chat, Office and Support issue smokes pass locally.
+
+## PR #174 review round 3 (GPT-6.1-Sol, 2026-11-09)
+
+Reviewed head 9c244c6; round 2 fixes verified. The earlier CI smoke timeout was traced to the existing send-completion race; the smoke passed on rerun.
+
+1. [x] Blocking: Apply bypassed the active organization. `confirmRun` takes the same boundary as starts, and the `confirm-run` IPC handler always sets it, so every renderer approval is checked inside the confirmation lock: the plan's tenant must be the active tenant. That one path covers agent write plans, baseline rollbacks, external gateway proposals and Agent Team approvals; dry run then Run for real was already held to the active organization in round 1. A refused plan is kept unchanged and never retargeted. The confirmation page names the plan's organization, keeps Apply disabled and offers Switch back; a refusal from a race shows the host's designed message. Host tests cover all four approval kinds with No organization and with another organization active; renderer tests cover both states and the race. (44fc909e)
+2. [x] Start errors were hidden behind the run review. The review checks the provider on its own, whatever the organization state, and disables Start with Open provider settings when it is not ready; a refused start appears inside the review with Try again and Open provider settings, tested with `within(dialog)` for an agent start and for Run again. (02b2ae78)
