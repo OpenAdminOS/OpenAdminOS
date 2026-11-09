@@ -885,3 +885,12 @@ it("says report destinations could not be checked on the No organization page (d
   const leaves = await screen.findByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
   expect(await within(leaves).findByText(CONNECTIONS_COPY.map.reportsFailedSentence)).toBeInTheDocument();
 });
+
+it("says a missing part is not granted in words, on a 24 px target (design round review, Muse U)", async () => {
+  const base = createMockAppState().tenants[0]!;
+  render(createMockAppState({ tenants: [{ ...base, grantedScopes: intuneScopes }] }));
+  const services = await screen.findByRole("region", { name: CONNECTIONS_COPY.servicesHeading });
+  const missing = within(services).getAllByRole("button").filter((button) => button.getAttribute("data-missing") === "true");
+  expect(missing.length).toBeGreaterThan(0);
+  for (const button of missing) expect(button).toHaveTextContent(/, not granted$/);
+});

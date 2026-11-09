@@ -589,6 +589,8 @@ function MicrosoftServiceRows({
                           onClick={() => setAccess({ serviceId: service.id, partIds: [part.id] })}
                         >
                           {part.title}
+                          {/* Said in words too, not only by the hollow dot. */}
+                          <span className="conn-part-state">, {CONNECTIONS_COPY.permissionNotGranted.toLowerCase()}</span>
                         </button>
                       ),
                     )}
