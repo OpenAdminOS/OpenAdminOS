@@ -232,7 +232,7 @@ describe("shell chrome", () => {
     expect(screen.queryByText("Team content")).not.toBeInTheDocument();
   });
 
-  it("shows which app registration each tenant is connected with in the organization menu", async () => {
+  it("names an own app registration in the organization menu (design round)", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();
     const openAdminOSTenant = {
@@ -265,22 +265,13 @@ describe("shell chrome", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
-    const ours = screen.getByRole("menuitemradio", { name: /Contoso IT/ });
-    expect(within(ours).getByText("OpenAdminOS app")).toHaveAttribute(
-      "title",
-      "OpenAdminOS app, client ID d1de0a94-f67a-421d-8804-a235955ffd69",
-    );
+    // The switcher names only an own app registration; the Organizations tab on Connections shows the details.
     const custom = screen.getByRole("menuitemradio", { name: /Fabrikam/ });
-    expect(within(custom).getByText("Own app registration · aaaaaaaa…")).toHaveAttribute(
-      "title",
-      "Own app registration, client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee, directory fabrikam.onmicrosoft.com",
-    );
+    expect(custom).toHaveTextContent("Own app registration");
+    const ours = screen.getByRole("menuitemradio", { name: /Contoso IT/ });
+    expect(ours).not.toHaveTextContent(/app registration/i);
     const legacy = screen.getByRole("menuitemradio", { name: /Northwind/ });
-    expect(within(legacy).getByText("Microsoft Graph Command Line Tools")).toHaveAttribute(
-      "title",
-      expect.stringContaining("client ID 14d82eec-204b-4c2f-b7e8-296a70dab67e. Connected before v0.5."),
-    );
-    expect(within(legacy).queryByText("OpenAdminOS app")).not.toBeInTheDocument();
+    expect(legacy).not.toHaveTextContent(/app registration/i);
     const pilot = screen.getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
     expect(within(pilot).queryByText(/app registration|OpenAdminOS app/i)).not.toBeInTheDocument();
   });

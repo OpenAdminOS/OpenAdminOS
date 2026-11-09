@@ -9,20 +9,19 @@ import {
   IconCheck,
   IconChevronDown,
   IconClose,
-  IconPlay,
+  IconConnectors,
+  IconFlask,
   IconPlus,
   IconRefresh,
-  IconSettings,
+  IconSearch,
 } from "./icons";
 import { TenantCheckStatus, useTenantCheck } from "./ServiceAccess";
 import { Modal, ModalHeader } from "./Modal";
 import { Pill } from "./Pill";
-import { ServiceMark, connectedServiceIds } from "./ServiceMark";
-import { TenantTile } from "./TenantTile";
+import { connectedServiceIds } from "./ServiceMark";
 import { useToast } from "./Toast";
 import { Tooltip } from "./ui";
 import { PILOT_COPY } from "../shared/pilot-mode";
-import { tenantRegistrationSummary } from "../shared/app-registration";
 import {
   activeOrganizationOf,
   resolveOrganizations,
@@ -32,7 +31,10 @@ import {
 } from "../shared/openAdminOS";
 
 const MENU_ITEM_CLASS =
-  "flex w-full items-center gap-2 rounded-[9px] px-2.5 py-2 text-left text-base text-[var(--color-text)] hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]";
+  "flex w-full items-center gap-2.5 rounded-md px-2 py-2 text-left text-sm text-[var(--color-text-soft)] hover:bg-[var(--color-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]";
+
+/** From this many organizations the switcher starts with a filter field. */
+export const ORGANIZATION_FILTER_FROM = 6;
 
 /**
  * The top-bar organization chip. Each organization shows the services it
@@ -42,6 +44,8 @@ const MENU_ITEM_CLASS =
 export function OrganizationSwitcher() {
   const navigate = useNavigate();
   const { state, addSampleTenant, setActiveOrganization, disconnectTenant } = useAppState();
+  const [query, setQuery] = useState("");
+  const filterRef = useRef<HTMLInputElement | null>(null);
   const { openSetup } = useSetupFlow();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -64,10 +68,18 @@ export function OrganizationSwitcher() {
   const menuItems = () =>
     Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? []);
 
-  // Opening moves focus into the menu: the active organization, else the first item.
+  // Opening moves focus into the menu: the filter when there is one, else
+  // the active organization, else the first item. A new opening starts unfiltered.
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setQuery("");
+      return;
+    }
     const frame = window.requestAnimationFrame(() => {
+      if (filterRef.current) {
+        filterRef.current.focus();
+        return;
+      }
       const items = menuItems();
       (items.find((item) => item.getAttribute("aria-checked") === "true") ?? items[0])?.focus();
     });
@@ -88,12 +100,20 @@ export function OrganizationSwitcher() {
     else if (event.key === "End") move(items.length - 1);
     else if (event.key === "Tab") close(false);
   };
-  const organizations = resolveOrganizations(state);
   const active = activeOrganizationOf(state);
   const tenantOf = (organization: OrganizationRecord | undefined): TenantRecord | undefined =>
     organization
       ? state.tenants.find((tenant) => tenant.id === organization.connections.microsoft365?.tenantId)
       : undefined;
+  // Selectable organizations, the most recently used first.
+  const organizations = orderByRecentUse(
+    resolveOrganizations(state).filter((organization) => tenantOf(organization) !== undefined),
+    (organization) => tenantOf(organization)?.lastUsedAt ?? tenantOf(organization)?.addedAt,
+  );
+  const showFilter = organizations.length >= ORGANIZATION_FILTER_FROM;
+  const shown = showFilter ? filterOrganizations(organizations, query, (organization) => tenantOf(organization)?.username) : organizations;
+  const showNoOrganization =
+    organizations.length > 0 && (!showFilter || query.trim() === "" || ORGANIZATION_COPY.noOrganization.toLowerCase().includes(query.trim().toLowerCase()));
   const activeTenant = tenantOf(active);
   const sampleActive = active?.kind === "sample";
 
@@ -189,11 +209,7 @@ export function OrganizationSwitcher() {
             }
             className="flex h-9 max-w-[320px] items-center gap-2 rounded-[9px] px-2 text-left text-base text-[var(--color-text)] transition-colors hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]"
           >
-            {active && activeTenant ? (
-              <TenantTile tenantId={activeTenant.id} displayName={active.name} size="sm" />
-            ) : (
-              <NoOrganizationMark />
-            )}
+            {active && activeTenant ? <OrganizationAvatar name={active.name} /> : <NoOrganizationMark />}
             <span className="min-w-0 truncate font-medium">
               {active?.name ?? ORGANIZATION_COPY.noOrganization}
             </span>
@@ -208,112 +224,104 @@ export function OrganizationSwitcher() {
             role="menu"
             aria-label={ORGANIZATION_COPY.menuLabel}
             onKeyDown={onMenuKeyDown}
-            className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[340px] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]"
+            className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[320px] overflow-hidden rounded-lg bg-[var(--color-bg-elevated)] p-1.5 shadow-[var(--shadow-pop)]"
           >
-            <div className="px-2.5 pb-1.5 pt-1 text-sm text-[var(--color-text-muted)]">
-              {ORGANIZATION_COPY.menuHeading}
-            </div>
+            {showFilter ? (
+              <label className="mb-1 flex h-8 items-center gap-2 rounded-md bg-[var(--color-bg-raised)] px-2.5 text-sm text-[var(--color-text-muted)]">
+                <IconSearch size={14} aria-hidden="true" />
+                <input
+                  ref={filterRef}
+                  type="search"
+                  value={query}
+                  onChange={(event) => setQuery(event.target.value)}
+                  placeholder={ORGANIZATION_COPY.findOrganization}
+                  aria-label={ORGANIZATION_COPY.findOrganization}
+                  className="min-w-0 flex-1 bg-transparent text-md text-[var(--color-text)] outline-none placeholder:text-[var(--color-text-placeholder)]"
+                />
+              </label>
+            ) : null}
             {organizations.length === 0 ? (
               <div className="px-2.5 py-3 text-sm leading-5 text-[var(--color-text-muted)]">
                 <div className="text-[var(--color-text)]">{ORGANIZATION_COPY.none}</div>
                 <div className="mt-0.5">{ORGANIZATION_COPY.noneDetail}</div>
               </div>
             ) : (
-              organizations.map((organization) => {
-                const tenant = tenantOf(organization);
-                if (!tenant) return null;
-                const isActive = organization.id === active?.id;
-                const sample = organization.kind === "sample";
-                const services = sample ? [] : connectedServiceIds(tenant);
-                const registration = tenantRegistrationSummary(tenant);
-                return (
-                  <div
-                    key={organization.id}
-                    className={`group flex flex-wrap items-center rounded-[9px] ${isActive ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}
-                  >
-                    <button
-                      type="button"
-                      role="menuitemradio"
-                      aria-checked={isActive}
-                      disabled={busy}
-                      tabIndex={-1}
-                      onClick={() => void pick(organization.id)}
-                      className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
-                    >
-                      <TenantTile tenantId={tenant.id} displayName={organization.name} size="sm" />
-                      <span className="min-w-0 flex-1">
-                        <span className="flex min-w-0 items-center gap-1.5">
-                          <span className="truncate text-base font-medium text-[var(--color-text)]">{organization.name}</span>
-                          {sample ? <Pill tone="info">{ORGANIZATION_COPY.sampleLabel}</Pill> : null}
-                        </span>
-                        {sample ? (
-                          <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]">
-                            {ORGANIZATION_COPY.sampleDetail}
-                          </span>
-                        ) : (
-                          <span
-                            className="mt-1 flex items-center gap-1"
-                            aria-label={ORGANIZATION_COPY.servicesLabel(services.map((id) => serviceById(id).title))}
-                          >
-                            {services.length > 0 ? (
-                              services.map((id) => <ServiceMark key={id} serviceId={id} size="sm" />)
-                            ) : (
-                              <span className="text-xs text-[var(--color-text-muted)]">
-                                {ORGANIZATION_COPY.servicesLabel([])}
-                              </span>
-                            )}
-                          </span>
-                        )}
-                        {registration ? (
-                          <span className="mt-0.5 block truncate text-xs text-[var(--color-text-muted)]" title={registration.title}>
-                            {registration.text}
-                          </span>
-                        ) : null}
-                        {tenant.tierProbeWarning ? (
-                          <span className="mt-0.5 block truncate text-xs text-[var(--color-warning)]" title={tenant.tierProbeWarning.message}>
-                            {SERVICE_COPY.tierProbeWarningShort}. {tenant.tierProbeWarning.message}
-                          </span>
-                        ) : null}
-                      </span>
-                      {isActive ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
-                    </button>
-                    {tenant.tierProbeWarning ? <SwitcherLicenseRetry tenant={tenant} /> : null}
-                    {/* Always visible, so it is reachable without hovering the row. */}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      tabIndex={-1}
-                      aria-label={sample ? `${PILOT_COPY.leaveAction}, ${organization.name}` : `Disconnect ${organization.name}`}
-                      title={sample ? PILOT_COPY.leaveAction : `Disconnect ${organization.name}`}
-                      disabled={busy}
-                      onClick={() => {
-                        setPendingDisconnect({ tenantId: tenant.id, name: organization.name, sample });
-                        close(false);
-                      }}
-                      className="mr-1.5 rounded-[7px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)]"
-                    >
-                      <IconClose size={11} />
-                    </button>
-                    <TenantCheckStatus tenant={tenant} className="basis-full px-2.5 pb-1.5" inMenu />
+              <div className="max-h-[min(360px,55vh)] overflow-y-auto" data-testid="organization-list">
+                {shown.length === 0 ? (
+                  <div role="status" className="px-2.5 py-3 text-sm text-[var(--color-text-muted)]">
+                    {ORGANIZATION_COPY.noMatch(query.trim())}
                   </div>
-                );
-              })
+                ) : null}
+                {shown.map((organization) => {
+                  const tenant = tenantOf(organization)!;
+                  const isActive = organization.id === active?.id;
+                  const sample = organization.kind === "sample";
+                  const services = sample ? [] : connectedServiceIds(tenant);
+                  const detail = sample
+                    ? ORGANIZATION_COPY.sampleDetail
+                    : ORGANIZATION_COPY.servicesLine(
+                        services.map((id) => serviceById(id).title),
+                        tenant.appRegistration?.kind === "custom",
+                      );
+                  return (
+                    <div key={organization.id} className={`rounded-md ${isActive ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}>
+                      <div className="flex items-center">
+                        <button
+                          type="button"
+                          role="menuitemradio"
+                          aria-checked={isActive}
+                          disabled={busy}
+                          tabIndex={-1}
+                          onClick={() => void pick(organization.id)}
+                          className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
+                        >
+                          <OrganizationAvatar name={organization.name} />
+                          <span className="min-w-0 flex-1">
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              <span className="truncate text-md text-[var(--color-text)]">{organization.name}</span>
+                              {sample ? <Pill tone="info">{ORGANIZATION_COPY.sampleLabel}</Pill> : null}
+                            </span>
+                            <span
+                              className="block truncate text-xs text-[var(--color-text-muted)]"
+                              {...(sample ? {} : { "aria-label": ORGANIZATION_COPY.servicesLabel(services.map((id) => serviceById(id).title)) })}
+                              title={detail}
+                            >
+                              {detail}
+                            </span>
+                            {tenant.tierProbeWarning ? (
+                              <span className="block truncate text-xs text-[var(--color-text-muted)]" title={tenant.tierProbeWarning.message}>
+                                {SERVICE_COPY.tierProbeWarningShort}. {tenant.tierProbeWarning.message}
+                              </span>
+                            ) : null}
+                          </span>
+                          {isActive ? <IconCheck size={14} className="shrink-0 text-[var(--color-text)]" /> : null}
+                        </button>
+                        {tenant.tierProbeWarning ? <SwitcherLicenseRetry tenant={tenant} /> : null}
+                      </div>
+                      <TenantCheckStatus tenant={tenant} className="px-2.5 pb-1.5" inMenu />
+                    </div>
+                  );
+                })}
+                {showNoOrganization ? (
+                  <button
+                    type="button"
+                    role="menuitemradio"
+                    aria-checked={!active}
+                    tabIndex={-1}
+                    disabled={busy}
+                    onClick={() => void pick(null)}
+                    className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)] ${!active ? "bg-[var(--color-active)]" : ""}`}
+                  >
+                    <NoOrganizationMark />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-md text-[var(--color-text)]">{ORGANIZATION_COPY.noOrganization}</span>
+                      <span className="block truncate text-xs text-[var(--color-text-muted)]">{ORGANIZATION_COPY.noOrganizationDetail}</span>
+                    </span>
+                    {!active ? <IconCheck size={14} className="shrink-0 text-[var(--color-text)]" /> : null}
+                  </button>
+                ) : null}
+              </div>
             )}
-            {organizations.length > 0 ? (
-              <button
-                type="button"
-                role="menuitemradio"
-                aria-checked={!active}
-                tabIndex={-1}
-                disabled={busy}
-                onClick={() => void pick(null)}
-                className={`${MENU_ITEM_CLASS} ${!active ? "bg-[var(--color-active)]" : ""}`}
-              >
-                <NoOrganizationMark />
-                <span className="min-w-0 flex-1 truncate">{ORGANIZATION_COPY.noOrganization}</span>
-                {!active ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
-              </button>
-            ) : null}
             <div className="my-1 h-px bg-[var(--color-border-soft)]" />
             <button
               type="button"
@@ -325,7 +333,7 @@ export function OrganizationSwitcher() {
               }}
               className={MENU_ITEM_CLASS}
             >
-              <IconPlus size={12} /> {ORGANIZATION_COPY.addOrganization}
+              <IconPlus size={14} /> {ORGANIZATION_COPY.addOrganization}
             </button>
             {sampleActive && activeTenant ? (
               <button
@@ -339,7 +347,7 @@ export function OrganizationSwitcher() {
                 }}
                 className={MENU_ITEM_CLASS}
               >
-                <IconClose size={12} /> {PILOT_COPY.leaveAction}
+                <IconClose size={14} /> {PILOT_COPY.leaveAction}
               </button>
             ) : (
               <button
@@ -365,7 +373,7 @@ export function OrganizationSwitcher() {
                 }}
                 className={MENU_ITEM_CLASS}
               >
-                <IconPlay size={12} /> {ORGANIZATION_COPY.previewSample}
+                <IconFlask size={14} /> {ORGANIZATION_COPY.previewSample}
               </button>
             )}
             <button
@@ -378,7 +386,7 @@ export function OrganizationSwitcher() {
               }}
               className={MENU_ITEM_CLASS}
             >
-              <IconSettings size={12} /> {ORGANIZATION_COPY.manageConnections}
+              <IconConnectors size={14} /> {ORGANIZATION_COPY.manageConnections}
             </button>
           </div>
         ) : null}
@@ -451,13 +459,46 @@ function SwitcherLicenseRetry({ tenant }: { tenant: TenantRecord }) {
   );
 }
 
+/** The most recently used first; ties keep their order. */
+export function orderByRecentUse<T>(items: readonly T[], usedAt: (item: T) => string | undefined): T[] {
+  const time = (item: T) => {
+    const value = Date.parse(usedAt(item) ?? "");
+    return Number.isFinite(value) ? value : 0;
+  };
+  return items.map((item, index) => ({ item, index })).sort((a, b) => time(b.item) - time(a.item) || a.index - b.index).map(({ item }) => item);
+}
+
+/** Matches the name, and the signed-in account's domain, case-insensitively. */
+export function filterOrganizations<T extends { name: string }>(items: readonly T[], query: string, account: (item: T) => string | undefined): T[] {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return [...items];
+  return items.filter((item) => {
+    const domain = account(item)?.split("@")[1] ?? "";
+    return item.name.toLowerCase().includes(needle) || domain.toLowerCase().includes(needle);
+  });
+}
+
+/** A neutral two-letter avatar: organizations are told apart by name, not colour. */
+function OrganizationAvatar({ name }: { name: string }) {
+  const words = name.trim().split(/\s+/).filter(Boolean);
+  const letters = (words.length >= 2 ? `${words[0]![0]}${words[1]![0]}` : (words[0] ?? "?").slice(0, 2)).toUpperCase();
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-grid h-6 w-6 shrink-0 place-items-center rounded-[6px] bg-[var(--color-bg-raised)] text-[10.5px] font-semibold text-[var(--color-text-soft)] ring-1 ring-inset ring-[var(--color-border-soft)]"
+    >
+      {letters}
+    </span>
+  );
+}
+
 /** An empty dashed tile, as for a service that is not connected in mockup 32: nothing is chosen, nothing is wrong. */
 function NoOrganizationMark() {
   return (
     <span
       aria-hidden="true"
       data-testid="no-organization-mark"
-      className="inline-block h-5 w-5 shrink-0 rounded-[5px] border border-dashed border-[var(--color-border-strong)]"
+      className="inline-block h-6 w-6 shrink-0 rounded-[6px] border border-dashed border-[var(--color-border-strong)]"
     />
   );
 }

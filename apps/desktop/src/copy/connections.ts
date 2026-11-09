@@ -6,6 +6,13 @@ export const ORGANIZATION_COPY = {
   noOrganization: "No organization",
   menuLabel: "Organizations",
   menuHeading: "Organizations",
+  /** The filter shown first in the switcher once there are this many organizations. */
+  findOrganization: "Find an organization",
+  noMatch: (query: string) => `No organization matches ${query}.`,
+  /** One line per organization: its services in words, and its own app registration. */
+  servicesLine: (titles: readonly string[], ownRegistration: boolean) =>
+    `${titles.length > 0 ? titles.join(", ") : "No services connected"}${ownRegistration ? ". Own app registration" : ""}`,
+  noOrganizationDetail: "Chat answers from the docs and references",
   sampleLabel: "Sample data",
   sampleDetail: "Fictional company, no Microsoft sign-in",
   none: "No organizations yet.",

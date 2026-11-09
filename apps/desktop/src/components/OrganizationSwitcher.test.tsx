@@ -64,7 +64,7 @@ describe("organization switcher", () => {
     expect(within(other).getByLabelText("Services: Intune, Entra, Defender")).toBeInTheDocument();
     const pilot = within(menu).getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
     expect(within(pilot).getByText(ORGANIZATION_COPY.sampleLabel)).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitemradio", { name: ORGANIZATION_COPY.noOrganization })).toHaveAttribute("aria-checked", "false");
+    expect(within(menu).getByRole("menuitemradio", { name: new RegExp(`^${ORGANIZATION_COPY.noOrganization}`) })).toHaveAttribute("aria-checked", "false");
     expect(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.addOrganization })).toBeInTheDocument();
     expect(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.previewSample })).toBeInTheDocument();
     await user.click(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.manageConnections }));
@@ -75,7 +75,7 @@ describe("organization switcher", () => {
     const user = userEvent.setup();
     const bridge = renderSwitcher();
     await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
-    await user.click(screen.getByRole("menuitemradio", { name: ORGANIZATION_COPY.noOrganization }));
+    await user.click(screen.getByRole("menuitemradio", { name: new RegExp(`^${ORGANIZATION_COPY.noOrganization}`) }));
     await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith(null));
     expect(await screen.findByRole("button", { name: ORGANIZATION_COPY.chipLabelNone(true) })).toHaveTextContent(
       ORGANIZATION_COPY.noOrganization,
@@ -107,9 +107,6 @@ describe("organization switcher keyboard and focus (review round 1)", () => {
     const menu = await screen.findByRole("menu", { name: ORGANIZATION_COPY.menuLabel });
     // The active organization takes focus.
     await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus());
-    // Its disconnect action is the next item, reachable without hover.
-    await user.keyboard("{ArrowDown}");
-    expect(within(menu).getByRole("menuitem", { name: "Disconnect Contoso IT" })).toHaveFocus();
     await user.keyboard("{ArrowDown}");
     expect(within(menu).getByRole("menuitemradio", { name: /Fabrikam/ })).toHaveFocus();
     await user.keyboard("{End}");
@@ -121,12 +118,12 @@ describe("organization switcher keyboard and focus (review round 1)", () => {
     await waitFor(() => expect(chip).toHaveFocus());
   });
 
-  it("keeps the disconnect action visible without hover", async () => {
+  it("has no Disconnect in the switch rows (design round)", async () => {
     const user = userEvent.setup();
     renderSwitcher();
     await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
-    const disconnect = screen.getByRole("menuitem", { name: "Disconnect Contoso IT" });
-    expect(disconnect.className).not.toMatch(/opacity-0/);
+    const menu = screen.getByRole("menu", { name: ORGANIZATION_COPY.menuLabel });
+    expect(within(menu).queryByRole("menuitem", { name: /Disconnect/ })).not.toBeInTheDocument();
   });
 
   it("returns focus to the chip after choosing an organization", async () => {
@@ -173,5 +170,64 @@ describe("switcher keyboard edge cases (Muse round 2)", () => {
     await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus());
     for (let step = 0; step < 4 && document.activeElement !== cancel; step += 1) await user.keyboard("{ArrowDown}");
     expect(cancel).toHaveFocus();
+  });
+});
+
+describe("switcher filter, order and height (design round)", () => {
+  function many(count: number) {
+    const base = createMockAppState().tenants[0]!;
+    const names = ["Woodgrove Bank", "Fabrikam", "Northwind Traders", "Adatum", "Tailspin Toys", "Litware", "Proseware"];
+    return names.slice(0, count).map((name, index) => ({
+      ...base,
+      id: `tenant-${index}`,
+      displayName: name,
+      username: `admin@${name.split(" ")[0]!.toLowerCase()}.example`,
+      // Proseware was used last, Woodgrove Bank first.
+      lastUsedAt: `2026-11-0${index + 1}T10:00:00.000Z`,
+    }));
+  }
+
+  it("lists the most recently used organization first", async () => {
+    const user = userEvent.setup();
+    const tenants = many(3);
+    renderSwitcher(createMockAppState({ tenants, activeTenantId: tenants[0]!.id }));
+    await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+    const names = within(screen.getByRole("menu", { name: ORGANIZATION_COPY.menuLabel }))
+      .getAllByRole("menuitemradio")
+      .map((item) => item.textContent ?? "");
+    expect(names[0]).toMatch(/^NTNorthwind Traders/);
+    expect(names[1]).toMatch(/^FAFabrikam/);
+    expect(names[2]).toMatch(/^WBWoodgrove Bank/);
+    expect(names.at(-1)).toMatch(/No organization/);
+  });
+
+  it("starts with a filter from six organizations that matches name and domain", async () => {
+    const user = userEvent.setup();
+    const tenants = many(7);
+    renderSwitcher(createMockAppState({ tenants, activeTenantId: tenants[0]!.id }));
+    await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+    const filter = await screen.findByRole("searchbox", { name: ORGANIZATION_COPY.findOrganization });
+    await waitFor(() => expect(filter).toHaveFocus());
+    await user.type(filter, "tail");
+    const menu = screen.getByRole("menu", { name: ORGANIZATION_COPY.menuLabel });
+    expect(within(menu).getAllByRole("menuitemradio").map((item) => item.textContent)).toEqual([expect.stringContaining("Tailspin Toys")]);
+    await user.clear(filter);
+    await user.type(filter, "litware.example");
+    expect(within(menu).getAllByRole("menuitemradio")).toHaveLength(1);
+    await user.clear(filter);
+    await user.type(filter, "zzz");
+    expect(within(menu).getByRole("status")).toHaveTextContent(ORGANIZATION_COPY.noMatch("zzz"));
+    // Arrow keys move from the filter into the list.
+    await user.clear(filter);
+    await user.keyboard("{ArrowDown}");
+    expect(within(menu).getAllByRole("menuitemradio")[0]).toHaveFocus();
+  });
+
+  it("has no filter below six organizations and caps the list height with scrolling", async () => {
+    const user = userEvent.setup();
+    renderSwitcher(createMockAppState({ tenants: many(5) }));
+    await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+    expect(screen.queryByRole("searchbox")).not.toBeInTheDocument();
+    expect(screen.getByTestId("organization-list").className).toMatch(/max-h-\[min\(360px,55vh\)\] overflow-y-auto/);
   });
 });
