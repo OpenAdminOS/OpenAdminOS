@@ -1617,6 +1617,8 @@ export interface AppStateStoreOptions {
 }
 
 export class AppStateStore {
+  /** Tenants disconnected in this session, with when, so their late run snapshots are dropped. */
+  private readonly removedTenants = new Map<string, string>();
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
   private readonly tokenStore: TokenCacheStorage;
@@ -1861,6 +1863,10 @@ export class AppStateStore {
         host.requireIntelligenceStore().listDriftBaselinePinnedObjects(input),
     });
     this.runService = new RunService({
+      tenantRemovedAfter: (tenantId, at) => {
+        const removedAt = this.removedTenants.get(tenantId);
+        return removedAt !== undefined && at <= removedAt;
+      },
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -7069,12 +7075,29 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async disconnectTenant(id: string): Promise<AppState> {
-    await this.cancelGraphCachePreload(id).catch(() => undefined);
+    if (!(await this.read()).tenants.some((tenant) => tenant.id === id)) {
+      throw new Error("That Microsoft 365 connection is no longer on this device. Reopen Connections and try again.");
+    }
+    // Stop everything still working for the tenant before anything is
+    // deleted: its runs, its cache preload and its Agent Team. Agent Team
+    // data goes first, outside the state lock, so a failure there leaves
+    // the connection and the rest of its data in place.
+    await this.runService.stopRunsForTenant(id);
+    await this.chatService.stopGraphCachePreload(id);
     for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
+    try {
+      await this.officeService.purgeTenant(id);
+    } catch (cause) {
+      const detail = cause instanceof Error ? cause.message : String(cause);
+      throw new Error(`Agent Team data for this organization could not be deleted, so nothing was disconnected. ${detail}`, { cause });
+    }
     await this.serialize(async () => {
       const persisted = await this.read();
       const target = persisted.tenants.find((tenant) => tenant.id === id);
-      if (target && target.kind !== "sample") {
+      if (!target) {
+        throw new Error("That Microsoft 365 connection is no longer on this device. Reopen Connections and try again.");
+      }
+      if (target.kind !== "sample") {
         try {
           await this.removeCachedAccount(target.appRegistration, target.homeAccountId);
         } catch (cause) {
@@ -7102,12 +7125,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (persisted.activeTenantId === id) {
         delete next.activeTenantId;
       }
+      // The write gateway was bound to this tenant; it is not bound to any now.
+      if (persisted.gateway?.boundTenantId === id) {
+        const { boundTenantId: _removed, ...gateway } = persisted.gateway;
+        next.gateway = gateway;
+      }
       this.intelligenceStore?.purgeTenant(id);
+      // Late snapshots of the tenant's runs, and their reports, are dropped.
+      this.removedTenants.set(id, new Date().toISOString());
       await this.write(next);
-      if (target?.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
+      if (target.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     });
     this.supersedeTenantCheck(id, "disconnected");
-    await this.officeService.purgeTenant(id);
 
     return this.getAppState();
   }
@@ -7397,6 +7426,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   private async enqueueRunDeliveries(run: RunRecord): Promise<void> {
     const persisted = await this.read();
+    // A run of a tenant that was disconnected meanwhile sends no report.
+    if (run.tenantId && !persisted.tenants.some((tenant) => tenant.id === run.tenantId)) return;
     if (
       run.tenantId &&
       persisted.tenants.some(

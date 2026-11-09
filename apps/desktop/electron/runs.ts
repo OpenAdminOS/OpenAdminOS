@@ -101,6 +101,8 @@ export class OrganizationBoundaryError extends Error {
 }
 
 export interface RunServiceHost {
+  /** True when the tenant was disconnected after this time, so its runs were deleted. */
+  tenantRemovedAfter?(tenantId: string, at: string): boolean;
   read(): Promise<RunPersistedState>;
   write(state: RunPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -152,6 +154,33 @@ export interface RunServiceHost {
 
 export class RunService {
   private readonly controllers = new Map<string, AbortController>();
+  /** The work driving each run, so a disconnect can wait for it to stop. */
+  private readonly drives = new Map<string, Promise<void>>();
+
+  private track(runId: string, drive: Promise<void>): void {
+    const settled = drive.catch(() => undefined).finally(() => {
+      if (this.drives.get(runId) === settled) this.drives.delete(runId);
+    });
+    this.drives.set(runId, settled);
+  }
+
+  /**
+   * Stop a tenant's in-flight work before it is disconnected: cancel its
+   * queued and running runs and wait until their drives have finished, so
+   * nothing writes for the tenant once its data is deleted.
+   */
+  async stopRunsForTenant(tenantId: string): Promise<void> {
+    const persisted = await this.host.read();
+    const live = persisted.runs.filter(
+      (run) => run.tenantId === tenantId && (run.status === "queued" || run.status === "running"),
+    );
+    for (const run of live) await this.cancelRun(run.id).catch(() => undefined);
+    const pending = persisted.runs
+      .filter((run) => run.tenantId === tenantId)
+      .map((run) => this.drives.get(run.id))
+      .filter((drive): drive is Promise<void> => drive !== undefined);
+    await Promise.all(pending);
+  }
   private readonly progress = new Map<string, { snapshot: RunRecord; waiters: Array<{ resolve(): void; reject(error: unknown): void }> }>();
   private readonly progressDrains = new Set<string>();
 
@@ -642,12 +671,12 @@ export class RunService {
       this.host.intelligenceStore.touchConversation(options.source.conversationId, undefined, now);
     }
 
-    void this.driveRun({
+    this.track(queued.queuedRun.id, this.driveRun({
       run: queued.queuedRun,
       agent: queued.agent,
       providerId: queued.providerId,
       model: queued.model,
-    });
+    }));
     this.host.recordLearningEventSafely({
       tenantId: queued.queuedRun.tenantId,
       agentSlug: queued.agent.slug,
@@ -884,7 +913,7 @@ export class RunService {
     });
 
     if (transition.kind === "rollback") {
-      void this.driveSystemApply({ run: transition.updated });
+      this.track(transition.updated.id, this.driveSystemApply({ run: transition.updated }));
       this.host.recordLearningEventSafely({
         tenantId: transition.updated.tenantId,
         agentSlug: transition.updated.agentSlug,
@@ -901,13 +930,13 @@ export class RunService {
       return transition.updated;
     }
 
-    void this.driveApply({
+    this.track(transition.updated.id, this.driveApply({
       run: transition.updated,
       agent: transition.agent,
       providerId: transition.providerId,
       model: transition.model,
       plan: transition.updated.plan!,
-    });
+    }));
     this.host.recordLearningEventSafely({
       tenantId: transition.updated.tenantId,
       agentSlug: transition.agent.slug,
@@ -1343,6 +1372,9 @@ export class RunService {
     await this.host.serialize(async () => {
       const persisted = await this.host.read();
       const previous = persisted.runs.find((existing) => existing.id === run.id);
+      // A run deleted with its disconnected tenant never comes back from a
+      // late snapshot, and its report is never delivered.
+      if (!previous && run.tenantId && this.host.tenantRemovedAfter?.(run.tenantId, run.queuedAt)) return;
       if (previous?.status === "cancelled") {
         const steps = previous.steps.map((step) => {
           const incoming = run.steps.find((candidate) => candidate.id === step.id);

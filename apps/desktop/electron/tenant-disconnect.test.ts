@@ -182,3 +182,78 @@ function seedTenantRows(db: DatabaseSync): void {
     .run(`graphCacheRefreshSchedule:${tenantId}`, "{}", "2026-08-01");
   db.exec("COMMIT");
 }
+
+describe("disconnect stops in-flight work first (design round review, Muse A)", () => {
+  async function fixture(extra: Record<string, unknown> = {}) {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-disconnect-live-"));
+    const statePath = join(dir, "state.json");
+    const running = {
+      id: "run-live", agentSlug: "fixture", tenantId: "tenant-1", status: "running",
+      queuedAt: "2026-08-01T00:00:00.000Z", startedAt: "2026-08-01T00:00:01.000Z", providerId: "ollama", steps: [], logs: [],
+    };
+    await writeFile(statePath, `${JSON.stringify({
+      activeProviderId: "ollama",
+      installedAgents: [],
+      tenants: [{ id: "tenant-1", displayName: "Contoso", username: "admin@contoso.example", homeAccountId: "home-1", connectedAt: "2026-08-01T00:00:00.000Z" }],
+      activeTenantId: "tenant-1",
+      runs: [running],
+      gateway: { enabled: true, port: 7777, boundTenantId: "tenant-1", clients: [] },
+      ...extra,
+    })}\n`, "utf8");
+    const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    return { dir, statePath, store, running };
+  }
+
+  it("cancels the tenant's running runs and waits for their work before deleting anything", async () => {
+    const { dir, statePath, store } = await fixture();
+    const runService = (store as unknown as { runService: { drives: Map<string, Promise<void>> } }).runService;
+    let finishDrive!: () => void;
+    const drive = new Promise<void>((resolve) => (finishDrive = resolve));
+    runService.drives.set("run-live", drive);
+    try {
+      let disconnected = false;
+      const pending = store.disconnectTenant("tenant-1").then(() => (disconnected = true));
+      // The run is cancelled, and the disconnect waits for its drive.
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      const during = JSON.parse(await readFile(statePath, "utf8")) as { runs: Array<{ id: string; status: string }>; tenants: unknown[] };
+      assert.equal(during.runs.find((run) => run.id === "run-live")?.status, "cancelled");
+      assert.equal(during.tenants.length, 1);
+      assert.equal(disconnected, false);
+      finishDrive();
+      await pending;
+      const after = JSON.parse(await readFile(statePath, "utf8")) as { runs: unknown[]; tenants: unknown[]; gateway?: { boundTenantId?: string } };
+      assert.deepEqual(after.runs, []);
+      assert.deepEqual(after.tenants, []);
+      // The write gateway is no longer bound to the removed tenant.
+      assert.equal(after.gateway?.boundTenantId, undefined);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("drops a late snapshot of a deleted run and sends no report for it", async () => {
+    const { dir, statePath, store, running } = await fixture();
+    try {
+      await store.disconnectTenant("tenant-1");
+      const runService = (store as unknown as { runService: { persistRunSnapshot(run: unknown): Promise<void> } }).runService;
+      await runService.persistRunSnapshot({ ...running, status: "completed", finishedAt: "2026-08-01T00:01:00.000Z" });
+      const after = JSON.parse(await readFile(statePath, "utf8")) as { runs: unknown[]; runDeliveryQueue?: unknown[] };
+      assert.deepEqual(after.runs, []);
+      assert.equal(after.runDeliveryQueue, undefined);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an unknown tenant like rename refuses an unknown organization", async () => {
+    const { dir, store } = await fixture();
+    try {
+      await assert.rejects(store.disconnectTenant("tenant-missing"), /no longer on this device/);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

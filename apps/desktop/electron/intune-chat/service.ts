@@ -385,6 +385,8 @@ export class IntuneChatService {
     {
       controller: AbortController;
       job: import("@openadminos/agent-sdk").GraphCachePreloadJob;
+      /** Settles when the preload has stopped writing. */
+      done: Promise<void>;
     }
   >();
   private refreshTail: Promise<unknown> = Promise.resolve();
@@ -409,8 +411,9 @@ export class IntuneChatService {
       active: [],
       results: [],
     };
-    this.preloadJobs.set(tenant.id, { controller, job });
-    void this.refreshGraphCacheInternal(
+    const entry = { controller, job, done: Promise.resolve() };
+    this.preloadJobs.set(tenant.id, entry);
+    entry.done = this.refreshGraphCacheInternal(
       { ...options, tenantId: tenant.id, resources },
       (event) => {
         job.completed = event.completed;
@@ -441,6 +444,15 @@ export class IntuneChatService {
       .finally(() => {
         job.active = [];
       });
+  }
+
+  /** Stop a tenant's preload and wait until it has stopped writing. */
+  async stopGraphCachePreload(tenantId: string): Promise<void> {
+    const entry = this.preloadJobs.get(tenantId);
+    if (!entry) return;
+    entry.controller.abort(new Error("Cache refresh stopped because the tenant was disconnected."));
+    await entry.done;
+    this.preloadJobs.delete(tenantId);
   }
 
   async cancelGraphCachePreload(tenantId: string): Promise<void> {
