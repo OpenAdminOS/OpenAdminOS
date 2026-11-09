@@ -13,7 +13,7 @@ import { useToast } from "../components/Toast";
 import { ServiceAccessDialog } from "../components/ServiceAccess";
 import { AgentNeedChips } from "../components/AgentNeedChips";
 import { AGENT_COPY, SCHEDULE_ORGANIZATION_COPY, SERVICE_COPY } from "../copy";
-import { reportDestinations, resultDestinations } from "../shared/delivery-destinations";
+import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
 import {
   IconChevronDown,
   IconClock,
@@ -40,6 +40,7 @@ import {
   resolveOrganizations,
   serviceById,
   type AgentSummary,
+  type ConnectorSummary,
   type InvalidAgentManifest,
   type RunRecord,
   type ServiceId,
@@ -72,6 +73,9 @@ export default function AgentsHome() {
   const [query, setQuery] = useState("");
   const [bulkRunning, setBulkRunning] = useState<"due" | "all" | null>(null);
   const [scheduler, setScheduler] = useState<{ enabled: boolean; canTurnOn: boolean } | null>(null);
+  // Where schedule results go needs each connector's saved configuration:
+  // undefined while loading, "failed" when the list could not be read.
+  const [connectors, setConnectors] = useState<ConnectorSummary[] | "failed" | undefined>(undefined);
   const [schedulerBusy, setSchedulerBusy] = useState(false);
   const [schedulerError, setSchedulerError] = useState<string | null>(null);
   const resumedBatchRef = useRef<string | null>(null);
@@ -127,6 +131,22 @@ export default function AgentsHome() {
       { replace: true },
     );
   }, [addFlow, navigate, searchParams]);
+
+  useEffect(() => {
+    if (!scheduledOnly) return;
+    let cancelled = false;
+    setConnectors(undefined);
+    void Promise.resolve(window.openAdminOS?.listConnectors?.() ?? [])
+      .then((list) => {
+        if (!cancelled) setConnectors(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnectors("failed");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [scheduledOnly]);
 
   useEffect(() => {
     if (!scheduledOnly) return;
@@ -589,7 +609,7 @@ export default function AgentsHome() {
                     </span>
                     {scheduledOnly ? (
                       <span className="mt-0.5 block truncate text-sm text-[var(--color-text-soft)]">
-                        {scheduleLine(row.installed, scheduleOrganization, activeOrganization?.id)}
+                        {scheduleLine(row.installed, scheduleOrganization, activeOrganization?.id, connectors)}
                       </span>
                     ) : (
                       <>
@@ -718,15 +738,30 @@ function scheduleLine(
   agent: AgentSummary,
   organization: { id: string; name: string } | undefined,
   activeOrganizationId: string | undefined,
+  connectors: readonly ConnectorSummary[] | "failed" | undefined,
 ): string {
   const when = !organization
     ? "Paused until it is assigned to an organization."
     : organization.id !== activeOrganizationId
       ? `Runs only while ${organization.name} is active.`
       : `Next run ${nextRunWords(Math.max(nextRunTime(agent), Date.now()))}.`;
-  const destinations = reportDestinations(resultDestinations([agent], undefined));
-  const results = destinations.length > 0 ? `Results can go to ${listWords(destinations)}.` : "Results stay in Runs.";
-  return `${when} ${results}`;
+  return `${when} ${scheduleResults(agent, connectors)}`;
+}
+
+/**
+ * Where a schedule's results go, by the same decision Connections and the
+ * host use. Unknown configuration is never shown as a destination.
+ */
+export function scheduleResults(agent: AgentSummary, connectors: readonly ConnectorSummary[] | "failed" | undefined): string {
+  const hasRule = Object.values(agent.delivery ?? {}).some((rule) => rule?.enabled === true);
+  if (!hasRule && !(agent.connectors?.length)) return "Results stay in Runs.";
+  if (connectors === undefined) return "Checking where results go.";
+  if (connectors === "failed") return "Where results go could not be checked. Review it in Connections, under Results go to.";
+  const destinations = resultDestinations([agent], connectors);
+  const reach = reportDestinations(destinations);
+  const unset = targetlessDestinations(destinations);
+  const results = reach.length > 0 ? `Results can go to ${listWords(reach)}.` : "Results stay in Runs.";
+  return unset.length > 0 ? `${results} ${listWords(unset)} ${unset.length === 1 ? "has" : "have"} no destination set, so nothing is sent there.` : results;
 }
 
 function listWords(names: readonly string[]): string {

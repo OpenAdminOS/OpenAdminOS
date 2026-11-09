@@ -331,3 +331,31 @@ describe("schedule words (design round)", () => {
     expect(nextRunWords(new Date(2026, 10, 12, 8, 0).getTime(), now)).toMatch(/^\S+ at 08:00$/);
   });
 });
+
+describe("where schedule results go (design round review)", () => {
+  function connector(id: string, name: string, config: Record<string, unknown>) {
+    return { descriptor: { id, name }, config, status: "connected" } as never;
+  }
+  it("uses the same decision as Connections, and never guesses while loading or after a failure", async () => {
+    const { scheduleResults } = await import("./AgentsHome");
+    const agent = createMockAgent({ delivery: { teams: { enabled: true } } });
+    expect(scheduleResults(agent, undefined)).toBe("Checking where results go.");
+    expect(scheduleResults(agent, "failed")).toMatch(/^Where results go could not be checked\./);
+    // A Teams rule on the default target with no default team and channel sends nothing.
+    expect(scheduleResults(agent, [connector("teams", "Microsoft Teams", {})])).toBe(
+      "Results stay in Runs. Microsoft Teams has no destination set, so nothing is sent there.",
+    );
+    expect(scheduleResults(agent, [connector("teams", "Microsoft Teams", { defaultTeamId: "t", defaultChannelId: "c" })])).toBe(
+      "Results can go to Microsoft Teams.",
+    );
+    expect(scheduleResults(createMockAgent({}), undefined)).toBe("Results stay in Runs.");
+  });
+
+  it("loads connector configuration on the Schedules tab", async () => {
+    const agent = createMockAgent({ schedule: { enabled: true, intervalSeconds: 86400, organizationId: "org-tenant-1" }, delivery: { teams: { enabled: true } } });
+    const listConnectors = vi.fn(async () => [{ descriptor: { id: "teams", name: "Microsoft Teams" }, config: {}, status: "connected" }] as never);
+    renderRoute(<Agents />, { path: "/agents", route: "/agents?filter=scheduled", bridge: makeMockBridge({ listConnectors }, createMockAppState({ installedAgents: [agent] })) });
+    expect(await screen.findByText(/Microsoft Teams has no destination set, so nothing is sent there\.$/)).toBeInTheDocument();
+    expect(screen.queryByText(/Results can go to Microsoft Teams/)).not.toBeInTheDocument();
+  });
+});
