@@ -214,8 +214,12 @@ describe("disconnect stops in-flight work first (design round review, Muse A)", 
       let disconnected = false;
       const pending = store.disconnectTenant("tenant-1").then(() => (disconnected = true));
       // The run is cancelled, and the disconnect waits for its drive.
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      const during = JSON.parse(await readFile(statePath, "utf8")) as { runs: Array<{ id: string; status: string }>; tenants: unknown[] };
+      type Stored = { runs: Array<{ id: string; status: string }>; tenants: unknown[] };
+      let during: Stored = JSON.parse(await readFile(statePath, "utf8")) as Stored;
+      for (let attempt = 0; attempt < 200 && during.runs.find((run) => run.id === "run-live")?.status !== "cancelled"; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        during = JSON.parse(await readFile(statePath, "utf8")) as Stored;
+      }
       assert.equal(during.runs.find((run) => run.id === "run-live")?.status, "cancelled");
       assert.equal(during.tenants.length, 1);
       assert.equal(disconnected, false);
