@@ -1645,3 +1645,13 @@ Muse Wonder Full:
 - J. [x] No organization uses an empty dashed tile instead of a question mark. (6386e35)
 
 Verification after round 1 (Node 22): typecheck clean; electron 1026 pass, 0 fail; runtime 256 pass; scripts 18 pass; renderer 539 pass in 61 files; `npm run qa` 197 pass, 4 warn, 0 fail; `npm run docs:check` clean. Live on Anthropic through the Claude Code CLI, `claude-sonnet-5`: the real `start-run` IPC refused a start pinned to the inactive organization's tenant and a scheduled start in another organization; the reach map names "Anthropic, through the Claude Code CLI" with "Region not reported to OpenAdminOS". Screenshots refreshed in `docs/screenshots/organizations/`.
+
+## PR #174 review round 2 (GPT-6.1-Sol and Claude evaluator, 2026-11-09)
+
+Reviewed head 8519540; round 1 fixes confirmed. Each fix is its own commit with a regression test.
+
+1. [x] Blocking: Agent Team persona schedules failed and disabled their personas. Persona recurrence starts with trigger schedule and the installed-agent schedule checks treated it as unassigned, or refused the persona's tenant while another organization was active. The organization and pinned-tenant checks now apply only to installed-agent schedules; persona runs are host-owned (the renderer cannot pass `office`) and keep their validated tenant binding. Integration tests drive `OfficeService.tick()` through the real `RunService` with the persona's tenant active and with another organization active; both failed before the fix. Whether personas move to organizations stays open for the maintainer. (662310b)
+2. [x] Assign stayed disabled after the first organization was connected with the card open. The selection keeps a choice that is still offered and otherwise takes the first; the test connects an organization while the card stays mounted. (9f8aba2)
+3. [x] The strip parity test compared with hard-coded values. The strip's boundary is now the pure `deriveDataBoundary`, used by the strip and by the reach model, and the test feeds the same states to both. (7e35952)
+4. [x] The menu bar waiting count had no test. Run due is now built in `companion-schedules.ts`, with tests for waiting schedules of another organization, unassigned ones, and no organization. (a5fd0f4)
+5. [x] Run again for a run whose organization is not active hit the host refusal as a raw error. A dialog names the run's organization and offers Switch to it, and for ordinary reruns Run in the active organization through the run review; a removed organization is named as removed. Agent Team reviews keep their own route. (4c12788)
