@@ -10,7 +10,9 @@ import {
   buildModelScanChecks,
   checkingProbe,
   runModelScan,
+  runtimeLaunch,
   scanOutcome,
+  startLocalRuntime,
   scanProbeFromProvider,
   type ModelScanCheck,
 } from "./model-scan.js";
@@ -221,5 +223,51 @@ describe("first-launch model scan", () => {
         await rm(existing, { recursive: true, force: true });
       }
     });
+  });
+});
+
+describe("starting a local runtime from the scan", () => {
+  const present = (paths: string[]) => async (path: string) => paths.includes(path);
+
+  it("uses the Ollama app on macOS, ollama serve elsewhere, and lms server start for LM Studio", async () => {
+    assert.deepEqual(await runtimeLaunch("ollama", { PATH: "" }, "darwin", present(["/Applications/Ollama.app"])), { command: "open", args: ["-a", "Ollama"], display: "open -a Ollama" });
+    assert.deepEqual(await runtimeLaunch("ollama", { PATH: "/opt/bin" }, "linux", present(["/opt/bin/ollama"])), { command: "/opt/bin/ollama", args: ["serve"], display: "ollama serve" });
+    assert.deepEqual(await runtimeLaunch("lm-studio", { PATH: "", HOME: "/home/a" }, "linux", present(["/home/a/.lmstudio/bin/lms"])), { command: "/home/a/.lmstudio/bin/lms", args: ["server", "start"], display: "lms server start" });
+    assert.equal(await runtimeLaunch("lm-studio", { PATH: "", HOME: "/home/a" }, "linux", present([])), undefined);
+  });
+
+  it("waits for the loopback endpoint and reports success", async () => {
+    let calls = 0;
+    const spawned: string[] = [];
+    const result = await startLocalRuntime({
+      name: "Ollama", manualCommand: "ollama serve",
+      launch: { command: "/opt/bin/ollama", args: ["serve"], display: "ollama serve" },
+      spawn: async (launch) => { spawned.push(`${launch.command} ${launch.args.join(" ")}`); },
+      isUp: async () => ++calls >= 3,
+      intervalMs: 5,
+    });
+    assert.deepEqual(result, { started: true });
+    assert.deepEqual(spawned, ["/opt/bin/ollama serve"]);
+  });
+
+  it("gives a designed failure that names the command to run by hand", async () => {
+    const notFound = await startLocalRuntime({ name: "LM Studio", manualCommand: "lms server start", launch: undefined, spawn: async () => undefined, isUp: async () => true });
+    assert.deepEqual(notFound, { started: false, message: "LM Studio was not found on this device. Start it yourself with `lms server start`, then scan again." });
+    const failed = await startLocalRuntime({
+      name: "Ollama", manualCommand: "ollama serve",
+      launch: { command: "ollama", args: ["serve"], display: "ollama serve" },
+      spawn: async () => { throw new Error("spawn EACCES"); },
+      isUp: async () => true,
+    });
+    assert.equal(failed.started, false);
+    assert.match((failed as { message: string }).message, /^Ollama did not start\. spawn EACCES\. Start it yourself with `ollama serve`, then scan again\.$/);
+    const silent = await startLocalRuntime({
+      name: "Ollama", manualCommand: "ollama serve",
+      launch: { command: "ollama", args: ["serve"], display: "ollama serve" },
+      spawn: async () => undefined,
+      isUp: async () => false,
+      timeoutMs: 100, intervalMs: 5,
+    });
+    assert.match((silent as { message: string }).message, /^Ollama did not answer within 0\.1 seconds\. Start it yourself with `ollama serve`, then scan again\.$/);
   });
 });

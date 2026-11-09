@@ -5557,6 +5557,10 @@ function registerIpcHandlers() {
   );
   ipcMain.handle("openadminos:complete-first-run-scan", handleTrusted(() => store.completeFirstRunScan()));
   ipcMain.handle(
+    "openadminos:start-local-runtime",
+    handleTrusted((_event, providerId: unknown) => store.startLocalRuntime(validateProviderId(providerId, "providerId"))),
+  );
+  ipcMain.handle(
     "openadminos:test-provider",
     handleTrusted((_event, providerId: unknown, model?: unknown) =>
       store.testProvider(

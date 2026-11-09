@@ -326,3 +326,91 @@ function formatSeconds(ms: number): string {
   const seconds = ms / 1000;
   return `${Number.isInteger(seconds) ? seconds : seconds.toFixed(1)} seconds`;
 }
+
+/** How to start a local runtime the scan found installed but not running. Fixed commands only. */
+export interface RuntimeLaunch {
+  command: string;
+  args: string[];
+  /** The command as the admin would type it, for the failure message. */
+  display: string;
+}
+
+async function exists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function findBinary(name: string, known: readonly string[], env: NodeJS.ProcessEnv, platform: NodeJS.Platform, check: (path: string) => Promise<boolean>): Promise<string | undefined> {
+  const file = platform === "win32" ? `${name}.exe` : name;
+  const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+  for (const candidate of [...known, ...pathDirs.map((dir) => join(dir, file))]) {
+    if (await check(candidate)) return candidate;
+  }
+  return undefined;
+}
+
+/**
+ * The command that starts Ollama or LM Studio on this device: the Ollama
+ * app on macOS when it is installed (it runs the server), otherwise
+ * `ollama serve`; LM Studio through its `lms server start` command.
+ * Undefined when the runtime is not found.
+ */
+export async function runtimeLaunch(
+  providerId: "ollama" | "lm-studio",
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  check: (path: string) => Promise<boolean> = exists,
+): Promise<RuntimeLaunch | undefined> {
+  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  if (providerId === "ollama") {
+    if (platform === "darwin" && (await check("/Applications/Ollama.app"))) {
+      return { command: "open", args: ["-a", "Ollama"], display: "open -a Ollama" };
+    }
+    const known = platform === "win32"
+      ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "Ollama", "ollama.exe")]
+      : ["/opt/homebrew/bin/ollama", "/usr/local/bin/ollama", "/usr/bin/ollama"];
+    const binary = await findBinary("ollama", known, env, platform, check);
+    return binary ? { command: binary, args: ["serve"], display: "ollama serve" } : undefined;
+  }
+  const binary = await findBinary("lms", [join(home, ".lmstudio", "bin", platform === "win32" ? "lms.exe" : "lms")], env, platform, check);
+  return binary ? { command: binary, args: ["server", "start"], display: "lms server start" } : undefined;
+}
+
+export const RUNTIME_START_TIMEOUT_MS = 12_000;
+
+/**
+ * Starts a local runtime and waits until its loopback endpoint answers.
+ * A failure is a designed message that names the command to run by hand.
+ */
+export async function startLocalRuntime(input: {
+  name: string;
+  launch: RuntimeLaunch | undefined;
+  manualCommand: string;
+  spawn: (launch: RuntimeLaunch) => Promise<void>;
+  isUp: () => Promise<boolean>;
+  timeoutMs?: number;
+  intervalMs?: number;
+}): Promise<{ started: true } | { started: false; message: string }> {
+  if (!input.launch) {
+    return { started: false, message: `${input.name} was not found on this device. Start it yourself with \`${input.manualCommand}\`, then scan again.` };
+  }
+  try {
+    await input.spawn(input.launch);
+  } catch (error) {
+    const reason = error instanceof Error && error.message ? ` ${error.message.replace(/\.?$/, ".")}` : "";
+    return { started: false, message: `${input.name} did not start.${reason} Start it yourself with \`${input.manualCommand}\`, then scan again.` };
+  }
+  const deadline = Date.now() + (input.timeoutMs ?? RUNTIME_START_TIMEOUT_MS);
+  while (Date.now() < deadline) {
+    if (await input.isUp()) return { started: true };
+    await new Promise((resolve) => setTimeout(resolve, input.intervalMs ?? 400));
+  }
+  return {
+    started: false,
+    message: `${input.name} did not answer within ${formatSeconds(input.timeoutMs ?? RUNTIME_START_TIMEOUT_MS)}. Start it yourself with \`${input.manualCommand}\`, then scan again.`,
+  };
+}

@@ -1,5 +1,6 @@
 import { OfficeService } from "./office.js";
 import { createHash, randomUUID } from "node:crypto";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { atomicRename } from "./atomic-rename.js";
@@ -51,6 +52,10 @@ import {
   setAgentUpdatesDir,
   toInstalledAgent,
   type TokenCacheStorage,
+  classifyLmStudioEndpoint,
+  classifyOllamaEndpoint,
+  resolveLmStudioEndpoint,
+  resolveOllamaEndpoint,
 } from "@openadminos/runtime";
 import type {
   AgentDraft,
@@ -218,6 +223,8 @@ import {
   MODEL_SCAN_RETRY_TIMEOUT_MS,
   buildModelScanChecks,
   runModelScan,
+  runtimeLaunch,
+  startLocalRuntime,
   runScanCheck,
   scanOutcome,
   type ModelScanCheck,
@@ -3385,6 +3392,47 @@ export class AppStateStore {
       console.info(`[providers] model scan selected local provider ${providerId}`);
       return outcome;
     });
+  }
+
+  /**
+   * Starts Ollama or LM Studio for the admin from the scan, waits for its
+   * loopback endpoint, then scans again so the outcome follows the
+   * provider rules. An endpoint off this device is never started or called.
+   */
+  async startLocalRuntime(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan: ModelScanResult }> {
+    if (providerId !== "ollama" && providerId !== "lm-studio") {
+      throw new Error("Only Ollama and LM Studio can be started from the scan.");
+    }
+    const endpoint = (providerId === "ollama" ? resolveOllamaEndpoint() : resolveLmStudioEndpoint()).replace(/\/$/, "");
+    const local = (providerId === "ollama" ? classifyOllamaEndpoint(endpoint) : classifyLmStudioEndpoint(endpoint)).isLocal;
+    const name = providerId === "ollama" ? "Ollama" : "LM Studio";
+    const manualCommand = providerId === "ollama" ? "ollama serve" : "lms server start";
+    const result = local
+      ? await startLocalRuntime({
+          name,
+          manualCommand,
+          launch: await runtimeLaunch(providerId),
+          spawn: (launch) =>
+            new Promise<void>((resolve, reject) => {
+              const child = spawn(launch.command, launch.args, { detached: true, stdio: "ignore" });
+              child.once("error", reject);
+              child.once("spawn", () => {
+                child.unref();
+                resolve();
+              });
+            }),
+          isUp: async () => {
+            try {
+              const response = await fetch(`${endpoint}${providerId === "ollama" ? "/api/tags" : "/v1/models"}`, { signal: AbortSignal.timeout(1_000) });
+              return response.ok;
+            } catch {
+              return false;
+            }
+          },
+        })
+      : { started: false as const, message: `${name} is set to ${endpoint}, outside this device. The scan only starts runtimes on this device.` };
+    const scan = await this.scanModels();
+    return result.started ? { started: true, scan } : { started: false, message: result.message, scan };
   }
 
   /** The first-launch scan was finished or skipped; it does not show again. */
