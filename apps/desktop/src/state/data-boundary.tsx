@@ -65,87 +65,94 @@ export function chatToolHosts(state: Pick<AppState, "mcpServers" | "chatToolUse"
   ];
 }
 
+/**
+ * The status strip's boundary for an app state: the one place that decides
+ * what the strip says about the model and where prompts go. The reach map
+ * on Connections is tested against it.
+ */
+export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBoundary {
+  const activeTenant = state.activeTenantId
+    ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
+    : undefined;
+  const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
+  const model = resolveProviderDefaultModel(
+    provider,
+    state.activeModelByProviderId,
+  ).model;
+
+  if (voiceHosted) {
+    const trust = deriveTrustCopy({
+      provider: { name: "OpenAI", isLocal: false },
+      model: "GPT-Live-1",
+      scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+    });
+    return {
+      kind: "hosted",
+      label: "Voice · OpenAI",
+      model: "GPT-Live-1",
+      tooltip: `${trust.boundary ?? trust.strip} Nova voice audio and shared context are active.`,
+      isVoiceHosted: true,
+    };
+  }
+
+  // Pilot mode never sends anything to a model: Chat answers are prepared
+  // and pilot agents use prepared text, whatever provider is configured.
+  if (activeTenant?.kind === "sample") {
+    return {
+      kind: "local",
+      label: PILOT_COPY.boundaryLabel,
+      tooltip: PILOT_COPY.boundaryTooltip,
+      isVoiceHosted: false,
+    };
+  }
+
+  if (!provider || !["connected", "available"].includes(provider.status)) {
+    const trust = deriveTrustCopy({
+      scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+    });
+    return {
+      kind: "none",
+      label: "No model",
+      tooltip: trust.confirmBody,
+      isVoiceHosted: false,
+    };
+  }
+
+  const trust = deriveTrustCopy({
+    provider,
+    ...(model ? { model } : {}),
+    scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+    toolHosts: chatToolHosts(state),
+  });
+  const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
+  const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";
+  if (provider.isLocal) {
+    return {
+      kind: "local",
+      label: `Local · ${provider.name}`,
+      ...(model ? { model } : {}),
+      ...toolHosts,
+      tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
+      isVoiceHosted: false,
+    };
+  }
+  return {
+    kind: "hosted",
+    label: `Hosted · ${provider.name}`,
+    ...(model ? { model } : {}),
+    ...toolHosts,
+    tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,
+    isVoiceHosted: false,
+  };
+}
+
 const DataBoundaryContext = createContext<DataBoundaryContextValue | undefined>(undefined);
 
 export function DataBoundaryProvider({ children }: { children: ReactNode }) {
   const { state } = useAppState();
   const [voiceHosted, setVoiceHosted] = useState(false);
 
-  const boundary = useMemo<DataBoundary>(() => {
-    const activeTenant = state.activeTenantId
-      ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
-      : undefined;
-    const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
-    const model = resolveProviderDefaultModel(
-      provider,
-      state.activeModelByProviderId,
-    ).model;
-
-    if (voiceHosted) {
-      const trust = deriveTrustCopy({
-        provider: { name: "OpenAI", isLocal: false },
-        model: "GPT-Live-1",
-        scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
-      });
-      return {
-        kind: "hosted",
-        label: "Voice · OpenAI",
-        model: "GPT-Live-1",
-        tooltip: `${trust.boundary ?? trust.strip} Nova voice audio and shared context are active.`,
-        isVoiceHosted: true,
-      };
-    }
-
-    // Pilot mode never sends anything to a model: Chat answers are prepared
-    // and pilot agents use prepared text, whatever provider is configured.
-    if (activeTenant?.kind === "sample") {
-      return {
-        kind: "local",
-        label: PILOT_COPY.boundaryLabel,
-        tooltip: PILOT_COPY.boundaryTooltip,
-        isVoiceHosted: false,
-      };
-    }
-
-    if (!provider || !["connected", "available"].includes(provider.status)) {
-      const trust = deriveTrustCopy({
-        scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
-      });
-      return {
-        kind: "none",
-        label: "No model",
-        tooltip: trust.confirmBody,
-        isVoiceHosted: false,
-      };
-    }
-
-    const trust = deriveTrustCopy({
-      provider,
-      ...(model ? { model } : {}),
-      scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
-      toolHosts: chatToolHosts(state),
-    });
-    const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
-    const toolDetail = trust.toolHosts ? ` ${trust.toolHosts.detail}` : "";
-    if (provider.isLocal) {
-      return {
-        kind: "local",
-        label: `Local · ${provider.name}`,
-        ...(model ? { model } : {}),
-        ...toolHosts,
-        tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
-        isVoiceHosted: false,
-      };
-    }
-    return {
-      kind: "hosted",
-      label: `Hosted · ${provider.name}`,
-      ...(model ? { model } : {}),
-      ...toolHosts,
-      tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,
-      isVoiceHosted: false,
-    };
-  }, [state, voiceHosted]);
+  const boundary = useMemo<DataBoundary>(() => deriveDataBoundary(state, voiceHosted), [state, voiceHosted]);
 
   const value = useMemo(
     () => ({ boundary, setVoiceHosted }),

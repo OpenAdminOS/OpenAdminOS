@@ -33,7 +33,6 @@ import {
   grantedParts,
   grantedScopeSet,
   resolveOrganizations,
-  resolveProviderDefaultModel,
   serviceStatus,
   type AppState,
   type ConnectorSummary,
@@ -46,7 +45,7 @@ import {
 import { PILOT_COPY } from "../shared/pilot-mode";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { hostedChannel } from "../shared/providers";
-import { chatToolHosts, useAppState } from "../state";
+import { chatToolHosts, deriveDataBoundary, useAppState } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
 
 interface ReachService {
@@ -90,14 +89,16 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
         };
       })
     : [];
+  // The model and where prompts go come from the status strip's own
+  // function, so the map and the strip cannot disagree.
+  const boundary = deriveDataBoundary(state);
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
-  const ready = provider && ["connected", "available"].includes(provider.status);
-  const modelName = resolveProviderDefaultModel(provider, state.activeModelByProviderId).model ?? provider?.name ?? "";
+  const modelName = boundary.model ?? provider?.name ?? "";
   const model: ReachModel["model"] = sample
     ? { kind: "sample", name: CONNECTIONS_COPY.map.modelSample }
-    : !provider || !ready
+    : boundary.kind === "none" || !provider
       ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
-      : provider.isLocal
+      : boundary.kind === "local"
         ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), providerName: provider.name }
         : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), providerName: provider.name, channel: hostedChannel(provider) };
   return {

@@ -12,8 +12,8 @@ import {
   mockProviders,
   renderRoute,
 } from "../test/test-utils";
-import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY } from "../copy";
-import { chatToolHosts } from "../state";
+import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, deriveToolHostsCopy } from "../copy";
+import { chatToolHosts, deriveDataBoundary } from "../state";
 import { hostedChannel } from "../shared/providers";
 import { AppShell } from "../components/AppShell";
 import { connectedServiceIds } from "../components/ServiceMark";
@@ -358,26 +358,60 @@ describe("one destination list for the map and Results (review round 1)", () => 
   });
 });
 
-describe("map and status strip agree (review round 1)", () => {
-  it("names the same provider, model and services as the strip and the organization switcher", async () => {
-    const hosted = mockProviders.find((provider) => !provider.isLocal && provider.status === "connected")!;
-    const state = createMockAppState({ activeProviderId: hosted.id, tenants: [partialTenant] });
+describe("map and status strip agree (review rounds 1 and 2)", () => {
+  // Every case feeds the same state to the strip's own function and to the
+  // reach model; nothing is compared against hard-coded values.
+  const unready = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, status: "error" as const } : provider));
+  const cases: Array<[string, AppState]> = [
+    ["local model", createMockAppState({ tenants: [partialTenant] })],
+    ["hosted model", createMockAppState({ activeProviderId: "openai", tenants: [partialTenant] })],
+    ["no model ready", createMockAppState({ providers: unready })],
+    ["hosted model with references", createMockAppState({
+      activeProviderId: "openai",
+      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true }, "microsoft-learn": { installed: true, enabled: true } }),
+    })],
+    ["no organization", (() => { const { activeTenantId: _none, ...state } = createMockAppState(); return state; })()],
+  ];
+  for (const [label, state] of cases) {
+    it(`names the same model, provider, hosts and services for ${label}`, () => {
+      const strip = deriveDataBoundary(state);
+      const model = buildReachModel(state);
+      expect(model.model.kind).toBe(strip.kind);
+      if (strip.kind !== "none") {
+        const provider = state.providers.find((entry) => entry.id === state.activeProviderId)!;
+        expect(strip.label).toContain(model.model.providerName!);
+        expect(model.model.providerName).toBe(provider.name);
+        expect(model.model.name).toBe(`${strip.model ?? provider.name}, ${strip.kind}`);
+      }
+      // The strip names its first host and a count; the map lists the same set.
+      expect(model.referenceHosts).toEqual(chatToolHosts(state));
+      const stripHosts = strip.kind === "none" ? undefined : strip.toolHosts;
+      if (model.referenceHosts.length > 0 && strip.kind !== "none") {
+        expect(stripHosts).toBe(deriveToolHostsCopy(model.referenceHosts)?.strip);
+      } else {
+        expect(stripHosts).toBeUndefined();
+      }
+      // Services the map reads are the ones the organization switcher marks.
+      const tenant = state.tenants.find((entry) => entry.id === state.activeTenantId);
+      expect(model.services.filter((service) => service.status !== "missing").map((service) => service.serviceId)).toEqual(
+        connectedServiceIds(tenant),
+      );
+    });
+  }
+
+  it("shows the strip's provider in the rendered map next to the rendered strip", async () => {
+    const state = createMockAppState({ activeProviderId: "openai", tenants: [partialTenant] });
     renderRoute(
       <AppShell>
         <Connections />
       </AppShell>,
       { path: "*", route: "/connections", bridge: makeMockBridge({}, state) },
     );
-    const strip = await screen.findByRole("status", { name: new RegExp(`Hosted · ${hosted.name}`) });
-    const model = buildReachModel(state);
-    expect(model.model.providerName).toBe(hosted.name);
-    expect(strip.getAttribute("aria-label")).toContain(model.model.name.replace(/, hosted$/, ""));
+    const strip = deriveDataBoundary(state);
+    const rendered = await screen.findByRole("status", { name: new RegExp(strip.label) });
+    expect(rendered).toHaveAccessibleName(expect.stringContaining(strip.model!));
     const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    expect(map).toHaveAccessibleDescription(/Prompts and tenant data go through the Codex CLI to OpenAI\./);
-    // Services the map reads are the ones the switcher marks for this organization.
-    expect(model.services.filter((service) => service.status !== "missing").map((service) => service.serviceId)).toEqual(
-      connectedServiceIds(partialTenant),
-    );
+    expect(map).toHaveAccessibleDescription(new RegExp(`The model is hosted: ${strip.model}, hosted\\.`));
   });
 });
 
