@@ -418,6 +418,7 @@ export function agentNameForRun(
   agents: { slug: string; name: string }[],
 ): string {
   if (run.origin === "baseline-rollback") return "Baseline rollback";
+  if (run.origin === "splashtop-change") return "Splashtop change";
   if (run.origin === "external-proposal") {
     return `External proposal from ${run.external?.clientName ?? "unknown client"}`;
   }
