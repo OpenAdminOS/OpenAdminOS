@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { deriveTrustCopy, providerDataLocation } from "../copy";
+import { deriveToolHostsCopy, deriveTrustCopy, promptsGoTo, providerDataLocation } from "../copy";
 
 /** Voice runs on OpenAI's own service, not Codex; the same line as PR #175. */
 const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
@@ -90,14 +90,19 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
   if (voiceHosted) {
     // Hosted voice names its own destination, says whether tenant data is
     // in scope, and keeps a local chat model honest.
+    // A hosted chat model and references stay named alongside voice.
     const chatLocal = provider?.isLocal === true;
+    const chatHosted = Boolean(provider && !provider.isLocal && ["connected", "available"].includes(provider.status));
+    const hosts = deriveToolHostsCopy(chatToolHosts(state));
+    const chatSentence = chatHosted && provider ? ` ${promptsGoTo(provider, Boolean(activeTenant))}.` : "";
     return {
       kind: "hosted",
-      label: "Voice · OpenAI",
+      label: chatHosted && provider ? `Voice · OpenAI and ${provider.name}` : "Voice · OpenAI",
       model: "GPT-Live-1",
       voiceProvider: "OpenAI",
       voiceLocation: "OpenAI",
-      tooltip: `${novaVoiceSentence(Boolean(activeTenant), chatLocal ? provider?.name : undefined)} Nova voice audio and shared context are active.`,
+      ...(hosts ? { toolHosts: hosts.strip, toolHostsNote: hosts.composer } : {}),
+      tooltip: `${novaVoiceSentence(Boolean(activeTenant), chatLocal ? provider?.name : undefined)}${chatSentence} Nova voice audio and shared context are active.${hosts ? ` ${hosts.detail}` : ""}`,
       isVoiceHosted: true,
     };
   }

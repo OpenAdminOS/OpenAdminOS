@@ -2308,14 +2308,7 @@ function ChatComposer({
       : "Ask a follow-up, or type / to run an agent"
     : SETUP_COPY.guestComposerPlaceholder;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-  // Hosted voice with a local chat model names the voice destination and
-  // keeps the chat model local; without an organization no tenant data is sent.
-  const toolNote = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
-  const hostedSentence = dataBoundary.kind === "hosted" && dataBoundary.isVoiceHosted
-    ? `${novaVoiceSentence(Boolean(activeTenant), activeProvider?.isLocal ? activeProvider.name : undefined)}${toolNote}`
-    : activeTenant
-      ? `${activeProvider ? promptsGoTo(activeProvider, true) : "Prompts and tenant data go to the selected provider"} while this model is selected.${toolNote}`
-      : `${activeProvider ? promptsGoTo(activeProvider) : "Prompts go to the selected provider"} while this model is selected. No organization is active, so no tenant data is included.${toolNote}`;
+  const hostedSentence = hostedComposerSentence(dataBoundary, activeProvider, Boolean(activeTenant));
 
   return (
     <div className="relative">
@@ -5002,4 +4995,24 @@ function scrollLatestUserNearTop(
   if (typeof scrollRoot.scrollTo === "function") scrollRoot.scrollTo({ top, behavior: "auto" });
   else scrollRoot.scrollTop = top;
   return scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight >= 56;
+}
+
+/**
+ * The composer's hosted sentence. Hosted voice names its own destination,
+ * keeps a local chat model local and still names a hosted chat model;
+ * without an organization no tenant data is sent; references stay named.
+ */
+export function hostedComposerSentence(
+  boundary: DataBoundary,
+  provider: Pick<ProviderSummary, "id" | "name" | "isLocal"> | undefined,
+  hasOrganization: boolean,
+): string {
+  const toolNote = boundary.kind !== "none" && boundary.toolHostsNote ? ` ${boundary.toolHostsNote}` : "";
+  if (boundary.kind === "hosted" && boundary.isVoiceHosted) {
+    const chat = provider && !provider.isLocal ? ` ${promptsGoTo(provider, hasOrganization)} while this model is selected.` : "";
+    return `${novaVoiceSentence(hasOrganization, provider?.isLocal ? provider.name : undefined)}${chat}${toolNote}`;
+  }
+  return hasOrganization
+    ? `${provider ? promptsGoTo(provider, true) : "Prompts and tenant data go to the selected provider"} while this model is selected.${toolNote}`
+    : `${provider ? promptsGoTo(provider) : "Prompts go to the selected provider"} while this model is selected. No organization is active, so no tenant data is included.${toolNote}`;
 }

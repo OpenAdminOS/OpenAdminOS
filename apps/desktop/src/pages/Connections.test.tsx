@@ -905,3 +905,22 @@ it("says multi-tenant jobs are deleted whole, with other organizations' results 
     "Multi-tenant chats and jobs that include it, deleted whole, with the results for the other organizations in them",
   );
 });
+
+describe("hosted voice with a hosted chat model and references (design round review 2, Muse A)", () => {
+  it("keeps the chat provider and the reference count in the strip and the composer", async () => {
+    const { hostedComposerSentence } = await import("./IntuneChat");
+    const state = createMockAppState({
+      activeProviderId: "openai",
+      mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true }, "kql-search": { installed: true, enabled: true } }),
+    });
+    const strip = deriveDataBoundary(state, true);
+    expect(strip.label).toBe("Voice · OpenAI and Codex");
+    expect(strip.kind !== "none" ? strip.toolHosts : undefined).toBeTruthy();
+    expect(strip.tooltip).toContain("Prompts and tenant data leave this device through Codex; location set by your account.");
+    const provider = state.providers.find((entry) => entry.id === "openai");
+    const composer = hostedComposerSentence(strip, provider, true);
+    expect(composer).toContain("Voice audio, prompts and tenant data go to OpenAI.");
+    expect(composer).toContain("Prompts and tenant data leave this device through Codex; location set by your account while this model is selected.");
+    expect(composer).toContain("learn.microsoft.com and www.kqlsearch.com");
+  });
+});
