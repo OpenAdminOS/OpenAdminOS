@@ -299,6 +299,30 @@
       .lane span { left: calc(50% + 12px); right: auto; bottom: auto; top: 50%; transform: translateY(-50%); text-align: left; white-space: nowrap; }
       .lane.out::before { border-top: 0; border-left: 1.5px dashed var(--text-3); }
     }
+    .stage { position: relative; aspect-ratio: 1; max-width: 460px; width: 100%; }
+    .stage svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+    .stage .orb { fill: none; stroke: var(--line); stroke-width: 0.25; }
+    .stage .orb.in { stroke-dasharray: 0.6 1; }
+    .stage .lk { stroke-width: 0.42; stroke-linecap: round; }
+    .stage .lk.local { stroke: var(--ok); }
+    .stage .lk.hosted { stroke: var(--warn); }
+    .stage .dev { position: absolute; left: 50%; top: 50%; width: 19%; height: 19%; transform: translate(-50%, -50%); border-radius: 26%; background: var(--surface); box-shadow: 0 0 0 1px var(--line), 0 18px 40px -18px rgba(0,0,0,.35); display: grid; place-items: center; font: 700 26px var(--font-ui); }
+    .nd { position: absolute; width: 24%; transform: translate(-50%, -24px); display: flex; flex-direction: column; align-items: center; text-align: center; font-size: 12px; }
+    .nd .dt { width: 48px; height: 48px; border-radius: 99px; display: grid; place-items: center; border: 1.5px solid var(--line); background: var(--bg); color: var(--text-3); font-weight: 600; }
+    .nd .nm { margin-top: 6px; font-weight: 500; }
+    .nd .st { color: var(--text-3); }
+    .nd[data-tone="ready"] .dt { background: var(--ok); border-color: var(--ok); color: var(--bg); }
+    .nd[data-tone="ready"][data-where="hosted"] .dt { box-shadow: 0 0 0 3px var(--bg), 0 0 0 4.5px var(--warn); }
+    .nd[data-tone="ready"][data-where="hosted"] .st { color: var(--warn); }
+    .nd[data-tone="found"] .dt { border-color: var(--ok); color: var(--ok); }
+    .nd[data-tone="muted"] { opacity: .35; }
+    .scan .lead { color: var(--text-3); font-size: var(--fs-small); margin: 0; }
+    .scan .hero { font: 500 46px/1 var(--font-serif); letter-spacing: -0.025em; margin: 8px 0 0; }
+    .scan .line { color: var(--text-2); margin: 12px 0 0; max-width: 44ch; }
+    .scan .where { color: var(--warn); font-size: var(--fs-small); font-weight: 500; margin: 4px 0 0; }
+    .scan .small-w { font-weight: 400; font-size: 12px; }
+    .scan .acts { display: flex; gap: 8px; margin-top: 18px; }
+    .scan .keep { display: flex; gap: 12px; align-items: center; border-top: 1px solid var(--line-soft); margin-top: 16px; padding-top: 12px; color: var(--text-2); font-size: var(--fs-small); }
     .scan { padding: 18px 26px 28px; background: var(--bg); min-height: 620px; }
     .scan-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-small); }
     .scan-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; margin-top: 34px; }
@@ -413,39 +437,36 @@
         <div class="scan">
           <div class="scan-brand"><span class="mark">oa</span> OpenAdminOS</div>
           <div class="scan-grid">
-            <div>
-              <h3 class="scan-title">What this device can answer with</h3>
-              <p class="scan-sub">OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and ports only, and sends nothing.</p>
-              <div class="scan-outcome">
-                <h4>A signed-in AI tool was found</h4>
-                <p>It is not selected for you, because prompts would leave this device. Choose it to answer with it, or keep everything local.</p>
-                <div class="pick"><div><div class="t">Claude Code</div><div class="where">Prompts go to Anthropic API · US</div></div><button class="btn primary">Use Claude Code</button></div>
-                <div class="pick"><div><div class="t">Codex</div><div class="where">Prompts go to OpenAI API · US</div></div><button class="btn">Use Codex</button></div>
-                <p class="small">To keep everything on this device, <a class="link" href="#">set up OpenAdmin 8B</a>.</p>
-                <p class="small"><a class="link" href="#">Continue to Chat without a model</a></p>
-              </div>
-              <p class="small">Not ready to set up a model? <a class="link" href="#">Preview with sample data</a> from a fictional company.</p>
+            <div class="stage" aria-hidden="true">
+              <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="38" class="orb"/><circle cx="50" cy="50" r="22" class="orb in"/><line x1="57.42" y1="57.42" x2="72.77" y2="72.77" class="lk hosted"/><line x1="50.00" y1="60.50" x2="50.00" y2="82.20" class="lk hosted"/></svg>
+              <div class="dev">oa</div>
+              <div class="nd" data-tone="found" data-where="local" style="left:50.00%;top:12.00%"><span class="dt">Ol</span><span class="nm">Ollama</span><span class="st">Installed, not running</span></div><div class="nd" data-tone="muted" data-where="local" style="left:76.87%;top:23.13%"><span class="dt">Ai</span><span class="nm">Apple Intelligence</span><span class="st">Not available</span></div><div class="nd" data-tone="found" data-where="local" style="left:88.00%;top:50.00%"><span class="dt">LM</span><span class="nm">LM Studio</span><span class="st">Installed, not running</span></div><div class="nd" data-tone="ready" data-where="hosted" style="left:76.87%;top:76.87%"><span class="dt">Cc</span><span class="nm">Claude Code</span><span class="st">Signed in</span></div><div class="nd" data-tone="ready" data-where="hosted" style="left:50.00%;top:88.00%"><span class="dt">Cx</span><span class="nm">Codex</span><span class="st">Signed in</span></div><div class="nd" data-tone="muted" data-where="hosted" style="left:23.13%;top:76.87%"><span class="dt">Gh</span><span class="nm">GitHub Copilot CLI</span><span class="st">Not installed</span></div><div class="nd" data-tone="muted" data-where="hosted" style="left:12.00%;top:50.00%"><span class="dt">Ge</span><span class="nm">Gemini CLI</span><span class="st">Not installed</span></div><div class="nd" data-tone="muted" data-where="hosted" style="left:23.13%;top:23.13%"><span class="dt">Az</span><span class="nm">Azure OpenAI</span><span class="st">Not configured</span></div>
             </div>
             <div>
-              <div class="scan-head"><span>On this device</span><span>8 of 8 checked</span></div>
+              <p class="lead">Signed in on this device</p>
+              <h3 class="hero">Claude Code</h3>
+              <p class="line">It is not selected until you choose it, because prompts leave this device when it answers.</p>
+              <p class="where">Prompts go to Anthropic API · US</p>
+              <div class="acts"><button class="btn primary">Use Claude Code</button><button class="btn">Use Codex</button></div>
+              <p class="where small-w">Codex: prompts go to OpenAI API · US</p>
+              <div class="keep"><span>To keep everything on this device, start Ollama.</span><button class="btn">Start Ollama</button></div>
+              <p class="small"><a class="link" href="#">Continue to Chat without a model</a> · Not ready to set up a model? <a class="link" href="#">Preview with sample data</a></p>
+              <div class="scan-head"><span>On this device</span><a class="link" href="#">Scan again</a></div>
               <ul class="ledger">
-                <li data-tone="found"><span class="m"></span><span class="n">Ollama</span><span class="r">Installed, not running<small>Start it with <code>ollama serve</code>, then scan again.</small></span></li>
-                <li data-tone="muted"><span class="m"></span><span class="n">Apple Intelligence</span><span class="r">Not available</span></li>
-                <li data-tone="found"><span class="m"></span><span class="n">LM Studio</span><span class="r">Installed, not running<small>Start the LM Studio server, then scan again.</small></span></li>
-                <li data-tone="ready"><span class="m"></span><span class="n">Claude Code</span><span class="r">Signed in<small>Version 2.1.319</small></span></li>
-                <li data-tone="ready"><span class="m"></span><span class="n">Codex</span><span class="r">Signed in<small>Version 0.166.0</small></span></li>
-                <li data-tone="checking"><span class="m"></span><span class="n">GitHub Copilot CLI</span><span class="r"><code>copilot sign-in status</code></span></li>
-                <li data-tone="warn"><span class="m"></span><span class="n">Gemini CLI</span><span class="r">Could not check<small>Gemini CLI did not answer within 2.5 seconds. Retry to check again.</small><button class="btn small">Retry</button></span></li>
-                <li data-tone="muted"><span class="m"></span><span class="n">Azure OpenAI</span><span class="r">Not configured</span></li>
+                <li data-tone="found"><span class="m"></span><span class="n">Ollama</span><span class="r">Installed, not running <code>localhost:11434</code></span></li>
+                <li data-tone="found"><span class="m"></span><span class="n">LM Studio</span><span class="r">Installed, not running <code>localhost:1234</code></span></li>
+                <li data-tone="ready"><span class="m"></span><span class="n">Claude Code</span><span class="r">Signed in <code>claude auth status</code></span></li>
+                <li data-tone="ready"><span class="m"></span><span class="n">Codex</span><span class="r">Signed in <code>codex login status</code></span></li>
+                <li data-tone="muted"><span class="m"></span><span class="n">Four more</span><span class="r">Not installed or not configured</span></li>
               </ul>
-              <p class="small">Checked here: localhost:11434, Apple Foundation helper, localhost:1234, claude auth status, codex login status, copilot sign-in status, gemini --version, saved Azure settings. Nothing was sent to a model or a provider.</p>
             </div>
           </div>
         </div>
       </div>
       <ul class="notes">
         <li>Every check starts at once and has a 2.5 second timeout; the whole scan reads as one sequence of about two seconds. A check that does not answer shows Could not check with Retry (one row here shows it mid-scan, one timed out), never a gap.</li>
-        <li>While a check runs, its row shows the local target it touches in the code face and a hairline sweeps under it; when it resolves, the hairline draws once in the state colour. With reduced motion the same text appears without movement, and each result is announced to screen readers.</li>
+        <li>One orchestrated sequence of about two and a half seconds: the device tile springs in, rings radiate and a sweep turns while checks run, nodes appear and resolve one by one with a spring. Found nodes fill and draw a link to the device, green when prompts stay local and amber when they would leave it; not-found nodes recede. At the settle the result slides in as the hero. A click, Skip or any key settles at once; reduced motion shows the settled state. The list beside it, with each local target checked, is the screen reader source and announces each result.</li>
+        <li>Ollama or LM Studio installed but not running gets Start: the Ollama app on macOS or <code>ollama serve</code>, or <code>lms server start</code>, then that runtime is checked again. A failure names the command to run by hand.</li>
         <li>Local only: loopback ports, local files and each CLI's own version and sign-in status. An Ollama or LM Studio endpoint off the device is not contacted, and no prompt is sent.</li>
         <li>Outcomes follow the provider rules. A ready local model is selected and named ("OpenAdmin 8B is ready on this device", Open Chat, Nothing leaves this device). A signed-in hosted tool is offered with its residency line and needs one click, as here. With nothing found, the screen offers OpenAdmin 8B (<code>ollama run openadminos/openadmin-8b</code>), all providers, and Scan again. The model explorer (#102) replaces the provider setup link when it ships.</li>
         <li>The scan runs once, on the first launch. Settings, Providers has Scan again. Continue to Chat without a model leads to the inline model choice in Chat.</li>
