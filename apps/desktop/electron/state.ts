@@ -1822,6 +1822,7 @@ export class AppStateStore {
     this.chatService = new IntuneChatService({
       tenantWritable: (tenantId) => this.tenantLifecycle.isWritable(tenantId),
       tenantLease: (tenantId, work) => this.withTenantLease(tenantId, work),
+      tenantSignal: (tenantId) => this.tenantLifecycle.signal(tenantId),
       read: () => host.read(),
       requireIntelligenceStore: () => host.requireIntelligenceStore(),
       resolveTenant: (persisted, tenantId) =>

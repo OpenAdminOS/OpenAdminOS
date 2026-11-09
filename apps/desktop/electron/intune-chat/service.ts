@@ -50,6 +50,7 @@ import {
   type RefreshGraphCacheOptions,
   type ResetSelfTrainingInput,
   type RunGraphApi,
+  type LlmOptions,
   type RunLlmApi,
   type RunLogLevel,
   type RunMultiTenantChatInput,
@@ -71,6 +72,7 @@ import {
 } from "@openadminos/agent-sdk";
 
 import { assertAgentCompatible, withAgentCompatibility } from "../agent-draft-helpers.js";
+import { TenantClosedError } from "../tenant-lifecycle.js";
 import {
   assertConversationAccess,
   assertConversationTenant,
@@ -325,6 +327,8 @@ export interface ChatServiceHost {
    * open, drained by Disconnect, and `signal` fires when it starts closing.
    */
   tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  /** The signal that fires when this tenant starts closing. */
+  tenantSignal?(tenantId: string): AbortSignal;
   /** Clock shared with the pilot Graph. Defaults to the system clock. */
   now?(): Date;
   requireIntelligenceStore(): IntelligenceSqliteStore;
@@ -463,6 +467,49 @@ export class IntuneChatService {
   private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
     if (!this.host.tenantLease) return work(signal);
     return this.host.tenantLease(tenantId, (leaseSignal) => work(signal ? AbortSignal.any([signal, leaseSignal]) : leaseSignal));
+  }
+
+  /**
+   * The model for tenant-scoped Chat work, behind the model egress choke
+   * point: every complete or stream is refused once one of these tenants
+   * starts closing, and stops with its signal. Agent Team does the same in
+   * its host; runs stop through their lease-cancelled controller.
+   */
+  private async tenantLlm(providerId: ProviderId, model: string | undefined, tenantIds: readonly string[]): Promise<RunLlmApi> {
+    const llm = await this.host.buildLlm(providerId, model);
+    const writable = this.host.tenantWritable;
+    if (!writable) return llm;
+    const signalOf = this.host.tenantSignal;
+    const assertOpen = () => {
+      for (const tenantId of tenantIds) if (!writable(tenantId)) throw new TenantClosedError(tenantId, "model request");
+    };
+    const withSignal = (options: LlmOptions): LlmOptions => {
+      const extra = signalOf ? tenantIds.map((tenantId) => signalOf(tenantId)) : [];
+      if (extra.length === 0) return options;
+      return { ...options, signal: AbortSignal.any([...(options.signal ? [options.signal] : []), ...extra]) };
+    };
+    return new Proxy(llm, {
+      get(target, property) {
+        const value = Reflect.get(target, property, target) as unknown;
+        if (typeof value !== "function") return value;
+        if (property === "complete") {
+          const complete = value as RunLlmApi["complete"];
+          return async (options: LlmOptions) => {
+            assertOpen();
+            return complete.call(target, withSignal(options));
+          };
+        }
+        if (property === "stream") {
+          const stream = value as RunLlmApi["stream"];
+          return (options: LlmOptions) =>
+            (async function* () {
+              assertOpen();
+              yield* stream.call(target, withSignal(options));
+            })();
+        }
+        return (value as (...args: unknown[]) => unknown).bind(target);
+      },
+    });
   }
 
   /** Lease every tenant a multi-tenant job reads or writes for. */
@@ -1034,6 +1081,7 @@ export class IntuneChatService {
 
     const summary = buildMultiTenantSummary(comparisons);
     const assistantText = await this.buildMultiTenantAssistantText({
+      tenantIds: [activeTenant.id, ...preflight.resolvedTenantIds],
       prompt: content,
       providerId,
       provider,
@@ -1500,6 +1548,8 @@ export class IntuneChatService {
   }
 
   private async buildMultiTenantAssistantText(input: {
+    /** Every tenant whose data is in the prompt. */
+    tenantIds: readonly string[];
     prompt: string;
     providerId: ProviderId;
     provider: ProviderSummary | undefined;
@@ -1508,7 +1558,7 @@ export class IntuneChatService {
     comparisons: MultiTenantChatJob["comparisons"];
   }): Promise<string> {
     const deterministic = summarizeMultiTenantResult(input.summary, input.comparisons);
-    const llm = withTenantDataOutputFilter(await this.host.buildLlm(input.providerId, input.model));
+    const llm = withTenantDataOutputFilter(await this.tenantLlm(input.providerId, input.model, input.tenantIds));
     if (!llm.available) return deterministic;
     try {
       const completion = await llm.complete({
@@ -2081,7 +2131,7 @@ export class IntuneChatService {
       assistantContent = directDeviceAnswer;
       responseModel = undefined;
     } else {
-      const llm = withTenantDataOutputFilter(await this.host.buildLlm(providerId, selectedModel));
+      const llm = withTenantDataOutputFilter(await this.tenantLlm(providerId, selectedModel, [tenant.id]));
       const withMemory = conversationMemory
         ? `Conversation so far (earliest first, may be truncated):\n${fenceTenantData(conversationMemory, "chat:history")}\n\nCurrent question: ${content}`
         : content;
@@ -2726,7 +2776,7 @@ export class IntuneChatService {
       responseModel = undefined;
       emitDelta(assistantContent);
     } else {
-      const llm = withTenantDataOutputFilter(await this.host.buildLlm(providerId, selectedModel));
+      const llm = withTenantDataOutputFilter(await this.tenantLlm(providerId, selectedModel, [tenant.id]));
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory

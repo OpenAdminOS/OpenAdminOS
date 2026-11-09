@@ -707,6 +707,42 @@ describe("Disconnect redesign: choke points, restart and agent batches", () => {
     }
   });
 
+  it("refuses a Chat model request for a closing organization and aborts one in flight (model egress choke point)", async () => {
+    const calls: Array<AbortSignal | undefined> = [];
+    const f = await fixture({ tenants: [tenant, otherTenant] }, {
+      llmFactory: () => ({
+        available: true,
+        defaultModel: "mock-chat",
+        async complete(options: { signal?: AbortSignal }) {
+          calls.push(options.signal);
+          return { text: "ok", model: "mock-chat" };
+        },
+        async *stream() { yield { delta: "", accumulated: "", done: true, model: "mock-chat" }; },
+      }),
+    });
+    const internals = f.store as unknown as {
+      tenantLifecycle: { close(id: string): void };
+      chatService: { tenantLlm(providerId: string, model: string, tenantIds: string[]): Promise<{ complete(options: Record<string, unknown>): Promise<unknown> }> };
+    };
+    try {
+      const both = await internals.chatService.tenantLlm("ollama", "mock-chat", [tenant.id, otherTenant.id]);
+      await both.complete({ prompt: "summary" });
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0]?.aborted, false);
+      internals.tenantLifecycle.close(tenant.id);
+      // The signal handed to the request in flight fired with the close.
+      assert.equal(calls[0]?.aborted, true);
+      await assert.rejects(both.complete({ prompt: "again" }), TenantClosedError);
+      assert.equal(calls.length, 1);
+      // A model request for the other, open organization is unaffected.
+      const other = await internals.chatService.tenantLlm("ollama", "mock-chat", [otherTenant.id]);
+      await other.complete({ prompt: "fine" });
+      assert.equal(calls.length, 2);
+    } finally {
+      await f.close();
+    }
+  });
+
   it("refuses a multi-tenant agent batch that includes a closing organization and writes no batch", async () => {
     const f = await fixture({ tenants: [tenant, otherTenant] }, { appVersion: "0.8.0" });
     const internals = f.store as unknown as { tenantLifecycle: { close(id: string): void } };
