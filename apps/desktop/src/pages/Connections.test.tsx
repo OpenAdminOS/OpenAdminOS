@@ -249,10 +249,21 @@ describe("Connections services", () => {
 describe("Connections results and organizations", () => {
   it("opens and closes a connector drawer from its URL", async () => {
     const user = userEvent.setup();
-    render(createMockAppState(), {}, "/connections?connector=jira");
-    expect(await screen.findByRole("dialog", { name: "Jira" })).toBeInTheDocument();
+    render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector()]) }, "/connections?connector=teams");
+    expect(await screen.findByRole("dialog", { name: "Microsoft Teams" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Close drawer" }));
-    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Jira" })).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Microsoft Teams" })).not.toBeInTheDocument());
+  });
+
+  it("lists only shipped connectors in Results go to, never planned ones (decision of 2026-11-04)", async () => {
+    render(createMockAppState(), { listConnectors: vi.fn(async () => [teamsConnector()]) }, "/connections?connector=jira");
+    const results = await screen.findByRole("region", { name: CONNECTIONS_COPY.resultsHeading });
+    await waitFor(() => expect(within(results).getByText("Microsoft Teams")).toBeInTheDocument());
+    for (const planned of ["Considering", "Planned", "Designed", "View details", "Jira", "ServiceNow", "SharePoint", "Generic webhook"]) {
+      expect(within(results).queryByText(planned)).not.toBeInTheDocument();
+    }
+    // An old link to a planned connector opens nothing.
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("renames an organization and shows a failed rename next to the field", async () => {
