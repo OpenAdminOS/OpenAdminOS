@@ -1,11 +1,11 @@
 ---
 title: "First run"
-description: "What happens the first time OpenAdminOS starts: a scan for models on this device, then Chat."
+description: "What happens the first time OpenAdminOS starts: a scan for models on this device, then Microsoft 365, then Chat."
 ---
 
 # First Run
 
-The first time OpenAdminOS starts, it checks this device for AI models before anything else. There is no sign-in to start with: Chat only needs a model.
+The first time OpenAdminOS starts, it takes you through two steps, shown as **1 Model** and **2 Microsoft 365** at the top: it checks this device for AI models, then offers to connect Microsoft 365. Both can be skipped. There is no sample data: OpenAdminOS works with your own organization, and Chat only needs a model.
 
 ## The Model Scan
 
@@ -26,11 +26,24 @@ The result is one choice of what answers in Chat:
 - A check that did not answer within 2.5 seconds shows **Retry** on its row.
 - With nothing found, the screen shows the command for OpenAdmin 8B (`ollama run openadminos/openadmin-8b`) and all providers.
 
-**Continue without a model** and **Preview with sample data** are below the choice. Chat shows the same choice when no model is selected. You can run the scan again from **Settings, Providers**, which shows the same answer for each runtime as the scan, for example "Installed, not running".
+**Continue without a model** is below the choice. Chat shows the same choice when no model is selected. You can run the scan again from **Settings, Providers**, which shows the same answer for each runtime as the scan, for example "Installed, not running".
+
+## Connect Microsoft 365
+
+The second step shows your device in the centre again, with Intune, Entra and Defender around it. A service that is not connected is dashed.
+
+1. Pick the services you manage. Nothing is picked for you. The step lists the read-only Microsoft Graph permissions those services need, plus the four sign-in permissions.
+2. Choose how to connect:
+   - **Sign in with Microsoft** opens the connect dialog with your services picked. Choose the app that signs in (the OpenAdminOS app or your own app registration) and sign in in your system browser.
+   - **Use our own app registration** opens the same dialog with your own app registration chosen.
+   - **Ask an admin to approve** copies a message with the admin consent link for an admin who can grant the permissions. If the clipboard refuses, the message is shown to copy yourself.
+3. After a successful sign-in the step shows your organization's name and each connected service with its parts, and **Open Chat** opens Chat with questions for what you connected, for example **Ask about Intune**.
+
+**Not now** opens Chat without connecting anything. If sign-in cannot reach Microsoft, for example offline or behind a proxy, the connect dialog names the host, whether a proxy was in the path and what to do next, and the step stays open. You can open this step again from **Settings, Tenants** with **Set up Microsoft 365**.
 
 ## Chat Without a Tenant
 
-Chat then opens with nothing connected. Questions about products, KQL, PowerShell and documentation are answered from the model, the local docs index and any public references you add. A question about your own devices or users answers with a card that names the service it needs (for example Intune), the exact read permissions, and three ways forward: **Connect**, **Use our own app registration**, or **Ask an admin to approve**, which copies a message with the admin consent link. No tenant data is read, your question is kept, and after connecting you choose **Ask again**.
+If you chose **Not now**, Chat opens with nothing connected. Questions about products, KQL, PowerShell and documentation are answered from the model, the local docs index and any public references you add. A question about your own devices or users answers with a card that names the service it needs (for example Intune), the exact read permissions, and three ways forward: **Connect**, **Use our own app registration**, or **Ask an admin to approve**, which copies a message with the admin consent link. No tenant data is read, your question is kept, and after connecting you choose **Ask again**.
 
 The empty Chat suggests public references such as Microsoft Learn, each with the host it sends question words to. None is added until you add it through the Marketplace install review.
 
@@ -38,23 +51,9 @@ With a hosted model and nothing connected, the first question asks you to confir
 
 If a sign-in, the Marketplace or a model download cannot reach the internet, the message names the host that could not be reached, whether this device has a system proxy (OpenAdminOS connects directly; Ollama uses the proxy set in its own environment) and what to do next.
 
-## Pilot Mode
-
-Pilot mode is a short, guided tour of what OpenAdminOS does. It runs on built-in sample data from a fictional company and is labeled on every screen. Nothing leaves your device.
-
-What you can do in pilot mode:
-
-- **Chat** with prepared prompts covering devices, compliance, Conditional Access, users, apps, and security. Each answer offers follow-up prompts. Free-text questions need a connected tenant.
-- **Run three agents**: Find inactive devices, Conditional Access explainer, and Stale guest cleanup. Stale guest cleanup is a write agent: it shows the full change review and typed confirmation, and confirmed changes apply only to the sample data.
-- **Review runs** in run history.
-
-Pilot answers and agent reports use prepared text built from the sample data. No AI model is used, so pilot mode works the same on every machine. Agent Team, Changes, Workspaces, Connectors, and schedules are available in production only.
-
-When you connect your tenant, the pilot data is removed and the app switches to production. You can open pilot mode again from the tenant switcher or Settings.
-
 ## Connecting Your Tenant
 
-When you connect from Chat's card, the tenant switcher or Settings, or start an agent without an active tenant:
+When you connect from the Connect Microsoft 365 step, Chat's card, the tenant switcher or Settings, or start an agent without an active tenant:
 
 1. Choose the app that signs in (the OpenAdminOS app or your own app registration), then review the read-only Microsoft Graph permissions by service. See [Authentication and permissions](../trust/authentication.md).
 2. Complete Microsoft sign-in in your system browser.
