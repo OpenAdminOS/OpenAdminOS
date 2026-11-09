@@ -1683,6 +1683,13 @@ export class AppStateStore {
   private writeTail: Promise<void> = Promise.resolve();
   /** The move to organizations, recorded on the first write after it. */
   private pendingMigrationAudit: Record<string, string | number | string[]> | undefined;
+  /**
+   * The move to organizations was handed to a write (in flight) or is on
+   * disk (recorded). A read that saw the file from before that write must
+   * not queue it again.
+   */
+  private migrationAuditInFlight: Record<string, string | number | string[]> | undefined;
+  private migrationAuditRecorded = false;
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
   private readonly tokenStore: TokenCacheStorage;
@@ -8032,7 +8039,13 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // after the read that performed it.
       // A read that started before a write finished saw the old file; it
       // must not queue the move again after that write recorded it.
-      if (reconciled.migrated && !this.pendingMigrationAudit && generation === this.writeGeneration) {
+      if (
+        reconciled.migrated &&
+        !this.pendingMigrationAudit &&
+        !this.migrationAuditInFlight &&
+        !this.migrationAuditRecorded &&
+        generation === this.writeGeneration
+      ) {
         this.pendingMigrationAudit = {
           organizationIds: reconciled.organizations.map((organization) => organization.id),
           organizationNames: reconciled.organizations.map((organization) => organization.name),
@@ -8419,6 +8432,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       : [];
     if (this.pendingMigrationAudit && (state.organizations?.length ?? 0) > 0) {
       recorded.unshift({ id: randomUUID(), timestamp, type: "organizations.migrated", details: this.pendingMigrationAudit });
+      this.migrationAuditInFlight = this.pendingMigrationAudit;
       this.pendingMigrationAudit = undefined;
     }
     const configurationAudit = appendConfigurationAudit(existing, recorded);
@@ -8488,8 +8502,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await atomicRename(tmpPath, this.filePath);
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
+      if (this.migrationAuditInFlight) {
+        this.migrationAuditInFlight = undefined;
+        this.migrationAuditRecorded = true;
+      }
       // A no-op on Windows; an unexpected failure is reported, not swallowed.
       if (durable) await syncDirectory(dirname(this.filePath));
+    } catch (error) {
+      // The write that carried the move to organizations failed before the
+      // rename: queue it again for the next write.
+      if (this.migrationAuditInFlight && !this.migrationAuditRecorded) {
+        this.pendingMigrationAudit = this.migrationAuditInFlight;
+        this.migrationAuditInFlight = undefined;
+      }
+      throw error;
     } finally {
       await rm(tmpPath, { force: true });
     }
