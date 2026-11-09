@@ -56,7 +56,8 @@ describe("tenant lifecycle", () => {
     assert.throws(() => lifecycle.open("t1"), TenantClosedError);
     lifecycle.abortClose("t1");
     assert.equal(lifecycle.phase("t1"), "open");
-    assert.equal(lifecycle.generation("t1"), 2);
+    assert.equal(lifecycle.generation("t1"), 1);
+    assert.equal(lifecycle.signal("t1").aborted, false);
   });
 
   it("guards fetch and token acquisition before every call, and withholds a token that arrives after closing began", async () => {

@@ -141,12 +141,15 @@ export class TenantLifecycle {
     entry.controller.abort(new TenantClosedError(tenantId));
   }
 
-  /** Disconnect could not record the removal: nothing changed, so the tenant opens again (new generation). */
+  /**
+   * Disconnect could not record the removal: nothing changed, so the tenant
+   * opens again in the same generation. Work that was stopped by the close
+   * still saves its final state (a cancelled run, for example).
+   */
   abortClose(tenantId: string): void {
     const entry = this.entry(tenantId);
     if (entry.phase !== "closing") return;
     entry.phase = "open";
-    entry.generation += 1;
     entry.controller = new AbortController();
   }
 
