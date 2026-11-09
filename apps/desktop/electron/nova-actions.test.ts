@@ -6,7 +6,7 @@ const state = { activeTenantId: 'tenant-a', activeProviderId: 'ollama', tenants:
 function fixture() {
   const sends: unknown[] = [], runs: unknown[] = [];
   const connectors = ['whatsapp-web','outlook','teams','slack','discord','signal'].map(id => ({ descriptor: { id, name: id }, status: "connected", config: { defaultRecipient: 'group@example.test', defaultRecipients: 'other@example.test', defaultTeamId: 'team', defaultChannelId: 'channel', defaultChannel: 'slack-channel' } })) as unknown as ConnectorSummary[];
-  const host: NovaActionHost = { connectors: async () => connectors, send: async input => { sends.push(input); return {}; }, startRun: async (...args) => { runs.push(args); return { id: 'run-test' } as never; } };
+  const host: NovaActionHost = { activeTenantId: async () => state.activeTenantId, connectors: async () => connectors, send: async input => { sends.push(input); return {}; }, startRun: async (...args) => { runs.push(args); return { id: 'run-test' } as never; } };
   return { host, sends, runs, connectors };
 }
 it('recognizes direct send requests without treating capability questions or evidence as commands', () => {

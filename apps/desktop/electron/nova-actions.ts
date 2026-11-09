@@ -8,7 +8,7 @@ export interface NovaActionHost {
   send(input: { connectorId: string; config: Record<string, unknown>; method: string; args: Record<string, unknown>; tenantId: string; actionId: string; signal: AbortSignal }): Promise<unknown>;
   startRun(slug: string, options: StartRunOptions): Promise<RunRecord>;
   /** The tenant of the active organization now, read when an action runs. */
-  activeTenantId?(): Promise<string | undefined>;
+  activeTenantId(): Promise<string | undefined>;
 }
 
 /** Said when the organization changed between the preview and the confirmation. */
@@ -17,7 +17,7 @@ export const NOVA_ORGANIZATION_CHANGED =
 
 /** An action runs only while the organization it was prepared in is still active. */
 async function assertStillActive(host: NovaActionHost, tenantId: string): Promise<void> {
-  if (host.activeTenantId && (await host.activeTenantId()) !== tenantId) {
+  if ((await host.activeTenantId()) !== tenantId) {
     throw new Error(NOVA_ORGANIZATION_CHANGED);
   }
 }
