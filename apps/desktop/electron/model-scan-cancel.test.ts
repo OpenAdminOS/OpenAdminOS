@@ -58,6 +58,16 @@ async function stopOnceStarted(id: string, binary: string, pidFile: string) {
   return { pid: Number(pid), probe: scanProbeFromProvider(summary) };
 }
 
+/**
+ * A server that is not running: "Not installed", or "Installed, not running"
+ * when the runtime is on this device. Never a failed check.
+ */
+function assertNotRunning(probe: ReturnType<typeof scanProbeFromProvider>): void {
+  assert.notEqual(probe.state, "could-not-check", probe.facts.join(" "));
+  assert.equal(probe.ready, false);
+  assert.match(probe.summary, /^(Not installed|Installed, not running)$/);
+}
+
 async function serve(handler: Parameters<typeof createServer>[1]): Promise<{ server: Server; url: string }> {
   const server = createServer(handler);
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
@@ -215,8 +225,8 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "not-found");
-    assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
+    assertNotRunning(scanProbeFromProvider(await checkOllama(catalog("ollama"))));
+    assertNotRunning(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))));
   });
 
   // The errors are injected in the shapes Node 22's fetch produces, so the
@@ -242,8 +252,8 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
         globalThis.fetch = (async () => { throw error; }) as typeof fetch;
         process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
         process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
-        assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "not-found");
-        assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
+        assertNotRunning(scanProbeFromProvider(await checkOllama(catalog("ollama"))));
+        assertNotRunning(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))));
       });
     }
     it("not running: a stopped server whose pooled socket was reused (UND_ERR_SOCKET, then refused)", async () => {
@@ -256,8 +266,8 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
       }) as typeof fetch;
       process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
       process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
-      assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "not-found");
-      assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
+      assertNotRunning(scanProbeFromProvider(await checkOllama(catalog("ollama"))));
+      assertNotRunning(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))));
       assert.equal(calls, 4, "each check retried once on a new connection");
     });
 
@@ -269,6 +279,28 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
         assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "could-not-check");
         assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "could-not-check");
       });
+    }
+  });
+
+  it("marks an installed runtime whose server is down as installed, so Settings and the scan agree (design round, L)", { skip: !posix }, async () => {
+    const bin = await mkdtemp(join(tmpdir(), "oaos-installed-"));
+    const original = process.env.PATH;
+    try {
+      await fakeCli(bin, "ollama", "exit 0");
+      process.env.PATH = `${bin}:/usr/bin:/bin`;
+      // A port that was just closed: the connection is refused.
+      const { server, url } = await serve(() => undefined);
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      process.env.OPENAGENTS_OLLAMA_URL = url;
+      const summary = await checkOllama(catalog("ollama"));
+      assert.equal(summary.status, "not-installed");
+      assert.equal(summary.installed, true);
+      const probe = scanProbeFromProvider(summary);
+      assert.equal(probe.summary, "Installed, not running", "the scan says what Settings says");
+    } finally {
+      if (original === undefined) delete process.env.PATH;
+      else process.env.PATH = original;
+      await rm(bin, { recursive: true, force: true });
     }
   });
 

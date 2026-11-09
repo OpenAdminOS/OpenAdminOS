@@ -233,7 +233,8 @@ export function scanProbeFromProvider(
     if (provider.status === "error") {
       return { ...base, state: "found", ready: false, summary: "Running, no text model", facts: [provider.detail ?? "Install a text-generation model, then scan again."], ...(provider.id === "ollama" ? { hasOpenAdmin8B: false } : {}) };
     }
-    if (extra.installedOnDisk) {
+    // Installed comes from the runtime's own check (also what Settings shows); a test can inject it.
+    if (extra.installedOnDisk ?? provider.installed) {
       return {
         ...base,
         state: "found",
@@ -274,35 +275,7 @@ export function scanProbeFromProvider(
   return { ...base, state: "found", ready: false, summary: "Installed, sign-in not confirmed", facts: [...version, ...(provider.detail ? [provider.detail] : [])] };
 }
 
-/** Whether a runtime is installed, from local files only: a binary on PATH or a known app location. */
-export async function installedOnDisk(providerId: "ollama" | "lm-studio", env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<boolean> {
-  const binary = providerId === "ollama" ? "ollama" : "lms";
-  const names = platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`] : [binary];
-  const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
-  const home = env.HOME ?? env.USERPROFILE ?? homedir();
-  const known =
-    providerId === "ollama"
-      ? platform === "darwin"
-        ? ["/Applications/Ollama.app", "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"]
-        : platform === "win32"
-          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "Ollama", "ollama.exe")]
-          : ["/usr/local/bin/ollama", "/usr/bin/ollama"]
-      : platform === "darwin"
-        ? ["/Applications/LM Studio.app", join(home, ".lmstudio", "bin", "lms")]
-        : platform === "win32"
-          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "LM Studio", "LM Studio.exe"), join(home, ".lmstudio", "bin", "lms.exe")]
-          : [join(home, ".lmstudio", "bin", "lms")];
-  const candidates = [...known, ...pathDirs.flatMap((dir) => names.map((name) => join(dir, name)))];
-  for (const candidate of candidates) {
-    try {
-      await access(candidate);
-      return true;
-    } catch {
-      // Not here.
-    }
-  }
-  return false;
-}
+export { installedOnDisk } from "./provider-detail.js";
 
 /**
  * The checks for this device, built on the existing provider detection.
@@ -312,12 +285,10 @@ export async function installedOnDisk(providerId: "ollama" | "lm-studio", env: N
 export function buildModelScanChecks(input: {
   catalog: readonly ProviderSummary[];
   check: (providerId: ProviderId, signal: AbortSignal, timeoutMs: number) => Promise<ProviderSummary>;
-  env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   /** Whether Ollama or LM Studio is installed, from local files. Injected in tests. */
   onDisk?: (providerId: "ollama" | "lm-studio") => Promise<boolean>;
 }): ModelScanCheck[] {
-  const env = input.env ?? process.env;
   const platform = input.platform ?? process.platform;
   return input.catalog
     .filter((provider) => provider.id !== "apple-foundation" || platform === "darwin")
@@ -346,9 +317,9 @@ export function buildModelScanChecks(input: {
             }
             const [summary, onDisk] = await Promise.all([
               input.check(provider.id, signal, timeoutMs),
-              input.onDisk ? input.onDisk(provider.id) : installedOnDisk(provider.id, env, platform),
+              input.onDisk ? input.onDisk(provider.id) : Promise.resolve(undefined),
             ]);
-            return scanProbeFromProvider(summary, { installedOnDisk: onDisk, target: meta.target });
+            return scanProbeFromProvider(summary, { ...(onDisk !== undefined ? { installedOnDisk: onDisk } : {}), target: meta.target });
           }
           return scanProbeFromProvider(await input.check(provider.id, signal, timeoutMs));
         },

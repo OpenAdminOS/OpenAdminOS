@@ -25,6 +25,21 @@ function provider(id: string) {
 }
 
 describe("Settings provider section", () => {
+  it("says Installed, not running for a runtime the scan found installed, as the scan does (design round, L)", async () => {
+    const providers = mockProviders.map((entry) =>
+      entry.id === "lm-studio" ? { ...entry, status: "not-installed" as const, installed: true, models: [] } : entry,
+    );
+    renderRoute(<Settings />, {
+      path: "/settings/:section?",
+      route: "/settings/providers",
+      bridge: makeMockBridge({}, createMockAppState({ providers })),
+    });
+    const heading = await screen.findByRole("heading", { name: "Providers" });
+    const view = within(heading.closest("section") as HTMLElement);
+    expect(view.getByText("Installed, not running")).toBeInTheDocument();
+    expect(view.queryByRole("button", { name: "Install guide" })).toBeNull();
+  });
+
   it("stores the Chat answer font as a device-local General preference", async () => {
     const user = userEvent.setup();
     setAnswerFont("serif");

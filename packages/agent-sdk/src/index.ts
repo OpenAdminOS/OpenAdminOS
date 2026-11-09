@@ -28,6 +28,11 @@ export interface ProviderSummary {
    * negative result. The model scan shows it as could not check.
    */
   checkFailed?: boolean;
+  /**
+   * Ollama and LM Studio: installed on this device (from local files) while
+   * its server does not answer. Settings and the model scan both read it.
+   */
+  installed?: boolean;
   models: string[];
   defaultModel?: string;
   cli?: {

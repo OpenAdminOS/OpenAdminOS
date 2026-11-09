@@ -715,7 +715,9 @@ function ProviderRow({
             : { label: "Available", tone: "neutral" as const }
           : provider.status === "error"
             ? { label: cliLabel ?? "Error", tone: "danger" as const }
-            : { label: "Not installed", tone: "neutral" as const };
+            : provider.installed
+              ? { label: "Installed, not running", tone: "neutral" as const }
+              : { label: "Not installed", tone: "neutral" as const };
 
   const handleTest = async () => {
     setTesting(true);
@@ -805,7 +807,7 @@ function ProviderRow({
               </div>
             </div>
           ) : null}
-          {implemented && (provider.status === "not-installed" || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) ? (
+          {implemented && ((provider.status === "not-installed" && !provider.installed) || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) ? (
             <UiButton
               className="mt-4"
               variant="ghost"

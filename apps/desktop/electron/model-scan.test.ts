@@ -116,7 +116,6 @@ describe("first-launch model scan", () => {
         checks: buildModelScanChecks({
           catalog: [catalog("ollama")],
           check: async () => { checked = true; return catalog("ollama"); },
-          env: { PATH: "" },
           platform: "linux",
         }),
       });

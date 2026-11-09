@@ -1,3 +1,7 @@
+import { access } from "node:fs/promises";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
+
 import {
   classifyOllamaEndpoint,
   classifyLmStudioEndpoint,
@@ -175,6 +179,8 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       return {
         ...trustedProvider,
         status: "not-installed",
+        // Settings and the scan read the same answer: installed on this device, server not running.
+        ...(endpointTrust.isLocal && (await installedOnDisk("ollama")) ? { installed: true } : {}),
         detail: ollamaEndpointDetail(endpointTrust, `Ollama is not reachable on ${endpoint}`),
         models: [],
       };
@@ -261,6 +267,7 @@ export async function checkLmStudio(provider: ProviderSummary, options: ScanChec
       ...trustedProvider,
       status: probe.status === "error" ? "error" : "not-installed",
       ...(probe.status === "error" ? { checkFailed: true } : {}),
+      ...(probe.status !== "error" && endpointTrust.isLocal && (await installedOnDisk("lm-studio")) ? { installed: true } : {}),
       detail: lmStudioEndpointDetail(
         endpointTrust,
         probe.detail ??
@@ -450,4 +457,34 @@ export async function checkAdditionalCli(provider: ProviderSummary, options: Sca
     detail: probe.detail, models: probe.models, defaultModel: probe.defaultModel,
     cli: { binaryPath: probe.binaryPath, version: probe.version, state: probe.ready ? "ready" : probe.failure ?? "check-required" },
   };
+}
+
+/** Whether a runtime is installed, from local files only: a binary on PATH or a known app location. */
+export async function installedOnDisk(providerId: "ollama" | "lm-studio", env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<boolean> {
+  const binary = providerId === "ollama" ? "ollama" : "lms";
+  const names = platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`] : [binary];
+  const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  const known =
+    providerId === "ollama"
+      ? platform === "darwin"
+        ? ["/Applications/Ollama.app", "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"]
+        : platform === "win32"
+          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "Ollama", "ollama.exe")]
+          : ["/usr/local/bin/ollama", "/usr/bin/ollama"]
+      : platform === "darwin"
+        ? ["/Applications/LM Studio.app", join(home, ".lmstudio", "bin", "lms")]
+        : platform === "win32"
+          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "LM Studio", "LM Studio.exe"), join(home, ".lmstudio", "bin", "lms.exe")]
+          : [join(home, ".lmstudio", "bin", "lms")];
+  const candidates = [...known, ...pathDirs.flatMap((dir) => names.map((name) => join(dir, name)))];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return true;
+    } catch {
+      // Not here.
+    }
+  }
+  return false;
 }
