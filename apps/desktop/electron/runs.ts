@@ -87,6 +87,10 @@ export function planOtherOrganizationCopy(organizationName: string): string {
   return `This plan was prepared in ${organizationName}, which is not the active organization. The plan is kept unchanged. Switch to ${organizationName} to review and apply it.`;
 }
 
+/** Why a plan prepared with no organization cannot be applied. It is never retargeted. */
+export const PLAN_NO_ORGANIZATION_COPY =
+  "This plan was prepared with no organization, so it cannot be applied. The plan is kept unchanged. Run the agent again in an organization to prepare a plan you can apply.";
+
 /**
  * A start refused because its organization is not the active one, or its
  * schedule is unassigned. For a scheduled start this is waiting, not a
@@ -794,6 +798,9 @@ export class RunService {
       if (!run.plan) {
         throw new Error(`Run ${runId} has no plan to confirm.`);
       }
+      // A plan with no organization has no tenant to apply to, whatever is
+      // active now; it is refused here so it stays exactly as it was.
+      if (run.tenantId === undefined) throw new OrganizationBoundaryError(PLAN_NO_ORGANIZATION_COPY);
       if (boundary.activeOrganizationOnly && run.tenantId !== persisted.activeTenantId) {
         const name =
           organizationForTenant(persisted.organizations ?? [], run.tenantId)?.name ??

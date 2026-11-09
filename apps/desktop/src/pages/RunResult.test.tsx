@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { Routes, Route, useLocation } from "react-router";
 
+import { RERUN_COPY } from "../copy";
 import RunResult from "./RunResult";
 import Agents from "./Agents";
 import {
@@ -745,4 +746,24 @@ it("runs Run for real after Switch from No organization without opening setup (M
   );
   expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
   expect(bridge.startRun).toHaveBeenCalledTimes(1);
+});
+
+describe("a plan prepared with no organization (Muse round 4)", () => {
+  it("keeps Apply disabled under No organization and says the plan stays unchanged", async () => {
+    const user = userEvent.setup();
+    const { tenantId: _tenant, ...run } = createAwaitingConfirmationRun({});
+    const { activeTenantId: _active, ...state } = createMockAppState({
+      installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })],
+      runs: [run],
+    });
+    const bridge = makeMockBridge({}, state);
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    const alert = (await screen.findAllByRole("alert")).find((element) => element.textContent?.includes(RERUN_COPY.planNoOrganizationTitle))!;
+    expect(alert).toHaveTextContent(RERUN_COPY.planNoOrganizationBody);
+    expect(screen.queryByText(/Apply will be simulated/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/This plan was prepared in/)).not.toBeInTheDocument();
+    await user.type(screen.getByPlaceholderText("Type here to enable Apply"), run.plan!.confirmationPhrase);
+    expect(screen.getByRole("button", { name: /^Apply / })).toBeDisabled();
+    expect(bridge.confirmRun).not.toHaveBeenCalled();
+  });
 });

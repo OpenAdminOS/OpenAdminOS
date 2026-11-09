@@ -278,7 +278,7 @@ export default function RunResult() {
         onReject={rejectRun}
         onRunForReal={reRun}
         inactiveOrganization={
-          run.status === "awaiting-confirmation" && run.tenantId !== state.activeTenantId
+          run.status === "awaiting-confirmation" && run.tenantId !== undefined && run.tenantId !== state.activeTenantId
             ? { name: runOrganization?.name ?? tenantName, ...(runOrganization ? { id: runOrganization.id } : {}) }
             : undefined
         }
@@ -992,9 +992,11 @@ function ConfirmationPage({
               <div className="mb-1 flex items-center gap-2 font-medium"><IconWarning size={14} />Microsoft Graph write</div>
               Approving will call Microsoft Graph. {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will be applied to {tenantName}. Review every operation below. Microsoft Graph changes may not be reversible.
             </div>
-          ) : plan ? (
-            <div className="border-l-2 border-[var(--color-info)] bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-info)]">
-              Apply will be simulated. No Microsoft Graph writes will be made.
+          ) : plan && run.status === "awaiting-confirmation" ? (
+            // The host refuses a plan with no organization; it is never applied elsewhere.
+            <div role="alert" className="rounded-[14px] bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-warning)]/25">
+              <div className="font-medium">{RERUN_COPY.planNoOrganizationTitle}</div>
+              <p className="mt-1 text-[var(--color-text-soft)]">{RERUN_COPY.planNoOrganizationBody}</p>
             </div>
           ) : null}
 
@@ -1039,7 +1041,7 @@ function ConfirmationPage({
                 runId={run.id}
                 plan={plan}
                 requiresRiskAcknowledgement={run.riskAssessment?.status === "complete" && run.riskAssessment.flags.some((flag) => flag.severity === "danger")}
-                blocked={Boolean(inactiveOrganization)}
+                blocked={Boolean(inactiveOrganization) || run.tenantId === undefined}
                 onConfirm={onConfirm}
                 onReject={onReject}
               />}

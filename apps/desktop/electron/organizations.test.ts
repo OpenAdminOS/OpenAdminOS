@@ -20,6 +20,7 @@ import { SAMPLE_TENANT_ID } from "./sample-tenant/dataset.js";
 import {
   noOrganizationRunCopy,
   OTHER_ORGANIZATION_RUN_COPY,
+  PLAN_NO_ORGANIZATION_COPY,
   planOtherOrganizationCopy,
   RunService,
   SCHEDULE_OTHER_ORGANIZATION_COPY,
@@ -862,6 +863,23 @@ describe("applying a reviewed plan holds to the active organization (review roun
           },
         );
         assert.deepEqual(h.state().runs, [run]);
+        assert.deepEqual(h.graphBuilds, []);
+      });
+    }
+  }
+
+  for (const [label, run] of cases) {
+    const tenantless = { ...run } as RunRecord;
+    delete (tenantless as { tenantId?: string }).tenantId;
+    for (const boundary of [{ activeOrganizationOnly: true }, {}]) {
+      it(`refuses ${label} with no organization under No organization${boundary.activeOrganizationOnly ? "" : " from any caller"} and keeps it unchanged (Muse round 4)`, async () => {
+        const h = harness(tenantless, undefined);
+        await assert.rejects(h.service.confirmRun(tenantless.id, plan.confirmationPhrase, boundary), (error: Error) => {
+          assert.equal(error.name, "OrganizationBoundaryError");
+          assert.equal(error.message, PLAN_NO_ORGANIZATION_COPY);
+          return true;
+        });
+        assert.deepEqual(h.state().runs, [tenantless]);
         assert.deepEqual(h.graphBuilds, []);
       });
     }

@@ -193,5 +193,8 @@ export const RERUN_COPY = {
   planElsewhereTitle: (organization: string) => `This plan was prepared in ${organization}`,
   planElsewhereBody: (organization: string) =>
     `${organization} is not the active organization, so the plan cannot be applied now. The plan is kept unchanged. Switch to ${organization} to review and apply it.`,
+  planNoOrganizationTitle: "This plan has no organization",
+  planNoOrganizationBody:
+    "It was prepared with no organization active, so it cannot be applied. The plan is kept unchanged. Run the agent again in an organization to prepare a plan you can apply.",
   runInActive: (organization: string) => `Run in ${organization}`,
 } as const;
