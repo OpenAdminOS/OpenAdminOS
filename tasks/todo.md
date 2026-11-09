@@ -1631,44 +1631,62 @@ R. [x] Leftover double block removed.
 ## PR #175 review round 2 (GPT-6.1-Sol and Claude evaluator, head 324eff4, 2026-11-09)
 
 Blocking
-1. [ ] Hosted sends bypass confirmation: preview and execution classify differently. One shared routing decision; consent enforced right before every hosted model call; deterministic-path test on both send paths.
-2. [ ] Startup discovery while the scan is pending (Office tick, menu bar, schedulers). Gate every background discovery path; test the startup sequence from a fresh store.
+1. [x] Hosted sends bypass confirmation: preview and execution classify differently. One shared routing decision; consent enforced right before every hosted model call; deterministic-path test on both send paths.
+2. [x] Startup discovery while the scan is pending (Office tick, menu bar, schedulers). Gate every background discovery path; test the startup sequence from a fresh store.
 
 Should fix
-3. [ ] Start LM Studio polls `/v1/v1/models`. Poll `${endpoint}/models`; test the store wiring with a stub server.
-4. [ ] Cancellation gaps: `discoverCli` spawns before checking the signal, Claude wrapper child survives, LM Studio drops the signal, Apple helper not abortable.
-5. [ ] Azure secret read blocks the whole scan; move into Azure's bounded check.
-6. [ ] HTTP failures look like install results; separate refused from timeout, parse and protocol failures.
-7. [ ] Retry and Start bypass the scan generation and in-flight guard; Start failure should not run a full scan.
-8. [ ] A failed Start of the secondary runtime is invisible.
-9. [ ] Manual scan with an enabled reference still says "Nothing leaves this device".
-10. [ ] Say that a started runtime keeps running after quit.
-11. [ ] Copilot row shows a command that no longer runs; show what actually runs per row.
+3. [x] Start LM Studio polls `/v1/v1/models`. Poll `${endpoint}/models`; test the store wiring with a stub server.
+4. [x] Cancellation gaps: `discoverCli` spawns before checking the signal, Claude wrapper child survives, LM Studio drops the signal, Apple helper not abortable.
+5. [x] Azure secret read blocks the whole scan; move into Azure's bounded check.
+6. [x] HTTP failures look like install results; separate refused from timeout, parse and protocol failures.
+7. [x] Retry and Start bypass the scan generation and in-flight guard; Start failure should not run a full scan.
+8. [x] A failed Start of the secondary runtime is invisible.
+9. [x] Manual scan with an enabled reference still says "Nothing leaves this device".
+10. [x] Say that a started runtime keeps running after quit.
+11. [x] Copilot row shows a command that no longer runs; show what actually runs per row.
 
 ## PR #175 Muse Wonder Full round 2 (head 324eff4, run on Node 26)
 
 Blocking
-A. [ ] `listProviders` has no first-run gate (setActiveModel, list-providers IPC, testProvider, send preview).
-B. [ ] A shared in-flight scan drops the second caller's progress and scan id.
+A. [x] `listProviders` has no first-run gate (setActiveModel, list-providers IPC, testProvider, send preview).
+B. [x] A shared in-flight scan drops the second caller's progress and scan id.
 
 Should fix
-C. [ ] Pending app state reports unchecked providers as available; show not checked and a loading surface.
-D. [ ] switchLocal sets provider and model in two calls; one host call with rollback.
-E. [ ] Exit actions stay enabled while an action is busy.
-F. [ ] Clear start and action errors on a new run.
-G. [ ] Inner HTTP timeouts, Azure and Apple failures map to negative results; pass the remaining budget; Apple SIGKILL escalation.
-H. [ ] Code-authoring detection needs a leading write or draft; widen request prefixes and verbs.
-I. [ ] Voice-hosted boundary passes no provider id or noTenant flag.
-J. [ ] Subtitle and ledger overstate what ran; state per row what ran.
-K. [ ] Cap concurrent Ollama `/api/show` calls.
-L. [ ] Focus management on open, settle, retry and close.
-M. [ ] The global key handler settles on Enter and Space from buttons.
-N. [ ] Continue to Chat before settle.
+C. [x] Pending app state reports unchecked providers as available; show not checked and a loading surface.
+D. [x] switchLocal sets provider and model in two calls; one host call with rollback.
+E. [x] Exit actions stay enabled while an action is busy.
+F. [x] Clear start and action errors on a new run.
+G. [x] Inner HTTP timeouts, Azure and Apple failures map to negative results; pass the remaining budget; Apple SIGKILL escalation.
+H. [x] Code-authoring detection needs a leading write or draft; widen request prefixes and verbs.
+I. [x] Voice-hosted boundary passes no provider id or noTenant flag.
+J. [x] Subtitle and ledger overstate what ran; state per row what ran.
+K. [x] Cap concurrent Ollama `/api/show` calls.
+L. [x] Focus management on open, settle, retry and close.
+M. [x] The global key handler settles on Enter and Space from buttons.
+N. [x] Continue to Chat before settle.
 
 Nits
-O. [ ] Windows Start: `.cmd`, `windowsHide`, missing `lms`.
-P. [ ] No-tenant multi-service card after a partial connect; card with a removed tenant.
-Q. [ ] Remember label and consent payload should name the model; host verifies it.
-R. [ ] Hosted with-tenant strip, boundary and confirmBody name the region.
-S. [ ] The sample data link misses its suffix.
-T. [ ] Tests: host Retry and concurrency, Codex and Copilot or Gemini hang-kill, tool-loop no-consent, empty `/models` integration.
+O. [x] Windows Start: `.cmd`, `windowsHide`, missing `lms`.
+P. [x] No-tenant multi-service card after a partial connect; card with a removed tenant.
+Q. [x] Remember label and consent payload should name the model; host verifies it.
+R. [x] Hosted with-tenant strip, boundary and confirmBody name the region.
+S. [x] The sample data link misses its suffix.
+T. [x] Tests: host Retry and concurrency, Codex and Copilot or Gemini hang-kill, tool-loop no-consent, empty `/models` integration.
+
+### Round 2 responses
+
+Review items (one commit each where practical, each with a regression test):
+- 1: `a03b21ca`. `noTenantRoute` is shared by preview and send; `gateHostedLlm` refuses every hosted model call until the confirmation is verified, on both send paths.
+- 2: `8f7b49c2`. While the first-run scan is pending, background discovery (Office tick, menu bar, schedulers) serves scan results or `not-checked`; startup tested from a fresh store.
+- 3, 7, 8, 10, 11: `c3887561`, `f29fcb4c`. Ready check polls `${endpoint}/models`; Retry and Start go through the single-flight queue and carry a generation; a failed Start returns its message without a scan and shows on its own row; the Start note says the runtime keeps running after quit; each row states what ran.
+- 4, 5, 6: `fb99c078`. Signals checked before every spawn, process-group kill for CLI wrappers, LM Studio and Apple helper stoppable, Azure settings read inside its bounded check, refused separated from timeout, parse and protocol failures.
+- 9: `c3887561`. A scan with an enabled reference names the reference hosts instead of "Nothing leaves this device".
+
+Muse round 2 items:
+- A to G, J to N, S, T: `8f7b49c2`, `c3887561`, `f29fcb4c`, `fb99c078`.
+- H: `51b1139d`. Request prefixes (can you, please, I need, help me) and verbs (write, draft, generate, create, build, make, give me, show me, produce) count as a code request.
+- I: `685c70a7`. The voice boundary passes the OpenAI provider id and the no-tenant flag.
+- O: `c43b9a0f`. Start spawns through the shared CLI launcher (`windowsHide`, `.exe` before `.cmd`, a refused batch launcher returns its reason); LM Studio installed without `lms` gets its own message.
+- P: `f4ee27e0`. A no-tenant card follows the tenant a partial connect added and offers Add per missing service; a card whose tenant was removed offers Connect.
+- Q: `1fba983b`. The consent payload carries the model; the host refuses a no-tenant confirmation for another model, and a tenant confirmation that names another model; the no-tenant remember label names provider and model.
+- R: `1a56406c`. Hosted with-tenant strip, boundary and confirmation name the documented data location, or "region not stated".
