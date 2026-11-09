@@ -1578,7 +1578,7 @@ function TenantRow({
         </div>
         <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
           {tenant.kind === "sample"
-            ? "You can open pilot mode again later from the tenant menu or Settings, Tenants."
+            ? "Sample data cannot be opened again after you leave it."
             : "Microsoft 365 data in the tenant is not changed. Reconnecting later starts with an empty local cache."}
         </p>
         {disconnectError && (

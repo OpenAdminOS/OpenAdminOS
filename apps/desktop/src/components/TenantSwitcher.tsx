@@ -285,7 +285,7 @@ export function TenantSwitcher() {
         <div className="space-y-4 p-6">
           <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {pendingDisconnect?.sample
-              ? `${PILOT_COPY.leaveBody} You can open pilot mode again later.`
+              ? `${PILOT_COPY.leaveBody} Sample data cannot be opened again after you leave it.`
               : "Cached credentials for this tenant will be removed from this machine. You can reconnect the tenant later."}
           </div>
           <div className="flex justify-end gap-2">
