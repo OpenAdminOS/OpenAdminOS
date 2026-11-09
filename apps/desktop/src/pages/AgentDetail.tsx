@@ -2862,7 +2862,7 @@ function RunPreflightModal({
       ? "Pauses for a diff and typed confirmation before anything is applied."
       : "None. This agent cannot change tenant state.";
   return (
-    <Modal open={open} onClose={onClose} size="md">
+    <Modal open={open} onClose={onClose} size="md" {...(blocker || missingServicesBlock ? { ariaDescribedBy: PREFLIGHT_BLOCKER_ID } : {})}>
       <ModalHeader
         title={dryRun ? "Review dry run" : "Review run"}
         subtitle={agent.name}
@@ -2871,7 +2871,7 @@ function RunPreflightModal({
       <div className="space-y-4 px-6 pb-6 pt-4">
         {blocker ? <PreflightBlockerBlock blocker={blocker} /> : null}
         {missingServicesBlock ? (
-          <ServiceNotConnectedNotice tenant={activeTenant} serviceIds={missingServices.map((service) => service.id)} primary />
+          <ServiceNotConnectedNotice id={PREFLIGHT_BLOCKER_ID} tenant={activeTenant} serviceIds={missingServices.map((service) => service.id)} primary />
         ) : null}
         <dl className="preflight-facts" aria-label="What this run uses">
           <PreflightFact label="Organization">
@@ -2951,11 +2951,19 @@ interface PreflightBlocker {
   hint: string;
 }
 
-/** The one thing that stops this run, with its fix as the only filled button. */
+const PREFLIGHT_BLOCKER_ID = "preflight-blocker";
+
+/**
+ * The one thing that stops this run, with its fix as the only filled
+ * button. Not an alert: the dialog names it as its description, and its
+ * fix takes focus when the dialog opens.
+ */
 function PreflightBlockerBlock({ blocker }: { blocker: PreflightBlocker }) {
   return (
     <div
-      role="alert"
+      id={PREFLIGHT_BLOCKER_ID}
+      // A refused start is announced; a standing blocker is the dialog's description.
+      role={blocker.tone === "danger" && blocker.title === "The run did not start." ? "alert" : undefined}
       data-tone={blocker.tone}
       className={`flex gap-3 rounded-lg px-4 py-3.5 ${
         blocker.tone === "danger"
@@ -2969,7 +2977,7 @@ function PreflightBlockerBlock({ blocker }: { blocker: PreflightBlocker }) {
         <p className="mt-0.5 text-sm leading-relaxed text-[var(--color-text-soft)]">{blocker.body}</p>
         {blocker.primary || blocker.secondary ? (
           <div className="mt-3 flex flex-wrap gap-2">
-            {blocker.primary ? <Button size="sm" variant="primary" onClick={blocker.primary.onClick}>{blocker.primary.label}</Button> : null}
+            {blocker.primary ? <Button size="sm" variant="primary" data-autofocus onClick={blocker.primary.onClick}>{blocker.primary.label}</Button> : null}
             {blocker.secondary ? <Button size="sm" variant="secondary" onClick={blocker.secondary.onClick}>{blocker.secondary.label}</Button> : null}
           </div>
         ) : null}

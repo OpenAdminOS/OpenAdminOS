@@ -548,11 +548,14 @@ export function ServiceNotConnectedNotice({
   tenant,
   serviceIds,
   primary = false,
+  id,
 }: {
   tenant: TenantRecord;
   serviceIds: readonly ServiceId[];
   /** In the run review the fix is the one filled button. */
   primary?: boolean;
+  /** Lets a dialog name this notice as its description. */
+  id?: string;
 }) {
   const [adding, setAdding] = useState<ServiceId | null>(null);
   if (serviceIds.length === 0) return null;
@@ -560,18 +563,26 @@ export function ServiceNotConnectedNotice({
   const ownRegistration = usesOwnRegistration(tenant);
   return (
     // Missing access is neutral and dashed, never amber: amber means data leaves this device.
-    <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-inset ring-[var(--color-border-soft)]">
+    // Not an alert: it holds its own fix, so a dialog uses it as its description instead.
+    <div id={id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-inset ring-[var(--color-border-soft)]">
       <ServiceMark serviceId={serviceIds[0]!} size="lg" off />
       <div className="min-w-0 flex-1 text-sm leading-relaxed text-[var(--color-text)]">
         <span className="font-medium">{SERVICE_COPY.needsNotConnected(titles)}</span>{" "}
         <span className="text-[var(--color-text-soft)]">{SERVICE_COPY.needsNotConnectedBody(tenant.displayName)}</span>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
-        {serviceIds.map((id) => (
-          <Button key={id} size="sm" variant={primary ? "primary" : "secondary"} onClick={() => setAdding(id)}>
+        {serviceIds.map((serviceId, index) => (
+          // One filled button even when several services are missing: the first fix.
+          <Button
+            key={serviceId}
+            size="sm"
+            variant={primary && index === 0 ? "primary" : "secondary"}
+            {...(primary && index === 0 ? { "data-autofocus": true } : {})}
+            onClick={() => setAdding(serviceId)}
+          >
             {ownRegistration
-              ? SERVICE_COPY.addPermissionsAction(serviceById(id).title)
-              : SERVICE_COPY.addAction(serviceById(id).title)}
+              ? SERVICE_COPY.addPermissionsAction(serviceById(serviceId).title)
+              : SERVICE_COPY.addAction(serviceById(serviceId).title)}
           </Button>
         ))}
       </div>

@@ -144,7 +144,7 @@ describe("agents by service", () => {
     });
 
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(within(dialog).getByRole("alert")).toHaveTextContent(
+    expect(blockerOf(dialog)).toHaveTextContent(
       "This agent uses DeviceManagementManagedDevices.Read.All, which its declared service Entra does not cover. It cannot run until the agent also declares Intune. Report it to the agent author.",
     );
     expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
@@ -297,7 +297,7 @@ describe("agents with service needs", () => {
     await user.click(await screen.findByRole("button", { name: "Connect Intune" }));
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
     // One blocker block whose fix is the only filled button (design round).
-    const blocker = within(dialog).getByRole("alert");
+    const blocker = blockerOf(dialog);
     expect(blocker).toHaveTextContent("Needs Intune in an active organization");
     expect(blocker).toHaveTextContent("No organization is active, so this agent has nothing to read.");
     expect(blocker.querySelector(".svc-mark")).toHaveAttribute("data-off", "true");
@@ -321,7 +321,7 @@ describe("agents with service needs", () => {
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/whoami/confirm", bridge });
 
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("Needs Microsoft 365 in an active organization");
+    expect(blockerOf(dialog)).toHaveTextContent("Needs Microsoft 365 in an active organization");
     expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
   });
 
@@ -474,7 +474,7 @@ it("names the organization of a resumed run's tenant, not the active one (Muse r
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
   expect(within(dialog).getByText("Fabrikam")).toBeInTheDocument();
   expect(within(dialog).queryByText("Contoso IT")).not.toBeInTheDocument();
-  expect(within(dialog).getByRole("alert")).toHaveTextContent("This run is set up for Fabrikam, which is not the active organization.");
+  expect(blockerOf(dialog)).toHaveTextContent("This run is set up for Fabrikam, which is not the active organization.");
   expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
 });
 
@@ -499,7 +499,7 @@ describe("start errors inside the run review (review round 3)", () => {
     const bridge = makeMockBridge({}, { ...state, tenants: [] });
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    const notReady = within(dialog).getAllByRole("alert").find((element) => element.textContent?.includes("is not ready to run this agent"))!;
+    const notReady = blockerOf(dialog);
     expect(notReady).toHaveTextContent("Ollama isn't running. Start it with `ollama serve`.");
     expect(within(notReady).getByRole("button", { name: "Open provider settings" })).toBeInTheDocument();
     expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
@@ -541,4 +541,20 @@ it("says the report destinations could not be checked when the connector list fa
   await waitFor(() => expect(dialog).toHaveTextContent("Where its report goes could not be checked: saved delivery rules may still send it."));
   expect(dialog).not.toHaveTextContent("No saved delivery rule sends its report.");
   expect(dialog).not.toHaveTextContent("so nothing is sent there");
+});
+
+/** The run review's blocker: the dialog's description, not an alert (design round review, Muse S). */
+function blockerOf(dialog: HTMLElement): HTMLElement {
+  const id = dialog.getAttribute("aria-describedby");
+  expect(id).toBeTruthy();
+  return document.getElementById(id!)!;
+}
+
+it("makes the blocker the dialog's description and focuses its fix (design round review, Muse S)", async () => {
+  const devices = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/devices/confirm", bridge: makeMockBridge({}, noOrganizationState([devices])) });
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(dialog).toHaveAccessibleDescription(/Needs Intune in an active organization/);
+  expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
+  await waitFor(() => expect(within(dialog).getByRole("button", { name: "Connect Intune" })).toHaveFocus());
 });
