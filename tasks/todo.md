@@ -1759,3 +1759,30 @@ B. [x] Windows tree kill cannot reach a child whose wrapper already exited (`tas
 - B: `309b8bfd`. Comment and SPEC state that on Windows `taskkill /T` ends the tree while the wrapper runs and does not reach a child left by a wrapper that already exited; a Job Object would close that. No behaviour change, so no new test.
 
 - CI on e94b9cc failed once in `run-confirmation.test.ts` (not changed in this PR): the rollback-run test saw the run fail, removed its folder, and the run's last state write then hit ENOENT after the test ended. The fixture now waits for the store's write queue to settle before removing the folder.
+
+## PR #175 review round 5 (GPT-6.1-Sol, head 3b2af39, 2026-11-09)
+
+Blocking
+1. [x] Manual scans allow unrestricted discovery while they run: the scan-results mode starts only after the probes finish, so an overlapping app state read during Scan again in a completed profile fetched an off-device endpoint. Enter it when a Scan, Retry or Start is requested; test background reads during a delayed manual scan.
+
+Should fix
+2. [x] The renderer scan fixture can drop completion: `finish()` does nothing before the scan effect installs its callback. Await `startModelScan` before finishing; a premature finish fails loudly.
+
+Nit
+3. [x] Public docs describe superseded behaviour: first-run says any key skips (Escape does), connect-shared-app says nothing is preselected (Chat's not-connected card preselects the service and part). Fix both, regenerate `web/content/docs`, `docs:check` clean.
+4. [x] A Claude cancellation host test failed once in a combined run; make it deterministic if reproducible.
+
+### Muse Wonder Full round 5 (head 3b2af39, no blocking or should-fix findings)
+
+A. [x] With no tenant, `getGraphCacheStatus()` without an id rejects through IPC and logs "Error occurred in handler" on every no-tenant conversation reload. Without an id and without an active tenant, return an empty status; an explicit unknown id still throws.
+B. [x] A scan check that times out can be missing from the served listing (its aborted summary lands after the copy), so Settings shows not checked while the scan row said Could not check. On timeout, record a failed-check summary for that provider.
+
+### Round 5 responses
+
+- 1: `6f0162cd`. `scanModels`, `retryModelScanProbe` and `startLocalRuntime` enter the scan-results mode when asked for, before any probe runs. Test: in a completed profile, Scan again is held on a slow LM Studio while app state, listing and the Office tick run; the off-device Ollama endpoint is never fetched (fails without the fix).
+- 2: `c0ca5bb3`. The fixture's `finish()` waits for the window to call `startModelScan` and throws when it never does; every call site awaits it. Test: a premature finish rejects.
+- 3: `9dba38f4`. First run says Escape, Skip or a click; connect-shared-app says Chat's not-connected card preselects the service and part. `web/content/docs` regenerated, `docs:check` clean.
+- 4: `b853d29b`. The wrapper-kill tests wait for the wrapper's child, then stop the check through its signal (the path the timeout uses) instead of racing a 1.5 s timeout against a loaded machine; `gone` waits up to 5 s for the system to reap. The timeout itself is still covered by a separate `runScanCheck` case.
+- A: `77e8a25b`. `getGraphCacheStatus()` without an id and without an active tenant returns an empty status; an explicit unknown id still throws. Test in the no-tenant harness.
+- B: `c260f99c`. After a scan or Retry, a check that ended could not check without a summary (timed out, refused off-device endpoint) is served as a failed check with its row's reason. Test: a check that never answers is listed with `checkFailed` and the row's fact, not "not checked".
+
