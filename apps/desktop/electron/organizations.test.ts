@@ -1002,8 +1002,6 @@ describe("reconcile keeps what it cannot use (Muse round 3)", () => {
         { id: shared, name: "Woodgrove", createdAt: "x", connections: { microsoft365: { tenantId: woodgrove.id } } },
         // Dropped: a second record for a tenant that is already claimed.
         { id: shared, name: "Woodgrove again", createdAt: "x", connections: { microsoft365: { tenantId: woodgrove.id } } },
-        // Dropped: no tenant and nothing this version keeps.
-        { id: shared, name: "Empty", createdAt: "x", connections: {} },
       ],
       rawNotice: undefined,
       tenants,
@@ -1011,6 +1009,25 @@ describe("reconcile keeps what it cannot use (Muse round 3)", () => {
     });
     assert.equal(scheduleOf(result.installedAgents, "shared")?.organizationId, `org-${woodgrove.id}`);
   });
+
+  for (const [label, other] of [
+    ["no tenant", { connections: {} }],
+    ["a different tenant", { connections: { microsoft365: { tenantId: "tenant-not-on-this-device" } } }],
+  ] as const) {
+    it(`leaves a schedule unassigned when a dropped record with its over-long id names ${label} (design round review, Muse P)`, () => {
+      const shared = `org-${"p".repeat(300)}`;
+      const result = reconcileOrganizations({
+        rawOrganizations: [
+          { id: shared, name: "Woodgrove", createdAt: "x", connections: { microsoft365: { tenantId: woodgrove.id } } },
+          { id: shared, name: "Other", createdAt: "x", ...other },
+        ],
+        rawNotice: undefined,
+        tenants,
+        installedAgents: [agent("shared", { schedule: { ...schedule(), organizationId: shared } })] as unknown as AgentSummary[],
+      });
+      assert.equal(scheduleOf(result.installedAgents, "shared")?.organizationId, undefined);
+    });
+  }
 
   it("leaves a schedule unassigned when several records share its over-long id (Muse round 5)", () => {
     const shared = `org-${"s".repeat(300)}`;

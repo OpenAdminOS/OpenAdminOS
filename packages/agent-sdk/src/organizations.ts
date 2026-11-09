@@ -115,10 +115,21 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
   // dropped record never makes an id ambiguous.
   const keptLongIds = new Map<string, number>();
   const replacedIds = new Map<string, string>();
+  // An over-long id that raw records use for different tenants, or for a
+  // tenant and for none, is ambiguous even when only one of them is kept.
+  const longIdTenants = new Map<string, Set<string>>();
+  for (const raw of migrated ? [] : (input.rawOrganizations as unknown[])) {
+    if (!isRecord(raw) || typeof raw.id !== "string" || raw.id.trim().length <= 300) continue;
+    const connections = isRecord(raw.connections) ? raw.connections : undefined;
+    const microsoft365 = connections && isRecord(connections.microsoft365) ? connections.microsoft365 : undefined;
+    const tenantKey = typeof microsoft365?.tenantId === "string" ? `tenant:${microsoft365.tenantId}` : "none";
+    const id = raw.id.trim();
+    longIdTenants.set(id, (longIdTenants.get(id) ?? new Set()).add(tenantKey));
+  }
   const keepId = (rawId: string, idUsable: boolean, base: string) => {
     if (idUsable) return rawId;
     const id = freshId(base);
-    if (rawId.length > 300) {
+    if (rawId.length > 300 && (longIdTenants.get(rawId)?.size ?? 0) <= 1) {
       const seen = (keptLongIds.get(rawId) ?? 0) + 1;
       keptLongIds.set(rawId, seen);
       if (seen === 1) replacedIds.set(rawId, id);
