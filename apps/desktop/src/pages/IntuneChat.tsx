@@ -2007,6 +2007,7 @@ function IntuneChatContent() {
                         tenant={messageTenant}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
+                        editDisabled={sending}
                         onCopy={() => void handleCopyMessage(message)}
                         onEditPrompt={() => handleEditPrompt(message)}
                         onRegenerate={() => void handleRegenerateResponse(message)}
@@ -4236,6 +4237,7 @@ function ChatMessageBubble({
   tenant,
   multiTenant,
   regenerateDisabled,
+  editDisabled,
   onCopy,
   onEditPrompt,
   onRegenerate,
@@ -4251,6 +4253,8 @@ function ChatMessageBubble({
   tenant?: TenantRecord;
   multiTenant: boolean;
   regenerateDisabled: boolean;
+  /** A send is still finishing, so Edit would be ignored; it waits instead. */
+  editDisabled: boolean;
   onCopy: () => void;
   onEditPrompt: () => void;
   onRegenerate: () => void;
@@ -4289,6 +4293,7 @@ function ChatMessageBubble({
               label="Edit and resend prompt"
               tooltip={`Edit · ${timestamp}`}
               icon={<IconPencil size={12} />}
+              disabled={editDisabled}
               onClick={onEditPrompt}
             />
           </div>

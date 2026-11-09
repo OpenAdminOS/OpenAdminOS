@@ -2086,3 +2086,34 @@ describe("IntuneChat live run", () => {
     expect(await screen.findByRole("button", { name: /4 steps/ }, { timeout: 4000 })).toBeInTheDocument();
   });
 });
+
+describe("IntuneChat edit while a send is finishing (review round 4)", () => {
+  it("keeps Edit disabled until the send settles, then loads the prompt into the composer", async () => {
+    const user = userEvent.setup();
+    const bridge = streamingBridge(createMockAppState());
+    // The conversation reload after the answer is slow: the send has not
+    // finished although the answer is already shown.
+    const list = vi.mocked(bridge.listIntuneChatConversations);
+    const original = list.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((done) => (release = done));
+    let calls = 0;
+    list.mockImplementation(async (...args) => {
+      calls += 1;
+      if (calls > 1) await held;
+      return original(...args);
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    const prompt = "Which managed devices have not synced in the last 7 days?";
+    await user.type(composer, prompt);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText(/17 of 119 managed devices have not checked in/);
+    const edit = screen.getByRole("button", { name: "Edit and resend prompt" });
+    expect(edit).toBeDisabled();
+    await act(async () => release());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit and resend prompt" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Edit and resend prompt" }));
+    expect(screen.getByRole("combobox", { name: "Ask about your Microsoft 365 tenant" })).toHaveValue(prompt);
+  });
+});
