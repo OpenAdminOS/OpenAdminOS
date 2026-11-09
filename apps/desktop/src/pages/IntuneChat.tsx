@@ -727,11 +727,20 @@ function IntuneChatContent() {
     }
     const workspaceContext = buildWorkspaceContextInput();
     const contextSummary = workspaceContext ? workspaceContextSummary : undefined;
+    // With no tenant, a question blocked on the device (it gets the
+    // not-connected card) sends nothing, so it needs no confirmation.
+    const blockedOnDevice =
+      !activeTenant &&
+      provider &&
+      !provider.isLocal &&
+      requiresHostedChatConsent(provider, activeTenant, activeModel) &&
+      (await window.openAdminOS?.previewIntuneChatSend?.({ content }).then((preview) => !preview.reachesModel).catch(() => false));
     if (
       provider &&
       activeTenant?.kind !== "sample" &&
       !provider.isLocal &&
-      (requiresHostedChatConsent(provider, activeTenant) || Boolean(workspaceContext))
+      !blockedOnDevice &&
+      (requiresHostedChatConsent(provider, activeTenant, activeModel) || Boolean(workspaceContext))
     ) {
       setHostedConsentPrompt({
         content,
@@ -751,7 +760,7 @@ function IntuneChatContent() {
     }
     await executeSend(
       content,
-      rememberedHostedProviderConsent(provider, activeTenant),
+      rememberedHostedProviderConsent(provider, activeTenant, activeModel),
       conversationIdOverride,
       workspaceContext,
     );
@@ -1137,7 +1146,7 @@ function IntuneChatContent() {
     const pending = hostedConsentPrompt;
     if (!pending) return;
     if (rememberHostedConsent) {
-      rememberHostedChatConsent(pending.tenantId, pending.providerId);
+      rememberHostedChatConsent(pending.tenantId, pending.providerId, pending.model);
     }
     setHostedConsentPrompt(null);
     await executeSend(
@@ -4134,17 +4143,19 @@ function ConsentFact({ label, value }: { label: string; value: string }) {
 function requiresHostedChatConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
+  model?: string,
 ): provider is { id: ProviderId; isLocal: false } {
   if (!provider || provider.isLocal) return false;
-  return !hasRememberedHostedChatConsent(tenant?.id, provider.id);
+  return !hasRememberedHostedChatConsent(tenant?.id, provider.id, model);
 }
 
 function rememberedHostedProviderConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
+  model?: string,
 ): HostedProviderConsentInput | undefined {
   if (!provider || provider.isLocal) return undefined;
-  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id)) return undefined;
+  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id, model)) return undefined;
   return createHostedProviderConsent(tenant?.id, provider.id, true);
 }
 
@@ -4179,27 +4190,30 @@ export function createHostedBatchProviderConsent(
   };
 }
 
-function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId): string {
-  // Tenant ids are GUIDs or the sample id, so the no-tenant key never collides with one.
+function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId, model?: string): string {
+  // Tenant ids are GUIDs or the sample id, so the no-tenant key never
+  // collides with one. The no-tenant decision also names the model, so a
+  // model change asks again.
   return tenantId
     ? `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`
-    : `openadminos:intune-chat-hosted-consent:v1:no-tenant:${providerId}`;
+    : `openadminos:intune-chat-hosted-consent:v2:no-tenant:${providerId}:${model ?? "default"}`;
 }
 
 function hasRememberedHostedChatConsent(
   tenantId: string | undefined,
   providerId: ProviderId,
+  model?: string,
 ): boolean {
   try {
-    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId)) === "true";
+    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId, model)) === "true";
   } catch {
     return false;
   }
 }
 
-function rememberHostedChatConsent(tenantId: string | undefined, providerId: ProviderId): void {
+function rememberHostedChatConsent(tenantId: string | undefined, providerId: ProviderId, model?: string): void {
   try {
-    window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId), "true");
+    window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId, model), "true");
   } catch {
     // If localStorage is unavailable, the next hosted send will ask again.
   }

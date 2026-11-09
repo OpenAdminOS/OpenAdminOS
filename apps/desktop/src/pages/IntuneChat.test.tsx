@@ -315,9 +315,38 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(consent).not.toHaveProperty("tenantId");
   });
 
+  it("sends a question blocked on the device without the hosted confirmation (review round 1, finding 9)", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      { previewIntuneChatSend: vi.fn(async () => ({ reachesModel: false })) },
+      guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), DEVICE_QUESTION);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("heading", { name: "Send your question to a hosted provider" })).not.toBeInTheDocument();
+    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0].hostedProviderConsent).toBeUndefined();
+  });
+
+  it("asks again after a model change when the no-tenant decision was remembered for another model (finding 10)", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4", "true");
+    try {
+      const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+      await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      expect(await screen.findByRole("heading", { name: "Send your question to a hosted provider" })).toBeInTheDocument();
+      expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    } finally {
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4");
+    }
+  });
+
   it("asks again with the tenant-bound confirmation once a tenant is connected, even after remembering the no-tenant one", async () => {
     const user = userEvent.setup();
-    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v1:no-tenant:openai", "true");
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5", "true");
     try {
       const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
       renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
@@ -326,7 +355,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       expect(await screen.findByRole("heading", { name: "Send tenant context to hosted provider" })).toBeInTheDocument();
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     } finally {
-      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v1:no-tenant:openai");
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5");
     }
   });
 });
