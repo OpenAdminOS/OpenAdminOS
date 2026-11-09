@@ -343,15 +343,16 @@ describe("Settings provider section", () => {
     expect(providersSection).not.toBeNull();
     const providerView = within(providersSection as HTMLElement);
     expect(providerView.getByText("Ollama")).toBeInTheDocument();
-    expect(providerView.getByText("OpenAI")).toBeInTheDocument();
+    expect(providerView.getByText("Codex")).toBeInTheDocument();
     expect(providerView.getAllByText("Connected")).toHaveLength(2);
     expect(providerView.getAllByText("Active")).toHaveLength(5);
     expect(providerView.getAllByText("Not installed")).toHaveLength(3);
     expect(providerView.queryByText("Coming soon")).not.toBeInTheDocument();
-    expect(providerView.getAllByText("Hosted via CLI").length).toBeGreaterThan(0);
-    expect(providerView.getByText("Hosted API")).toBeInTheDocument();
+    expect(providerView.getByText("Prompts go to OpenAI API · US")).toBeInTheDocument();
+    expect(providerView.getByText("Prompts go to Azure OpenAI · your resource's region")).toBeInTheDocument();
+    expect(providerView.queryByText("Hosted via CLI")).not.toBeInTheDocument();
 
-    await user.click(providerView.getByRole("radio", { name: "Set OpenAI active" }));
+    await user.click(providerView.getByRole("radio", { name: "Set Codex active" }));
 
     await waitFor(() => {
       expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
@@ -383,11 +384,11 @@ describe("Settings provider section", () => {
     expect(within(detected).queryByText("Anthropic")).not.toBeInTheDocument();
     // The detected provider also leads the full list, and stays inactive.
     const radios = screen.getAllByRole("radio", { name: /^Set .* active$/ });
-    expect(radios[0]).toHaveAccessibleName("Set OpenAI active");
+    expect(radios[0]).toHaveAccessibleName("Set Codex active");
     expect(radios[0]).not.toBeChecked();
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
 
-    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("OpenAI") }));
+    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("Codex") }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
   });
 

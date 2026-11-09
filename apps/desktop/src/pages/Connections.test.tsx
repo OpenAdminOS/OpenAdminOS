@@ -397,7 +397,8 @@ describe("map and status strip agree (review rounds 1 and 2)", () => {
       expect(model.model.kind).toBe(strip.kind);
       if (strip.kind !== "none") {
         const provider = state.providers.find((entry) => entry.id === state.activeProviderId)!;
-        expect(strip.label).toContain(model.model.providerName!);
+        // A hosted strip names where prompts go; a local one names the runtime.
+        expect(strip.label).toContain(strip.kind === "hosted" ? model.model.location! : model.model.providerName!);
         expect(model.model.providerName).toBe(provider.name);
         expect(model.model.name).toBe(`${strip.model ?? provider.name}, ${strip.kind}`);
       }

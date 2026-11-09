@@ -74,7 +74,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, providerDataLocation } from "../copy";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -2307,7 +2307,7 @@ function ChatComposer({
       : "Ask a follow-up, or type / to run an agent"
     : SETUP_COPY.guestComposerPlaceholder;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-  const hostedSentence = `Prompts and tenant data go to ${activeProvider?.name ?? "the selected provider"} while this model is selected.${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
+  const hostedSentence = `Prompts and tenant data go to ${activeProvider ? providerDataLocation(activeProvider) : "the selected provider"} while this model is selected.${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
 
   return (
     <div className="relative">
@@ -3966,7 +3966,7 @@ function HostedChatConsentModal({
 }) {
   const trustCopy = deriveTrustCopy({
     provider: prompt
-      ? { name: prompt.providerName, isLocal: false }
+      ? { id: prompt.providerId, name: prompt.providerName, isLocal: false }
       : { name: "Hosted provider", isLocal: false },
     ...(prompt?.model ? { model: prompt.model } : {}),
     scope: { tenantNames: prompt ? [prompt.tenantName] : [] },

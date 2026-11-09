@@ -596,7 +596,7 @@ describe("contextual tenant setup", () => {
     expect(detected.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
 
-    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("OpenAI") }));
+    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("Codex") }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
   });
 

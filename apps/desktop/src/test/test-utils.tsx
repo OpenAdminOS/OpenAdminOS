@@ -64,7 +64,7 @@ export const mockProviders: ProviderSummary[] = [
   },
   {
     id: "apple-foundation",
-    name: "Apple Foundation",
+    name: "Apple Intelligence",
     description: "Use Apple's on-device Foundation Models framework on compatible Macs.",
     isLocal: true,
     status: "available",
@@ -83,7 +83,7 @@ export const mockProviders: ProviderSummary[] = [
   },
   {
     id: "openai",
-    name: "OpenAI",
+    name: "Codex",
     description: "Use OpenAI through the locally installed Codex CLI.",
     isLocal: false,
     status: "connected",
@@ -93,7 +93,7 @@ export const mockProviders: ProviderSummary[] = [
   },
   {
     id: "anthropic",
-    name: "Anthropic",
+    name: "Claude Code",
     description: "Use Anthropic through the locally installed Claude Code CLI.",
     isLocal: false,
     status: "not-installed",

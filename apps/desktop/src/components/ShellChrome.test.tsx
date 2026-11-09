@@ -70,7 +70,7 @@ describe("shell chrome", () => {
     });
 
     expect(
-      await screen.findByRole("status", { name: /Hosted · OpenAI.*gpt-5/ }),
+      await screen.findByRole("status", { name: /Hosted · OpenAI API · US.*gpt-5/ }),
     ).toBeInTheDocument();
     expect(screen.getByText("Nightly")).toBeInTheDocument();
   });

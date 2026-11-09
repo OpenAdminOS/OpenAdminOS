@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { deriveTrustCopy } from "../copy";
+import { deriveTrustCopy, providerDataLocation } from "../copy";
 import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -141,7 +141,7 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
   }
   return {
     kind: "hosted",
-    label: `Hosted · ${provider.name}`,
+    label: `Hosted · ${providerDataLocation(provider)}`,
     ...(model ? { model } : {}),
     ...toolHosts,
     tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,

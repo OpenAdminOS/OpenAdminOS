@@ -674,7 +674,7 @@ describe("IntuneChat agent picker", () => {
 });
 
 describe("IntuneChat hosted-provider disclosure", () => {
-  const sentence = "Prompts and tenant data go to OpenAI while this model is selected.";
+  const sentence = "Prompts and tenant data go to OpenAI API · US while this model is selected.";
   const conversation: IntuneChatConversation = {
     id: "conversation-hosted", title: "Stale devices", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
   };
@@ -752,10 +752,10 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", {
       name: "Ask about your Microsoft 365 tenant",
     });
-    expect(document.querySelector("header")?.textContent ?? "").not.toContain("OpenAI");
+    expect(document.querySelector("header")?.textContent ?? "").not.toContain("Prompts and tenant data go to");
     // A new conversation shows the hosted sentence in full under the composer.
     expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts and tenant data go to OpenAI while this model is selected.",
+      "Prompts and tenant data go to OpenAI API · US while this model is selected.",
     );
 
     await user.type(composer, "Which Windows devices are stale?");
@@ -769,7 +769,7 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(
       screen.getByText(
         deriveTrustCopy({
-          provider: { name: "OpenAI", isLocal: false },
+          provider: { id: "openai", name: "Codex", isLocal: false },
           model: "gpt-5",
           scope: { tenantNames: ["Contoso IT"] },
         }).confirmBody,

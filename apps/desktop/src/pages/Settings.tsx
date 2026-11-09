@@ -71,6 +71,7 @@ import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import {
   SETTINGS_ITEMS,
+  providerDataLocation,
   SETTINGS_SECTIONS,
   SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS,
   searchSettings,
@@ -613,11 +614,8 @@ function ProviderRow({
     (provider.status === "available" && !provider.cli)
   );
   const cliLabel = provider.cli ? ({ ready: "Connected", "check-required": "Test required", "not-installed": "Not installed", "signed-out": "Signed out", "access-denied": "Access denied", "unsupported-version": "Update required", "request-failed": "Request failed" } as const)[provider.cli.state] : undefined;
-  const kind = provider.isLocal
-    ? "Local"
-    : provider.id === "azure-openai"
-      ? "Hosted API"
-      : "Hosted via CLI";
+  // A hosted provider names where its prompts go, like every other surface.
+  const kind = provider.isLocal ? "Local" : `Prompts go to ${providerDataLocation(provider)}`;
   const status = testing
     ? { label: "Checking", tone: "info" as const }
     : !implemented

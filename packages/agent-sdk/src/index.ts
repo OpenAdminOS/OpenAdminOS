@@ -4180,7 +4180,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "apple-foundation",
-    name: "Apple Foundation",
+    name: "Apple Intelligence",
     description:
       "Use Apple's on-device Foundation Models framework on compatible Macs.",
     isLocal: true,
@@ -4200,7 +4200,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "anthropic",
-    name: "Anthropic",
+    name: "Claude Code",
     description:
       "Use Claude models through the local Claude Code CLI. Tenant prompts are sent to Anthropic's API when active.",
     isLocal: false,
@@ -4210,7 +4210,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "openai",
-    name: "OpenAI Codex",
+    name: "Codex",
     description:
       "Hosted OpenAI models through the local Codex CLI. Tenant prompts leave this device when active.",
     isLocal: false,
@@ -4220,7 +4220,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "copilot",
-    name: "GitHub Copilot",
+    name: "GitHub Copilot CLI",
     description: "Use models through the GitHub Copilot CLI and your existing account. Tenant prompts leave this device and are processed through GitHub Copilot when active.",
     isLocal: false,
     status: "available",
@@ -4229,7 +4229,7 @@ export const providerCatalog: readonly ProviderSummary[] = [
   },
   {
     id: "gemini",
-    name: "Google Gemini",
+    name: "Gemini CLI",
     description: "Use Gemini through the installed Gemini CLI. Tenant prompts are sent to Google's service when active.",
     isLocal: false,
     status: "available",
