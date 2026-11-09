@@ -1628,8 +1628,6 @@ export class AppStateStore {
   /** Tenants disconnected in this session, with when, so their late run snapshots are dropped. */
   /** Writes run one after another; see write(). */
   private writeTail: Promise<void> = Promise.resolve();
-  /** Set by setAzureOpenAIConfig for the audit event of its write. */
-  private pendingAzureOpenAIKeyChange: "set" | "removed" | undefined;
   /** The move to organizations, recorded on the first write after it. */
   private pendingMigrationAudit: Record<string, string | number | string[]> | undefined;
   private readonly removedTenants = new Map<string, string>();
@@ -3277,22 +3275,24 @@ export class AppStateStore {
     const apiVersion =
       input.apiVersion.trim() || DEFAULT_AZURE_OPENAI_API_VERSION;
     const hasApiKeyInput = Object.prototype.hasOwnProperty.call(input, "apiKey");
-    if (hasApiKeyInput) {
-      const normalized =
-        typeof input.apiKey === "string" ? input.apiKey.trim() : null;
-      const accessor = this.providerSecretsFor("azure-openai");
-      if (normalized && normalized.length > 0) {
-        await accessor.set("api-key", normalized);
-      } else {
-        await accessor.remove("api-key");
-      }
-      // Recorded with the settings write below; the key value never is.
-      this.pendingAzureOpenAIKeyChange = normalized ? "set" : "removed";
-    }
 
+    // The key change and the settings write happen together under the lock,
+    // and the audit event for the key travels with this write only.
     await this.serialize(async () => {
+      let azureOpenAIKey: "set" | "removed" | undefined;
+      if (hasApiKeyInput) {
+        const normalized =
+          typeof input.apiKey === "string" ? input.apiKey.trim() : null;
+        const accessor = this.providerSecretsFor("azure-openai");
+        if (normalized && normalized.length > 0) {
+          await accessor.set("api-key", normalized);
+        } else {
+          await accessor.remove("api-key");
+        }
+        azureOpenAIKey = normalized ? "set" : "removed";
+      }
       const current = await this.read();
-      await this.write({
+      await this.writeWithAudit({
         ...current,
         providerConfigs: {
           ...(current.providerConfigs ?? {}),
@@ -3302,7 +3302,7 @@ export class AppStateStore {
             apiVersion,
           },
         },
-      });
+      }, azureOpenAIKey ? { azureOpenAIKey } : {});
     });
 
     return this.getAzureOpenAIConfig();
@@ -7983,12 +7983,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * come from that state too: only this method changes them, and a writer
    * holding an older copy cannot drop events written since.
    */
-  private recordConfigurationChanges(state: PersistedState): number {
+  private recordConfigurationChanges(state: PersistedState, audit: WriteAudit = {}): number {
     const previous = this.lastReadSnapshot;
     const existing = previous ? previous.configurationAudit : state.configurationAudit;
     const timestamp = this.clock().toISOString();
-    const azureOpenAIKey = this.pendingAzureOpenAIKeyChange;
-    this.pendingAzureOpenAIKeyChange = undefined;
+    const { azureOpenAIKey } = audit;
     const recorded = previous
       ? diffConfigurationAudit(previous, state, {
           timestamp,
@@ -8016,14 +8015,19 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * root cause of the "redirected to onboarding mid-action" bug.
    */
   private async write(input: PersistedState): Promise<void> {
+    return this.writeWithAudit(input, {});
+  }
+
+  /** A write that carries audit facts of its own operation, such as a key change. */
+  private async writeWithAudit(input: PersistedState, audit: WriteAudit): Promise<void> {
     // One write at a time, in call order, so audit events derived from the
     // last state written are never lost to an interleaved writer.
-    const run = this.writeTail.then(() => this.writeNow(input));
+    const run = this.writeTail.then(() => this.writeNow(input, audit));
     this.writeTail = run.catch(() => undefined);
     return run;
   }
 
-  private async writeNow(input: PersistedState): Promise<void> {
+  private async writeNow(input: PersistedState, audit: WriteAudit): Promise<void> {
     // Keep organizations consistent with the tenants being written, so a
     // removed tenant's organization and its schedule assignments never
     // outlive it in the file.
@@ -8041,7 +8045,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (reconciled.notice) state.organizationMigration = reconciled.notice;
     else delete state.organizationMigration;
-    this.recordConfigurationChanges(state);
+    this.recordConfigurationChanges(state, audit);
     // Every file that holds audit history is flushed, not only the write
     // that added events: a later unflushed replacement could lose them.
     const durable = (state.configurationAudit?.length ?? 0) > 0;
@@ -8060,4 +8064,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       await rm(tmpPath, { force: true });
     }
   }
+}
+
+/** Audit facts that belong to one write and are not visible in state, such as a key change. */
+interface WriteAudit {
+  azureOpenAIKey?: "set" | "removed";
 }

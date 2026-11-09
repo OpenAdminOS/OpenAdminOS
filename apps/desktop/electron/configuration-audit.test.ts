@@ -537,3 +537,44 @@ describe("configuration audit, design round review (Muse C, G, H, I, K)", () => 
     }
   });
 });
+
+describe("Azure OpenAI key audit per operation (design round review 2)", () => {
+  const settings = { endpoint: "https://contoso.openai.azure.com", deployment: "gpt-4o", apiVersion: "2024-10-21" };
+
+  it("records each of two concurrent key changes", async () => {
+    const fixture = await makeFixture();
+    try {
+      await Promise.all([
+        fixture.store.setAzureOpenAIConfig({ ...settings, apiKey: "first-key" }),
+        fixture.store.setAzureOpenAIConfig({ ...settings, apiKey: null }),
+      ]);
+      const keys = (await fixture.recorded()).filter((event) => event.type === "provider.configuration-changed").map((event) => event.details.apiKey);
+      assert.deepEqual(keys, ["set", "removed"]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("never attaches a failed write's key change to a later write", async () => {
+    const fixture = await makeFixture();
+    const store = fixture.store as unknown as { writeNow: (...args: unknown[]) => Promise<void> };
+    const original = store.writeNow.bind(store);
+    let fail = true;
+    store.writeNow = async (...args: unknown[]) => {
+      if (fail) {
+        fail = false;
+        throw new Error("The state file could not be written.");
+      }
+      return original(...args);
+    };
+    try {
+      await assert.rejects(fixture.store.setAzureOpenAIConfig({ ...settings, apiKey: "lost-key" }), /could not be written/);
+      await fixture.store.setActiveProvider("openai");
+      const events = await fixture.recorded();
+      assert.deepEqual(typesOf(events), ["provider.changed"]);
+      assert.ok(!events.some((event) => event.details.apiKey !== undefined));
+    } finally {
+      await fixture.close();
+    }
+  });
+});
