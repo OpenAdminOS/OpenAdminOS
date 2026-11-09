@@ -1188,6 +1188,31 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
       }, { noTenant: true, provider: hosted });
     });
 
+    it("uses one routing decision for preview and send, on both send paths (review round 2, item 1)", async () => {
+      for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+        await withHarness(async ({ store, prompts, script }) => {
+          await store.setChatInvestigationMode("always-deterministic");
+          script(["Autopatch rings are deployment groups."]);
+          const question = "Explain Windows Autopatch rings";
+          // The send answers this docs question with the model, so the preview must say so.
+          assert.deepEqual(await store.previewIntuneChatSend({ content: question }), { reachesModel: true }, send);
+          await assert.rejects(() => ask(store, send, { content: question }), /Hosted provider confirmation is required/, send);
+          assert.equal(prompts.length, 0, send);
+          const answered = (await ask(store, send, { content: question, hostedProviderConsent: noTenantConsent() })).assistantMessage;
+          assert.equal(answered.status, "completed", send);
+          assert.ok(prompts.length > 0, send);
+        }, { noTenant: true, provider: hosted });
+      }
+    });
+
+    it("asks for confirmation when the tool loop classifies a tenant question (round 2, item T)", async () => {
+      await withHarness(async ({ store, prompts }) => {
+        assert.deepEqual(await store.previewIntuneChatSend({ content: DEVICE_QUESTION }), { reachesModel: true });
+        await assert.rejects(() => store.sendIntuneChatMessage({ content: DEVICE_QUESTION }), /Hosted provider confirmation is required/);
+        assert.equal(prompts.length, 0);
+      }, { noTenant: true, provider: hosted });
+    });
+
     it("refuses a no-tenant acknowledgement for a send that includes tenant context", async () => {
       for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
         await withHarness(async ({ store, prompts, graphBuilds, graphPaths, script }) => {
@@ -1207,5 +1232,23 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
         }, { provider: hosted });
       }
     });
+  });
+});
+
+describe("hosted model gate (review round 2, item 1)", () => {
+  it("refuses every model call until the confirmation is verified", async () => {
+    const { gateHostedLlm } = await import("./service.js");
+    let calls = 0;
+    let verified = false;
+    const gated = gateHostedLlm(
+      { complete: async () => { calls += 1; return { text: "x", model: "m" }; }, stream: () => { calls += 1; return [] as never; } },
+      () => { if (!verified) throw new Error("Hosted provider confirmation is required."); },
+    );
+    await assert.rejects(async () => gated.complete(), /confirmation is required/);
+    assert.throws(() => gated.stream(), /confirmation is required/);
+    assert.equal(calls, 0);
+    verified = true;
+    await gated.complete();
+    assert.equal(calls, 1);
   });
 });

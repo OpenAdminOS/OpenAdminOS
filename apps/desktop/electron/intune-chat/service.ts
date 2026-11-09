@@ -265,6 +265,25 @@ function accessBlockTiming(
   return plan.sources.kind === "docs" ? {} : { now: blocked };
 }
 
+/**
+ * Refuses a model call that has no verified hosted confirmation: a
+ * backstop behind the routing decision, so no path can call a hosted
+ * model without one. For a local model the check passes at once.
+ */
+export function gateHostedLlm<T extends { complete: (...args: never[]) => unknown; stream: (...args: never[]) => unknown }>(llm: T, verify: () => void): T {
+  return {
+    ...llm,
+    complete: ((...args: never[]) => {
+      verify();
+      return llm.complete(...args);
+    }) as T["complete"],
+    stream: ((...args: never[]) => {
+      verify();
+      return llm.stream(...args);
+    }) as T["stream"],
+  };
+}
+
 /** The not-connected result of an answer that is the access line, for the card. */
 function notConnectedFor(
   accessBlockedMessage: string | undefined,
@@ -1926,13 +1945,17 @@ export class IntuneChatService {
       : undefined;
     // A no-tenant question that is blocked before any model call sends
     // nothing, so it needs no hosted confirmation.
-    if (!noTenant || this.noTenantSendReachesModel(content, persisted, provider, selectedModel)) this.requireHostedChatConsent(
-      input,
-      noTenant ? undefined : tenant,
-      provider,
-      providerId,
-      workspaceContext?.summary,
-    );
+    // The same routing decision as the preview: a no-tenant question that
+    // never reaches the model needs no confirmation. Every hosted model call
+    // below is gated on `consentVerified` as well (see gateHostedLlm).
+    const reachesModel = noTenant ? (await this.noTenantRoute(content, persisted, provider, selectedModel)).reachesModel : true;
+    let consentVerified = provider?.isLocal !== false;
+    const verifyConsent = () => {
+      if (consentVerified) return;
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary);
+      consentVerified = true;
+    };
+    if (reachesModel) verifyConsent();
     // The consent audit is per tenant; a no-tenant send has none to record against.
     if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant) {
       this.recordHostedProviderConsentSafely({
@@ -2123,7 +2146,7 @@ export class IntuneChatService {
       assistantContent = directDeviceAnswer;
       responseModel = undefined;
     } else {
-      const llm = withTenantDataOutputFilter(await this.host.buildLlm(providerId, selectedModel));
+      const llm = withTenantDataOutputFilter(gateHostedLlm(await this.host.buildLlm(providerId, selectedModel), verifyConsent));
       const withMemory = conversationMemory
         ? `Conversation so far (earliest first, may be truncated):\n${fenceTenantData(conversationMemory, "chat:history")}\n\nCurrent question: ${content}`
         : content;
@@ -2383,13 +2406,17 @@ export class IntuneChatService {
       : undefined;
     // A no-tenant question that is blocked before any model call sends
     // nothing, so it needs no hosted confirmation.
-    if (!noTenant || this.noTenantSendReachesModel(content, persisted, provider, selectedModel)) this.requireHostedChatConsent(
-      input,
-      noTenant ? undefined : tenant,
-      provider,
-      providerId,
-      workspaceContext?.summary,
-    );
+    // The same routing decision as the preview: a no-tenant question that
+    // never reaches the model needs no confirmation. Every hosted model call
+    // below is gated on `consentVerified` as well (see gateHostedLlm).
+    const reachesModel = noTenant ? (await this.noTenantRoute(content, persisted, provider, selectedModel)).reachesModel : true;
+    let consentVerified = provider?.isLocal !== false;
+    const verifyConsent = () => {
+      if (consentVerified) return;
+      this.requireHostedChatConsent(input, noTenant ? undefined : tenant, provider, providerId, workspaceContext?.summary);
+      consentVerified = true;
+    };
+    if (reachesModel) verifyConsent();
     // The consent audit is per tenant; a no-tenant send has none to record against.
     if (provider?.isLocal === false && input.hostedProviderConsent && !noTenant) {
       this.recordHostedProviderConsentSafely({
@@ -2787,7 +2814,7 @@ export class IntuneChatService {
       responseModel = undefined;
       emitDelta(assistantContent);
     } else {
-      const llm = withTenantDataOutputFilter(await this.host.buildLlm(providerId, selectedModel));
+      const llm = withTenantDataOutputFilter(gateHostedLlm(await this.host.buildLlm(providerId, selectedModel), verifyConsent));
       const contextualQuestion =
         voiceContext?.history ??
         (conversationMemory
@@ -3489,15 +3516,27 @@ export class IntuneChatService {
    * tenant question decided by the keyword rules without the tool loop)
    * get their answer on the device.
    */
-  private noTenantSendReachesModel(content: string, persisted: ChatPersistedState, provider: ProviderSummary | undefined, model: string | undefined): boolean {
+  /**
+   * The one routing decision for a send with no tenant, used by the send
+   * itself and by the renderer's preview: whether the question reaches the
+   * model. It follows the send step by step: planned resources are cleared
+   * (nothing is connected), a request to write code is docs, the keyword
+   * kind is vetoed to mixed by a tenant reference, and without the tool loop
+   * only a docs kind is answered by the model.
+   */
+  private async noTenantRoute(content: string, persisted: ChatPersistedState, provider: ProviderSummary, model: string | undefined): Promise<{ reachesModel: boolean }> {
     const planned = planChatContext(content);
-    if (planned.hasWriteIntent) return false;
-    if (persisted.installedAgents.some((agent) => [agent.name, agent.slug].some((name) => name.toLowerCase() === content.toLowerCase()))) return false;
-    if (isExplicitDocsRequest(content)) return true;
-    const toolsOffered = provider ? resolveAgenticCapability({ mode: this.host.requireIntelligenceStore().getChatInvestigationSettings().mode, provider, providerId: provider.id, ...(model ? { model } : {}) }).enabled : false;
-    const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
-    if (toolsOffered && !directResources) return true;
-    return classifyChatQuestion(content, { plannedResources: planned.resources, namesSource: false }) === "docs";
+    if (planned.hasWriteIntent) return { reachesModel: false };
+    if (persisted.installedAgents.some((agent) => [agent.name, agent.slug].some((name) => name.toLowerCase() === content.toLowerCase()))) return { reachesModel: false };
+    const docsWithoutTenant = isExplicitDocsRequest(content);
+    const toolsOffered = resolveAgenticCapability({ mode: this.host.requireIntelligenceStore().getChatInvestigationSettings().mode, provider, providerId: provider.id, ...(model ? { model } : {}) }).enabled;
+    const directResources = voiceDeviceEvidenceIntent(content) || Boolean(voiceResourcesForQuestion(content));
+    if (toolsOffered && !directResources && !docsWithoutTenant) return { reachesModel: true };
+    if (docsWithoutTenant) return { reachesModel: true };
+    const servers = toolsOffered ? (await this.mcpToolsFor(NO_TENANT_SCOPE, "")).mcp?.servers ?? [] : [];
+    const keyword = classifyChatQuestion(content, { plannedResources: [], namesSource: namedServers(content, servers).length > 0 });
+    const kind = keyword === "docs" && hasTenantReference(content) ? "mixed" : keyword;
+    return { reachesModel: kind === "docs" };
   }
 
   /** For the renderer: whether a send with no tenant would reach the model and so needs a hosted confirmation. */
@@ -3507,7 +3546,7 @@ export class IntuneChatService {
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const model = resolveProviderDefaultModel(provider, persisted.activeModelByProviderId).model;
-    return { reachesModel: this.noTenantSendReachesModel(input.content.trim(), persisted, provider, model) };
+    return this.noTenantRoute(input.content.trim(), persisted, provider, model);
   }
 
   private requireHostedChatConsent(
