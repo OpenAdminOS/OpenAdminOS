@@ -25,6 +25,7 @@ import { ModelChoiceList } from "../ModelChoiceList";
 import { useSetupFlow } from "../../setup/SetupFlowContext";
 import { McpServerDialog } from "../marketplace/McpServerDialog";
 import { ServiceAccessDialog } from "../ServiceAccess";
+import { ServiceMark } from "../ServiceMark";
 import { Button } from "../Button";
 import { useToast } from "../Toast";
 import { IconCheck, IconCopy, IconShield } from "../icons";
@@ -120,15 +121,21 @@ export function ModelChoice({
 const quietLink =
   "rounded-sm text-sm text-[var(--color-text-soft)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] hover:text-[var(--color-text)] hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60";
 
-/** One starter per service, from the registry's first standalone example question. */
-export function serviceStarters(): Array<{ question: string; service: string }> {
-  return AVAILABLE_SERVICES.slice(0, 2).flatMap((service) => {
-    const question = service.parts
+/**
+ * The "Needs a service" column of the empty Chat: the first service's
+ * standalone example questions, so the heading names the one service they
+ * all need.
+ */
+export function serviceStarterColumn(limit = 2): { service: (typeof AVAILABLE_SERVICES)[number]; questions: string[] } | undefined {
+  for (const service of AVAILABLE_SERVICES) {
+    const questions = service.parts
       .filter((part) => !part.planned)
       .flatMap((part) => part.chatExamples)
-      .find((example) => !/\bthis\b/i.test(example));
-    return question ? [{ question, service: service.title }] : [];
-  });
+      .filter((example) => !/\bthis\b/i.test(example))
+      .slice(0, limit);
+    if (questions.length > 0) return { service, questions };
+  }
+  return undefined;
 }
 
 /**
@@ -152,56 +159,72 @@ export function NoTenantChatHome({
   const suggestions = servers.filter((server) => !server.installed);
   // The list hides after the admin adds one reference or dismisses it.
   const showReferences = !dismissed && suggestions.length > 0 && !servers.some((server) => server.installed);
-  const shown = suggestions.slice(0, 3);
+  const shown = suggestions.slice(0, 2);
   const installServer = installing ? servers.find((server) => server.id === installing) : undefined;
-  const starters = [
-    ...FIRST_RUN_CHAT_COPY.worksNowStarters.map((question) => ({ question, label: FIRST_RUN_CHAT_COPY.worksNow, needs: false })),
-    ...serviceStarters().map((starter) => ({ question: starter.question, label: FIRST_RUN_CHAT_COPY.needs(starter.service), needs: true })),
+  const needs = serviceStarterColumn();
+  const columns = [
+    { key: "works", heading: FIRST_RUN_CHAT_COPY.worksNow, mark: null, questions: [...FIRST_RUN_CHAT_COPY.worksNowStarters] },
+    ...(needs
+      ? [{ key: "needs", heading: FIRST_RUN_CHAT_COPY.needs(needs.service.title), mark: <ServiceMark service={needs.service.id} title={needs.service.title} size={17} off />, questions: needs.questions }]
+      : []),
   ];
 
   return (
-    <div className="mt-5 space-y-5">
-      <ul aria-label={FIRST_RUN_CHAT_COPY.startersLabel} className="grid gap-2 min-[680px]:grid-cols-2">
-        {starters.map((starter) => (
-          <li key={starter.question}>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => onAsk(starter.question)}
-              className="flex h-full w-full flex-col items-start gap-1.5 rounded-xl bg-[var(--color-surface)] px-3.5 py-3 text-left ring-1 ring-[var(--color-border-soft)] transition-colors hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60"
-            >
-              <span className="text-base leading-5 text-[var(--color-text)]">{starter.question}</span>
-              <span className={`text-xs font-medium ${starter.needs ? "text-[var(--color-text-muted)]" : "text-[var(--color-success)]"}`}>{starter.label}</span>
-            </button>
-          </li>
+    <div className="@container mt-7 space-y-7">
+      {/* Two columns of plain rows (mockup 32, section C); one column on a narrow window. */}
+      <div aria-label={FIRST_RUN_CHAT_COPY.startersLabel} role="group" className="grid gap-x-8 gap-y-5 @[600px]:grid-cols-2">
+        {columns.map((column) => (
+          <section key={column.key} aria-labelledby={`starters-${column.key}`}>
+            <h2 id={`starters-${column.key}`} className="flex items-center gap-2 px-2 text-sm font-medium text-[var(--color-text-soft)]">
+              {column.mark}
+              {column.heading}
+            </h2>
+            <ul className="mt-1.5">
+              {column.questions.map((question) => (
+                <li key={question}>
+                  <button
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => onAsk(question)}
+                    className="flex min-h-10 w-full items-center rounded-md px-2 py-2 text-left text-base leading-5 text-[var(--color-text)] transition-colors hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60"
+                  >
+                    {question}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </section>
         ))}
-      </ul>
+      </div>
 
       {showReferences ? (
-        <section aria-labelledby="reference-suggestions-heading" className="rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border-soft)]">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
-            <h2 id="reference-suggestions-heading" className="text-base font-medium text-[var(--color-text)]">
+        <section aria-labelledby="reference-suggestions-heading" className="border-t border-[var(--color-border-soft)] pt-4">
+          <div className="flex items-center justify-between gap-2 px-2">
+            <h2 id="reference-suggestions-heading" className="text-sm font-medium text-[var(--color-text)]">
               {FIRST_RUN_CHAT_COPY.referencesTitle}
             </h2>
-            <button
-              type="button"
+            <Button
+              size="sm"
+              variant="ghost"
               aria-label={FIRST_RUN_CHAT_COPY.hideReferencesLabel}
               onClick={() => {
                 writeReferencesDismissed();
                 setDismissed(true);
               }}
-              className="rounded text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
             >
               {FIRST_RUN_CHAT_COPY.hideReferences}
-            </button>
+            </Button>
           </div>
-          <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{FIRST_RUN_CHAT_COPY.referencesHint}</p>
-          <ul className="mt-3 divide-y divide-[var(--color-border-soft)]">
+          <p className="px-2 text-xs text-[var(--color-text-muted)]">{FIRST_RUN_CHAT_COPY.referencesHint}</p>
+          <ul className="mt-2 divide-y divide-[var(--color-border-soft)]">
             {shown.map((server) => (
-              <li key={server.id} className="flex items-center gap-3 py-2.5">
+              <li key={server.id} className="flex items-center gap-3 px-2 py-2.5">
+                <span aria-hidden="true" className="service-mark inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium">
+                  {server.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2)}
+                </span>
                 <div className="min-w-0 flex-1">
                   <div className="text-base text-[var(--color-text)]">{server.name}</div>
-                  <div className="text-sm text-[var(--color-text-soft)]">{FIRST_RUN_CHAT_COPY.referenceHost(server.host)}</div>
+                  <div className="text-xs text-[var(--color-text-muted)]">{FIRST_RUN_CHAT_COPY.referenceHost(server.host)}</div>
                 </div>
                 <Button size="sm" variant="secondary" aria-label={FIRST_RUN_CHAT_COPY.addReferenceLabel(server.name)} onClick={() => setInstalling(server.id)}>
                   {FIRST_RUN_CHAT_COPY.addReference}
@@ -210,16 +233,15 @@ export function NoTenantChatHome({
             ))}
           </ul>
           {suggestions.length > shown.length ? (
-            <p className="mt-2 text-sm text-[var(--color-text-muted)]">
+            <p className="mt-1 px-2 text-xs text-[var(--color-text-muted)]">
               {FIRST_RUN_CHAT_COPY.moreReferences(suggestions.length - shown.length)}{" "}
               <button
                 type="button"
                 onClick={() => navigate("/marketplace?kind=mcp")}
-                className="rounded font-medium text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+                className="rounded-sm text-[var(--color-text-soft)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
               >
                 {FIRST_RUN_CHAT_COPY.marketplace}
               </button>
-              .
             </p>
           ) : null}
         </section>

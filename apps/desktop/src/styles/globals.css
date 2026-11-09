@@ -1097,3 +1097,17 @@ select { color-scheme: inherit; }
 @media (hover: none) {
   .calm-row-actions { opacity: 1; transform: none; }
 }
+
+/* Service marks (mockup 32): a connected service is a quiet filled tile; one
+   that is not connected is dashed with muted letters, everywhere. */
+.service-mark {
+  background: var(--color-bg-raised);
+  color: var(--color-text-soft);
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+}
+.service-mark[data-off="true"] {
+  background: transparent;
+  color: var(--color-text-muted);
+  box-shadow: none;
+  border: 1px dashed var(--color-border-strong);
+}

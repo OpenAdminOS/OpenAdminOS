@@ -142,21 +142,22 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       state,
     );
 
-  it("opens with starters and reference suggestions, a model line, and no setup dialog", async () => {
+  it("opens with two columns of starters and reference suggestions, the destination once, and no setup dialog", async () => {
     const bridge = makeMockBridge({}, guestState());
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
     expect(await screen.findByRole("heading", { name: FIRST_RUN_CHAT_COPY.homeTitle })).toBeInTheDocument();
-    expect(screen.getByText("Answering with llama3.1 in Ollama on this device.")).toBeInTheDocument();
-    const starters = within(screen.getByRole("list", { name: FIRST_RUN_CHAT_COPY.startersLabel }));
-    expect(starters.getAllByText("Works now")).toHaveLength(2);
-    expect(starters.getByText("Needs Intune")).toBeInTheDocument();
-    expect(starters.getByText("Needs Entra")).toBeInTheDocument();
-    expect(starters.getByRole("button", { name: /Which guests have not signed in for 90 days\?/ })).toBeInTheDocument();
+    // The model line is gone; the composer's model menu and the line under it say it (design round, C).
+    expect(screen.queryByText(/^Answering with/)).toBeNull();
+    const starters = within(screen.getByRole("group", { name: FIRST_RUN_CHAT_COPY.startersLabel }));
+    expect(starters.getByRole("heading", { name: "Works now" })).toBeInTheDocument();
+    const needs = starters.getByRole("heading", { name: /Needs Intune/ }).closest("section")!;
+    expect(within(needs).getAllByRole("button").length).toBeGreaterThan(0);
+    expect(starters.queryByText("Needs Entra")).toBeNull();
     expect(screen.getByText("Questions go to learn.microsoft.com")).toBeInTheDocument();
     expect(screen.getByText("Questions go to www.kqlsearch.com")).toBeInTheDocument();
-    expect(screen.getByText("Questions go to www.intuneautomation.com")).toBeInTheDocument();
-    expect(screen.getByText(/3 more in the/)).toBeInTheDocument();
+    expect(screen.queryByText("Questions go to www.intuneautomation.com")).toBeNull();
+    expect(screen.getByText(/4 more in the/)).toBeInTheDocument();
     expect(screen.getByText(LOCAL_NO_TENANT)).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveAttribute("placeholder", FIRST_RUN_CHAT_COPY.placeholderNoTenant);
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
@@ -299,7 +300,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
     expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts go to OpenAI API · US while this model is selected. Nothing is connected, so no tenant data is sent.",
+      "Prompts go to OpenAI API · US. Nothing is connected, so no tenant data is sent.",
     );
     await user.type(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -856,7 +857,7 @@ describe("IntuneChat agent picker", () => {
 });
 
 describe("IntuneChat hosted-provider disclosure", () => {
-  const sentence = "Prompts and tenant data go to OpenAI API · US while this model is selected.";
+  const sentence = "Prompts and tenant data go to OpenAI API · US.";
   const conversation: IntuneChatConversation = {
     id: "conversation-hosted", title: "Stale devices", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
   };
@@ -937,7 +938,7 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(document.querySelector("header")?.textContent ?? "").not.toContain("OpenAI");
     // A new conversation shows the hosted sentence in full under the composer.
     expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts and tenant data go to OpenAI API · US while this model is selected.",
+      "Prompts and tenant data go to OpenAI API · US.",
     );
 
     await user.type(composer, "Which Windows devices are stale?");

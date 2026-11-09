@@ -1852,22 +1852,6 @@ function IntuneChatContent() {
                 <p className="mt-2 text-md leading-6 text-[var(--color-text-muted)]">
                   {FIRST_RUN_CHAT_COPY.homeSubtitle}
                 </p>
-                {modelReady && provider ? (
-                  <p className="mt-3 flex flex-wrap items-center gap-x-2 text-sm text-[var(--color-text-soft)]">
-                    <span>
-                      {provider.isLocal
-                        ? FIRST_RUN_CHAT_COPY.modelLineLocal(activeModel ?? provider.name, provider.name)
-                        : FIRST_RUN_CHAT_COPY.modelLineHosted(activeModel ?? provider.name, providerDataLocation(provider))}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => navigate("/settings/providers")}
-                      className="rounded font-medium text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
-                    >
-                      {FIRST_RUN_CHAT_COPY.changeModel}
-                    </button>
-                  </p>
-                ) : null}
               </div>
             )}
             {!activeTenant && !modelReady ? (
@@ -2604,16 +2588,15 @@ function ChatComposer({
           </button>
         </div>
       ) : dataBoundary.kind === "local" ? (
-        <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
-          <IconLock size={13} />
+        <div className="mt-2.5 flex items-center justify-center gap-1.5 text-center text-xs text-[var(--color-text-muted)]">
           <span>
             {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : activeTenant ? LOCAL_BOUNDARY_COPY.plain : LOCAL_BOUNDARY_COPY.noTenant}
             {dataBoundary.toolHostsNote ? <span className="text-[var(--color-warning)]"> {dataBoundary.toolHostsNote}</span> : null}
           </span>
         </div>
       ) : (
-        <div id={disclosureId} role="note" hidden={!(hostedDisclosureFull || disclosureOpen)} className={`mt-2.5 items-center gap-1.5 text-sm text-[var(--color-warning)] ${hostedDisclosureFull || disclosureOpen ? "flex" : ""} ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
-          <IconCloud size={13} />
+        // The destination, stated once under the composer (mockup 32, section C); the top bar chip carries it too.
+        <div id={disclosureId} role="note" hidden={!(hostedDisclosureFull || disclosureOpen)} className={`mt-2.5 items-center justify-center text-center text-xs text-[var(--color-warning)] ${hostedDisclosureFull || disclosureOpen ? "flex" : ""}`}>
           <span>{hostedSentence}</span>
         </div>
       )}

@@ -20,9 +20,6 @@ export const FIRST_RUN_CHAT_COPY = {
   homeTitle: "What are you working on?",
   homeSubtitle:
     "Ask about Intune, Entra, Defender, macOS management, KQL or PowerShell. Questions about your own devices and users need a connected service.",
-  modelLineLocal: (model: string, provider: string) => `Answering with ${model} in ${provider} on this device.`,
-  modelLineHosted: (model: string, location: string) => `Answering with ${model} through ${location}.`,
-  changeModel: "Change model",
   startersLabel: "Starter questions",
   worksNow: "Works now",
   needs: (service: string) => `Needs ${service}`,
@@ -52,9 +49,8 @@ export const FIRST_RUN_CHAT_COPY = {
   previewFailed: (reason: string) => `Sample data did not open. ${reason}`,
   noModelFooter: "Read-only by default. Write actions always ask for your confirmation.",
   noModelSendNotice: "Choose a model above to send this question. It is kept in the composer.",
-  hostedNoTenantSentence: (location: string) =>
-    `Prompts go to ${location} while this model is selected. Nothing is connected, so no tenant data is sent.`,
-  hostedTenantSentence: (location: string) => `Prompts and tenant data go to ${location} while this model is selected.`,
+  hostedNoTenantSentence: (location: string) => `Prompts go to ${location}. Nothing is connected, so no tenant data is sent.`,
+  hostedTenantSentence: (location: string) => `Prompts and tenant data go to ${location}.`,
 } as const;
 
 /** The not-connected card in the Chat transcript (SPEC.md 4a, mockup 32 section D). */
