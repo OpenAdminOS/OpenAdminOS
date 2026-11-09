@@ -50,7 +50,17 @@ function scanBridge(outcome: ModelScanOutcome, probes: ModelScanProbe[] = PROBES
   );
   return {
     bridge,
-    finish: () => finish?.(),
+    /**
+     * Completes the scan the window started. It waits for the window to call
+     * `startModelScan` and fails loudly when it never does, so no test
+     * finishes a scan that has not begun (review round 5, item 2).
+     */
+    finish: async (timeout = 3000) => {
+      await waitFor(() => {
+        if (!finish) throw new Error("finish() was called before the window started the scan (startModelScan was not called).");
+      }, { timeout });
+      finish!();
+    },
     /** Sends a progress event as an older scan run would. */
     emitForeign: (entry: ModelScanProbe) => listener?.(entry, `${currentScanId}-older`),
   };
@@ -76,6 +86,13 @@ const reducedMotion = () => {
   afterEach(() => document.documentElement.removeAttribute("data-reduced-motion"));
 };
 
+describe("the scan test fixture (review round 5, item 2)", () => {
+  it("fails loudly when a test finishes a scan the window never started", async () => {
+    const { finish } = scanBridge({ kind: "nothing" });
+    await expect(finish(100)).rejects.toThrow(/before the window started the scan/);
+  });
+});
+
 describe("first-launch model scan screen", () => {
   reducedMotion();
 
@@ -90,7 +107,7 @@ describe("first-launch model scan screen", () => {
     expect(within(list).getByText("claude --version, claude auth status")).toBeInTheDocument();
     expect(screen.getByText("0 of 4 checked")).toBeInTheDocument();
 
-    finish();
+    await finish();
     expect(await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" })).toBeInTheDocument();
     expect(screen.getByText("What ran: localhost:11434; localhost:1234; claude --version, claude auth status; copilot --version. The Claude Code and Codex sign-in status commands may check with their provider. No prompt was sent to any model.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Scan finished\./));
@@ -101,7 +118,7 @@ describe("first-launch model scan screen", () => {
     const { container } = renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
     expect(container.querySelector(".scan-screen")).toHaveAttribute("data-motion", "reduced");
-    finish();
+    await finish();
     await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" });
     expect(container.querySelector(".scan-screen")).toHaveAttribute("data-phase", "settled");
     // The stage is decorative; the list is the accessible source.
@@ -113,7 +130,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] });
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
 
     await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" });
     expect(screen.getByText("Prompts go to Anthropic API · US")).toBeInTheDocument();
@@ -133,7 +150,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "local-selected", providerId: "ollama", model: "openadminos/openadmin-8b:latest" }, local);
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
 
     expect(await screen.findByRole("heading", { name: "OpenAdmin 8B is ready on this device" })).toBeInTheDocument();
     expect(screen.getByText(MODEL_SCAN_COPY.nothingLeaves)).toBeInTheDocument();
@@ -153,7 +170,7 @@ describe("first-launch model scan screen", () => {
     });
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
 
     expect(await screen.findByRole("heading", { level: 1, name: "Ollama is installed on this device" })).toBeInTheDocument();
     await user.click(screen.getAllByRole("button", { name: "Start Ollama" })[0]!);
@@ -173,7 +190,7 @@ describe("first-launch model scan screen", () => {
     });
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
 
     await user.click((await screen.findAllByRole("button", { name: "Start Ollama" }))[0]!);
     expect(await screen.findByRole("alert")).toHaveTextContent("Ollama did not answer within 12 seconds. Start it yourself with ollama serve, then scan again.");
@@ -186,7 +203,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "nothing" }, none);
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
 
     expect(await screen.findByRole("heading", { name: MODEL_SCAN_COPY.nothingTitle })).toBeInTheDocument();
     expect(screen.getByText(MODEL_SCAN_COPY.installCommand)).toBeInTheDocument();
@@ -202,7 +219,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] });
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
 
     expect(await screen.findByText(/did not answer within 2\.5 seconds/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Check GitHub Copilot CLI again" }));
@@ -219,7 +236,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "nothing" }, timedOut);
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     expect(await screen.findByRole("heading", { name: MODEL_SCAN_COPY.nothingTitle })).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Check Claude Code again" }));
@@ -236,7 +253,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "local-available", providerId: "ollama", model: "openadminos/openadmin-8b:latest", selectedProviderId: "anthropic" }, both);
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
 
     expect(await screen.findByRole("heading", { level: 1, name: "OpenAdmin 8B is ready on this device, not selected" })).toBeInTheDocument();
     expect(screen.getByText("It runs in Ollama. Chat keeps answering with Claude Code, your choice, until you switch.")).toBeInTheDocument();
@@ -269,7 +286,7 @@ describe("first-launch model scan screen", () => {
     vi.mocked(bridge.startLocalRuntime!).mockResolvedValue({ started: false, message: "LM Studio was not found on this device. Start it yourself with `lms server start`, then scan again." });
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     expect(await screen.findByRole("heading", { level: 1, name: "Ollama is installed on this device" })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Start LM Studio" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("LM Studio was not found on this device. Start it yourself with lms server start, then scan again.");
@@ -289,7 +306,7 @@ describe("first-launch model scan screen", () => {
     vi.mocked(bridge.retryModelScanProbe!).mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     await screen.findByRole("heading", { name: MODEL_SCAN_COPY.nothingTitle });
     await user.click(screen.getByRole("button", { name: "Check Claude Code again" }));
     // One Retry at a time (Muse round 4, A).
@@ -317,7 +334,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "local-ready", providerId: "ollama", model: "openadminos/openadmin-8b:latest" }, local, withReference);
     renderGate(bridge);
     await userEvent.setup().click(await screen.findByRole("button", { name: MODEL_SCAN_COPY.scanAgain }));
-    finish();
+    await finish();
     await screen.findByRole("heading", { level: 1, name: "OpenAdmin 8B is ready on this device" });
     expect(screen.queryByText(MODEL_SCAN_COPY.nothingLeaves)).not.toBeInTheDocument();
     expect(screen.getByText("Runs on this device. Your references get tool queries to learn.microsoft.com.")).toBeInTheDocument();
@@ -342,7 +359,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] }, probes);
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     const ledger = await screen.findByText(/^What ran:/);
     expect(ledger.textContent).toContain("What ran: claude --version, claude auth status.");
     expect(ledger.textContent).toContain("Not contacted, set outside this device: 10.0.0.5:11434.");
@@ -353,7 +370,7 @@ describe("first-launch model scan screen", () => {
     const { bridge, finish } = scanBridge({ kind: "nothing" });
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     await waitFor(() => expect(document.querySelector('[data-phase="settled"]')).not.toBeNull());
     expect(screen.getByRole("button", { name: "Continue to Chat without a model" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Preview with sample data" })).toBeInTheDocument();
@@ -366,7 +383,7 @@ describe("first-launch model scan screen", () => {
     vi.mocked(bridge.startLocalRuntime!).mockReturnValue(new Promise(() => undefined));
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     await user.click((await screen.findAllByRole("button", { name: "Start Ollama" }))[0]!);
     await waitFor(() => expect(bridge.startLocalRuntime).toHaveBeenCalledOnce());
     // Every exit, "Show all providers" included (review round 4, item 3).
@@ -386,7 +403,7 @@ describe("first-launch model scan screen", () => {
     vi.mocked(bridge.startLocalRuntime!).mockReturnValue(new Promise(() => undefined));
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     await user.click(await screen.findByRole("button", { name: MODEL_SCAN_COPY.retryLabel("GitHub Copilot CLI") }));
     await waitFor(() => expect(bridge.retryModelScanProbe).toHaveBeenCalledOnce());
     for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.previewLink, "Use Claude Code"]) {
@@ -404,7 +421,7 @@ describe("first-launch model scan screen", () => {
     vi.mocked(bridge.startLocalRuntime!).mockReturnValue(new Promise(() => undefined));
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
-    finish();
+    await finish();
     await user.click((await screen.findAllByRole("button", { name: "Start Ollama" }))[0]!);
     await waitFor(() => expect(bridge.startLocalRuntime).toHaveBeenCalledOnce());
     const retry = screen.getByRole("button", { name: MODEL_SCAN_COPY.retryLabel("GitHub Copilot CLI") });
@@ -434,7 +451,7 @@ describe("first-launch model scan screen", () => {
     renderGate(bridge);
     const heading = await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
     await waitFor(() => expect(heading).toHaveFocus());
-    finish();
+    await finish();
     const settled = await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" });
     await waitFor(() => expect(settled).toHaveFocus());
   });
@@ -448,7 +465,7 @@ describe("first-launch model scan screen", () => {
     expect(bridge.startModelScan).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.scanAgain }));
     expect(await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title })).toBeInTheDocument();
-    finish();
+    await finish();
     await user.click(await screen.findByRole("button", { name: MODEL_SCAN_COPY.continueWithoutModel }));
     expect(await screen.findByText("App content")).toBeInTheDocument();
     expect(bridge.completeFirstRunScan).not.toHaveBeenCalled();
@@ -461,7 +478,7 @@ describe("first-launch model scan with motion", () => {
     const { container } = renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
     expect(container.querySelector(".scan-screen")).toHaveAttribute("data-motion", "full");
-    finish();
+    await finish();
     // Results are paced, so right after the scan returns nothing has settled yet.
     expect(container.querySelector(".scan-screen")).toHaveAttribute("data-phase", "scanning");
     await userEvent.keyboard("{Escape}");
