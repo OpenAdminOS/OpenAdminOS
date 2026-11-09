@@ -964,6 +964,15 @@ describe("Chat steps, sources and follow-ups end to end", () => {
   });
 });
 
+describe("Graph cache status with no tenant (Muse round 5, A)", () => {
+  it("reports an empty cache without an id when nothing is connected, and still refuses an unknown id", async () => {
+    await withHarness(async ({ store }) => {
+      assert.deepEqual(await store.getGraphCacheStatus(), { resources: [] });
+      await assert.rejects(() => store.getGraphCacheStatus("00000000-0000-0000-0000-000000000000"));
+    }, { noTenant: true });
+  });
+});
+
 describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
   const DEVICE_QUESTION = "Which devices have not synced in 30 days?";
   const ask = (store: AppStateStore, send: "sendIntuneChatMessage" | "streamIntuneChatMessage", input: Parameters<AppStateStore["sendIntuneChatMessage"]>[0]) =>

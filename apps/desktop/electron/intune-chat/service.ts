@@ -1592,6 +1592,11 @@ export class IntuneChatService {
 
   async getGraphCacheStatus(tenantId?: string): Promise<GraphCacheStatus> {
     const persisted = await this.host.read();
+    // A conversation with nothing connected asks for the cache without an
+    // id: there is no cache to report. An explicit unknown id still fails.
+    if (tenantId === undefined && !persisted.tenants.some((tenant) => tenant.id === persisted.activeTenantId)) {
+      return { resources: [] };
+    }
     const resolvedTenant = this.host.resolveTenant(persisted, tenantId);
     const store = this.host.requireIntelligenceStore();
     return {
