@@ -1073,3 +1073,19 @@ describe("connector tests from No organization (Muse round 4)", () => {
     }
   });
 });
+
+describe("plan size history for a run stored with an empty tenant (Muse round 6)", () => {
+  it("compares no history when the run has no organization", () => {
+    const plan = { summary: "Disable 30 guests", confirmationPhrase: "DISABLE 30 GUESTS", actions: Array.from({ length: 30 }, (_, index) => ({ id: `a${index}`, kind: "graph-write", label: "Disable guest", severity: "default", request: { method: "PATCH", path: `/users/${index}`, body: {} } })) };
+    const small = { ...plan, actions: plan.actions.slice(0, 1) };
+    const history = Array.from({ length: 3 }, (_, index) => ({
+      id: `old-${index}`, agentSlug: "stale-guest-cleanup", status: "completed", queuedAt: "2026-11-01T10:00:00.000Z", tenantId: "", confirmedAt: "2026-11-01T10:01:00.000Z",
+      trigger: "manual", steps: [], logs: [], plan: small,
+    }));
+    const run = { id: "run-blank", agentSlug: "stale-guest-cleanup", status: "awaiting-confirmation", queuedAt: "2026-11-09T10:00:00.000Z", tenantId: "", trigger: "manual", steps: [], logs: [], plan } as unknown as RunRecord;
+    const h = runHarness({ activeProviderId: "ollama", installedAgents: [], runs: [...history, run], tenants: [] } as unknown as RunPersistedState);
+    const assessment = (h.service as unknown as { assessPlan(run: RunRecord, state: RunPersistedState): RunRecord["riskAssessment"] }).assessPlan(run, h.state());
+    assert.equal(assessment?.status, "complete");
+    if (assessment?.status === "complete") assert.equal(assessment.flags.some((flag) => flag.id === "unusual-plan-size"), false);
+  });
+});

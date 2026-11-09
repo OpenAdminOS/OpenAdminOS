@@ -1421,7 +1421,7 @@ export class RunService {
       : undefined;
     return assessWritePlanSafely(run.plan, {
       ...(graphOperations ? { graphOperations } : {}),
-      historicalConfirmedActionCounts: run.origin !== undefined || run.tenantId === undefined ? [] : state.runs.flatMap((previous) =>
+      historicalConfirmedActionCounts: run.origin !== undefined || !run.tenantId ? [] : state.runs.flatMap((previous) =>
         previous.id !== run.id && previous.agentSlug === run.agentSlug &&
         previous.tenantId === run.tenantId && previous.confirmedAt && Array.isArray(previous.plan?.actions)
           ? [previous.plan.actions.length]
