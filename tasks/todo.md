@@ -1597,3 +1597,33 @@ Branch `first-run/without-sign-in`. Criteria 1, 2, 3, 4 and 12 above; part B (or
 - [x] Hosted send without a tenant asks for its own confirmation, bound in main to no tenant plus provider and refused with tenant context (criterion 12)
 - [x] First-launch model scan screen (scope change from the maintainer, 2026-11-09): parallel local-only checks with timeouts and Retry, outcome under the provider rules, Scan again in Settings, Providers; mockup 32 section B updated
 - [x] Renderer and main tests per criterion, screenshots light and dark, SPEC, CHANGELOG, docs
+
+## PR #175 review round 1 (separate Claude evaluator, GPT-6.1-Sol and Muse Wonder Full, 2026-11-09)
+
+Reviewed commit 692241f. Each fix has a regression test. Findings 1 to 7 touch the same scan functions, so they landed in three layered commits (runtime 0e46f1b, host 9c2702a, screen 0eb25e5) instead of one per finding; each test names its finding.
+
+Blocking
+1. [x] The scan promised local answers while a remembered hosted choice stayed selected. A local model found next to the admin's own choice is now `local-available`: shown as "ready on this device, not selected" with an explicit switch; nothing is switched. Host and renderer tests.
+2. [x] The Copilot probe listed models from GitHub. The scan uses an install-only Copilot probe (`copilot --version`); a fake-CLI test pins the arguments each CLI runs during the scan.
+3. [x] App state ran unbounded provider detection, including off-device endpoints, before the scan. While the scan is pending, app state loads without provider detection, and scan checks never contact an Ollama or LM Studio endpoint off the device. Tests with a stalled provider list and an off-device `OPENAGENTS_OLLAMA_URL` with a fetch spy.
+
+Should fix
+4. [x] Timeouts did not stop probes. The scan timeout aborts the check; Claude Code and Codex probes kill their CLI and try no further binaries, CLI discovery terminates `--version`, Ollama requests abort. Tested with a hanging fake CLI that must be killed. Not done: the Apple Foundation helper probe still runs to its own 10 second limit.
+5. [x] LM Studio with no loaded model counted as ready. It is now "Running, no model loaded" and not ready, in the scan and in shared provider readiness.
+6. [x] A successful Retry kept the old outcome. Retry returns the whole scan with its outcome applied; renderer test for a timed-out hosted tool found on Retry.
+7. [x] Failed checks were shown as negative results. HTTP errors, unreadable capabilities and CLI request failures are could not check with Retry; signed out stays a found, negative result.
+8. [x] A multi-service card offered only the first service. It offers Add for each service still missing and Ask again once none is; tested by granting two services in sequence.
+9. [x] A blocked tenant question asked for the hosted confirmation. The host requires no confirmation for a question blocked before any model call, and the renderer skips the dialog through a preview. With the tool loop the model classifies the question, so the question is sent and the confirmation stays.
+10. [x] The remembered no-tenant confirmation ignored the model. It is keyed by provider and model now. Response: the tenant-bound key has never included the model; it is unchanged here so remembered tenant decisions keep working.
+K. [x] Status commands may contact the vendor. The scan copy says each tool's own sign-in status command may check with its provider and that no prompt is sent; the arguments are pinned by test; the 2.5 second timeout covers version and status together.
+L. [x] No in-flight guard. A second scan shares the running one, and progress carries a scan id the window filters on. Host and renderer tests.
+M. [x] Code requests with "our" or "which" got the card. With nothing connected, any request to write a query or script is docs; tests for both phrasings; SPEC note updated.
+
+Missing tests: added the positive no-tenant acknowledgement on the stream path. Response: the card's Connect, own registration, Ask an admin to approve and Ask again actions, and "no sign-in prompt for a docs question with no tenant", are covered by the IntuneChat renderer tests added in a254571 ("connects with the part preselected ... asks again only when chosen", "opens the own registration path from the card", "copies a message with the admin consent link", "sends a docs starter at once with no tenant, no setup dialog and no hosted confirmation").
+
+Nits
+N. [x] Card heading ids use `useId`; tested with two cards for one part.
+O. [x] SPEC scan bullet says Gemini shows "sign-in not confirmed" until a Test.
+P. [x] Nova voice with no tenant names the voice surface; tested.
+Q. [x] `.cmd` shims are accepted on Windows. No test: the lookup reads the real file system.
+R. [x] Leftover double block removed.
