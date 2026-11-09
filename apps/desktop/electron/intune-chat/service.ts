@@ -314,8 +314,16 @@ export interface ChatPersistedState {
   activeTenantId?: string;
 }
 
+/** Said when a cache refresh meets a disconnect; nothing it read is saved. */
+export const CACHE_TENANT_DISCONNECTED =
+  "This organization was disconnected, so the cache refresh stopped and saved nothing for it.";
+
 export interface ChatServiceHost {
   read(): Promise<ChatPersistedState>;
+  /** True from the moment a disconnect of this tenant begins. */
+  tenantClosed?(tenantId: string): boolean;
+  /** Changes when the tenant is disconnected or connected again; a cache write from an older generation is dropped. */
+  tenantGeneration?(tenantId: string): number;
   /** Clock shared with the pilot Graph. Defaults to the system clock. */
   now?(): Date;
   requireIntelligenceStore(): IntelligenceSqliteStore;
@@ -444,6 +452,16 @@ export class IntuneChatService {
       .finally(() => {
         job.active = [];
       });
+  }
+
+  /**
+   * Stop a disconnecting tenant's cache work: abort its preload, then wait
+   * for every queued or running refresh, ordinary ones included. Their
+   * writes for the tenant are dropped by the generation check meanwhile.
+   */
+  async drainTenantRefreshes(tenantId: string): Promise<void> {
+    await this.stopGraphCachePreload(tenantId);
+    await this.refreshTail.catch(() => undefined);
   }
 
   /** Stop a tenant's preload and wait until it has stopped writing. */
@@ -1600,6 +1618,11 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted, options.tenantId);
+    if (this.host.tenantClosed?.(tenant.id)) throw new Error(CACHE_TENANT_DISCONNECTED);
+    // A write is kept only for the connection this refresh started with.
+    const generation = this.host.tenantGeneration?.(tenant.id);
+    const stillConnected = () =>
+      !this.host.tenantClosed?.(tenant.id) && this.host.tenantGeneration?.(tenant.id) === generation;
     // Resources whose service part is not granted are reported as skipped
     // with the service to add, never refreshed and never counted as errors.
     const requested = sanitizeGraphResources(options.resources);
@@ -1685,6 +1708,7 @@ export class IntuneChatService {
         if (pageResult.pageLimitReached && existing?.refreshedAt && !existing.pageLimitReached) {
           throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
         }
+        if (!stillConnected()) throw new Error(CACHE_TENANT_DISCONNECTED);
         store.replaceGraphResources({
           tenantId: tenant.id,
           resource,

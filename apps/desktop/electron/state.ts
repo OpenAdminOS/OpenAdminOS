@@ -1625,6 +1625,10 @@ export interface AppStateStoreOptions {
 }
 
 export class AppStateStore {
+  /** Tenants being disconnected or disconnected in this session: no new work starts for them. */
+  private readonly closedTenants = new Set<string>();
+  /** Bumped when a tenant closes or connects again; cache writes from an older generation are dropped. */
+  private readonly tenantGenerations = new Map<string, number>();
   /** Tenants disconnected in this session, with when, so their late run snapshots are dropped. */
   /** Writes run one after another; see write(). */
   private writeTail: Promise<void> = Promise.resolve();
@@ -1796,6 +1800,8 @@ export class AppStateStore {
     });
     const host = this;
     this.chatService = new IntuneChatService({
+      tenantClosed: (tenantId) => this.closedTenants.has(tenantId),
+      tenantGeneration: (tenantId) => this.tenantGenerations.get(tenantId) ?? 0,
       read: () => host.read(),
       requireIntelligenceStore: () => host.requireIntelligenceStore(),
       resolveTenant: (persisted, tenantId) =>
@@ -1875,6 +1881,7 @@ export class AppStateStore {
         host.requireIntelligenceStore().listDriftBaselinePinnedObjects(input),
     });
     this.runService = new RunService({
+      tenantClosed: (tenantId) => this.closedTenants.has(tenantId),
       tenantRemovedAfter: (tenantId, at) => {
         const removedAt = this.removedTenants.get(tenantId);
         return removedAt !== undefined && at <= removedAt;
@@ -1934,6 +1941,7 @@ export class AppStateStore {
         console.info("[gateway]", message, metadata ?? ""),
     });
     this.runDeliveryService = new RunDeliveryService({
+      tenantClosed: (tenantId) => this.closedTenants.has(tenantId),
       read: () => host.read(),
       write: (state) => host.write(state as PersistedState),
       serialize: (task) => host.serialize(task),
@@ -6997,7 +7005,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
   /** The active organization's tenant right now, for checks at the moment an action runs. */
   async activeTenantId(): Promise<string | undefined> {
-    return (await this.read()).activeTenantId;
+    // A tenant being disconnected is not active for Nova actions.
+    const active = (await this.read()).activeTenantId;
+    return active && this.closedTenants.has(active) ? undefined : active;
   }
 
   async setActiveOrganization(id: string | null): Promise<AppState> {
@@ -7091,39 +7101,60 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async disconnectTenant(id: string): Promise<AppState> {
-    if (!(await this.read()).tenants.some((tenant) => tenant.id === id)) {
-      throw new Error("That Microsoft 365 connection is no longer on this device. Reopen Connections and try again.");
+    // 1. Close the door under the state lock, before anything else: from
+    //    here every entry point refuses the tenant (runs and confirmations,
+    //    schedules, cache refreshes and writes, deliveries, Nova actions,
+    //    gateway proposals), and older cache writes are dropped.
+    await this.serialize(async () => {
+      if (!(await this.read()).tenants.some((tenant) => tenant.id === id)) {
+        throw new Error("That Microsoft 365 connection is no longer on this device. Reopen Connections and try again.");
+      }
+      this.closeTenant(id);
+    });
+    const reopen = () => {
+      this.closedTenants.delete(id);
+      this.tenantGenerations.set(id, (this.tenantGenerations.get(id) ?? 0) + 1);
+    };
+    // 2. Drain the work in flight: runs, every cache refresh, claimed
+    //    report deliveries and the Agent Team.
+    try {
+      await this.runService.stopRunsForTenant(id);
+      await this.chatService.drainTenantRefreshes(id);
+      const tenantRunIds = new Set((await this.read()).runs.filter((run) => run.tenantId === id).map((run) => run.id));
+      await this.runDeliveryService.drainRuns(tenantRunIds);
+      for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
+    } catch (cause) {
+      reopen();
+      throw cause;
     }
-    // Stop everything still working for the tenant before anything is
-    // deleted: its runs, its cache preload and its Agent Team. Agent Team
-    // data goes first, outside the state lock, so a failure there leaves
-    // the connection and the rest of its data in place.
-    await this.runService.stopRunsForTenant(id);
-    await this.chatService.stopGraphCachePreload(id);
-    for (const persona of this.officeService.state().personas.filter(p => p.tenantId === id)) await this.officeService.stop(persona.id);
+    // 3. Remove the sign-in first: if that fails, nothing was deleted and
+    //    the organization stays connected and usable.
+    const target = (await this.read()).tenants.find((tenant) => tenant.id === id);
+    if (target && target.kind !== "sample") {
+      try {
+        await this.removeCachedAccount(target.appRegistration, target.homeAccountId);
+      } catch (cause) {
+        reopen();
+        const detail = cause instanceof Error ? cause.message : String(cause);
+        throw new Error(
+          `The Microsoft sign-in connection could not be removed, so nothing was deleted and the organization is still connected. ${detail}`,
+          { cause },
+        );
+      }
+    }
+    // 4. Agent Team data. A failure here does not stop the disconnect,
+    //    since the sign-in is gone; it is reported as partial below.
+    let agentTeamFailure: string | undefined;
     try {
       await this.officeService.purgeTenant(id);
     } catch (cause) {
-      const detail = cause instanceof Error ? cause.message : String(cause);
-      throw new Error(`Agent Team data for this organization could not be deleted, so nothing was disconnected. ${detail}`, { cause });
+      agentTeamFailure = cause instanceof Error ? cause.message : String(cause);
     }
+    // 5. Delete the organization's local data.
     await this.serialize(async () => {
       const persisted = await this.read();
-      const target = persisted.tenants.find((tenant) => tenant.id === id);
-      if (!target) {
-        throw new Error("That Microsoft 365 connection is no longer on this device. Reopen Connections and try again.");
-      }
-      if (target.kind !== "sample") {
-        try {
-          await this.removeCachedAccount(target.appRegistration, target.homeAccountId);
-        } catch (cause) {
-          const detail = cause instanceof Error ? cause.message : String(cause);
-          throw new Error(
-            `The Microsoft sign-in connection could not be removed, so local tenant deletion was not started. ${detail}`,
-            { cause },
-          );
-        }
-      }
+      const current = persisted.tenants.find((tenant) => tenant.id === id);
+      if (!current) return;
       const nextTenants = persisted.tenants.filter((tenant) => tenant.id !== id);
       const removedRunIds = new Set(
         persisted.runs.filter((run) => run.tenantId === id).map((run) => run.id),
@@ -7150,11 +7181,26 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       // Late snapshots of the tenant's runs, and their reports, are dropped.
       this.removedTenants.set(id, new Date().toISOString());
       await this.write(next);
-      if (target.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
+      if (current.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     });
     this.supersedeTenantCheck(id, "disconnected");
-
+    if (agentTeamFailure) {
+      throw new Error(
+        `Microsoft 365 was disconnected and its local data deleted, but its Agent Team data could not be deleted: ${agentTeamFailure} It stays on this device until it is removed from Agent Team.`,
+      );
+    }
     return this.getAppState();
+  }
+
+  /** Close a tenant to new work and start a new connection generation. */
+  private closeTenant(id: string): void {
+    this.closedTenants.add(id);
+    this.tenantGenerations.set(id, (this.tenantGenerations.get(id) ?? 0) + 1);
+  }
+
+  /** True from the moment a disconnect of this tenant begins, until it is connected again. */
+  tenantClosed(id: string): boolean {
+    return this.closedTenants.has(id);
   }
 
   async startRun(
@@ -8047,6 +8093,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (reconciled.notice) state.organizationMigration = reconciled.notice;
     else delete state.organizationMigration;
+    // A tenant connected again after its disconnect is open, with a new generation.
+    const before = this.lastReadSnapshot;
+    for (const tenant of state.tenants) {
+      if (this.closedTenants.has(tenant.id) && before && !before.tenants.some((entry) => entry.id === tenant.id)) {
+        this.closedTenants.delete(tenant.id);
+        this.tenantGenerations.set(tenant.id, (this.tenantGenerations.get(tenant.id) ?? 0) + 1);
+      }
+    }
     this.recordConfigurationChanges(state, audit);
     // Every file that holds audit history is flushed, not only the write
     // that added events: a later unflushed replacement could lose them.

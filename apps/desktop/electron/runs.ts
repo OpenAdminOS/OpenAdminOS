@@ -100,7 +100,13 @@ export class OrganizationBoundaryError extends Error {
   override readonly name = "OrganizationBoundaryError";
 }
 
+/** Why nothing new starts or applies for an organization that is being disconnected. */
+export const TENANT_DISCONNECTING_COPY =
+  "This organization is being disconnected, so nothing new starts or applies for it.";
+
 export interface RunServiceHost {
+  /** True from the moment a disconnect of this tenant begins. */
+  tenantClosed?(tenantId: string): boolean;
   /** True when the tenant was disconnected after this time, so its runs were deleted. */
   tenantRemovedAfter?(tenantId: string, at: string): boolean;
   read(): Promise<RunPersistedState>;
@@ -157,6 +163,10 @@ export class RunService {
   /** The work driving each run, so a disconnect can wait for it to stop. */
   private readonly drives = new Map<string, Promise<void>>();
 
+  private assertTenantOpen(tenantId: string | undefined): void {
+    if (tenantId && this.host.tenantClosed?.(tenantId)) throw new OrganizationBoundaryError(TENANT_DISCONNECTING_COPY);
+  }
+
   private track(runId: string, drive: Promise<void>): void {
     const settled = drive.catch(() => undefined).finally(() => {
       if (this.drives.get(runId) === settled) this.drives.delete(runId);
@@ -170,17 +180,23 @@ export class RunService {
    * nothing writes for the tenant once its data is deleted.
    */
   async stopRunsForTenant(tenantId: string): Promise<void> {
-    const persisted = await this.host.read();
-    const live = persisted.runs.filter(
-      (run) => run.tenantId === tenantId && (run.status === "queued" || run.status === "running"),
-    );
-    for (const run of live) await this.cancelRun(run.id).catch(() => undefined);
-    const pending = persisted.runs
-      .filter((run) => run.tenantId === tenantId)
-      .map((run) => this.drives.get(run.id))
-      .filter((drive): drive is Promise<void> => drive !== undefined);
-    await Promise.all(pending);
+    // Admission is already closed (tenantClosed), so this settles: repeat
+    // until no queued or running run and no drive is left for the tenant,
+    // which also catches a run admitted just before the close.
+    for (let pass = 0; pass < 50; pass++) {
+      const persisted = await this.host.read();
+      const runs = persisted.runs.filter((run) => run.tenantId === tenantId);
+      const live = runs.filter((run) => run.status === "queued" || run.status === "running");
+      for (const run of live) await this.cancelRun(run.id).catch(() => undefined);
+      const pending = runs
+        .map((run) => this.drives.get(run.id))
+        .filter((drive): drive is Promise<void> => drive !== undefined);
+      if (live.length === 0 && pending.length === 0) return;
+      await Promise.all(pending);
+      await new Promise((resolve) => setImmediate(resolve));
+    }
   }
+
   private readonly progress = new Map<string, { snapshot: RunRecord; waiters: Array<{ resolve(): void; reject(error: unknown): void }> }>();
   private readonly progressDrains = new Set<string>();
 
@@ -311,6 +327,8 @@ export class RunService {
       // before any provider or Graph work.
       const requestedTenantId =
         typeof options.tenantId === "string" ? options.tenantId : persisted.activeTenantId;
+      // Admission closes before a disconnect drains its work, under this lock.
+      this.assertTenantOpen(requestedTenantId);
       const pilotRun = persisted.tenants.some(
         (tenant) => tenant.id === requestedTenantId && tenant.kind === "sample",
       );
@@ -729,6 +747,7 @@ export class RunService {
       tenantId: input.tenantId,
     };
     await this.host.serialize(async () => {
+      this.assertTenantOpen(input.tenantId);
       const persisted = await this.host.read();
       run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
@@ -781,6 +800,7 @@ export class RunService {
       tenantId: input.tenantId,
     };
     await this.host.serialize(async () => {
+      this.assertTenantOpen(input.tenantId);
       const persisted = await this.host.read();
       run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
@@ -819,6 +839,7 @@ export class RunService {
         throw new Error(`Run not found: ${runId}`);
       }
       assertRunCanApply(run);
+      this.assertTenantOpen(run.tenantId);
       if (run.status !== "awaiting-confirmation") {
         throw new Error(
           `Run ${runId} is not awaiting confirmation (status: ${run.status}).`,
