@@ -1361,6 +1361,22 @@ export class RunService {
   }
 
   /**
+   * Stops every Splashtop change of the organization that is applying and
+   * waits until each has stopped, so a disconnect can delete the token
+   * knowing no apply still holds it. A stopped run is marked failed with
+   * the exact count it applied; the request in flight is aborted.
+   */
+  async stopSplashtopApplies(organizationId: string, reason: string): Promise<void> {
+    const persisted = await this.host.read();
+    const runIds = persisted.runs
+      .filter((run) => run.origin === "splashtop-change" && run.splashtop?.organizationId === organizationId)
+      .filter((run) => run.status === "running" || run.status === "queued" || this.drives.has(run.id))
+      .map((run) => run.id);
+    for (const runId of runIds) this.controllers.get(runId)?.abort(new Error(reason));
+    await Promise.all(runIds.map((runId) => this.drives.get(runId) ?? Promise.resolve()));
+  }
+
+  /**
    * Apply a confirmed Splashtop change plan: in order, one request per
    * action, through the run's own organization's connection. Fail-stop:
    * the first error marks the run failed with an exact count, and nothing
