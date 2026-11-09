@@ -943,7 +943,7 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(
       screen.getByText(
         deriveTrustCopy({
-          provider: { name: "OpenAI", isLocal: false },
+          provider: { id: "openai", name: "OpenAI", isLocal: false },
           model: "gpt-5",
           scope: { tenantNames: ["Contoso IT"] },
         }).confirmBody,

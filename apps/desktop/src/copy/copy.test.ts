@@ -38,7 +38,7 @@ describe("v0.4 copy catalog", () => {
     expect(SETUP_COPY.dailyRole + SETUP_COPY.consentRole + SETUP_COPY.scopedRoles).not.toContain("\u2014");
   });
 
-  it("derives local and hosted trust boundaries without inventing a region", () => {
+  it("derives local and hosted trust boundaries, naming only a documented region", () => {
     const local = deriveTrustCopy({
       provider: { name: "Ollama", isLocal: true },
       model: "qwen2.5:7b",
@@ -48,14 +48,17 @@ describe("v0.4 copy catalog", () => {
     expect(local.boundary).toBeUndefined();
 
     const hosted = deriveTrustCopy({
-      provider: { name: "Anthropic", isLocal: false },
+      provider: { id: "anthropic", name: "Anthropic", isLocal: false },
       scope: { tenantNames: ["Contoso", "Fabrikam"] },
       attachments: { workspaceTitle: "Incident 42", evidenceCount: 2 },
     });
     expect(hosted.strip).toContain("Anthropic");
     expect(hosted.confirmBody).toContain("2 selected tenants");
     expect(hosted.confirmBody).toContain("2 evidence items");
-    expect(hosted.confirmBody).not.toMatch(/\b(?:US|EU|region)\b/i);
+    // The region comes from the provider's documented data location, never guessed (PR #175 round 2, R).
+    expect(hosted.confirmBody).toContain("(Anthropic API · US)");
+    const unknown = deriveTrustCopy({ provider: { name: "Example", isLocal: false }, scope: { tenantNames: ["Contoso"] } });
+    expect(unknown.confirmBody).toContain("(Example · region not stated)");
   });
 
   it("names MCP tool hosts honestly, also for a local model", () => {
@@ -69,8 +72,8 @@ describe("v0.4 copy catalog", () => {
     // With MCP tools on, a local model no longer claims that prompts stay on the device.
     expect(local.storage).toBe("The model, Graph and cache data, and chat history stay on this device.");
     expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true } }).storage).toBe("Tenant data, prompts, and chat history stay on this device.");
-    const hosted = deriveTrustCopy({ provider: { name: "Anthropic", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
-    expect(hosted.strip).toBe("hosted · tenant context sent to Anthropic · tool queries to learn.microsoft.com");
+    const hosted = deriveTrustCopy({ provider: { id: "anthropic", name: "Anthropic", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
+    expect(hosted.strip).toBe("hosted · tenant context sent to Anthropic API · US · tool queries to learn.microsoft.com");
     expect(deriveToolHostsCopy([])).toBeUndefined();
     expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true }, toolHosts: [] }).strip).toBe("local-only · no data leaves this device");
     for (const value of [...stringsIn(local.toolHosts), local.storage]) {
@@ -96,5 +99,14 @@ describe("v0.4 copy catalog", () => {
       action: { label: "Retry", kind: "retry" },
     });
     expect(chatErrorCopy("Error: bridge failed\n    at /home/user/app/main.js:42").why).toBeUndefined();
+  });
+});
+
+describe("hosted trust copy names the region (PR #175 Muse round 2, R)", () => {
+  it("names where prompts go in the strip, boundary and confirmation with a tenant", () => {
+    const copy = deriveTrustCopy({ provider: { id: "openai", name: "OpenAI", isLocal: false }, model: "gpt-5", scope: { tenantNames: ["Contoso"] } });
+    expect(copy.strip).toBe("hosted · tenant context sent to OpenAI API · US");
+    expect(copy.boundary).toBe("Tenant context will be sent to OpenAI API · US.");
+    expect(copy.confirmBody).toBe("OpenAI using gpt-5 (OpenAI API · US) will receive the prompt and selected context from Contoso.");
   });
 });

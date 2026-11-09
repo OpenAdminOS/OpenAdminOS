@@ -174,11 +174,12 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
   }
 
   return {
-    strip: `hosted · tenant context sent to ${providerName}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
+    // Each line names where prompts are processed, not just the provider (hard constraint 1).
+    strip: `hosted · tenant context sent to ${location}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
     ...(toolHosts ? { toolHosts } : {}),
-    boundary: `Tenant context will be sent to ${providerName}${attachments ? ` with ${attachments}` : ""}.`,
+    boundary: `Tenant context will be sent to ${location}${attachments ? ` with ${attachments}` : ""}.`,
     confirmTitle: "Send tenant context to hosted provider",
-    confirmBody: `${providerName}${modelDetail} will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,
+    confirmBody: `${providerName}${modelDetail} (${location}) will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,
     storage: "Chat history and the Graph cache stay on this device.",
     isLocal: false,
   };
