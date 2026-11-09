@@ -873,3 +873,30 @@ describe("applying a reviewed plan holds to the active organization (review roun
     assert.equal(confirmed.tenantId, woodgrove.id);
   });
 });
+
+describe("a run with no tenant whose agent now needs a service (Muse round 3)", () => {
+  it("fails closed with the no-organization message and never builds a Graph client", async () => {
+    const changed = agent("team-script-draft", { scopes: ["User.Read.All"], services: ["entra"] }) as unknown as AgentSummary;
+    const queued = {
+      id: "run-tenantless", agentSlug: "team-script-draft", status: "queued", queuedAt: "2026-11-09T00:00:00.000Z",
+      trigger: "manual", providerId: "ollama", model: "test", steps: [], logs: [],
+    } as unknown as RunRecord;
+    const tenants = [woodgrove] as unknown as TenantRecord[];
+    const h = runHarness({
+      activeProviderId: "ollama",
+      installedAgents: [changed],
+      runs: [queued],
+      tenants,
+      organizations: reconcileOrganizations({ rawOrganizations: [], rawNotice: undefined, tenants, installedAgents: [] }).organizations,
+      activeTenantId: woodgrove.id,
+    });
+    const internal = h.service as unknown as { driveRun(input: { run: RunRecord; agent: AgentSummary; providerId: string; model?: string }): Promise<void> };
+    (h.service as unknown as { baseRunLlm: () => Promise<unknown> }).baseRunLlm = async () => ({});
+    await internal.driveRun({ run: queued, agent: changed, providerId: "ollama", model: "test" });
+    assert.deepEqual(h.graphBuilds, []);
+    const stored = h.state().runs.find((run) => run.id === "run-tenantless");
+    assert.equal(stored?.status, "failed");
+    assert.equal(stored?.tenantId, undefined);
+    assert.match(stored?.error ?? stored?.summary ?? "", /No organization is active\. team-script-draft reads Entra/);
+  });
+});
