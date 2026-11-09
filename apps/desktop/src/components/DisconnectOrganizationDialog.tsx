@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
@@ -28,6 +28,11 @@ export function DisconnectOrganizationDialog({
   const toast = useToast();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Deleting local data is an explicit choice: Disconnect stays off until it is checked.
+  const [deleteLocal, setDeleteLocal] = useState(false);
+  useEffect(() => {
+    if (open) setDeleteLocal(false);
+  }, [open]);
   const sample = tenant.kind === "sample";
   return (
     <Modal open={open} onClose={() => { if (!busy) onClose(); }} size="md">
@@ -38,14 +43,48 @@ export function DisconnectOrganizationDialog({
         onClose={() => { if (!busy) onClose(); }}
       />
       <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          {sample ? PILOT_COPY.leaveBody : ORGANIZATION_COPY.disconnectBody}
-        </div>
-        <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
-          {sample
-            ? `You can open it again with ${ORGANIZATION_COPY.previewSample} in the organization menu.`
-            : ORGANIZATION_COPY.disconnectNote}
-        </p>
+        {sample ? (
+          <>
+            <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+              {PILOT_COPY.leaveBody}
+            </div>
+            <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
+              {`You can open it again with ${ORGANIZATION_COPY.previewSample} in the organization menu.`}
+            </p>
+          </>
+        ) : (
+          <>
+            <section aria-labelledby="disconnect-deletes" className="text-sm leading-relaxed">
+              <h3 id="disconnect-deletes" className="font-medium text-[var(--color-text)]">{ORGANIZATION_COPY.disconnectDeletesTitle}</h3>
+              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[var(--color-text-soft)]">
+                {ORGANIZATION_COPY.disconnectDeletes.map((item) => <li key={item}>{item}</li>)}
+              </ul>
+              <p className="mt-1.5 text-[var(--color-text-muted)]">{ORGANIZATION_COPY.disconnectSchedules}</p>
+            </section>
+            <section aria-labelledby="disconnect-keeps" className="text-sm leading-relaxed">
+              <h3 id="disconnect-keeps" className="font-medium text-[var(--color-text)]">{ORGANIZATION_COPY.disconnectKeepsTitle}</h3>
+              <p className="mt-1 text-[var(--color-text-soft)]">{ORGANIZATION_COPY.disconnectKeepsBody}</p>
+              <button
+                type="button"
+                className="mt-1 text-[var(--color-text)] underline underline-offset-2 hover:text-[var(--color-text-soft)]"
+                onClick={() => void window.openAdminOS?.openExternal(ORGANIZATION_COPY.disconnectRevokeUrl)}
+              >
+                {ORGANIZATION_COPY.disconnectRevokeLink}
+              </button>
+            </section>
+            {/* TODO(ugur): disconnecting always deletes the local data today. Should admins be able to disconnect and keep it, for example for an audit? */}
+            <label className="flex items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3.5 py-3 text-sm text-[var(--color-text)] ring-1 ring-inset ring-[var(--color-border-soft)]">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 accent-[var(--color-danger)]"
+                checked={deleteLocal}
+                disabled={busy}
+                onChange={(event) => setDeleteLocal(event.target.checked)}
+              />
+              <span>{ORGANIZATION_COPY.disconnectConfirmLocal(organization.name)}</span>
+            </label>
+          </>
+        )}
         {error ? (
           <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {error}
@@ -55,7 +94,7 @@ export function DisconnectOrganizationDialog({
           <Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button
             variant="danger"
-            disabled={busy}
+            disabled={busy || (!sample && !deleteLocal)}
             onClick={() => {
               setBusy(true);
               setError(null);

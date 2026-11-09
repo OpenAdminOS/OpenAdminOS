@@ -40,6 +40,21 @@ export const ORGANIZATION_COPY = {
     "This removes the Microsoft sign-in connection and the organization, and permanently deletes its local Graph cache, change history, chats, workspaces, run history, learning records and queued deliveries from this device. Its schedules stay on their agents, unassigned, until you assign them to another organization.",
   disconnectNote: "Microsoft 365 data in the tenant is not changed. Connecting the tenant again creates the organization again with an empty local cache.",
   disconnectAction: "Disconnect and delete local data",
+  /** What disconnecting deletes from this device, named one by one. */
+  disconnectDeletes: [
+    "Microsoft sign-in tokens for this organization",
+    "Its Graph cache and change history",
+    "Its run history and queued report deliveries",
+    "Its chats, workspaces and learning records",
+  ],
+  disconnectDeletesTitle: "Deleted from this device",
+  disconnectKeepsTitle: "Stays in Microsoft Entra",
+  disconnectKeepsBody:
+    "The OpenAdminOS enterprise application and the admin consent granted to it stay in the tenant. Disconnecting here does not revoke them.",
+  disconnectRevokeLink: "How to revoke access in Entra",
+  disconnectRevokeUrl: "https://docs.openadminos.com/trust-model/authentication#disconnecting-and-revoking",
+  disconnectSchedules: "Its schedules stay on their agents, unassigned, until you assign them to another organization.",
+  disconnectConfirmLocal: (name: string) => `Delete ${name}'s local data from this device`,
   disconnected: (name: string) => `${name} disconnected. Its local data was deleted from this device.`,
   disconnectFailed: (detail: string) =>
     `Disconnecting failed.${detail ? ` ${detail}` : ""} Restart OpenAdminOS, check that secure storage is available, then try again.`,

@@ -308,6 +308,7 @@ describe("Connections services", () => {
     await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
     const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
     expect(dialog).toHaveTextContent("unassigned, until you assign them to another organization");
+    await user.click(within(dialog).getByRole("checkbox", { name: ORGANIZATION_COPY.disconnectConfirmLocal("Contoso IT") }));
     await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectAction }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("The local state file could not be written.");
     expect(screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ })).toBeInTheDocument();
@@ -773,5 +774,26 @@ describe("saving a Teams default updates every disclosure (review round 7)", () 
     await waitFor(() => expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsSent(["Microsoft Teams"])), { timeout: 3000 });
     const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
     expect(map).toHaveAccessibleDescription(/Run reports and agent messages can go to Microsoft Teams/);
+  });
+});
+
+describe("disconnect confirmation (enterprise round)", () => {
+  it("names what is deleted and what stays in Entra, links the revoke steps, and needs explicit consent to delete local data", async () => {
+    const user = userEvent.setup();
+    const disconnectTenant = vi.fn(async () => createMockAppState({ tenants: [] }));
+    const bridge = render(createMockAppState(), { disconnectTenant });
+    await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+    await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
+    const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
+    for (const item of ORGANIZATION_COPY.disconnectDeletes) expect(dialog).toHaveTextContent(item);
+    expect(dialog).toHaveTextContent("The OpenAdminOS enterprise application and the admin consent granted to it stay in the tenant.");
+    await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectRevokeLink }));
+    expect(bridge.openExternal).toHaveBeenCalledWith("https://docs.openadminos.com/trust-model/authentication#disconnecting-and-revoking");
+    const confirm = within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectAction });
+    expect(confirm).toBeDisabled();
+    await user.click(within(dialog).getByRole("checkbox", { name: ORGANIZATION_COPY.disconnectConfirmLocal("Contoso IT") }));
+    expect(confirm).toBeEnabled();
+    await user.click(confirm);
+    await waitFor(() => expect(disconnectTenant).toHaveBeenCalledWith("tenant-1"));
   });
 });
