@@ -15,7 +15,8 @@ import {
   IconShield,
   IconWarning,
 } from "../components/icons";
-import { SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
+import { POLICY_COPY, SETUP_COPY, pendingIntentCopy, resumeIntentLabel } from "../copy";
+import { SetByItBadge } from "../components/ManagedPolicy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import type {
   ConnectTenantOptions,
@@ -75,6 +76,7 @@ export function TenantSetupDialog({
   providers,
   activeProviderId,
   savedRegistrations = [],
+  registrationLocked = false,
   editOptions,
   presetPartIds,
   onClose,
@@ -98,6 +100,8 @@ export function TenantSetupDialog({
   activeProviderId: ProviderId;
   /** Custom registrations remembered on this device, most recent first. */
   savedRegistrations?: SavedAppRegistration[];
+  /** The IT policy file locks sign-in to its own registration (the `managed` entry). */
+  registrationLocked?: boolean;
   /** Options of the attempt the admin returned to edit after an error. */
   editOptions?: ConnectTenantOptions;
   /** Service parts an entry point named; preselected, the app choice stays open. */
@@ -131,7 +135,10 @@ export function TenantSetupDialog({
           agentName={agentName}
           scopes={scopes}
           scopesError={scopesError}
-          savedRegistrations={savedRegistrations}
+          savedRegistrations={
+            registrationLocked ? savedRegistrations.filter((entry) => entry.managed) : savedRegistrations
+          }
+          registrationLocked={registrationLocked}
           onCancel={onClose}
           onConnect={onConnect}
           {...(stage === "own-registration" ? { initialChoice: "own" as const } : {})}
@@ -203,6 +210,7 @@ function PermissionsStep({
   scopes,
   scopesError,
   savedRegistrations,
+  registrationLocked,
   onCancel,
   onConnect,
   initialChoice,
@@ -214,6 +222,7 @@ function PermissionsStep({
   scopes: RequestedScope[] | null;
   scopesError: string | null;
   savedRegistrations: SavedAppRegistration[];
+  registrationLocked: boolean;
   onCancel: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
   /** Set only by entry points that already expressed which app to use. */
@@ -231,9 +240,12 @@ function PermissionsStep({
   const initialRegistration = initialOptions?.appRegistration;
   // Neither app is preselected: the admin chooses before Approve enables.
   const [choice, setChoice] = useState<SignInChoice | null>(
-    initialOptions ? (initialRegistration ? "own" : "openadminos") : initialChoice ?? null,
+    registrationLocked
+      ? "own"
+      : initialOptions ? (initialRegistration ? "own" : "openadminos") : initialChoice ?? null,
   );
   const [savedSelection, setSavedSelection] = useState<string>(() => {
+    if (registrationLocked && savedRegistrations[0]) return savedRegistrationKey(savedRegistrations[0]);
     if (initialRegistration) {
       const key = savedRegistrationKey(initialRegistration);
       return savedRegistrations.some((entry) => savedRegistrationKey(entry) === key)
@@ -412,9 +424,16 @@ function PermissionsStep({
           <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
             {SETUP_COPY.signInChoiceHint}
           </p>
+          {registrationLocked ? (
+            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-soft)]">
+              <SetByItBadge />
+              {POLICY_COPY.registrationLocked}
+            </p>
+          ) : null}
           <div className="mt-3 grid gap-2 sm:grid-cols-2">
             <SignInChoiceCard
               value="openadminos"
+              disabled={registrationLocked}
               checked={choice === "openadminos"}
               title={SETUP_COPY.openAdminOSAppTitle}
               points={SETUP_COPY.openAdminOSAppPoints(OPENADMINOS_APP_CLIENT_ID)}
@@ -469,7 +488,7 @@ function PermissionsStep({
                       </label>
                     );
                   })}
-                  <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-[var(--color-surface-hover)]">
+                  {registrationLocked ? null : <label className="flex cursor-pointer items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-[var(--color-surface-hover)]">
                     <input
                       type="radio"
                       name="saved-app-registration"
@@ -481,7 +500,7 @@ function PermissionsStep({
                     <span className="text-sm text-[var(--color-text-soft)]">
                       {SETUP_COPY.newRegistrationOption}
                     </span>
-                  </label>
+                  </label>}
                 </div>
               </fieldset>
             )}
@@ -759,12 +778,14 @@ function PermissionsStep({
 function SignInChoiceCard({
   value,
   checked,
+  disabled = false,
   title,
   points,
   onSelect,
 }: {
   value: SignInChoice;
   checked: boolean;
+  disabled?: boolean;
   title: string;
   points: readonly string[];
   onSelect: (value: SignInChoice) => void;
@@ -773,7 +794,7 @@ function SignInChoiceCard({
   const pointsId = `setup-sign-in-${value}-points`;
   return (
     <label
-      className={`flex cursor-pointer items-start gap-3 rounded-xl px-4 py-3 ring-1 transition-colors focus-within:ring-2 focus-within:ring-[var(--color-accent)] ${
+      className={`flex items-start gap-3 rounded-xl px-4 py-3 ring-1 transition-colors focus-within:ring-2 focus-within:ring-[var(--color-accent)] ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"} ${
         checked
           ? "bg-[var(--color-accent-soft)] ring-[var(--color-accent)]/45"
           : "bg-[var(--color-surface)] ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)]"
@@ -784,6 +805,7 @@ function SignInChoiceCard({
         name="sign-in-app"
         value={value}
         checked={checked}
+        disabled={disabled}
         onChange={() => onSelect(value)}
         aria-labelledby={titleId}
         aria-describedby={pointsId}

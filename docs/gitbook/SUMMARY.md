@@ -9,6 +9,7 @@
 - [Organizations and Connections](getting-started/organizations.md)
 - [Connect with the shared app](getting-started/connect-shared-app.md)
 - [Own app registration](getting-started/own-app-registration.md)
+- [Managed configuration](getting-started/managed-configuration.md)
 
 ## Services
 

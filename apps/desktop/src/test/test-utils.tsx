@@ -656,6 +656,13 @@ export function makeMockBridge(
       const { providerAutoSelectNotice: _dismissed, ...rest } = appState;
       return updateState(rest);
     }),
+    dismissManagedPolicyNotice: vi.fn(async () =>
+      updateState(
+        appState.managedPolicy
+          ? { ...appState, managedPolicy: { ...appState.managedPolicy, noticeDismissed: true } }
+          : appState,
+      ),
+    ),
     setActiveModel: vi.fn(async (providerId: ProviderId, model: string | null) =>
       updateState({
         ...appState,

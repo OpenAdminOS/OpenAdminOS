@@ -16,6 +16,7 @@ import {
   useShellChrome,
 } from "../state";
 import { TopBar } from "./TopBar";
+import { ManagedPolicyNotice } from "./ManagedPolicy";
 import { useToast } from "./Toast";
 import { useAppState } from "../state";
 import { SAMPLE_DATA_REMOVED_NOTICE } from "../copy";
@@ -114,6 +115,7 @@ function ShellLayout({
       <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
+        <ManagedPolicyNotice />
         <main id="main-content" tabIndex={-1} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {children}
         </main>

@@ -73,6 +73,9 @@ import {
   type WorkspacePromptContextInput,
   type WorkspacePromptContextSummary,
   type WorkspaceSummary,
+  MANAGED_POLICY_SET_BY,
+  isManagedSettingLocked,
+  managedLockedModel,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
@@ -2616,6 +2619,11 @@ function ComposerModelPopover({
     (provider) => ["connected", "available"].includes(provider.status) && provider.models.length > 0,
   );
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  // The host lists only what the IT policy file allows; this says who decided.
+  const { state: appState } = useAppState();
+  const setByPolicy =
+    isManagedSettingLocked(appState.managedPolicy, "defaultProvider") ||
+    managedLockedModel(appState.managedPolicy, activeProviderId) !== undefined;
 
   useEffect(() => {
     const closeFromOutside = (event: globalThis.MouseEvent) => {
@@ -2653,6 +2661,12 @@ function ComposerModelPopover({
         <IconChevronDown size={11} className="text-[var(--color-text-muted)]" />
       </summary>
       <div role="menu" aria-label="Models" className="absolute bottom-[calc(100%+8px)] right-0 z-[90] w-[min(360px,calc(100vw-48px))] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]">
+        {setByPolicy ? (
+          <div className="flex items-center gap-1.5 px-2 pb-1 pt-1 text-xs text-[var(--color-text-muted)]">
+            <IconLock size={11} />
+            {MANAGED_POLICY_SET_BY}
+          </div>
+        ) : null}
         {([true, false] as const).map((local, groupIndex) => {
           const group = availableProviders.filter((provider) => provider.isLocal === local);
           if (group.length === 0) return null;

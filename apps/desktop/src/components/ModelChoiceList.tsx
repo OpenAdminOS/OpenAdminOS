@@ -2,7 +2,9 @@ import { useId, type ReactNode } from "react";
 
 import { MODEL_CHOICE_COPY, MODEL_SCAN_COPY } from "../copy";
 import { ProviderLogo } from "./ProviderLogo";
-import type { ProviderId } from "../shared/openAdminOS";
+import { SetByItBadge } from "./ManagedPolicy";
+import { isManagedSettingLocked, type ProviderId } from "../shared/openAdminOS";
+import { useAppState } from "../state";
 import type { ChoiceOption } from "../setup/model-choice";
 
 /**
@@ -32,6 +34,11 @@ export function ModelChoiceList({
   label?: string;
 }) {
   const name = useId();
+  // The host lists only providers the IT policy file allows; a locked one says who set it.
+  const { state } = useAppState();
+  const lockedProvider = isManagedSettingLocked(state.managedPolicy, "defaultProvider")
+    ? state.managedPolicy?.values.defaultProvider
+    : undefined;
   return (
     <div role="radiogroup" aria-label={label} className="rounded-lg bg-[var(--color-surface)] p-1 ring-1 ring-inset ring-[var(--color-border-soft)]">
       {options.map((option) => {
@@ -64,6 +71,7 @@ export function ModelChoiceList({
                 <span className={`mt-0.5 block text-sm leading-5 ${option.where === "hosted" && !option.unavailable ? "text-[var(--color-warning)]" : "text-[var(--color-text-soft)]"}`}>
                   {option.whereLine}
                 </span>
+                {option.providerId === lockedProvider ? <SetByItBadge className="mt-1" /> : null}
               </span>
               {option.unavailable && onRetry ? (
                 <button

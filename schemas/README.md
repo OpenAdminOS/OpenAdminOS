@@ -1,3 +1,8 @@
+# JSON Schemas
+
+- `agent-template.schema.json`: agent manifests, described below.
+- `policy.schema.json`: the IT policy file (managed configuration), version 1. The app parses the same format in `apps/desktop/electron/managed-policy.ts`; `scripts/policy-schema.test.mjs` checks that the schema, the app and the examples in `docs/gitbook/getting-started/managed-configuration.md` agree. Change all three together.
+
 # JSON Schema for Agent Templates
 
 `agent-template.schema.json` is the canonical shape for any

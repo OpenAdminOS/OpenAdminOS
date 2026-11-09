@@ -1,17 +1,22 @@
 import {
   DEFAULT_GRAPH_READ_SCOPE_NAMES,
+  MANAGED_POLICY_SETTING_KEYS,
   grantedParts,
   qualifyScope,
   splashtopConnectionOf,
   splashtopRegion,
   type AgentSummary,
+  type ManagedPolicyScope,
+  type ManagedPolicySettingKey,
+  type ManagedPolicyValues,
   type OrganizationRecord,
   type TenantRecord,
 } from "@openadminos/agent-sdk";
 
 /**
  * Configuration changes for the audit log: connections, organizations,
- * provider and model, public references and schedule assignments.
+ * provider and model, public references, schedule assignments and the IT
+ * policy file.
  *
  * Events are derived by comparing the state before and after each write,
  * so every flow that changes these settings is recorded, including the
@@ -43,6 +48,10 @@ export const CONFIGURATION_AUDIT_EVENT_TYPES = [
   "schedule.unassigned",
   "provider.configuration-changed",
   "organizations.migrated",
+  "policy.loaded",
+  "policy.changed",
+  "policy.removed",
+  "policy.invalid",
   "splashtop.connected",
   "splashtop.token-rotated",
   "splashtop.disconnected",
@@ -62,6 +71,28 @@ export interface ConfigurationAuditEvent {
   details: Record<string, ConfigurationAuditDetail>;
 }
 
+/**
+ * The IT policy file as last applied, kept in state so a change between
+ * launches is recorded once. Problems are stored as their Settings lines.
+ */
+export interface ManagedPolicyRecord {
+  /** Absent when the files set no valid setting. */
+  fingerprint?: string;
+  /** Absent when the files have no problem. */
+  issuesFingerprint?: string;
+  values: ManagedPolicyValues;
+  sources: Partial<Record<ManagedPolicySettingKey, ManagedPolicyScope>>;
+  locked: ManagedPolicySettingKey[];
+  issues: string[];
+  /** The problems whose one-time notice was dismissed. */
+  noticeDismissedFor?: string;
+  /** The policy registration last added to the saved registrations, so a removed one is not added again. */
+  seededRegistration?: string;
+}
+
+/** Problems recorded per event; the count says how many there were. */
+export const POLICY_AUDIT_MAX_PROBLEMS = 20;
+
 /** The parts of persisted state that configuration events are derived from. */
 export interface ConfigurationAuditSnapshot {
   activeProviderId: string;
@@ -74,6 +105,7 @@ export interface ConfigurationAuditSnapshot {
   mcpServers?: Readonly<Record<string, { enabled: boolean }>>;
   /** Azure OpenAI endpoint settings; the API key is never part of state. */
   providerConfigs?: { azureOpenAI?: { endpoint: string; deployment: string; apiVersion: string } };
+  managedPolicy?: ManagedPolicyRecord;
 }
 
 export interface ConfigurationAuditContext {
@@ -83,6 +115,8 @@ export interface ConfigurationAuditContext {
   publicReferenceName: (serverId: string) => string | undefined;
   /** The Azure OpenAI API key was set or removed with this write; the value is never recorded. */
   azureOpenAIKey?: "set" | "removed";
+  /** The IT policy file made this write: provider and model changes say so. */
+  policy?: boolean;
 }
 
 type EventSeed = Omit<ConfigurationAuditEvent, "id" | "timestamp">;
@@ -283,7 +317,8 @@ export function diffConfigurationAudit(
         providerId: next.activeProviderId,
         previousProviderId: previous.activeProviderId,
         // False when the host selected a ready local provider by itself.
-        chosenByAdmin: next.providerChosenByUser !== false,
+        chosenByAdmin: next.providerChosenByUser !== false && context.policy !== true,
+        ...(context.policy ? { setByPolicy: true } : {}),
       },
     });
   }
@@ -301,6 +336,7 @@ export function diffConfigurationAudit(
         // An absent model means the provider's own default.
         model: after ?? "provider default",
         previousModel: before ?? "provider default",
+        ...(context.policy ? { setByPolicy: true } : {}),
       },
     });
   }
@@ -342,6 +378,8 @@ export function diffConfigurationAudit(
     });
   }
 
+  seeds.push(...policySeeds(previous.managedPolicy, next.managedPolicy));
+
   // Schedule assignments. An agent that was uninstalled is not a change of assignment.
   const previousAgents = new Map(previous.installedAgents.map((agent) => [agent.slug || agent.id, agent]));
   for (const agent of next.installedAgents) {
@@ -381,11 +419,68 @@ export function diffConfigurationAudit(
   return seeds.map((seed) => ({ id: context.newId(), timestamp: context.timestamp, ...seed }));
 }
 
+/** What the IT policy file sets, as audit details: ids, names and keys, never more. */
+function policyDetails(record: ManagedPolicyRecord): Record<string, ConfigurationAuditDetail> {
+  const keys = MANAGED_POLICY_SETTING_KEYS.filter((key) => record.values[key] !== undefined);
+  const { values } = record;
+  return {
+    keys: [...keys],
+    lockedKeys: keys.filter((key) => record.locked.includes(key)),
+    machineKeys: keys.filter((key) => record.sources[key] === "machine"),
+    userKeys: keys.filter((key) => record.sources[key] === "user"),
+    ...(values.allowedProviders ? { allowedProviders: [...values.allowedProviders] } : {}),
+    ...(values.defaultProvider ? { defaultProvider: values.defaultProvider } : {}),
+    ...(values.defaultModel ? { defaultModel: values.defaultModel } : {}),
+    ...(values.allowedPublicReferences ? { allowedPublicReferences: [...values.allowedPublicReferences] } : {}),
+    ...(values.appRegistration ? { appRegistrationClientId: values.appRegistration.clientId } : {}),
+    ...(values.skipFirstRunScan !== undefined ? { skipFirstRunScan: values.skipFirstRunScan } : {}),
+  };
+}
+
+function policySeeds(previous: ManagedPolicyRecord | undefined, next: ManagedPolicyRecord | undefined): EventSeed[] {
+  const seeds: EventSeed[] = [];
+  const before = previous?.fingerprint;
+  const after = next?.fingerprint;
+  if (!before && after && next) {
+    seeds.push({ type: "policy.loaded", details: policyDetails(next) });
+  } else if (before && after && before !== after && previous && next) {
+    const changedKeys = MANAGED_POLICY_SETTING_KEYS.filter(
+      (key) =>
+        JSON.stringify(previous.values[key]) !== JSON.stringify(next.values[key]) ||
+        previous.sources[key] !== next.sources[key] ||
+        previous.locked.includes(key) !== next.locked.includes(key),
+    );
+    seeds.push({ type: "policy.changed", details: { ...policyDetails(next), changedKeys } });
+  } else if (before && !after && previous) {
+    seeds.push({ type: "policy.removed", details: { previousKeys: policyDetails(previous).keys as string[] } });
+  }
+  if (next?.issuesFingerprint && next.issuesFingerprint !== previous?.issuesFingerprint) {
+    seeds.push({
+      type: "policy.invalid",
+      details: { problemCount: next.issues.length, problems: next.issues.slice(0, POLICY_AUDIT_MAX_PROBLEMS) },
+    });
+  }
+  return seeds;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 const EVENT_TYPES: ReadonlySet<string> = new Set(CONFIGURATION_AUDIT_EVENT_TYPES);
+
+const POLICY_DETAIL_KEYS = [
+  "keys",
+  "lockedKeys",
+  "machineKeys",
+  "userKeys",
+  "allowedProviders",
+  "defaultProvider",
+  "defaultModel",
+  "allowedPublicReferences",
+  "appRegistrationClientId",
+  "skipFirstRunScan",
+] as const;
 
 /**
  * The detail fields each event type may carry. A stored field outside its
@@ -402,8 +497,8 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "organization.renamed": ["previousName", "sampleData"],
   "organization.switched": ["noOrganization", "previousOrganizationId", "previousOrganizationName", "previousNoOrganization", "sampleData"],
   "organization.removed": ["sampleData"],
-  "provider.changed": ["providerId", "previousProviderId", "chosenByAdmin"],
-  "model.changed": ["providerId", "model", "previousModel"],
+  "provider.changed": ["providerId", "previousProviderId", "chosenByAdmin", "setByPolicy"],
+  "model.changed": ["providerId", "model", "previousModel", "setByPolicy"],
   "public-reference.installed": ["serverId", "serverName", "enabled"],
   "public-reference.enabled": ["serverId", "serverName"],
   "public-reference.disabled": ["serverId", "serverName"],
@@ -412,6 +507,10 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "schedule.unassigned": ["agentSlug", "agentName", "previousOrganizationId", "previousOrganizationName", "scheduleRemoved"],
   "provider.configuration-changed": ["providerId", "changed", "endpoint", "deployment", "apiVersion", "apiKey"],
   "organizations.migrated": ["organizationIds", "organizationNames", "schedulesAssigned", "schedulesUnassigned", "assignedOrganizationId"],
+  "policy.loaded": [...POLICY_DETAIL_KEYS],
+  "policy.changed": [...POLICY_DETAIL_KEYS, "changedKeys"],
+  "policy.removed": ["previousKeys"],
+  "policy.invalid": ["problemCount", "problems"],
   "splashtop.connected": ["region", "host", "teamId", "account", "reconnected"],
   "splashtop.token-rotated": ["region", "host", "teamId"],
   "splashtop.disconnected": ["region", "host", "teamId", "organizationRemoved"],

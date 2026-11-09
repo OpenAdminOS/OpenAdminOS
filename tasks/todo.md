@@ -1,5 +1,16 @@
 # Current active plan
 
+- [ ] Managed configuration, issue #176 (branch `managed/policy-file`, PR #177). Built: policy file paths, schema, parsing with line numbers, precedence, main-process enforcement for providers, models, public references and the app registration, Settings and notice UI, configuration audit events, IT admin docs.
+
+  Acceptance criteria:
+  1. With a policy that allows only local providers, no hosted provider is offered or selectable anywhere, and the main process refuses one for Chat, agents and tests.
+  2. With a policy that sets a provider and model and `skipFirstRunScan`, a fresh install whose policy provider is ready skips the scan, opens at Connect Microsoft 365, then Chat with that model.
+  3. A setting the policy sets shows "Set by your IT department" and cannot be changed.
+  4. An invalid policy file shows a designed error naming the file, the line and the problem (Settings and a one-time notice); only invalid keys fall back to no policy.
+  5. Policy load, change, removal and problems are recorded in the configuration audit.
+
+  - [x] First-run scan integration (after #175 merged): the scan checks only allowed providers and keeps the policy provider selected, a locked provider shows as set by IT in the model choice, and `skipFirstRunScan` with a ready policy provider skips the scan and opens at Connect Microsoft 365.
+
 - [ ] Chat hardening mega PR (branch `fix/chat-hardening`, decision Ugur 2026-10-25: one PR for all findings) from the [2026-10-24 full Chat test](./chat-full-test-2026-10-24.md) including the live addendum.
 
   Deliverables (one PR, staged commits): (0) diagnose and fix investigative Chat on the Codex provider; (1) evidence guard for tenant-data finals plus deterministic flip with visible notice on repeated protocol failure; (2) tenant-scoped conversations; (3) picker provider switch, Azure send gate, Gemini selectability, fail-closed provider resolution; (4) cache invalidation after confirmed write runs, `graph_get` paging, sources from executed traces, model-facing staleness aligned to host TTLs, named-scope 403s; (5) single agent matcher with read/write badge, expanded write-intent routing, bounded conversation memory; (6) actionable error notices, streaming live region, per-stream cancel, Node 22 pin with Node 26-safe test setup, SPEC and CHANGELOG reconciliation.

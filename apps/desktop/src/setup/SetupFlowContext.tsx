@@ -18,6 +18,7 @@ import type {
   RequestedScope,
   TenantRecord,
 } from "../shared/openAdminOS";
+import { isManagedSettingLocked } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import {
   clearPendingIntent,
@@ -357,6 +358,10 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         providers={state.providers}
         activeProviderId={state.activeProviderId}
         savedRegistrations={state.savedAppRegistrations ?? []}
+        registrationLocked={
+          isManagedSettingLocked(state.managedPolicy, "appRegistration") &&
+          (state.savedAppRegistrations ?? []).some((entry) => entry.managed)
+        }
         {...(editOptions ? { editOptions } : {})}
         {...(presetPartIds ? { presetPartIds } : {})}
         onClose={closeFlow}

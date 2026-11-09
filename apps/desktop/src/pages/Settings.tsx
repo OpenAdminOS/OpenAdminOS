@@ -44,6 +44,9 @@ import {
   type GraphCacheStatus,
   type GatewayPublicStatus,
   type LocalDataSummary,
+  isManagedSettingLocked,
+  managedLockedModel,
+  type ManagedPolicyStatus,
   type ProviderId,
   type ProviderTestResult,
   type ProviderSummary,
@@ -67,6 +70,7 @@ import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
+import { ManagedPolicyPanel, SetByItBadge } from "../components/ManagedPolicy";
 import { ScanAgainButton } from "../setup/FirstRunScan";
 import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
@@ -470,7 +474,13 @@ export default function Settings() {
                 </div>
               }
             >
+              {state.managedPolicy ? (
+                <div className="mb-4 max-w-[1040px]">
+                  <ManagedPolicyPanel policy={state.managedPolicy} />
+                </div>
+              ) : null}
               <ProvidersSection
+                policy={state.managedPolicy}
                 providers={state.providers}
                 activeProviderId={state.activeProviderId}
                 activeModelByProviderId={state.activeModelByProviderId}
@@ -560,6 +570,7 @@ function SettingsPageSection({
 }
 
 function ProvidersSection({
+  policy,
   providers,
   activeProviderId,
   activeModelByProviderId,
@@ -567,6 +578,7 @@ function ProvidersSection({
   onSetActiveModel,
   onProviderConfigSaved,
 }: {
+  policy: ManagedPolicyStatus | undefined;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
   activeModelByProviderId: Partial<Record<ProviderId, string>> | undefined;
@@ -594,6 +606,7 @@ function ProvidersSection({
         {ordered.map((provider) => (
           <ProviderRow
             key={provider.id}
+            policy={policy}
             provider={provider}
             activeProviderId={activeProviderId}
             activeModel={activeModelByProviderId?.[provider.id]}
@@ -608,6 +621,7 @@ function ProvidersSection({
 }
 
 function ProviderRow({
+  policy,
   provider,
   activeProviderId,
   activeModel,
@@ -615,6 +629,7 @@ function ProviderRow({
   onSetActiveModel,
   onRefresh,
 }: {
+  policy: ManagedPolicyStatus | undefined;
   provider: ProviderSummary;
   activeProviderId: ProviderId;
   activeModel: string | undefined;
@@ -623,6 +638,9 @@ function ProviderRow({
   onRefresh: () => Promise<void>;
 }) {
   const isActive = provider.id === activeProviderId;
+  // The IT policy file can fix the provider and its model; the host refuses any other choice too.
+  const providerLocked = isManagedSettingLocked(policy, "defaultProvider");
+  const modelLocked = managedLockedModel(policy, provider.id) !== undefined;
   const implemented = isProviderImplemented(provider.id);
   const installedModels = provider.models ?? [];
   const [testing, setTesting] = useState(false);
@@ -683,13 +701,14 @@ function ProviderRow({
           <p className="mt-0.5 text-sm text-[var(--color-text-muted)]" title={provider.isLocal ? undefined : providerDataLocationDetail(provider)}>{kind}</p>
         </div>
         <Badge tone={status.tone}>{status.label}</Badge>
+        {providerLocked && isActive ? <SetByItBadge /> : null}
         <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-soft)]">
           <input
             type="radio"
             name="active-provider"
             aria-label={`Set ${provider.name} active`}
             checked={isActive}
-            disabled={!isActive && !canActivate}
+            disabled={providerLocked || (!isActive && !canActivate)}
             onChange={(event) => {
               if (event.target.checked && !isActive) void onSetActiveProvider(provider.id);
             }}
@@ -722,7 +741,10 @@ function ProviderRow({
           ) : null}
           {implemented && installedModels.length > 0 ? (
             <div className="mt-4">
-              <div className="text-sm font-medium text-[var(--color-text)]">Models</div>
+              <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
+                Models
+                {modelLocked ? <SetByItBadge /> : null}
+              </div>
               <div className="mt-2 flex flex-wrap gap-2">
                 {installedModels.map((model) => {
                   const selected = model === effectiveModel;
@@ -733,6 +755,7 @@ function ProviderRow({
                       variant={selected ? "secondary" : "ghost"}
                       className="max-w-full font-mono"
                       title={model}
+                      disabled={modelLocked}
                       onClick={() => void (async () => {
                         if (!isActive) await onSetActiveProvider(provider.id);
                         await onSetActiveModel(provider.id, selected && isActive ? null : model);

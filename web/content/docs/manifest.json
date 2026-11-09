@@ -54,6 +54,13 @@
           "route": "basics/own-app-registration",
           "path": "basics/own-app-registration",
           "children": []
+        },
+        {
+          "title": "Managed configuration",
+          "source": "getting-started/managed-configuration.md",
+          "route": "basics/managed-configuration",
+          "path": "basics/managed-configuration",
+          "children": []
         }
       ]
     },
@@ -478,6 +485,10 @@
     {
       "source": "getting-started/own-app-registration",
       "destination": "basics/own-app-registration"
+    },
+    {
+      "source": "getting-started/managed-configuration",
+      "destination": "basics/managed-configuration"
     },
     {
       "source": "generated/services/intune",
