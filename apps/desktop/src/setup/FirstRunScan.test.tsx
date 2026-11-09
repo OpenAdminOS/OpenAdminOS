@@ -446,7 +446,7 @@ describe("first-launch model scan screen", () => {
   });
 
   it("renders what the first-run screenshot capture waits for once settled (review round 4, item 4)", async () => {
-    // electron/first-run-capture.ts waits for the settled phase and these two exits by their exact labels.
+    // electron/first-run-capture.ts waits for the settled phase and this exit by its exact label.
     const { bridge, finish } = scanBridge({ kind: "nothing" });
     renderGate(bridge);
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });

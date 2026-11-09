@@ -19,6 +19,8 @@ const outDir = resolve(
 );
 const names = [
   "first-run-scan",
+  "first-run-microsoft",
+  "first-run-microsoft-picked",
   "connect-permissions",
   "own-registration",
   "pilot-chat",
