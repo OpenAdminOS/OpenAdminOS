@@ -1,7 +1,7 @@
 import { useId, useState } from "react";
 import { useNavigate } from "react-router";
 
-import { FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, providerDataLocation } from "../../copy";
+import { FIRST_RUN_CHAT_COPY, MODEL_SCAN_COPY, NOT_CONNECTED_COPY } from "../../copy";
 import { copyTextToClipboard } from "../../shared/clipboard";
 import {
   AVAILABLE_SERVICES,
@@ -20,17 +20,19 @@ import {
   type ServiceId,
   type TenantRecord,
 } from "../../shared/openAdminOS";
-import { detectedHostedProviders } from "../../shared/provider-detection";
+import { actionLabel, actionNote, optionsFromProviders, preselect, type ChoiceOption } from "../../setup/model-choice";
+import { ModelChoiceList } from "../ModelChoiceList";
 import { useSetupFlow } from "../../setup/SetupFlowContext";
 import { McpServerDialog } from "../marketplace/McpServerDialog";
 import { ServiceAccessDialog } from "../ServiceAccess";
 import { Button } from "../Button";
 import { useToast } from "../Toast";
-import { IconCheck, IconCloud, IconCopy, IconHardDrive, IconShield } from "../icons";
+import { IconCheck, IconCopy, IconShield } from "../icons";
 
 /**
- * The only setup Chat cannot work without. Shown in place of the empty
- * Chat while no model is ready (mockup 32, section B).
+ * The only setup Chat cannot work without, shown in place of the empty Chat
+ * while no model is ready. It is the scan's choice list (mockup 32,
+ * section B), so first launch and Chat show the same decision the same way.
  */
 export function ModelChoice({
   providers,
@@ -43,135 +45,80 @@ export function ModelChoice({
 }) {
   const navigate = useNavigate();
   const { startPilot } = useSetupFlow();
-  const [selecting, setSelecting] = useState<ProviderId | null>(null);
+  const options = optionsFromProviders(providers);
+  const [selected, setSelected] = useState<ProviderId | null>(null);
+  const [working, setWorking] = useState<ProviderId | "preview" | null>(null);
+  const [errors, setErrors] = useState<Partial<Record<ProviderId, string>>>({});
   const [error, setError] = useState<string | null>(null);
-  const [previewing, setPreviewing] = useState(false);
-  const detected = detectedHostedProviders(providers, activeProviderId);
+  const picked = selected && options.some((option) => option.providerId === selected) ? selected : preselect(options);
+  const chosen = options.find((option) => option.providerId === picked);
+  const note = actionNote(chosen);
 
-  const select = (id: ProviderId) => {
-    setSelecting(id);
-    setError(null);
-    void onSelectProvider(id)
-      .catch((caught: unknown) => setError(caught instanceof Error ? caught.message : String(caught)))
-      .finally(() => setSelecting(null));
+  const act = async (option: ChoiceOption) => {
+    if (working) return;
+    if (option.action === "get-model" || option.action === "rescan") {
+      navigate("/settings/providers");
+      return;
+    }
+    setWorking(option.providerId);
+    setErrors(({ [option.providerId]: _cleared, ...rest }) => rest);
+    try {
+      if (option.action === "start") {
+        const started = await window.openAdminOS?.startLocalRuntime?.(option.providerId);
+        if (!started?.started) {
+          setErrors((all) => ({ ...all, [option.providerId]: started?.message ?? MODEL_SCAN_COPY.startFailed(option.name) }));
+          return;
+        }
+      }
+      await onSelectProvider(option.providerId);
+    } catch (caught) {
+      setErrors((all) => ({ ...all, [option.providerId]: caught instanceof Error ? caught.message : String(caught) }));
+    } finally {
+      setWorking(null);
+    }
   };
   const preview = () => {
-    setPreviewing(true);
+    setWorking("preview");
     setError(null);
     void startPilot()
       .catch((caught: unknown) => setError(FIRST_RUN_CHAT_COPY.previewFailed(caught instanceof Error ? caught.message : String(caught))))
-      .finally(() => setPreviewing(false));
+      .finally(() => setWorking(null));
   };
 
   return (
-    <div>
-      <section
-        aria-labelledby="model-choice-heading"
-        className="rounded-2xl bg-[var(--color-surface)] p-6 ring-1 ring-[var(--color-border-soft)] shadow-[var(--shadow-soft)]"
-      >
-        <h2 id="model-choice-heading" className="text-lg font-medium text-[var(--color-text)]">
-          {FIRST_RUN_CHAT_COPY.modelChoiceTitle}
-        </h2>
-        <p className="mt-1 text-base leading-6 text-[var(--color-text-muted)]">{FIRST_RUN_CHAT_COPY.modelChoiceBody}</p>
-        <ul className="mt-5 space-y-2.5">
-          <ModelOption
-            icon={<IconHardDrive size={15} />}
-            title={FIRST_RUN_CHAT_COPY.localOptionTitle}
-            body={FIRST_RUN_CHAT_COPY.localOptionBody}
-            command={FIRST_RUN_CHAT_COPY.localOptionCommand}
-            where={FIRST_RUN_CHAT_COPY.localOptionWhere}
-            whereTone="local"
-            action={
-              <Button size="sm" variant="primary" onClick={() => navigate("/settings/providers")}>
-                {FIRST_RUN_CHAT_COPY.localOptionAction}
-              </Button>
-            }
-          />
-          {detected.map((provider) => (
-            <ModelOption
-              key={provider.id}
-              icon={<IconCloud size={15} />}
-              title={FIRST_RUN_CHAT_COPY.hostedOptionTitle(provider.name)}
-              body={FIRST_RUN_CHAT_COPY.hostedOptionBody}
-              where={FIRST_RUN_CHAT_COPY.hostedOptionWhere(providerDataLocation(provider))}
-              whereTone="hosted"
-              action={
-                <Button size="sm" variant="secondary" disabled={selecting !== null} onClick={() => select(provider.id)}>
-                  {FIRST_RUN_CHAT_COPY.hostedOptionAction(provider.name)}
-                </Button>
-              }
-            />
-          ))}
-          <ModelOption
-            title={FIRST_RUN_CHAT_COPY.otherOptionTitle}
-            body={FIRST_RUN_CHAT_COPY.otherOptionBody}
-            action={
-              <Button size="sm" variant="ghost" onClick={() => navigate("/settings/providers")}>
-                {FIRST_RUN_CHAT_COPY.otherOptionAction}
-              </Button>
-            }
-          />
-        </ul>
-        {error ? (
-          <p role="alert" className="mt-4 rounded-lg bg-[var(--color-danger-soft)] px-3 py-2 text-sm text-[var(--color-danger)]">
-            {error}
-          </p>
-        ) : null}
-      </section>
-      <p className="mt-4 text-sm text-[var(--color-text-muted)]">
-        {FIRST_RUN_CHAT_COPY.previewPrefix}{" "}
-        <button
-          type="button"
-          disabled={previewing}
-          onClick={preview}
-          className="rounded font-medium text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
-        >
+    <section aria-labelledby="model-choice-heading">
+      <h2 id="model-choice-heading" className="text-md font-medium text-[var(--color-text)]">
+        {FIRST_RUN_CHAT_COPY.modelChoiceTitle}
+      </h2>
+      <p className="mt-1 text-sm text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.chooseBody}</p>
+      <div className="mt-4">
+        <ModelChoiceList options={options} selected={picked} onSelect={setSelected} disabled={working !== null} errors={errors} label={FIRST_RUN_CHAT_COPY.modelChoiceTitle} />
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Button variant="primary" size="lg" disabled={!chosen || working !== null} onClick={() => chosen && void act(chosen)}>
+          {actionLabel(chosen, activeProviderId)}
+        </Button>
+        <button type="button" onClick={() => navigate("/settings/providers")} className={quietLink}>
+          {MODEL_SCAN_COPY.allProviders}
+        </button>
+      </div>
+      {note ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">{note}</p> : null}
+      {error ? (
+        <p role="alert" className="mt-3 text-sm text-[var(--color-danger)]">
+          {error}
+        </p>
+      ) : null}
+      <p className="mt-5 border-t border-[var(--color-border-soft)] pt-4 text-sm">
+        <button type="button" disabled={working !== null} onClick={preview} className={quietLink}>
           {FIRST_RUN_CHAT_COPY.previewLink}
-        </button>{" "}
-        {FIRST_RUN_CHAT_COPY.previewSuffix}
+        </button>
       </p>
-    </div>
+    </section>
   );
 }
 
-function ModelOption({
-  icon,
-  title,
-  body,
-  command,
-  where,
-  whereTone,
-  action,
-}: {
-  icon?: React.ReactNode;
-  title: string;
-  body: string;
-  command?: string;
-  where?: string;
-  whereTone?: "local" | "hosted";
-  action: React.ReactNode;
-}) {
-  return (
-    <li className="flex flex-wrap items-start gap-3 rounded-xl bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-[var(--color-border-soft)]">
-      <span className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-hover)] text-[var(--color-text-muted)]">
-        {icon ?? <IconShield size={15} />}
-      </span>
-      <div className="min-w-[200px] flex-1">
-        <div className="text-base font-medium text-[var(--color-text)]">{title}</div>
-        <p className="mt-0.5 text-sm leading-5 text-[var(--color-text-soft)]">{body}</p>
-        {command ? (
-          <code className="mt-1.5 inline-block rounded-md bg-[var(--color-surface)] px-2 py-0.5 font-mono text-xs text-[var(--color-text)] ring-1 ring-[var(--color-border-soft)]">
-            {command}
-          </code>
-        ) : null}
-        {where ? (
-          <p className={`mt-1 text-sm ${whereTone === "hosted" ? "text-[var(--color-warning)]" : "text-[var(--color-success)]"}`}>{where}</p>
-        ) : null}
-      </div>
-      <div className="shrink-0 self-center">{action}</div>
-    </li>
-  );
-}
+const quietLink =
+  "rounded-sm text-sm text-[var(--color-text-soft)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] hover:text-[var(--color-text)] hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60";
 
 /** One starter per service, from the registry's first standalone example question. */
 export function serviceStarters(): Array<{ question: string; service: string }> {

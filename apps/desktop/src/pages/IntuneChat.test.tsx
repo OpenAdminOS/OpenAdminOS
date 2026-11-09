@@ -255,16 +255,19 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(message).not.toMatch(/ - | – | — /);
   });
 
-  it("shows the inline model choice with no model, preselects nothing, and keeps the draft on Send", async () => {
+  it("shows the scan's choice list with no model, never preselects a hosted tool, and keeps the draft on Send", async () => {
     const user = userEvent.setup();
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, status: "not-installed" as const } : provider));
     const bridge = makeMockBridge({}, guestState({ providers }));
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
     expect(await screen.findByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeInTheDocument();
-    expect(screen.getByText(FIRST_RUN_CHAT_COPY.localOptionTitle)).toBeInTheDocument();
-    expect(screen.getByText(FIRST_RUN_CHAT_COPY.localOptionCommand)).toBeInTheDocument();
-    expect(screen.getByText("Prompts go to OpenAI API · US")).toBeInTheDocument();
+    // The same list as the first-launch scan (design round, B): local first, hosted rows say where prompts go.
+    const group = screen.getByRole("radiogroup", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle });
+    expect(within(group).getByRole("radio", { name: /^Ollama/ })).toBeChecked();
+    expect(within(group).getByRole("radio", { name: /^Codex/ })).not.toBeChecked();
+    expect(within(group).getByText("Prompts go to OpenAI API · US")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Get OpenAdmin 8B" })).toBeInTheDocument();
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
     const composer = screen.getByRole("combobox", { name: CHAT_COPY.composerLabel });
     expect(composer).toHaveAttribute("placeholder", FIRST_RUN_CHAT_COPY.placeholderNoModel);
@@ -275,7 +278,8 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Use OpenAI" }));
+    await user.click(within(group).getByRole("radio", { name: /^Codex/ }));
+    await user.click(screen.getByRole("button", { name: "Use Codex" }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
   });
 

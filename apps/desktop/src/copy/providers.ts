@@ -84,33 +84,9 @@ export const MODEL_SCAN_COPY = {
   ledger: (targets: readonly string[], notContacted: readonly string[] = []) =>
     `What ran: ${targets.join("; ")}.${notContacted.length > 0 ? ` Not contacted, set outside this device: ${notContacted.join("; ")}.` : ""} The Claude Code and Codex sign-in status commands may check with their provider. No prompt was sent to any model.`,
   localTitle: (model: string) => `${model} is ready on this device`,
-  hostedReady: (name: string) => `${name} is signed in on this device`,
-  availableTitle: (model: string) => `${model} is ready on this device, not selected`,
-  availableLine: (runtime: string, selected: string) =>
-    `It runs in ${runtime}. Chat keeps answering with ${selected}, your choice, until you switch.`,
-  keepSelected: (name: string) => `Keep ${name}`,
-  installedTitle: (name: string) => `${name} is installed on this device`,
-  heroLead: (kind: "local" | "switch" | "hosted" | "start" | "nothing") =>
-    kind === "switch"
-      ? "Found on this device"
-      : kind === "local"
-      ? "Ready on this device"
-      : kind === "hosted"
-        ? "Signed in on this device"
-        : kind === "start"
-          ? "Installed, not running"
-          : "Nothing to answer with yet",
-  localLine: (runtime: string) => `Runs in ${runtime}. Chat answers with it from now on.`,
-  hostedLine: "It is not selected until you choose it, because prompts leave this device when it answers.",
-  hostedWhereNamed: (name: string, location: string) => `${name}: prompts go to ${location}`,
-  keepLocal: (name: string) => `To keep everything on this device, start ${name}.`,
-  installedLine: "Start it to answer on this device. OpenAdminOS runs the start command for you and checks it again.",
-  nothingShort: "No model yet",
-  start: (name: string) => `Start ${name}`,
   starting: (name: string) => `Starting ${name}`,
   startingShort: "Starting",
   started: (name: string) => `${name} started. It keeps running after you quit OpenAdminOS.`,
-  startNote: (name: string) => `${name} keeps running after you quit OpenAdminOS.`,
   localWithReferences: (toolQueries: string) => `Runs on this device. Your references get ${toolQueries}.`,
   startFailed: (name: string) => `${name} did not start. Start it yourself, then scan again.`,
   skip: "Skip scan",
@@ -120,22 +96,15 @@ export const MODEL_SCAN_COPY = {
   hostedTitle: "A signed-in AI tool was found",
   hostedBody:
     "It is not selected for you, because prompts would leave this device. Choose it to answer with it, or keep everything local.",
-  hostedWhere: (location: string) => `Prompts go to ${location}`,
-  useHosted: (name: string) => `Use ${name}`,
-  keepLocalPrefix: "To keep everything on this device,",
-  setUpOpenAdmin: "set up OpenAdmin 8B",
   continueWithoutModel: "Continue without a model",
   nothingTitle: "No model on this device yet",
   nothingBody: "Install Ollama, then run this command to get OpenAdmin 8B, a model trained for Intune and Entra work:",
   nothingRunningBody: (runtime: string) => `${runtime} is installed but not running. Start it, or get OpenAdmin 8B with:`,
   installCommand: "ollama run openadminos/openadmin-8b",
-  setUpOpenAdminAction: "Set up OpenAdmin 8B",
   allProviders: "Show all providers",
   scanAgain: "Scan again",
   continueToChat: "Continue to Chat",
   scanFailed: "The scan did not start.",
-  previewPrefix: "Not ready to set up a model?",
   previewLink: "Preview with sample data",
-  previewSuffix: "from a fictional company.",
   previewFailed: (reason: string) => `Sample data did not open. ${reason}`,
 } as const;
