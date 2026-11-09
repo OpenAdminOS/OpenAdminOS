@@ -773,6 +773,11 @@ export interface OrganizationRecord {
  */
 export interface OrganizationConnections {
   microsoft365?: { tenantId: string };
+  /**
+   * Connections of services this version does not know, kept as they were
+   * so a connection made by a newer version survives a downgrade.
+   */
+  [vendorService: string]: Record<string, unknown> | undefined;
 }
 
 /**

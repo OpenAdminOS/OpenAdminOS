@@ -90,6 +90,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
   const claimedTenants = new Set<string>();
   const usedIds = new Set<string>();
   const stored = new Map<string, OrganizationRecord>();
+  const withoutMicrosoft365: OrganizationRecord[] = [];
 
   for (const raw of migrated ? [] : (input.rawOrganizations as unknown[])) {
     if (!isRecord(raw)) continue;
@@ -97,9 +98,27 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     if (id.length === 0 || id.length > 300 || usedIds.has(id)) continue;
     const connections = isRecord(raw.connections) ? raw.connections : undefined;
     const microsoft365 = connections && isRecord(connections.microsoft365) ? connections.microsoft365 : undefined;
+    // Connections of services this version does not know stay untouched.
+    const unknown: Record<string, Record<string, unknown>> = {};
+    for (const [key, value] of Object.entries(connections ?? {})) {
+      if (key !== "microsoft365" && isRecord(value)) unknown[key] = value;
+    }
     const tenantId = typeof microsoft365?.tenantId === "string" ? microsoft365.tenantId : undefined;
     const tenant = tenantId ? tenantsById.get(tenantId) : undefined;
-    if (!tenant || claimedTenants.has(tenant.id)) continue;
+    if (!tenant || claimedTenants.has(tenant.id)) {
+      // An organization a newer version made without Microsoft 365 is kept
+      // as it was; this version cannot select it.
+      if (!tenant && Object.keys(unknown).length > 0) {
+        usedIds.add(id);
+        withoutMicrosoft365.push({
+          id,
+          name: normalizeOrganizationName(raw.name) ?? "Organization",
+          createdAt: typeof raw.createdAt === "string" && raw.createdAt.length > 0 ? raw.createdAt : "",
+          connections: unknown,
+        });
+      }
+      continue;
+    }
     const fallback = organizationFromTenant(tenant);
     usedIds.add(id);
     claimedTenants.add(tenant.id);
@@ -109,11 +128,11 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
       name: tenant.kind === "sample" ? fallback.name : normalizeOrganizationName(raw.name) ?? fallback.name,
       ...(tenant.kind === "sample" ? { kind: "sample" as const } : {}),
       createdAt: typeof raw.createdAt === "string" && raw.createdAt.length > 0 ? raw.createdAt : fallback.createdAt,
-      connections: { microsoft365: { tenantId: tenant.id } },
+      connections: { ...unknown, microsoft365: { tenantId: tenant.id } },
     });
   }
 
-  const organizations = input.tenants.map((tenant) => {
+  const fromTenants = input.tenants.map((tenant) => {
     const existing = stored.get(tenant.id);
     if (existing) return existing;
     const created = organizationFromTenant(tenant);
@@ -124,6 +143,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     usedIds.add(id);
     return { ...created, id };
   });
+  const organizations = [...fromTenants, ...withoutMicrosoft365];
 
   const organizationIds = new Set(organizations.map((organization) => organization.id));
   const sampleIds = new Set(organizations.filter((organization) => organization.kind === "sample").map((organization) => organization.id));

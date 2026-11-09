@@ -400,7 +400,7 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
               <button type="button" onClick={() => void retry()} className="mt-1 inline-flex items-center gap-1 rounded-[4px] font-medium hover:underline focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)]"><IconRefresh size={10} /> Retry</button>
             </div>
           ) : null}
-          <AccountRow activeTenant={activeTenant} organizationCount={resolveOrganizations(state).length} nightly={isNightlyVersion(state.appVersion)} />
+          <AccountRow activeTenant={activeTenant} organizationCount={resolveOrganizations(state).filter((organization) => organization.connections.microsoft365).length} nightly={isNightlyVersion(state.appVersion)} />
         </div>
       </div>
     </aside>

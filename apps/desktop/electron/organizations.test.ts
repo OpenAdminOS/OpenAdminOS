@@ -654,3 +654,32 @@ describe("menu bar run due (review round 1)", () => {
     assert.equal(scheduleRunsInActiveOrganization({ organizationId: "org-a" }, undefined), false);
   });
 });
+
+describe("connections of other vendors survive (review round 1)", () => {
+  it("keeps unknown connection keys and organizations without Microsoft 365 through read and write", async () => {
+    const fixture = await makeStore(currentVersionState({
+      organizations: [
+        { id: `org-${woodgrove.id}`, name: "Woodgrove", createdAt: "2026-09-01T08:00:00.000Z", connections: { microsoft365: { tenantId: woodgrove.id }, jamf: { instanceUrl: "https://woodgrove.jamfcloud.com" } } },
+        { id: "org-northwind", name: "Northwind Studio", createdAt: "2026-11-20T08:00:00.000Z", connections: { jamf: { instanceUrl: "https://northwind.jamfcloud.com" } } },
+        // Not a record: dropped.
+        { id: "org-broken", name: "Broken", createdAt: "x", connections: { jamf: "nope" } },
+      ],
+    }));
+    try {
+      const app = await fixture.store.getAppState();
+      const woodgroveOrg = app.organizations?.find((organization) => organization.id === `org-${woodgrove.id}`);
+      assert.deepEqual(woodgroveOrg?.connections, { jamf: { instanceUrl: "https://woodgrove.jamfcloud.com" }, microsoft365: { tenantId: woodgrove.id } });
+      assert.ok(app.organizations?.some((organization) => organization.id === "org-northwind"));
+      assert.equal(app.organizations?.some((organization) => organization.id === "org-broken"), false);
+      await fixture.store.setActiveTenant(woodgrove.id);
+      const written = await fixture.file();
+      assert.deepEqual(written.organizations?.find((organization) => organization.id === "org-northwind")?.connections, { jamf: { instanceUrl: "https://northwind.jamfcloud.com" } });
+      assert.equal(written.organizations?.find((organization) => organization.id === `org-${woodgrove.id}`)?.connections.jamf?.instanceUrl, "https://woodgrove.jamfcloud.com");
+      // This version cannot run schedules in, or switch to, an organization without Microsoft 365.
+      await assert.rejects(fixture.store.assignAgentSchedule("find-inactive-devices", "org-northwind"), /cannot run schedules in that organization/);
+      await assert.rejects(fixture.store.setActiveOrganization("org-northwind"), /no longer on this device/);
+    } finally {
+      await fixture.close();
+    }
+  });
+});

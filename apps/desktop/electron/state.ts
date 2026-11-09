@@ -6979,6 +6979,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (organization.kind === "sample") {
         throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
       }
+      if (!organization.connections.microsoft365) {
+        throw new Error("This version of OpenAdminOS cannot run schedules in that organization. Choose another one, or update OpenAdminOS.");
+      }
       const index = persisted.installedAgents.findIndex((agent) => agent.slug === slug || agent.id === slug);
       const agent = index >= 0 ? persisted.installedAgents[index] : undefined;
       if (!agent?.schedule) {
