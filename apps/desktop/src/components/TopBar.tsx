@@ -11,8 +11,8 @@ export function TopBar() {
   const { collapsed, toggleSidebar, setTitleTarget, setActionsTarget } = useShellChrome();
   const { boundary } = useDataBoundary();
   const { state } = useAppState();
-  // Up to a 1100 px window the chip is one short line: where prompts go and
-  // how many references receive words from questions, never cut off.
+  // The chip is one short line at every width: where prompts go and how
+  // many references receive words from questions, never cut off.
   const referenceCount = boundary.kind !== "none" && boundary.toolHosts ? chatToolHosts(state).length : 0;
   const draggable = platform === "macos" || platform === "windows";
 
@@ -79,10 +79,9 @@ export function TopBar() {
             >
               {boundary.kind === "local" ? <IconLock size={11} className="shrink-0" /> : <IconCloud size={11} className="shrink-0" />}
               <span className="truncate">{boundary.label}</span>
-              {boundary.model ? <span className="truncate text-[var(--color-text-muted)] max-[1100px]:hidden">· {boundary.model}</span> : null}
-              {boundary.toolHosts ? <span data-testid="boundary-tool-hosts" className="truncate text-[var(--color-text-muted)] max-[1100px]:hidden">· {boundary.toolHosts}</span> : null}
+              {/* One short line at every width: the model and the host list are in the name and tooltip. */}
               {referenceCount > 0 ? (
-                <span data-testid="boundary-reference-count" className="shrink-0 whitespace-nowrap text-[var(--color-text-muted)] min-[1101px]:hidden">
+                <span data-testid="boundary-reference-count" className="shrink-0 whitespace-nowrap text-[var(--color-text-muted)]">
                   {`+${referenceCount} reference${referenceCount === 1 ? "" : "s"}`}
                 </span>
               ) : null}
