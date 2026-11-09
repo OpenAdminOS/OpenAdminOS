@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import Agents from "./Agents";
 import Marketplace from "./Marketplace";
-import { createMockAgent, createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
+import { createMockAgent, createMockAppState, makeMockBridge, mockProviders, renderRoute } from "../test/test-utils";
 import { SERVICE_PARTS, type RegistryAgentSummary } from "../shared/openAdminOS";
 
 function registryAgent(overrides: Partial<RegistryAgentSummary>): RegistryAgentSummary {
@@ -353,7 +353,7 @@ describe("preflight without an organization (review round 1)", () => {
     const state = { ...noOrganizationState([draft]), activeProviderId: "openai" as const };
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge: makeMockBridge({}, state) });
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(dialog).toHaveTextContent(/Prompts and agent context are sent through OpenAI.*No organization is active, so no tenant data is included\./);
+    expect(dialog).toHaveTextContent("Prompts and agent context are sent through the Codex CLI to OpenAI and leave this device. No organization is active, so no tenant data is included.");
     expect(dialog).not.toHaveTextContent("Tenant prompts");
   });
 
@@ -364,6 +364,23 @@ describe("preflight without an organization (review round 1)", () => {
       route: "/agents/devices/confirm",
       bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "openai", installedAgents: [agent] })),
     });
-    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Tenant prompts and agent context are sent through");
+    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Tenant prompts and agent context are sent through the Codex CLI to OpenAI and leave this device.");
   });
+});
+
+it("names the Azure OpenAI API, not a local CLI, in the run review", async () => {
+  const azure = { ...mockProviders.find((provider) => provider.id === "azure-openai")!, status: "available" as const, models: ["gpt-4o"], defaultModel: "gpt-4o" };
+  const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  renderRoute(<Agents startRunOnOpen />, {
+    path: "/agents/:slug/confirm",
+    route: "/agents/devices/confirm",
+    bridge: makeMockBridge({}, createMockAppState({
+      activeProviderId: "azure-openai",
+      providers: mockProviders.map((provider) => (provider.id === "azure-openai" ? azure : provider)),
+      installedAgents: [agent],
+    })),
+  });
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(dialog).toHaveTextContent("sent through the Azure OpenAI API to your deployment");
+  expect(dialog).not.toHaveTextContent("local CLI");
 });

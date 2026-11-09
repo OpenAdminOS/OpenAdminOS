@@ -47,6 +47,7 @@ import { AgentNeedChips } from "../components/AgentNeedChips";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
+import { hostedChannel } from "../shared/providers";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   activeOrganizationOf,
@@ -1086,6 +1087,7 @@ export default function AgentDetail({
           agent={agent}
           activeTenant={pendingTenant}
           providerName={pendingTenant?.kind === "sample" ? PILOT_COPY.providerName : pendingProvider?.name ?? pendingProviderId}
+          providerId={pendingProviderId}
           providerIsLocal={pendingTenant?.kind === "sample" || pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
           pilot={pendingTenant?.kind === "sample"}
@@ -2699,6 +2701,7 @@ function RunPreflightModal({
   agent,
   activeTenant,
   providerName,
+  providerId,
   providerIsLocal,
   requestedScopes,
   pilot = false,
@@ -2721,6 +2724,7 @@ function RunPreflightModal({
   agent: { name: string; mode: "read" | "write"; scopes: string[]; services?: ServiceId[]; schedule?: unknown; connectors?: readonly unknown[]; graphOperations?: readonly unknown[]; delivery?: AgentSummary["delivery"] };
   activeTenant: TenantRecord | undefined;
   providerName: string;
+  providerId: ProviderId;
   providerIsLocal: boolean;
   requestedScopes: RequestedScope[];
   model: string | undefined;
@@ -2789,8 +2793,8 @@ function RunPreflightModal({
         {!providerIsLocal && (
           <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
             {activeTenant
-              ? `Hosted provider selected. Tenant prompts and agent context are sent through ${providerName}'s local CLI and leave this device.`
-              : `Hosted provider selected. Prompts and agent context are sent through ${providerName}'s local CLI and leave this device. No organization is active, so no tenant data is included.`}
+              ? `Hosted provider selected. Tenant prompts and agent context are sent through ${hostedChannel({ id: providerId, name: providerName })} and leave this device.`
+              : `Hosted provider selected. Prompts and agent context are sent through ${hostedChannel({ id: providerId, name: providerName })} and leave this device. No organization is active, so no tenant data is included.`}
           </div>
         )}
         {scopeBlockCopy && (

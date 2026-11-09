@@ -14,6 +14,7 @@ import {
 } from "../test/test-utils";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY } from "../copy";
 import { chatToolHosts } from "../state";
+import { hostedChannel } from "../shared/providers";
 import { AppShell } from "../components/AppShell";
 import { connectedServiceIds } from "../components/ServiceMark";
 import { SERVICE_PARTS, type AppState, type ConnectorSummary } from "../shared/openAdminOS";
@@ -88,9 +89,9 @@ describe("Connections reach map", () => {
     expect(model.model.kind).toBe("hosted");
     render(state);
     const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    expect(within(map).getByText(`${hosted.name}, hosted`)).toBeInTheDocument();
+    expect(within(map).getByText(`${hosted.name}, through the Codex CLI`)).toBeInTheDocument();
     expect(within(map).getByText(CONNECTIONS_COPY.map.hostedRegion(hosted.name))).toBeInTheDocument();
-    expect(reachDescription(model)).toContain(`Prompts and tenant data go to ${hosted.name}. Region set by your ${hosted.name} account.`);
+    expect(reachDescription(model)).toContain(`Prompts and tenant data go through the Codex CLI to OpenAI. ${CONNECTIONS_COPY.map.hostedRegion(hosted.name)}.`);
   });
 
   it("shows No organization with nothing read and a Connect action", async () => {
@@ -372,10 +373,30 @@ describe("map and status strip agree (review round 1)", () => {
     expect(model.model.providerName).toBe(hosted.name);
     expect(strip.getAttribute("aria-label")).toContain(model.model.name.replace(/, hosted$/, ""));
     const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    expect(map).toHaveAccessibleDescription(new RegExp(`Prompts and tenant data go to ${hosted.name}\\.`));
+    expect(map).toHaveAccessibleDescription(/Prompts and tenant data go through the Codex CLI to OpenAI\./);
     // Services the map reads are the ones the switcher marks for this organization.
     expect(model.services.filter((service) => service.status !== "missing").map((service) => service.serviceId)).toEqual(
       connectedServiceIds(partialTenant),
     );
+  });
+});
+
+describe("hosted channel per provider type (review round 1)", () => {
+  it("names a vendor CLI or an API, never a CLI for an API provider", () => {
+    expect(hostedChannel({ id: "anthropic", name: "Anthropic" })).toBe("the Claude Code CLI to Anthropic");
+    expect(hostedChannel({ id: "openai", name: "OpenAI Codex" })).toBe("the Codex CLI to OpenAI");
+    expect(hostedChannel({ id: "azure-openai", name: "Azure OpenAI" })).toBe("the Azure OpenAI API to your deployment");
+    expect(hostedChannel({ id: "azure-openai", name: "Azure OpenAI" })).not.toMatch(/CLI/);
+  });
+
+  it("shows the Azure OpenAI API in the map, not a CLI", () => {
+    const azure = { ...mockProviders.find((provider) => provider.id === "azure-openai")!, status: "available" as const, models: ["gpt-4o"], defaultModel: "gpt-4o" };
+    const state = createMockAppState({
+      activeProviderId: "azure-openai",
+      providers: mockProviders.map((provider) => (provider.id === "azure-openai" ? azure : provider)),
+    });
+    const model = buildReachModel(state);
+    expect(reachDescription(model)).toContain("Prompts and tenant data go through the Azure OpenAI API to your deployment.");
+    expect(reachDescription(model)).not.toMatch(/CLI/);
   });
 });

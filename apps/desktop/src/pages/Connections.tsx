@@ -44,6 +44,7 @@ import {
 } from "../shared/openAdminOS";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import { hostedChannel } from "../shared/providers";
 import { chatToolHosts, useAppState } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
 
@@ -64,7 +65,7 @@ export interface ReachModel {
   organizationName?: string;
   sample: boolean;
   services: ReachService[];
-  model: { kind: "none" | "local" | "hosted" | "sample"; name: string; providerName?: string };
+  model: { kind: "none" | "local" | "hosted" | "sample"; name: string; providerName?: string; channel?: string };
   referenceHosts: string[];
   reportDestinations: string[];
 }
@@ -97,7 +98,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
       ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
       : provider.isLocal
         ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), providerName: provider.name }
-        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), providerName: provider.name };
+        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), providerName: provider.name, channel: hostedChannel(provider) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
     sample,
@@ -116,7 +117,7 @@ function serviceStateText(service: ReachService): string {
 }
 
 function promptsDestination(model: ReachModel["model"]): string {
-  if (model.kind === "hosted") return `${model.providerName ?? model.name}, hosted`;
+  if (model.kind === "hosted") return `${model.providerName ?? model.name}, through ${model.channel?.replace(/ to .*$/, "") ?? "its API"}`;
   if (model.kind === "local") return CONNECTIONS_COPY.map.promptsLocal;
   if (model.kind === "sample") return CONNECTIONS_COPY.map.promptsSample;
   return CONNECTIONS_COPY.map.promptsNoModel;
@@ -137,7 +138,7 @@ export function reachDescription(model: ReachModel): string {
     model.model.kind === "local"
       ? `The model runs on this device: ${model.model.name}.`
       : model.model.kind === "hosted"
-        ? `The model is hosted: ${model.model.name}. Prompts and tenant data go to ${model.model.providerName}. ${CONNECTIONS_COPY.map.hostedRegion(model.model.providerName ?? "provider")}.`
+        ? `The model is hosted: ${model.model.name}. Prompts and tenant data go through ${model.model.channel}. ${CONNECTIONS_COPY.map.hostedRegion(model.model.providerName ?? "provider")}.`
         : model.model.kind === "sample"
           ? "Sample answers are prepared on this device. No model is used."
           : "No model is ready.";
