@@ -1836,6 +1836,14 @@ Acceptance criteria
 - [x] Tests for the mapping, the variants, the accessible label and the Apple neutral case. Scan (running and settled) and Chat's model choice recaptured at 1280x800 light and 960 px dark.
 - [ ] Step 4: after main is merged, `ProviderLogo` on #174's provider marks (the Connections reach map row and the organization surfaces that show a provider).
 
+### Real logos for every provider and service (maintainer decision, 2026-11-09)
+
+- [x] Official files fetched unmodified: Claude spark (Anthropic press kit), OpenAI Blossom black and white (openai.com/brand), Gemini colour PNG (Google Workspace logo archive; Google publishes no SVG), Azure OpenAI, Intune and Defender for Cloud (Azure Architecture Icons V25), Entra ID colour (Entra architecture icons), Apple Intelligence (developer.apple.com icon; Apple offers no separate download). Microsoft has no Defender XDR icon in its downloads, so Defender shows Defender for Cloud.
+- [x] `ProviderLogo` shows a logo for every `ProviderId`, a neutral mark only for an unknown provider; an optical `scale` for files with built-in clear space. `ServiceMark` and `ServiceLogo` show the Microsoft icons on the not-connected card, Chat starters and the Microsoft 365 step.
+- [x] Disclaimer in Settings, About, the README License section and both NOTICE files (`provider-logos/`, `service-logos/`), which list owner, source URL and retrieval date and how to request removal.
+- [x] Tests: every provider and service resolves to its logo, light and dark variants or one file on both, accessible labels.
+- [ ] Step 4: the same logos on #174's provider and service marks (reach map, service rows, switcher, Agents chips, run review).
+
 
 ## Remove pilot mode and sample data (maintainer decision, 2026-11-09; step 4, waits for the signal after #174 merges)
 
