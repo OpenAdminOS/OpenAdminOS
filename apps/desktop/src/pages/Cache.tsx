@@ -557,7 +557,7 @@ export function DataSettingsSection() {
             rows={visibleResources}
             rowKey={(resource) => resource.resource}
             loading={Boolean(tenantId) && !status}
-            emptyTitle={tenantId ? "No matching resources" : "No active tenant"}
+            emptyTitle={tenantId ? "No matching resources" : "No organization is active"}
             emptyDescription={tenantId ? "Change the resource search or filter." : "Connect a tenant before inspecting cache resources."}
           />
         </div>

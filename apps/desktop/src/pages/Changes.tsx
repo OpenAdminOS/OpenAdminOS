@@ -1179,8 +1179,8 @@ export default function Changes() {
           ) : !activeTenant ? (
             <EmptyState
               icon={<IconWarning size={18} />}
-              title="No active tenant"
-              description="Connect a Microsoft 365 tenant before reviewing tenant changes."
+              title="No organization is active"
+              description="Changes reads Intune and Entra configuration for the active organization. Choose an organization in the organization menu, or connect Microsoft 365 to add one."
               action={
                 <Button
                   variant="primary"
@@ -1193,7 +1193,7 @@ export default function Changes() {
                     )
                   }
                 >
-                  Connect tenant
+                  Connect Microsoft 365
                 </Button>
               }
             />

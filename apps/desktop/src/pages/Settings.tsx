@@ -1520,7 +1520,7 @@ export function ChatSettingsSection() {
     : "Loading";
   const graphCacheLabel = activeTenant
     ? `${activeTenantCacheRows.toLocaleString()} rows for ${activeTenant.displayName}`
-    : "No active tenant";
+    : "No organization is active";
   const runHistoryLabel = localDataSummary?.runHistoryCount !== undefined
     ? `${localDataSummary.runHistoryCount.toLocaleString()} records`
     : `${state.runs.length.toLocaleString()} records`;
