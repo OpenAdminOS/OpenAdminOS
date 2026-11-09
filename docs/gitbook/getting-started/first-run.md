@@ -17,7 +17,7 @@ One screen checks, all at once:
 - **Claude Code** and **Codex**: installed and signed in.
 - **GitHub Copilot CLI** (installed; its sign-in is checked when you select it), **Gemini CLI** (sign-in not confirmed until you test it), and a saved **Azure OpenAI** deployment.
 
-Each tool appears around your device and resolves to found, not found, or could not check; the list beside it shows what each check touched (for example `localhost:11434` or `claude auth status`). A check that does not answer within 2.5 seconds shows **Retry**. Press any key or **Skip** to see the result at once. The scan reads local files and loopback ports and runs each CLI's own version and sign-in status command, which may check the sign-in with its provider. It sends no prompt to any model, and an Ollama or LM Studio endpoint on another machine is not contacted. If Ollama or LM Studio is installed but not running, **Start** starts it for you and checks it again.
+Each tool appears around your device and resolves to found, not found, or could not check; the list beside it shows what each check touched (for example `localhost:11434` or `claude auth status`). A check that does not answer within 2.5 seconds shows **Retry**. Press Escape, choose **Skip** or click to see the result at once. The scan reads local files and loopback ports and runs each CLI's own version and sign-in status command, which may check the sign-in with its provider. It sends no prompt to any model, and an Ollama or LM Studio endpoint on another machine is not contacted. If Ollama or LM Studio is installed but not running, **Start** starts it for you and checks it again.
 
 What happens next follows the provider rules:
 

@@ -11,7 +11,7 @@ The OpenAdminOS app is a published multi-tenant app registration with client ID 
 
 1. Start connecting a tenant from Chat's not-connected card, the tenant menu, Settings, Tenants, the pilot mode banner, or any action that needs a tenant. They all open the same dialog.
 2. Choose **OpenAdminOS app**.
-3. Under **Services**, select at least one of Intune, Entra and Defender. Nothing is preselected.
+3. Under **Services**, select at least one of Intune, Entra and Defender. From Chat's not-connected card, the service and part the question needs are already selected; from anywhere else nothing is preselected.
 4. Expand a service to review its parts, each exact Microsoft Graph scope, and why it is needed. Clear the parts your team should not read. A service checkbox shows a mixed state when only some of its parts are selected.
 5. Choose **Approve N read scopes and continue to Microsoft**. Microsoft's consent screen then lists the sign-in scopes plus the scopes of the selected parts, and nothing else.
 
