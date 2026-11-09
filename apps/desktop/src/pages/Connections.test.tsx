@@ -87,7 +87,7 @@ describe("Connections reach map", () => {
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
   });
 
-  it("names the hosted provider and says its region is not reported", async () => {
+  it("names the hosted provider and its documented API location", async () => {
     const hosted = mockProviders.find((provider) => !provider.isLocal && provider.status === "connected")!;
     const state = createMockAppState({ activeProviderId: hosted.id });
     const model = buildReachModel(state);
@@ -95,8 +95,9 @@ describe("Connections reach map", () => {
     render(state);
     const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
     expect(within(map).getByText(`${hosted.name}, through the Codex CLI`)).toBeInTheDocument();
-    expect(within(map).getByText("Region not reported to OpenAdminOS")).toBeInTheDocument();
-    expect(reachDescription(model)).toContain("Prompts and tenant data go through the Codex CLI to OpenAI. Region not reported to OpenAdminOS.");
+    expect(within(map).getByText("OpenAI API · US")).toBeInTheDocument();
+    expect(reachDescription(model)).toContain("Prompts and tenant data go through the Codex CLI to OpenAI. Prompts go to OpenAI API · US.");
+    expect(reachDescription(model)).not.toContain("Region not reported");
   });
 
   it("shows No organization with nothing read and a Connect action", async () => {

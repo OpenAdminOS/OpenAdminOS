@@ -12,7 +12,7 @@ export interface TrustAttachments {
 }
 
 export interface TrustCopyInput {
-  provider?: Pick<ProviderSummary, "name" | "isLocal">;
+  provider?: Pick<ProviderSummary, "name" | "isLocal"> & Partial<Pick<ProviderSummary, "id">>;
   model?: string;
   scope?: TrustScope;
   attachments?: TrustAttachments;
@@ -34,6 +34,22 @@ export const LOCAL_BOUNDARY_COPY = {
   plain: "Local model. Tenant data stays on this device.",
   withTools: "Local model. Graph and cache data stay on this device.",
 } as const;
+
+/**
+ * Where a hosted provider sends prompts, as the status strip, the composer
+ * and the hosted confirmation name it ("Anthropic API · US").
+ */
+const HOSTED_DATA_LOCATIONS: Readonly<Record<string, string>> = {
+  anthropic: "Anthropic API · US",
+  openai: "OpenAI API · US",
+  copilot: "GitHub Copilot · region not stated",
+  gemini: "Google Gemini API · region not stated",
+  "azure-openai": "Azure OpenAI · your resource's region",
+};
+
+export function providerDataLocation(provider: Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>): string {
+  return (provider.id && HOSTED_DATA_LOCATIONS[provider.id]) || `${provider.name} · region not stated`;
+}
 
 export interface DerivedTrustCopy {
   strip: string;
@@ -123,12 +139,14 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
     };
   }
 
+  const location = providerDataLocation(input.provider);
   return {
-    strip: `hosted · tenant context sent to ${providerName}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
+    // Each line names where prompts are processed, not just the provider (hard constraint 1).
+    strip: `hosted · tenant context sent to ${location}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
     ...(toolHosts ? { toolHosts } : {}),
-    boundary: `Tenant context will be sent to ${providerName}${attachments ? ` with ${attachments}` : ""}.`,
+    boundary: `Tenant context will be sent to ${location}${attachments ? ` with ${attachments}` : ""}.`,
     confirmTitle: "Send tenant context to hosted provider",
-    confirmBody: `${providerName}${modelDetail} will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,
+    confirmBody: `${providerName}${modelDetail} (${location}) will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,
     storage: "Chat history and the Graph cache stay on this device.",
     isLocal: false,
   };

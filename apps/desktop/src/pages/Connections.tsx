@@ -21,7 +21,7 @@ import {
 import { TenantTile } from "../components/TenantTile";
 import { useToast } from "../components/Toast";
 import { Badge, Button as UiButton, StatusDot } from "../components/ui";
-import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, userFacingErrorReason } from "../copy";
+import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, providerDataLocation, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
@@ -65,7 +65,7 @@ export interface ReachModel {
   organizationName?: string;
   sample: boolean;
   services: ReachService[];
-  model: { kind: "none" | "local" | "hosted" | "sample"; name: string; providerName?: string; channel?: string };
+  model: { kind: "none" | "local" | "hosted" | "sample"; name: string; providerName?: string; channel?: string; location?: string };
   referenceHosts: string[];
   /** null while the connector list loads or when it could not be loaded. */
   reportDestinations: string[] | null;
@@ -107,7 +107,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
       ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
       : boundary.kind === "local"
         ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), providerName: provider.name }
-        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), providerName: provider.name, channel: hostedChannel(provider) };
+        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), providerName: provider.name, channel: hostedChannel(provider), location: providerDataLocation(provider) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
     sample,
@@ -153,7 +153,7 @@ export function reachDescription(model: ReachModel): string {
     model.model.kind === "local"
       ? `The model runs on this device: ${model.model.name}.`
       : model.model.kind === "hosted"
-        ? `The model is hosted: ${model.model.name}. ${model.organizationName ? "Prompts and tenant data go" : "Prompts and agent context go"} through ${model.model.channel}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."} ${CONNECTIONS_COPY.map.hostedRegion(model.model.providerName ?? "provider")}.`
+        ? `The model is hosted: ${model.model.name}. ${model.organizationName ? "Prompts and tenant data go" : "Prompts and agent context go"} through ${model.model.channel}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."} Prompts go to ${model.model.location ?? "the provider"}.`
         : model.model.kind === "sample"
           ? "Sample answers are prepared on this device. No model is used."
           : "No model is ready.";
@@ -240,7 +240,7 @@ function ReachMap({ model }: { model: ReachModel }) {
               {promptsDestination(model.model)}
               {model.model.kind === "hosted" ? (
                 <span className="block text-xs text-[var(--color-text-muted)]">
-                  {CONNECTIONS_COPY.map.hostedRegion(model.model.providerName ?? model.model.name)}
+                  {model.model.location}
                 </span>
               ) : null}
             </span>
