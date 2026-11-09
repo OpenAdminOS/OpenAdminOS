@@ -6,6 +6,7 @@ import { IconChevronDown, IconRefresh } from "../components/icons";
 import { Modal, ModalHeader } from "../components/Modal";
 import { DeviceTile } from "../components/DeviceTile";
 import { DisconnectOrganizationDialog } from "../components/DisconnectOrganizationDialog";
+import { ProviderMark } from "../components/ProviderLogo";
 import { ReferenceMark, ServiceMark } from "../components/ServiceMark";
 import {
   ServiceAccessDialog,
@@ -38,6 +39,7 @@ import {
   type AppState,
   type ConnectorSummary,
   type OrganizationRecord,
+  type ProviderId,
   type SavedAppRegistration,
   type ServiceConnectionStatus,
   type ServiceId,
@@ -45,6 +47,7 @@ import {
 } from "../shared/openAdminOS";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import { useSetupFlow } from "../setup/SetupFlowContext";
+import { MicrosoftStepButton, useOpenMicrosoftStep } from "../setup/FirstRunScan";
 import { hostedChannel } from "../shared/providers";
 import { chatToolHosts, deriveDataBoundary, novaVoiceSentence, useAppState, useDataBoundaryOptional } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
@@ -72,6 +75,8 @@ export interface ReachModel {
     name: string;
     /** The model id alone, as the status strip shows it. */
     modelName?: string;
+    /** The provider, for its logo. */
+    providerId?: ProviderId;
     providerName?: string;
     channel?: string;
     /** Where prompts go, in the shared sentence form (promptsGoTo). */
@@ -120,8 +125,8 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     : boundary.kind === "none" || !provider
       ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
       : boundary.kind === "local"
-        ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerName: provider.name }
-        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization) && !sample), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
+        ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerId: provider.id, providerName: provider.name }
+        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerId: provider.id, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization) && !sample), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
     sample,
@@ -433,7 +438,7 @@ function ReachMap({ model }: { model: ReachModel }) {
             {hosted ? (
               <ReachRow
                 linkId="prompts"
-                mark={<ReferenceMark name={(model.model.location ?? model.model.providerName ?? model.model.name).split(" ")[0] ?? ""} />}
+                mark={model.model.providerId ? <ProviderMark provider={model.model.providerId} /> : <ReferenceMark name={(model.model.location ?? model.model.providerName ?? model.model.name).split(" ")[0] ?? ""} />}
                 title={model.model.location ?? promptsDestination(model.model)}
                 titleHint={`${model.model.location ?? ""}, ${promptsDestination(model.model)}`}
                 {...(model.model.locationDetail ? { detail: model.model.locationDetail } : {})}
@@ -455,7 +460,7 @@ function ReachMap({ model }: { model: ReachModel }) {
             <ul className="reach-rows">
               <ReachRow
                 linkId="voice"
-                mark={<ReferenceMark name={model.voice.provider} />}
+                mark={<ProviderMark provider="openai" />}
                 title={CONNECTIONS_COPY.map.voiceDestination(model.voice.location)}
                 state={model.voice.model ? <ReachState tone="leaves">{model.voice.model}</ReachState> : undefined}
               />
@@ -1175,7 +1180,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
         <SectionHeading id="connections-leaves-now" title={CONNECTIONS_COPY.leavesNowHeading} />
         <ul className="conn-rows">
           <li className="conn-row">
-            {hosted ? <ReferenceMark name={prompts.split(" ")[0] ?? ""} size="lg" /> : <ReferenceMark name="" size="lg" off />}
+            {hosted && model.model.providerId ? <ProviderMark provider={model.model.providerId} size="lg" /> : hosted ? <ReferenceMark name={prompts.split(" ")[0] ?? ""} size="lg" /> : <ReferenceMark name="" size="lg" off />}
             <div className="min-w-0">
               <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.promptsNoOrganization}</div>
               <div className={`text-sm ${hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`}>{prompts}</div>
@@ -1190,7 +1195,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
           </li>
           {model.voice ? (
             <li className="conn-row">
-              <ReferenceMark name={model.voice.provider} size="lg" />
+              <ProviderMark provider="openai" size="lg" />
               <div className="min-w-0">
                 <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.voice}</div>
                 <div className="text-sm text-[var(--color-warning)]">{CONNECTIONS_COPY.map.voiceDestination(model.voice.location)}</div>
@@ -1257,6 +1262,8 @@ export default function Connections() {
   const [searchParams, setSearchParams] = useSearchParams();
   const { state, loading, removeSavedAppRegistration } = useAppState();
   const { openSetup } = useSetupFlow();
+  // Connect Microsoft 365 opens the onboarding step (services, permissions, sign-in) where it is available.
+  const openMicrosoftStep = useOpenMicrosoftStep();
   // The Results section loads the connector list; the map uses the same one.
   // undefined while loading, null when the list could not be loaded.
   const [connectors, setConnectors] = useState<ConnectorSummary[] | null | undefined>(undefined);
@@ -1301,6 +1308,7 @@ export default function Connections() {
       <PageHeader
         title={organization ? CONNECTIONS_COPY.title(organization.name) : CONNECTIONS_COPY.pageTitle}
         subtitle={organization ? CONNECTIONS_COPY.lede : CONNECTIONS_COPY.ledeNone}
+        {...(organization ? { actions: <MicrosoftStepButton /> } : {})}
         wide
       />
       <PageBody>
@@ -1331,7 +1339,7 @@ export default function Connections() {
             ) : (
               <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
                 {!organization ? (
-                  <NoOrganization model={reach} onConnect={openSetup} onShowReferences={showReferences} />
+                  <NoOrganization model={reach} onConnect={openMicrosoftStep ?? openSetup} onShowReferences={showReferences} />
                 ) : (
                   <>
                     {sample ? (

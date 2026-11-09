@@ -64,6 +64,9 @@ describe("agents by service", () => {
     const list = await screen.findByLabelText("Installed agents");
     expect(within(list).getByText("Needs Defender")).toBeInTheDocument();
     expect(within(list).getByText("Needs Entra")).toBeInTheDocument();
+    // Need chips carry Microsoft's icon for the service, dashed while it is missing (step 4).
+    const chip = within(list).getByText("Needs Defender").closest(".need-chip") ?? within(list).getByText("Needs Defender").parentElement!;
+    expect(chip.querySelector('.svc-mark[data-service="defender"] [data-kind="logo"] img')).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
     expect(screen.getByRole("menuitemradio", { name: "All services" })).toHaveAttribute("aria-checked", "true");
@@ -118,6 +121,12 @@ describe("agents by service", () => {
 
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
     expect(within(dialog).getByText("Needs Defender, not connected.")).toBeInTheDocument();
+    // The run review shows the provider's logo by the model and Microsoft's icon by what it reads, dashed while not connected (step 4).
+    const facts = dialog.querySelector("dl[aria-label=\"What this run uses\"]")!;
+    expect(facts.querySelector(`[data-provider-logo="${state.activeProviderId}"][data-kind="logo"]`)).not.toBeNull();
+    const reads = facts.querySelector('.svc-mark[data-service="defender"]');
+    expect(reads).toHaveAttribute("data-off", "true");
+    expect(reads!.querySelector('[data-kind="logo"] img')).not.toBeNull();
     expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
     await user.click(within(dialog).getByRole("button", { name: "Add Defender" }));
     expect(screen.getByRole("dialog", { name: "Add Defender access" })).toBeInTheDocument();

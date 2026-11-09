@@ -14,6 +14,7 @@ import { Button } from "../components/Button";
 import { ModelChoiceList } from "../components/ModelChoiceList";
 import { ProviderLogo, providerLogoKind } from "../components/ProviderLogo";
 import { IconLogo } from "../components/icons";
+import { DeviceTile } from "../components/DeviceTile";
 import { MICROSOFT_STEP_COPY, MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocationDetail } from "../copy";
 import { chatToolHosts } from "../state/data-boundary";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
@@ -747,8 +748,9 @@ function ScanStage({
         })}
       </svg>
       <div className="scan-sweep absolute inset-[12%] rounded-full" />
-      <div className="scan-device absolute left-1/2 top-1/2 flex aspect-square w-[20%] items-center justify-center rounded-[27%] bg-[var(--color-accent)]">
-        <IconLogo size={44} className="text-[var(--color-on-accent)]" />
+      {/* #174's shared device tile, sized to the stage. */}
+      <div className="scan-device absolute left-1/2 top-1/2 aspect-square w-[20%]">
+        <DeviceTile size="xl" />
       </div>
       {rows.map((probe, index) => {
         const { x, y } = position(index);
@@ -907,7 +909,14 @@ function ScanResult({
 }
 
 
-/** Settings: open the Connect Microsoft 365 step again. */
+/** Opens Connect Microsoft 365 from Connections, or undefined where the onboarding gate is not available. */
+export function useOpenMicrosoftStep(): (() => void) | undefined {
+  const scan = useContext(ModelScanContext);
+  const supported = typeof window.openAdminOS?.startModelScan === "function";
+  return supported && scan ? scan.openMicrosoftStep : undefined;
+}
+
+/** Connections: open the Connect Microsoft 365 step again. */
 export function MicrosoftStepButton() {
   const scan = useContext(ModelScanContext);
   const supported = typeof window.openAdminOS?.startModelScan === "function";

@@ -17,7 +17,7 @@ import {
 import { TenantCheckStatus, useTenantCheck } from "./ServiceAccess";
 import { Modal, ModalHeader } from "./Modal";
 import { Pill } from "./Pill";
-import { connectedServiceIds } from "./ServiceMark";
+import { ServiceMark, connectedServiceIds } from "./ServiceMark";
 import { useToast } from "./Toast";
 import { Tooltip } from "./ui";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -320,12 +320,19 @@ export function OrganizationSwitcher() {
                               <span className="truncate text-md text-[var(--color-text)]">{organization.name}</span>
                               {sample ? <Pill tone="info">{ORGANIZATION_COPY.sampleLabel}</Pill> : null}
                             </span>
-                            <span
-                              className="block truncate text-xs text-[var(--color-text-muted)]"
-                              {...(sample ? {} : { "aria-label": ORGANIZATION_COPY.servicesLabel(services.map((id) => serviceById(id).title)) })}
-                              title={detail}
-                            >
-                              {detail}
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              {services.length > 0 ? (
+                                <span className="flex shrink-0 gap-0.5" aria-hidden="true">
+                                  {services.map((id) => <ServiceMark key={id} serviceId={id} size="sm" />)}
+                                </span>
+                              ) : null}
+                              <span
+                                className="block min-w-0 truncate text-xs text-[var(--color-text-muted)]"
+                                {...(sample ? {} : { "aria-label": ORGANIZATION_COPY.servicesLabel(services.map((id) => serviceById(id).title)) })}
+                                title={detail}
+                              >
+                                {detail}
+                              </span>
                             </span>
                             {tenant.tierProbeWarning ? (
                               <span className="block truncate text-xs text-[var(--color-text-muted)]" title={tenant.tierProbeWarning.message}>

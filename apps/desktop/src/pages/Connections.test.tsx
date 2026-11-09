@@ -100,6 +100,8 @@ describe("Connections reach map", () => {
     const row = within(map).getByText("Codex · location set by your account");
     expect(row).toHaveAttribute("title", expect.stringContaining("Codex · location set by your account"));
     expect(within(map).getByText(model.model.modelName!)).toBeInTheDocument();
+    // The prompts row carries the provider's own logo, not two letters (step 4).
+    expect(map.querySelector(`[data-service="provider"] [data-provider-logo="${hosted.id}"][data-kind="logo"]`)).not.toBeNull();
     // The description uses the same sentence as every other surface (design round review 2).
     expect(reachDescription(model)).toContain(`${promptsGoTo(hosted, true)}.`);
     expect(reachDescription(model)).toContain("Prompts and tenant data leave this device through Codex; location set by your account.");
@@ -230,6 +232,11 @@ describe("Connections services", () => {
     expect(rows[1]).toHaveTextContent(/Entra.*\d of 6 parts/);
     expect(rows[1]).not.toHaveTextContent("Partial");
     expect(rows[2]).toHaveTextContent(/Defender.*Not connected/);
+    // Each row shows Microsoft's icon for the service; a service that is not connected keeps a dashed tile (step 4).
+    for (const [row, id] of [[rows[0]!, "intune"], [rows[1]!, "entra"], [rows[2]!, "defender"]] as const) {
+      expect(row.querySelector(`.svc-mark [data-service-logo="${id}"][data-kind="logo"] img`), id).not.toBeNull();
+    }
+    expect(rows[2]!.querySelector(".svc-mark")).toHaveAttribute("data-off", "true");
     // The shared app never offers Check again; consent adds access.
     expect(within(services).queryByRole("button", { name: SERVICE_COPY.checkAgain })).not.toBeInTheDocument();
     expect(within(rows[2]!).getByRole("button", { name: "Add Defender access" })).toHaveTextContent("Connect");

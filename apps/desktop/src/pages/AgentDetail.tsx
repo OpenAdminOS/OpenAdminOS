@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ServiceMark } from "../components/ServiceMark";
+import { ProviderLogo } from "../components/ProviderLogo";
 import { Select } from "../components/Select";
 import { Link, useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { Card } from "../components/Card";
@@ -57,6 +58,7 @@ import {
   resolveOrganizations,
   serviceById,
   agentServiceIds,
+  serviceStatus,
   availableScopeSet,
   missingPartsForScopes,
   missingServicesForAgent,
@@ -2878,6 +2880,13 @@ function RunPreflightModal({
             {activeTenant ? organizationName ?? activeTenant.displayName : serviceFree ? "None needed" : "None active"}
           </PreflightFact>
           <PreflightFact label="Reads">
+            {serviceFree ? null : (
+              <span className="mr-1.5 inline-flex translate-y-[3px] gap-1" aria-hidden="true">
+                {agentServiceIds(agent).map((id) => (
+                  <ServiceMark key={id} serviceId={id} size="sm" off={!activeTenant || serviceStatus(activeTenant, id) === "missing"} />
+                ))}
+              </span>
+            )}
             {serviceFree
               ? "Nothing. It reads no service data."
               : `${neededTitles.length > 0 ? formatServiceList(neededTitles) : "Microsoft 365 sign-in"}, ${agent.mode === "write" ? "read and write" : "read-only"}`}
@@ -2888,7 +2897,10 @@ function RunPreflightModal({
             ) : null}
           </PreflightFact>
           <PreflightFact label="Model">
-            {model ?? "Provider default"}
+            <span className="inline-flex items-center gap-1.5">
+              <ProviderLogo provider={providerId} size={14} />
+              {model ?? "Provider default"}
+            </span>
             {pilot ? null : providerIsLocal ? (
               <span className="mt-0.5 block text-xs text-[var(--color-success)]">{`${providerName}. Prompts stay on this device.`}</span>
             ) : (

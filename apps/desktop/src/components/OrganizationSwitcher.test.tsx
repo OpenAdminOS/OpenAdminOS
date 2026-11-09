@@ -62,6 +62,8 @@ describe("organization switcher", () => {
     expect(within(active).getByLabelText("Services: Intune, Entra")).toBeInTheDocument();
     const other = within(menu).getByRole("menuitemradio", { name: /Fabrikam/ });
     expect(within(other).getByLabelText("Services: Intune, Entra, Defender")).toBeInTheDocument();
+    // Microsoft's service icons before the services line (step 4).
+    expect([...other.querySelectorAll("[data-service-logo][data-kind='logo']")].map((node) => node.getAttribute("data-service-logo"))).toEqual(["intune", "entra", "defender"]);
     const pilot = within(menu).getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
     expect(within(pilot).getByText(ORGANIZATION_COPY.sampleLabel)).toBeInTheDocument();
     expect(within(menu).getByRole("menuitemradio", { name: new RegExp(`^${ORGANIZATION_COPY.noOrganization}`) })).toHaveAttribute("aria-checked", "false");

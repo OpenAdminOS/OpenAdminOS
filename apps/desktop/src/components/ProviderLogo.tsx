@@ -80,3 +80,18 @@ export function ProviderLogo({
     </span>
   );
 }
+
+const MARK_INNER: Readonly<Record<"sm" | "md" | "lg", number>> = { sm: 12, md: 15, lg: 20 };
+
+/**
+ * A provider's logo on the same quiet tile as a service or reference mark
+ * (#174's reach map and connection rows), at the sm, md and lg tile sizes.
+ */
+export function ProviderMark({ provider, size = "md", label }: { provider: string; size?: "sm" | "md" | "lg"; label?: string }) {
+  return (
+    <span className="svc-mark" data-service="provider" data-size={size} {...(label ? { role: "img", "aria-label": label } : { "aria-hidden": true })}>
+      <ProviderLogo provider={provider} size={MARK_INNER[size]} />
+    </span>
+  );
+}
+
