@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import type { AgentSummary } from "@openadminos/agent-sdk";
 
 import { companionUpcomingSchedules, runDueCompanionSchedules } from "./companion-schedules.js";
+import { OrganizationBoundaryError, SCHEDULE_OTHER_ORGANIZATION_COPY } from "./runs.js";
 
 function agent(slug: string, organizationId?: string): AgentSummary {
   return {
@@ -76,5 +77,31 @@ describe("menu bar run due counts only due schedules as waiting (Muse round 2)",
     );
     assert.equal(result.waitingOtherOrganization, 1);
     assert.equal(result.skippedNotDue, 0);
+  });
+});
+
+describe("menu bar run due when the organization changes mid-batch (Muse round 3)", () => {
+  it("counts a refused start as waiting, not as an error", async () => {
+    const result = await runDueCompanionSchedules(
+      { installedAgents: [agent("first", "org-a"), agent("second", "org-a")], runs: [], activeOrganizationId: "org-a" },
+      Date.parse("2026-11-09T12:00:00.000Z"),
+      {
+        startScheduledRun: async (entry) => {
+          if (entry.slug === "second") throw new OrganizationBoundaryError(SCHEDULE_OTHER_ORGANIZATION_COPY);
+        },
+      },
+    );
+    assert.equal(result.queued, 1);
+    assert.equal(result.waitingOtherOrganization, 1);
+    assert.deepEqual(result.errors, []);
+  });
+
+  it("still reports other failures as errors", async () => {
+    const result = await runDueCompanionSchedules(
+      { installedAgents: [agent("first", "org-a")], runs: [], activeOrganizationId: "org-a" },
+      Date.parse("2026-11-09T12:00:00.000Z"),
+      { startScheduledRun: async () => { throw new Error("Ollama isn't reachable."); } },
+    );
+    assert.deepEqual(result.errors, [{ agentSlug: "first", message: "Ollama isn't reachable." }]);
   });
 });

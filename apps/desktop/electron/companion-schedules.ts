@@ -8,6 +8,8 @@ import {
   type RunRecord,
 } from "@openadminos/agent-sdk";
 
+import { OrganizationBoundaryError } from "./runs.js";
+
 /** When an enabled schedule is next due; a schedule that never fired is due now. */
 export function nextRunTimeForSchedule(
   schedule: AgentSchedule | undefined,
@@ -111,6 +113,12 @@ export async function runDueCompanionSchedules(
       await host.startScheduledRun(agent);
       result.queued += 1;
     } catch (error) {
+      // The organization changed during the batch: the schedule waits for
+      // its organization, as in fireDueSchedules.
+      if (error instanceof OrganizationBoundaryError) {
+        result.waitingOtherOrganization += 1;
+        continue;
+      }
       result.errors.push({
         agentSlug: agent.slug,
         message: error instanceof Error ? error.message : String(error),
