@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import Connections, { buildReachModel, reachDescription } from "./Connections";
-import { deliveryDestinations } from "../shared/delivery-destinations";
+import { reportDestinations, resultDestinations, unconfiguredDestinations } from "../shared/delivery-destinations";
 import {
   createMockAgent,
   createMockAppState,
@@ -14,7 +14,15 @@ import {
 } from "../test/test-utils";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY } from "../copy";
 import { chatToolHosts } from "../state";
-import { SERVICE_PARTS, type AppState } from "../shared/openAdminOS";
+import { SERVICE_PARTS, type AppState, type ConnectorSummary } from "../shared/openAdminOS";
+
+function connector(id: string, name: string, status: ConnectorSummary["status"] = "connected"): ConnectorSummary {
+  return {
+    descriptor: { id, name, version: "1.0.0", authSource: "external", scopes: [], capabilities: [], trust: { publisher: "OpenAdminOS", verified: true } } as unknown as ConnectorSummary["descriptor"],
+    config: {},
+    status,
+  };
+}
 
 function render(state: AppState, overrides: Parameters<typeof makeMockBridge>[0] = {}, route = "/connections") {
   const bridge = makeMockBridge(overrides, state);
@@ -43,11 +51,10 @@ describe("Connections reach map", () => {
         createMockAgent({ id: "b", slug: "b", delivery: { slack: { enabled: false } } }),
       ],
     });
-    const model = buildReachModel(state);
+    const model = buildReachModel(state, [connector("teams", "Microsoft Teams")]);
     expect(model.referenceHosts).toEqual(chatToolHosts(state));
     expect(model.referenceHosts).toEqual(["learn.microsoft.com", "www.kqlsearch.com"]);
     expect(model.reportDestinations).toEqual(["Microsoft Teams"]);
-    expect(deliveryDestinations(state.installedAgents)).toEqual(["Microsoft Teams"]);
     expect(model.model.kind).toBe("local");
     expect(model.services.map((service) => [service.title, service.status])).toEqual([
       ["Intune", "connected"],
@@ -62,12 +69,12 @@ describe("Connections reach map", () => {
       mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true } }),
       installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })],
     });
-    render(state);
+    render(state, { listConnectors: vi.fn(async () => [connector("teams", "Microsoft Teams")]) });
     const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    const description = reachDescription(buildReachModel(state));
-    expect(map).toHaveAccessibleDescription(description);
+    const description = reachDescription(buildReachModel(state, [connector("teams", "Microsoft Teams")]));
+    await waitFor(() => expect(map).toHaveAccessibleDescription(description));
     expect(description).toMatch(
-      /^Contoso IT reads Intune, connected, Entra, \d of 6 parts and Defender, not connected into this device\. The model runs on this device: llama3\.1, local\. Words from questions go to www\.kqlsearch\.com\. Run reports go to Microsoft Teams under saved delivery rules\.$/,
+      /^Contoso IT reads Intune, connected, Entra, \d of 6 parts and Defender, not connected into this device\. The model runs on this device: llama3\.1, local\. Words from questions go to www\.kqlsearch\.com\. Run reports and agent messages go to Microsoft Teams under saved delivery rules and agent steps\.$/,
     );
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
   });
@@ -299,3 +306,52 @@ describe("Connections results and organizations", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(/The saved registration was not removed\. .*Try again\./);
   });
 });
+
+describe("one destination list for the map and Results (review round 1)", () => {
+  it("lists configured connectors used by a rule or a step, and names rules to connectors that are not set up", () => {
+    const agents = [
+      createMockAgent({ id: "a", slug: "a", delivery: { slack: { enabled: true }, teams: { enabled: true } } }),
+      createMockAgent({ id: "b", slug: "b", connectors: [{ id: "discord" }] as never }),
+      createMockAgent({ id: "c", slug: "c", delivery: { outlook: { enabled: false } } }),
+    ];
+    const connectors = [connector("teams", "Microsoft Teams"), connector("discord", "Discord"), connector("slack", "Slack", "needs-setup"), connector("outlook", "Outlook")];
+    const destinations = resultDestinations(agents, connectors);
+    expect(reportDestinations(destinations)).toEqual(["Slack", "Microsoft Teams", "Discord"].filter((name) => name !== "Slack"));
+    expect(unconfiguredDestinations(destinations)).toEqual(["Slack"]);
+    // Nothing counts as set up before the connector list loads.
+    expect(reportDestinations(resultDestinations(agents, undefined))).toEqual([]);
+  });
+
+  it("shows the same destinations in the map and the Results section", async () => {
+    const state = createMockAppState({
+      installedAgents: [
+        createMockAgent({ id: "a", slug: "a", delivery: { slack: { enabled: true }, teams: { enabled: true } } }),
+        createMockAgent({ id: "b", slug: "b", connectors: [{ id: "discord" }] as never }),
+      ],
+    });
+    render(state, {
+      listConnectors: vi.fn(async () => [connector("teams", "Microsoft Teams"), connector("discord", "Discord"), connector("slack", "Slack", "needs-setup")]),
+    });
+    const results = await screen.findByTestId("result-destinations");
+    expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsSent(["Microsoft Teams", "Discord"]));
+    expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsUnset(["Slack"]));
+    const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(map).toHaveAccessibleDescription(/Run reports and agent messages go to Microsoft Teams and Discord under saved delivery rules and agent steps\./);
+    expect(map).not.toHaveAccessibleDescription(/Slack/);
+  });
+
+  it("dedupes reference hosts in the map, its text alternative and the strip", async () => {
+    const state = createMockAppState({
+      mcpServers: createMockMcpServers({
+        "release-communications": { installed: true, enabled: true, host: "www.microsoft.com" },
+        "microsoft-learn": { installed: true, enabled: true, host: "www.microsoft.com" },
+      }),
+    });
+    expect(chatToolHosts(state)).toEqual(["www.microsoft.com"]);
+    render(state);
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(within(map).getAllByText("www.microsoft.com")).toHaveLength(1);
+    expect(map).toHaveAccessibleDescription(/Words from questions go to www\.microsoft\.com\./);
+  });
+});
+

@@ -83,9 +83,12 @@ export default function Connectors() {
 export function ConnectorsSettingsSection({
   connectorId,
   onConnectorChange,
+  onConnectorsLoaded,
 }: {
   connectorId?: string | null;
   onConnectorChange?: (connectorId: string | null) => void;
+  /** Receives every loaded connector list, so Connections draws its map from the same list. */
+  onConnectorsLoaded?: (connectors: ConnectorSummary[]) => void;
 }) {
   const [connectors, setConnectors] = useState<ConnectorSummary[] | undefined>(
     undefined,
@@ -106,10 +109,11 @@ export function ConnectorsSettingsSection({
     try {
       const summaries = await api.listConnectors();
       setConnectors(summaries);
+      onConnectorsLoaded?.(summaries);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
+  }, [onConnectorsLoaded]);
 
   useEffect(() => {
     void refresh();

@@ -24,7 +24,7 @@ import { Badge, Button as UiButton, StatusDot } from "../components/ui";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
-import { deliveryDestinations } from "../shared/delivery-destinations";
+import { reportDestinations, resultDestinations, unconfiguredDestinations } from "../shared/delivery-destinations";
 import {
   AVAILABLE_SERVICES,
   SERVICE_PARTS,
@@ -35,6 +35,7 @@ import {
   resolveProviderDefaultModel,
   serviceStatus,
   type AppState,
+  type ConnectorSummary,
   type OrganizationRecord,
   type SavedAppRegistration,
   type ServiceConnectionStatus,
@@ -68,7 +69,7 @@ export interface ReachModel {
   reportDestinations: string[];
 }
 
-export function buildReachModel(state: AppState): ReachModel {
+export function buildReachModel(state: AppState, connectors?: readonly ConnectorSummary[]): ReachModel {
   const organization = activeOrganizationOf(state);
   const tenant = organization
     ? state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId)
@@ -104,7 +105,7 @@ export function buildReachModel(state: AppState): ReachModel {
     model,
     // Pilot Chat never calls a model or a tool.
     referenceHosts: sample ? [] : chatToolHosts(state),
-    reportDestinations: sample ? [] : deliveryDestinations(state.installedAgents),
+    reportDestinations: sample ? [] : reportDestinations(resultDestinations(state.installedAgents, connectors)),
   };
 }
 
@@ -144,8 +145,8 @@ export function reachDescription(model: ReachModel): string {
     ? `Words from questions go to ${listText(model.referenceHosts)}.`
     : "Words from questions go nowhere: no public reference is on.";
   const reports = model.reportDestinations.length > 0
-    ? `Run reports go to ${listText(model.reportDestinations)} under saved delivery rules.`
-    : "Run reports go nowhere: no delivery rule is saved.";
+    ? `Run reports and agent messages go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
+    : "Run reports and agent messages go nowhere: no rule or step uses a connector that is set up.";
   return `${services} ${device} ${words} ${reports}`;
 }
 
@@ -221,6 +222,31 @@ function ReachMap({ model }: { model: ReachModel }) {
         </ul>
       </div>
     </figure>
+  );
+}
+
+/** The Results section's view of the same destination list as the map. */
+function ResultDestinationsSummary({
+  destinations,
+  loaded,
+}: {
+  destinations: ReturnType<typeof resultDestinations>;
+  loaded: boolean;
+}) {
+  if (!loaded) return null;
+  const sent = reportDestinations(destinations);
+  const unset = unconfiguredDestinations(destinations);
+  return (
+    <div className="mb-3 space-y-2 text-sm" data-testid="result-destinations">
+      <p className="text-[var(--color-text-soft)]">
+        {sent.length > 0 ? CONNECTIONS_COPY.resultsSent(sent) : CONNECTIONS_COPY.resultsNone}
+      </p>
+      {unset.length > 0 ? (
+        <p role="status" className="rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
+          {CONNECTIONS_COPY.resultsUnset(unset)}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -774,7 +800,10 @@ export default function Connections() {
   const [searchParams] = useSearchParams();
   const { state, loading, removeSavedAppRegistration } = useAppState();
   const { openSetup } = useSetupFlow();
-  const reach = useMemo(() => buildReachModel(state), [state]);
+  // The Results section loads the connector list; the map uses the same one.
+  const [connectors, setConnectors] = useState<ConnectorSummary[] | undefined>(undefined);
+  const reach = useMemo(() => buildReachModel(state, connectors), [connectors, state]);
+  const destinations = useMemo(() => resultDestinations(state.installedAgents, connectors), [connectors, state.installedAgents]);
   const organization = activeOrganizationOf(state);
   const tenant = organization
     ? state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId)
@@ -869,10 +898,14 @@ export default function Connections() {
                 {PILOT_COPY.featureInProduction("Connector deliveries", true)}
               </p>
             ) : (
-              <ConnectorsSettingsSection
-                connectorId={searchParams.get("connector")}
-                onConnectorChange={updateConnectorRoute}
-              />
+              <>
+                <ResultDestinationsSummary destinations={destinations} loaded={connectors !== undefined} />
+                <ConnectorsSettingsSection
+                  connectorId={searchParams.get("connector")}
+                  onConnectorChange={updateConnectorRoute}
+                  onConnectorsLoaded={setConnectors}
+                />
+              </>
             )}
           </section>
 

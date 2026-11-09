@@ -64,8 +64,8 @@ export const CONNECTIONS_COPY = {
     leaves: "Leaves this device",
     questionWords: "Words from your questions",
     noReferences: "Nowhere, no public reference is on",
-    reports: "Run reports, by delivery rule",
-    noReports: "Nowhere, no delivery rule is saved",
+    reports: "Run reports, by delivery rule or agent step",
+    noReports: "Nowhere, no rule or step uses a connector that is set up",
     prompts: "Prompts and tenant data",
     promptsLocal: "Nowhere, the model is local",
     /**
@@ -106,6 +106,11 @@ export const CONNECTIONS_COPY = {
   referenceToggleFailed: (name: string, detail: string) =>
     `${name} was not changed.${detail ? ` ${detail}` : ""} Try again.`,
   resultsHeading: "Results go to",
+  resultsSent: (names: readonly string[]) =>
+    `Run reports and agent messages leave this device to ${names.length <= 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}.`,
+  resultsNone: "No run report or agent message leaves this device: no saved delivery rule or agent step uses a connector that is set up.",
+  resultsUnset: (names: readonly string[]) =>
+    `Saved delivery rules or agent steps use ${names.length <= 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}, which ${names.length === 1 ? "is" : "are"} not set up, so nothing is sent there. Set ${names.length === 1 ? "it" : "them"} up below.`,
   resultsBody:
     "Where agents send finished run reports. Saved delivery rules post automatically, including for scheduled runs; agent steps that send a message show a preview first.",
   organizationsHeading: "Organizations on this device",
