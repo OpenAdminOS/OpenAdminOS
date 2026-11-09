@@ -12,13 +12,7 @@ type FirstRunCaptureAction =
   | "leave-microsoft-step"
   | "open-connect-permissions"
   | "open-own-registration"
-  | "close-setup"
-  | "start-pilot-chat"
-  | "open-pilot-agents"
-  | "run-inactive-devices"
-  | "open-write-confirm"
-  | "open-hidden-route"
-  | "open-paused-schedules";
+  | "close-setup";
 
 export const FIRST_RUN_CAPTURE_SHOTS = [
   "first-run-scan",
@@ -26,22 +20,12 @@ export const FIRST_RUN_CAPTURE_SHOTS = [
   "first-run-microsoft-picked",
   "connect-permissions",
   "own-registration",
-  "pilot-chat",
-  "pilot-agents",
-  "pilot-agent-report",
-  "pilot-write-confirm",
-  "pilot-hidden-route",
-  "schedules-paused",
 ] as const;
 
 // Theme changes animate colors; wait for the transition before capturing.
 const THEME_SETTLE_MS = 1500;
 
-export async function captureFirstRunShots(
-  window: BrowserWindow,
-  outDir: string,
-  preparePausedSchedules: () => Promise<void>,
-): Promise<void> {
+export async function captureFirstRunShots(window: BrowserWindow, outDir: string): Promise<void> {
   await mkdir(join(outDir, "app"), { recursive: true });
   window.setContentSize(FIRST_RUN_CAPTURE_WIDTH, FIRST_RUN_CAPTURE_HEIGHT);
   window.webContents.setBackgroundThrottling(false);
@@ -63,34 +47,6 @@ export async function captureFirstRunShots(
   await captureThemes(window, outDir, "own-registration");
   await runStep(window, "close-setup");
 
-  // Pilot mode has no entry point in the app (maintainer decision,
-  // 2026-11-09): the capture adds the sample tenant over IPC and reloads.
-  // These shots go with the removal of pilot mode in step 4.
-  await window.webContents.executeJavaScript(
-    'window.openAdminOS.addSampleTenant().then(() => { location.hash = "/chat"; })',
-    true,
-  );
-  await reload(window);
-  await runStep(window, "start-pilot-chat");
-  await captureThemes(window, outDir, "pilot-chat");
-
-  await runStep(window, "open-pilot-agents");
-  await captureThemes(window, outDir, "pilot-agents");
-
-  await runStep(window, "run-inactive-devices");
-  await captureThemes(window, outDir, "pilot-agent-report");
-
-  await runStep(window, "open-write-confirm");
-  await captureThemes(window, outDir, "pilot-write-confirm");
-
-  await runStep(window, "open-hidden-route");
-  await captureThemes(window, outDir, "pilot-hidden-route");
-
-  await preparePausedSchedules();
-  await reload(window);
-  await runStep(window, "open-paused-schedules");
-  await captureThemes(window, outDir, "schedules-paused");
-
   console.log(`[first-run-capture] wrote ${FIRST_RUN_CAPTURE_SHOTS.length * 2} screenshots`);
 }
 
@@ -110,15 +66,6 @@ async function capturePage(window: BrowserWindow): Promise<Electron.NativeImage>
     }
   }
   throw lastError;
-}
-
-async function reload(window: BrowserWindow): Promise<void> {
-  const loaded = new Promise<void>((resolve) =>
-    window.webContents.once("did-finish-load", () => resolve()),
-  );
-  window.webContents.reload();
-  await loaded;
-  await waitForViewport(window);
 }
 
 async function captureThemes(
@@ -245,12 +192,6 @@ async function firstRunCaptureStepScript(
     findButton(label)!.click();
     await delay(150);
   };
-  const navigate = async (route: string) => {
-    const expected = `#${route}`;
-    if (location.hash !== expected) location.hash = route;
-    await waitFor(() => location.hash === expected, `${route} hash`);
-    await delay(200);
-  };
 
   const scrollIntoDialogView = async (selector: string) => {
     document.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: "center" });
@@ -343,90 +284,5 @@ async function firstRunCaptureStepScript(
       () => !bodyText().includes("Connect a Microsoft 365 tenant"),
       "setup dialog close",
     );
-    return;
   }
-
-  if (action === "start-pilot-chat") {
-    await waitFor(
-      () =>
-        Boolean(document.querySelector('[role="group"][aria-label="Prepared prompts"]')),
-      "pilot Chat",
-    );
-    const chip = document.querySelector<HTMLButtonElement>(
-      '[role="group"][aria-label="Prepared prompts"] button',
-    );
-    if (!chip) throw new Error("Pilot prompt chip was not found.");
-    chip.click();
-    await waitFor(
-      () =>
-        bodyText().includes("managed devices have not checked in with Intune") &&
-        Boolean(document.querySelector('[role="group"][aria-label="Follow-up prompts"]')) &&
-        bodyText().includes("In production, answers come from your tenant and the model you choose."),
-      "prepared pilot answer",
-    );
-    // Pilot Chat keeps the prompt bubble at the top when the answer
-    // arrives, so the narrative is on screen. Capture what the app shows.
-    await delay(400);
-    return;
-  }
-
-  if (action === "open-pilot-agents") {
-    await navigate("/agents");
-    await waitFor(
-      () =>
-        bodyText().includes("Available in pilot mode") &&
-        bodyText().includes("Available in production") &&
-        Boolean(findButton("Run Find inactive devices")),
-      "pilot agents",
-    );
-    return;
-  }
-
-  if (action === "run-inactive-devices") {
-    await clickButton("Run Find inactive devices");
-    await waitFor(
-      () =>
-        location.hash.startsWith("#/runs/") &&
-        bodyText().includes("Prepared sample report.") &&
-        bodyText().includes("Pilot (prepared)"),
-      "completed pilot run",
-      40000,
-    );
-    await delay(500);
-    return;
-  }
-
-  if (action === "open-write-confirm") {
-    await navigate("/agents/stale-guest-cleanup/confirm");
-    await clickButton("Start run");
-    await waitFor(
-      () =>
-        location.hash.startsWith("#/runs/") &&
-        bodyText().includes("DISABLE 5 GUESTS") &&
-        bodyText().includes("Type the phrase below to confirm"),
-      "write confirmation",
-      40000,
-    );
-    await delay(500);
-    return;
-  }
-
-  if (action === "open-hidden-route") {
-    await navigate("/office");
-    await waitFor(
-      () => bodyText().includes("Agent Team is available in production. Connect your tenant to use it."),
-      "pilot hidden route",
-    );
-    return;
-  }
-
-  await navigate("/agents");
-  await waitFor(
-    () =>
-      bodyText().includes(
-        "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.",
-      ) &&
-      bodyText().includes("Switch to Contoso Production"),
-    "paused schedules notice",
-  );
 }

@@ -15,7 +15,7 @@ const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-first-run-capture-
 // Screenshots land in <outDir>/app. The default keeps them outside the repo.
 const outDir = resolve(
   process.env.OPENADMINOS_FIRST_RUN_SCREENSHOT_OUT_DIR ??
-    join(homedir(), ".cache", "oaos-pilot", "shots"),
+    join(homedir(), ".cache", "oaos-first-run", "shots"),
 );
 const names = [
   "first-run-scan",
@@ -23,12 +23,6 @@ const names = [
   "first-run-microsoft-picked",
   "connect-permissions",
   "own-registration",
-  "pilot-chat",
-  "pilot-agents",
-  "pilot-agent-report",
-  "pilot-write-confirm",
-  "pilot-hidden-route",
-  "schedules-paused",
 ];
 const expectedFiles = names.flatMap((name) =>
   ["light", "dark"].map((theme) => join(outDir, "app", `${name}-${theme}.png`)),
