@@ -39,6 +39,8 @@ export const CONFIGURATION_AUDIT_EVENT_TYPES = [
   "public-reference.removed",
   "schedule.assigned",
   "schedule.unassigned",
+  "provider.configuration-changed",
+  "organizations.migrated",
 ] as const;
 
 export type ConfigurationAuditEventType = (typeof CONFIGURATION_AUDIT_EVENT_TYPES)[number];
@@ -65,6 +67,8 @@ export interface ConfigurationAuditSnapshot {
   organizations?: readonly OrganizationRecord[];
   installedAgents: readonly AgentSummary[];
   mcpServers?: Readonly<Record<string, { enabled: boolean }>>;
+  /** Azure OpenAI endpoint settings; the API key is never part of state. */
+  providerConfigs?: { azureOpenAI?: { endpoint: string; deployment: string; apiVersion: string } };
 }
 
 export interface ConfigurationAuditContext {
@@ -72,6 +76,8 @@ export interface ConfigurationAuditContext {
   newId: () => string;
   /** Catalog name of a public reference, when the catalog has it. */
   publicReferenceName: (serverId: string) => string | undefined;
+  /** The Azure OpenAI API key was set or removed with this write; the value is never recorded. */
+  azureOpenAIKey?: "set" | "removed";
 }
 
 type EventSeed = Omit<ConfigurationAuditEvent, "id" | "timestamp">;
@@ -286,6 +292,24 @@ export function diffConfigurationAudit(
     if (!nextServers[serverId]) seeds.push({ type: "public-reference.removed", details: referenceDetails(serverId) });
   }
 
+  // Azure OpenAI endpoint settings, and whether its key was set or removed.
+  const beforeAzure = previous.providerConfigs?.azureOpenAI;
+  const afterAzure = next.providerConfigs?.azureOpenAI;
+  const changedFields = (["endpoint", "deployment", "apiVersion"] as const).filter(
+    (field) => (beforeAzure?.[field] ?? "") !== (afterAzure?.[field] ?? ""),
+  );
+  if (changedFields.length > 0 || context.azureOpenAIKey) {
+    seeds.push({
+      type: "provider.configuration-changed",
+      details: {
+        providerId: "azure-openai",
+        changed: [...changedFields, ...(context.azureOpenAIKey ? ["apiKey"] : [])],
+        ...(afterAzure ? { endpoint: afterAzure.endpoint, deployment: afterAzure.deployment, apiVersion: afterAzure.apiVersion } : {}),
+        ...(context.azureOpenAIKey ? { apiKey: context.azureOpenAIKey } : {}),
+      },
+    });
+  }
+
   // Schedule assignments. An agent that was uninstalled is not a change of assignment.
   const previousAgents = new Map(previous.installedAgents.map((agent) => [agent.slug || agent.id, agent]));
   for (const agent of next.installedAgents) {
@@ -331,10 +355,38 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 const EVENT_TYPES: ReadonlySet<string> = new Set(CONFIGURATION_AUDIT_EVENT_TYPES);
 
-/** Keeps the detail fields of a recorded shape; a field of another shape is left out, not the event. */
-function sanitizeDetails(value: unknown): Record<string, ConfigurationAuditDetail> {
+/**
+ * The detail fields each event type may carry. A stored field outside its
+ * type's list is dropped, so a hand-edited or newer file cannot smuggle
+ * other data into the export.
+ */
+const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[]>> = {
+  "microsoft365.connected": ["tenantName", "account", "registration", "reconnected", "grantedScopeCount", "sampleData"],
+  "microsoft365.disconnected": ["tenantName", "sampleData"],
+  "microsoft365.access-added": ["scopes", "partIds", "sampleData"],
+  "microsoft365.access-removed": ["scopes", "partIds", "sampleData"],
+  "organization.created": ["sampleData"],
+  "organization.renamed": ["previousName", "sampleData"],
+  "organization.switched": ["noOrganization", "previousOrganizationId", "previousOrganizationName", "previousNoOrganization", "sampleData"],
+  "organization.removed": ["sampleData"],
+  "provider.changed": ["providerId", "previousProviderId", "chosenByAdmin"],
+  "model.changed": ["providerId", "model", "previousModel"],
+  "public-reference.installed": ["serverId", "serverName", "enabled"],
+  "public-reference.enabled": ["serverId", "serverName"],
+  "public-reference.disabled": ["serverId", "serverName"],
+  "public-reference.removed": ["serverId", "serverName"],
+  "schedule.assigned": ["agentSlug", "agentName", "previousOrganizationId", "previousOrganizationName"],
+  "schedule.unassigned": ["agentSlug", "agentName", "previousOrganizationId", "previousOrganizationName", "scheduleRemoved"],
+  "provider.configuration-changed": ["providerId", "changed", "endpoint", "deployment", "apiVersion", "apiKey"],
+  "organizations.migrated": ["organizationIds", "organizationNames", "schedulesAssigned", "schedulesUnassigned", "assignedOrganizationId"],
+};
+
+/** Keeps the allowed detail fields of a recorded shape; a field of another shape is left out, not the event. */
+function sanitizeDetails(type: ConfigurationAuditEventType, value: unknown): Record<string, ConfigurationAuditDetail> {
+  const allowed = new Set(DETAIL_KEYS[type]);
   const details: Record<string, ConfigurationAuditDetail> = {};
   for (const [key, entry] of Object.entries(isRecord(value) ? value : {})) {
+    if (!allowed.has(key)) continue;
     if (typeof entry === "string" || typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry))) {
       details[key] = entry;
     } else if (Array.isArray(entry) && entry.every((item) => typeof item === "string")) {
@@ -353,7 +405,7 @@ export function sanitizeConfigurationAudit(value: unknown): ConfigurationAuditEv
     if (typeof raw.id !== "string" || raw.id.length === 0) continue;
     if (typeof raw.timestamp !== "string" || !Number.isFinite(Date.parse(raw.timestamp))) continue;
     if (typeof raw.type !== "string" || !EVENT_TYPES.has(raw.type)) continue;
-    const details = sanitizeDetails(raw.details);
+    const details = sanitizeDetails(raw.type as ConfigurationAuditEventType, raw.details);
     events.push({
       id: raw.id,
       timestamp: raw.timestamp,

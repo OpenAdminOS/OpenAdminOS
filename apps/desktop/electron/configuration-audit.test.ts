@@ -79,11 +79,13 @@ function run(id: string, queuedAt: string) {
 }
 
 async function makeFixture(initial: Record<string, unknown> = {}, options: { mcpCatalog?: McpCatalogEntry[] } = {}) {
+  const secrets = new Map<string, string>();
   const dir = await mkdtemp(join(tmpdir(), "openadminos-configuration-audit-"));
   const statePath = join(dir, "state.json");
   await writeFile(
     statePath,
-    JSON.stringify({ activeProviderId: "ollama", providerChosenByUser: true, installedAgents: [], runs: [], tenants: [], ...initial }),
+    // The current file shape: the move to organizations happened already.
+    JSON.stringify({ activeProviderId: "ollama", providerChosenByUser: true, installedAgents: [], runs: [], tenants: [], organizations: [], ...initial }),
     "utf8",
   );
   const requests: string[][] = [];
@@ -96,6 +98,11 @@ async function makeFixture(initial: Record<string, unknown> = {}, options: { mcp
     appVersion: "0.8.0",
     clock: () => new Date(NOW),
     ...(options.mcpCatalog ? { mcpCatalog: options.mcpCatalog } : {}),
+    providerSecretsFor: () => ({
+      get: async (key: string) => secrets.get(key),
+      set: async (key: string, value: string) => void secrets.set(key, value),
+      remove: async (key: string) => void secrets.delete(key),
+    }),
     interactiveSignIn: async ({ scopes }) => {
       requests.push([...(scopes ?? [])]);
       return {
@@ -460,5 +467,73 @@ describe("legacy grants (design round review)", () => {
     const removedParts = grantedParts(legacy).map((part) => part.id).filter((id) => !grantedParts(narrowed).some((part) => part.id === id));
     assert.deepEqual([...(removed.details.partIds as string[])].sort(), removedParts.sort());
     assert.ok(removedParts.length > 0);
+  });
+});
+
+describe("configuration audit, design round review (Muse C, G, H, I, K)", () => {
+  it("records the move to organizations once, on the first write after it", async () => {
+    const fixture = await makeFixture({ tenants: [contoso], activeTenantId: contoso.id, organizations: undefined });
+    try {
+      await fixture.store.setActiveProvider("openai");
+      await fixture.store.setActiveProvider("ollama");
+      const events = await fixture.recorded();
+      const migrated = events.filter((event) => event.type === "organizations.migrated");
+      assert.equal(migrated.length, 1);
+      assert.deepEqual(migrated[0]!.details.organizationIds, [`org-${contoso.id}`]);
+      assert.equal(events[0]!.type, "organizations.migrated");
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("records Azure OpenAI settings and whether its key was set, never the key", async () => {
+    const fixture = await makeFixture();
+    try {
+      await fixture.store.setAzureOpenAIConfig({ endpoint: "https://contoso.openai.azure.com", deployment: "gpt-4o", apiVersion: "2024-10-21", apiKey: "secret-key-value" });
+      await fixture.store.setAzureOpenAIConfig({ endpoint: "https://contoso.openai.azure.com", deployment: "gpt-4o", apiVersion: "2024-10-21", apiKey: null });
+      const events = (await fixture.recorded()).filter((event) => event.type === "provider.configuration-changed");
+      assert.equal(events.length, 2);
+      assert.deepEqual(events[0]!.details.changed, ["endpoint", "deployment", "apiVersion", "apiKey"]);
+      assert.equal(events[0]!.details.apiKey, "set");
+      assert.deepEqual(events[1]!.details.changed, ["apiKey"]);
+      assert.equal(events[1]!.details.apiKey, "removed");
+      assert.ok(!(await readFile(fixture.statePath, "utf8")).includes("secret-key-value"));
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("keeps both events of two concurrent configuration changes", async () => {
+    const fixture = await makeFixture({ tenants: [contoso, fabrikam], activeTenantId: contoso.id });
+    try {
+      await Promise.all([fixture.store.setActiveProvider("openai"), fixture.store.renameOrganization(`org-${contoso.id}`, "Contoso Bank")]);
+      const types = typesOf(await fixture.recorded());
+      assert.ok(types.includes("provider.changed"));
+      assert.ok(types.includes("organization.renamed"));
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("drops stored detail fields an event type does not allow", () => {
+    const [event] = sanitizeConfigurationAudit([
+      { id: "e1", timestamp: NOW, type: "provider.changed", details: { providerId: "openai", accessToken: "leak", prompt: "text" } },
+    ])!;
+    assert.deepEqual(event!.details, { providerId: "openai" });
+  });
+
+  it("exports an id column and the retention note in CSV", async () => {
+    const fixture = await makeFixture();
+    try {
+      await fixture.store.setActiveProvider("openai");
+      const exported = await fixture.store.exportAuditLog({ format: "csv" });
+      const [header, row] = exported.content.trim().split("\n");
+      const columns = header!.split(",");
+      assert.ok(columns.includes("id"));
+      assert.ok(columns.includes("retentionNote"));
+      assert.match(row!, /up to the newest 10,000/);
+    } finally {
+      await fixture.close();
+    }
   });
 });

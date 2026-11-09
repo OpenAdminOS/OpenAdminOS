@@ -1,7 +1,7 @@
 import { OfficeService } from "./office.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, open as openFile, readFile, rm, writeFile } from "node:fs/promises";
 import { atomicRename } from "./atomic-rename.js";
 import {
   appendConfigurationAudit,
@@ -1416,8 +1416,7 @@ function serializeAuditLogJson(input: {
       retention: {
         policy: input.retentionPolicy,
         ...(input.lastPruneResult ? { lastPruneResult: input.lastPruneResult } : {}),
-        note:
-          `Run history may omit records removed by the local retention policy. Configuration changes are kept independently of run retention, up to the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")}.`,
+        note: AUDIT_RETENTION_NOTE,
       },
       hashChain: {
         algorithm: "sha256",
@@ -1454,6 +1453,8 @@ function serializeAuditLogCsv(input: {
     "chainAlgorithm",
     "chainStartHash",
     "chainFinalHash",
+    "retentionNote",
+    "id",
     "sha256",
     "timestamp",
     "type",
@@ -1475,6 +1476,10 @@ function serializeAuditLogCsv(input: {
       "sha256",
       AUDIT_CHAIN_START_HASH,
       input.finalHash,
+      // The same note as the JSON export, so a CSV recipient knows what may be missing.
+      AUDIT_RETENTION_NOTE,
+      // The id is part of each hashed event, so the chain can be verified from the CSV.
+      event.id,
       event.sha256,
       event.timestamp,
       event.type,
@@ -1488,6 +1493,8 @@ function serializeAuditLogCsv(input: {
   );
   return `${columns.join(",")}\n${rows.join("\n")}${rows.length > 0 ? "\n" : ""}`;
 }
+
+const AUDIT_RETENTION_NOTE = `Run history may omit records removed by the local retention policy. Configuration changes are kept independently of run retention, up to the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")}.`;
 
 function csvCell(value: unknown): string {
   const text = String(value ?? "");
@@ -1618,6 +1625,12 @@ export interface AppStateStoreOptions {
 
 export class AppStateStore {
   /** Tenants disconnected in this session, with when, so their late run snapshots are dropped. */
+  /** Writes run one after another; see write(). */
+  private writeTail: Promise<void> = Promise.resolve();
+  /** Set by setAzureOpenAIConfig for the audit event of its write. */
+  private pendingAzureOpenAIKeyChange: "set" | "removed" | undefined;
+  /** The move to organizations, recorded on the first write after it. */
+  private pendingMigrationAudit: Record<string, string | number | string[]> | undefined;
   private readonly removedTenants = new Map<string, string>();
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
@@ -3272,6 +3285,8 @@ export class AppStateStore {
       } else {
         await accessor.remove("api-key");
       }
+      // Recorded with the settings write below; the key value never is.
+      this.pendingAzureOpenAIKeyChange = normalized ? "set" : "removed";
     }
 
     await this.serialize(async () => {
@@ -7484,9 +7499,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       raw = await readFile(this.filePath, "utf8");
     } catch (error) {
       if (isNodeError(error) && error.code === "ENOENT") {
-        await this.write(defaultState);
-        this.lastReadSnapshot = defaultState;
-        return defaultState;
+        // A fresh copy: the bootstrap state is written through the same chain
+        // as every other write and is never shared with later mutations.
+        const fresh = structuredClone(defaultState);
+        await this.write(fresh);
+        return this.lastReadSnapshot ?? fresh;
       }
       // The file exists but couldn't be read (permission, IO error).
       // Return the last-known-good snapshot rather than fabricating
@@ -7608,6 +7625,17 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       state.organizations = reconciled.organizations;
       state.installedAgents = reconciled.installedAgents;
       if (reconciled.notice) state.organizationMigration = reconciled.notice;
+      // The move to organizations is recorded once, on the first write
+      // after the read that performed it.
+      if (reconciled.migrated && !this.pendingMigrationAudit) {
+        this.pendingMigrationAudit = {
+          organizationIds: reconciled.organizations.map((organization) => organization.id),
+          organizationNames: reconciled.organizations.map((organization) => organization.name),
+          schedulesAssigned: reconciled.notice?.assignedCount ?? 0,
+          schedulesUnassigned: reconciled.notice?.unassignedCount ?? 0,
+          ...(reconciled.notice?.assignedOrganizationId ? { assignedOrganizationId: reconciled.notice.assignedOrganizationId } : {}),
+        };
+      }
       const savedAppRegistrations = sanitizeSavedAppRegistrations(
         (parsed as { savedAppRegistrations?: unknown }).savedAppRegistrations,
       );
@@ -7954,19 +7982,28 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * come from that state too: only this method changes them, and a writer
    * holding an older copy cannot drop events written since.
    */
-  private recordConfigurationChanges(state: PersistedState): void {
+  private recordConfigurationChanges(state: PersistedState): number {
     const previous = this.lastReadSnapshot;
     const existing = previous ? previous.configurationAudit : state.configurationAudit;
+    const timestamp = this.clock().toISOString();
+    const azureOpenAIKey = this.pendingAzureOpenAIKeyChange;
+    this.pendingAzureOpenAIKeyChange = undefined;
     const recorded = previous
       ? diffConfigurationAudit(previous, state, {
-          timestamp: this.clock().toISOString(),
+          timestamp,
           newId: () => randomUUID(),
           publicReferenceName: (serverId) => this.mcpCatalog.find((entry) => entry.id === serverId)?.name,
+          ...(azureOpenAIKey ? { azureOpenAIKey } : {}),
         })
       : [];
+    if (this.pendingMigrationAudit && (state.organizations?.length ?? 0) > 0) {
+      recorded.unshift({ id: randomUUID(), timestamp, type: "organizations.migrated", details: this.pendingMigrationAudit });
+      this.pendingMigrationAudit = undefined;
+    }
     const configurationAudit = appendConfigurationAudit(existing, recorded);
     if (configurationAudit) state.configurationAudit = configurationAudit;
     else delete state.configurationAudit;
+    return recorded.length;
   }
 
   /**
@@ -7978,6 +8015,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * root cause of the "redirected to onboarding mid-action" bug.
    */
   private async write(input: PersistedState): Promise<void> {
+    // One write at a time, in call order, so audit events derived from the
+    // last state written are never lost to an interleaved writer.
+    const run = this.writeTail.then(() => this.writeNow(input));
+    this.writeTail = run.catch(() => undefined);
+    return run;
+  }
+
+  private async writeNow(input: PersistedState): Promise<void> {
     // Keep organizations consistent with the tenants being written, so a
     // removed tenant's organization and its schedule assignments never
     // outlive it in the file.
@@ -7995,17 +8040,32 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (reconciled.notice) state.organizationMigration = reconciled.notice;
     else delete state.organizationMigration;
-    this.recordConfigurationChanges(state);
+    const recordedEvents = this.recordConfigurationChanges(state);
     await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     try {
       await writeFile(tmpPath, serialized, { encoding: "utf8", mode: 0o600 });
+      // Audit events must survive a crash: flush the file before the rename
+      // and the directory after it.
+      if (recordedEvents > 0) await syncPath(tmpPath);
       await atomicRename(tmpPath, this.filePath);
+      if (recordedEvents > 0) await syncPath(dirname(this.filePath)).catch(() => undefined);
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
     } finally {
       await rm(tmpPath, { force: true });
     }
+  }
+}
+
+/** Flush a file or directory to disk. Directories cannot be opened for sync on Windows. */
+async function syncPath(path: string): Promise<void> {
+  if (process.platform === "win32" && !path.endsWith(".tmp")) return;
+  const handle = await openFile(path, "r");
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
   }
 }
