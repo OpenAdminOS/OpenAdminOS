@@ -491,6 +491,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:dismiss-organization-migration-notice"),
   disconnectTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:disconnect-tenant", id),
+  retryTenantCleanup: (id: string) =>
+    ipcRenderer.invoke("openadminos:retry-tenant-cleanup", id),
   removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) =>
     ipcRenderer.invoke("openadminos:remove-saved-app-registration", clientId, directoryTenantId),
   getAgentManifest: (slug: string) =>

@@ -315,15 +315,16 @@ export interface ChatPersistedState {
 }
 
 /** Said when a cache refresh meets a disconnect; nothing it read is saved. */
-export const CACHE_TENANT_DISCONNECTED =
-  "This organization was disconnected, so the cache refresh stopped and saved nothing for it.";
 
 export interface ChatServiceHost {
   read(): Promise<ChatPersistedState>;
-  /** True from the moment a disconnect of this tenant begins. */
-  tenantClosed?(tenantId: string): boolean;
-  /** Changes when the tenant is disconnected or connected again; a cache write from an older generation is dropped. */
-  tenantGeneration?(tenantId: string): number;
+  /** False once a disconnect of this tenant began (see tenant-lifecycle.ts). */
+  tenantWritable?(tenantId: string): boolean;
+  /**
+   * Run a tenant's work under its lease: refused when the tenant is not
+   * open, drained by Disconnect, and `signal` fires when it starts closing.
+   */
+  tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
   /** Clock shared with the pilot Graph. Defaults to the system clock. */
   now?(): Date;
   requireIntelligenceStore(): IntelligenceSqliteStore;
@@ -455,13 +456,21 @@ export class IntuneChatService {
   }
 
   /**
-   * Stop a disconnecting tenant's cache work: abort its preload, then wait
-   * for every queued or running refresh, ordinary ones included. Their
-   * writes for the tenant are dropped by the generation check meanwhile.
+   * Run tenant work under its lease, with an abort signal that also fires
+   * when the tenant starts closing. Without a lifecycle host (unit tests)
+   * the work runs as before.
    */
-  async drainTenantRefreshes(tenantId: string): Promise<void> {
-    await this.stopGraphCachePreload(tenantId);
-    await this.refreshTail.catch(() => undefined);
+  private leased<T>(tenantId: string, signal: AbortSignal | undefined, work: (signal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+    if (!this.host.tenantLease) return work(signal);
+    return this.host.tenantLease(tenantId, (leaseSignal) => work(signal ? AbortSignal.any([signal, leaseSignal]) : leaseSignal));
+  }
+
+  /** Lease every tenant a multi-tenant job reads or writes for. */
+  private leasedAll<T>(tenantIds: readonly string[], work: () => Promise<T>): Promise<T> {
+    const unique = [...new Set(tenantIds)];
+    const step = (index: number): Promise<T> =>
+      index >= unique.length ? work() : this.leased(unique[index]!, undefined, () => step(index + 1));
+    return step(0);
   }
 
   /** Stop a tenant's preload and wait until it has stopped writing. */
@@ -776,6 +785,9 @@ export class IntuneChatService {
     const preflight = await this.buildMultiTenantPreflight(input);
     const providers = await this.host.listProviders();
     const activeTenant = this.host.resolveTenant(persisted);
+    // The job runs under the lease of every tenant it reads or writes for,
+    // so Disconnect of any of them refuses, stops and drains it.
+    return this.leasedAll([activeTenant.id, ...preflight.resolvedTenantIds], async () => {
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
     this.requireHostedBatchConsent(input.hostedProviderConsent, preflight, provider, providerId);
@@ -1108,6 +1120,7 @@ export class IntuneChatService {
     };
     onEvent?.({ type: "completed", result });
     return result;
+    });
   }
 
   async streamMultiTenantIntuneChat(
@@ -1252,6 +1265,8 @@ export class IntuneChatService {
     if (runnable.length === 0) {
       throw new Error("No selected tenants are ready for this agent batch.");
     }
+    // The batch runs under the lease of every tenant it starts runs for.
+    return this.leasedAll(runnable.map((tenant) => tenant.tenantId), async () => {
 
     const now = new Date().toISOString();
     let batch: MultiTenantAgentBatch = {
@@ -1309,6 +1324,7 @@ export class IntuneChatService {
     };
     store.upsertMultiTenantAgentBatch(batch);
     return { batch, runs };
+    });
   }
 
   async listMultiTenantAgentBatches(): Promise<MultiTenantAgentBatch[]> {
@@ -1618,11 +1634,10 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted, options.tenantId);
-    if (this.host.tenantClosed?.(tenant.id)) throw new Error(CACHE_TENANT_DISCONNECTED);
-    // A write is kept only for the connection this refresh started with.
-    const generation = this.host.tenantGeneration?.(tenant.id);
-    const stillConnected = () =>
-      !this.host.tenantClosed?.(tenant.id) && this.host.tenantGeneration?.(tenant.id) === generation;
+    // The refresh runs under the tenant's lease: refused once Disconnect
+    // began, stopped by its signal and drained by it. The store checks every
+    // cache write against the lease's generation.
+    return this.leased(tenant.id, signal, async (signal) => {
     // Resources whose service part is not granted are reported as skipped
     // with the service to add, never refreshed and never counted as errors.
     const requested = sanitizeGraphResources(options.resources);
@@ -1708,7 +1723,6 @@ export class IntuneChatService {
         if (pageResult.pageLimitReached && existing?.refreshedAt && !existing.pageLimitReached) {
           throw new Error("Refresh reached a collection limit. The previous complete snapshot was kept. Use Cache → Preload to collect all pages.");
         }
-        if (!stillConnected()) throw new Error(CACHE_TENANT_DISCONNECTED);
         store.replaceGraphResources({
           tenantId: tenant.id,
           resource,
@@ -1811,6 +1825,7 @@ export class IntuneChatService {
         return entry ? [entry] : [];
       }),
     };
+    });
   }
 
   /**
@@ -1855,6 +1870,8 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
+    // The send runs under the tenant's lease; Disconnect refuses and drains it.
+    return this.leased(tenant.id, undefined, async () => {
     if (tenant.kind === "sample") {
       return answerPilotChatMessage({
         message: input,
@@ -2267,6 +2284,7 @@ export class IntuneChatService {
         schedule: store.getGraphCacheRefreshSchedule(tenant.id),
       },
     };
+    });
   }
 
   async streamIntuneChatMessage(
@@ -2282,6 +2300,9 @@ export class IntuneChatService {
     const store = this.host.requireIntelligenceStore();
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted);
+    // The send runs under the tenant's lease; Disconnect stops and drains it.
+    return this.leased(tenant.id, options.signal, async (leaseSignal) => {
+    if (leaseSignal) options = { ...options, signal: leaseSignal };
     if (tenant.kind === "sample") {
       return answerPilotChatMessage({
         message: input,
@@ -3096,6 +3117,7 @@ export class IntuneChatService {
       onEvent({ type: "completed", result });
     }
     return result;
+    });
   }
 
   /**
@@ -3121,12 +3143,15 @@ export class IntuneChatService {
     }
     const persisted = await this.host.read();
     const tenant = this.host.resolveTenant(persisted, tenantId);
+    // Gateway reads run under the tenant's lease, like every other tenant read.
+    return this.leased(tenant.id, undefined, async () => {
     const ctx = this.buildChatToolContext(tenant);
     const execution = await executeIntuneChatTool(ctx, match, params);
     if (execution.trace.error) {
       throw new Error(execution.trace.error);
     }
     return execution.result;
+    });
   }
 
   /**
@@ -3503,6 +3528,8 @@ export class IntuneChatService {
     const nowMs = Date.now();
 
     for (const tenant of persisted.tenants) {
+      // A closing tenant is not refreshed and its refresh schedule is not marked.
+      if (this.host.tenantWritable && !this.host.tenantWritable(tenant.id)) continue;
       if (!this.host.intelligenceStore.isGraphCacheRefreshDue(tenant.id, nowMs)) continue;
       const startedAt = new Date(nowMs).toISOString();
       try {
@@ -3521,6 +3548,9 @@ export class IntuneChatService {
             : {}),
         });
       } catch (error) {
+        // A tenant that started closing during its refresh is skipped: its
+        // schedule is not marked, and the other tenants still refresh.
+        if (this.host.tenantWritable && !this.host.tenantWritable(tenant.id)) continue;
         this.host.intelligenceStore.markGraphCacheRefreshScheduleRun({
           tenantId: tenant.id,
           startedAt,

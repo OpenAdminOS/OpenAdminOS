@@ -9,6 +9,19 @@ export interface NovaActionHost {
   startRun(slug: string, options: StartRunOptions): Promise<RunRecord>;
   /** The tenant of the active organization now, read when an action runs. */
   activeTenantId(): Promise<string | undefined>;
+  /**
+   * Run an approved action under its tenant's lease: refused once the
+   * organization is being disconnected, drained by Disconnect, and the
+   * signal fires when it starts closing, so a multi-part send stops.
+   */
+  tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+}
+
+/** Run an approved action under its tenant's lease, with both signals. */
+function leased<T>(host: NovaActionHost, tenantId: string, signal: AbortSignal, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  return host.tenantLease
+    ? host.tenantLease(tenantId, (leaseSignal) => work(AbortSignal.any([signal, leaseSignal])))
+    : work(signal);
 }
 
 /** Said when the organization changed between the preview and the confirmation. */
@@ -76,12 +89,12 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     const candidates = state.installedAgents.filter(a => normalize(a.name) === normalize(intent.name) || normalize(a.slug) === normalize(intent.name));
     if (candidates.length !== 1) throw new Error('Name one installed agent exactly. Open Agents to see the available names.');
     const agent = candidates[0]!;
-    return { preview: { id, title: `Run ${agent.name}`, target: state.tenants.find(t => t.id === tenantId)?.displayName || 'Selected tenant', body: `Run ${agent.name} against the selected tenant. Write plans require their normal review. Existing saved result-delivery routes may send notifications when the run finishes.`, kind: 'run' }, execute: async signal => {
+    return { preview: { id, title: `Run ${agent.name}`, target: state.tenants.find(t => t.id === tenantId)?.displayName || 'Selected tenant', body: `Run ${agent.name} against the selected tenant. Write plans require their normal review. Existing saved result-delivery routes may send notifications when the run finishes.`, kind: 'run' }, execute: outer => leased(host, tenantId, outer, async signal => {
       signal.throwIfAborted();
       await assertStillActive(host, tenantId);
       const run = await host.startRun(agent.slug, { tenantId, providerId: state.activeProviderId });
       return { text: `${agent.name} was queued. Follow its progress in Runs; any required approvals remain in the app.`, route: `/runs/${run.id}` };
-    } };
+    }) };
   }
   const connector = (await host.connectors()).find(c => c.descriptor.id === intent.connectorId);
   if (!connector) throw new Error('This connector is unavailable. Open Connectors to configure a supported destination.');
@@ -116,7 +129,7 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
     throw new Error(`${connector.descriptor.name} does not have a verified personal destination for you. Its configured destination is ${target}. Say send this via ${connector.descriptor.name} to review that destination; I will not treat it as a private message to you.`);
   const parts = novaMessageParts(evidence, intent.connectorId);
   const deliveryNote = parts.length > 1 ? `This report will be sent as ${parts.length} numbered messages, in order. Review the full content below. If a send fails, remaining messages stop without automatic retries.` : undefined;
-  return { preview: { id, kind: 'send', title: `Send via ${connector.descriptor.name}`, target, body: evidence, ...(deliveryNote ? { deliveryNote } : {}) }, execute: async signal => {
+  return { preview: { id, kind: 'send', title: `Send via ${connector.descriptor.name}`, target, body: evidence, ...(deliveryNote ? { deliveryNote } : {}) }, execute: outer => leased(host, tenantId, outer, async signal => {
     await assertStillActive(host, tenantId);
     let accepted = 0;
     try {
@@ -133,5 +146,5 @@ export async function prepareNovaAction(text: string | NovaActionIntent, evidenc
       throw new Error(`${accepted} of ${parts.length} messages confirmed accepted by ${connector.descriptor.name}. Remaining messages were stopped. The failed request may still have been accepted; check the destination before retrying. ${error instanceof Error ? error.message : 'Connector unavailable.'}`);
     }
     return { text: intent.connectorId === 'outlook' ? 'Outlook accepted the email for sending. Delivery to the recipient is not yet confirmed.' : `${connector.descriptor.name} accepted ${parts.length === 1 ? 'the message' : `all ${parts.length} messages`} to ${target}. Recipient delivery is not yet confirmed.` };
-  } };
+  }) };
 }

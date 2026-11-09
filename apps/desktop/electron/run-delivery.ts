@@ -1,4 +1,5 @@
 import { PILOT_COPY } from "../src/shared/pilot-mode.js";
+import { TenantClosedError } from "./tenant-lifecycle.js";
 import { deliveryBlock, deliveryRuleKeyFor } from "../src/shared/delivery-destinations.js";
 import {
   assertSignedInAccount,
@@ -85,8 +86,16 @@ interface WhatsAppWebDeliveryClient {
 }
 
 export interface RunDeliveryHost {
-  /** True from the moment a disconnect of this tenant begins. */
-  tenantClosed?(tenantId: string): boolean;
+  /** False once a disconnect of this tenant began (see tenant-lifecycle.ts). */
+  tenantWritable?(tenantId: string): boolean;
+  /** Run a delivery under its tenant's lease, so Disconnect refuses and drains it. */
+  tenantLease?<T>(tenantId: string, work: () => Promise<T>): Promise<T>;
+  /**
+   * The connector transport for a tenant's deliveries: a fetch that refuses
+   * every request and retry once the tenant is closing, and the check run
+   * right before a send over a transport that is not fetch.
+   */
+  connectorTransport?(tenantId: string): { fetch: typeof fetch; assertEgress: () => void };
   read(): Promise<RunDeliveryPersistedState>;
   write(state: RunDeliveryPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -128,34 +137,14 @@ export const DISCONNECTED_DELIVERY =
 
 export class RunDeliveryService {
   private deliveryQueueProcessing: Promise<void> | undefined;
-  /** Deliveries that were claimed and are being processed, by run id. */
-  private readonly inFlight = new Map<string, Promise<RunDeliveryResult>>();
-
-  /** Wait for the claimed deliveries of these runs to finish (each stops before sending). */
-  async drainRuns(runIds: ReadonlySet<string>): Promise<void> {
-    await Promise.all([...this.inFlight].filter(([runId]) => runIds.has(runId)).map(([, work]) => work.catch(() => undefined)));
-  }
 
   private tenantClosed(run: RunRecord): boolean {
-    return Boolean(run.tenantId && this.host.tenantClosed?.(run.tenantId));
+    return Boolean(run.tenantId && this.host.tenantWritable && !this.host.tenantWritable(run.tenantId));
   }
 
-  /** Checked right before every send, so a disconnect can never be followed by a post. */
-  private assertTenantOpen(run: RunRecord): void {
-    if (this.tenantClosed(run)) throw new Error(DISCONNECTED_DELIVERY);
-  }
-
-  /** A connector secret that, once resolved, is only used while the tenant is still connected. */
-  private guardedSecrets(run: RunRecord, inner: SecretAccessor): SecretAccessor {
-    return {
-      get: async (key) => {
-        const value = await inner.get(key);
-        this.assertTenantOpen(run);
-        return value;
-      },
-      set: (key, value) => inner.set(key, value),
-      remove: (key) => inner.remove(key),
-    };
+  /** The guarded transport for this run's connector, when it has an organization. */
+  private transportFor(run: RunRecord): { fetch?: typeof fetch; assertEgress?: () => void } {
+    return run.tenantId && this.host.connectorTransport ? this.host.connectorTransport(run.tenantId) : {};
   }
 
   constructor(private readonly host: RunDeliveryHost) {}
@@ -404,14 +393,7 @@ export class RunDeliveryService {
     for (;;) {
       const item = await this.claimDueRunDelivery();
       if (!item) return;
-      const work = this.processRunDeliveryItem(item);
-      this.inFlight.set(item.runId, work);
-      let result: RunDeliveryResult;
-      try {
-        result = await work;
-      } finally {
-        if (this.inFlight.get(item.runId) === work) this.inFlight.delete(item.runId);
-      }
+      const result = await this.processRunDeliveryItem(item);
       if (result.retryable && item.attempts < RUN_DELIVERY_MAX_ATTEMPTS) {
         await this.rescheduleRunDelivery(item, result.error);
       } else {
@@ -463,6 +445,20 @@ export class RunDeliveryService {
       return { retryable: false };
     }
     if (this.tenantClosed(run)) return { retryable: false, error: DISCONNECTED_DELIVERY };
+    if (!run.tenantId || !this.host.tenantLease) return this.deliverRunReport(item, persisted, run);
+    try {
+      return await this.host.tenantLease(run.tenantId, () => this.deliverRunReport(item, persisted, run));
+    } catch (error) {
+      if (error instanceof TenantClosedError) return { retryable: false, error: DISCONNECTED_DELIVERY };
+      throw error;
+    }
+  }
+
+  private async deliverRunReport(
+    item: RunDeliveryQueueItem,
+    persisted: RunDeliveryPersistedState,
+    run: RunRecord,
+  ): Promise<RunDeliveryResult> {
     // Only the run's own tenant labels its report; a run with no
     // organization never borrows the one active now.
     const tenantId = run.tenantId;
@@ -689,6 +685,7 @@ export class RunDeliveryService {
         tenant: tenantSession,
         config,
         secrets: noSecrets,
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:teams-delivery:${stepId}:${iteration}`,
@@ -705,7 +702,6 @@ export class RunDeliveryService {
       }
       const markdown = formatTeamsDeliveryMessage(run, agent, tenant);
       const auditStartedAt = Date.now();
-      this.assertTenantOpen(run);
       const result = await capabilities.postChannelMessage({
         ...(delivery?.useDefaultTarget === false && delivery.teamId
           ? { teamId: delivery.teamId }
@@ -841,7 +837,8 @@ export class RunDeliveryService {
     try {
       const text = formatWhatsAppDeliveryMessage(run, agent, tenant);
       const auditStartedAt = Date.now();
-      this.assertTenantOpen(run);
+      // The socket is not fetch: its transport check runs right before the send.
+      this.transportFor(run).assertEgress?.();
       const result = await this.host.whatsAppWebClient().sendMessage({
         to: recipient,
         text,
@@ -1046,7 +1043,8 @@ export class RunDeliveryService {
       instance = await factory.build({
         tenant: tenantSession,
         config: baseConfig,
-        secrets: this.guardedSecrets(run, this.host.connectorSecretsFor(OUTLOOK_CONNECTOR_ID)),
+        secrets: this.host.connectorSecretsFor(OUTLOOK_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:outlook-delivery:${stepId}:${iteration}`,
@@ -1073,7 +1071,6 @@ export class RunDeliveryService {
       } = { subject, markdown, idempotencyKey };
       if (recipients && recipients.length > 0) args.to = recipients;
       const auditStartedAt = Date.now();
-      this.assertTenantOpen(run);
       const result = await capabilities.sendMail(args);
       const audit = createDeliveryAuditEntry({
         runId: run.id,
@@ -1214,7 +1211,8 @@ export class RunDeliveryService {
       instance = await factory.build({
         tenant: createLocalOnlyTenantSession(),
         config: baseConfig,
-        secrets: this.guardedSecrets(run, this.host.connectorSecretsFor(SLACK_CONNECTOR_ID)),
+        secrets: this.host.connectorSecretsFor(SLACK_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:slack-delivery:${stepId}:${iteration}`,
@@ -1237,7 +1235,6 @@ export class RunDeliveryService {
       };
       if (channel) args.channel = channel;
       const auditStartedAt = Date.now();
-      this.assertTenantOpen(run);
       const result = await capabilities.sendMessage(args);
       const audit = createDeliveryAuditEntry({
         runId: run.id,
@@ -1346,7 +1343,8 @@ export class RunDeliveryService {
       instance = await factory.build({
         tenant: createLocalOnlyTenantSession(),
         config: baseConfig,
-        secrets: this.guardedSecrets(run, this.host.connectorSecretsFor(DISCORD_CONNECTOR_ID)),
+        secrets: this.host.connectorSecretsFor(DISCORD_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:discord-delivery:${stepId}:${iteration}`,
@@ -1369,7 +1367,6 @@ export class RunDeliveryService {
       };
       if (threadId) args.threadId = threadId;
       const auditStartedAt = Date.now();
-      this.assertTenantOpen(run);
       const result = await capabilities.sendMessage(args);
       const audit = createDeliveryAuditEntry({
         runId: run.id,
@@ -1493,7 +1490,8 @@ export class RunDeliveryService {
       instance = await factory.build({
         tenant: createLocalOnlyTenantSession(),
         config: baseConfig,
-        secrets: this.guardedSecrets(run, this.host.connectorSecretsFor(SIGNAL_CONNECTOR_ID)),
+        secrets: this.host.connectorSecretsFor(SIGNAL_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:signal-delivery:${stepId}:${iteration}`,
@@ -1516,7 +1514,6 @@ export class RunDeliveryService {
       };
       if (delivery.useDefaultRecipient === false) args.to = recipient;
       const auditStartedAt = Date.now();
-      this.assertTenantOpen(run);
       const result = await capabilities.sendMessage(args);
       const audit = createDeliveryAuditEntry({
         runId: run.id,

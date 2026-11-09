@@ -5669,7 +5669,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId() },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work) },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -6485,6 +6485,9 @@ function registerIpcHandlers() {
     store.disconnectTenant(requireBoundedString(id, "tenantId", 256)),
   ),
   );
+  ipcMain.handle("openadminos:retry-tenant-cleanup", handleTrusted((_event, id: unknown) =>
+    store.retryTenantCleanup(requireBoundedString(id, "tenantId", 256)),
+  ));
   ipcMain.handle(
     "openadminos:remove-saved-app-registration",
     handleTrusted((_event, clientId: unknown, directoryTenantId?: unknown) =>
@@ -6867,6 +6870,11 @@ if (!gotLock) {
           }
         : {}),
     });
+    // A disconnect whose cleanup did not finish resumes first, before any
+    // scheduler, Agent Team tick, gateway or delivery worker starts.
+    await store.resumeTenantCleanups().catch((error) =>
+      console.warn("[tenant-lifecycle] resuming cleanup failed", error),
+    );
     await store.recoverInterruptedRuns();
     void store.refreshPilotCacheIfStale().catch((error) => {
       console.warn(

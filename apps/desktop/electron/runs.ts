@@ -1,3 +1,4 @@
+import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -101,14 +102,21 @@ export class OrganizationBoundaryError extends Error {
 }
 
 /** Why nothing new starts or applies for an organization that is being disconnected. */
-export const TENANT_DISCONNECTING_COPY =
-  "This organization is being disconnected, so nothing new starts or applies for it.";
+export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
 export interface RunServiceHost {
-  /** True from the moment a disconnect of this tenant begins. */
-  tenantClosed?(tenantId: string): boolean;
-  /** True when the tenant was disconnected after this time, so its runs were deleted. */
-  tenantRemovedAfter?(tenantId: string, at: string): boolean;
+  /**
+   * False once a disconnect of this tenant began, and for work of an
+   * older generation of it (see tenant-lifecycle.ts).
+   */
+  tenantWritable?(tenantId: string): boolean;
+  /**
+   * Run a tenant's work under its lease: refused when the tenant is not
+   * open, drained by Disconnect, and `signal` fires when it starts closing.
+   */
+  tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  /** The guarded connector transport for a tenant's runs (see tenant-lifecycle.ts). */
+  connectorTransport?(tenantId: string): { fetch: typeof fetch; assertEgress: () => void };
   read(): Promise<RunPersistedState>;
   write(state: RunPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -163,38 +171,27 @@ export class RunService {
   /** The work driving each run, so a disconnect can wait for it to stop. */
   private readonly drives = new Map<string, Promise<void>>();
 
+  /** Admission: a clear refusal before anything is written for a closing tenant. */
   private assertTenantOpen(tenantId: string | undefined): void {
-    if (tenantId && this.host.tenantClosed?.(tenantId)) throw new OrganizationBoundaryError(TENANT_DISCONNECTING_COPY);
-  }
-
-  private track(runId: string, drive: Promise<void>): void {
-    const settled = drive.catch(() => undefined).finally(() => {
-      if (this.drives.get(runId) === settled) this.drives.delete(runId);
-    });
-    this.drives.set(runId, settled);
+    if (tenantId && this.host.tenantWritable && !this.host.tenantWritable(tenantId)) throw new OrganizationBoundaryError(TENANT_DISCONNECTING_COPY);
   }
 
   /**
-   * Stop a tenant's in-flight work before it is disconnected: cancel its
-   * queued and running runs and wait until their drives have finished, so
-   * nothing writes for the tenant once its data is deleted.
+   * Drive a run under its tenant's lease. When the tenant starts closing,
+   * the lease signal cancels the run and Disconnect waits for the drive.
    */
-  async stopRunsForTenant(tenantId: string): Promise<void> {
-    // Admission is already closed (tenantClosed), so this settles: repeat
-    // until no queued or running run and no drive is left for the tenant,
-    // which also catches a run admitted just before the close.
-    for (let pass = 0; pass < 50; pass++) {
-      const persisted = await this.host.read();
-      const runs = persisted.runs.filter((run) => run.tenantId === tenantId);
-      const live = runs.filter((run) => run.status === "queued" || run.status === "running");
-      for (const run of live) await this.cancelRun(run.id).catch(() => undefined);
-      const pending = runs
-        .map((run) => this.drives.get(run.id))
-        .filter((drive): drive is Promise<void> => drive !== undefined);
-      if (live.length === 0 && pending.length === 0) return;
-      await Promise.all(pending);
-      await new Promise((resolve) => setImmediate(resolve));
-    }
+  private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
+    const leased = tenantId && this.host.tenantLease
+      ? this.host.tenantLease(tenantId, async (signal) => {
+          const stop = () => this.controllers.get(runId)?.abort(signal.reason);
+          signal.addEventListener("abort", stop, { once: true });
+          try { return await start(); } finally { signal.removeEventListener("abort", stop); }
+        })
+      : start();
+    const settled = leased.catch(() => undefined).finally(() => {
+      if (this.drives.get(runId) === settled) this.drives.delete(runId);
+    });
+    this.drives.set(runId, settled);
   }
 
   private readonly progress = new Map<string, { snapshot: RunRecord; waiters: Array<{ resolve(): void; reject(error: unknown): void }> }>();
@@ -689,7 +686,7 @@ export class RunService {
       this.host.intelligenceStore.touchConversation(options.source.conversationId, undefined, now);
     }
 
-    this.track(queued.queuedRun.id, this.driveRun({
+    this.track(queued.queuedRun.id, queued.queuedRun.tenantId, () => this.driveRun({
       run: queued.queuedRun,
       agent: queued.agent,
       providerId: queued.providerId,
@@ -934,7 +931,7 @@ export class RunService {
     });
 
     if (transition.kind === "rollback") {
-      this.track(transition.updated.id, this.driveSystemApply({ run: transition.updated }));
+      this.track(transition.updated.id, transition.updated.tenantId, () => this.driveSystemApply({ run: transition.updated }));
       this.host.recordLearningEventSafely({
         tenantId: transition.updated.tenantId,
         agentSlug: transition.updated.agentSlug,
@@ -951,7 +948,7 @@ export class RunService {
       return transition.updated;
     }
 
-    this.track(transition.updated.id, this.driveApply({
+    this.track(transition.updated.id, transition.updated.tenantId, () => this.driveApply({
       run: transition.updated,
       agent: transition.agent,
       providerId: transition.providerId,
@@ -1123,6 +1120,7 @@ export class RunService {
         ...(selection.tenantSession ? { tenant: selection.tenantSession } : {}),
         connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
+        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
         confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
         onProgress: (next) => this.queueRunSnapshot(stamp(next)),
@@ -1212,6 +1210,7 @@ export class RunService {
           tenant: selection.tenantSession,
           connectorConfigs: await this.host.readConnectorConfigs(),
           connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
+        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
           confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
           realWrites: true,
           onProgress: (next) =>
@@ -1395,7 +1394,7 @@ export class RunService {
       const previous = persisted.runs.find((existing) => existing.id === run.id);
       // A run deleted with its disconnected tenant never comes back from a
       // late snapshot, and its report is never delivered.
-      if (!previous && run.tenantId && this.host.tenantRemovedAfter?.(run.tenantId, run.queuedAt)) return;
+      if (!previous && run.tenantId && this.host.tenantWritable && !this.host.tenantWritable(run.tenantId)) return;
       if (previous?.status === "cancelled") {
         const steps = previous.steps.map((step) => {
           const incoming = run.steps.find((candidate) => candidate.id === step.id);

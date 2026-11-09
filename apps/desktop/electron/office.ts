@@ -33,6 +33,14 @@ type Context = {
   providerConfigKeys?: Record<string, string>;
 };
 export interface OfficeHost {
+  /**
+   * The host's persistence check for Agent Team data: false for a tenant
+   * that is being disconnected (see tenant-lifecycle.ts). A refused write
+   * is dropped and logged here.
+   */
+  tenantWritable?(tenantId: string, what: string): boolean;
+  /** Run a teammate's work under its tenant's lease, refused and drained by Disconnect. */
+  tenantLease?<T>(tenantId: string, work: () => Promise<T>): Promise<T>;
   context(): Promise<Context>;
   startRun(slug: string, options: StartRunOptions): Promise<RunRecord>;
   cancelRun(id: string): Promise<RunRecord>;
@@ -77,7 +85,7 @@ export class OfficeService {
     this.db.exec(`PRAGMA journal_mode=WAL; PRAGMA secure_delete=ON;
       CREATE TABLE IF NOT EXISTS office_personas (id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS office_missions (id TEXT PRIMARY KEY, persona_id TEXT NOT NULL, tenant_id TEXT NOT NULL, data TEXT NOT NULL);`);
-    this.memory = new OfficeMemory(this.db);
+    this.memory = new OfficeMemory(this.db, (tenantId, what) => this.writable(tenantId, what));
     for (const sidecar of [`${path}-wal`, `${path}-shm`])
       if (existsSync(sidecar)) chmodSync(sidecar, 0o600);
   }
@@ -121,7 +129,17 @@ export class OfficeService {
         .map(({ trustKey: _, ...m }) => m),
     };
   }
+  /** The persistence choke point of office.db: a refused write is dropped and logged. */
+  private writable(tenantId: string, what: string): boolean {
+    if (!this.host.tenantWritable || this.host.tenantWritable(tenantId, what)) return true;
+    console.warn(`[office] dropped a write for an organization being disconnected: ${what}`, { tenantId });
+    return false;
+  }
+  private leased<T>(tenantId: string | undefined, work: () => Promise<T>): Promise<T> {
+    return tenantId && this.host.tenantLease ? this.host.tenantLease(tenantId, work) : work();
+  }
   private putPersona(p: StoredPersona) {
+    if (!this.writable(p.tenantId, "office teammate")) return;
     this.db
       .prepare(
         "INSERT INTO office_personas VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data, tenant_id=excluded.tenant_id",
@@ -129,6 +147,7 @@ export class OfficeService {
       .run(p.id, p.tenantId, JSON.stringify(p));
   }
   private putMission(m: StoredMission) {
+    if (!this.writable(m.tenantId, "office mission")) return;
     this.db
       .prepare(
         "INSERT INTO office_missions VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET data=excluded.data",
@@ -248,6 +267,12 @@ export class OfficeService {
     return provider;
   }
   save(input: unknown): Promise<OfficeState> {
+    const tenantId = input && typeof input === "object" && typeof (input as { tenantId?: unknown }).tenantId === "string"
+      ? (input as { tenantId: string }).tenantId
+      : undefined;
+    return this.leased(tenantId, () => this.saveLeased(input));
+  }
+  private saveLeased(input: unknown): Promise<OfficeState> {
     return this.serial(async () => {
       if (!input || typeof input !== "object" || Array.isArray(input))
         throw new Error("Office teammate must be an object.");
@@ -503,12 +528,13 @@ export class OfficeService {
     });
   }
   start(id: string): Promise<OfficeState> {
-    return this.serial(async () => {
+    const tenantId = this.personas().find((p) => p.id === id)?.tenantId;
+    return this.leased(tenantId, () => this.serial(async () => {
       await this.begin(this.persona(id), "manual");
       await this.advance();
       this.host.changed();
       return this.state();
-    });
+    }));
   }
   private async begin(
     p: StoredPersona,
@@ -619,6 +645,8 @@ export class OfficeService {
     return this.serial(async () => {
       for (const p of this.personas()) {
         if (
+          // A teammate of an organization being disconnected does not start.
+          (this.host.tenantWritable && !this.host.tenantWritable(p.tenantId, "office schedule")) ||
           !p.enabled ||
           !p.nextRunAt ||
           Date.parse(p.nextRunAt) > this.now() ||
@@ -1008,6 +1036,12 @@ export class OfficeService {
   }
   private answering = new Set<string>();
   async ask(input: { id: string; question: string }) {
+    // The question runs under its teammate's tenant lease: refused while the
+    // organization is being disconnected, and drained by Disconnect.
+    const tenantId = this.personas().find((p) => p.id === input.id)?.tenantId;
+    return this.leased(tenantId, () => this.askLeased(input));
+  }
+  private async askLeased(input: { id: string; question: string }) {
     const snapshot = await this.serial(async () => {
       const p = this.persona(input.id);
       if (this.answering.has(p.id))
