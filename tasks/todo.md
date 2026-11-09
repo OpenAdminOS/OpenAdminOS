@@ -1683,3 +1683,17 @@ Reviewed head 9c244c6; round 2 fixes verified. The earlier CI smoke timeout was 
 
 1. [x] Blocking: Apply bypassed the active organization. `confirmRun` takes the same boundary as starts, and the `confirm-run` IPC handler always sets it, so every renderer approval is checked inside the confirmation lock: the plan's tenant must be the active tenant. That one path covers agent write plans, baseline rollbacks, external gateway proposals and Agent Team approvals; dry run then Run for real was already held to the active organization in round 1. A refused plan is kept unchanged and never retargeted. The confirmation page names the plan's organization, keeps Apply disabled and offers Switch back; a refusal from a race shows the host's designed message. Host tests cover all four approval kinds with No organization and with another organization active; renderer tests cover both states and the race. (44fc909e)
 2. [x] Start errors were hidden behind the run review. The review checks the provider on its own, whatever the organization state, and disables Start with Open provider settings when it is not ready; a refused start appears inside the review with Try again and Open provider settings, tested with `within(dialog)` for an agent start and for Run again. (02b2ae78)
+
+### Muse Wonder Full round 3 (reviewed 9c244c6, Node 22)
+
+No blocking findings; round 2 fixes verified. Muse confirms the earlier smoke timeout came from the old "Switch tenant" wording, fixed in 622d3a4d. The CI run on 46b8436 failed only in the Intune Chat smoke at "edit prompt loaded into composer", the known send-completion race; the smoke passes locally.
+
+1. [x] Switch then Run for real from No organization opened setup: the rerun ran from the closure taken before the switch. It now waits for the render where that organization is active. Test starts from No organization with a planned dry run. (f3ecc51c)
+2. [x] The run review treated a failed connector load as "nothing set up". A failed load now says the destinations could not be checked. (cc2fa872)
+3. [x] Nova runs and sends kept the tenant captured at preview. Execution checks that organization is still active and otherwise refuses with nothing run or sent; Nova starts also carry the active-organization boundary. (664d2749)
+4. [x] Copied and exported reports of a run with no organization say "Organization: none". (e599af56)
+5. [x] A run without a tenant whose agent now needs a service fails closed with the no-organization message, and write and system applies without a tenant refuse, instead of falling back to the active tenant. (cf01b179)
+6. [x] Menu bar Run due counts a mid-batch `OrganizationBoundaryError` as waiting. (03c67c73)
+7. [x] Reconcile keeps records with a long or duplicate id under a fresh deterministic id with their vendor connections, keeps unknown connection values that are not records, and the migration notice counts only schedules it moved. (73cb2c7e)
+- [x] `registration-script.test.ts` timed out under full-suite load (seen here in round 2 too): its tests start PowerShell several times, so the file allows 60 seconds per test. (commit after 73cb2c7e)
+- [x] The Settings search test read its first result before the page finished loading under full-suite load. It now waits for the result. (test commit after the registration fix)
