@@ -1,5 +1,16 @@
 # Current active plan
 
+- [ ] Managed configuration, issue #176 (branch `managed/policy-file`). Built: policy file paths, schema, parsing with line numbers, precedence, main-process enforcement for providers, models, public references and the app registration, Settings and notice UI, configuration audit events, IT admin docs.
+
+  Acceptance criteria:
+  1. With a policy that allows only local providers, no hosted provider is offered or selectable anywhere, and the main process refuses one for Chat, agents and tests.
+  2. With a policy that sets a provider and model, a fresh install skips the scan and opens Chat with that model.
+  3. A setting the policy sets shows "Set by your IT department" and cannot be changed.
+  4. An invalid policy file shows a designed error naming the file, the line and the problem (Settings and a one-time notice); only invalid keys fall back to no policy.
+  5. Policy load, change, removal and problems are recorded in the configuration audit.
+
+  - [ ] TODO(#175): first-run scan integration. PR #175 (first-run model scan) was not merged when this was built. After it merges: merge `origin/main`, make the scan skip itself when `skipFirstRunScan` is true and the policy provider is ready (open Chat with the policy model), and make the scan list only `state.providers` (already filtered by policy in `AppStateStore.listProviders`). Criterion 2 depends on this.
+
 - [ ] Chat hardening mega PR (branch `fix/chat-hardening`, decision Ugur 2026-10-25: one PR for all findings) from the [2026-10-24 full Chat test](./chat-full-test-2026-10-24.md) including the live addendum.
 
   Deliverables (one PR, staged commits): (0) diagnose and fix investigative Chat on the Codex provider; (1) evidence guard for tenant-data finals plus deterministic flip with visible notice on repeated protocol failure; (2) tenant-scoped conversations; (3) picker provider switch, Azure send gate, Gemini selectability, fail-closed provider resolution; (4) cache invalidation after confirmed write runs, `graph_get` paging, sources from executed traces, model-facing staleness aligned to host TTLs, named-scope 403s; (5) single agent matcher with read/write badge, expanded write-intent routing, bounded conversation memory; (6) actionable error notices, streaming live region, per-stream cancel, Node 22 pin with Node 26-safe test setup, SPEC and CHANGELOG reconciliation.
