@@ -2780,7 +2780,9 @@ function RunPreflightModal({
   // Scopes the services cannot account for block the run, as in preflight.
   const scopeBlockCopy = unmappedScopesCopy(agent.scopes) ?? uncoveredScopesCopy(agent);
   // Report destinations depend on which connectors are set up.
-  const [connectors, setConnectors] = useState<ConnectorSummary[] | null>(null);
+  // null while loading, "failed" when the list could not be read: a failed
+  // load is never treated as "nothing is set up".
+  const [connectors, setConnectors] = useState<ConnectorSummary[] | null | "failed">(null);
   useEffect(() => {
     if (!open) return;
     let cancelled = false;
@@ -2790,7 +2792,7 @@ function RunPreflightModal({
         if (!cancelled) setConnectors(list);
       })
       .catch(() => {
-        if (!cancelled) setConnectors([]);
+        if (!cancelled) setConnectors("failed");
       });
     return () => {
       cancelled = true;
@@ -2940,7 +2942,11 @@ function RunPreflightModal({
               ? "OpenAdminOS runs this agent against the active organization and saves the result to local run history."
               : serviceFree
                 ? `OpenAdminOS runs this agent with no organization and saves the result to local run history. It reads no service data. ${
-                    connectors ? noOrganizationReportLine(manualRunReportDestinations(agent, false, connectors)) : "Checking where its report goes."
+                    connectors === "failed"
+                      ? "Where its report goes could not be checked: saved delivery rules may still send it. Review them in Connections, under Results go to."
+                      : connectors
+                        ? noOrganizationReportLine(manualRunReportDestinations(agent, false, connectors))
+                        : "Checking where its report goes."
                   }`
                 : "This agent cannot start until an organization with its services is active."} {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
               ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."

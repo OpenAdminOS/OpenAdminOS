@@ -489,3 +489,20 @@ describe("start errors inside the run review (review round 3)", () => {
     await waitFor(() => expect(startRun).toHaveBeenCalledTimes(2));
   });
 });
+
+it("says the report destinations could not be checked when the connector list fails (Muse round 3)", async () => {
+  const draft = createMockAgent({
+    id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [],
+    delivery: { slack: { enabled: true } },
+  });
+  const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents: [draft] });
+  const bridge = makeMockBridge(
+    { listConnectors: vi.fn(async () => { throw new Error("The connector list could not be read."); }) },
+    { ...state, tenants: [] },
+  );
+  renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  await waitFor(() => expect(dialog).toHaveTextContent("Where its report goes could not be checked: saved delivery rules may still send it."));
+  expect(dialog).not.toHaveTextContent("No saved delivery rule sends its report.");
+  expect(dialog).not.toHaveTextContent("not set up, so nothing is sent there");
+});
