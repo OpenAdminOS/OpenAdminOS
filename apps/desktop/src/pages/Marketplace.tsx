@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { useSearchParams } from "react-router";
+import { useNavigate, useSearchParams } from "react-router";
 
 import { PageBody, PageHeader } from "../components/AppShell";
 import { IconCloud, IconExternal, IconRefresh, IconSearch, IconShield, IconWarning } from "../components/icons";
@@ -39,7 +39,7 @@ export default function Marketplace() {
   const openServer = servers.find((server) => server.id === openServerId);
   const filtering = kind !== "discover" || query.trim() !== "";
   const shownServers = servers.filter((server) => matchesServer(server, query));
-  const showSplashtopApi = matchesPreview(SPLASHTOP_API_PREVIEW.terms, query);
+  const showSplashtopApi = matchesListing(SPLASHTOP_API_LISTING.terms, query);
   const toolUse = state.chatToolUse;
 
   const setParams = (update: (next: URLSearchParams) => void) => {
@@ -164,7 +164,7 @@ export default function Marketplace() {
                     onOpen={() => openListing(server.id)}
                   />
                 ))}
-                {showSplashtopApi ? <ConnectionPreviewCard /> : null}
+                {showSplashtopApi ? <ConnectionListingCard /> : null}
               </div>
               {servers.length === 0 ? (
                 <p role="status" className="text-sm text-[var(--color-text-muted)]">The MCP catalog is not available in this build.</p>
@@ -203,52 +203,55 @@ export default function Marketplace() {
 }
 
 /**
- * A vendor connection that needs the customer's own credentials. It is shown
- * as a preview: the connection itself (token in the OS keychain, per
- * organization, governed writes) is not built yet, so nothing can be installed.
+ * A vendor service built into OpenAdminOS that needs the customer's own
+ * credentials. It is connected per organization on Connections, so the
+ * listing opens that connect step instead of installing anything here.
  */
-const SPLASHTOP_API_PREVIEW = {
+const SPLASHTOP_API_LISTING = {
   id: "splashtop-open-api",
-  name: "Splashtop Open API",
+  name: "Splashtop",
   publisher: "Splashtop",
-  pitch: "Read computers, inventory, sessions and audit logs, and run actions such as rebooting computers, each with your confirmation.",
+  pitch: "Read computers, inventory, users, sessions and audit logs, and plan changes such as reboots, each applied only after your typed confirmation.",
   terms: ["splashtop", "splashtop open api", "splashtop api", "remote access", "remote support", "connection"],
 };
 
-function matchesPreview(terms: readonly string[], query: string): boolean {
+function matchesListing(terms: readonly string[], query: string): boolean {
   const needle = query.trim().toLowerCase();
   if (!needle) return true;
   return terms.some((term) => term.includes(needle) || needle.includes(term));
 }
 
-function ConnectionPreviewCard() {
-  const preview = SPLASHTOP_API_PREVIEW;
+function ConnectionListingCard() {
+  const navigate = useNavigate();
+  const listing = SPLASHTOP_API_LISTING;
   return (
-    <article
-      aria-label={`${preview.name}, connection by ${preview.publisher}, coming soon`}
-      className="flex flex-col overflow-hidden rounded-2xl bg-[var(--color-surface)] text-left ring-1 ring-[var(--color-border-soft)]"
+    <button
+      type="button"
+      aria-label={`${listing.name}, connection by ${listing.publisher}. Connect on Connections`}
+      onClick={() => navigate("/connections?connect=splashtop")}
+      className="flex flex-col overflow-hidden rounded-2xl bg-[var(--color-surface)] text-left ring-1 ring-[var(--color-border-soft)] transition-shadow hover:ring-[var(--color-border)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
     >
       <span className="relative block aspect-[16/10]">
-        <CoverArt id={preview.id} className="absolute inset-0 h-full w-full" />
-        <span className="absolute left-3 top-3"><ListingTags tags={["Connection", "Coming soon"]} /></span>
+        <CoverArt id={listing.id} className="absolute inset-0 h-full w-full" />
+        <span className="absolute left-3 top-3"><ListingTags tags={["Connection", "Built in"]} /></span>
       </span>
       <span className="flex flex-1 flex-col gap-2.5 px-4 pb-4 pt-3.5">
         <span>
-          <span className="block text-[15px] font-semibold leading-tight text-[var(--color-text)]">{preview.name}</span>
-          <span className="text-sm text-[var(--color-text-muted)]">{preview.publisher}</span>
+          <span className="block text-[15px] font-semibold leading-tight text-[var(--color-text)]">{listing.name}</span>
+          <span className="text-sm text-[var(--color-text-muted)]">{listing.publisher}</span>
         </span>
-        <span className="text-sm text-[var(--color-text-soft)]">{preview.pitch}</span>
-        <div className="grid gap-1.5 text-sm text-[var(--color-text-muted)]">
-          <div className="flex items-center gap-2"><IconShield size={13} className="shrink-0" /><span>Needs a Splashtop Enterprise API token</span></div>
-          <div className="flex items-center gap-2"><IconShield size={13} className="shrink-0" /><span>The token stays in this device's keychain</span></div>
-          <div className="flex items-center gap-2 text-[var(--color-warning)]"><IconCloud size={13} className="shrink-0" /><span>Requests go only to webapi.splashtop.com, .eu or .nr</span></div>
-        </div>
+        <span className="text-sm text-[var(--color-text-soft)]">{listing.pitch}</span>
+        <span className="grid gap-1.5 text-sm text-[var(--color-text-muted)]">
+          <span className="flex items-center gap-2"><IconShield size={13} className="shrink-0" /><span>Needs a Splashtop Enterprise API token</span></span>
+          <span className="flex items-center gap-2"><IconShield size={13} className="shrink-0" /><span>The token stays in this device's secure storage</span></span>
+          <span className="flex items-center gap-2 text-[var(--color-warning)]"><IconCloud size={13} className="shrink-0" /><span>Requests go only to webapi.splashtop.com, .eu or .nr</span></span>
+        </span>
         <span className="mt-auto flex items-center justify-between gap-2 pt-1 text-sm">
-          <span className="text-[var(--color-text-soft)]">Connect Splashtop on Connections</span>
-          <span className="whitespace-nowrap text-xs text-[var(--color-text-muted)]">Coming soon</span>
+          <span className="text-[var(--color-text-soft)]">Connect on Connections</span>
+          <span className="whitespace-nowrap text-xs text-[var(--color-text-muted)]">Per organization</span>
         </span>
       </span>
-    </article>
+    </button>
   );
 }
 
