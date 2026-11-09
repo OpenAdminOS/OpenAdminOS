@@ -6931,6 +6931,8 @@ if (!gotLock) {
 
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
+      // Network failures name the system proxy, which OpenAdminOS's own requests do not use.
+      resolveProxy: (url) => session.defaultSession.resolveProxy(url),
       tokenStore,
       tokenStoreFor,
       legacyTokenStoresFor,

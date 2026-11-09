@@ -71,13 +71,15 @@ export async function pullEmbeddingModel(
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, stream: false }),
   });
-  if (!response.ok) {
-    throw new Error(`Ollama pull failed with HTTP ${response.status}.`);
-  }
+  // Ollama reports a failed download in the body, often with HTTP 500:
+  // read it first, so the reason (an unreachable registry, a proxy) is kept.
   const payload = (await response.json().catch(() => undefined)) as
     | { status?: string; error?: string }
     | undefined;
   if (payload?.error) {
     throw new Error(`Ollama pull failed: ${payload.error}`);
+  }
+  if (!response.ok) {
+    throw new Error(`Ollama pull failed with HTTP ${response.status}.`);
   }
 }

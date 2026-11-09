@@ -284,8 +284,10 @@ describe("starting a local runtime from the scan", () => {
       spawn: async () => undefined,
       isUp: async () => false,
       timeoutMs: 100, intervalMs: 5,
+      host: "127.0.0.1:11434",
     });
-    assert.match((silent as { message: string }).message, /^Ollama did not answer within 0\.1 seconds\. Start it yourself with `ollama serve`, then scan again\.$/);
+    // The loopback host is named, and no proxy is in the path (design and enterprise round).
+    assert.equal((silent as { message: string }).message, "Ollama did not answer on 127.0.0.1:11434 within 0.1 seconds. It runs on this device, so no proxy is involved. Start it yourself with `ollama serve`, then scan again.");
   });
 });
 

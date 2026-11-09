@@ -1,4 +1,5 @@
 import { OfficeService } from "./office.js";
+import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -407,6 +408,8 @@ interface PersistedState {
   retrievalAutoInstallAttemptedAt?: string;
   /** Last background attempt to pull the embedding model via Ollama. */
   embeddingModelPullAttemptedAt?: string;
+  /** Why the last background pull failed, shown in Settings until a pull succeeds. */
+  embeddingModelPullError?: string;
   /**
    * MCP write-gateway configuration. The pairing token is never stored
    * here; it lives in provider-style safeStorage. Off by default.
@@ -1497,6 +1500,12 @@ export interface AppStateStoreOptions {
    */
   statsApiUrl?: string;
   /**
+   * Reads the device's system proxy for a URL (Electron's
+   * `session.resolveProxy`), so a network failure can say whether one is
+   * set. OpenAdminOS's own requests do not go through it.
+   */
+  resolveProxy?: ProxyResolver;
+  /**
    * Factory for a per-client-id token cache when a tenant is connected
    * with a bring-your-own app registration. Custom registrations must
    * not share the default identity's cache. Receives the canonical
@@ -1594,6 +1603,15 @@ export interface AppStateStoreOptions {
  * summary can land after the scan is done), so it is served as a failed
  * check with the reason its scan row showed, never as "not checked".
  */
+/** "127.0.0.1:11434" from a runtime endpoint. */
+function endpointHost(endpoint: string): string {
+  try {
+    return new URL(endpoint).host;
+  } catch {
+    return endpoint;
+  }
+}
+
 function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes: readonly ModelScanProbe[]): Map<ProviderId, ProviderSummary> {
   const results = new Map(found);
   for (const probe of probes) {
@@ -1625,6 +1643,7 @@ export class AppStateStore {
   private readonly tokenStoreFor: AppStateStoreOptions["tokenStoreFor"];
   private readonly legacyTokenStoresFor: AppStateStoreOptions["legacyTokenStoresFor"];
   private readonly statsApiUrl: string;
+  private resolveProxy: ProxyResolver | undefined;
   private readonly usageTelemetryUrl: string;
   private readonly appVersion: string;
   private readonly sandboxedCodeDefault: boolean;
@@ -1744,6 +1763,7 @@ export class AppStateStore {
         : undefined;
       this.graphFactory = options.graphFactory;
       this.providerListFactory = options.providerListFactory;
+      this.resolveProxy = options.resolveProxy;
       this.llmFactory = options.llmFactory;
       this.whatsAppWebClientFactory = options.whatsAppWebClientFactory;
       this.connectorSecretsForOverride = options.connectorSecretsFor;
@@ -2354,10 +2374,12 @@ export class AppStateStore {
   async getRetrievalStatusWithUpdates(): Promise<RetrievalStatus> {
     const status = await this.getRetrievalStatus();
     const embedding = await embeddingModelState();
+    const pullError = (await this.read()).embeddingModelPullError;
     const withEmbedding: RetrievalStatus = {
       ...status,
       ollamaReachable: embedding.ollamaReachable,
       embeddingModelInstalled: embedding.installed,
+      ...(pullError && !embedding.installed ? { embeddingModelError: pullError } : {}),
     };
     if (!withEmbedding.available) return withEmbedding;
     const manifest = await fetchIndexManifest();
@@ -2535,7 +2557,23 @@ export class AppStateStore {
         });
       });
 
-      await pullEmbeddingModel(endpoint);
+      try {
+        await pullEmbeddingModel(endpoint);
+      } catch (error) {
+        // Not silent: Settings shows why, naming the registry and the proxy Ollama uses.
+        const message =
+          (await describeNetworkFailure({ what: "The local index model download", url: "https://registry.ollama.ai/", error, path: "ollama" })) ??
+          (error instanceof Error ? error.message : String(error));
+        await this.serialize(async () => {
+          await this.write({ ...(await this.read()), embeddingModelPullError: message });
+        });
+        this.emitStateChanged("retrieval-embedding-failed");
+        throw error;
+      }
+      await this.serialize(async () => {
+        const { embeddingModelPullError: _cleared, ...rest } = await this.read();
+        await this.write(rest);
+      });
       this.emitStateChanged("retrieval-embedding-installed");
     } catch (error) {
       console.info(
@@ -2632,6 +2670,7 @@ export class AppStateStore {
     const registrySource = persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE;
     const result = await refreshRegistry(this.userDataPath, registrySource, {
       allowDevSource: this.allowDevRegistrySource,
+      ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}),
     });
 
     const bothSourcesFailed = result.error !== null && !result.fromCache;
@@ -3318,6 +3357,16 @@ export class AppStateStore {
     );
   }
 
+  /**
+   * A Microsoft sign-in failure as the admin reads it: a network failure
+   * names login.microsoftonline.com, whether a system proxy is set and the
+   * fix; anything else keeps the MSAL mapping.
+   */
+  private async signInFailure(error: unknown, registration: Parameters<typeof humanizeMsalError>[1]): Promise<Error> {
+    const network = await describeNetworkFailure({ what: "Microsoft sign-in", url: "https://login.microsoftonline.com/", error, ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}) });
+    return new Error(network ?? humanizeMsalError(error, registration));
+  }
+
   /** Set when a scan, Retry or Start is asked for and when the first-run scan completes; cleared by `refreshProviders`. */
   private scanResultsServed = false;
 
@@ -3595,6 +3644,7 @@ export class AppStateStore {
         manualCommand,
         launch,
         appWithoutCommand: !launch && providerId === "lm-studio" && (await lmStudioAppInstalled()),
+        host: endpointHost(endpoint),
         // The shared CLI launcher hides the console window on Windows and refuses a batch launcher it cannot resolve, with a reason.
         spawn: (launch) =>
           new Promise<void>((resolve, reject) => {
@@ -6142,6 +6192,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       manifestText = await response.text();
     } catch (err) {
+      // An unreachable Marketplace names its host, the proxy and the fix.
+      const network = await describeNetworkFailure({ what: "The Marketplace", url: target.manifestUrl, error: timeoutWhenAborted(err), ...(this.resolveProxy ? { resolveProxy: this.resolveProxy } : {}) });
+      if (network) throw new Error(network);
       const reason = err instanceof Error ? err.message : String(err);
       throw new Error(`${context}: failed to fetch manifest: ${reason}`);
     } finally {
@@ -6578,7 +6631,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         timeoutMs: 300_000,
       });
     } catch (error) {
-      throw new Error(humanizeMsalError(error, registration));
+      throw await this.signInFailure(error, registration);
     } finally {
       if (this.tenantConnectController === controller) {
         this.tenantConnectController = undefined;
@@ -6719,7 +6772,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       try {
         result = await this.tenantCheckSignIn(operation, tenant, toResourceScopes(scopeNames));
       } catch (error) {
-        throw new Error(humanizeMsalError(error, tenant.appRegistration));
+        throw await this.signInFailure(error, tenant.appRegistration);
       }
       // Consent from another account must not change this tenant's grants.
       assertSignedInAccount(result, connectedAccountOf(tenant));
@@ -6773,12 +6826,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       } catch (silentError) {
         if (silentError instanceof TenantAccountMismatchError) throw silentError;
         if (!isInteractionRequired(silentError)) {
-          throw new Error(humanizeMsalError(silentError, tenant.appRegistration));
+          throw await this.signInFailure(silentError, tenant.appRegistration);
         }
         try {
           result = await this.tenantCheckSignIn(operation, tenant, CUSTOM_REGISTRATION_SCOPES);
         } catch (error) {
-          throw new Error(humanizeMsalError(error, tenant.appRegistration));
+          throw await this.signInFailure(error, tenant.appRegistration);
         }
         // A fresh sign-in could be anyone, so it must match before grants
         // are replaced.
@@ -7800,6 +7853,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       }
       if (typeof parsed.embeddingModelPullAttemptedAt === "string") {
         state.embeddingModelPullAttemptedAt = parsed.embeddingModelPullAttemptedAt;
+      }
+      if (typeof parsed.embeddingModelPullError === "string") {
+        state.embeddingModelPullError = parsed.embeddingModelPullError;
       }
       if (isPlainRecordValue(parsed.gateway)) {
         const gateway = parsed.gateway as Record<string, unknown>;

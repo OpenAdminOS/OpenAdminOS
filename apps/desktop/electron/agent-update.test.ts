@@ -155,6 +155,52 @@ describe("registry manifest integrity and update lifecycle", () => {
   });
 });
 
+describe("Marketplace network failures (design and enterprise round)", () => {
+  const unreachable = () => Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND registry.example"), { code: "ENOTFOUND" }) });
+
+  it("names the host, the system proxy and the fix when an agent's manifest cannot be fetched", async () => {
+    const repoRoot = await findRepoRoot();
+    const source = "https://registry.example/agents";
+    const index = JSON.parse(await readFile(join(repoRoot, "agents", "index.json"), "utf8")) as { agents: Array<Record<string, unknown>> };
+    const entry = index.agents.find((item) => item.slug === "find-inactive-devices");
+    assert.ok(entry);
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async (input) => {
+      if (String(input).endsWith("/index.json")) {
+        return new Response(JSON.stringify({ schemaVersion: 1, agents: [{ ...entry, manifestUrl: `${source}/find-inactive-devices/manifest.yaml`, manifestSha256: "0".repeat(64) }] }), { status: 200 });
+      }
+      throw unreachable();
+    };
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-agent-network-"));
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, tokenStore, statsApiUrl: "", appVersion: "0.4.0", resolveProxy: async () => "PROXY proxy.contoso.com:8080" });
+    try {
+      await store.setRegistrySource(source, { confirmExternalSource: true });
+      await assert.rejects(
+        () => store.installAgent("find-inactive-devices"),
+        /^Error: The Marketplace could not reach registry\.example: its name did not resolve\. This device has a system proxy \(proxy\.contoso\.com:8080\); OpenAdminOS connects directly and did not use it\. Ask your network team to allow direct HTTPS access to registry\.example, then try again\.$/,
+      );
+    } finally {
+      store.close();
+      globalThis.fetch = originalFetch;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("names the host when the Marketplace index cannot be checked", async () => {
+    const { refreshRegistry } = await import("./registry-client.js");
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = async () => { throw unreachable(); };
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-registry-network-"));
+    try {
+      const result = await refreshRegistry(dir, "https://registry.example/agents", { resolveProxy: async () => "DIRECT" });
+      assert.match(result.error ?? "", /^The Marketplace could not reach registry\.example: its name did not resolve\. No system proxy is set, and OpenAdminOS connected directly\. Check the network connection, VPN and DNS, then try again\.$/);
+    } finally {
+      globalThis.fetch = originalFetch;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 function digest(value: string): string {
   return createHash("sha256").update(value, "utf8").digest("hex");
 }

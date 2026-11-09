@@ -737,6 +737,15 @@ describe("Settings provider section", () => {
     expect(screen.getByRole("button", { name: "Check for updates" })).toBeDisabled();
   });
 
+  it("shows why the local index model could not download, with the fix (design and enterprise round)", async () => {
+    const message = "The local index model download could not reach registry.ollama.ai: its name did not resolve. Ollama downloads it itself and uses the proxy set in its own environment (HTTPS_PROXY), not this device's proxy setting. If this device reaches the internet through a proxy, set HTTPS_PROXY where Ollama runs and restart it. Otherwise check the network connection, then try again.";
+    const bridge = makeMockBridge({
+      getRetrievalStatus: vi.fn(async () => ({ available: true, version: "2026-11-01", chunkCount: 10, embeddingModel: "nomic-embed-text", ollamaReachable: true, embeddingModelInstalled: false, embeddingModelError: message })),
+    });
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/privacy", bridge });
+    expect(await screen.findByRole("alert", { name: "" })).toHaveTextContent(message);
+  });
+
   it("shows an unavailable retrieval reason and checks for a refreshed index", async () => {
     const user = userEvent.setup();
     const reason = "The local Microsoft documentation index is not installed.";

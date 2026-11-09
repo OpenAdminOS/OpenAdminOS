@@ -1885,6 +1885,8 @@ export interface RetrievalStatus {
    * The index alone cannot ground answers without it.
    */
   embeddingModelInstalled?: boolean;
+  /** Why the last background download of the embedding model failed, with the fix. */
+  embeddingModelError?: string;
 }
 
 // ─── MCP write-gateway (v0.5) ────────────────────────────────────────────

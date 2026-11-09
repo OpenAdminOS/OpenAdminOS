@@ -455,6 +455,8 @@ export async function startLocalRuntime(input: {
   manualCommand: string;
   /** The app is installed but the command that starts it was not found (LM Studio without `lms`). */
   appWithoutCommand?: boolean;
+  /** The loopback address it should answer on, named when it does not ("127.0.0.1:11434"). */
+  host?: string;
   spawn: (launch: RuntimeLaunch) => Promise<void>;
   isUp: () => Promise<boolean>;
   timeoutMs?: number;
@@ -477,8 +479,11 @@ export async function startLocalRuntime(input: {
     if (await input.isUp()) return { started: true };
     await new Promise((resolve) => setTimeout(resolve, input.intervalMs ?? 400));
   }
+  // On this device, so no proxy is in the path: the runtime itself did not come up.
+  const where = input.host ? ` on ${input.host}` : "";
+  const proxy = input.host ? " It runs on this device, so no proxy is involved." : "";
   return {
     started: false,
-    message: `${input.name} did not answer within ${formatSeconds(input.timeoutMs ?? RUNTIME_START_TIMEOUT_MS)}. Start it yourself with \`${input.manualCommand}\`, then scan again.`,
+    message: `${input.name} did not answer${where} within ${formatSeconds(input.timeoutMs ?? RUNTIME_START_TIMEOUT_MS)}.${proxy} Start it yourself with \`${input.manualCommand}\`, then scan again.`,
   };
 }

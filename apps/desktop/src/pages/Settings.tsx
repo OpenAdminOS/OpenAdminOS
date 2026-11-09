@@ -4492,8 +4492,10 @@ function PrivacySection({
                     />
                   </dl>
                   {retrievalStatus.embeddingModelInstalled === false ? (
-                    <p className="mt-2 text-sm text-[var(--color-warning)]">
-                      {retrievalStatus.ollamaReachable
+                    <p role={retrievalStatus.embeddingModelError ? "alert" : undefined} className="mt-2 text-sm text-[var(--color-warning)]">
+                      {retrievalStatus.embeddingModelError
+                        ? retrievalStatus.embeddingModelError
+                        : retrievalStatus.ollamaReachable
                         ? "The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives."
                         : "Ollama isn't running, so the embedding model can't be fetched and questions can't be matched against the index. Start Ollama and it installs automatically."}
                     </p>
