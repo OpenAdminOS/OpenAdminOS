@@ -1731,7 +1731,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       textarea instanceof HTMLTextAreaElement &&
       textarea.value === "" &&
       Boolean(send?.disabled) &&
-      Boolean(findNamedButton("Switch tenant, Smoke Tenant")) &&
+      Boolean(findNamedButton("Switch organization, Smoke Tenant")) &&
       Boolean(document.querySelector('summary[aria-label="Scope: Smoke Tenant"]'))
     );
   };
@@ -1866,7 +1866,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => bodyText().includes("Run an agent with /"), "Intune Chat route");
   await waitFor(
     () =>
-      Boolean(findNamedButton("Switch tenant, Smoke Tenant")) &&
+      Boolean(findNamedButton("Switch organization, Smoke Tenant")) &&
       Boolean(document.querySelector('textarea[role="combobox"]')) &&
       Boolean(document.querySelector('[aria-label="Application navigation"]')),
     "tenant-connected chat shell",

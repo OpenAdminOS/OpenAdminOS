@@ -158,7 +158,7 @@ export async function runOfficeRehearsal(
   );
   await wait(`document.documentElement.hasAttribute('data-team-presentation')`);
   await evaluate(
-    `(()=>{const scope=document.querySelector('header[aria-label="Current tenant, provider, and data boundary"]');if(!(scope instanceof Element))throw new Error('Presentation lost the tenant status strip');const style=window.getComputedStyle(scope);if(style.visibility==='hidden'||style.display==='none')throw new Error('Presentation concealed the tenant status strip');if(document.querySelector('.scene-persona-label strong').textContent.includes('Rehearsal teammate'))throw new Error('Persona names were not concealed');})()`,
+    `(()=>{const scope=document.querySelector('header[aria-label="Current organization, provider, and data boundary"]');if(!(scope instanceof Element))throw new Error('Presentation lost the tenant status strip');const style=window.getComputedStyle(scope);if(style.visibility==='hidden'||style.display==='none')throw new Error('Presentation concealed the tenant status strip');if(document.querySelector('.scene-persona-label strong').textContent.includes('Rehearsal teammate'))throw new Error('Persona names were not concealed');})()`,
   );
   await frame(join(outputDir, "office-presentation.png"));
   await evaluate(
