@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import type { McpHost } from "./mcp/host.js";
 import { AppStateStore } from "./state.js";
 
 const tokenStore: TokenCacheStorage = { read: async () => "", write: async () => undefined };
+const ZERO_HASH = "0".repeat(64);
 const ACCESS_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.secret-access-token-value";
 const ID_TOKEN = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.secret-id-token-value";
 const NOW = "2026-11-09T12:00:00.000Z";
@@ -325,6 +327,44 @@ describe("configuration audit events", () => {
       await fixture.close();
     }
   });
+
+  it("exports events in both formats with a valid hash chain after run history is pruned", async () => {
+    const fixture = await prunedFixture();
+    try {
+      const exported = await fixture.store.exportAuditLog({ format: "json" });
+      const document = JSON.parse(exported.content) as {
+        retention: { note: string };
+        hashChain: { finalHash: string };
+        events: Array<Record<string, unknown> & { sha256: string; type: string; source: string }>;
+      };
+      const changes = document.events.filter((event) => event.source === "configuration-change");
+      assert.deepEqual(changes.map((event) => event.type), ["organization.switched", "provider.changed"]);
+      assert.equal((changes[0]!.details as Record<string, unknown>).organizationId, `org-${fabrikam.id}`);
+      assert.equal((changes[0]!.details as Record<string, unknown>).organizationName, "Fabrikam");
+      assert.equal(changes[0]!.tenantId, fabrikam.id);
+      assert.match(document.retention.note, /Configuration changes are kept independently of run retention/);
+      // The pruned run is gone from the export; the changes are not.
+      assert.equal(document.events.some((event) => event.runId === "run-old"), false);
+      assert.ok(document.events.some((event) => event.runId === "run-new"));
+
+      let previousHash = ZERO_HASH;
+      for (const event of document.events) {
+        const { sha256, ...withoutHash } = event;
+        assert.equal(sha256, createHash("sha256").update(previousHash).update(canonicalJson(withoutHash)).digest("hex"));
+        previousHash = sha256;
+      }
+      assert.equal(document.hashChain.finalHash, previousHash);
+
+      const csv = await fixture.store.exportAuditLog({ format: "csv" });
+      const lines = csv.content.trim().split("\n");
+      assert.equal(lines.length - 1, document.events.length);
+      assert.equal(lines.filter((line) => line.includes(",configuration-change,")).length, 2);
+      assert.ok(lines.some((line) => line.includes(",organization.switched,configuration-change,")));
+      assert.equal(csv.hashChain.finalHash, previousHash);
+    } finally {
+      await fixture.close();
+    }
+  });
 });
 
 describe("configuration audit storage", () => {
@@ -385,3 +425,14 @@ describe("configuration audit storage", () => {
     assert.deepEqual(events.map((entry) => entry.id), ["id-0", "id-1"]);
   });
 });
+
+function canonicalJson(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
+  if (Array.isArray(value)) return `[${value.map((entry) => canonicalJson(entry)).join(",")}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .filter((key) => record[key] !== undefined)
+    .sort()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`)
+    .join(",")}}`;
+}

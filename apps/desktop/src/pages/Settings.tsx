@@ -3090,7 +3090,7 @@ function GeneralSection() {
         />
         <SettingRow
           id="audit-log-export"
-          description="Exports retained run history, write-confirmation events, connector delivery audit entries, and recorded hosted-provider consent acknowledgements. Old run records may already be absent because of retention."
+          description="Exports retained run history, write-confirmation events, connector delivery audit entries, recorded hosted-provider consent acknowledgements, and changes to connections, organizations, provider, model, public references and schedule assignments. Old run records may already be absent because of retention. Those changes are kept independently of it."
           control={
             <AuditLogExportControls
               format={auditExportFormat}

@@ -7,6 +7,7 @@ import {
   appendConfigurationAudit,
   diffConfigurationAudit,
   sanitizeConfigurationAudit,
+  CONFIGURATION_AUDIT_MAX_EVENTS,
   type ConfigurationAuditEvent,
 } from "./configuration-audit.js";
 import { dirname, join } from "node:path";
@@ -716,7 +717,8 @@ function sampleRelevantLicenses(): NonNullable<TenantRecord["relevantLicenses"]>
 type AuditLogEventSource =
   | "run-history"
   | "connector-audit"
-  | "hosted-provider-consent";
+  | "hosted-provider-consent"
+  | "configuration-change";
 
 interface AuditLogActor {
   kind: "connected-admin" | "local-admin";
@@ -742,6 +744,7 @@ type AuditLogEvent = AuditLogEventSeed & { sha256: string };
 
 interface AuditLogBuildInput {
   novaConnectorAudit?: PersistedState["novaConnectorAudit"];
+  configurationAudit?: PersistedState["configurationAudit"];
   runs: RunRecord[];
   tenants: TenantRecord[];
   installedAgents: AgentSummary[];
@@ -885,6 +888,21 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
       details: {
         source: consent.source,
         ...consent.payload,
+      },
+    });
+  }
+
+  for (const change of input.configurationAudit ?? []) {
+    events.push({
+      id: `configuration:${change.id}`,
+      timestamp: change.timestamp,
+      type: change.type,
+      source: "configuration-change",
+      ...(change.tenantId ? { tenantId: change.tenantId } : {}),
+      details: {
+        ...(change.organizationId ? { organizationId: change.organizationId } : {}),
+        ...(change.organizationName ? { organizationName: change.organizationName } : {}),
+        ...change.details,
       },
     });
   }
@@ -1044,9 +1062,13 @@ function compareAuditEvents(left: AuditLogEventSeed, right: AuditLogEventSeed): 
     "run-history": 0,
     "connector-audit": 1,
     "hosted-provider-consent": 2,
+    "configuration-change": 3,
   };
   const sourceDiff = sourceOrder[left.source] - sourceOrder[right.source];
   if (sourceDiff !== 0) return sourceDiff;
+  // Configuration changes recorded together keep the order they were
+  // recorded in; the sort is stable.
+  if (left.source === "configuration-change") return 0;
   return left.id.localeCompare(right.id);
 }
 
@@ -1395,7 +1417,7 @@ function serializeAuditLogJson(input: {
         policy: input.retentionPolicy,
         ...(input.lastPruneResult ? { lastPruneResult: input.lastPruneResult } : {}),
         note:
-          "Run history may omit records removed by the local retention policy.",
+          `Run history may omit records removed by the local retention policy. Configuration changes are kept independently of run retention, up to the newest ${CONFIGURATION_AUDIT_MAX_EVENTS.toLocaleString("en-US")}.`,
       },
       hashChain: {
         algorithm: "sha256",
@@ -3702,6 +3724,7 @@ export class AppStateStore {
     const allEvents = buildAuditLogEvents({
       runs: persisted.runs,
       novaConnectorAudit: persisted.novaConnectorAudit,
+      configurationAudit: persisted.configurationAudit,
       tenants: persisted.tenants,
       installedAgents: persisted.installedAgents,
       hostedProviderConsentEvents:
