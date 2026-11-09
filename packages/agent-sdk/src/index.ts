@@ -81,6 +81,12 @@ export interface ModelScanResult {
   outcome: ModelScanOutcome;
   startedAt: string;
   finishedAt: string;
+  /**
+   * Increases with every scan, Retry and Start rescan the host completes.
+   * A window applies a result only when it is newer than the last one it
+   * applied, so responses that arrive out of order never overwrite it.
+   */
+  generation?: number;
 }
 
 export interface ProviderTestResult {
@@ -2903,11 +2909,13 @@ export interface OpenAdminOSApi {
    * Starts Ollama or LM Studio found installed but not running, waits for
    * its loopback endpoint and scans again. `message` explains a failure.
    */
-  startLocalRuntime?(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan: ModelScanResult }>;
+  startLocalRuntime?(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan?: ModelScanResult }>;
   /** Runs one check of the scan again, with a longer timeout. */
   retryModelScanProbe?(providerId: ProviderId): Promise<ModelScanResult>;
   /** `scanId` is the id the window passed to `startModelScan`; results of another run are ignored. */
   onModelScanProgress?(listener: (probe: ModelScanProbe, scanId?: string) => void): () => void;
+  /** Selects a provider and its model in one validated write. */
+  setActiveProviderAndModel?(providerId: ProviderId, model: string): Promise<AppState>;
   /** Records that the first-launch scan was finished or skipped. */
   completeFirstRunScan?(): Promise<AppState>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;

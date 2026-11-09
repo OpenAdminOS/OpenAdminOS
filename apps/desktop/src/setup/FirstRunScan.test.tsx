@@ -5,7 +5,7 @@ import { Route, Routes, useLocation } from "react-router";
 
 import { MODEL_SCAN_COPY } from "../copy";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
-import { createMockAppState, makeMockBridge, renderWithAppState } from "../test/test-utils";
+import { createMockAppState, createMockMcpServers, makeMockBridge, renderWithAppState } from "../test/test-utils";
 import { ModelScanGate, ScanAgainButton } from "./FirstRunScan";
 
 const probe = (providerId: ProviderId, name: string, where: "local" | "hosted", target: string, rest: Partial<ModelScanProbe> = {}): ModelScanProbe => ({
@@ -14,8 +14,8 @@ const probe = (providerId: ProviderId, name: string, where: "local" | "hosted", 
 const PROBES: ModelScanProbe[] = [
   probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Installed, not running", ready: false, facts: ["Start it with `ollama serve`, then scan again."] }),
   probe("lm-studio", "LM Studio", "local", "localhost:1234", { state: "not-found", summary: "Not installed", ready: false }),
-  probe("anthropic", "Claude Code", "hosted", "claude auth status", { facts: ["Version 2.1.0"] }),
-  probe("copilot", "GitHub Copilot CLI", "hosted", "copilot sign-in status", { state: "could-not-check", summary: "Could not check", ready: false, facts: ["GitHub Copilot CLI did not answer within 2.5 seconds. Retry to check again."] }),
+  probe("anthropic", "Claude Code", "hosted", "claude --version, claude auth status", { facts: ["Version 2.1.0"] }),
+  probe("copilot", "GitHub Copilot CLI", "hosted", "copilot --version", { state: "could-not-check", summary: "Could not check", ready: false, facts: ["GitHub Copilot CLI did not answer within 2.5 seconds. Retry to check again."] }),
 ];
 
 function scanBridge(outcome: ModelScanOutcome, probes: ModelScanProbe[] = PROBES, state = createMockAppState({ tenants: [], activeTenantId: undefined, firstRunScanPending: true })) {
@@ -44,6 +44,7 @@ function scanBridge(outcome: ModelScanOutcome, probes: ModelScanProbe[] = PROBES
       }),
       completeFirstRunScan: vi.fn(async () => ({ ...state, firstRunScanPending: undefined })),
       startLocalRuntime: vi.fn(async () => ({ started: true, scan: result })),
+      setActiveProviderAndModel: vi.fn(async () => state),
     },
     state,
   );
@@ -86,12 +87,12 @@ describe("first-launch model scan screen", () => {
     expect(screen.queryByText("App content")).not.toBeInTheDocument();
     const list = screen.getByRole("list", { busy: true });
     expect(await within(list).findByText("localhost:11434")).toBeInTheDocument();
-    expect(within(list).getByText("claude auth status")).toBeInTheDocument();
+    expect(within(list).getByText("claude --version, claude auth status")).toBeInTheDocument();
     expect(screen.getByText("0 of 4 checked")).toBeInTheDocument();
 
     finish();
     expect(await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" })).toBeInTheDocument();
-    expect(screen.getByText(/Checked here: localhost:11434, localhost:1234, claude auth status, copilot sign-in status\. A tool's own sign-in status command may check with its provider\. No prompt was sent to any model\./)).toBeInTheDocument();
+    expect(screen.getByText("What ran: localhost:11434; localhost:1234; claude --version, claude auth status; copilot --version. The Claude Code and Codex sign-in status commands may check with their provider. No prompt was sent to any model.")).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Scan finished\./));
   });
 
@@ -206,14 +207,14 @@ describe("first-launch model scan screen", () => {
     expect(await screen.findByText(/did not answer within 2\.5 seconds/)).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Check GitHub Copilot CLI again" }));
     await waitFor(() => expect(bridge.retryModelScanProbe).toHaveBeenCalledWith("copilot"));
-    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub Copilot CLI: Signed in."));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("GitHub Copilot CLI: Signed in."), { timeout: 3000 });
   });
 
   it("leads with a hosted tool a Retry found, when the first scan found no model", async () => {
     const user = userEvent.setup();
     const timedOut = [
       probe("lm-studio", "LM Studio", "local", "localhost:1234", { state: "not-found", summary: "Not installed", ready: false }),
-      probe("anthropic", "Claude Code", "hosted", "claude auth status", { state: "could-not-check", summary: "Could not check", ready: false, facts: ["Claude Code did not answer within 2.5 seconds. Retry to check again."] }),
+      probe("anthropic", "Claude Code", "hosted", "claude --version, claude auth status", { state: "could-not-check", summary: "Could not check", ready: false, facts: ["Claude Code did not answer within 2.5 seconds. Retry to check again."] }),
     ];
     const { bridge, finish } = scanBridge({ kind: "nothing" }, timedOut);
     renderGate(bridge);
@@ -230,7 +231,7 @@ describe("first-launch model scan screen", () => {
     const user = userEvent.setup();
     const both = [
       probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Running, 1 model", models: ["openadminos/openadmin-8b:latest"], hasOpenAdmin8B: true }),
-      probe("anthropic", "Claude Code", "hosted", "claude auth status"),
+      probe("anthropic", "Claude Code", "hosted", "claude --version, claude auth status"),
     ];
     const { bridge, finish } = scanBridge({ kind: "local-available", providerId: "ollama", model: "openadminos/openadmin-8b:latest", selectedProviderId: "anthropic" }, both);
     renderGate(bridge);
@@ -241,8 +242,9 @@ describe("first-launch model scan screen", () => {
     expect(screen.getByText("It runs in Ollama. Chat keeps answering with Claude Code, your choice, until you switch.")).toBeInTheDocument();
     expect(screen.queryByText(MODEL_SCAN_COPY.nothingLeaves)).not.toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Use OpenAdmin 8B" }));
-    await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("ollama"));
-    await waitFor(() => expect(bridge.setActiveModel).toHaveBeenCalledWith("ollama", "openadminos/openadmin-8b:latest"));
+    // Provider and model in one call, so a failed model never leaves a half switch (round 2, D).
+    await waitFor(() => expect(bridge.setActiveProviderAndModel).toHaveBeenCalledWith("ollama", "openadminos/openadmin-8b:latest"));
+    expect(bridge.setActiveProvider).not.toHaveBeenCalled();
   });
 
   it("ignores progress from another scan run (review round 1, finding L)", async () => {
@@ -255,6 +257,82 @@ describe("first-launch model scan screen", () => {
     expect(screen.queryByText("Gemini CLI")).not.toBeInTheDocument();
     expect(screen.queryByText("Signed out elsewhere")).not.toBeInTheDocument();
     expect(screen.getByText("0 of 4 checked")).toBeInTheDocument();
+  });
+
+  it("shows a failed Start of the secondary runtime beside its row (round 2, item 8)", async () => {
+    const user = userEvent.setup();
+    const stopped = [
+      probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Installed, not running", ready: false }),
+      probe("lm-studio", "LM Studio", "local", "localhost:1234", { summary: "Installed, not running", ready: false }),
+    ];
+    const { bridge, finish } = scanBridge({ kind: "nothing" }, stopped);
+    vi.mocked(bridge.startLocalRuntime!).mockResolvedValue({ started: false, message: "LM Studio was not found on this device. Start it yourself with `lms server start`, then scan again." });
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    expect(await screen.findByRole("heading", { level: 1, name: "Ollama is installed on this device" })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Start LM Studio" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("LM Studio was not found on this device. Start it yourself with lms server start, then scan again.");
+    // A failed start does not rescan or replace the result.
+    expect(screen.getByRole("heading", { level: 1, name: "Ollama is installed on this device" })).toBeInTheDocument();
+    expect(screen.getAllByText("LM Studio keeps running after you quit OpenAdminOS.").length).toBeGreaterThan(0);
+  });
+
+  it("never lets an older Retry overwrite a newer result (round 2, item 7)", async () => {
+    const user = userEvent.setup();
+    const timedOut = [
+      probe("anthropic", "Claude Code", "hosted", "claude --version, claude auth status", { state: "could-not-check", summary: "Could not check", ready: false }),
+      probe("openai", "Codex", "hosted", "codex --version, codex login status", { state: "could-not-check", summary: "Could not check", ready: false }),
+    ];
+    const { bridge, finish } = scanBridge({ kind: "nothing" }, timedOut);
+    const resolvers: Array<(scan: ModelScanResult) => void> = [];
+    vi.mocked(bridge.retryModelScanProbe!).mockImplementation(() => new Promise((resolve) => resolvers.push(resolve)));
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    await screen.findByRole("heading", { name: MODEL_SCAN_COPY.nothingTitle });
+    await user.click(screen.getByRole("button", { name: "Check Claude Code again" }));
+    await user.click(screen.getByRole("button", { name: "Check Codex again" }));
+    const newer: ModelScanResult = { probes: timedOut.map((entry) => ({ ...entry, state: "found", summary: "Signed in", ready: true })), outcome: { kind: "hosted-detected", providerIds: ["openai"] }, startedAt: "", finishedAt: "b", generation: 5 };
+    const older: ModelScanResult = { probes: timedOut, outcome: { kind: "nothing" }, startedAt: "", finishedAt: "a", generation: 4 };
+    resolvers[1]!(newer);
+    expect(await screen.findByRole("heading", { level: 1, name: "Codex is signed in on this device" })).toBeInTheDocument();
+    resolvers[0]!(older);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(screen.getByRole("heading", { level: 1, name: "Codex is signed in on this device" })).toBeInTheDocument();
+  });
+
+  it("does not claim nothing leaves when a public reference is enabled (round 2, item 9)", async () => {
+    const local = [probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Running, 1 model", models: ["openadminos/openadmin-8b:latest"], hasOpenAdmin8B: true })];
+    const withReference = createMockAppState({ mcpServers: createMockMcpServers({ "microsoft-learn": { installed: true, enabled: true } }) });
+    const { bridge, finish } = scanBridge({ kind: "local-ready", providerId: "ollama", model: "openadminos/openadmin-8b:latest" }, local, withReference);
+    renderGate(bridge);
+    await userEvent.setup().click(await screen.findByRole("button", { name: MODEL_SCAN_COPY.scanAgain }));
+    finish();
+    await screen.findByRole("heading", { level: 1, name: "OpenAdmin 8B is ready on this device" });
+    expect(screen.queryByText(MODEL_SCAN_COPY.nothingLeaves)).not.toBeInTheDocument();
+    expect(screen.getByText("Runs on this device. Your references get tool queries to learn.microsoft.com.")).toBeInTheDocument();
+  });
+
+  it("can be left before it settles, completing the first run without selecting anything (round 2, item N)", async () => {
+    const user = userEvent.setup();
+    const { bridge } = scanBridge({ kind: "nothing" });
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.continueToChat }));
+    await waitFor(() => expect(bridge.completeFirstRunScan).toHaveBeenCalledOnce());
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+  });
+
+  it("focuses the heading on open and on settle (round 2, item L)", async () => {
+    const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] });
+    renderGate(bridge);
+    const heading = await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    await waitFor(() => expect(heading).toHaveFocus());
+    finish();
+    const settled = await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" });
+    await waitFor(() => expect(settled).toHaveFocus());
   });
 
   it("does not show after the first launch, and opens again from Scan again", async () => {

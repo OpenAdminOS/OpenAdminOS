@@ -12,7 +12,8 @@ import { useLocation, useNavigate } from "react-router";
 
 import { Button } from "../components/Button";
 import { IconLogo } from "../components/icons";
-import { MODEL_SCAN_COPY, providerDataLocation } from "../copy";
+import { MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocation } from "../copy";
+import { chatToolHosts } from "../state/data-boundary";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { useSetupFlow } from "./SetupFlowContext";
@@ -54,7 +55,17 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
   // Until app state says whether the first-run scan is pending, show a quiet
   // surface rather than the shell, so nothing claims a provider not yet checked.
   const deciding = supported && firstRun === null && !location.pathname.startsWith("/companion");
-  const value = useMemo<ModelScanContextValue>(() => ({ openScan: () => setManual(true) }), []);
+  // Focus returns to whatever opened the scan when it closes.
+  const invoker = useRef<HTMLElement | null>(null);
+  const value = useMemo<ModelScanContextValue>(
+    () => ({
+      openScan: () => {
+        invoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setManual(true);
+      },
+    }),
+    [],
+  );
   return (
     <ModelScanContext.Provider value={value}>
       {deciding ? (
@@ -65,6 +76,9 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
           onClose={() => {
             setManual(false);
             setFirstRun(false);
+            const target = invoker.current;
+            invoker.current = null;
+            if (target) window.setTimeout(() => target.focus(), 0);
           }}
         />
       ) : (
@@ -154,7 +168,7 @@ export function recommend(outcome: ModelScanOutcome, rows: readonly ModelScanPro
 export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onClose: () => void }) {
   const api = window.openAdminOS;
   const navigate = useNavigate();
-  const { refresh, setActiveProvider } = useAppState();
+  const { state, refresh, setActiveProvider } = useAppState();
   const { startPilot } = useSetupFlow();
   const reduced = useMemo(prefersReducedMotion, []);
   const [probes, setProbes] = useState<ModelScanProbe[]>([]);
@@ -165,8 +179,13 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   const [skipped, setSkipped] = useState(reduced);
   const [scanError, setScanError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [startError, setStartError] = useState<{ providerId: ProviderId; message: string } | null>(null);
+  // A failed Start is shown beside its own runtime, so a secondary runtime's failure is never lost.
+  const [startErrors, setStartErrors] = useState<Record<string, string>>({});
+  const [retrying, setRetrying] = useState<ProviderId | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Scan, Retry and Start results carry a host generation; an older one never overwrites a newer one.
+  const latestGeneration = useRef(0);
+  const headingRef = useRef<HTMLHeadingElement | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const [run, setRun] = useState(0);
   const timers = useRef<number[]>([]);
@@ -193,6 +212,8 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     setResult(null);
     setSettled(false);
     setScanError(null);
+    setStartErrors({});
+    setActionError(null);
     pending.current = [];
     const elapsed = () => performance.now() - started;
     const reveal = (probe: ModelScanProbe) => {
@@ -225,6 +246,10 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
       .startModelScan(scanId)
       .then((scan) => {
         if (cancelled) return;
+        if (scan.generation !== undefined) {
+          if (scan.generation <= latestGeneration.current) return;
+          latestGeneration.current = scan.generation;
+        }
         for (const probe of scan.probes) {
           if (!order.includes(probe.providerId)) reveal({ ...probe, state: "checking" });
           if (!pending.current.some((entry) => entry.providerId === probe.providerId)) reveal(probe);
@@ -272,8 +297,9 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
 
   useEffect(() => {
     if (settled) return;
+    // Only Escape skips: Enter and Space belong to whatever button has focus.
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" || event.key === "Enter" || event.key === " ") skip();
+      if (event.key === "Escape") skip();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -288,49 +314,61 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     setAnnouncement(MODEL_SCAN_COPY.finishedAnnouncement(heroTitle(pick)));
   }, [settled, result, rows]);
 
+  /** Applies a Retry or Start rescan unless a newer result is already shown. */
+  const applyScan = (scan: ModelScanResult): boolean => {
+    if (scan.generation !== undefined) {
+      if (scan.generation <= latestGeneration.current) return false;
+      latestGeneration.current = scan.generation;
+    }
+    announcedResult.current = scan;
+    setShown(Object.fromEntries(scan.probes.map((entry) => [entry.providerId, entry])));
+    setResult(scan);
+    return true;
+  };
+
   const retry = async (providerId: ProviderId) => {
     if (!api?.retryModelScanProbe) return;
     const current = rows.find((probe) => probe.providerId === providerId);
     if (!current) return;
-    setShown((all) => ({ ...all, [providerId]: { ...current, state: "checking", summary: "Checking", facts: [] } }));
+    setRetrying(providerId);
     try {
       // The retry returns the whole scan, so a check that now succeeds changes what the result leads with.
       const scan = await api.retryModelScanProbe(providerId);
-      announcedResult.current = scan;
-      setShown(Object.fromEntries(scan.probes.map((entry) => [entry.providerId, entry])));
-      setResult(scan);
-      const probe = scan.probes.find((entry) => entry.providerId === providerId);
-      if (probe) setAnnouncement(MODEL_SCAN_COPY.announce(probe.name, probe.summary));
+      if (applyScan(scan)) {
+        const probe = scan.probes.find((entry) => entry.providerId === providerId);
+        if (probe) setAnnouncement(MODEL_SCAN_COPY.announce(probe.name, probe.summary));
+      }
       await refresh();
     } catch (caught) {
       setShown((all) => ({
         ...all,
         [providerId]: { ...current, state: "could-not-check", summary: MODEL_SCAN_COPY.couldNotCheck, facts: [caught instanceof Error ? caught.message : String(caught)] },
       }));
+    } finally {
+      setRetrying(null);
     }
   };
 
   const start = async (probe: ModelScanProbe) => {
     if (!api?.startLocalRuntime) return;
     setBusy(`start:${probe.providerId}`);
-    setStartError(null);
+    setStartErrors(({ [probe.providerId]: _cleared, ...others }) => others);
     setAnnouncement(MODEL_SCAN_COPY.starting(probe.name));
     try {
       const outcome = await api.startLocalRuntime(probe.providerId);
-      // The start announces its own result, not the settled scan again.
-      announcedResult.current = outcome.scan;
-      setShown(Object.fromEntries(outcome.scan.probes.map((entry) => [entry.providerId, entry])));
-      setResult(outcome.scan);
-      if (outcome.started) setAnnouncement(MODEL_SCAN_COPY.started(probe.name));
-      else {
+      if (outcome.started) {
+        // The start announces its own result, not the settled scan again.
+        if (outcome.scan) applyScan(outcome.scan);
+        setAnnouncement(MODEL_SCAN_COPY.started(probe.name));
+      } else {
         const message = outcome.message ?? MODEL_SCAN_COPY.startFailed(probe.name);
-        setStartError({ providerId: probe.providerId, message });
+        setStartErrors((all) => ({ ...all, [probe.providerId]: message }));
         setAnnouncement(message);
       }
       await refresh();
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
-      setStartError({ providerId: probe.providerId, message });
+      setStartErrors((all) => ({ ...all, [probe.providerId]: message }));
       setAnnouncement(message);
     } finally {
       setBusy(null);
@@ -367,8 +405,9 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     setBusy(providerId);
     setActionError(null);
     try {
-      await setActiveProvider(providerId);
-      if (model) await api?.setActiveModel?.(providerId, model);
+      // Provider and model in one validated write, so a failed model never leaves a half switch.
+      if (model && api?.setActiveProviderAndModel) await api.setActiveProviderAndModel(providerId, model);
+      else await setActiveProvider(providerId);
       await finish("/chat");
     } catch (caught) {
       setActionError(caught instanceof Error ? caught.message : String(caught));
@@ -396,6 +435,16 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   const targets = [...new Set(rows.map((probe) => probe.target))];
   const pick = settled && result ? recommend(result.outcome, rows) : null;
   const startingId = busy?.startsWith("start:") ? busy.slice(6) : null;
+  // The local data line follows the existing trust copy: with a public
+  // reference enabled, question words leave the device for its host.
+  const referenceHosts = chatToolHosts(state);
+  const localLine = referenceHosts.length > 0 ? MODEL_SCAN_COPY.localWithReferences(deriveToolHostsCopy(referenceHosts)!.strip) : MODEL_SCAN_COPY.nothingLeaves;
+
+  // Focus the heading when the screen opens and when the result settles, so
+  // keyboard and screen reader users start from it.
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, [settled]);
 
   return (
     <div
@@ -427,7 +476,9 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                 pick={pick}
                 rows={rows}
                 busy={busy}
-                startError={startError}
+                startErrors={startErrors}
+                localLine={localLine}
+                headingRef={headingRef}
                 onUseHosted={(id) => void useHosted(id)}
                 onSwitchLocal={(id, model) => void switchLocal(id, model)}
                 onOpenChat={() => void finish("/chat")}
@@ -436,13 +487,21 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
               />
             ) : (
               <div>
-                <h1 id="model-scan-heading" className="font-serif text-[2.75rem] font-medium leading-[1.05] tracking-[-0.022em]">
+                <h1 id="model-scan-heading" ref={headingRef} tabIndex={-1} className="font-serif text-[2.75rem] font-medium leading-[1.05] tracking-[-0.022em] focus:outline-none">
                   {MODEL_SCAN_COPY.title}
                 </h1>
                 <p className="mt-4 max-w-[42ch] text-md leading-6 text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.subtitle}</p>
                 <p className="mt-7 font-serif text-[1.65rem] tabular-nums leading-none text-[var(--color-text)]" aria-hidden="true">
                   {MODEL_SCAN_COPY.progress(resolved, rows.length)}
                 </p>
+                {!scanError ? (
+                  // A scan that stalls before its checks can still be left; nothing is selected.
+                  <p className="mt-6 text-sm">
+                    <button type="button" onClick={() => void finish("/chat")} className={linkClass}>
+                      {MODEL_SCAN_COPY.continueToChat}
+                    </button>
+                  </p>
+                ) : null}
                 {scanError ? (
                   <div role="alert" className="mt-8 max-w-[44ch] rounded-xl bg-[var(--color-warning-soft)] p-4 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
                     <p className="font-medium">{MODEL_SCAN_COPY.scanFailed}</p>
@@ -466,14 +525,15 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
             ) : null}
             {settled || scanError ? (
               <p className="scan-hero-in mt-6 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]" style={{ animationDelay: "160ms" }}>
-                <button type="button" onClick={() => void finish("/chat")} className={linkClass}>
+                <button type="button" disabled={busy !== null} onClick={() => void finish("/chat")} className={linkClass}>
                   {MODEL_SCAN_COPY.continueWithoutModel}
                 </button>
                 <span>
                   {MODEL_SCAN_COPY.previewPrefix}{" "}
                   <button type="button" disabled={busy !== null} onClick={() => void preview()} className={linkClass}>
                     {MODEL_SCAN_COPY.previewLink}
-                  </button>
+                  </button>{" "}
+                  {MODEL_SCAN_COPY.previewSuffix}
                 </span>
               </p>
             ) : null}
@@ -484,7 +544,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                   {MODEL_SCAN_COPY.listHeading}
                 </h2>
                 {settled ? (
-                  <button type="button" onClick={() => setRun((value) => value + 1)} className={`${linkClass} text-sm`}>
+                  <button type="button" disabled={busy !== null || retrying !== null} onClick={() => setRun((value) => value + 1)} className={`${linkClass} text-sm`}>
                     {MODEL_SCAN_COPY.scanAgain}
                   </button>
                 ) : null}
@@ -495,6 +555,9 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                     key={probe.providerId}
                     probe={probe}
                     starting={startingId === probe.providerId}
+                    retrying={retrying === probe.providerId}
+                    startError={startErrors[probe.providerId]}
+                    busy={busy !== null}
                     canStart={Boolean(api?.startLocalRuntime) && (probe.providerId === "ollama" || probe.providerId === "lm-studio") && probe.summary === "Installed, not running"}
                     onRetry={() => void retry(probe.providerId)}
                     onStart={() => void start(probe)}
@@ -596,12 +659,18 @@ function ScanStage({
 function ScanRow({
   probe,
   starting,
+  retrying,
+  startError,
+  busy,
   canStart,
   onRetry,
   onStart,
 }: {
   probe: ModelScanProbe;
   starting: boolean;
+  retrying: boolean;
+  startError: string | undefined;
+  busy: boolean;
   canStart: boolean;
   onRetry: () => void;
   onStart: () => void;
@@ -627,14 +696,23 @@ function ScanRow({
             ))}
           </ul>
         ) : null}
-        {probe.state === "could-not-check" ? (
-          <Button size="sm" variant="secondary" className="mt-1.5" onClick={onRetry} aria-label={MODEL_SCAN_COPY.retryLabel(probe.name)}>
-            {MODEL_SCAN_COPY.retry}
+        {/* Buttons stay mounted and are disabled while working, so keyboard focus is not lost. */}
+        {probe.state === "could-not-check" || retrying ? (
+          <Button size="sm" variant="secondary" className="mt-1.5" disabled={retrying} onClick={onRetry} aria-label={MODEL_SCAN_COPY.retryLabel(probe.name)}>
+            {retrying ? MODEL_SCAN_COPY.checking : MODEL_SCAN_COPY.retry}
           </Button>
-        ) : canStart && !starting ? (
-          <Button size="sm" variant="secondary" className="mt-1.5" onClick={onStart}>
-            {MODEL_SCAN_COPY.start(probe.name)}
-          </Button>
+        ) : canStart || starting ? (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="secondary" disabled={starting || busy} onClick={onStart}>
+              {starting ? MODEL_SCAN_COPY.starting(probe.name) : MODEL_SCAN_COPY.start(probe.name)}
+            </Button>
+            <span className="text-xs text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.startNote(probe.name)}</span>
+          </div>
+        ) : null}
+        {startError ? (
+          <p role="alert" className="mt-1.5 text-xs leading-5 text-[var(--color-warning)]">
+            <InlineCode text={startError} />
+          </p>
         ) : null}
       </div>
     </li>
@@ -675,7 +753,9 @@ function ScanHero({
   pick,
   rows,
   busy,
-  startError,
+  startErrors,
+  localLine,
+  headingRef,
   onUseHosted,
   onSwitchLocal,
   onOpenChat,
@@ -685,7 +765,9 @@ function ScanHero({
   pick: Recommendation;
   rows: readonly ModelScanProbe[];
   busy: string | null;
-  startError: { providerId: ProviderId; message: string } | null;
+  startErrors: Record<string, string>;
+  localLine: string;
+  headingRef: React.RefObject<HTMLHeadingElement | null>;
   onUseHosted: (id: ProviderId) => void;
   onSwitchLocal: (id: ProviderId, model?: string) => void;
   onOpenChat: () => void;
@@ -694,29 +776,32 @@ function ScanHero({
 }) {
   const name = (id: ProviderId) => rows.find((probe) => probe.providerId === id)?.name ?? id;
   const startButton = (probe: ModelScanProbe, primary: boolean) => (
-    <Button variant={primary ? "primary" : "secondary"} size={primary ? "md" : "sm"} disabled={busy !== null} onClick={() => onStart(probe)}>
-      {busy === `start:${probe.providerId}` ? MODEL_SCAN_COPY.starting(probe.name) : MODEL_SCAN_COPY.start(probe.name)}
-    </Button>
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <Button variant={primary ? "primary" : "secondary"} size={primary ? "md" : "sm"} disabled={busy !== null} onClick={() => onStart(probe)}>
+        {busy === `start:${probe.providerId}` ? MODEL_SCAN_COPY.starting(probe.name) : MODEL_SCAN_COPY.start(probe.name)}
+      </Button>
+      <span className="text-xs text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.startNote(probe.name)}</span>
+    </span>
   );
   const failure = (id: ProviderId) =>
-    startError?.providerId === id ? (
-      <p role="alert" className="mt-3 max-w-[44ch] text-sm leading-5 text-[var(--color-warning)]">
-        <InlineCode text={startError.message} />
+    startErrors[id] ? (
+      <p className="mt-3 max-w-[44ch] text-sm leading-5 text-[var(--color-warning)]">
+        <InlineCode text={startErrors[id]!} />
       </p>
     ) : null;
   return (
     <div className="scan-hero-in">
       <p className="text-sm text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.heroLead(pick.kind)}</p>
-      <h1 id="model-scan-heading" className="mt-2 font-serif text-[3.25rem] font-medium leading-[1] tracking-[-0.025em]">
+      <h1 id="model-scan-heading" ref={headingRef} tabIndex={-1} className="mt-2 focus:outline-none font-serif text-[3.25rem] font-medium leading-[1] tracking-[-0.025em]">
         <span className="sr-only">{heroTitle(pick)}</span>
         <span aria-hidden="true">{pick.kind === "local" || pick.kind === "hosted" || pick.kind === "switch" ? pick.title : pick.kind === "start" ? pick.probe.name : MODEL_SCAN_COPY.nothingShort}</span>
       </h1>
       {pick.kind === "local" ? (
         <>
           <p className="mt-3 text-md text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.localLine(pick.runtime)}</p>
-          <p className="mt-1 text-sm font-medium text-[var(--color-success)]">{MODEL_SCAN_COPY.nothingLeaves}</p>
+          <p className={`mt-1 text-sm font-medium ${localLine === MODEL_SCAN_COPY.nothingLeaves ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}`}>{localLine}</p>
           <div className="mt-6">
-            <Button variant="primary" onClick={onOpenChat}>
+            <Button variant="primary" disabled={busy !== null} onClick={onOpenChat}>
               {MODEL_SCAN_COPY.openChat}
             </Button>
           </div>
@@ -728,7 +813,7 @@ function ScanHero({
             <Button variant="primary" disabled={busy !== null} onClick={() => onSwitchLocal(pick.providerId, pick.model)}>
               {MODEL_SCAN_COPY.useHosted(pick.title)}
             </Button>
-            <Button variant="secondary" size="sm" onClick={onOpenChat}>
+            <Button variant="secondary" size="sm" disabled={busy !== null} onClick={onOpenChat}>
               {MODEL_SCAN_COPY.keepSelected(name(pick.selectedProviderId))}
             </Button>
           </div>
@@ -771,7 +856,7 @@ function ScanHero({
       ) : pick.kind === "start" ? (
         <>
           <p className="mt-3 max-w-[44ch] text-md leading-6 text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.installedLine}</p>
-          <p className="mt-1 text-sm font-medium text-[var(--color-success)]">{MODEL_SCAN_COPY.nothingLeaves}</p>
+          <p className={`mt-1 text-sm font-medium ${localLine === MODEL_SCAN_COPY.nothingLeaves ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}`}>{localLine}</p>
           <div className="mt-6 flex flex-wrap gap-2">
             {startButton(pick.probe, true)}
             <Button variant="secondary" size="sm" onClick={onSetUp}>

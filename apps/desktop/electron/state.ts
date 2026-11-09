@@ -226,6 +226,7 @@ import {
   scanProviderCheck,
   runModelScan,
   runtimeLaunch,
+  runtimeReadyUrl,
   startLocalRuntime,
   runScanCheck,
   scanOutcome,
@@ -3372,17 +3373,47 @@ export class AppStateStore {
    * hosted providers are only offered.
    */
   async scanModels(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
-    // One scan at a time: a second request while one runs shares it, so a
-    // double click never starts a second set of checks.
-    if (this.modelScanInFlight) return this.modelScanInFlight;
-    const run = this.runModelScanOnce(onProbe).finally(() => {
-      this.modelScanInFlight = undefined;
+    // One scan at a time: a second request while one is queued or running
+    // shares it. Each subscriber gets every progress event, including the
+    // ones sent before it joined, so a second window or Scan again misses
+    // nothing.
+    const shared = this.sharedModelScan;
+    if (shared) {
+      if (onProbe) {
+        for (const probe of shared.emitted) onProbe(probe);
+        shared.subscribers.add(onProbe);
+      }
+      return shared.promise;
+    }
+    const next: { subscribers: Set<(probe: ModelScanProbe) => void>; emitted: ModelScanProbe[]; promise: Promise<ModelScanResult> } = {
+      subscribers: new Set(onProbe ? [onProbe] : []),
+      emitted: [],
+      promise: Promise.resolve(undefined as never),
+    };
+    next.promise = this.exclusiveModelScan(() =>
+      this.runModelScanOnce((probe) => {
+        next.emitted.push(probe);
+        for (const subscriber of next.subscribers) subscriber(probe);
+      }),
+    ).finally(() => {
+      if (this.sharedModelScan === next) this.sharedModelScan = undefined;
     });
-    this.modelScanInFlight = run;
-    return run;
+    this.sharedModelScan = next;
+    return next.promise;
   }
 
-  private modelScanInFlight: Promise<ModelScanResult> | undefined;
+  private sharedModelScan:
+    | { subscribers: Set<(probe: ModelScanProbe) => void>; emitted: ModelScanProbe[]; promise: Promise<ModelScanResult> }
+    | undefined;
+  private modelScanQueue: Promise<unknown> = Promise.resolve();
+  private modelScanGeneration = 0;
+
+  /** Scan, Retry and Start rescans run one at a time, in the order they were asked for. */
+  private exclusiveModelScan<T>(task: () => Promise<T>): Promise<T> {
+    const run = this.modelScanQueue.catch(() => undefined).then(task);
+    this.modelScanQueue = run.catch(() => undefined);
+    return run;
+  }
   /** What the latest scan found, served by `listProviders` while the first-run scan is pending. */
   private modelScanProviders = new Map<ProviderId, ProviderSummary>();
 
@@ -3392,7 +3423,7 @@ export class AppStateStore {
     const probes = await runModelScan({ checks: await this.modelScanChecks(found), ...(onProbe ? { onProbe } : {}) });
     this.modelScanProviders = new Map(found);
     const outcome = await this.applyModelScanOutcome([...found.values()]);
-    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString() };
+    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString(), generation: ++this.modelScanGeneration };
   }
 
   /**
@@ -3402,6 +3433,10 @@ export class AppStateStore {
    */
   async retryModelScanProbe(providerId: ProviderId): Promise<ModelScanResult> {
     if (!isProviderId(providerId)) throw new Error(`Unknown provider: ${String(providerId)}`);
+    return this.exclusiveModelScan(() => this.retryModelScanProbeNow(providerId));
+  }
+
+  private async retryModelScanProbeNow(providerId: ProviderId): Promise<ModelScanResult> {
     const startedAt = this.clock().toISOString();
     const found = new Map<ProviderId, ProviderSummary>();
     const checks = await this.modelScanChecks(found);
@@ -3411,7 +3446,7 @@ export class AppStateStore {
     );
     this.modelScanProviders = new Map(found);
     const outcome = await this.applyModelScanOutcome([...found.values()]);
-    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString() };
+    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString(), generation: ++this.modelScanGeneration };
   }
 
   private async applyModelScanOutcome(providers: ProviderSummary[]): Promise<ModelScanOutcome> {
@@ -3447,7 +3482,7 @@ export class AppStateStore {
    * loopback endpoint, then scans again so the outcome follows the
    * provider rules. An endpoint off this device is never started or called.
    */
-  async startLocalRuntime(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan: ModelScanResult }> {
+  async startLocalRuntime(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan?: ModelScanResult }> {
     if (providerId !== "ollama" && providerId !== "lm-studio") {
       throw new Error("Only Ollama and LM Studio can be started from the scan.");
     }
@@ -3471,7 +3506,7 @@ export class AppStateStore {
             }),
           isUp: async () => {
             try {
-              const response = await fetch(`${endpoint}${providerId === "ollama" ? "/api/tags" : "/v1/models"}`, { signal: AbortSignal.timeout(1_000) });
+              const response = await fetch(runtimeReadyUrl(providerId, endpoint), { signal: AbortSignal.timeout(1_000) });
               return response.ok;
             } catch {
               return false;
@@ -3479,8 +3514,9 @@ export class AppStateStore {
           },
         })
       : { started: false as const, message: `${name} is set to ${endpoint}, outside this device. The scan only starts runtimes on this device.` };
-    const scan = await this.scanModels();
-    return result.started ? { started: true, scan } : { started: false, message: result.message, scan };
+    // A failed start returns its failure as it is; only a started runtime is scanned again.
+    if (!result.started) return { started: false, message: result.message };
+    return { started: true, scan: await this.scanModels() };
   }
 
   /** The first-launch scan was finished or skipped; it does not show again. */
@@ -6159,6 +6195,31 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       });
     });
 
+    return this.getAppState();
+  }
+
+  /**
+   * Selects a provider and its model together, validated first and written
+   * once, so a failed model never leaves the provider half switched.
+   */
+  async setActiveProviderAndModel(id: ProviderId, model: string): Promise<AppState> {
+    if (!isProviderId(id)) throw new Error(`Unknown provider: ${String(id)}`);
+    if (typeof model !== "string" || !model.trim()) throw new Error("A model name is required.");
+    const provider = (await this.listProviders()).find((entry) => entry.id === id);
+    if (!provider) throw new Error(`Provider not found: ${id}`);
+    if (provider.models.length > 0 && !provider.models.includes(model)) {
+      throw new Error(`${provider.name} does not list ${model}. Scan again, then choose a model it lists.`);
+    }
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const { providerAutoSelection: _cleared, ...rest } = persisted;
+      await this.write({
+        ...rest,
+        activeProviderId: id,
+        providerChosenByUser: true,
+        activeModelByProviderId: { ...persisted.activeModelByProviderId, [id]: model },
+      });
+    });
     return this.getAppState();
   }
 

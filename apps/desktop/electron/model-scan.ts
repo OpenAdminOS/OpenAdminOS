@@ -45,14 +45,14 @@ export function checkingProbe(check: Pick<ModelScanCheck, "providerId" | "name" 
   return { providerId: check.providerId, name: check.name, where: check.where, target: check.target, state: "checking", summary: "Checking", facts: [], ready: false, models: [] };
 }
 
-/** What each check touches, shown while it runs. CLI checks run only the version and sign-in status commands. */
+/** Exactly what each check runs or reads, shown on its row and in the closing line. */
 export const SCAN_TARGETS: Readonly<Record<ProviderId, string>> = {
   ollama: "localhost:11434",
   "lm-studio": "localhost:1234",
   "apple-foundation": "Apple Foundation helper",
-  anthropic: "claude auth status",
-  openai: "codex login status",
-  copilot: "copilot sign-in status",
+  anthropic: "claude --version, claude auth status",
+  openai: "codex --version, codex login status",
+  copilot: "copilot --version",
   gemini: "gemini --version",
   "azure-openai": "saved Azure settings",
 };
@@ -425,6 +425,16 @@ export async function runtimeLaunch(
 }
 
 export const RUNTIME_START_TIMEOUT_MS = 12_000;
+
+/**
+ * The loopback address that answers once a started runtime is ready. The
+ * LM Studio endpoint already ends in `/v1`, so its models list is
+ * `${endpoint}/models`, the same address its probe reads.
+ */
+export function runtimeReadyUrl(providerId: "ollama" | "lm-studio", endpoint: string): string {
+  const base = endpoint.replace(/\/$/, "");
+  return providerId === "ollama" ? `${base}/api/tags` : `${base}/models`;
+}
 
 /**
  * Starts a local runtime and waits until its loopback endpoint answers.

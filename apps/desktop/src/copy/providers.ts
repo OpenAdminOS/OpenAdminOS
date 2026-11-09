@@ -20,7 +20,7 @@ export const MODEL_SCAN_COPY = {
   title: "Looking for models on this device",
   titleDone: "What this device can answer with",
   subtitle:
-    "OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and ports, and runs each tool's own version and sign-in status command, which may check the sign-in with its provider. No prompt is sent to any model.",
+    "OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and loopback ports and runs each tool's version command; for Claude Code and Codex also their sign-in status command, which may check with the provider. No prompt is sent to any model.",
   listHeading: "On this device",
   progress: (done: number, total: number) => (total === 0 ? "Starting" : `${done} of ${total} checked`),
   checking: "checking",
@@ -30,7 +30,7 @@ export const MODEL_SCAN_COPY = {
   announce: (name: string, summary: string) => `${name}: ${summary}.`,
   finishedAnnouncement: (outcome: string) => `Scan finished. ${outcome}`,
   ledger: (targets: readonly string[]) =>
-    `Checked here: ${targets.join(", ")}. A tool's own sign-in status command may check with its provider. No prompt was sent to any model.`,
+    `What ran: ${targets.join("; ")}. The Claude Code and Codex sign-in status commands may check with their provider. No prompt was sent to any model.`,
   localTitle: (model: string) => `${model} is ready on this device`,
   hostedReady: (name: string) => `${name} is signed in on this device`,
   availableTitle: (model: string) => `${model} is ready on this device, not selected`,
@@ -57,7 +57,9 @@ export const MODEL_SCAN_COPY = {
   start: (name: string) => `Start ${name}`,
   starting: (name: string) => `Starting ${name}`,
   startingShort: "Starting",
-  started: (name: string) => `${name} started.`,
+  started: (name: string) => `${name} started. It keeps running after you quit OpenAdminOS.`,
+  startNote: (name: string) => `${name} keeps running after you quit OpenAdminOS.`,
+  localWithReferences: (toolQueries: string) => `Runs on this device. Your references get ${toolQueries}.`,
   startFailed: (name: string) => `${name} did not start. Start it yourself, then scan again.`,
   skip: "Skip",
   localBody: (model: string, runtime: string) => `Chat answers with ${model} in ${runtime}. You can change the model at any time.`,
