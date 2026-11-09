@@ -148,7 +148,7 @@ describe("first-launch model scan", () => {
     it("reads hosted CLIs from their sign-in status", () => {
       assert.deepEqual(
         { ...scanProbeFromProvider(claudeReady), durationMs: undefined },
-        { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", models: ["claude-sonnet-5-5"], state: "found", ready: true, summary: "Signed in", facts: ["Version 2.4.0"], durationMs: undefined },
+        { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude --version, claude auth status", models: ["claude-sonnet-5-5"], state: "found", ready: true, summary: "Signed in", facts: ["Version 2.4.0"], durationMs: undefined },
       );
       const signedOut = scanProbeFromProvider({ ...catalog("openai"), status: "error", detail: "Run `codex login`.", models: [], cli: { state: "signed-out" } });
       assert.equal(signedOut.summary, "Installed, not signed in");
@@ -469,6 +469,92 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("review round 2: coordination and Start (items 3, 7, B)", () => {
+  const fresh = async (onList?: () => void) => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => {
+        onList?.();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
+      },
+    });
+    return { store, cleanup: async () => { store.close(); await rm(dir, { recursive: true, force: true }); } };
+  };
+
+  it("sends every progress event to each caller of a shared scan, including one that joins late (B)", async () => {
+    const { store, cleanup } = await fresh();
+    try {
+      const first: string[] = [];
+      const second: string[] = [];
+      const a = store.scanModels((probe) => first.push(`${probe.providerId}:${probe.state}`));
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const b = store.scanModels((probe) => second.push(`${probe.providerId}:${probe.state}`));
+      const [ra, rb] = await Promise.all([a, b]);
+      assert.equal(ra, rb);
+      assert.deepEqual(new Set(second), new Set(first));
+      assert.ok(first.length >= ra.probes.length * 2);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("numbers every scan and Retry completion so a window can ignore an older one (7)", async () => {
+    const { store, cleanup } = await fresh();
+    try {
+      const scan = await store.scanModels();
+      const [retry, again] = await Promise.all([store.retryModelScanProbe("anthropic"), store.scanModels()]);
+      assert.ok(typeof scan.generation === "number");
+      assert.equal(retry.generation, scan.generation! + 1, "the Retry was queued first");
+      assert.equal(again.generation, scan.generation! + 2, "the scan ran after it, never alongside");
+    } finally {
+      await cleanup();
+    }
+  });
+
+  it("returns a failed Start without scanning again", async () => {
+    let listed = 0;
+    const { store, cleanup } = await fresh(() => { listed += 1; });
+    const original = process.env.OPENAGENTS_OLLAMA_URL;
+    process.env.OPENAGENTS_OLLAMA_URL = "http://10.20.30.40:11434";
+    try {
+      const result = await store.startLocalRuntime("ollama");
+      assert.equal(result.started, false);
+      assert.match(result.message ?? "", /outside this device/);
+      assert.equal(result.scan, undefined);
+      assert.equal(listed, 0);
+    } finally {
+      if (original === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = original;
+      await cleanup();
+    }
+  });
+
+  it("polls LM Studio's models list at the default endpoint, without a doubled /v1 (3)", async () => {
+    const { createServer } = await import("node:http");
+    const { resolveLmStudioEndpoint } = await import("@openadminos/runtime");
+    const { runtimeReadyUrl } = await import("./model-scan.js");
+    assert.match(runtimeReadyUrl("lm-studio", resolveLmStudioEndpoint()), /\/v1\/models$/);
+    assert.doesNotMatch(runtimeReadyUrl("lm-studio", resolveLmStudioEndpoint()), /\/v1\/v1\//);
+    const seen: string[] = [];
+    const server = createServer((request, response) => {
+      seen.push(request.url ?? "");
+      response.writeHead(request.url === "/v1/models" ? 200 : 404).end("{\"data\":[]}");
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const port = (server.address() as { port: number }).port;
+    try {
+      const response = await fetch(runtimeReadyUrl("lm-studio", `http://127.0.0.1:${port}/v1`));
+      assert.equal(response.ok, true);
+      assert.deepEqual(seen, ["/v1/models"]);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });
