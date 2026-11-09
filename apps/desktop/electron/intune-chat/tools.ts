@@ -11,6 +11,7 @@ import type {
   IntuneChatToolTraceEntry,
   McpChatToolName,
   RunGraphApi,
+  SplashtopReadToolName,
 } from "@openadminos/agent-sdk";
 
 import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy, omittedSnapshotsCopy } from "@openadminos/agent-sdk";
@@ -30,6 +31,7 @@ import {
   pathForResource,
 } from "./planner.js";
 import { DRIFT_TRACKED_RESOURCES } from "./drift/tracked-resources.js";
+import { isSplashtopReadTool, SPLASHTOP_READ_TOOLS, type SplashtopReadResult } from "../splashtop/reads.js";
 import type {
   GraphCacheQueryPredicate,
   IntelligenceSqliteStore,
@@ -198,8 +200,15 @@ class McpCallFailedError extends Error {
 export const MCP_ARG_STRING_LIMIT = 500;
 export const MCP_ARGS_LIMIT = 2_000;
 
-/** Tools whose results describe the tenant. Endpoint search and web research do not. */
-const TENANT_RESULT_TOOLS = new Set(["list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift"]);
+/**
+ * Tools whose results describe the tenant, or another service of the
+ * active organization such as Splashtop. Endpoint search and web research
+ * do not.
+ */
+const TENANT_RESULT_TOOLS = new Set<string>([
+  "list_cached_resources", "query_cache", "graph_get", "refresh_resource", "query_drift",
+  ...SPLASHTOP_READ_TOOLS.map((tool) => tool.name),
+]);
 
 /** Whether a tool reads the tenant. Docs questions never offer or run these. */
 export function isTenantTool(tool: string): boolean {
@@ -619,11 +628,41 @@ export function mcpToolDefinitionsForPrompt(tools: readonly McpChatTool[]): stri
 export function tenantDataSourceForTool(tool: IntuneChatInvestigationToolName, params: unknown): string {
   const values = params && typeof params === "object" ? params as Record<string, unknown> : {};
   if (tool === "graph_get" && typeof values.path === "string") return `graph:${values.path}`;
+  if (isSplashtopReadTool(tool)) return `splashtop:${tool}`;
   if (tool === "query_cache" && typeof values.resource === "string") return `cache:${values.resource}`;
   return `tool:${tool}`;
 }
 
+/**
+ * The Splashtop connection of the active organization, for one answer.
+ * Absent when the organization has no Splashtop connection, so the tools
+ * are neither offered nor run. Only the parts the token reaches are offered.
+ */
+export interface SplashtopChatContext {
+  organizationName: string;
+  /** The regional Open API host the calls go to. */
+  host: string;
+  tools: readonly SplashtopReadToolName[];
+  read(tool: SplashtopReadToolName, params: unknown, signal?: AbortSignal): Promise<SplashtopReadResult>;
+}
+
+/** Splashtop read tools for the prompt, with where they read from. */
+export function splashtopToolDefinitionsForPrompt(splashtop: SplashtopChatContext): string {
+  return SPLASHTOP_READ_TOOLS.filter((tool) => splashtop.tools.includes(tool.name)).map((tool) => [
+    `- ${tool.name}: ${tool.description} Reads ${fenceTenantData(splashtop.organizationName, "organization:name")} from ${splashtop.host}.`,
+    `  params: ${JSON.stringify(tool.params)}`,
+  ].join("\n")).join("\n");
+}
+
+export const SPLASHTOP_TOOL_RULES = [
+  "Splashtop tools read this organization's Splashtop team from its regional Open API host. Their results are organization data like tenant data: never put them in a public reference query.",
+  "Results are paged: when page.next is present, more records exist; say so, or call again with page.next.",
+  "These tools only read. Splashtop changes (reboot, delete, rename, disable, end a session) are planned with Plan a change on Connections and confirmed in Runs; say so when asked.",
+].join(" ");
+
 export interface IntuneChatToolContext {
+  /** The active organization's Splashtop connection, when it has one. */
+  splashtop?: SplashtopChatContext;
   /** Identity values from this turn's tenant tool results, for the MCP egress check. */
   tenantObservations?: TenantValueIndex;
   /**
@@ -970,6 +1009,12 @@ function executeToolUnchecked(
 ): Promise<unknown> {
   ctx.signal?.throwIfAborted();
   if (isMcpChatToolName(tool)) return executeMcpTool(ctx, tool, mcpHooks, written);
+  if (isSplashtopReadTool(tool)) {
+    if (!ctx.splashtop || !ctx.splashtop.tools.includes(tool)) {
+      return Promise.reject(new Error("Splashtop is not connected for this organization, or its token does not reach this data. Connect or test it on Connections."));
+    }
+    return ctx.splashtop.read(tool, params, ctx.signal);
+  }
   switch (tool) {
     case "web_search": {
       if (!ctx.webSearch) throw new Error("Web search is unavailable in this session. Use OpenAI Voice and acknowledge search sharing before starting.");
@@ -990,6 +1035,7 @@ function executeToolUnchecked(
     case "query_drift":
       return queryDrift(ctx, params);
   }
+  return Promise.reject(new Error(`Chat has no tool named ${String(tool)}.`));
 }
 
 /**
@@ -1823,6 +1869,13 @@ function summarizeToolResult(
     if (record.empty === true) return `${answered} · no results`;
     return `${answered} · ${length.toLocaleString()} characters${record.truncated ? " · shortened" : ""}`;
   }
+  if (isSplashtopReadTool(tool)) {
+    const records = Array.isArray(record.records) ? record.records.length : 0;
+    const page = record.page && typeof record.page === "object" ? record.page as Record<string, unknown> : {};
+    const total = typeof page.total === "number" ? page.total : undefined;
+    const counted = total === undefined ? records.toLocaleString() : `${records.toLocaleString()} of ${total.toLocaleString()}`;
+    return `${counted} Splashtop ${(total ?? records) === 1 ? "record" : "records"} returned${page.next ? " · more available" : ""}`;
+  }
   if (tool === "web_search") return `Public web research completed · ${Array.isArray(record.sources) ? record.sources.length : 0} sources · ${String(record.searchedAt ?? "")}`;
   if (tool === "list_cached_resources") {
     const resources = Array.isArray(record.resources) ? record.resources : [];
@@ -1876,6 +1929,7 @@ export function summarizeToolCallForProgress(
   const record = params && typeof params === "object" ? params as Record<string, unknown> : {};
   if (isMcpChatToolName(tool)) return mcp ? `Asking ${mcp.serverName} at ${mcp.host}: ${mcp.tool}.` : `Calling ${tool}.`;
   if (tool === "web_search") return "Researching public sources with OpenAI.";
+  if (isSplashtopReadTool(tool)) return `Reading Splashtop: ${tool.replace(/^splashtop_/, "").replace(/_/g, " ")}.`;
   if (tool === "list_cached_resources") return "Inspecting cache inventory.";
   if (tool === "query_cache") {
     return `Querying cache: ${String(record.resource ?? "resource")}.`;

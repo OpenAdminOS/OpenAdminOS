@@ -184,6 +184,15 @@ import {
   SERVICE_PARTS,
   servicePartById,
   toResourceScopes,
+  isSplashtopChangeKind,
+  SPLASHTOP_SERVICE,
+  splashtopPartOn,
+  type ConnectSplashtopInput,
+  type PrepareSplashtopChangeInput,
+  type RotateSplashtopTokenInput,
+  type SplashtopChangeKind,
+  type SplashtopChangeTarget,
+  type SplashtopConnectionSummary,
   type AgentDiscordDelivery,
   type AgentOutlookDelivery,
   type AgentSchedule,
@@ -243,6 +252,13 @@ import { IntuneChatService, chatToolUseStatus, type IntuneChatStreamOptions } fr
 import { mcpChatToolName, mcpPrivateTermsForTenant, type McpChatContext, type McpChatServer, type McpChatTool } from "./intune-chat/tools.js";
 import { TenantValueIndex } from "./intune-chat/tenant-values.js";
 import { MCP_CATALOG, mcpHost, type McpCatalogEntry } from "./mcp/catalog.js";
+import { SplashtopApiError, type SplashtopFetch } from "./splashtop/api.js";
+import { buildSplashtopChangePlan, isPlannedSplashtopRequest, validateSplashtopChangeRequest } from "./splashtop/plans.js";
+import { runSplashtopRead } from "./splashtop/reads.js";
+import { SplashtopService } from "./splashtop/service.js";
+import { listSplashtopChangeTargets } from "./splashtop/targets.js";
+import { MemorySplashtopTokenStore, SafeStorageSplashtopTokenStore, type SplashtopTokenStore } from "./splashtop/token-store.js";
+import type { SplashtopChatContext } from "./intune-chat/tools.js";
 import { isAllowedTool, McpHost, type McpToolInfo } from "./mcp/host.js";
 import { definitionForResource } from "./intune-chat/planner.js";
 import { DriftService } from "./intune-chat/drift/service.js";
@@ -267,7 +283,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { OrganizationBoundaryError, RunService } from "./runs.js";
+import { OrganizationBoundaryError, RunService, type SplashtopRunClient } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -1632,6 +1648,10 @@ export interface AppStateStoreOptions {
   tenantDrainMs?: number;
   /** Test hook: MCP servers to offer instead of the built-in catalog. */
   mcpCatalog?: readonly McpCatalogEntry[];
+  /** Test hook: where Splashtop tokens are kept. Defaults to safeStorage under the user data folder. */
+  splashtopTokens?: SplashtopTokenStore;
+  /** Test hook: the fetch Splashtop Open API calls use. */
+  splashtopFetch?: SplashtopFetch;
 }
 
 /** How long Disconnect waits for an organization's work to stop before cleanup goes on. */
@@ -1677,6 +1697,8 @@ export class AppStateStore {
   /** Counts uninstalls per server, so an install that was connecting meanwhile is not written back. */
   private readonly mcpUninstalls = new Map<string, number>();
   private readonly mcpCatalog: readonly McpCatalogEntry[];
+  /** The Splashtop connection of each organization; see splashtop/service.ts. */
+  private readonly splashtop: SplashtopService<PersistedState>;
   private retrievalIndexInstance: RetrievalIndex | undefined;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
@@ -1808,6 +1830,18 @@ export class AppStateStore {
     }
     this.sampleGraph = createSampleGraph({ clock: this.clock });
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
+    const splashtopOptions: Partial<AppStateStoreOptions> = typeof options === "string" ? {} : options;
+    this.splashtop = new SplashtopService<PersistedState>({
+      read: () => this.read(),
+      serialize: (work) => this.serialize(work),
+      write: (state) => this.write(state),
+      tokens: splashtopOptions.splashtopTokens ?? (splashtopOptions.userDataPath
+        ? new SafeStorageSplashtopTokenStore(join(splashtopOptions.userDataPath, "services", "secrets"))
+        : new MemorySplashtopTokenStore()),
+      clock: () => this.clock(),
+      ...(splashtopOptions.splashtopFetch ? { fetch: splashtopOptions.splashtopFetch } : {}),
+      changed: () => this.emitStateChanged("splashtop-changed"),
+    });
     this.mcpHost = new McpHost({
       clientVersion: this.appVersion,
       // Read again right before each call, so turning a server off stops answers already running.
@@ -1837,6 +1871,7 @@ export class AppStateStore {
       retrieveDocumentation: (query) => host.retrieveDocumentation(query),
       documentationIndexVersion: () => host.documentationIndexVersion(),
       mcpChatContext: (tenant) => host.mcpChatContext(tenant),
+      splashtopChatContext: (tenant) => host.splashtopChatContext(tenant),
       appVersion: this.appVersion,
       get userDataPath() {
         return host.userDataPath;
@@ -1921,6 +1956,7 @@ export class AppStateStore {
         host.selfTrainingPromptOverlay(tenantId, agentSlug),
       recordLearningEventSafely: (input) => host.recordLearningEventSafely(input),
       notifyRunFinished: (run) => host.notifyRunFinished(run),
+      splashtopForRun: (run) => host.splashtopForRun(run),
       agentManifestError: (agent) => host.agentManifestError(agent),
       emitStateChanged: (reason, runId) => host.emitStateChanged(reason, runId),
       enqueueRunDeliveries: (run) => host.enqueueRunDeliveries(run),
@@ -2160,6 +2196,7 @@ export class AppStateStore {
         useFor: entry.useFor,
         auth: entry.auth,
         readOnly: entry.readOnly,
+        ...(entry.builtin ? { builtIn: true as const } : {}),
         installed: Boolean(installed),
         enabled: installed?.enabled === true,
         ...(installed ? { installedAt: installed.installedAt } : {}),
@@ -2279,6 +2316,129 @@ export class AppStateStore {
     });
     this.emitStateChanged("mcp-servers-changed");
     return this.listMcpServers();
+  }
+
+  /**
+   * Splashtop changes and connections are made in the active organization
+   * only, as plans are confirmed there; another organization's connection
+   * is never touched from a view of this one.
+   */
+  private requireActiveOrganization(persisted: PersistedState, organizationId: string): void {
+    const active = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
+    if (!active || active.id !== organizationId) {
+      throw new OrganizationBoundaryError("This works only in the active organization. Switch to it, then try again.");
+    }
+  }
+
+  async connectSplashtop(input: ConnectSplashtopInput): Promise<SplashtopConnectionSummary> {
+    this.requireActiveOrganization(await this.read(), input.organizationId);
+    return this.splashtop.connect(input);
+  }
+
+  async testSplashtop(organizationId: string): Promise<SplashtopConnectionSummary> {
+    return this.splashtop.test(organizationId);
+  }
+
+  async rotateSplashtopToken(input: RotateSplashtopTokenInput): Promise<SplashtopConnectionSummary> {
+    this.requireActiveOrganization(await this.read(), input.organizationId);
+    return this.splashtop.rotate(input);
+  }
+
+  async disconnectSplashtop(organizationId: string): Promise<void> {
+    await this.splashtop.disconnect(organizationId);
+  }
+
+  async listSplashtopChangeTargets(organizationId: string, kind: SplashtopChangeKind): Promise<SplashtopChangeTarget[]> {
+    const persisted = await this.read();
+    this.requireActiveOrganization(persisted, organizationId);
+    if (!isSplashtopChangeKind(kind)) throw new Error("Choose a change: reboot, delete or rename computers, disable users, or end sessions.");
+    const binding = await this.splashtop.binding(persisted, organizationId);
+    return listSplashtopChangeTargets({ api: binding.api, teamId: binding.record.teamId }, kind);
+  }
+
+  /**
+   * Builds a Splashtop change plan from targets read again now and parks
+   * it at the typed confirmation gate. Nothing is applied here.
+   */
+  async prepareSplashtopChange(input: PrepareSplashtopChangeInput): Promise<RunRecord> {
+    const persisted = await this.read();
+    this.requireActiveOrganization(persisted, input.organizationId);
+    const request = validateSplashtopChangeRequest(input);
+    const binding = await this.splashtop.binding(persisted, input.organizationId);
+    const tenantId = binding.organization.connections.microsoft365?.tenantId;
+    if (!tenantId) throw new OrganizationBoundaryError("This organization has no Microsoft 365 connection, so its runs cannot be recorded yet.");
+    const plan = await buildSplashtopChangePlan(
+      { api: binding.api, teamId: binding.record.teamId, teamLabel: SplashtopService.teamLabel(binding) },
+      request,
+    );
+    return this.runService.startSplashtopChangeRun({
+      tenantId,
+      organizationId: binding.organization.id,
+      kind: request.kind,
+      region: binding.record.region,
+      plan,
+    });
+  }
+
+  /**
+   * The connection a confirmed Splashtop run applies through: its own
+   * organization, which must still hold the run's tenant, the same team
+   * and the same region. Every action is checked against the requests the
+   * host plans before it is sent.
+   */
+  private async splashtopForRun(run: RunRecord): Promise<SplashtopRunClient> {
+    if (run.origin !== "splashtop-change" || !run.splashtop || !run.tenantId) {
+      throw new Error("This run is not a Splashtop change. Nothing was sent.");
+    }
+    const persisted = await this.read();
+    const binding = await this.splashtop.binding(persisted, run.splashtop.organizationId);
+    if (binding.organization.connections.microsoft365?.tenantId !== run.tenantId) {
+      throw new OrganizationBoundaryError("This plan belongs to another organization than the Splashtop connection. Nothing was sent.");
+    }
+    if (binding.record.region !== run.splashtop.region) {
+      throw new Error("Splashtop was connected again in another region after this plan was prepared. Nothing was sent; prepare the change again.");
+    }
+    const teamId = binding.record.teamId;
+    return {
+      teamId,
+      apply: async (action, signal) => {
+        if (!isPlannedSplashtopRequest(action, teamId)) {
+          throw new SplashtopApiError("refused", "This action is not a Splashtop change OpenAdminOS plans for this team. Nothing was sent.", { sent: false });
+        }
+        const request = action.request!;
+        await binding.api.request({
+          method: request.method,
+          path: request.path,
+          ...(request.body !== undefined ? { body: request.body } : {}),
+          signal,
+        });
+      },
+    };
+  }
+
+  /**
+   * The Splashtop read tools for one Chat answer, for the organization
+   * that holds this tenant. Every call checks again that the connection
+   * and its token are the ones the answer started with.
+   */
+  private async splashtopChatContext(tenant: TenantRecord): Promise<SplashtopChatContext | undefined> {
+    const started = await this.splashtop.bindingForTenant(await this.read(), tenant.id);
+    if (!started) return undefined;
+    const tools = SPLASHTOP_SERVICE.parts
+      .filter((part) => splashtopPartOn(part, started.record.tokenScopes))
+      .flatMap((part) => part.tools);
+    return {
+      organizationName: started.organization.name,
+      host: started.api.host,
+      tools,
+      read: async (tool, params, signal) => {
+        const current = await this.splashtop.bindingForTenant(await this.read(), tenant.id).catch(() => undefined);
+        if (!current || current.organization.id !== started.organization.id || current.record.tokenSetAt !== started.record.tokenSetAt) {
+          throw new SplashtopApiError("refused", "Splashtop was disconnected, or its token changed, during this answer. Nothing was sent.", { sent: false });
+        }
+        return runSplashtopRead({ api: current.api, teamId: current.record.teamId, ...(signal ? { signal } : {}), now: () => this.clock() }, tool, params);
+      },
+    };
   }
 
   /** Tools of the enabled MCP servers, for one Chat answer. */
@@ -3227,6 +3387,7 @@ export class AppStateStore {
       schedulerStatus: this.deriveSchedulerStatus(persisted),
       office: this.officeService.state(),
       mcpServers: this.mcpServerSummaries(persisted),
+      splashtopConnections: this.splashtop.summaries(persisted),
       chatToolUse: chatToolUseStatus({
         mode: this.intelligenceStore?.getChatInvestigationSettings().mode ?? "auto",
         provider: activeProvider,
@@ -7226,6 +7387,16 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           tenantRemovalFor(current, new Date().toISOString(), removedRunIds),
         ],
       };
+      // On this version an organization is held by its Microsoft 365
+      // connection, so its Splashtop connection goes with it (the dialog
+      // says so); otherwise the record would outlive its tenant.
+      if (persisted.organizations) {
+        next.organizations = persisted.organizations.map((organization) => {
+          if (organization.connections.microsoft365?.tenantId !== id || !("splashtop" in organization.connections)) return organization;
+          const { splashtop: _removed, ...connections } = organization.connections;
+          return { ...organization, connections };
+        });
+      }
       const deliveryQueue = (persisted.runDeliveryQueue ?? []).filter((item) => !removed.has(item.runId));
       if (deliveryQueue.length > 0) next.runDeliveryQueue = deliveryQueue;
       else delete next.runDeliveryQueue;
@@ -7247,6 +7418,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
     // A license check of the removed connection saves nothing.
     this.supersedeTenantCheck(id, "disconnected");
+    // The organization is gone with this write, so its Splashtop token goes
+    // now, whatever the rest of the cleanup does; cleanup sweeps again.
+    await this.splashtop.sweep(await this.read()).catch((error: unknown) => {
+      console.warn("[splashtop] the token of the removed organization is deleted by cleanup:", errorText(error));
+    });
     this.emitStateChanged("tenant-removed");
     await this.runTenantCleanup(id);
     return this.getAppState();
@@ -7311,6 +7487,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       } catch (cause) {
         throw new Error(`Its Chat and cache data could not be deleted. ${errorText(cause)}`, { cause });
       }
+      // 4. Tokens of other services of the removed organization, such as Splashtop.
+      try {
+        await this.splashtop.sweep(await this.read());
+      } catch (cause) {
+        throw new Error(`Its Splashtop API token could not be deleted. ${errorText(cause)}`, { cause });
+      }
     } catch (cause) {
       failure = errorText(cause);
     }
@@ -7341,6 +7523,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   async resumeTenantCleanups(): Promise<void> {
     const removals = (await this.read()).tenantRemovals ?? [];
     for (const removal of removals) await this.runTenantCleanup(removal.tenantId);
+    // A token whose organization went away while the app was closed is deleted too.
+    await this.splashtop.sweep(await this.read()).catch((error: unknown) => {
+      console.warn("[splashtop] could not delete the token of a removed organization:", errorText(error));
+    });
   }
 
   /** Retry cleanup of a disconnected organization (Connections, or the connect flow). */
