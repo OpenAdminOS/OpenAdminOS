@@ -2,9 +2,8 @@ import { useMemo, useState } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 
 import { PageBody, PageHeader } from "../components/AppShell";
-import { Button } from "../components/Button";
 import { IconRefresh } from "../components/icons";
-import { Modal, ModalHeader } from "../components/Modal";
+import { DisconnectOrganizationDialog } from "../components/DisconnectOrganizationDialog";
 import { ReferenceMark, ServiceMark } from "../components/ServiceMark";
 import {
   ServiceAccessDialog,
@@ -482,81 +481,13 @@ function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRe
       <TenantLicensesNotChecked tenant={tenant} />
       <TenantCheckStatus tenant={tenant} />
       <MicrosoftServiceRows tenant={tenant} />
-      <DisconnectDialog
+      <DisconnectOrganizationDialog
         open={disconnecting}
         organization={organization}
         tenant={tenant}
         onClose={() => setDisconnecting(false)}
       />
     </div>
-  );
-}
-
-function DisconnectDialog({
-  open,
-  organization,
-  tenant,
-  onClose,
-}: {
-  open: boolean;
-  organization: OrganizationRecord;
-  tenant: TenantRecord;
-  onClose: () => void;
-}) {
-  const { disconnectTenant } = useAppState();
-  const toast = useToast();
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const sample = tenant.kind === "sample";
-  return (
-    <Modal open={open} onClose={() => { if (!busy) onClose(); }} size="md">
-      <ModalHeader
-        title={sample ? PILOT_COPY.leaveTitle : ORGANIZATION_COPY.disconnectTitle(organization.name)}
-        subtitle={sample ? "Delete the sample organization and its local data" : "Remove the connection and its local data"}
-        badge={<Badge tone={sample ? "info" : "danger"}>Permanent local deletion</Badge>}
-        onClose={() => { if (!busy) onClose(); }}
-      />
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-          {sample ? PILOT_COPY.leaveBody : ORGANIZATION_COPY.disconnectBody}
-        </div>
-        <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
-          {sample
-            ? `You can open it again with ${ORGANIZATION_COPY.previewSample} in the organization menu.`
-            : ORGANIZATION_COPY.disconnectNote}
-        </p>
-        {error ? (
-          <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-            {error}
-          </div>
-        ) : null}
-        <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>
-          <Button
-            variant="danger"
-            disabled={busy}
-            onClick={() => {
-              setBusy(true);
-              setError(null);
-              void disconnectTenant(tenant.id)
-                .then(() => {
-                  toast.success(sample ? "Pilot mode ended. Its sample data was deleted from this device." : ORGANIZATION_COPY.disconnected(organization.name));
-                  onClose();
-                })
-                .catch((caught) =>
-                  setError(
-                    userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ??
-                      ORGANIZATION_COPY.disconnectFailed(""),
-                  ),
-                )
-                .finally(() => setBusy(false));
-            }}
-          >
-            {busy ? (sample ? "Removing" : "Disconnecting") : sample ? PILOT_COPY.leaveAction : ORGANIZATION_COPY.disconnectAction}
-          </Button>
-        </div>
-      </div>
-    </Modal>
   );
 }
 
