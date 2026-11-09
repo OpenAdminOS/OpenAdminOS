@@ -288,6 +288,13 @@ function ScheduleOrganizationRow({ agent }: { agent: AgentSummary }) {
   );
   const current = choices.find((organization) => organization.id === agent.schedule?.organizationId);
   const [selected, setSelected] = useState(choices[0]?.id ?? "");
+  // Organizations can be connected or removed while the card stays open:
+  // keep a selection that is still offered, otherwise take the first.
+  const choiceIds = choices.map((organization) => organization.id).join("\n");
+  useEffect(() => {
+    const ids = choiceIds ? choiceIds.split("\n") : [];
+    setSelected((current) => (ids.includes(current) ? current : ids[0] ?? ""));
+  }, [choiceIds]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (

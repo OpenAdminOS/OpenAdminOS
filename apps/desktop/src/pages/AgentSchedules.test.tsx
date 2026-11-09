@@ -10,6 +10,7 @@ import {
   makeMockBridge,
   renderRoute,
 } from "../test/test-utils";
+import type { AppState } from "../shared/openAdminOS";
 
 describe("Agents schedule actions", () => {
   
@@ -272,3 +273,35 @@ it("offers Dry run for write agents through the normal preflight", async () => {
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("device-offboard", { dryRun: true }));
 });
 
+
+describe("assigning a schedule (review round 2)", () => {
+  it("enables Assign when the first organization is connected while the card stays open", async () => {
+    const user = userEvent.setup();
+    const agent = createMockAgent({ id: "loose", slug: "loose", name: "Loose", schedule: { enabled: true, intervalSeconds: 900 } });
+    const { activeTenantId: _none, ...empty } = createMockAppState({ installedAgents: [agent] });
+    let current: AppState = { ...empty, tenants: [] };
+    const listeners: Array<(info: { reason: string }) => void> = [];
+    const bridge = makeMockBridge(
+      {
+        getAppState: vi.fn(async () => current),
+        onAppStateChanged: vi.fn((listener: (info: { reason: string }) => void) => {
+          listeners.push(listener);
+          return () => undefined;
+        }),
+      },
+      current,
+    );
+    renderRoute(<Agents />, { path: "/agents/:slug", route: "/agents/loose?action=schedule", bridge });
+    expect(await screen.findByText("Connect an organization to assign this schedule. Schedules never run in the sample organization.")).toBeInTheDocument();
+
+    // Connecting Microsoft 365 adds the first organization.
+    current = createMockAppState({ installedAgents: [agent] });
+    for (const listener of listeners) listener({ reason: "tenant-connected" });
+
+    const assign = await screen.findByRole("button", { name: "Assign" });
+    await waitFor(() => expect(assign).toBeEnabled());
+    expect(screen.getByRole("combobox", { name: /Assign to organization for Loose/ })).toHaveValue("org-tenant-1");
+    await user.click(assign);
+    await waitFor(() => expect(bridge.assignAgentSchedule).toHaveBeenCalledWith("loose", "org-tenant-1"));
+  });
+});
