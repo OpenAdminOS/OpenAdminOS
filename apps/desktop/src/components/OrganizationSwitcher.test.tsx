@@ -94,3 +94,47 @@ describe("organization switcher", () => {
     expect(within(menu).queryByRole("menuitemradio")).not.toBeInTheDocument();
   });
 });
+
+describe("organization switcher keyboard and focus (review round 1)", () => {
+  it("moves focus into the menu, navigates with arrow keys and returns focus to the chip", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState().tenants[0]!;
+    const second = { ...base, id: "tenant-2", displayName: "Fabrikam" };
+    renderSwitcher(createMockAppState({ tenants: [base, second] }));
+    const chip = await screen.findByRole("button", { name: "Switch organization, Contoso IT" });
+    chip.focus();
+    await user.keyboard("{ArrowDown}");
+    const menu = await screen.findByRole("menu", { name: ORGANIZATION_COPY.menuLabel });
+    // The active organization takes focus.
+    await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus());
+    // Its disconnect action is the next item, reachable without hover.
+    await user.keyboard("{ArrowDown}");
+    expect(within(menu).getByRole("menuitem", { name: "Disconnect Contoso IT" })).toHaveFocus();
+    await user.keyboard("{ArrowDown}");
+    expect(within(menu).getByRole("menuitemradio", { name: /Fabrikam/ })).toHaveFocus();
+    await user.keyboard("{End}");
+    expect(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.manageConnections })).toHaveFocus();
+    await user.keyboard("{Home}");
+    expect(within(menu).getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).not.toBeInTheDocument();
+    await waitFor(() => expect(chip).toHaveFocus());
+  });
+
+  it("keeps the disconnect action visible without hover", async () => {
+    const user = userEvent.setup();
+    renderSwitcher();
+    await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
+    const disconnect = screen.getByRole("menuitem", { name: "Disconnect Contoso IT" });
+    expect(disconnect.className).not.toMatch(/opacity-0/);
+  });
+
+  it("returns focus to the chip after choosing an organization", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState().tenants[0]!;
+    renderSwitcher(createMockAppState({ tenants: [base, { ...base, id: "tenant-2", displayName: "Fabrikam" }] }));
+    await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
+    await user.click(screen.getByRole("menuitemradio", { name: /Fabrikam/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Switch organization, Fabrikam" })).toHaveFocus());
+  });
+});

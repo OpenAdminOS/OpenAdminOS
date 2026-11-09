@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
 import { useNavigate } from "react-router";
 
 import { useAppState } from "../state";
@@ -52,6 +52,41 @@ export function OrganizationSwitcher() {
     sample: boolean;
   } | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  /** Close the menu; focus goes back to the chip unless something else takes it. */
+  const close = (returnFocus = true) => {
+    setOpen(false);
+    if (returnFocus) window.requestAnimationFrame(() => triggerRef.current?.focus());
+  };
+
+  const menuItems = () =>
+    Array.from(menuRef.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? []);
+
+  // Opening moves focus into the menu: the active organization, else the first item.
+  useEffect(() => {
+    if (!open) return;
+    const frame = window.requestAnimationFrame(() => {
+      const items = menuItems();
+      (items.find((item) => item.getAttribute("aria-checked") === "true") ?? items[0])?.focus();
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [open]);
+
+  const onMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+    const items = menuItems();
+    const index = items.indexOf(document.activeElement as HTMLElement);
+    const move = (next: number) => {
+      event.preventDefault();
+      items[(next + items.length) % items.length]?.focus();
+    };
+    if (event.key === "ArrowDown") move(index + 1);
+    else if (event.key === "ArrowUp") move(index - 1);
+    else if (event.key === "Home") move(0);
+    else if (event.key === "End") move(items.length - 1);
+    else if (event.key === "Tab") close(false);
+  };
   const organizations = resolveOrganizations(state);
   const active = activeOrganizationOf(state);
   const tenantOf = (organization: OrganizationRecord | undefined): TenantRecord | undefined =>
@@ -68,7 +103,7 @@ export function OrganizationSwitcher() {
     };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
-      if (event.key === "Escape") setOpen(false);
+      if (event.key === "Escape") close();
     };
     window.addEventListener("mousedown", onPointerDown);
     window.addEventListener("keydown", onKeyDown);
@@ -80,13 +115,13 @@ export function OrganizationSwitcher() {
 
   const pick = async (organizationId: string | null) => {
     if (organizationId === (active?.id ?? null)) {
-      setOpen(false);
+      close();
       return;
     }
     setBusy(true);
     try {
       await setActiveOrganization(organizationId);
-      setOpen(false);
+      close();
     } catch (error) {
       toast.error(
         ORGANIZATION_COPY.switchFailed(
@@ -135,8 +170,15 @@ export function OrganizationSwitcher() {
       <div ref={wrapperRef} className="app-region-no-drag relative min-w-0">
         <Tooltip content={tooltip} side="bottom">
           <button
+            ref={triggerRef}
             type="button"
             onClick={() => setOpen((current) => !current)}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" && !open) {
+                event.preventDefault();
+                setOpen(true);
+              }
+            }}
             aria-haspopup="menu"
             aria-expanded={open}
             aria-label={
@@ -163,8 +205,10 @@ export function OrganizationSwitcher() {
 
         {open ? (
           <div
+            ref={menuRef}
             role="menu"
             aria-label={ORGANIZATION_COPY.menuLabel}
+            onKeyDown={onMenuKeyDown}
             className="absolute left-0 top-[calc(100%+7px)] z-[90] w-[340px] overflow-hidden rounded-[14px] bg-[var(--color-raised)] p-1.5 shadow-[var(--shadow-pop)]"
           >
             <div className="px-2.5 pb-1.5 pt-1 text-sm text-[var(--color-text-muted)]">
@@ -193,6 +237,7 @@ export function OrganizationSwitcher() {
                       role="menuitemradio"
                       aria-checked={isActive}
                       disabled={busy}
+                      tabIndex={-1}
                       onClick={() => void pick(organization.id)}
                       className="flex min-w-0 flex-1 items-center gap-2.5 px-2.5 py-2 text-left focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--color-accent)]"
                     >
@@ -234,16 +279,19 @@ export function OrganizationSwitcher() {
                       {isActive ? <IconCheck size={12} className="text-[var(--color-accent)]" /> : null}
                     </button>
                     {tenant.tierProbeWarning ? <SwitcherLicenseRetry tenant={tenant} /> : null}
+                    {/* Always visible, so it is reachable without hovering the row. */}
                     <button
                       type="button"
-                      aria-label={sample ? PILOT_COPY.leaveAction : `Disconnect ${organization.name}`}
+                      role="menuitem"
+                      tabIndex={-1}
+                      aria-label={sample ? `${PILOT_COPY.leaveAction}, ${organization.name}` : `Disconnect ${organization.name}`}
                       title={sample ? PILOT_COPY.leaveAction : `Disconnect ${organization.name}`}
                       disabled={busy}
                       onClick={() => {
                         setPendingDisconnect({ tenantId: tenant.id, name: organization.name, sample });
-                        setOpen(false);
+                        close(false);
                       }}
-                      className="mr-1.5 rounded-[7px] p-1.5 text-[var(--color-text-muted)] opacity-0 transition-opacity hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)] group-hover:opacity-100"
+                      className="mr-1.5 rounded-[7px] p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-danger-soft)] hover:text-[var(--color-danger)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-danger)]"
                     >
                       <IconClose size={11} />
                     </button>
@@ -257,6 +305,7 @@ export function OrganizationSwitcher() {
                 type="button"
                 role="menuitemradio"
                 aria-checked={!active}
+                tabIndex={-1}
                 disabled={busy}
                 onClick={() => void pick(null)}
                 className={`${MENU_ITEM_CLASS} ${!active ? "bg-[var(--color-active)]" : ""}`}
@@ -272,8 +321,9 @@ export function OrganizationSwitcher() {
             <button
               type="button"
               role="menuitem"
+              tabIndex={-1}
               onClick={() => {
-                setOpen(false);
+                close(false);
                 openSetup();
               }}
               className={MENU_ITEM_CLASS}
@@ -284,10 +334,11 @@ export function OrganizationSwitcher() {
               <button
                 type="button"
                 role="menuitem"
+                tabIndex={-1}
                 disabled={busy}
                 onClick={() => {
                   setPendingDisconnect({ tenantId: activeTenant.id, name: active!.name, sample: true });
-                  setOpen(false);
+                  close(false);
                 }}
                 className={MENU_ITEM_CLASS}
               >
@@ -297,12 +348,13 @@ export function OrganizationSwitcher() {
               <button
                 type="button"
                 role="menuitem"
+                tabIndex={-1}
                 disabled={busy}
                 onClick={() => {
                   setBusy(true);
                   void addSampleTenant()
                     .then(() => {
-                      setOpen(false);
+                      close(false);
                       navigate("/chat");
                     })
                     .catch((error) =>
@@ -322,8 +374,9 @@ export function OrganizationSwitcher() {
             <button
               type="button"
               role="menuitem"
+              tabIndex={-1}
               onClick={() => {
-                setOpen(false);
+                close(false);
                 navigate("/connections");
               }}
               className={MENU_ITEM_CLASS}
@@ -380,6 +433,8 @@ function SwitcherLicenseRetry({ tenant }: { tenant: TenantRecord }) {
   return (
     <button
       type="button"
+      role="menuitem"
+      tabIndex={-1}
       aria-label={label}
       title={label}
       onClick={() => {

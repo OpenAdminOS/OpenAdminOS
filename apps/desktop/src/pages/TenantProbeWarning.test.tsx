@@ -278,7 +278,7 @@ describe("tenant checks with cancel", () => {
     renderRoute(<OrganizationSwitcher />, { path: "/", route: "/", bridge: makeMockBridge({ retryTenantLicenseCheck }, before) });
 
     await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
-    await user.click(screen.getByRole("button", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
+    await user.click(screen.getByRole("menuitem", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
     expect(retryTenantLicenseCheck).toHaveBeenCalledWith("tenant-1");
     expect(await screen.findByText(SERVICE_COPY.licenseCheckFinished)).toBeInTheDocument();
   });
@@ -303,7 +303,7 @@ describe("tenant checks with cancel", () => {
 
     await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
     const menu = screen.getByRole("menu", { name: "Organizations" });
-    await user.click(within(menu).getByRole("button", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
+    await user.click(within(menu).getByRole("menuitem", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
     live.publish({ ...before, tenantChecks: [{ tenantId: "tenant-1", kind: "license", phase: "licenses" }] });
     // The switcher shows the check with a labelled Cancel, not a second X.
     const inMenu = await within(menu).findByRole("status", { name: SERVICE_COPY.checkRunningFor("Contoso IT") });
