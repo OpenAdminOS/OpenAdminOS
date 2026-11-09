@@ -813,7 +813,7 @@ function buildAgenticSystemPrompt(input: RunAgenticChatInput, questionKind: Intu
     input.voice ? VOICE_ANSWER_INSTRUCTIONS : "",
     "",
     input.noTenant
-      ? "No tenant is connected, so there is no tenant data to read. A request to explain a product, or to write a query or script the admin runs themselves, is docs. Choose tenant or mixed only when the answer needs facts about the admin's own tenant."
+      ? "No organization is active, so there is no tenant data to read. A request to explain a product, or to write a query or script the admin runs themselves, is docs. Choose tenant or mixed only when the answer needs facts about the admin's own tenant."
       : docsOnly
         ? "This is a documentation question. Do not check the tenant. Answer from documentation sources."
         : "You can investigate read-only tenant data by asking the host to run tools.",

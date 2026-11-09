@@ -25,7 +25,7 @@ describe("voice boundary (PR #175 Muse round 2, I)", () => {
     });
     const tooltip = await screen.findByTestId("tooltip");
     await act(async () => undefined);
-    expect(tooltip.textContent).toContain("Voice audio and prompts go to OpenAI. Nothing is connected, so no tenant data is sent. Processing follows your OpenAI workspace's data residency setting.");
+    expect(tooltip.textContent).toContain("Voice audio and prompts go to OpenAI. No organization is active, so no tenant data is sent. Processing follows your OpenAI workspace's data residency setting.");
     expect(tooltip.textContent).not.toMatch(/Tenant context will be sent/);
   });
 });

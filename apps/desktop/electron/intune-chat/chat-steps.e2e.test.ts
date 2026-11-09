@@ -992,7 +992,7 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
         assert.match(result.assistantMessage.content, /full disk access/, send);
         assert.equal(result.assistantMessage.notConnected, undefined, send);
         // The model is told plainly that nothing is connected, so it classifies against that.
-        assert.match(prompts[0]!.system, /No tenant is connected, so there is no tenant data to read\./, send);
+        assert.match(prompts[0]!.system, /No organization is active, so there is no tenant data to read\./, send);
         assert.match(prompts[0]!.system, /Tenant: none connected/, send);
         assert.doesNotMatch(prompts[0]!.system, /You can investigate read-only tenant data/, send);
         assert.equal(result.conversation.tenantId, undefined, send);
@@ -1026,7 +1026,7 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
         const message = result.assistantMessage;
         assert.equal(message.status, "completed", send);
         assert.deepEqual(message.notConnected, { reason: "no-tenant", partIds: ["intune.devices"] }, send);
-        assert.match(message.content, /^This needs Intune\. Nothing is connected, so no tenant data was read\./, send);
+        assert.match(message.content, /^This needs Intune\. No organization is active, so no tenant data was read\./, send);
         assert.equal(message.followUps, undefined, send);
         assert.deepEqual(graphPaths, [], send);
         assert.deepEqual(graphBuilds, [], send);
@@ -1088,7 +1088,7 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
     await withHarness(async ({ store }) => {
       await assert.rejects(
         () => store.streamIntuneChatMessage({ content: "How many devices?" }, () => {}, { voice: true }),
-        /Nova voice needs a connected tenant\. Connect a Microsoft 365 tenant, or ask in Chat, which answers without one\./,
+        /Nova voice needs an organization\. Connect Microsoft 365, or ask in Chat, which answers without one\./,
       );
     }, { noTenant: true });
   });
@@ -1148,7 +1148,7 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
     await withHarness(async ({ store, graphPaths, script }) => {
       script([{ kind: "tenant", sources: [], final: true, answer: "You have 3 open incidents." }]);
       const message = (await store.sendIntuneChatMessage({ content: "List our open security incidents" })).assistantMessage;
-      assert.equal(message.content, "Defender is not connected for this tenant. Add it in Settings, Tenants.");
+      assert.equal(message.content, "Defender is not connected for this tenant. Add it in Connections.");
       assert.deepEqual(message.notConnected, { reason: "service-missing", partIds: ["defender.incidents"], tenantId: tenant.id });
       assert.deepEqual(graphPaths, []);
     }, { grantedScopes: requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name)) });
@@ -1244,7 +1244,7 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
           script([{ kind: "tenant", sources: [], final: true, answer: "9 devices." }]);
           await assert.rejects(
             () => ask(store, send, { content: DEVICE_QUESTION, hostedProviderConsent: noTenantConsent() }),
-            /covered a send without a tenant\. This send includes tenant context, so confirm it again/,
+            /covered a send with no organization\. This send includes tenant context, so confirm it again/,
             send,
           );
           assert.equal(prompts.length, 0, send);

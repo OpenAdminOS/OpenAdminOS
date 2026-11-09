@@ -96,7 +96,7 @@ describe("shell chrome", () => {
     const status = await screen.findByRole("status", { name: "Hosted · Codex · location set by your account · gpt-5" });
     await user.hover(status);
     expect(
-      await screen.findByText(/^Prompts leave this device through Codex; location set by your account\. Nothing is connected, so no tenant data is sent\. Codex sends prompts to OpenAI/),
+      await screen.findByText(/^Prompts leave this device through Codex; location set by your account\. No organization is active, so no tenant data is sent\. Codex sends prompts to OpenAI/),
     ).toBeInTheDocument();
   });
 

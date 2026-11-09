@@ -844,10 +844,10 @@ export function notConnectedAnswerText(input: {
   tenantName?: string;
 }): string {
   const services = servicesOfParts(input.partIds).map((service) => service.title);
-  const needs = services.length > 0 ? formatServiceList(services) : "a connected Microsoft 365 tenant";
+  const needs = services.length > 0 ? formatServiceList(services) : "Microsoft 365";
   if (input.reason === "no-tenant") {
-    return `This needs ${needs}. Nothing is connected, so no tenant data was read. ${
-      services.length > 0 ? `Connect ${formatServiceList(services)} to answer it.` : "Connect a tenant to answer it."
+    return `This needs ${needs}. No organization is active, so no tenant data was read. ${
+      services.length > 0 ? `Connect ${formatServiceList(services)} to answer it.` : "Connect Microsoft 365 to answer it."
     } Your question is kept.`;
   }
   const tenant = input.tenantName ?? "this tenant";

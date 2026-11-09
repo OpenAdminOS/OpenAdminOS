@@ -31,7 +31,7 @@ import { partIdsFor, requestedScopes } from "../shared/openAdminOS";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
-const LOCAL_NO_TENANT = "Local model. Nothing connected. Nothing leaves this device.";
+const LOCAL_NO_TENANT = "Local model. No organization. Nothing leaves this device.";
 
 function LocationProbe() {
   return <output data-testid="location">{useLocation().pathname}</output>;
@@ -129,7 +129,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     { id: "user-g", conversationId: guestConversation.id, role: "user", content: DEVICE_QUESTION, status: "completed", createdAt: guestConversation.createdAt },
     {
       id: "assistant-g", conversationId: guestConversation.id, role: "assistant", status: "completed", createdAt: guestConversation.updatedAt, questionKind: "tenant",
-      content: "This needs Intune. Nothing is connected, so no tenant data was read. Connect Intune to answer it. Your question is kept.",
+      content: "This needs Intune. No organization is active, so no tenant data was read. Connect Intune to answer it. Your question is kept.",
       notConnected: { reason: "no-tenant", partIds: ["intune.devices"] },
     },
   ];
@@ -356,7 +356,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
     expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts leave this device through Codex; location set by your account. Nothing is connected, so no tenant data is sent.",
+      "Prompts leave this device through Codex; location set by your account while this model is selected. No organization is active, so no tenant data is included.",
     );
     await user.type(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
     await user.click(screen.getByRole("button", { name: "Send" }));
@@ -364,7 +364,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     const dialog = await screen.findByRole("dialog", { name: "Send this question through Codex?" });
     expect(dialog).toHaveAttribute("aria-modal", "false");
     expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("Explain Autopatch rings");
-    expect(within(dialog).getByText("Codex answers with your existing sign-in. Nothing is connected, so no tenant data is included.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Codex answers with your existing sign-in. No organization is active, so no tenant data is included.")).toBeInTheDocument();
     const goesTo = within(dialog).getByText("Codex · location set by your account", { exact: false });
     // The detail says what the location depends on (maintainer decision, 2026-11-09).
     expect(within(dialog).getByText(/^Codex sends prompts to OpenAI, or to the endpoint its configuration selects\./)).toBeInTheDocument();
@@ -373,7 +373,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(within(dialog).getByText("Chat history")).toBeInTheDocument();
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     // The remembered decision is per provider and model, and the label names the model (Muse round 2, Q).
-    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for questions without a tenant on gpt-5" })).not.toBeChecked();
+    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for questions with no organization on gpt-5" })).not.toBeChecked();
     expect(within(dialog).getByText("Model").nextElementSibling).toHaveTextContent("gpt-5");
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Send through Codex" })).toHaveFocus());
 

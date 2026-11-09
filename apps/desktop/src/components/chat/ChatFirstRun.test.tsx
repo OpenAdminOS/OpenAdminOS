@@ -68,7 +68,7 @@ describe("NotConnectedCard after the tenant changed (Muse round 2, P)", () => {
       { notConnected: { reason: "service-missing", partIds: ["entra.signins", "defender.incidents"], tenantId: "removed-tenant" }, tenants: [], activeTenant: undefined },
       [],
     );
-    expect(screen.getByText(/The tenant this question was about is no longer in OpenAdminOS/)).toBeInTheDocument();
+    expect(screen.getByText(/The organization this question was about is no longer in OpenAdminOS/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /^Connect Entra.+Defender$/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Use our own app registration" })).toBeInTheDocument();
   });

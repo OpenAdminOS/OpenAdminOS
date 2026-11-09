@@ -197,7 +197,7 @@ const NO_TENANT_SCOPE: TenantRecord = Object.freeze({
 }) as TenantRecord;
 
 const NO_TENANT_GRAPH_REFUSAL =
-  "No tenant is connected, so Chat reads no tenant data. Connect a tenant to answer this.";
+  "No organization is active, so Chat reads no tenant data. Connect Microsoft 365 to answer this.";
 
 function restrictPlannedResourcesForTenant(
   planned: PlannedChatContext,
@@ -2051,7 +2051,7 @@ export class IntuneChatService {
     ).model;
     const chatBudget = intuneChatProviderBudget(providerId);
     if (noTenant && input.workspaceContext) {
-      throw new Error("Workspaces belong to a tenant. Connect a tenant to attach workspace context, or send without it.");
+      throw new Error("Workspaces belong to an organization. Choose one to attach workspace context, or send without it.");
     }
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
@@ -2505,7 +2505,7 @@ export class IntuneChatService {
     options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
     if (noTenant && (options.voice || options.scope)) {
-      throw new Error("Nova voice needs a connected tenant. Connect a Microsoft 365 tenant, or ask in Chat, which answers without one.");
+      throw new Error("Nova voice needs an organization. Connect Microsoft 365, or ask in Chat, which answers without one.");
     }
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");
@@ -2517,7 +2517,7 @@ export class IntuneChatService {
       throw new Error("Nova's reasoning model or provider trust changed. Start a new conversation.");
     const chatBudget = intuneChatProviderBudget(providerId);
     if (noTenant && input.workspaceContext) {
-      throw new Error("Workspaces belong to a tenant. Connect a tenant to attach workspace context, or send without it.");
+      throw new Error("Workspaces belong to an organization. Choose one to attach workspace context, or send without it.");
     }
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
@@ -3700,7 +3700,7 @@ export class IntuneChatService {
     }
     if (tenant && consent.noTenant === true) {
       throw new Error(
-        "Hosted provider confirmation covered a send without a tenant. This send includes tenant context, so confirm it again.",
+        "Hosted provider confirmation covered a send with no organization. This send includes tenant context, so confirm it again.",
       );
     }
     if (!tenant && consent.noTenant !== true) {
