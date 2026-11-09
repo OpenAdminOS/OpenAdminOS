@@ -1237,6 +1237,19 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
               <span />
               <span />
             </li>
+          ) : model.reportDestinations === null ? (
+            // Unknown is never shown as nowhere: say it is being checked, or could not be.
+            <li className="conn-row" aria-busy={model.reportDestinationsState === "loading" || undefined}>
+              <ReferenceMark name="" size="lg" off />
+              <div className="min-w-0">
+                <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.reportsNowHeading}</div>
+                <div className="text-sm text-[var(--color-text-muted)]">
+                  {model.reportDestinationsState === "failed" ? CONNECTIONS_COPY.map.reportsFailedSentence : CONNECTIONS_COPY.map.reportsLoadingSentence}
+                </div>
+              </div>
+              <span />
+              <span />
+            </li>
           ) : null}
         </ul>
       </section>

@@ -878,3 +878,10 @@ it("opens this organization's granted permissions from the Manage menu, not the 
   expect(within(dialog).getByText(/DeviceManagementManagedDevices\.Read\.All/)).toBeInTheDocument();
   expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
 });
+
+it("says report destinations could not be checked on the No organization page (design round review, Muse Q)", async () => {
+  const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents: [createMockAgent({ delivery: { slack: { enabled: true } } })] });
+  render(state, { listConnectors: vi.fn(async () => { throw new Error("The connector list could not be read."); }) });
+  const leaves = await screen.findByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
+  expect(await within(leaves).findByText(CONNECTIONS_COPY.map.reportsFailedSentence)).toBeInTheDocument();
+});
