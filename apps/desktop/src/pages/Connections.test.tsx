@@ -227,6 +227,17 @@ describe("Connections services", () => {
     render(createMockAppState({ mcpServers: createMockMcpServers() }));
     expect(await screen.findByText(CONNECTIONS_COPY.referencesEmpty)).toBeInTheDocument();
   });
+
+  it("never promises that nothing leaves the device while a delivery rule sends reports (review round 5)", async () => {
+    const state = createMockAppState({
+      mcpServers: createMockMcpServers(),
+      installedAgents: [createMockAgent({ delivery: { slack: { enabled: true, useDefaultChannel: false, channel: "C999" } } })],
+    });
+    render(state, { listConnectors: vi.fn(async () => [connector("slack", "Slack", "unknown")]) });
+    const references = await screen.findByText(CONNECTIONS_COPY.referencesEmpty);
+    expect(references).not.toHaveTextContent(/nothing leaves this device/i);
+    expect(await screen.findByTestId("result-destinations")).toHaveTextContent(CONNECTIONS_COPY.resultsSent(["Slack"]));
+  });
 });
 
 describe("Connections results and organizations", () => {
@@ -510,3 +521,4 @@ describe("destinations follow what the host sends (review round 4)", () => {
     expect(targetlessDestinations(destinations)).toEqual([]);
   });
 });
+

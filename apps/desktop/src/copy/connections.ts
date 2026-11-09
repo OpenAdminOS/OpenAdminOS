@@ -102,7 +102,7 @@ export const CONNECTIONS_COPY = {
   openMarketplace: "Open Marketplace",
   referencesHeading: "Public references",
   referencesBody: "No sign-in. Used by Chat in every organization. Words from questions go to the host shown.",
-  referencesEmpty: "No public reference is added. Add one from the Marketplace; with a local model nothing leaves this device until you do.",
+  referencesEmpty: "No public reference is added. Add one from the Marketplace. Until you do, Chat sends no words from your questions to a reference host.",
   referenceOn: "On",
   referenceOff: "Off",
   referenceTurnOn: "Turn on",
