@@ -1815,3 +1815,31 @@ Maintainer decisions: disconnect keeps deleting local data with the explicit tic
 - [x] U: missing parts say "not granted" in words on a 24 px target. (07e140f6)
 - [x] V: paused schedules are neutral and reference counts muted; the boundary chip is one short line at every width now that labels are longer. (11ab8402, 94ab9dfd)
 - [x] Nits: unknown tenant fails like rename, recovery text kept in the dialog error, tenant domain in the dialog (87d602be, b3b2541d); reach description includes the voice model (b4ef9007); motion tokens used, `--ease-spring` kept for #175's scan (49fbad71); glossary says result connectors live on Connections (91943652); screenshots recaptured without the tooltip (90328897).
+
+## PR #174 design round review 2 (reviewed eadd95e, 2026-11-09)
+
+### GPT-6.1-Sol
+
+1. [x] Windows durability: the state file is written and synced through the handle that wrote it (`durable-file.ts`), and the folder sync is skipped on Windows, where a directory handle cannot be synced; EINVAL, ENOTSUP and EOPNOTSUPP are ignored and any other folder sync error is raised. Tests use a mocked fs that refuses sync on a read-only handle as Windows does. (6d11a560)
+2. [x] to 4. [x] One disconnect lifecycle. Disconnect first marks the tenant closed under the state lock. Every entry point then refuses it: run admission and confirmation, schedule firing, rollback and external proposals, cache refresh starts and every cache write (a generation compare drops a write that started before the close), delivery claim and the check just before each send, Nova actions and gateway proposals. Disconnect then drains in-flight runs, cache refreshes and deliveries, and only then deletes. A tenant that comes back after the close is reopened. Regression tests reproduce GPT's three cases: an overlapping refresh leaves no cached rows, a run started while Disconnect waits is refused, and a claimed Slack delivery never posts. (ed6f60f9)
+5. [x] Multi-tenant chats and jobs that include the organization are deleted whole, with the other organizations' results in them; the dialog, docs and SPEC say so and a two-tenant job test covers it. (cae1bbdd)
+6. [x] The Azure OpenAI key change is recorded with its own settings write inside the write chain, so concurrent set and remove each record their own event and a failed write records nothing. Tests cover both. (d7c50816)
+7. [x] The Microsoft sign-in is removed first. If that fails nothing is deleted and the organization stays connected. A failed Agent Team purge after the local delete is reported as partial, with what stays on the device. Failure-injection tests cover both. (ed6f60f9)
+8. [x] Every replacement of a state file that holds configuration audit history is flushed, not only the write that added an event (chosen over a separate store as the smaller change). A folder sync failure is raised instead of being swallowed. (6d11a560)
+9. [x] The reach map's description is built from the shared `promptsGoTo` sentence; tests assert parity with it for local, hosted and no-organization cases. (af2d734c)
+
+Also: a read racing a write could queue the move to organizations twice; the migration event is only queued when the read saw the latest write (fcc3c45a). The trailing `CLAUDE.md` wording change was withdrawn by the maintainer; `CLAUDE.md` is untouched.
+
+### Muse Wonder Full
+
+- [x] A: hosted voice with a hosted chat model names both (`Voice · OpenAI and <provider>`) and keeps the reference count; the tooltip and the composer give voice's sentence plus the chat model's. Strip and composer tests. (e944bd4c)
+- [x] B: SPEC uses "GitHub Copilot CLI" and "Gemini CLI" in the location labels. (0042f7ef)
+- [x] C: a reach map location with a detail line wraps instead of truncating; screenshots recaptured at 1280 and 960 in both themes. (4ef8d60e, 7c07ea1f)
+- [x] D: the hosted confirmation lead for Azure OpenAI says "the Azure OpenAI API". (b7dd2bcd)
+- [x] E: `pick` returns at once while a switch runs, so Enter in the filter waits too. (40ebea11)
+- [x] F: a legacy reconnect counts its granted scopes through `grantedScopeNames`. (eca07fbc)
+
+### Maintainer decision: no sample data
+
+- [x] The product has no sample data; PR #175 removes pilot mode entirely after this PR merges. This PR removes its own entry points: "Preview with sample data" in the organization switcher, the Connections No organization empty state button, and "You can open it again" in the leave dialogs. A sample organization from an earlier pilot still shows labeled with Leave pilot mode. The sample organization handling code stays for #175. Tests assert there is no way into sample data from the menu or the empty state. SPEC, docs and CHANGELOG updated; switcher and No organization screenshots recaptured. (1f88fa94, 72c684ea)
+- Not changed here: the first-launch welcome's pilot choice comes from main, not this PR, and goes with the rest of pilot mode in #175.
