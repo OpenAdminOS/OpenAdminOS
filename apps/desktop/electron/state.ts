@@ -7628,7 +7628,9 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (reconciled.notice) state.organizationMigration = reconciled.notice;
       // The move to organizations is recorded once, on the first write
       // after the read that performed it.
-      if (reconciled.migrated && !this.pendingMigrationAudit) {
+      // A read that started before a write finished saw the old file; it
+      // must not queue the move again after that write recorded it.
+      if (reconciled.migrated && !this.pendingMigrationAudit && generation === this.writeGeneration) {
         this.pendingMigrationAudit = {
           organizationIds: reconciled.organizations.map((organization) => organization.id),
           organizationNames: reconciled.organizations.map((organization) => organization.name),
