@@ -259,7 +259,7 @@ import {
   buildUsageTelemetryPayload,
   type UsageTelemetryPayload,
 } from "./telemetry/usage.js";
-import { RunService } from "./runs.js";
+import { OrganizationBoundaryError, RunService } from "./runs.js";
 import { RunDeliveryService } from "./run-delivery.js";
 import {
   OUTLOOK_CONNECTOR_ID,
@@ -4929,6 +4929,13 @@ export class AppStateStore {
           lastScheduledRunAt: new Date(nowMs).toISOString(),
         });
       } catch (error) {
+        // The organization changed after this tick read the state, or the
+        // schedule lost its assignment: it waits for its organization. No
+        // failure is recorded and the due slot is kept.
+        if (error instanceof OrganizationBoundaryError) {
+          waiting += 1;
+          continue;
+        }
         await this.persistScheduledRunFailure(agent, schedule, error, nowMs);
         console.error(
           `[scheduler] agent "${agent.slug}" failed to start:`,

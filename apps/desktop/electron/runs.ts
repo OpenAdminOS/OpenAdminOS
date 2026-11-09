@@ -82,6 +82,15 @@ export const SCHEDULE_OTHER_ORGANIZATION_COPY =
 export const UNASSIGNED_SCHEDULE_RUN_COPY =
   "This schedule is unassigned, so it is paused. Assign it to an organization on the agent page, then run it.";
 
+/**
+ * A start refused because its organization is not the active one, or its
+ * schedule is unassigned. For a scheduled start this is waiting, not a
+ * failure: the scheduler records nothing and keeps the due slot.
+ */
+export class OrganizationBoundaryError extends Error {
+  override readonly name = "OrganizationBoundaryError";
+}
+
 export interface RunServiceHost {
   read(): Promise<RunPersistedState>;
   write(state: RunPersistedState): Promise<void>;
@@ -293,7 +302,7 @@ export class RunService {
         options.tenantId !== undefined &&
         options.tenantId !== persisted.activeTenantId
       ) {
-        throw new Error(OTHER_ORGANIZATION_RUN_COPY);
+        throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
       }
       // Pilot mode refuses schedules with its own production message first.
       if (pilotRun && options.trigger === "schedule") {
@@ -302,10 +311,10 @@ export class RunService {
       if (agentSchedule) {
         const active = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
         if (!agent.schedule?.organizationId) {
-          throw new Error(UNASSIGNED_SCHEDULE_RUN_COPY);
+          throw new OrganizationBoundaryError(UNASSIGNED_SCHEDULE_RUN_COPY);
         }
         if (!active || agent.schedule.organizationId !== active.id) {
-          throw new Error(SCHEDULE_OTHER_ORGANIZATION_COPY);
+          throw new OrganizationBoundaryError(SCHEDULE_OTHER_ORGANIZATION_COPY);
         }
       }
       if (options.dryRun && (options.office || options.officeContext)) {
@@ -493,7 +502,7 @@ export class RunService {
         pinnedTenantId !== undefined &&
         pinnedTenantId !== persisted.activeTenantId
       ) {
-        throw new Error(OTHER_ORGANIZATION_RUN_COPY);
+        throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
       }
 
       // Entra ID tier preflight: if the agent declares a required tier

@@ -705,3 +705,41 @@ describe("organization names (review round 1)", () => {
     }
   });
 });
+
+describe("organization switch during a scheduler tick (Muse round 2)", () => {
+  it("records no failure and keeps the due slot when the host refuses after a switch", async () => {
+    const lastScheduledRunAt = "2026-01-01T00:00:00.000Z";
+    const fixture = await makeStore(currentVersionState({
+      organizations: [],
+      installedAgents: [agent("find-inactive-devices", { schedule: { ...schedule(lastScheduledRunAt), organizationId: `org-${woodgrove.id}` } })],
+    }));
+    const store = fixture.store as unknown as {
+      startRun(slug: string, options?: Record<string, unknown>): Promise<RunRecord>;
+    };
+    const realStart = store.startRun.bind(fixture.store);
+    let attempts = 0;
+    // The admin switches to Fabrikam after the tick read the state.
+    store.startRun = async (slug, options) => {
+      attempts += 1;
+      await fixture.store.setActiveTenant(fabrikam.id);
+      return realStart(slug, options);
+    };
+    const info = console.info;
+    const error = console.error;
+    const errors: unknown[] = [];
+    console.info = () => undefined;
+    console.error = (...values: unknown[]) => void errors.push(values);
+    try {
+      await fixture.store.fireDueSchedules();
+      assert.equal(attempts, 1);
+      const app = await fixture.store.getAppState();
+      assert.equal(app.runs.some((run) => run.trigger === "schedule"), false);
+      assert.equal(scheduleOf(app.installedAgents, "find-inactive-devices")?.lastScheduledRunAt, lastScheduledRunAt);
+      assert.deepEqual(errors, []);
+    } finally {
+      console.info = info;
+      console.error = error;
+      await fixture.close();
+    }
+  });
+});
