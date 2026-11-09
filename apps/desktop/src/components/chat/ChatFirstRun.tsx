@@ -45,12 +45,10 @@ export function ModelChoice({
   onSelectProvider: (id: ProviderId) => Promise<void>;
 }) {
   const navigate = useNavigate();
-  const { startPilot } = useSetupFlow();
   const options = optionsFromProviders(providers);
   const [selected, setSelected] = useState<ProviderId | null>(null);
-  const [working, setWorking] = useState<ProviderId | "preview" | null>(null);
+  const [working, setWorking] = useState<ProviderId | null>(null);
   const [errors, setErrors] = useState<Partial<Record<ProviderId, string>>>({});
-  const [error, setError] = useState<string | null>(null);
   const picked = selected && options.some((option) => option.providerId === selected) ? selected : preselect(options);
   const chosen = options.find((option) => option.providerId === picked);
   const note = actionNote(chosen);
@@ -78,14 +76,6 @@ export function ModelChoice({
       setWorking(null);
     }
   };
-  const preview = () => {
-    setWorking("preview");
-    setError(null);
-    void startPilot()
-      .catch((caught: unknown) => setError(FIRST_RUN_CHAT_COPY.previewFailed(caught instanceof Error ? caught.message : String(caught))))
-      .finally(() => setWorking(null));
-  };
-
   return (
     <section aria-labelledby="model-choice-heading">
       <h2 id="model-choice-heading" className="text-md font-medium text-[var(--color-text)]">
@@ -104,16 +94,6 @@ export function ModelChoice({
         </button>
       </div>
       {note ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">{note}</p> : null}
-      {error ? (
-        <p role="alert" className="mt-3 text-sm text-[var(--color-danger)]">
-          {error}
-        </p>
-      ) : null}
-      <p className="mt-5 border-t border-[var(--color-border-soft)] pt-4 text-sm">
-        <button type="button" disabled={working !== null} onClick={preview} className={quietLink}>
-          {FIRST_RUN_CHAT_COPY.previewLink}
-        </button>
-      </p>
     </section>
   );
 }

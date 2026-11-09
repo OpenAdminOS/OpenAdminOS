@@ -261,7 +261,7 @@ describe("first-launch model scan screen", () => {
     expect(screen.getByRole("button", { name: "Start Ollama and open Chat" })).toBeEnabled();
   });
 
-  it("offers OpenAdmin 8B, all providers and sample data when nothing is found", async () => {
+  it("offers OpenAdmin 8B and all providers when nothing is found, and no sample data (maintainer decision, 2026-11-09)", async () => {
     const user = userEvent.setup();
     const none = [probe("lm-studio", "LM Studio", "local", "localhost:1234", { state: "not-found", summary: "Not installed", ready: false })];
     const { bridge, finish } = scanBridge({ kind: "nothing" }, none);
@@ -272,9 +272,9 @@ describe("first-launch model scan screen", () => {
     expect(await screen.findByRole("heading", { name: MODEL_SCAN_COPY.nothingTitle })).toBeInTheDocument();
     expect(screen.getByText(MODEL_SCAN_COPY.installCommand)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: MODEL_SCAN_COPY.allProviders })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.previewLink }));
-    await waitFor(() => expect(bridge.addSampleTenant).toHaveBeenCalledOnce());
-    expect(bridge.completeFirstRunScan).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("button", { name: /sample data/i })).toBeNull();
+    expect(bridge.addSampleTenant).not.toHaveBeenCalled();
+    void user;
   });
 
   it("shows a check that could not finish with Retry, and announces the new result", async () => {
@@ -444,7 +444,7 @@ describe("first-launch model scan screen", () => {
     await finish();
     await waitFor(() => expect(document.querySelector('[data-phase="settled"]')).not.toBeNull());
     expect(screen.getByRole("button", { name: "Continue without a model" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Preview with sample data" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sample data/i })).toBeNull();
   });
 
   it("keeps every exit and the choice disabled while a Start is polling (Muse round 3, M2)", async () => {
@@ -457,7 +457,7 @@ describe("first-launch model scan screen", () => {
     await finish();
     await user.click(await screen.findByRole("button", { name: "Start Ollama and open Chat" }));
     await waitFor(() => expect(bridge.startLocalRuntime).toHaveBeenCalledOnce());
-    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.previewLink, MODEL_SCAN_COPY.scanAgain, "Start Ollama and open Chat"]) {
+    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.scanAgain, "Start Ollama and open Chat"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
     expect(radio("Claude Code")).toBeDisabled();
@@ -475,7 +475,7 @@ describe("first-launch model scan screen", () => {
     await finish();
     await user.click(await screen.findByRole("button", { name: MODEL_SCAN_COPY.retryLabel("GitHub Copilot CLI") }));
     await waitFor(() => expect(bridge.retryModelScanProbe).toHaveBeenCalledOnce());
-    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.previewLink, "Start Ollama and open Chat"]) {
+    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, "Start Ollama and open Chat"]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
     expect(radio("Claude Code")).toBeDisabled();

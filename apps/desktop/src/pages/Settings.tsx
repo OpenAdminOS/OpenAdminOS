@@ -208,8 +208,7 @@ export default function Settings() {
     setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
-  const { openSetup, startPilot } = useSetupFlow();
-  const toast = useToast();
+  const { openSetup } = useSetupFlow();
   // An explicit refresh checks every provider in full, also right after the first-run scan.
   const refreshProviders = useCallback(async () => {
     await window.openAdminOS?.refreshProviders?.();
@@ -505,21 +504,6 @@ export default function Settings() {
               query={settingsQuery}
               action={
                 <div className="flex items-center gap-2">
-                  {pilot ? null : (
-                    <UiButton
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        void startPilot().catch((caught) =>
-                          toast.error(
-                            `Pilot mode did not open. ${caught instanceof Error ? userFacingErrorReason(caught.message) ?? "" : ""} Try again from Settings, Tenants.`.replace(/\s+/g, " "),
-                          ),
-                        );
-                      }}
-                    >
-                      {PILOT_COPY.openAction}
-                    </UiButton>
-                  )}
                   <UiButton variant="primary" size="sm" onClick={() => openSetup()}>Connect tenant</UiButton>
                 </div>
               }

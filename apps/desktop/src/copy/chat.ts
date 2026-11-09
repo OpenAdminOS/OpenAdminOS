@@ -45,8 +45,6 @@ export const FIRST_RUN_CHAT_COPY = {
   placeholderNoTenant: "Ask a question",
   placeholderNoModel: "Choose a model to start asking",
   modelChoiceTitle: "Choose a model to answer with",
-  previewLink: "Preview with sample data",
-  previewFailed: (reason: string) => `Sample data did not open. ${reason}`,
   noModelFooter: "Read-only by default. Write actions always ask for your confirmation.",
   noModelSendNotice: "Choose a model above to send this question. It is kept in the composer.",
   /** `goesTo` is `promptsGoTo(provider)`: "Prompts go to ..." or "Prompts leave this device through ...". */

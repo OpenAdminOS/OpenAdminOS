@@ -329,7 +329,7 @@ describe("shell chrome", () => {
     expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
   });
 
-  it("opens pilot mode from the tenant menu", async () => {
+  it("offers no sample data in the tenant menu (maintainer decision, 2026-11-09)", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const addSampleTenant = vi.fn(async () => pilotState());
@@ -340,8 +340,8 @@ describe("shell chrome", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Connect a tenant" }));
-    await user.click(screen.getByRole("menuitem", { name: "Open pilot mode" }));
-    expect(addSampleTenant).toHaveBeenCalledOnce();
+    expect(screen.queryByRole("menuitem", { name: /pilot mode|sample data/i })).toBeNull();
+    expect(addSampleTenant).not.toHaveBeenCalled();
   });
 
   it("leaves pilot mode only after a confirm that says what is deleted", async () => {

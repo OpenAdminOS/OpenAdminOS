@@ -288,14 +288,13 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
   });
 
-  it("starts pilot mode from Preview with sample data", async () => {
-    const user = userEvent.setup();
+  it("offers no sample data in the model choice (maintainer decision, 2026-11-09)", async () => {
     const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, status: "not-installed" as const } : provider));
     const bridge = makeMockBridge({}, guestState({ providers }));
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
-    await user.click(await screen.findByRole("button", { name: FIRST_RUN_CHAT_COPY.previewLink }));
-    await waitFor(() => expect(bridge.addSampleTenant).toHaveBeenCalledOnce());
+    expect(await screen.findByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sample data/i })).toBeNull();
   });
 
   it("cancels the inline confirmation with Escape, keeps the question and returns to the composer (design round, D)", async () => {

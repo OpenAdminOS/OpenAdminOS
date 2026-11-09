@@ -9,7 +9,6 @@ import {
   IconCheck,
   IconChevronDown,
   IconClose,
-  IconPlay,
   IconPlus,
   IconRefresh,
   IconSettings,
@@ -34,7 +33,7 @@ function entraTierLabel(tier: "free" | "p1" | "p2" | "unknown" | undefined): str
 
 export function TenantSwitcher() {
   const navigate = useNavigate();
-  const { state, addSampleTenant, setActiveTenant, disconnectTenant } = useAppState();
+  const { state, setActiveTenant, disconnectTenant } = useAppState();
   const { openSetup } = useSetupFlow();
   const toast = useToast();
   const [open, setOpen] = useState(false);
@@ -230,30 +229,7 @@ export function TenantSwitcher() {
               })
             )}
             <div className="my-1 h-px bg-[var(--color-border-soft)]" />
-            {pilotActive ? null : (
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true);
-                  void addSampleTenant()
-                    .then(() => {
-                      setOpen(false);
-                      navigate("/chat");
-                    })
-                    .catch((error) =>
-                      toast.error(
-                        `Pilot mode did not open.${error instanceof Error ? ` ${userFacingErrorReason(error.message)}` : ""} Try again from the tenant menu.`,
-                      ),
-                    )
-                    .finally(() => setBusy(false));
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <IconPlay size={12} /> {PILOT_COPY.openAction}
-              </button>
-            )}
+            {/* No sample data (maintainer decision, 2026-11-09): pilot mode has no entry point. */}
             <button
               type="button"
               role="menuitem"

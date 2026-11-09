@@ -18,7 +18,6 @@ import { MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocationDetail } from
 import { chatToolHosts } from "../state/data-boundary";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
 import { useAppState } from "../state";
-import { useSetupFlow } from "./SetupFlowContext";
 import { actionLabel, actionNote, modelDisplayName, optionsFromProbes, preselect, type ChoiceOption } from "./model-choice";
 
 /**
@@ -136,7 +135,6 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   const api = window.openAdminOS;
   const navigate = useNavigate();
   const { state, refresh, setActiveProvider } = useAppState();
-  const { startPilot } = useSetupFlow();
   const reduced = useMemo(prefersReducedMotion, []);
   const [probes, setProbes] = useState<ModelScanProbe[]>([]);
   const [shown, setShown] = useState<Record<string, ModelScanProbe>>({});
@@ -423,23 +421,6 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     }
   };
 
-  const preview = async () => {
-    if (finishing.current || activity !== null) return;
-    finishing.current = true;
-    setBusy("preview");
-    setActionError(null);
-    try {
-      if (firstRun) await api?.completeFirstRunScan?.();
-      await startPilot();
-      onClose();
-    } catch (caught) {
-      finishing.current = false;
-      setActionError(MODEL_SCAN_COPY.previewFailed(caught instanceof Error ? caught.message : String(caught)));
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const platform = api?.platform;
   const draggable = platform === "macos" || platform === "windows";
   // A refused off-device endpoint ran nothing; the closing line names it as not contacted.
@@ -556,9 +537,6 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                 <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                   <button type="button" disabled={activity !== null} onClick={() => void finish("/chat")} className={linkClass}>
                     {MODEL_SCAN_COPY.continueWithoutModel}
-                  </button>
-                  <button type="button" disabled={activity !== null} onClick={() => void preview()} className={linkClass}>
-                    {MODEL_SCAN_COPY.previewLink}
                   </button>
                 </p>
                 <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">

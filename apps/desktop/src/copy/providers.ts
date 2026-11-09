@@ -106,6 +106,4 @@ export const MODEL_SCAN_COPY = {
   scanAgain: "Scan again",
   continueToChat: "Continue to Chat",
   scanFailed: "The scan did not start.",
-  previewLink: "Preview with sample data",
-  previewFailed: (reason: string) => `Sample data did not open. ${reason}`,
 } as const;
