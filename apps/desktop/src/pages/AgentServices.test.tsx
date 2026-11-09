@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes } from "react-router";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import Agents from "./Agents";
 import Marketplace from "./Marketplace";
@@ -332,11 +332,11 @@ describe("preflight without an organization (review round 1)", () => {
         discord: { enabled: true, includeManualRuns: false },
       },
     });
-    const bridge = makeMockBridge({}, noOrganizationState([draft]));
+    const bridge = makeMockBridge({ listConnectors: vi.fn(async () => [connectorSummary("slack")]) }, noOrganizationState([draft]));
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
     expect(dialog).toHaveTextContent("It reads no service data.");
-    expect(dialog).toHaveTextContent("Saved delivery rules send its report to Slack.");
+    await waitFor(() => expect(dialog).toHaveTextContent("Saved delivery rules send its report to Slack."));
     expect(dialog).toHaveTextContent("Microsoft Teams is skipped: it posts with an organization's Microsoft sign-in.");
     expect(dialog).not.toHaveTextContent("cannot reach any service");
     expect(dialog).not.toHaveTextContent("Discord");
@@ -345,7 +345,8 @@ describe("preflight without an organization (review round 1)", () => {
   it("says when no delivery rule sends the report", async () => {
     const draft = createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] });
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge: makeMockBridge({}, noOrganizationState([draft])) });
-    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("No saved delivery rule sends its report.");
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    await waitFor(() => expect(dialog).toHaveTextContent("No saved delivery rule sends its report."));
   });
 
   it("uses no-organization wording for a hosted provider", async () => {
@@ -394,4 +395,29 @@ it("gives screen readers the service needs as text, not a label on a span", asyn
   // The row button's accessible name includes the needs.
   expect(screen.getByRole("button", { name: /Secure score prioritizer.*Needs Defender, not connected/ })).toBeInTheDocument();
   expect(document.querySelector("span[aria-label^='Needs']")).toBeNull();
+});
+
+function connectorSummary(id: string, status: "connected" | "needs-setup" = "connected") {
+  return {
+    descriptor: { id, name: id, version: "1.0.0", authSource: "external", scopes: [], capabilities: [], trust: {} },
+    config: {},
+    status,
+  } as never;
+}
+
+it("never promises delivery to a connector that is not set up (Muse round 2)", async () => {
+  const draft = createMockAgent({
+    id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [],
+    delivery: { slack: { enabled: true }, discord: { enabled: true } },
+  });
+  const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents: [draft] });
+  const bridge = makeMockBridge(
+    { listConnectors: vi.fn(async () => [connectorSummary("discord"), connectorSummary("slack", "needs-setup")]) },
+    { ...state, tenants: [] },
+  );
+  renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  await waitFor(() => expect(dialog).toHaveTextContent("Saved delivery rules send its report to Discord."));
+  expect(dialog).toHaveTextContent("Slack is not set up, so nothing is sent there.");
+  expect(dialog).not.toHaveTextContent("send its report to Slack");
 });

@@ -94,19 +94,26 @@ export function unconfiguredDestinations(destinations: readonly ResultDestinatio
 
 /**
  * Where a manual run's report can go under this agent's saved delivery
- * rules. A run with no organization skips Teams and Outlook, which post
- * with an organization's sign-in; those are returned as `skipped`.
+ * rules. A rule sends only to a connector that is set up (`notSetUp`
+ * otherwise), and a run with no organization skips Teams and Outlook,
+ * which post with an organization's sign-in (`skipped`).
  */
 export function manualRunReportDestinations(
   agent: Pick<AgentSummary, "delivery">,
   hasOrganization: boolean,
-): { sent: string[]; skipped: string[] } {
+  connectors: readonly ConnectorSummary[],
+): { sent: string[]; skipped: string[]; notSetUp: string[] } {
   const applies = DELIVERY_CONNECTORS.filter((connector) => {
     const rule = agent.delivery?.[connector.key];
     return rule?.enabled === true && rule.includeManualRuns !== false;
   });
+  const skipped = applies.filter((connector) => !hasOrganization && connector.needsOrganization);
+  const rest = applies.filter((connector) => !skipped.includes(connector));
+  const configured = (connector: (typeof DELIVERY_CONNECTORS)[number]) =>
+    connectorConfigured(connectors.find((summary) => summary.descriptor.id === DELIVERY_CONNECTOR_IDS[connector.key]));
   return {
-    sent: applies.filter((connector) => hasOrganization || !connector.needsOrganization).map((connector) => connector.name),
-    skipped: applies.filter((connector) => !hasOrganization && connector.needsOrganization).map((connector) => connector.name),
+    sent: rest.filter(configured).map((connector) => connector.name),
+    skipped: skipped.map((connector) => connector.name),
+    notSetUp: rest.filter((connector) => !configured(connector)).map((connector) => connector.name),
   };
 }

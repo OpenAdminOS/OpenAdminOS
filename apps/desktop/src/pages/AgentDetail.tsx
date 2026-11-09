@@ -2677,7 +2677,7 @@ function ChoiceButton({
 }
 
 /** Where the report of a run with no organization goes, from the agent's saved delivery rules. */
-function noOrganizationReportLine(destinations: { sent: string[]; skipped: string[] }): string {
+function noOrganizationReportLine(destinations: { sent: string[]; skipped: string[]; notSetUp: string[] }): string {
   const list = (names: string[]) =>
     names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
   const sent = destinations.sent.length > 0
@@ -2686,7 +2686,10 @@ function noOrganizationReportLine(destinations: { sent: string[]; skipped: strin
   const skipped = destinations.skipped.length > 0
     ? ` ${list(destinations.skipped)} ${destinations.skipped.length === 1 ? "is" : "are"} skipped: ${destinations.skipped.length === 1 ? "it posts" : "they post"} with an organization's Microsoft sign-in.`
     : "";
-  return `${sent}${skipped}`;
+  const notSetUp = destinations.notSetUp.length > 0
+    ? ` ${list(destinations.notSetUp)} ${destinations.notSetUp.length === 1 ? "is" : "are"} not set up, so nothing is sent there.`
+    : "";
+  return `${sent}${skipped}${notSetUp}`;
 }
 
 /** What Run again keeps from the original run when it opens the preflight. */
@@ -2745,6 +2748,23 @@ function RunPreflightModal({
     : [];
   // Scopes the services cannot account for block the run, as in preflight.
   const scopeBlockCopy = unmappedScopesCopy(agent.scopes) ?? uncoveredScopesCopy(agent);
+  // Report destinations depend on which connectors are set up.
+  const [connectors, setConnectors] = useState<ConnectorSummary[] | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    setConnectors(null);
+    void Promise.resolve(window.openAdminOS?.listConnectors?.() ?? [])
+      .then((list) => {
+        if (!cancelled) setConnectors(list);
+      })
+      .catch(() => {
+        if (!cancelled) setConnectors([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
   // Only an agent that calls no service API runs without an organization.
   const serviceFree = agentCallsNoServiceApi(agent);
   const neededTitles = agentServiceIds(agent).map((id) => serviceById(id).title);
@@ -2848,7 +2868,9 @@ function RunPreflightModal({
             {activeTenant
               ? "OpenAdminOS runs this agent against the active organization and saves the result to local run history."
               : serviceFree
-                ? `OpenAdminOS runs this agent with no organization and saves the result to local run history. It reads no service data. ${noOrganizationReportLine(manualRunReportDestinations(agent, false))}`
+                ? `OpenAdminOS runs this agent with no organization and saves the result to local run history. It reads no service data. ${
+                    connectors ? noOrganizationReportLine(manualRunReportDestinations(agent, false, connectors)) : "Checking where its report goes."
+                  }`
                 : "This agent cannot start until an organization with its services is active."} {dryRun ? "This run only prepares a plan. Graph writes, connector changes, and automatic result delivery are blocked." : agent.mode === "write"
               ? "If the agent proposes changes, it will pause for a diff and typed confirmation before anything is applied."
               : "This agent cannot change tenant state."}
