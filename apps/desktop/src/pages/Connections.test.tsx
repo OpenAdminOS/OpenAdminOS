@@ -865,3 +865,16 @@ describe("disconnect names the registration and what goes (design round review)"
     expect(dialog).not.toHaveTextContent(ORGANIZATION_COPY.disconnectNoOrganizationAfter);
   });
 });
+
+it("opens this organization's granted permissions from the Manage menu, not the connect flow (design round review, Muse M)", async () => {
+  const user = userEvent.setup();
+  const base = createMockAppState().tenants[0]!;
+  render(createMockAppState({ tenants: [{ ...base, grantedScopes: intuneScopes }] }));
+  await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+  await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.permissions }));
+  const dialog = screen.getByRole("dialog", { name: CONNECTIONS_COPY.permissionsTitle("Contoso IT") });
+  expect(within(dialog).getAllByText(CONNECTIONS_COPY.permissionGranted).length).toBeGreaterThan(0);
+  expect(within(dialog).getAllByText(CONNECTIONS_COPY.permissionNotGranted).length).toBeGreaterThan(0);
+  expect(within(dialog).getByText(/DeviceManagementManagedDevices\.Read\.All/)).toBeInTheDocument();
+  expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
+});

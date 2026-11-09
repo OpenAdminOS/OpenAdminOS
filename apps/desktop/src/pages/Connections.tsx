@@ -718,16 +718,65 @@ function RenameOrganizationForm({
 }
 
 /**
+ * What this organization's Microsoft 365 connection has granted: each part
+ * with its Graph permissions, granted or not. Adding access stays on the
+ * service rows.
+ */
+function GrantedPermissionsDialog({
+  open,
+  organization,
+  tenant,
+  onClose,
+}: {
+  open: boolean;
+  organization: OrganizationRecord;
+  tenant: TenantRecord;
+  onClose: () => void;
+}) {
+  const granted = new Set(grantedParts(tenant).map((part) => part.id));
+  return (
+    <Modal open={open} onClose={onClose} size="md">
+      <ModalHeader title={CONNECTIONS_COPY.permissionsTitle(organization.name)} subtitle={tenantDomain(tenant)} onClose={onClose} />
+      <div className="max-h-[60vh] space-y-5 overflow-y-auto p-6">
+        {AVAILABLE_SERVICES.map((service) => (
+          <section key={service.id} aria-labelledby={`permissions-${service.id}`}>
+            <h3 id={`permissions-${service.id}`} className="flex items-center gap-2 text-md font-medium text-[var(--color-text)]">
+              <ServiceMark serviceId={service.id} size="sm" off={serviceStatus(tenant, service.id) === "missing"} />
+              {service.title}
+            </h3>
+            <ul className="mt-2 divide-y divide-[var(--color-border-soft)]">
+              {SERVICE_PARTS.filter((part) => part.service === service.id).map((part) => (
+                <li key={part.id} className="py-2 text-sm">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[var(--color-text)]">{partShortLabel(part).replace(/^./, (letter) => letter.toUpperCase())}</span>
+                    <span className="inline-flex items-center gap-1.5 text-[var(--color-text-soft)]">
+                      <span className={`h-1.5 w-1.5 rounded-full ${granted.has(part.id) ? "bg-[var(--color-text-soft)]" : "ring-1 ring-inset ring-[var(--color-text-muted)]"}`} aria-hidden="true" />
+                      {granted.has(part.id) ? CONNECTIONS_COPY.permissionGranted : CONNECTIONS_COPY.permissionNotGranted}
+                    </span>
+                  </div>
+                  <div className="mt-0.5 font-mono text-xs text-[var(--color-text-muted)]">{part.scopes.map((scope) => scope.name).join(", ")}</div>
+                </li>
+              ))}
+            </ul>
+          </section>
+        ))}
+        <p className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.permissionsHint}</p>
+      </div>
+    </Modal>
+  );
+}
+
+/**
  * The Microsoft 365 group: the tenant line with a Manage menu (permissions,
  * rename, disconnect), then the service rows.
  */
 function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRecord; tenant: TenantRecord }) {
-  const { openSetup } = useSetupFlow();
   const { refreshTenantGrants } = useAppState();
   const tenantCheck = useTenantCheck(tenant.id);
   const [checkResult, setCheckResult] = useState<ReturnType<typeof checkAgainResult> | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
   const [renaming, setRenaming] = useState(false);
+  const [showingPermissions, setShowingPermissions] = useState(false);
   const sample = tenant.kind === "sample";
   const ownRegistration = usesOwnRegistration(tenant);
   const registration = tenantRegistrationSummary(tenant);
@@ -796,7 +845,7 @@ function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRe
               ...(sample
                 ? []
                 : [
-                    { id: "permissions", label: CONNECTIONS_COPY.permissions, onSelect: openSetup },
+                    { id: "permissions", label: CONNECTIONS_COPY.permissions, onSelect: () => setShowingPermissions(true) },
                     { id: "rename", label: CONNECTIONS_COPY.renameOrganization, onSelect: () => setRenaming(true) },
                     { id: "manage-separator", type: "separator" as const },
                   ]),
@@ -820,6 +869,7 @@ function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRe
         tenant={tenant}
         onClose={() => setDisconnecting(false)}
       />
+      <GrantedPermissionsDialog open={showingPermissions} organization={organization} tenant={tenant} onClose={() => setShowingPermissions(false)} />
       <Modal open={renaming} onClose={() => setRenaming(false)} size="md">
         <ModalHeader title={CONNECTIONS_COPY.renameOrganization} onClose={() => setRenaming(false)} />
         <div className="p-6">
