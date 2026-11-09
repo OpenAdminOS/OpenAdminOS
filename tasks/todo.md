@@ -1733,3 +1733,9 @@ Confirms both round 5 findings above. GPT-6.1-Sol round 6 found nothing on 8ee48
 2. [x] A plan or run stored with `tenantId: ""` is treated as no organization: the confirmation lock refuses it with the no-organization copy, the run and apply paths fail closed, and the confirmation page shows the no-organization notice with Apply disabled. Host and renderer tests. (b7592474)
 3. [x] Invoking a connector (Teams team and channel lists) with no organization active uses `NO_MICROSOFT_365_ORGANIZATION("invoking connectors")`. Test. (294bf23a)
 4. [x] An over-long id shared by several records is not remapped: both records are kept under fresh ids and a schedule naming it is left unassigned, as the comment says. Test. (68980fd8)
+
+## PR #174 review round 7 (GPT-6.1-Sol, 2026-11-09)
+
+Reviewed head 06949c7; the Muse round 5 fixes were verified.
+
+1. [x] Blocking: saving the first Teams default team and channel did not refresh the connector list the map and Results read, so both still said nothing is sent to Teams while the host could post there. The picker now reloads the connector list after a successful save; a renderer test saves a default and checks both disclosures (fails without the fix).
