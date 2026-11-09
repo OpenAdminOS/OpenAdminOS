@@ -227,6 +227,40 @@ describe("first-launch model scan", () => {
       }
     });
 
+    it("records provider and model changes from the scan and Chat's model choice in the configuration audit (step 4)", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+      const lmStudio: ProviderSummary = { ...catalog("lm-studio"), status: "connected", models: ["local-model"], defaultModel: "local-model" };
+      const claude: ProviderSummary = { ...catalog("anthropic"), status: "connected", models: [] };
+      const providers = providerCatalog.map((provider) => (provider.id === "lm-studio" ? lmStudio : provider.id === "anthropic" ? claude : { ...provider, status: "not-installed" as const, models: [] }));
+      const statePath = join(dir, "state.json");
+      const store = new AppStateStore({
+        filePath: statePath, userDataPath: dir, statsApiUrl: "",
+        tokenStore: { read: async () => "", write: async () => undefined },
+        providerListFactory: () => providers,
+      });
+      const recorded = async () =>
+        (JSON.parse(await readFile(statePath, "utf8")) as { configurationAudit?: Array<{ type: string; details: Record<string, unknown> }> }).configurationAudit ?? [];
+      try {
+        // The scan selects a ready local model by itself: recorded as not chosen by the admin.
+        await store.getAppState();
+        await store.scanModels();
+        const afterScan = await recorded();
+        const selected = afterScan.find((event) => event.type === "provider.changed");
+        assert.ok(selected, "the scan's selection is recorded");
+        assert.equal(selected.details.chosenByAdmin, false);
+        // The scan's choice and Chat's model choice select a provider and model in one write.
+        await store.completeFirstRunScan();
+        await store.setActiveProviderAndModel("anthropic", "claude-sonnet-5-5");
+        const events = (await recorded()).slice(afterScan.length);
+        assert.deepEqual(events.map((event) => event.type), ["provider.changed", "model.changed"]);
+        assert.deepEqual(events[0]!.details, { providerId: "anthropic", previousProviderId: "lm-studio", chosenByAdmin: true });
+        assert.deepEqual(events[1]!.details, { providerId: "anthropic", model: "claude-sonnet-5-5", previousModel: "provider default" });
+      } finally {
+        store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+
     it("keeps Connect Microsoft 365 pending across a provider setup detour and a restart, until it is left (PR #175 onboarding round review, 4)", async () => {
       const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
       const providers = providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
