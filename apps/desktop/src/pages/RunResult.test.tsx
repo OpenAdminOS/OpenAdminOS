@@ -767,3 +767,29 @@ describe("a plan prepared with no organization (Muse round 4)", () => {
     expect(bridge.confirmRun).not.toHaveBeenCalled();
   });
 });
+
+it("says Run again did not continue when the run page closes before the switch lands (Muse round 4)", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true, tenantId: "tenant-1", finishedAt: "2026-10-31T12:00:00Z" });
+  const { activeTenantId: _none, ...state } = createMockAppState({
+    installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })],
+    runs: [run],
+  });
+  // The switch never lands while the page is open.
+  const bridge = makeMockBridge({ setActiveOrganization: vi.fn(() => new Promise<never>(() => undefined)) }, state);
+  renderWithAppState(
+    <Routes>
+      <Route path="/runs/:id" element={<RunResult />} />
+      <Route path="/runs" element={<div>Runs list</div>} />
+    </Routes>,
+    { route: `/runs/${run.id}`, bridge },
+  );
+  await user.click(await screen.findByRole("button", { name: /Run for real/ }));
+  const dialog = await screen.findByRole("dialog", { name: /This run was in Contoso IT/ });
+  await user.click(within(dialog).getByRole("button", { name: "Switch to Contoso IT" }));
+  await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith("org-tenant-1"));
+  await user.click(screen.getByRole("button", { name: "Runs" }));
+  expect(await screen.findByText("Runs list")).toBeInTheDocument();
+  expect(await screen.findByText(RERUN_COPY.rerunNotContinued)).toBeInTheDocument();
+  expect(bridge.startRun).not.toHaveBeenCalled();
+});

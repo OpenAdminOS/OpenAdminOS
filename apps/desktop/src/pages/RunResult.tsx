@@ -73,27 +73,29 @@ export default function RunResult() {
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams();
+  const { state } = useAppState();
+  const run = state.runs.find((candidate) => candidate.id === id);
+  if (!run) {
+    return <MissingRun onBack={() => navigate(`/runs${location.search}`)} />;
+  }
+  return <RunResultPage key={run.id} run={run} />;
+}
+
+function RunResultPage({ run }: { run: RunRecord }) {
+  const navigate = useNavigate();
+  const location = useLocation();
   const { state, startRun, confirmRun, rejectRun, cancelRun, setActiveOrganization } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const toast = useToast();
   const [crossOrganization, setCrossOrganization] = useState(false);
-  // Set after Switch in the cross-organization dialog; the rerun runs on the
-  // render where that organization is active, with fresh gates.
+  // The organization a Switch in the cross-organization dialog is moving
+  // to; the rerun runs on the render where it is active, with fresh gates.
   const [rerunAfterSwitch, setRerunAfterSwitch] = useState<string | null>(null);
+  const pendingRerunRef = useRef<string | null>(null);
   const proceedRerunRef = useRef<(() => void) | null>(null);
   const activeOrganizationId = activeOrganizationOf(state)?.id;
-  useEffect(() => {
-    if (!rerunAfterSwitch || activeOrganizationId !== rerunAfterSwitch) return;
-    setRerunAfterSwitch(null);
-    proceedRerunRef.current?.();
-  }, [activeOrganizationId, rerunAfterSwitch]);
-  const run = state.runs.find((candidate) => candidate.id === id);
 
   const closeToRuns = () => navigate(`/runs${location.search}`);
-
-  if (!run) {
-    return <MissingRun onBack={closeToRuns} />;
-  }
 
   const agent = state.installedAgents.find(
     (candidate) => candidate.slug === run.agentSlug,
@@ -148,7 +150,25 @@ export default function RunResult() {
   const proceedRerun = () => {
     proceedRerunImpl();
   };
-  proceedRerunRef.current = proceedRerun;
+  // The latest render's rerun, set before the effect below reads it.
+  useEffect(() => {
+    proceedRerunRef.current = proceedRerun;
+  });
+  useEffect(() => {
+    pendingRerunRef.current = rerunAfterSwitch;
+    if (!rerunAfterSwitch || activeOrganizationId !== rerunAfterSwitch) return;
+    pendingRerunRef.current = null;
+    setRerunAfterSwitch(null);
+    proceedRerunRef.current?.();
+  }, [activeOrganizationId, rerunAfterSwitch]);
+  // Leaving the page before the switch lands does not drop the rerun silently.
+  useEffect(
+    () => () => {
+      if (pendingRerunRef.current) toast.info(RERUN_COPY.rerunNotContinued);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const proceedRerunImpl = () => {
     if (requiresTeamReview) {
@@ -243,15 +263,16 @@ export default function RunResult() {
                 // The rerun continues once the switch reaches the app state:
                 // this closure still sees the organization before the switch.
                 const target = runOrganization.id;
-                void setActiveOrganization(target)
-                  .then(() => setRerunAfterSwitch(target))
-                  .catch((caught) =>
-                    toast.error(
-                      ORGANIZATION_COPY.switchFailed(
-                        userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
-                      ),
+                setRerunAfterSwitch(target);
+                void setActiveOrganization(target).catch((caught) => {
+                  pendingRerunRef.current = null;
+                  setRerunAfterSwitch(null);
+                  toast.error(
+                    ORGANIZATION_COPY.switchFailed(
+                      userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
                     ),
                   );
+                });
               }}
             >
               {RERUN_COPY.switchTo(runOrganization.name)}
