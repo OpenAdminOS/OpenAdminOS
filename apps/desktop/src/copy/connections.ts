@@ -66,6 +66,10 @@ export const CONNECTIONS_COPY = {
     noReferences: "Nowhere, no public reference is on",
     reports: "Run reports, by delivery rule or agent step",
     noReports: "Nowhere, no rule or step uses a connector that is set up",
+    reportsLoading: "Checking result connectors",
+    reportsLoadingSentence: "Where run reports go is being checked.",
+    reportsFailed: "Result connectors could not be checked",
+    reportsFailedSentence: "Where run reports go could not be checked. Open Results go to below and try again.",
     prompts: "Prompts and tenant data",
     /** With no organization nothing from a tenant is read, so only prompts leave. */
     promptsNoOrganization: "Prompts and agent context",

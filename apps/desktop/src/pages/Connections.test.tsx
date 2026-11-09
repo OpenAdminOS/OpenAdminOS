@@ -454,3 +454,33 @@ describe("hosted reach copy with no organization (Muse round 2)", () => {
     expect(description).not.toContain("No tenant data is included");
   });
 });
+
+describe("report destinations while connectors load (Muse round 2)", () => {
+  it("says the destinations are being checked until the connector list resolves", async () => {
+    let resolve!: (value: ConnectorSummary[]) => void;
+    const pending = new Promise<ConnectorSummary[]>((done) => (resolve = done));
+    const state = createMockAppState({ installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })] });
+    render(state, { listConnectors: vi.fn(() => pending) });
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(within(map).getByText(CONNECTIONS_COPY.map.reportsLoading)).toBeInTheDocument();
+    expect(map).toHaveAccessibleDescription(new RegExp(CONNECTIONS_COPY.map.reportsLoadingSentence));
+    expect(map).not.toHaveAccessibleDescription(/Run reports and agent messages go nowhere/);
+    resolve([connector("teams", "Microsoft Teams")]);
+    await waitFor(() => expect(within(map).getByText("Microsoft Teams")).toBeInTheDocument());
+    expect(within(map).queryByText(CONNECTIONS_COPY.map.reportsLoading)).not.toBeInTheDocument();
+  });
+
+  it("says the destinations could not be checked when the connector list fails", async () => {
+    const state = createMockAppState({ installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })] });
+    render(state, { listConnectors: vi.fn(async () => { throw new Error("The connector list could not be read."); }) });
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    await waitFor(() => expect(within(map).getByText(CONNECTIONS_COPY.map.reportsFailed)).toBeInTheDocument());
+    expect(map).not.toHaveAccessibleDescription(/Run reports and agent messages go nowhere/);
+  });
+
+  it("reports nowhere only once the list is known", () => {
+    const state = createMockAppState({ installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })] });
+    expect(buildReachModel(state).reportDestinations).toBeNull();
+    expect(buildReachModel(state, []).reportDestinations).toEqual([]);
+  });
+});

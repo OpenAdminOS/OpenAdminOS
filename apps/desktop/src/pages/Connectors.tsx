@@ -87,8 +87,11 @@ export function ConnectorsSettingsSection({
 }: {
   connectorId?: string | null;
   onConnectorChange?: (connectorId: string | null) => void;
-  /** Receives every loaded connector list, so Connections draws its map from the same list. */
-  onConnectorsLoaded?: (connectors: ConnectorSummary[]) => void;
+  /**
+   * Receives every loaded connector list, so Connections draws its map from
+   * the same list; null when the list could not be loaded.
+   */
+  onConnectorsLoaded?: (connectors: ConnectorSummary[] | null) => void;
 }) {
   const [connectors, setConnectors] = useState<ConnectorSummary[] | undefined>(
     undefined,
@@ -112,6 +115,7 @@ export function ConnectorsSettingsSection({
       onConnectorsLoaded?.(summaries);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      onConnectorsLoaded?.(null);
     }
   }, [onConnectorsLoaded]);
 

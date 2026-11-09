@@ -67,10 +67,12 @@ export interface ReachModel {
   services: ReachService[];
   model: { kind: "none" | "local" | "hosted" | "sample"; name: string; providerName?: string; channel?: string };
   referenceHosts: string[];
-  reportDestinations: string[];
+  /** null while the connector list loads or when it could not be loaded. */
+  reportDestinations: string[] | null;
+  reportDestinationsState: "ready" | "loading" | "failed";
 }
 
-export function buildReachModel(state: AppState, connectors?: readonly ConnectorSummary[]): ReachModel {
+export function buildReachModel(state: AppState, connectors?: readonly ConnectorSummary[] | null): ReachModel {
   const organization = activeOrganizationOf(state);
   const tenant = organization
     ? state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId)
@@ -108,7 +110,10 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     model,
     // Pilot Chat never calls a model or a tool.
     referenceHosts: sample ? [] : chatToolHosts(state),
-    reportDestinations: sample ? [] : reportDestinations(resultDestinations(state.installedAgents, connectors)),
+    // Until the connector list resolves, nothing is known about where
+    // reports go; the map says so instead of saying nowhere.
+    reportDestinations: sample ? [] : connectors ? reportDestinations(resultDestinations(state.installedAgents, connectors)) : null,
+    reportDestinationsState: sample || connectors ? "ready" : connectors === null ? "failed" : "loading",
   };
 }
 
@@ -147,9 +152,13 @@ export function reachDescription(model: ReachModel): string {
   const words = model.referenceHosts.length > 0
     ? `Words from questions go to ${listText(model.referenceHosts)}.`
     : "Words from questions go nowhere: no public reference is on.";
-  const reports = model.reportDestinations.length > 0
-    ? `Run reports and agent messages go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
-    : "Run reports and agent messages go nowhere: no rule or step uses a connector that is set up.";
+  const reports = model.reportDestinations === null
+    ? model.reportDestinationsState === "failed"
+      ? CONNECTIONS_COPY.map.reportsFailedSentence
+      : CONNECTIONS_COPY.map.reportsLoadingSentence
+    : model.reportDestinations.length > 0
+      ? `Run reports and agent messages go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
+      : "Run reports and agent messages go nowhere: no rule or step uses a connector that is set up.";
   return `${services} ${device} ${words} ${reports}`;
 }
 
@@ -201,7 +210,13 @@ function ReachMap({ model }: { model: ReachModel }) {
         </ul>
         <h4>{CONNECTIONS_COPY.map.reports}</h4>
         <ul className="reach-items">
-          {model.reportDestinations.length === 0 ? (
+          {model.reportDestinations === null ? (
+            <li className="reach-item" data-off="true" aria-busy={model.reportDestinationsState === "loading"}>
+              <span className="reach-item-text">
+                {model.reportDestinationsState === "failed" ? CONNECTIONS_COPY.map.reportsFailed : CONNECTIONS_COPY.map.reportsLoading}
+              </span>
+            </li>
+          ) : model.reportDestinations.length === 0 ? (
             <li className="reach-item" data-off="true"><span className="reach-item-text">{CONNECTIONS_COPY.map.noReports}</span></li>
           ) : (
             model.reportDestinations.map((name) => (
@@ -804,9 +819,10 @@ export default function Connections() {
   const { state, loading, removeSavedAppRegistration } = useAppState();
   const { openSetup } = useSetupFlow();
   // The Results section loads the connector list; the map uses the same one.
-  const [connectors, setConnectors] = useState<ConnectorSummary[] | undefined>(undefined);
+  // undefined while loading, null when the list could not be loaded.
+  const [connectors, setConnectors] = useState<ConnectorSummary[] | null | undefined>(undefined);
   const reach = useMemo(() => buildReachModel(state, connectors), [connectors, state]);
-  const destinations = useMemo(() => resultDestinations(state.installedAgents, connectors), [connectors, state.installedAgents]);
+  const destinations = useMemo(() => resultDestinations(state.installedAgents, connectors ?? undefined), [connectors, state.installedAgents]);
   const organization = activeOrganizationOf(state);
   const tenant = organization
     ? state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId)
@@ -902,7 +918,7 @@ export default function Connections() {
               </p>
             ) : (
               <>
-                <ResultDestinationsSummary destinations={destinations} loaded={connectors !== undefined} />
+                <ResultDestinationsSummary destinations={destinations} loaded={Boolean(connectors)} />
                 <ConnectorsSettingsSection
                   connectorId={searchParams.get("connector")}
                   onConnectorChange={updateConnectorRoute}
