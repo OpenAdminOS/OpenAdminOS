@@ -163,7 +163,8 @@ export function diffConfigurationAudit(
           ...(tenant.kind === "sample" ? {} : { account: tenant.username }),
           registration: tenant.kind === "sample" ? "sample" : tenant.appRegistration?.kind ?? "openadminos",
           reconnected,
-          grantedScopeCount: tenant.grantedScopes?.length ?? 0,
+          // Counted by the runtime's rule: no recorded grants means the default read scopes.
+          grantedScopeCount: grantedScopeNames(tenant).size,
           ...sample,
         },
       });

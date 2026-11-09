@@ -578,3 +578,18 @@ describe("Azure OpenAI key audit per operation (design round review 2)", () => {
     }
   });
 });
+
+it("counts a legacy reconnect's grants by the runtime's rule (design round review 2, Muse F)", async () => {
+  const { diffConfigurationAudit } = await import("./configuration-audit.js");
+  const { DEFAULT_GRAPH_READ_SCOPE_NAMES } = await import("@openadminos/agent-sdk");
+  const before = { ...contoso, connectionId: "first", grantedScopes: undefined } as unknown as import("@openadminos/agent-sdk").TenantRecord;
+  const after = { ...contoso, connectionId: "second", grantedScopes: undefined } as unknown as import("@openadminos/agent-sdk").TenantRecord;
+  const events = diffConfigurationAudit(
+    { activeProviderId: "ollama", tenants: [before], installedAgents: [] },
+    { activeProviderId: "ollama", tenants: [after], installedAgents: [] },
+    { timestamp: NOW, newId: () => "e1", publicReferenceName: () => undefined },
+  );
+  const connected = events.find((event) => event.type === "microsoft365.connected");
+  assert.equal(connected?.details.reconnected, true);
+  assert.equal(connected?.details.grantedScopeCount, DEFAULT_GRAPH_READ_SCOPE_NAMES.length);
+});
