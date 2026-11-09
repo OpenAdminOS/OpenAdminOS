@@ -2418,6 +2418,7 @@ export class AppStateStore {
       organizationId: binding.organization.id,
       kind: request.kind,
       region: binding.record.region,
+      connectedAt: binding.record.connectedAt,
       plan,
     });
   }
@@ -2442,6 +2443,12 @@ export class AppStateStore {
     }
     if (binding.record.region !== run.splashtop.region) {
       throw new Error("Splashtop was connected again in another region after this plan was prepared. Nothing was sent; prepare the change again.");
+    }
+    // Binds every action, also end-session ones whose path names no team,
+    // to the connection the plan was read through. A reconnect, to the
+    // same team or another one in the same region, is refused.
+    if (!run.splashtop.connectedAt || binding.record.connectedAt !== run.splashtop.connectedAt) {
+      throw new Error("Splashtop was connected again after this plan was prepared. Nothing was sent; prepare the change again.");
     }
     const teamId = binding.record.teamId;
     return {

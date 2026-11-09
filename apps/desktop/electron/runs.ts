@@ -771,6 +771,8 @@ export class RunService {
     organizationId: string;
     kind: NonNullable<RunRecord["splashtop"]>["kind"];
     region: NonNullable<RunRecord["splashtop"]>["region"];
+    /** The connection the plan was read through; apply refuses any other. */
+    connectedAt: string;
     plan: NonNullable<RunRecord["plan"]>;
   }): Promise<RunRecord> {
     if (input.plan.actions.length === 0) throw new Error("A Splashtop change needs at least one target.");
@@ -779,7 +781,7 @@ export class RunService {
       id: `run_${randomUUID()}`,
       agentSlug: "splashtop-change",
       origin: "splashtop-change",
-      splashtop: { organizationId: input.organizationId, kind: input.kind, region: input.region },
+      splashtop: { organizationId: input.organizationId, kind: input.kind, region: input.region, connectedAt: input.connectedAt },
       status: "awaiting-confirmation",
       queuedAt,
       trigger: "manual",
