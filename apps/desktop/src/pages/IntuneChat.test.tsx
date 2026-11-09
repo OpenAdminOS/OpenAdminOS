@@ -298,6 +298,27 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(screen.queryByRole("button", { name: /sample data/i })).toBeNull();
   });
 
+  it("offers LM Studio without a loaded model as a recovery, and checks providers again in place (PR #175 onboarding round review, 3)", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) =>
+      provider.id === "lm-studio"
+        ? { ...provider, status: "connected" as const, installed: true, models: [] }
+        : provider.isLocal
+          ? { ...provider, status: "not-installed" as const, installed: false, models: [] }
+          : { ...provider, status: "not-installed" as const },
+    );
+    const refreshProviders = vi.fn(async () => undefined);
+    const bridge = makeMockBridge({ refreshProviders }, guestState({ providers, activeProviderId: "lm-studio" }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    const row = await screen.findByRole("radio", { name: /^LM Studio/ });
+    expect(row.closest("label")).toHaveTextContent("No model yet");
+    expect(row.closest("label")).toHaveTextContent("Load a model in LM Studio, then scan again.");
+    await user.click(row);
+    await user.click(screen.getByRole("button", { name: "Scan again" }));
+    await waitFor(() => expect(refreshProviders).toHaveBeenCalledOnce());
+  });
+
   it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {
     const user = userEvent.setup();
     const base = createMockAppState();

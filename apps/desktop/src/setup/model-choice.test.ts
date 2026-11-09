@@ -65,4 +65,18 @@ describe("the choice of what answers in Chat (design round, B)", () => {
       expect(option.whereLine).toMatch(/^Prompts (go to|leave this device through) /);
     }
   });
+
+  it("never offers a running runtime without a model as ready, and gives it the scan's recovery (PR #175 onboarding round review, 3)", () => {
+    const base = mockProviders.filter((provider) => provider.id === "ollama" || provider.id === "lm-studio");
+    const running = (id: ProviderId, models: string[]): ProviderSummary => ({ ...base.find((provider) => provider.id === id)!, status: "connected", installed: true, models });
+    const options = optionsFromProviders([running("ollama", []), running("lm-studio", [])]);
+    expect(options.map((option) => [option.providerId, option.state, option.action])).toEqual([
+      ["ollama", "No model yet", "get-model"],
+      ["lm-studio", "No model yet", "rescan"],
+    ]);
+    expect(options[1]!.whereLine).toBe("On this device. Load a model in LM Studio, then scan again.");
+    expect(actionLabel(options[1], undefined, "chat")).toBe("Scan again");
+    // The same rows the send path accepts: a loaded model makes it ready.
+    expect(optionsFromProviders([running("lm-studio", ["qwen3-8b"])])[0]).toMatchObject({ action: "open", state: "Ready", model: "qwen3-8b" });
+  });
 });

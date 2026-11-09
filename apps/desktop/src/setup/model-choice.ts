@@ -1,5 +1,6 @@
 import { MODEL_CHOICE_COPY, PROVIDER_TOOL_NAMES, promptsGoTo } from "../copy";
 import type { ModelScanOutcome, ModelScanProbe, ProviderId, ProviderSummary } from "../shared/openAdminOS";
+import { isProviderReady } from "../shared/provider-detection";
 
 /**
  * The one choice of what answers in Chat (mockup 32, section B), shared by
@@ -120,11 +121,17 @@ export function optionsFromProviders(providers: readonly ProviderSummary[]): Cho
   const options: ChoiceOption[] = [];
   for (const provider of providers) {
     const name = toolName(provider.id, provider.name);
-    const ready = provider.status === "connected" || (provider.id === "azure-openai" && provider.status === "available");
+    // The same readiness the send path uses: a runtime without a model it can answer with is not ready.
+    const ready = isProviderReady(provider);
     if (provider.isLocal) {
       if (ready) {
         const model = provider.defaultModel ?? provider.models[0];
         options.push({ providerId: provider.id, name, where: "local", whereLine: MODEL_CHOICE_COPY.localReady(modelDisplayName(model)), state: MODEL_CHOICE_COPY.ready, action: "open", ...(model ? { model } : {}) });
+      } else if (provider.status === "connected" && provider.id === "lm-studio") {
+        // Running without a loaded model: the scan's recovery.
+        options.push({ providerId: "lm-studio", name, where: "local", whereLine: MODEL_CHOICE_COPY.localLoadModel, state: MODEL_CHOICE_COPY.noModel, action: "rescan" });
+      } else if (provider.status === "connected" && provider.id === "ollama") {
+        options.push({ providerId: "ollama", name, where: "local", whereLine: MODEL_CHOICE_COPY.localGetModel, state: MODEL_CHOICE_COPY.noModel, action: "get-model" });
       } else if (provider.installed && (provider.id === "ollama" || provider.id === "lm-studio")) {
         options.push({ providerId: provider.id, name, where: "local", whereLine: MODEL_CHOICE_COPY.localStart(provider.id), state: MODEL_CHOICE_COPY.notRunning, action: "start" });
       } else if (provider.id === "ollama") {

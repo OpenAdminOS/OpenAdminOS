@@ -23,6 +23,7 @@ import {
 import { actionLabel, actionNote, optionsFromProviders, preselect, type ChoiceOption } from "../../setup/model-choice";
 import { ModelChoiceList } from "../ModelChoiceList";
 import { useSetupFlow } from "../../setup/SetupFlowContext";
+import { useAppState } from "../../state";
 import { McpServerDialog } from "../marketplace/McpServerDialog";
 import { ServiceAccessDialog } from "../ServiceAccess";
 import { ServiceMark } from "../ServiceMark";
@@ -45,6 +46,7 @@ export function ModelChoice({
   onSelectProvider: (id: ProviderId) => Promise<void>;
 }) {
   const navigate = useNavigate();
+  const { refresh } = useAppState();
   const options = optionsFromProviders(providers);
   const [selected, setSelected] = useState<ProviderId | null>(null);
   const [working, setWorking] = useState<ProviderId | null>(null);
@@ -55,8 +57,19 @@ export function ModelChoice({
 
   const act = async (option: ChoiceOption) => {
     if (working) return;
-    if (option.action === "get-model" || option.action === "rescan") {
+    if (option.action === "get-model") {
       navigate("/settings/providers");
+      return;
+    }
+    if (option.action === "rescan") {
+      // LM Studio runs without a loaded model: check the providers again once one is loaded.
+      setWorking(option.providerId);
+      try {
+        await window.openAdminOS?.refreshProviders?.();
+        await refresh();
+      } finally {
+        setWorking(null);
+      }
       return;
     }
     setWorking(option.providerId);
