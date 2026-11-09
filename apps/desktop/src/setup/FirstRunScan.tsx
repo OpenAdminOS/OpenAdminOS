@@ -11,12 +11,14 @@ import {
 import { useLocation, useNavigate } from "react-router";
 
 import { Button } from "../components/Button";
+import { ModelChoiceList } from "../components/ModelChoiceList";
 import { IconLogo } from "../components/icons";
-import { MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocation } from "../copy";
+import { MODEL_SCAN_COPY, deriveToolHostsCopy } from "../copy";
 import { chatToolHosts } from "../state/data-boundary";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { useSetupFlow } from "./SetupFlowContext";
+import { actionLabel, actionNote, modelDisplayName, optionsFromProbes, preselect, type ChoiceOption } from "./model-choice";
 
 /**
  * The first-launch model scan (SPEC.md 4a, first launch): a full-window
@@ -89,17 +91,17 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
 }
 
 /**
- * The scan as one orchestrated sequence: the device tile springs in, rings
- * radiate while every check runs, nodes appear and resolve one by one, and
- * at the settle the result hero slides in. Skippable; reduced motion shows
- * the settled state. Timings are minimums: a slow check resolves when it
- * answers.
+ * The scan as one orchestrated sequence of about 2.4 seconds: the device
+ * tile springs in, two rings radiate and a sweep turns while every check
+ * runs, nodes appear and resolve one by one, and at the settle the choice
+ * rises in. Skippable; reduced motion shows the end state. Timings are
+ * minimums: a slow check resolves when it answers.
  */
-const NODE_APPEAR_MS = 300;
-const NODE_APPEAR_STEP_MS = 70;
-const REVEAL_BASE_MS = 900;
-const REVEAL_STEP_MS = 170;
-const SETTLE_AFTER_MS = 450;
+const NODE_APPEAR_MS = 240;
+const NODE_APPEAR_STEP_MS = 60;
+const REVEAL_BASE_MS = 760;
+const REVEAL_STEP_MS = 160;
+const SETTLE_AFTER_MS = 300;
 
 function prefersReducedMotion(): boolean {
   try {
@@ -123,46 +125,21 @@ const INITIALS: Partial<Record<ProviderId, string>> = {
   "azure-openai": "Az",
 };
 
-type NodeTone = "checking" | "ready" | "installed" | "muted" | "warning" | "starting";
+type NodeTone = "checking" | "ready" | "installed" | "muted" | "unknown" | "starting";
 
 function toneOf(probe: ModelScanProbe, starting: boolean): NodeTone {
   if (starting) return "starting";
   if (probe.state === "checking") return "checking";
-  if (probe.state === "could-not-check") return "warning";
+  if (probe.state === "could-not-check") return "unknown";
   if (probe.state === "not-found") return "muted";
   return probe.ready ? "ready" : "installed";
 }
 
-function modelName(model: string | undefined): string | undefined {
-  if (!model) return undefined;
-  return /(^|\/)openadmin-8b(:|$)/.test(model) ? "OpenAdmin 8B" : model;
-}
-
-type Recommendation =
-  | { kind: "local"; providerId: ProviderId; title: string; runtime: string }
-  | { kind: "switch"; providerId: ProviderId; model?: string; title: string; runtime: string; selectedProviderId: ProviderId }
-  | { kind: "hosted"; providerId: ProviderId; title: string; others: ProviderId[]; startable?: ModelScanProbe }
-  | { kind: "start"; probe: ModelScanProbe }
-  | { kind: "nothing" };
-
-/** The one choice the result leads with, under the provider rules. */
-export function recommend(outcome: ModelScanOutcome, rows: readonly ModelScanProbe[]): Recommendation {
-  const startable = rows.find((probe) => (probe.providerId === "ollama" || probe.providerId === "lm-studio") && probe.state === "found" && !probe.ready && probe.summary === "Installed, not running");
-  if (outcome.kind === "local-selected" || outcome.kind === "local-ready") {
-    const runtime = rows.find((probe) => probe.providerId === outcome.providerId)?.name ?? outcome.providerId;
-    return { kind: "local", providerId: outcome.providerId, title: modelName(outcome.model) ?? runtime, runtime };
-  }
-  if (outcome.kind === "local-available") {
-    const runtime = rows.find((probe) => probe.providerId === outcome.providerId)?.name ?? outcome.providerId;
-    return { kind: "switch", providerId: outcome.providerId, ...(outcome.model ? { model: outcome.model } : {}), title: modelName(outcome.model) ?? runtime, runtime, selectedProviderId: outcome.selectedProviderId };
-  }
-  if (outcome.kind === "hosted-detected") {
-    const [first, ...others] = outcome.providerIds;
-    const title = rows.find((probe) => probe.providerId === first)?.name ?? first!;
-    return { kind: "hosted", providerId: first!, title, others, ...(startable ? { startable } : {}) };
-  }
-  if (startable) return { kind: "start", probe: startable };
-  return { kind: "nothing" };
+/** The status under a node and in the check list: short, in the scan's words. */
+function statusOf(probe: ModelScanProbe, starting: boolean): string {
+  if (starting) return MODEL_SCAN_COPY.startingShort;
+  if (probe.state === "checking") return MODEL_SCAN_COPY.checking;
+  return probe.summary;
 }
 
 export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onClose: () => void }) {
@@ -179,12 +156,13 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   const [skipped, setSkipped] = useState(reduced);
   const [scanError, setScanError] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  // A failed Start is shown beside its own runtime, so a secondary runtime's failure is never lost.
-  const [startErrors, setStartErrors] = useState<Record<string, string>>({});
+  // A failed Start is written under its own row, so a secondary runtime's failure is never lost.
+  const [startErrors, setStartErrors] = useState<Partial<Record<ProviderId, string>>>({});
   const [retrying, setRetrying] = useState<ProviderId | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   // Any action or Retry in progress: every exit and every other action waits for it.
   const activity: string | null = busy ?? (retrying ? `retry:${retrying}` : null);
+  const [selected, setSelected] = useState<ProviderId | null>(null);
   // Scan, Retry and Start results carry a host generation; an older one never overwrites a newer one.
   const latestGeneration = useRef(0);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -216,6 +194,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     setScanError(null);
     setStartErrors({});
     setActionError(null);
+    setSelected(null);
     pending.current = [];
     const elapsed = () => performance.now() - started;
     const reveal = (probe: ModelScanProbe) => {
@@ -307,14 +286,19 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     return () => window.removeEventListener("keydown", onKey);
   }, [settled, skip]);
 
+  const options = useMemo(() => (settled && result ? optionsFromProbes(rows, result.outcome) : []), [settled, result, rows]);
+  // The choice opens on the first model on this device, in the same frame as
+  // the result; the admin's own pick stays while a later result still offers it.
+  const picked = selected && options.some((option) => option.providerId === selected && !option.unavailable) ? selected : preselect(options);
+  const chosen = options.find((option) => option.providerId === picked);
+
   // Announced once per scan, when it settles; a retry or a start announces its own result.
   const announcedResult = useRef<ModelScanResult | null>(null);
   useEffect(() => {
     if (!settled || !result || announcedResult.current === result) return;
     announcedResult.current = result;
-    const pick = recommend(result.outcome, rows);
-    setAnnouncement(MODEL_SCAN_COPY.finishedAnnouncement(heroTitle(pick)));
-  }, [settled, result, rows]);
+    setAnnouncement(MODEL_SCAN_COPY.finishedAnnouncement(resultTitle(result.outcome, options, chosen)));
+  }, [settled, result, options, chosen]);
 
   /** Applies a Retry or Start rescan unless a newer result is already shown. */
   const applyScan = (scan: ModelScanResult): boolean => {
@@ -328,13 +312,16 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     return true;
   };
 
+  // Set while the window is leaving: no second exit, Start or switch runs meanwhile.
+  const finishing = useRef(false);
+
   const retry = async (providerId: ProviderId) => {
     if (!api?.retryModelScanProbe || finishing.current || activity !== null) return;
     const current = rows.find((probe) => probe.providerId === providerId);
     if (!current) return;
     setRetrying(providerId);
     try {
-      // The retry returns the whole scan, so a check that now succeeds changes what the result leads with.
+      // The retry returns the whole scan, so a check that now succeeds changes what the result offers.
       const scan = await api.retryModelScanProbe(providerId);
       if (applyScan(scan)) {
         const probe = scan.probes.find((entry) => entry.providerId === providerId);
@@ -351,38 +338,9 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     }
   };
 
-  const start = async (probe: ModelScanProbe) => {
-    if (!api?.startLocalRuntime || finishing.current || activity !== null) return;
-    setBusy(`start:${probe.providerId}`);
-    setStartErrors(({ [probe.providerId]: _cleared, ...others }) => others);
-    setAnnouncement(MODEL_SCAN_COPY.starting(probe.name));
-    try {
-      const outcome = await api.startLocalRuntime(probe.providerId);
-      if (outcome.started) {
-        // The start announces its own result, not the settled scan again.
-        if (outcome.scan) applyScan(outcome.scan);
-        setAnnouncement(MODEL_SCAN_COPY.started(probe.name));
-      } else {
-        const message = outcome.message ?? MODEL_SCAN_COPY.startFailed(probe.name);
-        setStartErrors((all) => ({ ...all, [probe.providerId]: message }));
-        setAnnouncement(message);
-      }
-      await refresh();
-    } catch (caught) {
-      const message = caught instanceof Error ? caught.message : String(caught);
-      setStartErrors((all) => ({ ...all, [probe.providerId]: message }));
-      setAnnouncement(message);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  // Set while the window is leaving: no second exit, Start or switch runs meanwhile.
-  const finishing = useRef(false);
-
-  // `busy` here is the value when the action began: an exit pressed while a
+  // `activity` here is the value when the action began: an exit pressed while a
   // Start or another action runs is refused, so a Start's later scan never
-  // lands after the window left. Hosted and local switches call it from the
+  // lands after the window left. The choice's own actions call it from the
   // render in which they started, where it is still null.
   const finish = async (to: string | null) => {
     if (finishing.current || activity !== null) return;
@@ -401,34 +359,77 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     }
   };
 
-  const useHosted = async (providerId: ProviderId) => {
+  /** Selects a provider (and its model, in one validated write), then opens Chat. */
+  const select = async (providerId: ProviderId, model: string | undefined) => {
+    if (model && api?.setActiveProviderAndModel) await api.setActiveProviderAndModel(providerId, model);
+    else await setActiveProvider(providerId);
+  };
+
+  const act = async (option: ChoiceOption) => {
     if (finishing.current || activity !== null) return;
-    setBusy(providerId);
+    if (option.action === "get-model") return finish("/settings/providers");
+    if (option.action === "rescan") return setRun((value) => value + 1);
+    if (option.action === "start") return start(option);
+    setBusy(option.providerId);
     setActionError(null);
     try {
-      await setActiveProvider(providerId);
+      if (option.action === "use" || option.providerId !== state.activeProviderId) await select(option.providerId, option.model);
       await finish("/chat");
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : String(caught));
+      setStartErrors((all) => ({ ...all, [option.providerId]: caught instanceof Error ? caught.message : String(caught) }));
     } finally {
       setBusy(null);
     }
   };
 
-  // An explicit switch to a local model the admin did not choose before.
-  const switchLocal = async (providerId: ProviderId, model?: string) => {
-    if (finishing.current || activity !== null) return;
-    setBusy(providerId);
-    setActionError(null);
+  /** Starts a runtime, and opens Chat with it once it answers with a model. */
+  const start = async (option: ChoiceOption) => {
+    if (!api?.startLocalRuntime) return;
+    setBusy(`start:${option.providerId}`);
+    setStartErrors(({ [option.providerId]: _cleared, ...others }) => others);
+    setAnnouncement(MODEL_SCAN_COPY.starting(option.name));
     try {
-      // Provider and model in one validated write, so a failed model never leaves a half switch.
-      if (model && api?.setActiveProviderAndModel) await api.setActiveProviderAndModel(providerId, model);
-      else await setActiveProvider(providerId);
-      await finish("/chat");
+      const outcome = await api.startLocalRuntime(option.providerId);
+      if (!outcome.started) {
+        const message = outcome.message ?? MODEL_SCAN_COPY.startFailed(option.name);
+        setStartErrors((all) => ({ ...all, [option.providerId]: message }));
+        setAnnouncement(message);
+        await refresh();
+        return;
+      }
+      setAnnouncement(MODEL_SCAN_COPY.started(option.name));
+      if (outcome.scan) applyScan(outcome.scan);
+      const now = outcome.scan ? optionsFromProbes(outcome.scan.probes, outcome.scan.outcome).find((entry) => entry.providerId === option.providerId) : undefined;
+      if (now?.action === "open") {
+        // It answers with a model: select it and open Chat, as the button said.
+        await select(option.providerId, now.model);
+        finishing.current = false;
+        setBusy(null);
+        await finishFrom(true);
+        return;
+      }
+      await refresh();
     } catch (caught) {
-      setActionError(caught instanceof Error ? caught.message : String(caught));
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setStartErrors((all) => ({ ...all, [option.providerId]: message }));
+      setAnnouncement(message);
     } finally {
-      setBusy(null);
+      setBusy((current) => (current === `start:${option.providerId}` ? null : current));
+    }
+  };
+
+  /** Leaves for Chat from inside an action that already holds the lock. */
+  const finishFrom = async (fromAction: boolean) => {
+    if (!fromAction) return;
+    finishing.current = true;
+    try {
+      if (firstRun) await api?.completeFirstRunScan?.();
+      await refresh();
+      onClose();
+      navigate("/chat");
+    } catch (caught) {
+      finishing.current = false;
+      setActionError(caught instanceof Error ? caught.message : String(caught));
     }
   };
 
@@ -454,18 +455,20 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   // A refused off-device endpoint ran nothing; the closing line names it as not contacted.
   const targets = [...new Set(rows.filter((probe) => !probe.notContacted).map((probe) => probe.target))];
   const notContacted = [...new Set(rows.filter((probe) => probe.notContacted).map((probe) => probe.target))];
-  const pick = settled && result ? recommend(result.outcome, rows) : null;
-  const startingId = busy?.startsWith("start:") ? busy.slice(6) : null;
+  const startingId = busy?.startsWith("start:") ? (busy.slice(6) as ProviderId) : null;
   // The local data line follows the existing trust copy: with a public
   // reference enabled, question words leave the device for its host.
   const referenceHosts = chatToolHosts(state);
   const localLine = referenceHosts.length > 0 ? MODEL_SCAN_COPY.localWithReferences(deriveToolHostsCopy(referenceHosts)!.strip) : MODEL_SCAN_COPY.nothingLeaves;
+  const found = rows.filter((probe) => probe.state === "found").length;
 
   // Focus the heading when the screen opens and when the result settles, so
   // keyboard and screen reader users start from it.
   useEffect(() => {
     headingRef.current?.focus();
   }, [settled]);
+
+  const showResult = settled && result && !scanError;
 
   return (
     <div
@@ -478,57 +481,61 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
         style={platform === "windows" ? { paddingRight: 140 } : undefined}
       >
         <IconLogo size={21} className="text-[var(--color-text)]" />
-        <span className="font-semibold tracking-[-0.01em]">OpenAdminOS</span>
+        <span className="font-serif text-md font-medium">OpenAdminOS</span>
         <span className="flex-1" />
         {!settled && !scanError ? (
-          <button type="button" onClick={skip} className="app-region-no-drag rounded-md px-2 py-1 text-sm text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
+          <Button size="sm" variant="ghost" className="app-region-no-drag" onClick={skip}>
             {MODEL_SCAN_COPY.skip}
-          </button>
+          </Button>
         ) : null}
       </header>
       <main id="main-content" aria-labelledby="model-scan-heading" className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto grid min-h-full w-full max-w-[1180px] grid-cols-1 items-start gap-x-12 gap-y-6 px-6 pb-10 pt-6 min-[900px]:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] min-[900px]:px-10">
-          <ScanStage rows={rows} visible={visible} settled={settled} startingId={startingId} onSkip={skip} />
+        <div className="scan-grid mx-auto grid min-h-full w-full max-w-[1180px] grid-cols-1 items-center gap-x-8 gap-y-6 px-6 py-6 min-[860px]:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] min-[860px]:px-12 min-[1000px]:gap-x-12">
+          <ScanStage
+            rows={rows}
+            visible={visible}
+            settled={settled}
+            startingId={startingId}
+            selected={showResult ? picked : null}
+            selectable={showResult ? options.filter((option) => !option.unavailable).map((option) => option.providerId) : []}
+            onSelect={(id) => activity === null && setSelected(id)}
+            onSkip={skip}
+          />
 
-          <section className="min-w-0 self-center" aria-labelledby="model-scan-heading">
-            {pick ? (
-              <ScanHero
-                key={`${pick.kind}:${result?.finishedAt ?? ""}`}
-                pick={pick}
-                rows={rows}
-                busy={activity}
-                startErrors={startErrors}
+          <section className="w-full min-w-0 max-w-[440px] justify-self-center min-[860px]:justify-self-start" aria-labelledby="model-scan-heading">
+            {showResult ? (
+              <ScanResult
+                key={result.finishedAt}
+                result={result}
+                options={options}
+                chosen={chosen}
+                selected={picked}
+                found={found}
+                total={rows.length}
+                activity={activity}
+                startingId={startingId}
+                retrying={retrying}
+                errors={startErrors}
                 localLine={localLine}
+                activeProviderId={state.activeProviderId}
                 headingRef={headingRef}
-                onUseHosted={(id) => void useHosted(id)}
-                onSwitchLocal={(id, model) => void switchLocal(id, model)}
-                onOpenChat={() => void finish("/chat")}
-                onSetUp={() => void finish("/settings/providers")}
-                onStart={(probe) => void start(probe)}
+                onSelect={setSelected}
+                onRetry={(id) => void retry(id)}
+                onAct={(option) => void act(option)}
+                onShowProviders={() => void finish("/settings/providers")}
               />
             ) : (
               <div>
-                <h1 id="model-scan-heading" ref={headingRef} tabIndex={-1} className="font-serif text-[2.75rem] font-medium leading-[1.05] tracking-[-0.022em] focus:outline-none">
+                <h1 id="model-scan-heading" ref={headingRef} tabIndex={-1} className="font-serif text-display font-medium focus:outline-none">
                   {MODEL_SCAN_COPY.title}
                 </h1>
-                <p className="mt-4 max-w-[42ch] text-md leading-6 text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.subtitle}</p>
-                <p className="mt-7 font-serif text-[1.65rem] tabular-nums leading-none text-[var(--color-text)]" aria-hidden="true">
-                  {MODEL_SCAN_COPY.progress(resolved, rows.length)}
-                </p>
-                {!scanError ? (
-                  // A scan that stalls before its checks can still be left; nothing is selected.
-                  <p className="mt-6 text-sm">
-                    <button type="button" disabled={activity !== null} onClick={() => void finish("/chat")} className={linkClass}>
-                      {MODEL_SCAN_COPY.continueToChat}
-                    </button>
-                  </p>
-                ) : null}
+                <p className="mt-3 text-base text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.subtitle}</p>
                 {scanError ? (
-                  <div role="alert" className="mt-8 max-w-[44ch] rounded-xl bg-[var(--color-warning-soft)] p-4 text-sm leading-5 text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-                    <p className="font-medium">{MODEL_SCAN_COPY.scanFailed}</p>
-                    <p className="mt-1">{scanError}</p>
+                  <div role="alert" className="mt-6 rounded-lg bg-[var(--color-surface)] p-4 text-sm ring-1 ring-inset ring-[var(--color-border-soft)]">
+                    <p className="font-medium text-[var(--color-text)]">{MODEL_SCAN_COPY.scanFailed}</p>
+                    <p className="mt-1 text-[var(--color-text-soft)]">{scanError}</p>
                     <div className="mt-3 flex gap-2">
-                      <Button size="sm" variant="secondary" disabled={activity !== null} onClick={() => setRun((value) => value + 1)}>
+                      <Button size="sm" variant="primary" disabled={activity !== null} onClick={() => setRun((value) => value + 1)}>
                         {MODEL_SCAN_COPY.scanAgain}
                       </Button>
                       <Button size="sm" variant="ghost" disabled={activity !== null} onClick={() => void finish("/chat")}>
@@ -536,57 +543,57 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                       </Button>
                     </div>
                   </div>
+                ) : (
+                  <ScanChecklist rows={rows} resolved={resolved} startingId={startingId} settled={settled} />
+                )}
+                {!scanError ? (
+                  // A scan that stalls before its checks can still be left; nothing is selected.
+                  <p className="mt-5 text-sm">
+                    <button type="button" disabled={activity !== null} onClick={() => void finish("/chat")} className={linkClass}>
+                      {MODEL_SCAN_COPY.continueToChat}
+                    </button>
+                  </p>
                 ) : null}
               </div>
             )}
             {actionError ? (
-              <p role="alert" className="mt-4 max-w-[46ch] text-sm text-[var(--color-danger)]">
+              <p role="alert" className="mt-4 text-sm text-[var(--color-danger)]">
                 {actionError}
               </p>
             ) : null}
-            {settled || scanError ? (
-              <p className="scan-hero-in mt-6 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]" style={{ animationDelay: "160ms" }}>
-                <button type="button" disabled={activity !== null} onClick={() => void finish("/chat")} className={linkClass}>
-                  {MODEL_SCAN_COPY.continueWithoutModel}
-                </button>
-                <span>
-                  {MODEL_SCAN_COPY.previewPrefix}{" "}
+            {showResult || scanError ? (
+              <div className="scan-rise mt-5 border-t border-[var(--color-border-soft)] pt-4" style={{ animationDelay: "180ms" }}>
+                <p className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                  <button type="button" disabled={activity !== null} onClick={() => void finish("/chat")} className={linkClass}>
+                    {MODEL_SCAN_COPY.continueWithoutModel}
+                  </button>
                   <button type="button" disabled={activity !== null} onClick={() => void preview()} className={linkClass}>
                     {MODEL_SCAN_COPY.previewLink}
-                  </button>{" "}
-                  {MODEL_SCAN_COPY.previewSuffix}
-                </span>
-              </p>
-            ) : null}
-
-            <section aria-labelledby="model-scan-list-heading" className="mt-8">
-              <div className="flex items-baseline justify-between gap-4 border-b border-[var(--color-border)] pb-2">
-                <h2 id="model-scan-list-heading" className="text-sm font-medium text-[var(--color-text-soft)]">
-                  {MODEL_SCAN_COPY.listHeading}
-                </h2>
-                {settled ? (
-                  <button type="button" disabled={activity !== null} onClick={() => setRun((value) => value + 1)} className={`${linkClass} text-sm`}>
+                  </button>
+                </p>
+                <div className="mt-3 flex flex-wrap items-start gap-x-4 gap-y-1 text-xs text-[var(--color-text-muted)]">
+                  <details className="scan-what-ran min-w-0 flex-1">
+                    <summary className="cursor-pointer select-none rounded-sm hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
+                      {MODEL_SCAN_COPY.whatRan}
+                    </summary>
+                    <div className="mt-2 space-y-1.5 leading-5">
+                      <p>{MODEL_SCAN_COPY.whatRanDetail}</p>
+                      <ul className="font-mono text-[var(--color-text-soft)]">
+                        {rows.map((probe) => (
+                          <li key={probe.providerId}>
+                            {probe.name}: {probe.target}
+                          </li>
+                        ))}
+                      </ul>
+                      <p>{MODEL_SCAN_COPY.ledger(targets, notContacted)}</p>
+                    </div>
+                  </details>
+                  <button type="button" disabled={activity !== null} onClick={() => setRun((value) => value + 1)} className={linkClass}>
                     {MODEL_SCAN_COPY.scanAgain}
                   </button>
-                ) : null}
+                </div>
               </div>
-              <ul aria-busy={!settled} className="divide-y divide-[var(--color-border-soft)]">
-                {rows.map((probe) => (
-                  <ScanRow
-                    key={probe.providerId}
-                    probe={probe}
-                    starting={startingId === probe.providerId}
-                    retrying={retrying === probe.providerId}
-                    startError={startErrors[probe.providerId]}
-                    busy={activity !== null}
-                    canStart={Boolean(api?.startLocalRuntime) && (probe.providerId === "ollama" || probe.providerId === "lm-studio") && probe.summary === "Installed, not running"}
-                    onRetry={() => void retry(probe.providerId)}
-                    onStart={() => void start(probe)}
-                  />
-                ))}
-              </ul>
-              {settled ? <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.ledger(targets, notContacted)}</p> : null}
-            </section>
+            ) : null}
           </section>
         </div>
       </main>
@@ -597,18 +604,58 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   );
 }
 
-/** The radial map: this device in the centre, each tool a node on the orbit. Decorative; the list is the accessible source. */
+/** The check list while the scan runs: one line per check. It is the accessible source of each result. */
+function ScanChecklist({ rows, resolved, startingId, settled }: { rows: readonly ModelScanProbe[]; resolved: number; startingId: ProviderId | null; settled: boolean }) {
+  const segments = 8;
+  const total = Math.max(rows.length, 1);
+  const filled = Math.round((resolved / total) * segments);
+  return (
+    <section aria-labelledby="model-scan-list-heading" className="mt-6">
+      <h2 id="model-scan-list-heading" className="sr-only">
+        {MODEL_SCAN_COPY.listHeading}
+      </h2>
+      <div className="flex items-center gap-3">
+        <span className="text-sm tabular-nums text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.progress(resolved, rows.length)}</span>
+        <span className="flex max-w-[200px] flex-1 gap-[3px]" aria-hidden="true">
+          {Array.from({ length: segments }, (_, index) => (
+            <span key={index} className="scan-segment h-[3px] flex-1 rounded-full" data-done={index < filled ? "true" : "false"} />
+          ))}
+        </span>
+      </div>
+      <ul aria-busy={!settled} className="mt-3 divide-y divide-[var(--color-border-soft)]">
+        {rows.map((probe) => {
+          const starting = startingId === probe.providerId;
+          return (
+            <li key={probe.providerId} data-tone={toneOf(probe, starting)} data-where={probe.where} className="scan-list-row flex h-8 items-center gap-2.5">
+              <span className="scan-list-mark shrink-0" aria-hidden="true" />
+              <span className="min-w-0 flex-1 truncate text-sm text-[var(--color-text)]">{probe.name}</span>
+              <span className="shrink-0 text-sm text-[var(--color-text-soft)]">{statusOf(probe, starting)}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
+/** The radial map: this device in the centre, each tool a node on the orbit. Decorative; the lists are the accessible source. */
 function ScanStage({
   rows,
   visible,
   settled,
   startingId,
+  selected,
+  selectable,
+  onSelect,
   onSkip,
 }: {
   rows: readonly ModelScanProbe[];
   visible: Record<string, boolean>;
   settled: boolean;
-  startingId: string | null;
+  startingId: ProviderId | null;
+  selected: ProviderId | null;
+  selectable: readonly ProviderId[];
+  onSelect: (id: ProviderId) => void;
   onSkip: () => void;
 }) {
   const count = Math.max(rows.length, 1);
@@ -617,29 +664,33 @@ function ScanStage({
     return { x: 50 + 38 * Math.cos(angle), y: 50 + 38 * Math.sin(angle), angle };
   };
   return (
-    <div className="scan-stage relative mx-auto aspect-square w-full max-w-[540px] select-none min-[900px]:sticky min-[900px]:top-4 min-[900px]:self-start" aria-hidden="true" onClick={settled ? undefined : onSkip}>
+    <div
+      className="scan-stage relative mx-auto aspect-square w-full select-none"
+      style={{ maxWidth: "min(520px, calc(100vh - 150px))" }}
+      aria-hidden="true"
+      onClick={settled ? undefined : onSkip}
+      data-has-selection={selected ? "true" : "false"}
+    >
       <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100">
         <circle className="scan-orbit" cx="50" cy="50" r="38" />
         <circle className="scan-orbit scan-orbit-inner" cx="50" cy="50" r="22" />
         <g className="scan-rings">
           <circle className="scan-ring" cx="50" cy="50" r="38" />
-          <circle className="scan-ring" cx="50" cy="50" r="38" style={{ animationDelay: "0.55s" }} />
-          <circle className="scan-ring" cx="50" cy="50" r="38" style={{ animationDelay: "1.1s" }} />
-        </g>
-        <g className="scan-sweep">
-          <line x1="50" y1="50" x2="50" y2="9" />
+          <circle className="scan-ring" cx="50" cy="50" r="38" style={{ animationDelay: "0.9s" }} />
         </g>
         {rows.map((probe, index) => {
           const { angle } = position(index);
           const tone = toneOf(probe, startingId === probe.providerId);
-          if (tone !== "ready" || !visible[probe.providerId]) return null;
-          const from = { x: 50 + 10.5 * Math.cos(angle), y: 50 + 10.5 * Math.sin(angle) };
-          const to = { x: 50 + 32.2 * Math.cos(angle), y: 50 + 32.2 * Math.sin(angle) };
+          if ((tone !== "ready" && tone !== "installed") || !visible[probe.providerId]) return null;
+          const from = { x: 50 + 11 * Math.cos(angle), y: 50 + 11 * Math.sin(angle) };
+          // Stops short of the node, outside its selection ring.
+          const to = { x: 50 + 31.6 * Math.cos(angle), y: 50 + 31.6 * Math.sin(angle) };
           return (
             <line
               key={probe.providerId}
               className="scan-link"
               data-where={probe.where}
+              data-selected={selected === probe.providerId ? "true" : "false"}
               x1={from.x}
               y1={from.y}
               x2={to.x}
@@ -649,94 +700,39 @@ function ScanStage({
           );
         })}
       </svg>
-      <div className="scan-device absolute left-1/2 top-1/2 flex h-[19%] w-[19%] items-center justify-center rounded-[26%] bg-[var(--color-surface)]">
-        <IconLogo size={40} className="text-[var(--color-text)]" />
+      <div className="scan-sweep absolute inset-[12%] rounded-full" />
+      <div className="scan-device absolute left-1/2 top-1/2 flex aspect-square w-[20%] items-center justify-center rounded-[27%] bg-[var(--color-accent)]">
+        <IconLogo size={44} className="text-[var(--color-on-accent)]" />
       </div>
       {rows.map((probe, index) => {
         const { x, y } = position(index);
-        const tone = toneOf(probe, startingId === probe.providerId);
+        const starting = startingId === probe.providerId;
+        const tone = toneOf(probe, starting);
+        const canSelect = selectable.includes(probe.providerId);
         return (
           <div
             key={probe.providerId}
-            className="scan-node absolute flex w-[23%] flex-col items-center text-center"
+            className="scan-node absolute flex w-[25%] flex-col items-center text-center"
             style={{ left: `${x}%`, top: `${y}%` }}
             data-tone={tone}
             data-where={probe.where}
             data-visible={visible[probe.providerId] ? "true" : "false"}
             data-settled={settled ? "true" : "false"}
+            data-selected={selected === probe.providerId ? "true" : "false"}
+            data-selectable={canSelect ? "true" : "false"}
+            onClick={canSelect ? () => onSelect(probe.providerId) : undefined}
           >
-            <span className="scan-node-dot flex h-14 w-14 items-center justify-center rounded-full text-[15px] font-semibold tracking-[-0.01em]">
+            <span className="scan-node-dot flex items-center justify-center rounded-full text-sm font-semibold">
               {INITIALS[probe.providerId] ?? probe.name.slice(0, 2)}
             </span>
-            <span className="mt-2 text-[13px] font-medium leading-4 text-[var(--color-text)]">{probe.name}</span>
-            <span className="scan-node-status mt-0.5 text-xs leading-4">{probe.state === "checking" ? MODEL_SCAN_COPY.checking : probe.summary}</span>
+            <span className="scan-node-plate mt-1.5 flex flex-col items-center rounded-[6px] px-1.5">
+              <span className="scan-node-name text-sm font-medium leading-[18px]">{probe.name}</span>
+              <span className="scan-node-status text-xs leading-4">{statusOf(probe, starting)}</span>
+            </span>
           </div>
         );
       })}
     </div>
-  );
-}
-
-function ScanRow({
-  probe,
-  starting,
-  retrying,
-  startError,
-  busy,
-  canStart,
-  onRetry,
-  onStart,
-}: {
-  probe: ModelScanProbe;
-  starting: boolean;
-  retrying: boolean;
-  startError: string | undefined;
-  busy: boolean;
-  canStart: boolean;
-  onRetry: () => void;
-  onStart: () => void;
-}) {
-  const tone = toneOf(probe, starting);
-  return (
-    <li data-tone={tone} className="scan-list-row grid grid-cols-[14px_minmax(0,1fr)] gap-x-2.5 py-2">
-      <span className="scan-list-mark mt-[5px]" aria-hidden="true" />
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-baseline gap-x-2">
-          <span className="text-sm font-medium text-[var(--color-text)]">{probe.name}</span>
-          <span className={`text-sm ${tone === "muted" ? "text-[var(--color-text-muted)]" : tone === "warning" ? "text-[var(--color-warning)]" : "text-[var(--color-text-soft)]"}`}>
-            {starting ? MODEL_SCAN_COPY.startingShort : probe.state === "checking" ? MODEL_SCAN_COPY.checking : probe.summary}
-          </span>
-          <span className="truncate font-mono text-xs text-[var(--color-text-muted)]">{probe.target}</span>
-        </div>
-        {probe.facts.length > 0 && probe.state !== "not-found" && probe.state !== "checking" ? (
-          <ul className="mt-0.5 text-xs leading-5 text-[var(--color-text-muted)]">
-            {probe.facts.map((fact) => (
-              <li key={fact} className={probe.models.includes(fact) ? "font-mono" : undefined}>
-                <InlineCode text={fact} />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-        {/* Buttons stay mounted and are disabled while working, so keyboard focus is not lost. */}
-        {probe.state === "could-not-check" || retrying ? (
-          <Button size="sm" variant="secondary" className="mt-1.5" disabled={retrying || busy} onClick={onRetry} aria-label={MODEL_SCAN_COPY.retryLabel(probe.name)}>
-            {retrying ? MODEL_SCAN_COPY.checking : MODEL_SCAN_COPY.retry}
-          </Button>
-        ) : canStart || starting ? (
-          <div className="mt-1.5 flex flex-wrap items-center gap-2">
-            <Button size="sm" variant="secondary" disabled={starting || busy} onClick={onStart}>
-              {starting ? MODEL_SCAN_COPY.starting(probe.name) : MODEL_SCAN_COPY.start(probe.name)}
-            </Button>
-            <span className="text-xs text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.startNote(probe.name)}</span>
-          </div>
-        ) : null}
-        {startError ? (
-          <p role="alert" className="mt-1.5 text-xs leading-5 text-[var(--color-warning)]">
-            <InlineCode text={startError} />
-          </p>
-        ) : null}
-      </div>
-    </li>
   );
 }
 
@@ -759,149 +755,107 @@ function InlineCode({ text }: { text: string }) {
 }
 
 const linkClass =
-  "rounded font-medium text-[var(--color-text-soft)] underline underline-offset-2 hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]";
+  "rounded-sm text-[var(--color-text-soft)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] hover:text-[var(--color-text)] hover:decoration-current focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60";
 
-function heroTitle(pick: Recommendation): string {
-  if (pick.kind === "local") return MODEL_SCAN_COPY.localTitle(pick.title);
-  if (pick.kind === "switch") return MODEL_SCAN_COPY.availableTitle(pick.title);
-  if (pick.kind === "hosted") return MODEL_SCAN_COPY.hostedReady(pick.title);
-  if (pick.kind === "start") return MODEL_SCAN_COPY.installedTitle(pick.probe.name);
-  return MODEL_SCAN_COPY.nothingTitle;
+/** The heading the result leads with, by outcome and choice. */
+function resultTitle(outcome: ModelScanOutcome, options: readonly ChoiceOption[], chosen: ChoiceOption | undefined): string {
+  if (options.length === 0) return MODEL_SCAN_COPY.nothingTitle;
+  const selectedLocal = (outcome.kind === "local-selected" || outcome.kind === "local-ready") && chosen?.providerId === outcome.providerId && chosen.action === "open";
+  if (selectedLocal) return MODEL_SCAN_COPY.localTitle(modelDisplayName(chosen.model) ?? chosen.name);
+  return MODEL_SCAN_COPY.chooseTitle;
 }
 
-/** The result: the recommended choice large, its data line, one primary action, alternatives secondary. */
-function ScanHero({
-  pick,
-  rows,
-  busy,
-  startErrors,
+/** The result: one choice of what answers in Chat and one button whose label follows it (mockup 32, section B). */
+function ScanResult({
+  result,
+  options,
+  chosen,
+  selected,
+  found,
+  total,
+  activity,
+  startingId,
+  retrying,
+  errors,
   localLine,
+  activeProviderId,
   headingRef,
-  onUseHosted,
-  onSwitchLocal,
-  onOpenChat,
-  onSetUp,
-  onStart,
+  onSelect,
+  onRetry,
+  onAct,
+  onShowProviders,
 }: {
-  pick: Recommendation;
-  rows: readonly ModelScanProbe[];
-  busy: string | null;
-  startErrors: Record<string, string>;
+  result: ModelScanResult;
+  options: readonly ChoiceOption[];
+  chosen: ChoiceOption | undefined;
+  selected: ProviderId | null;
+  found: number;
+  total: number;
+  activity: string | null;
+  startingId: ProviderId | null;
+  retrying: ProviderId | null;
+  errors: Partial<Record<ProviderId, string>>;
   localLine: string;
+  activeProviderId: ProviderId;
   headingRef: React.RefObject<HTMLHeadingElement | null>;
-  onUseHosted: (id: ProviderId) => void;
-  onSwitchLocal: (id: ProviderId, model?: string) => void;
-  onOpenChat: () => void;
-  onSetUp: () => void;
-  onStart: (probe: ModelScanProbe) => void;
+  onSelect: (id: ProviderId) => void;
+  onRetry: (id: ProviderId) => void;
+  onAct: (option: ChoiceOption) => void;
+  onShowProviders: () => void;
 }) {
-  const name = (id: ProviderId) => rows.find((probe) => probe.providerId === id)?.name ?? id;
-  const startButton = (probe: ModelScanProbe, primary: boolean) => (
-    <span className="inline-flex flex-wrap items-center gap-2">
-      <Button variant={primary ? "primary" : "secondary"} size={primary ? "md" : "sm"} disabled={busy !== null} onClick={() => onStart(probe)}>
-        {busy === `start:${probe.providerId}` ? MODEL_SCAN_COPY.starting(probe.name) : MODEL_SCAN_COPY.start(probe.name)}
-      </Button>
-      <span className="text-xs text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.startNote(probe.name)}</span>
-    </span>
-  );
-  const failure = (id: ProviderId) =>
-    startErrors[id] ? (
-      <p className="mt-3 max-w-[44ch] text-sm leading-5 text-[var(--color-warning)]">
-        <InlineCode text={startErrors[id]!} />
-      </p>
-    ) : null;
+  const title = resultTitle(result.outcome, options, chosen);
+  const localReady = title !== MODEL_SCAN_COPY.chooseTitle && title !== MODEL_SCAN_COPY.nothingTitle;
+  if (options.length === 0) {
+    return (
+      <div className="scan-rise">
+        <p className="text-sm text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.found(found, total)}</p>
+        <h1 id="model-scan-heading" ref={headingRef} tabIndex={-1} className="mt-1.5 font-serif text-display font-medium focus:outline-none">
+          {title}
+        </h1>
+        <p className="mt-3 text-base text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.nothingBody}</p>
+        <pre className="mt-3 overflow-x-auto rounded-md bg-[var(--color-surface)] px-3 py-2 font-mono text-sm text-[var(--color-text)] ring-1 ring-inset ring-[var(--color-border-soft)]">
+          {MODEL_SCAN_COPY.installCommand}
+        </pre>
+        <div className="mt-5">
+          <Button variant="primary" size="lg" disabled={activity !== null} onClick={onShowProviders}>
+            {MODEL_SCAN_COPY.allProviders}
+          </Button>
+        </div>
+      </div>
+    );
+  }
+  const note = chosen?.where === "local" && chosen.action === "open" ? localLine : actionNote(chosen);
+  const starting = chosen && startingId === chosen.providerId;
   return (
-    <div className="scan-hero-in">
-      <p className="text-sm text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.heroLead(pick.kind)}</p>
-      <h1 id="model-scan-heading" ref={headingRef} tabIndex={-1} className="mt-2 focus:outline-none font-serif text-[3.25rem] font-medium leading-[1] tracking-[-0.025em]">
-        <span className="sr-only">{heroTitle(pick)}</span>
-        <span aria-hidden="true">{pick.kind === "local" || pick.kind === "hosted" || pick.kind === "switch" ? pick.title : pick.kind === "start" ? pick.probe.name : MODEL_SCAN_COPY.nothingShort}</span>
+    <div className="scan-rise">
+      <p className="text-sm text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.found(found, total)}</p>
+      <h1 id="model-scan-heading" ref={headingRef} tabIndex={-1} className="mt-1.5 font-serif text-display font-medium focus:outline-none">
+        {title}
       </h1>
-      {pick.kind === "local" ? (
-        <>
-          <p className="mt-3 text-md text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.localLine(pick.runtime)}</p>
-          <p className={`mt-1 text-sm font-medium ${localLine === MODEL_SCAN_COPY.nothingLeaves ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}`}>{localLine}</p>
-          <div className="mt-6">
-            <Button variant="primary" disabled={busy !== null} onClick={onOpenChat}>
-              {MODEL_SCAN_COPY.openChat}
-            </Button>
-          </div>
-        </>
-      ) : pick.kind === "switch" ? (
-        <>
-          <p className="mt-3 max-w-[44ch] text-md leading-6 text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.availableLine(pick.runtime, name(pick.selectedProviderId))}</p>
-          <div className="mt-6 flex flex-wrap items-center gap-2">
-            <Button variant="primary" disabled={busy !== null} onClick={() => onSwitchLocal(pick.providerId, pick.model)}>
-              {MODEL_SCAN_COPY.useHosted(pick.title)}
-            </Button>
-            <Button variant="secondary" size="sm" disabled={busy !== null} onClick={onOpenChat}>
-              {MODEL_SCAN_COPY.keepSelected(name(pick.selectedProviderId))}
-            </Button>
-          </div>
-        </>
-      ) : pick.kind === "hosted" ? (
-        <>
-          <p className="mt-3 max-w-[44ch] text-md leading-6 text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.hostedLine}</p>
-          <p className="mt-1 text-sm font-medium text-[var(--color-warning)]">{MODEL_SCAN_COPY.hostedWhere(providerDataLocation({ id: pick.providerId, name: pick.title }))}</p>
-          <div className="mt-6 flex flex-wrap items-center gap-2">
-            <Button variant="primary" disabled={busy !== null} onClick={() => onUseHosted(pick.providerId)}>
-              {MODEL_SCAN_COPY.useHosted(pick.title)}
-            </Button>
-            {pick.others.map((id) => (
-              <Button key={id} variant="secondary" size="sm" disabled={busy !== null} onClick={() => onUseHosted(id)}>
-                {MODEL_SCAN_COPY.useHosted(name(id))}
-              </Button>
-            ))}
-          </div>
-          {pick.others.map((id) => (
-            <p key={id} className="mt-2 text-xs text-[var(--color-warning)]">
-              {MODEL_SCAN_COPY.hostedWhereNamed(name(id), providerDataLocation({ id, name: name(id) }))}
-            </p>
-          ))}
-          {pick.startable ? (
-            <div className="mt-5 flex flex-wrap items-center gap-3 border-t border-[var(--color-border-soft)] pt-4">
-              <p className="text-sm text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.keepLocal(pick.startable.name)}</p>
-              {startButton(pick.startable, false)}
-            </div>
-          ) : (
-            <p className="mt-5 text-sm text-[var(--color-text-muted)]">
-              {MODEL_SCAN_COPY.keepLocalPrefix}{" "}
-              <button type="button" disabled={busy !== null} onClick={onSetUp} className={linkClass}>
-                {MODEL_SCAN_COPY.setUpOpenAdmin}
-              </button>
-              .
-            </p>
-          )}
-          {pick.startable ? failure(pick.startable.providerId) : null}
-        </>
-      ) : pick.kind === "start" ? (
-        <>
-          <p className="mt-3 max-w-[44ch] text-md leading-6 text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.installedLine}</p>
-          <p className={`mt-1 text-sm font-medium ${localLine === MODEL_SCAN_COPY.nothingLeaves ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}`}>{localLine}</p>
-          <div className="mt-6 flex flex-wrap gap-2">
-            {startButton(pick.probe, true)}
-            <Button variant="secondary" size="sm" disabled={busy !== null} onClick={onSetUp}>
-              {MODEL_SCAN_COPY.allProviders}
-            </Button>
-          </div>
-          {failure(pick.probe.providerId)}
-        </>
-      ) : (
-        <>
-          <p className="mt-3 max-w-[44ch] text-md leading-6 text-[var(--color-text-soft)]">{MODEL_SCAN_COPY.nothingBody}</p>
-          <code className="mt-3 inline-block rounded-md bg-[var(--color-bg-raised)] px-2 py-1 font-mono text-sm text-[var(--color-text)]">
-            {MODEL_SCAN_COPY.installCommand}
-          </code>
-          <div className="mt-6 flex flex-wrap gap-2">
-            <Button variant="primary" disabled={busy !== null} onClick={onSetUp}>
-              {MODEL_SCAN_COPY.setUpOpenAdminAction}
-            </Button>
-            <Button variant="secondary" size="sm" disabled={busy !== null} onClick={onSetUp}>
-              {MODEL_SCAN_COPY.allProviders}
-            </Button>
-          </div>
-        </>
-      )}
+      <p className="mt-3 text-base text-[var(--color-text-soft)]">{localReady ? localLine : MODEL_SCAN_COPY.chooseBody}</p>
+      <div className="mt-5">
+        <ModelChoiceList
+          options={options}
+          selected={selected}
+          onSelect={onSelect}
+          disabled={activity !== null}
+          errors={Object.fromEntries(Object.entries(errors).map(([id, message]) => [id, <InlineCode key={id} text={message ?? ""} />]))}
+          retrying={retrying}
+          onRetry={onRetry}
+        />
+      </div>
+      <div className="mt-4">
+        <Button
+          variant="primary"
+          size="lg"
+          disabled={!chosen || chosen.unavailable || activity !== null}
+          onClick={() => chosen && onAct(chosen)}
+          leadingIcon={starting ? <span className="scan-spinner" aria-hidden="true" /> : undefined}
+        >
+          {actionLabel(chosen, activeProviderId)}
+        </Button>
+        {note ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">{note}</p> : null}
+      </div>
     </div>
   );
 }

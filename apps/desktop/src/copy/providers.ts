@@ -15,11 +15,64 @@ export const PROVIDER_DETECTION_COPY = {
   autoSelectedNoticeSettings: "Open provider settings",
 } as const;
 
+/**
+ * What each provider is called wherever the admin chooses a model. For a
+ * CLI tool the name is the tool; where prompts go is the provider, on its
+ * own line ("Claude Code", "Prompts go to Anthropic API · US").
+ */
+export const PROVIDER_TOOL_NAMES: Readonly<Partial<Record<string, string>>> = {
+  ollama: "Ollama",
+  "lm-studio": "LM Studio",
+  "apple-foundation": "Apple Intelligence",
+  anthropic: "Claude Code",
+  openai: "Codex",
+  copilot: "GitHub Copilot CLI",
+  gemini: "Gemini CLI",
+  "azure-openai": "Azure OpenAI",
+};
+
+/** The choice of what answers in Chat, shared by the scan and Chat (mockup 32, section B). */
+export const MODEL_CHOICE_COPY = {
+  groupLabel: "What answers in Chat",
+  ready: "Ready",
+  notRunning: "Not running",
+  noModel: "No model yet",
+  notInstalled: "Not installed",
+  signedIn: "Signed in",
+  notSignedIn: "Not signed in",
+  installed: "Installed",
+  configured: "Configured",
+  couldNotCheck: "Could not check",
+  couldNotCheckLine: (name: string) => `${name} did not answer. Retry to check it again.`,
+  localReady: (model: string | undefined) => (model ? `On this device. Answers with ${model}.` : "On this device."),
+  localStart: (id: string) =>
+    id === "lm-studio" ? "On this device. OpenAdminOS starts its server." : "On this device. OpenAdminOS starts it for you.",
+  localGetModel: "On this device. Get OpenAdmin 8B, a model trained for Intune and Entra work.",
+  localLoadModel: "On this device. Load a model in LM Studio, then scan again.",
+  hostedWhere: (location: string) => `Prompts go to ${location}`,
+  chooseModel: "Choose a model",
+  openChat: "Open Chat",
+  use: (name: string) => `Use ${name}`,
+  startAndOpen: (name: string) => `Start ${name} and open Chat`,
+  getOpenAdmin: "Get OpenAdmin 8B",
+  getOpenAdminNote: "Shows the one command that downloads it with Ollama.",
+  scanAgain: "Scan again",
+  keepsRunning: (name: string) => `${name} keeps running after you quit OpenAdminOS.`,
+  usesSignIn: (name: string) => `Uses your ${name} sign-in. No API key is stored.`,
+  usesAzure: "Uses the Azure OpenAI settings saved on this device.",
+} as const;
+
 /** The first-launch model scan (SPEC.md 4a, first launch). */
 export const MODEL_SCAN_COPY = {
   title: "Looking for models on this device",
   subtitle:
-    "OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and loopback ports and runs each tool's version command; for Claude Code and Codex also their sign-in status command, which may check with the provider. No prompt is sent to any model.",
+    "Checks the model runtimes and AI tools on this device, and whether you are signed in to them. Nothing is sent to a model.",
+  found: (found: number, total: number) => `${found} of ${total} found on this device`,
+  chooseTitle: "Choose what answers in Chat",
+  chooseBody: "Models on this device keep prompts here. Signed-in tools send prompts to their provider.",
+  whatRan: "What ran",
+  whatRanDetail:
+    "It read local files and loopback ports and ran each tool's version command; for Claude Code and Codex also their sign-in status command, which may check the sign-in with the provider.",
   listHeading: "On this device",
   progress: (done: number, total: number) => (total === 0 ? "Starting" : `${done} of ${total} checked`),
   checking: "checking",
@@ -60,7 +113,7 @@ export const MODEL_SCAN_COPY = {
   startNote: (name: string) => `${name} keeps running after you quit OpenAdminOS.`,
   localWithReferences: (toolQueries: string) => `Runs on this device. Your references get ${toolQueries}.`,
   startFailed: (name: string) => `${name} did not start. Start it yourself, then scan again.`,
-  skip: "Skip",
+  skip: "Skip scan",
   localBody: (model: string, runtime: string) => `Chat answers with ${model} in ${runtime}. You can change the model at any time.`,
   nothingLeaves: "Nothing leaves this device.",
   openChat: "Open Chat",
@@ -71,8 +124,8 @@ export const MODEL_SCAN_COPY = {
   useHosted: (name: string) => `Use ${name}`,
   keepLocalPrefix: "To keep everything on this device,",
   setUpOpenAdmin: "set up OpenAdmin 8B",
-  continueWithoutModel: "Continue to Chat without a model",
-  nothingTitle: "No model found on this device",
+  continueWithoutModel: "Continue without a model",
+  nothingTitle: "No model on this device yet",
   nothingBody: "Install Ollama, then run this command to get OpenAdmin 8B, a model trained for Intune and Entra work:",
   nothingRunningBody: (runtime: string) => `${runtime} is installed but not running. Start it, or get OpenAdmin 8B with:`,
   installCommand: "ollama run openadminos/openadmin-8b",

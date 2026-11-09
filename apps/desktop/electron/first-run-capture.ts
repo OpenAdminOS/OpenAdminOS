@@ -224,7 +224,7 @@ async function firstRunCaptureStepScript(
     await waitFor(
       () =>
         document.querySelector('[data-phase="settled"]') !== null &&
-        Boolean(findButton("Continue to Chat without a model")) &&
+        Boolean(findButton("Continue without a model")) &&
         Boolean(findButton("Preview with sample data")),
       "first-run model scan settled",
     );
@@ -232,7 +232,7 @@ async function firstRunCaptureStepScript(
   }
 
   if (action === "leave-scan") {
-    await clickButton("Continue to Chat without a model");
+    await clickButton("Continue without a model");
     await waitFor(() => bodyText().includes("Choose a model to answer with"), "Chat with no model");
     return;
   }
