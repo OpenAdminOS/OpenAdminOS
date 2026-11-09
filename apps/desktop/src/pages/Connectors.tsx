@@ -166,6 +166,7 @@ export function ConnectorsSettingsSection({
             summary={openConnector}
             busy={testing === "teams"}
             onTest={() => handleTest("teams")}
+            onSaved={refresh}
           />
         </div>
       );
@@ -589,10 +590,13 @@ function FeaturedTeamsCard({
   summary,
   busy,
   onTest,
+  onSaved,
 }: {
   summary: ConnectorSummary;
   busy: boolean;
   onTest: () => void;
+  /** Reloads the connector list so every disclosure of where reports go sees the saved default. */
+  onSaved?: () => void | Promise<void>;
 }) {
   const descriptor = summary.descriptor;
   const isConnected = summary.status === "connected";
@@ -665,7 +669,7 @@ function FeaturedTeamsCard({
             </Tag>
           </div>
           {isConnected ? (
-            <TeamsDefaultsPicker summary={summary} />
+            <TeamsDefaultsPicker summary={summary} {...(onSaved ? { onSaved } : {})} />
           ) : (
             <div className="mt-3 rounded-lg border border-dashed border-[var(--color-border-soft)] bg-[var(--color-surface)]/55 p-4">
               <p className="text-base text-[var(--color-text-soft)]">
@@ -1872,7 +1876,15 @@ function RoadmapCard({ entry }: { entry: RoadmapEntry }) {
 
 // ─── Teams defaults picker ────────────────────────────────────────────────
 
-function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
+function TeamsDefaultsPicker({
+  summary,
+  onSaved,
+}: {
+  summary: ConnectorSummary;
+  onSaved?: () => void | Promise<void>;
+}) {
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const initialTeamId =
     typeof summary.config.defaultTeamId === "string"
       ? summary.config.defaultTeamId
@@ -1990,6 +2002,9 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
           if (cancelled) return;
           lastSavedDefaultKey.current = selectedDefaultKey;
           setSavedAt(new Date().toISOString());
+          // The map, Results and the run review read the connector list;
+          // a new default changes where reports can go.
+          void onSavedRef.current?.();
         })
         .catch((err) => {
           if (!cancelled) {

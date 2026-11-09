@@ -540,3 +540,34 @@ describe("hosted voice in the map (review round 5)", () => {
     expect(reachDescription(quiet)).not.toContain("Nova voice");
   });
 });
+
+describe("saving a Teams default updates every disclosure (review round 7)", () => {
+  it("lists Microsoft Teams in the map and Results after the first default team and channel are saved", async () => {
+    const user = userEvent.setup();
+    const state = createMockAppState({ installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })] });
+    let saved: Record<string, unknown> = {};
+    render(
+      state,
+      {
+        listConnectors: vi.fn(async () => [connector("teams", "Microsoft Teams", "connected", saved)]),
+        listConnectorTeams: vi.fn(async () => [{ id: "team-1", displayName: "IT Ops" }] as never),
+        listConnectorChannels: vi.fn(async () => [{ id: "channel-1", displayName: "Device alerts" }] as never),
+        setConnectorConfig: vi.fn(async (_id: string, config: Record<string, unknown>) => {
+          saved = { ...saved, ...config };
+        }) as never,
+      },
+      "/connections?connector=teams",
+    );
+    const results = await screen.findByTestId("result-destinations");
+    expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsUnset(["Microsoft Teams"]));
+    const team = await screen.findByRole("combobox", { name: "Team" });
+    await waitFor(() => expect(within(team).getByRole("option", { name: "IT Ops" })).toBeInTheDocument());
+    await user.selectOptions(team, "team-1");
+    const channel = screen.getByRole("combobox", { name: "Channel" });
+    await waitFor(() => expect(within(channel).getByRole("option", { name: "Device alerts" })).toBeInTheDocument());
+    await user.selectOptions(channel, "channel-1");
+    await waitFor(() => expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsSent(["Microsoft Teams"])), { timeout: 3000 });
+    const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(map).toHaveAccessibleDescription(/Run reports and agent messages can go to Microsoft Teams/);
+  });
+});
