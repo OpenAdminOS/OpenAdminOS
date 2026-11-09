@@ -1776,8 +1776,57 @@ confirmation, the host removes the tenant record, tenant-pinned runs and queued
 deliveries, Graph cache/status, conversations and messages, workspaces and
 evidence, drift history, self-training/audit records, saved-query tenant
 references, tenant-group membership, multi-tenant jobs/batches that include the
-tenant, and its cache schedule before removing the MSAL account. Failure is
-surfaced and never presented as a successful disconnect.
+tenant, its cache schedule and the MSAL account. A failure is surfaced and never
+presented as a successful disconnect.
+
+**Disconnect design (PR #174 Disconnect redesign, 2026-11-09).** The guarantee
+that no work for a disconnecting organization reaches the network or persists is
+enforced at choke points, not by each caller.
+
+- **Tenant lease** (`apps/desktop/electron/tenant-lifecycle.ts`). One module owns
+  each tenant's lifecycle: `open`, `closing` (Disconnect began, or its cleanup is
+  pending), `removed` (cleanup finished), with a generation number. All tenant work
+  runs inside `withTenantLease(tenantId, work)`: refused when the tenant is not
+  open, registered so Disconnect can drain it, and handed an AbortSignal that fires
+  when closing begins. The lease is also kept in async context, so a choke point
+  knows the generation of the work that calls it. Routed through it: runs (and so
+  schedules, rollbacks, gateway proposals and Nova run actions), cache refreshes and
+  preloads, single and multi-tenant Chat sends, multi-tenant agent batches, report
+  deliveries, Nova actions and sends, gateway reads, and Agent Team save, start,
+  tick and ask.
+- **Egress choke points.** The Graph adapter gets a guarded fetch; the MSAL client
+  of a tenant is wrapped so every token acquisition is refused once the tenant is
+  closing, and a token that arrives after closing began is withheld; tenant
+  sessions for connectors go through the same check; the license probe uses the
+  guarded fetch. Connectors receive the host transport in
+  `ConnectorBuildContext.fetch` (every request and retry) and
+  `ConnectorBuildContext.assertEgress` (called right before a send over a
+  transport that is not fetch: the WhatsApp socket and the Signal CLI). A
+  forgotten caller still cannot reach the network for a closing tenant.
+- **Persistence choke points.** Tenant-scoped writes in the SQLite store
+  (conversations, messages, tool calls, graph cache, drift baselines, multi-tenant
+  jobs and batches, workspaces, learning events, the refresh schedule) and in
+  `office.db` check the tenant first; in `state.json`, a write may remove anything
+  but never adds or changes a record (tenant, run, delivery, Nova connector audit,
+  active tenant, gateway binding) of a tenant that is not writable. Writes from a
+  closing tenant, or from work of an older generation, are dropped and logged.
+- **Two phases, persisted.** Phase 1, under the state lock: the tenant closes (every
+  lease signal fires) and one write removes the tenant with its runs, deliveries,
+  active selection and gateway binding, and stores a removal record
+  (`tenantRemovals`). From here the organization is gone in the UI. Phase 2: drain
+  leased work with a bounded wait (15 seconds; past it, cleanup goes on because the
+  choke points refuse anything the work could still do), remove the Microsoft
+  sign-in, delete Agent Team and Chat data, then drop the record. If phase 2 fails
+  or the app quits, the record stays, the tenant stays closed, and cleanup resumes
+  at the next launch before any scheduler, Agent Team tick, gateway or delivery
+  worker starts, or from Retry cleanup on Connections.
+- **Reconnect.** The same tenant connects again only after its cleanup finished;
+  that opens a new generation. While cleanup is pending, the connect flow shows
+  "Disconnecting <name> has not finished on this device: <why>. Retry cleanup on
+  Connections, then connect again." with Retry cleanup.
+- **Outcome.** The dialog reports the truth: disconnected, or removed with cleanup
+  pending and why, as a warning rather than a failure. `AppState.tenantCleanups`
+  lists pending cleanups; Connections shows them with Retry cleanup.
 
 Verification for the chat surface includes `npm run smoke:intune-chat`. The smoke
 test launches Electron in a dev-only fixture mode, seeds a local tenant, drives
