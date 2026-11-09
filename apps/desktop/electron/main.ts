@@ -128,7 +128,8 @@ import type {
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
-import { providerCatalog, servicePartById } from "@openadminos/agent-sdk";
+import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, servicePartById } from "@openadminos/agent-sdk";
+import { companionUpcomingSchedules, runDueCompanionSchedules } from "./companion-schedules.js";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -1237,11 +1238,11 @@ async function runScreenshotCapture(): Promise<void> {
       heading: "Settings",
     },
     {
-      route: "/settings/connectors",
+      route: "/connections",
       name: "settings-connectors",
       file: "app/settings-connectors.png",
-      waitFor: ["Settings", "Connectors"],
-      heading: "Connectors",
+      waitFor: ["connections", "Results go to"],
+      heading: "connections",
     },
   ];
 
@@ -1251,7 +1252,7 @@ async function runScreenshotCapture(): Promise<void> {
       { route: "/office", name: "agent-team", waitFor: ["Agent Team", "Review inbox"] },
       { route: "/changes?scope=all", name: "fleet", waitFor: ["Changes"] },
       { route: "/chat?panel=workspaces", name: "workspaces", waitFor: ["Workspaces"] },
-      { route: "/settings/connectors", name: "connectors", waitFor: ["Connectors"] },
+      { route: "/connections", name: "connectors", waitFor: ["Results go to"] },
       { route: "/runs", name: "runs", waitFor: ["Runs"] },
       { route: "/agents?filter=scheduled", name: "schedules", waitFor: ["Library"] },
       { route: "/settings/appearance", name: "appearance", waitFor: ["Midnight"] },
@@ -1733,7 +1734,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
       textarea instanceof HTMLTextAreaElement &&
       textarea.value === "" &&
       Boolean(send?.disabled) &&
-      Boolean(findNamedButton("Switch tenant, Smoke Tenant")) &&
+      Boolean(findNamedButton("Switch organization, Smoke Tenant")) &&
       Boolean(document.querySelector('summary[aria-label="Scope: Smoke Tenant"]'))
     );
   };
@@ -1868,7 +1869,7 @@ async function intuneChatSmokeScript(): Promise<Record<string, unknown>> {
   await waitFor(() => bodyText().includes("Run an agent with /"), "Intune Chat route");
   await waitFor(
     () =>
-      Boolean(findNamedButton("Switch tenant, Smoke Tenant")) &&
+      Boolean(findNamedButton("Switch organization, Smoke Tenant")) &&
       Boolean(document.querySelector('textarea[role="combobox"]')) &&
       Boolean(document.querySelector('[aria-label="Application navigation"]')),
     "tenant-connected chat shell",
@@ -2636,23 +2637,7 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
       status: run.status,
       route: `/runs/${run.id}`,
     }));
-  const upcomingSchedules = state.installedAgents
-    .filter((agent) => agent.schedule?.enabled === true)
-    .map((agent) => {
-      const latest = latestScheduledRunForAgent(state.runs, agent.slug);
-      return {
-        agentSlug: agent.slug,
-        agentName: agent.name,
-        mode: agent.mode,
-        nextRunAt: new Date(nextRunTimeForSchedule(agent.schedule, nowMs)).toISOString(),
-        intervalSeconds: agent.schedule?.intervalSeconds ?? 3600,
-        ...(latest?.status ? { lastStatus: latest.status } : {}),
-        ...(latest?.changeState ? { changeState: latest.changeState } : {}),
-        route: `/agents/${agent.slug}`,
-      };
-    })
-    .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))
-    .slice(0, 5);
+  const upcomingSchedules = companionUpcomingSchedules(state, nowMs);
   const recentActivity = state.runs
     .filter((run) => run.status !== "failed")
     .slice(0, 6)
@@ -2696,40 +2681,10 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
 async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult> {
   const state = await store.getAppState();
   const nowMs = Date.now();
-  const result: CompanionRunDueReadSchedulesResult = {
-    queued: 0,
-    skippedWrite: 0,
-    skippedInFlight: 0,
-    skippedNotDue: 0,
-    errors: [],
-  };
-
-  for (const agent of state.installedAgents) {
-    const schedule = agent.schedule;
-    if (!schedule?.enabled) continue;
-    if (agent.mode === "write") {
-      result.skippedWrite += 1;
-      continue;
-    }
-    const dueAt = nextRunTimeForSchedule(schedule, nowMs);
-    if (dueAt > nowMs) {
-      result.skippedNotDue += 1;
-      continue;
-    }
-    const inFlight = state.runs.some(
-      (run) =>
-        run.agentSlug === agent.slug &&
-        (run.status === "queued" ||
-          run.status === "running" ||
-          run.status === "awaiting-confirmation"),
-    );
-    if (inFlight) {
-      result.skippedInFlight += 1;
-      continue;
-    }
-
-    try {
+  return runDueCompanionSchedules(state, nowMs, {
+    startScheduledRun: async (agent) => {
       await store.startRun(agent.slug, { trigger: "schedule" });
+      const schedule = agent.schedule!;
       await store.updateAgentSchedule(agent.slug, {
         enabled: true,
         intervalSeconds: schedule.intervalSeconds,
@@ -2738,37 +2693,8 @@ async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult
         notifyOnChangeOnly: schedule.notifyOnChangeOnly,
         lastScheduledRunAt: new Date(nowMs).toISOString(),
       });
-      result.queued += 1;
-    } catch (error) {
-      result.errors.push({
-        agentSlug: agent.slug,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  return result;
-}
-
-function nextRunTimeForSchedule(
-  schedule: AgentSchedule | undefined,
-  nowMs = Date.now(),
-): number {
-  if (!schedule?.enabled) return Number.POSITIVE_INFINITY;
-  const lastFired = schedule.lastScheduledRunAt
-    ? new Date(schedule.lastScheduledRunAt).getTime()
-    : 0;
-  if (lastFired <= 0) return nowMs;
-  return lastFired + schedule.intervalSeconds * 1000;
-}
-
-function latestScheduledRunForAgent(
-  runs: RunRecord[],
-  agentSlug: string,
-): RunRecord | undefined {
-  return runs
-    .filter((run) => run.agentSlug === agentSlug && run.trigger === "schedule")
-    .sort((a, b) => Date.parse(b.queuedAt) - Date.parse(a.queuedAt))[0];
+    },
+  });
 }
 
 function agentNameForRun(
@@ -5804,7 +5730,7 @@ function registerIpcHandlers() {
     () => store.getAppState(),
     (input, options) => store.streamIntuneChatMessage(input, event => options.onEvent?.(event), { ...options, voice: true }),
     fetch,
-    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options) },
+    { classifyCommand: (text, context, options) => store.classifyNovaCommand(text, context, options), connectors: () => store.listConnectors(), send: input => store.sendNovaConnector(input), startRun: (slug, options) => store.startRun(slug, options, { activeOrganizationOnly: true }), activeTenantId: () => store.activeTenantId(), tenantLease: (tenantId, work) => store.withTenantLease(tenantId, work) },
   );
   ipcMain.handle("openadminos:nova", handleTrusted((event, input: import("@openadminos/agent-sdk").NovaRequest, streamId?: unknown) => {
     const safeStreamId = streamId === undefined ? undefined : requireBoundedString(streamId, "Nova streamId", 128);
@@ -6513,9 +6439,11 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:start-run",
     handleTrusted((_event, agentSlug: unknown, options?: unknown) =>
+      // A renderer start may only pin the active organization's tenant.
       store.startRun(
         requireAgentSlug(agentSlug, "agentSlug"),
         validateStartRunOptions(options),
+        { activeOrganizationOnly: true },
       ),
     ),
   );
@@ -6525,9 +6453,11 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:confirm-run",
     handleTrusted((_event, runId: unknown, phrase: unknown) =>
+      // Every approval from the renderer applies only in the active organization.
       store.confirmRun(
         requireBoundedString(runId, "runId", 128),
         requireBoundedString(phrase, "confirmation phrase", 500),
+        { activeOrganizationOnly: true },
       ),
     ),
   );
@@ -6590,10 +6520,35 @@ function registerIpcHandlers() {
     store.setActiveTenant(requireBoundedString(id, "tenantId", 256)),
   ),
   );
+  ipcMain.handle("openadminos:set-active-organization", handleTrusted((_event, id: unknown) =>
+    store.setActiveOrganization(id === null ? null : requireBoundedString(id, "organizationId", 300)),
+  ),
+  );
+  ipcMain.handle("openadminos:rename-organization", handleTrusted((_event, id: unknown, name: unknown) =>
+    store.renameOrganization(
+      requireBoundedString(id, "organizationId", 300),
+      // UTF-16 length: the stored limit counts code points, each at most two units.
+      requireBoundedString(name, "name", ORGANIZATION_NAME_MAX_LENGTH * 2),
+    ),
+  ),
+  );
+  ipcMain.handle("openadminos:assign-agent-schedule", handleTrusted((_event, slug: unknown, organizationId: unknown) =>
+    store.assignAgentSchedule(
+      requireAgentSlug(slug, "slug"),
+      requireBoundedString(organizationId, "organizationId", 300),
+    ),
+  ),
+  );
+  ipcMain.handle("openadminos:dismiss-organization-migration-notice", handleTrusted(() =>
+    store.dismissOrganizationMigrationNotice(),
+  ));
   ipcMain.handle("openadminos:disconnect-tenant", handleTrusted((_event, id: unknown) =>
     store.disconnectTenant(requireBoundedString(id, "tenantId", 256)),
   ),
   );
+  ipcMain.handle("openadminos:retry-tenant-cleanup", handleTrusted((_event, id: unknown) =>
+    store.retryTenantCleanup(requireBoundedString(id, "tenantId", 256)),
+  ));
   ipcMain.handle(
     "openadminos:remove-saved-app-registration",
     handleTrusted((_event, clientId: unknown, directoryTenantId?: unknown) =>
@@ -6978,6 +6933,11 @@ if (!gotLock) {
           }
         : {}),
     });
+    // A disconnect whose cleanup did not finish resumes first, before any
+    // scheduler, Agent Team tick, gateway or delivery worker starts.
+    await store.resumeTenantCleanups().catch((error) =>
+      console.warn("[tenant-lifecycle] resuming cleanup failed", error),
+    );
     await store.recoverInterruptedRuns();
     void store.refreshPilotCacheIfStale().catch((error) => {
       console.warn(

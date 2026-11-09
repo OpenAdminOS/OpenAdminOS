@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { ActivityFeed } from "../components/ActivityFeed";
@@ -34,14 +34,17 @@ import {
   StatusDot,
   type MenuEntry,
 } from "../components/ui";
-import { userFacingErrorReason } from "../copy";
+import { ORGANIZATION_COPY, RERUN_COPY, userFacingErrorReason } from "../copy";
+import { Modal, ModalHeader } from "../components/Modal";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import {
+  activeOrganizationOf,
   deriveTrustState,
   providerCatalog,
+  resolveOrganizations,
   type RunRecord,
   type TenantRecord,
   type WriteAction,
@@ -54,6 +57,7 @@ import {
   runReportPlaintext,
 } from "../shared/runReport";
 import { useAppState } from "../state";
+import type { RerunChoice } from "./AgentDetail";
 import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   agentNameForRun,
@@ -69,16 +73,29 @@ export default function RunResult() {
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams();
-  const { state, startRun, confirmRun, rejectRun, cancelRun } = useAppState();
+  const { state } = useAppState();
+  const run = state.runs.find((candidate) => candidate.id === id);
+  if (!run) {
+    return <MissingRun onBack={() => navigate(`/runs${location.search}`)} />;
+  }
+  return <RunResultPage key={run.id} run={run} />;
+}
+
+function RunResultPage({ run }: { run: RunRecord }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { state, startRun, confirmRun, rejectRun, cancelRun, setActiveOrganization } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const toast = useToast();
-  const run = state.runs.find((candidate) => candidate.id === id);
+  const [crossOrganization, setCrossOrganization] = useState(false);
+  // The organization a Switch in the cross-organization dialog is moving
+  // to; the rerun runs on the render where it is active, with fresh gates.
+  const [rerunAfterSwitch, setRerunAfterSwitch] = useState<string | null>(null);
+  const pendingRerunRef = useRef<string | null>(null);
+  const proceedRerunRef = useRef<(() => void) | null>(null);
+  const activeOrganizationId = activeOrganizationOf(state)?.id;
 
   const closeToRuns = () => navigate(`/runs${location.search}`);
-
-  if (!run) {
-    return <MissingRun onBack={closeToRuns} />;
-  }
 
   const agent = state.installedAgents.find(
     (candidate) => candidate.slug === run.agentSlug,
@@ -110,13 +127,67 @@ export default function RunResult() {
     run.officeContext && (agent?.mode === "write" || !runTrust.isLocal),
   );
 
+  const openRerunPreflight = (slug: string, runChoice: RerunChoice) => {
+    navigate(`/agents/${encodeURIComponent(slug)}/confirm`, { state: { runChoice } });
+  };
+
+  // A rerun of a run from an organization that is not active asks first:
+  // switch to that organization, or run in the active one.
+  const runOrganization = run.tenantId
+    ? resolveOrganizations(state).find((organization) => organization.connections.microsoft365?.tenantId === run.tenantId)
+    : undefined;
+  const activeOrganization = activeOrganizationOf(state);
+
   const reRun = () => {
+    // Agent Team reviews its own assignments with their tenant.
+    if (!requiresTeamReview && run.tenantId && run.tenantId !== state.activeTenantId) {
+      setCrossOrganization(true);
+      return;
+    }
+    proceedRerun();
+  };
+
+  const proceedRerun = () => {
+    proceedRerunImpl();
+  };
+  // The latest render's rerun, set before the effect below reads it.
+  useEffect(() => {
+    proceedRerunRef.current = proceedRerun;
+  });
+  useEffect(() => {
+    pendingRerunRef.current = rerunAfterSwitch;
+    if (!rerunAfterSwitch || activeOrganizationId !== rerunAfterSwitch) return;
+    pendingRerunRef.current = null;
+    setRerunAfterSwitch(null);
+    proceedRerunRef.current?.();
+  }, [activeOrganizationId, rerunAfterSwitch]);
+  // Leaving the page before the switch lands does not drop the rerun silently.
+  useEffect(
+    () => () => {
+      if (pendingRerunRef.current) toast.info(RERUN_COPY.rerunNotContinued);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+
+  const proceedRerunImpl = () => {
     if (requiresTeamReview) {
       navigate(
         run.office?.personaId
           ? `/office?persona=${encodeURIComponent(run.office.personaId)}`
           : "/office",
       );
+      return;
+    }
+    // An ordinary rerun opens the agent's preflight with the same provider
+    // and model, so it names the organization and services it will use,
+    // whether or not the original run had an organization. Run for real
+    // and Team retries keep their own flows.
+    if (run.status !== "planned" && !run.officeContext) {
+      openRerunPreflight(run.agentSlug, {
+        ...(run.providerId ? { providerId: run.providerId } : {}),
+        ...(run.model ? { model: run.model } : {}),
+      });
       return;
     }
     if (
@@ -154,8 +225,68 @@ export default function RunResult() {
       );
   };
 
+  // Only an ordinary rerun can move to the active organization; Run for
+  // real and Team retries stay with the run's own tenant.
+  const ordinaryRerun = run.status !== "planned" && !run.officeContext;
+  const crossOrganizationDialog = (
+    <Modal open={crossOrganization} onClose={() => setCrossOrganization(false)} size="md">
+      <ModalHeader
+        title={RERUN_COPY.title(runOrganization?.name)}
+        subtitle={displayName}
+        onClose={() => setCrossOrganization(false)}
+      />
+      <div className="space-y-4 p-6">
+        <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">
+          {RERUN_COPY.body(runOrganization?.name, activeOrganization?.name, ordinaryRerun)}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={() => setCrossOrganization(false)}>Cancel</Button>
+          {ordinaryRerun && activeOrganization ? (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setCrossOrganization(false);
+                openRerunPreflight(run.agentSlug, {
+                  ...(run.providerId ? { providerId: run.providerId } : {}),
+                  ...(run.model ? { model: run.model } : {}),
+                });
+              }}
+            >
+              {RERUN_COPY.runInActive(activeOrganization.name)}
+            </Button>
+          ) : null}
+          {runOrganization ? (
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCrossOrganization(false);
+                // The rerun continues once the switch reaches the app state:
+                // this closure still sees the organization before the switch.
+                const target = runOrganization.id;
+                setRerunAfterSwitch(target);
+                void setActiveOrganization(target).catch((caught) => {
+                  pendingRerunRef.current = null;
+                  setRerunAfterSwitch(null);
+                  toast.error(
+                    ORGANIZATION_COPY.switchFailed(
+                      userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
+                    ),
+                  );
+                });
+              }}
+            >
+              {RERUN_COPY.switchTo(runOrganization.name)}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </Modal>
+  );
+
   if (run.status === "awaiting-confirmation" || run.status === "planned") {
     return (
+      <>
+      {crossOrganizationDialog}
       <ConfirmationPage
         run={run}
         displayName={displayName}
@@ -167,11 +298,28 @@ export default function RunResult() {
         onConfirm={confirmRun}
         onReject={rejectRun}
         onRunForReal={reRun}
+        inactiveOrganization={
+          run.status === "awaiting-confirmation" && Boolean(run.tenantId) && run.tenantId !== state.activeTenantId
+            ? { name: runOrganization?.name ?? tenantName, ...(runOrganization ? { id: runOrganization.id } : {}) }
+            : undefined
+        }
+        onSwitchOrganization={(organizationId) =>
+          void setActiveOrganization(organizationId).catch((caught) =>
+            toast.error(
+              ORGANIZATION_COPY.switchFailed(
+                userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
+              ),
+            ),
+          )
+        }
       />
+      </>
     );
   }
 
   return (
+    <>
+    {crossOrganizationDialog}
     <RunPage
       key={run.id}
       run={run}
@@ -189,6 +337,10 @@ export default function RunResult() {
       onRerun={reRun}
       onCancel={() => cancelRun(run.id)}
       onRetargetCurrent={() => {
+        if (!run.officeContext) {
+          openRerunPreflight(run.agentSlug, {});
+          return;
+        }
         if (
           !requireTenantAndProvider(
             createPendingIntent({
@@ -212,6 +364,7 @@ export default function RunResult() {
           );
       }}
     />
+    </>
   );
 }
 
@@ -794,6 +947,8 @@ function ConfirmationPage({
   onConfirm,
   onReject,
   onRunForReal,
+  inactiveOrganization,
+  onSwitchOrganization,
 }: {
   run: RunRecord;
   displayName: string;
@@ -801,6 +956,9 @@ function ConfirmationPage({
   tenantName: string;
   trustDetail: string;
   providerIsLocal: boolean;
+  /** The plan's organization when it is not the active one. Applying waits for it. */
+  inactiveOrganization?: { name: string; id?: string } | undefined;
+  onSwitchOrganization?: (organizationId: string) => void;
   onBack: () => void;
   onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
   onReject: (runId: string) => Promise<RunRecord>;
@@ -855,9 +1013,25 @@ function ConfirmationPage({
               <div className="mb-1 flex items-center gap-2 font-medium"><IconWarning size={14} />Microsoft Graph write</div>
               Approving will call Microsoft Graph. {plan.actions.length} planned {plan.actions.length === 1 ? "change" : "changes"} will be applied to {tenantName}. Review every operation below. Microsoft Graph changes may not be reversible.
             </div>
-          ) : plan ? (
-            <div className="border-l-2 border-[var(--color-info)] bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-info)]">
-              Apply will be simulated. No Microsoft Graph writes will be made.
+          ) : plan && run.status === "awaiting-confirmation" ? (
+            // The host refuses a plan with no organization; it is never applied elsewhere.
+            <div role="alert" className="rounded-[14px] bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-warning)]/25">
+              <div className="font-medium">{RERUN_COPY.planNoOrganizationTitle}</div>
+              <p className="mt-1 text-[var(--color-text-soft)]">{RERUN_COPY.planNoOrganizationBody}</p>
+            </div>
+          ) : null}
+
+          {inactiveOrganization && !dryRun && plan ? (
+            <div role="alert" className="rounded-[14px] bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-warning)]/25">
+              <div className="font-medium">{RERUN_COPY.planElsewhereTitle(inactiveOrganization.name)}</div>
+              <p className="mt-1 text-[var(--color-text-soft)]">{RERUN_COPY.planElsewhereBody(inactiveOrganization.name)}</p>
+              {inactiveOrganization.id && onSwitchOrganization ? (
+                <div className="mt-3">
+                  <Button variant="primary" onClick={() => onSwitchOrganization(inactiveOrganization.id!)}>
+                    {RERUN_COPY.switchTo(inactiveOrganization.name)}
+                  </Button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
@@ -888,6 +1062,7 @@ function ConfirmationPage({
                 runId={run.id}
                 plan={plan}
                 requiresRiskAcknowledgement={run.riskAssessment?.status === "complete" && run.riskAssessment.flags.some((flag) => flag.severity === "danger")}
+                blocked={Boolean(inactiveOrganization) || !run.tenantId}
                 onConfirm={onConfirm}
                 onReject={onReject}
               />}
@@ -912,11 +1087,14 @@ function TypedConfirmation({
   runId,
   plan,
   requiresRiskAcknowledgement,
+  blocked = false,
   onConfirm,
   onReject,
 }: {
   runId: string;
   plan: WritePlan;
+  /** Apply stays disabled while the plan's organization is not active. */
+  blocked?: boolean;
   requiresRiskAcknowledgement: boolean;
   onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
   onReject: (runId: string) => Promise<RunRecord>;
@@ -925,7 +1103,7 @@ function TypedConfirmation({
   const [riskAcknowledged, setRiskAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const armed = typed === plan.confirmationPhrase && (!requiresRiskAcknowledgement || riskAcknowledged);
+  const armed = !blocked && typed === plan.confirmationPhrase && (!requiresRiskAcknowledgement || riskAcknowledged);
 
   const confirm = async () => {
     if (!armed || busy) return;

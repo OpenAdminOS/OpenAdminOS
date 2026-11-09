@@ -20,10 +20,7 @@ import type {
 
 import { PageBody, PageHeader } from "../components/AppShell";
 import {
-  JiraLogo,
   OutlookLogo,
-  ServiceNowLogo,
-  SharePointLogo,
   SlackLogo,
   TeamsLogo,
   WebhookLogo,
@@ -83,9 +80,15 @@ export default function Connectors() {
 export function ConnectorsSettingsSection({
   connectorId,
   onConnectorChange,
+  onConnectorsLoaded,
 }: {
   connectorId?: string | null;
   onConnectorChange?: (connectorId: string | null) => void;
+  /**
+   * Receives every loaded connector list, so Connections draws its map from
+   * the same list; null when the list could not be loaded.
+   */
+  onConnectorsLoaded?: (connectors: ConnectorSummary[] | null) => void;
 }) {
   const [connectors, setConnectors] = useState<ConnectorSummary[] | undefined>(
     undefined,
@@ -106,10 +109,12 @@ export function ConnectorsSettingsSection({
     try {
       const summaries = await api.listConnectors();
       setConnectors(summaries);
+      onConnectorsLoaded?.(summaries);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
+      onConnectorsLoaded?.(null);
     }
-  }, []);
+  }, [onConnectorsLoaded]);
 
   useEffect(() => {
     void refresh();
@@ -136,7 +141,6 @@ export function ConnectorsSettingsSection({
   const openConnector = connectors?.find(
     (connector) => connector.descriptor.id === openConnectorId,
   );
-  const openRoadmapEntry = roadmap.find((entry) => entry.id === openConnectorId);
 
   const setOpenConnector = (id: string | null) => {
     setOpenConnectorId(id);
@@ -144,13 +148,7 @@ export function ConnectorsSettingsSection({
   };
 
   const renderConnectorDetail = () => {
-    if (!openConnector) {
-      return openRoadmapEntry ? (
-        <div className="p-5">
-          <RoadmapCard entry={openRoadmapEntry} />
-        </div>
-      ) : null;
-    }
+    if (!openConnector) return null;
     if (openConnector.descriptor.id === "teams") {
       return (
         <div className="p-5">
@@ -158,6 +156,7 @@ export function ConnectorsSettingsSection({
             summary={openConnector}
             busy={testing === "teams"}
             onTest={() => handleTest("teams")}
+            onSaved={refresh}
           />
         </div>
       );
@@ -228,20 +227,13 @@ export function ConnectorsSettingsSection({
               onOpen={() => setOpenConnector(connector.descriptor.id)}
             />
           ))}
-          {roadmap.map((entry) => (
-            <ConnectorRoadmapRow
-              key={entry.id}
-              entry={entry}
-              onOpen={() => setOpenConnector(entry.id)}
-            />
-          ))}
           <ConnectorRoutingSummary connectors={connectors} />
         </div>
       )}
 
       <Drawer
-        open={Boolean(openConnectorId && (openConnector || openRoadmapEntry))}
-        title={openConnector?.descriptor.name ?? openRoadmapEntry?.name ?? "Connector"}
+        open={Boolean(openConnectorId && openConnector)}
+        title={openConnector?.descriptor.name ?? "Connector"}
         onClose={() => setOpenConnector(null)}
       >
         {renderConnectorDetail()}
@@ -272,25 +264,6 @@ function ConnectorSettingsRow({
       <UiButton size="sm" variant="secondary" onClick={onOpen}>
         {connector.status === "connected" ? "Manage" : "Set up"}
       </UiButton>
-    </div>
-  );
-}
-
-function ConnectorRoadmapRow({
-  entry,
-  onOpen,
-}: {
-  entry: RoadmapEntry;
-  onOpen: () => void;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-4 border-b border-[var(--color-border-soft)] px-5 py-4">
-      <div className="min-w-0 flex-1">
-        <div className="text-base font-medium text-[var(--color-text)]">{entry.name}</div>
-        <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{entry.description}</p>
-      </div>
-      <Badge tone="neutral">{entry.status === "designed" ? "Designed" : entry.status === "planned" ? "Planned" : "Considering"}</Badge>
-      <UiButton size="sm" variant="ghost" onClick={onOpen}>View details</UiButton>
     </div>
   );
 }
@@ -581,10 +554,13 @@ function FeaturedTeamsCard({
   summary,
   busy,
   onTest,
+  onSaved,
 }: {
   summary: ConnectorSummary;
   busy: boolean;
   onTest: () => void;
+  /** Reloads the connector list so every disclosure of where reports go sees the saved default. */
+  onSaved?: () => void | Promise<void>;
 }) {
   const descriptor = summary.descriptor;
   const isConnected = summary.status === "connected";
@@ -657,7 +633,7 @@ function FeaturedTeamsCard({
             </Tag>
           </div>
           {isConnected ? (
-            <TeamsDefaultsPicker summary={summary} />
+            <TeamsDefaultsPicker summary={summary} {...(onSaved ? { onSaved } : {})} />
           ) : (
             <div className="mt-3 rounded-lg border border-dashed border-[var(--color-border-soft)] bg-[var(--color-surface)]/55 p-4">
               <p className="text-base text-[var(--color-text-soft)]">
@@ -1759,112 +1735,17 @@ function NotificationConnectorCard({
   );
 }
 
-// ─── Roadmap cards ────────────────────────────────────────────────────────
-
-interface RoadmapEntry {
-  id: string;
-  name: string;
-  category: string;
-  authSource: "graph-delegated" | "external" | "webhook";
-  description: string;
-  Icon: BrandIcon;
-  status: "designed" | "planned" | "considering";
-}
-
-const roadmap: RoadmapEntry[] = [
-  {
-    id: "servicenow",
-    name: "ServiceNow",
-    category: "Ticketing",
-    authSource: "external",
-    description:
-      "Create and update incidents from agent findings. Stale-device reports become tracked tickets routed to the right assignment group.",
-    Icon: ServiceNowLogo,
-    status: "designed",
-  },
-  {
-    id: "jira",
-    name: "Jira",
-    category: "Ticketing",
-    authSource: "external",
-    description:
-      "File issues against a project board with structured fields populated from the agent's structured output.",
-    Icon: JiraLogo,
-    status: "planned",
-  },
-  {
-    id: "sharepoint",
-    name: "SharePoint",
-    category: "Documents",
-    authSource: "graph-delegated",
-    description:
-      "Drop generated reports as documents in a site library. Run outputs become a permanent compliance trail.",
-    Icon: SharePointLogo,
-    status: "considering",
-  },
-  {
-    id: "webhook",
-    name: "Generic webhook",
-    category: "Custom",
-    authSource: "webhook",
-    description:
-      "POST run results to any HTTPS endpoint. Escape hatch for tools that don't have a first-class connector yet.",
-    Icon: WebhookLogo,
-    status: "considering",
-  },
-];
-
-function RoadmapCard({ entry }: { entry: RoadmapEntry }) {
-  const statusLabel: Record<RoadmapEntry["status"], string> = {
-    designed: "Designed",
-    planned: "Planned",
-    considering: "Considering",
-  };
-  const authLabel: Record<RoadmapEntry["authSource"], string> = {
-    "graph-delegated": "Graph delegated",
-    external: "External auth",
-    webhook: "Webhook",
-  };
-  const { Icon } = entry;
-  return (
-    <article className="group flex flex-col rounded-xl border border-[var(--color-border-soft)] bg-[var(--color-surface)]/40 p-4 transition-opacity">
-      <div className="flex items-start gap-3">
-        <div
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] p-1.5 ring-1 ring-[var(--color-border-soft)]"
-          // Desaturate the brand icon so the roadmap row reads as
-          // "not available yet" at a glance. Hovering nudges the
-          // grayscale off slightly to hint at the underlying brand
-          // without making the card look interactive.
-          style={{
-            filter: "grayscale(1)",
-            opacity: 0.55,
-          }}
-        >
-          <Icon size={26} />
-        </div>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <h3 className="truncate text-base font-semibold text-[var(--color-text-soft)]">
-              {entry.name}
-            </h3>
-            <Tag tone="muted">{entry.category}</Tag>
-          </div>
-          <p className="mt-0.5 text-xs text-[var(--color-text-muted)]">
-            {authLabel[entry.authSource]}
-          </p>
-        </div>
-        <Tag tone="warning">{statusLabel[entry.status]}</Tag>
-      </div>
-      <p className="mt-3 text-base leading-relaxed text-[var(--color-text-muted)]">
-        {entry.description}
-      </p>
-    </article>
-  );
-}
-
 // ─── Teams defaults picker ────────────────────────────────────────────────
 
-function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
+function TeamsDefaultsPicker({
+  summary,
+  onSaved,
+}: {
+  summary: ConnectorSummary;
+  onSaved?: () => void | Promise<void>;
+}) {
+  const onSavedRef = useRef(onSaved);
+  onSavedRef.current = onSaved;
   const initialTeamId =
     typeof summary.config.defaultTeamId === "string"
       ? summary.config.defaultTeamId
@@ -1982,6 +1863,9 @@ function TeamsDefaultsPicker({ summary }: { summary: ConnectorSummary }) {
           if (cancelled) return;
           lastSavedDefaultKey.current = selectedDefaultKey;
           setSavedAt(new Date().toISOString());
+          // The map, Results and the run review read the connector list;
+          // a new default changes where reports can go.
+          void onSavedRef.current?.();
         })
         .catch((err) => {
           if (!cancelled) {

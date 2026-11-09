@@ -49,13 +49,13 @@ export const SETUP_COPY = {
   ownRegistrationBody:
     "Register a public client in Entra under Mobile and desktop applications with the redirect URI http://localhost and Allow public client flows set to Yes, then enter its details below. The setup script below can create it for you.",
   savedRegistrationsLegend: "Saved registrations",
-  savedRegistrationsHint: "Registrations you connected with before. Remove them in Settings, Tenants.",
+  savedRegistrationsHint: "Registrations you connected with before. Remove them in Connections.",
   newRegistrationOption: "Enter a different registration",
   chooseSignInReason: "Choose OpenAdminOS app or your own app registration above to continue.",
   selectServiceReason: "Select at least one service.",
   servicePickerLegend: "Services",
   servicePickerHint:
-    "Choose the services to connect. Expand a service to review its parts, each exact Microsoft Graph scope and why it is needed. You can add services later in Settings, Tenants.",
+    "Choose the services to connect. Expand a service to review its parts, each exact Microsoft Graph scope and why it is needed. You can add services later in Connections.",
   scriptServicesLegend: "Services in the script",
   ownRegistrationServicesNote:
     "Your app registration's API permissions decide which services are available. OpenAdminOS reads the granted permissions from the token after sign-in and switches on each service part that is fully granted.",
@@ -66,7 +66,7 @@ export const SETUP_COPY = {
         ? `Connected services: ${connected.join(", ")}.`
         : "No service is connected yet.",
       missing.length > 0
-        ? `Not connected: ${missing.join(", ")}. Add them in Settings, Tenants.`
+        ? `Not connected: ${missing.join(", ")}. Add them in Connections.`
         : "",
     ]
       .filter(Boolean)
@@ -201,7 +201,7 @@ export const SERVICE_COPY = {
   consentNoteGeneric:
     "Runs are blocked while a service this agent needs is not connected for the tenant. Scopes a connected service has not granted yet are requested when the run starts.",
   consentNoteBlocked: (services: readonly string[], tenant: string) =>
-    `Runs are blocked until ${joinTitles(services)} ${services.length === 1 ? "is" : "are"} connected for ${tenant}. Add ${services.length === 1 ? "it" : "them"} in Settings, Tenants.`,
+    `Runs are blocked until ${joinTitles(services)} ${services.length === 1 ? "is" : "are"} connected for ${tenant}. Add ${services.length === 1 ? "it" : "them"} in Connections.`,
   consentNotePending: (tenant: string) =>
     `Scopes not yet granted for ${tenant} are requested when the run starts.`,
   consentNoteGranted: (tenant: string) => `Every scope listed here is granted for ${tenant}.`,

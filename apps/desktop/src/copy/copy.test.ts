@@ -8,7 +8,10 @@ import {
   chatErrorCopy,
   deriveToolHostsCopy,
   deriveTrustCopy,
+  HOSTED_CONFIRM_COPY,
+  PROVIDER_COMPANIES,
   promptsGoTo,
+  sendsThroughTool,
   providerDataLocation,
   providerDataLocationDetail,
   searchSettings,
@@ -41,7 +44,7 @@ describe("v0.4 copy catalog", () => {
     expect(SETUP_COPY.dailyRole + SETUP_COPY.consentRole + SETUP_COPY.scopedRoles).not.toContain("\u2014");
   });
 
-  it("derives local and hosted trust boundaries, naming only a documented region", () => {
+  it("derives local and hosted trust boundaries with the provider's documented location", () => {
     const local = deriveTrustCopy({
       provider: { name: "Ollama", isLocal: true },
       model: "qwen2.5:7b",
@@ -51,17 +54,15 @@ describe("v0.4 copy catalog", () => {
     expect(local.boundary).toBeUndefined();
 
     const hosted = deriveTrustCopy({
-      provider: { id: "anthropic", name: "Anthropic", isLocal: false },
+      provider: { id: "anthropic", name: "Claude Code", isLocal: false },
       scope: { tenantNames: ["Contoso", "Fabrikam"] },
       attachments: { workspaceTitle: "Incident 42", evidenceCount: 2 },
     });
-    expect(hosted.strip).toContain("Claude Code · location set by your account");
+    expect(hosted.strip).toBe("hosted · tenant context sent to Claude Code · location set by your account");
+    expect(hosted.confirmBody).toContain("(Claude Code · location set by your account)");
+    expect(hosted.boundary).toBe("Prompts and tenant data leave this device through Claude Code; location set by your account, with workspace Incident 42, 2 evidence items.");
     expect(hosted.confirmBody).toContain("2 selected tenants");
     expect(hosted.confirmBody).toContain("2 evidence items");
-    // The region comes from the provider's documented data location, never guessed (PR #175 round 2, R).
-    expect(hosted.confirmBody).toContain("(Claude Code · location set by your account)");
-    const unknown = deriveTrustCopy({ provider: { name: "Example", isLocal: false }, scope: { tenantNames: ["Contoso"] } });
-    expect(unknown.confirmBody).toContain("(Example · location not stated)");
   });
 
   it("names MCP tool hosts honestly, also for a local model", () => {
@@ -75,7 +76,7 @@ describe("v0.4 copy catalog", () => {
     // With MCP tools on, a local model no longer claims that prompts stay on the device.
     expect(local.storage).toBe("The model, Graph and cache data, and chat history stay on this device.");
     expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true } }).storage).toBe("Tenant data, prompts, and chat history stay on this device.");
-    const hosted = deriveTrustCopy({ provider: { id: "anthropic", name: "Anthropic", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
+    const hosted = deriveTrustCopy({ provider: { id: "anthropic", name: "Claude Code", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
     expect(hosted.strip).toBe("hosted · tenant context sent to Claude Code · location set by your account · tool queries to learn.microsoft.com");
     expect(deriveToolHostsCopy([])).toBeUndefined();
     expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true }, toolHosts: [] }).strip).toBe("local-only · no data leaves this device");
@@ -107,10 +108,10 @@ describe("v0.4 copy catalog", () => {
 
 describe("hosted trust copy names the region (PR #175 Muse round 2, R)", () => {
   it("names where prompts go in the strip, boundary and confirmation with a tenant", () => {
-    const copy = deriveTrustCopy({ provider: { id: "openai", name: "OpenAI", isLocal: false }, model: "gpt-5", scope: { tenantNames: ["Contoso"] } });
+    const copy = deriveTrustCopy({ provider: { id: "openai", name: "Codex", isLocal: false }, model: "gpt-5", scope: { tenantNames: ["Contoso"] } });
     expect(copy.strip).toBe("hosted · tenant context sent to Codex · location set by your account");
     expect(copy.boundary).toBe("Prompts and tenant data leave this device through Codex; location set by your account.");
-    expect(copy.confirmBody).toBe("OpenAI using gpt-5 (Codex · location set by your account) will receive the prompt and selected context from Contoso.");
+    expect(copy.confirmBody).toBe("Codex using gpt-5 (Codex · location set by your account) will receive the prompt and selected context from Contoso.");
   });
 });
 
@@ -142,5 +143,16 @@ describe("hosted data locations (maintainer decision, 2026-11-09, refined)", () 
     expect(promptsGoTo({ id: "azure-openai", name: "Azure OpenAI" })).toBe("Prompts go to Azure OpenAI · location set by your deployment type");
     expect(promptsGoTo({ id: "gemini", name: "Gemini CLI" })).toBe("Prompts leave this device through Gemini CLI; location not stated");
     expect(promptsGoTo({ id: "copilot", name: "GitHub Copilot CLI" })).toBe("Prompts leave this device through GitHub Copilot CLI; location not stated");
+  });
+});
+
+describe("hosted confirmation wording, as PR #175 (design round review)", () => {
+  it("names a CLI as the way the question leaves and an API by its company", () => {
+    expect(sendsThroughTool({ id: "anthropic" })).toBe(true);
+    expect(HOSTED_CONFIRM_COPY.titleThrough("Claude Code")).toBe("Send this question through Claude Code?");
+    expect(HOSTED_CONFIRM_COPY.sendThrough("Claude Code")).toBe("Send through Claude Code");
+    expect(HOSTED_CONFIRM_COPY.bodyThroughTenant("Claude Code", "Contoso")).toMatch(/^Claude Code answers with your existing sign-in\./);
+    expect(sendsThroughTool({ id: "azure-openai" })).toBe(false);
+    expect(HOSTED_CONFIRM_COPY.title(PROVIDER_COMPANIES["azure-openai"]!)).toBe("Send this question to Azure OpenAI?");
   });
 });

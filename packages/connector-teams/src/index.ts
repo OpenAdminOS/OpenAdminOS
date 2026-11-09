@@ -238,7 +238,7 @@ export const teamsConnector: ConnectorFactory<TeamsConnectorCapabilities> =
     async build(
       ctx: ConnectorBuildContext,
     ): Promise<ConnectorInstance<TeamsConnectorCapabilities>> {
-      const client = createTeamsGraphClient({ tenant: ctx.tenant });
+      const client = createTeamsGraphClient({ tenant: ctx.tenant, ...(ctx.fetch ? { fetchImpl: ctx.fetch } : {}) });
       const capabilities = buildCapabilities(client, ctx.config);
       return {
         descriptor: teamsDescriptor,

@@ -10,7 +10,7 @@ import {
 import { IconCheck, IconClose, IconWarning } from "./icons";
 import { IconButton } from "./ui";
 
-type ToastTone = "success" | "error" | "info";
+type ToastTone = "success" | "error" | "info" | "warning";
 
 interface Toast {
   id: string;
@@ -25,6 +25,8 @@ interface ToastContextValue {
   success(message: string, durationMs?: number | null): void;
   error(message: string, durationMs?: number | null): void;
   info(message: string, durationMs?: number | null): void;
+  /** A partial outcome that needs the admin's attention: sticks until dismissed. */
+  warning(message: string, durationMs?: number | null): void;
   dismiss(id: string): void;
 }
 
@@ -33,6 +35,7 @@ const ToastContext = createContext<ToastContextValue | undefined>(undefined);
 const DEFAULT_DURATIONS: Record<ToastTone, number | null> = {
   success: 3500,
   info: 4000,
+  warning: null, // partial outcomes stick until dismissed
   error: null, // errors stick until dismissed
 };
 
@@ -59,6 +62,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       success: (message, durationMs) => push({ tone: "success", message, durationMs }),
       error: (message, durationMs) => push({ tone: "error", message, durationMs }),
       info: (message, durationMs) => push({ tone: "info", message, durationMs }),
+      warning: (message, durationMs) => push({ tone: "warning", message, durationMs }),
       dismiss,
     }),
     [push, dismiss],
@@ -115,7 +119,9 @@ function ToastRow({
       ? "bg-[var(--color-success-soft)] ring-[var(--color-success)]/35 text-[var(--color-success)]"
       : toast.tone === "error"
         ? "bg-[var(--color-danger-soft)] ring-[var(--color-danger)]/40 text-[var(--color-danger)]"
-        : "bg-[var(--color-bg-elevated)] ring-[var(--color-border-strong)] text-[var(--color-text)]";
+        : toast.tone === "warning"
+          ? "bg-[var(--color-warning-soft)] ring-[var(--color-warning)]/40 text-[var(--color-warning)]"
+          : "bg-[var(--color-bg-elevated)] ring-[var(--color-border-strong)] text-[var(--color-text)]";
 
   return (
     <div
@@ -125,7 +131,7 @@ function ToastRow({
       <span className="mt-0.5 shrink-0">
         {toast.tone === "success" ? (
           <IconCheck size={12} />
-        ) : toast.tone === "error" ? (
+        ) : toast.tone === "error" || toast.tone === "warning" ? (
           <IconWarning size={12} />
         ) : (
           <span className="inline-block h-2 w-2 rounded-full bg-[var(--color-info)]" />

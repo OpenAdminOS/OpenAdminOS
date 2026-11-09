@@ -548,6 +548,11 @@ export interface ExecuteRunInput {
    */
   connectorSecretsFor?: (connectorId: string) => SecretAccessor;
   /**
+   * Host transport for the run's connectors: the desktop host passes one
+   * that refuses every request once the organization is being disconnected.
+   */
+  connectorTransport?: { fetch?: typeof fetch; assertEgress?: () => void };
+  /**
    * Called before every `notify`/`mutating`/`destructive` capability
    * invocation. The wrapper aborts the call when this returns
    * `{ approved: false }`. Phase 6 wires this to the preview-and-send
@@ -668,6 +673,7 @@ async function createPhaseHandle(
       configFor: (connectorId) => input.connectorConfigs?.[connectorId] ?? {},
       secretsFor: (connectorId) =>
         input.connectorSecretsFor?.(connectorId) ?? noSecrets,
+      ...(input.connectorTransport ? { transport: input.connectorTransport } : {}),
       log: logFn,
     });
     builtConnectors = preflight.built;

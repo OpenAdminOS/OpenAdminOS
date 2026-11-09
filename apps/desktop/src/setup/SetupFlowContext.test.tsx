@@ -14,7 +14,7 @@ import { OPENADMINOS_APP_CLIENT_ID } from "../shared/openAdminOS";
 
 const INTUNE_PARTS = ["intune.people", "intune.devices", "intune.apps"];
 import { useSetupFlow } from "./SetupFlowContext";
-import { PROVIDER_DETECTION_COPY, SETUP_COPY } from "../copy";
+import { ORGANIZATION_COPY, PROVIDER_DETECTION_COPY, SETUP_COPY } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
 function SetupTrigger() {
@@ -581,7 +581,7 @@ describe("contextual tenant setup", () => {
     expect(detected.compareDocumentPosition(grid) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
 
-    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("OpenAI") }));
+    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("Codex") }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
   });
 
@@ -865,3 +865,29 @@ function RequireProviderButton({ onReady }: { onReady: () => void }) {
     </Button>
   );
 }
+
+describe("connecting an organization whose disconnect is still cleaning up (Disconnect redesign)", () => {
+  beforeEach(() => clearPendingIntent());
+
+  it("shows the designed message with Retry cleanup in the sign-in error", async () => {
+    const user = userEvent.setup();
+    const pending = { tenantId: "tenant-1", displayName: "Contoso", removedAt: "2026-11-09T10:00:00.000Z", error: "The Microsoft sign-in could not be removed. Locked." };
+    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined, tenantCleanups: [pending] });
+    const message = "Disconnecting Contoso has not finished on this device: The Microsoft sign-in could not be removed. Locked. Retry cleanup on Connections, then connect again.";
+    const connectTenant = vi.fn(async () => {
+      throw new Error(message);
+    });
+    const bridge = makeMockBridge({ connectTenant }, emptyState);
+    renderSetup(bridge);
+
+    await user.click(await screen.findByRole("button", { name: "Connect tenant" }));
+    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
+    await user.click(await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(await within(dialog).findByText(message)).toBeInTheDocument();
+    const notice = within(dialog).getByRole("region", { name: ORGANIZATION_COPY.cleanupHeading });
+    await user.click(within(notice).getByRole("button", { name: `${ORGANIZATION_COPY.retryCleanup}, Contoso` }));
+    await waitFor(() => expect(bridge.retryTenantCleanup).toHaveBeenCalledWith("tenant-1"));
+  });
+});

@@ -39,9 +39,9 @@ The second step shows your device in the centre again, with Intune, Entra and De
    - **Ask an admin to approve** copies a message with the admin consent link for an admin who can grant the permissions. If the clipboard refuses, the message is shown to copy yourself.
 3. After a successful sign-in the step shows your organization's name and each connected service with its parts, and **Open Chat** opens Chat with questions for what you connected, for example **Ask about Intune**.
 
-**Not now** opens Chat without connecting anything. If sign-in cannot reach Microsoft, for example offline or behind a proxy, the connect dialog names the host, whether a proxy was in the path and what to do next, and the step stays open. You can open this step again from **Settings, Tenants** with **Set up Microsoft 365**.
+**Not now** opens Chat without connecting anything. If sign-in cannot reach Microsoft, for example offline or behind a proxy, the connect dialog names the host, whether a proxy was in the path and what to do next, and the step stays open. You can open this step again from **Connections** with **Set up Microsoft 365**.
 
-## Chat Without a Tenant
+## Chat Without an Organization
 
 If you chose **Not now**, Chat opens with nothing connected. Questions about products, KQL, PowerShell and documentation are answered from the model, the local docs index and any public references you add. A question about your own devices or users answers with a card that names the service it needs (for example Intune), the exact read permissions, and three ways forward: **Connect**, **Use our own app registration**, or **Ask an admin to approve**, which copies a message with the admin consent link. No tenant data is read, your question is kept, and after connecting you choose **Ask again**.
 
@@ -60,7 +60,7 @@ When you connect from the Connect Microsoft 365 step, Chat's card, the tenant sw
 3. Pick or repair an LLM provider if the action needs one.
 4. Review and explicitly resume the original action.
 
-After sign-in, OpenAdminOS shows which enterprise application was added to your tenant and how many delegated permissions it holds. Canceling keeps a Chat draft but discards the pending action. OpenAdminOS never sends a question or starts an agent automatically after sign-in, and agents cannot start without an active tenant.
+After sign-in, OpenAdminOS shows which enterprise application was added to your tenant and how many delegated permissions it holds. Canceling keeps a Chat draft but discards the pending action. OpenAdminOS never sends a question or starts an agent automatically after sign-in, and an agent that reads a service cannot start until that service is connected in the active organization.
 
 ## Provider Choice
 

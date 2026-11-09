@@ -290,7 +290,7 @@ describe("own app registration grants", () => {
       silent: async () => ({ scopes: [], accessToken: "" }),
     });
     try {
-      await assert.rejects(fixture.store.refreshTenantGrants("contoso-tenant-id"), /Use Add access in Settings, Tenants/);
+      await assert.rejects(fixture.store.refreshTenantGrants("contoso-tenant-id"), /Use Add access in Connections/);
       assert.equal(fixture.silentRequests.length, 0);
     } finally {
       await fixture.close();

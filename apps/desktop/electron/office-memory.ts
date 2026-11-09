@@ -10,7 +10,11 @@ import type {
 import { fingerprintRunOutput } from "./run-delivery-format.js";
 
 export class OfficeMemory {
-  constructor(private db: DatabaseSync) {
+  /**
+   * `writable` is the persistence check: a record of a tenant that is being
+   * disconnected is dropped (and logged by OfficeService), never written.
+   */
+  constructor(private db: DatabaseSync, private readonly writable: (tenantId: string, what: string) => boolean = () => true) {
     db.exec(
       "CREATE TABLE IF NOT EXISTS office_memory (kind TEXT NOT NULL, id TEXT NOT NULL, tenant_id TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(kind,id))",
     );
@@ -28,6 +32,7 @@ export class OfficeMemory {
     kind: "finding" | "handoff" | "message",
     record: T,
   ) {
+    if (!this.writable(record.tenantId, `office ${kind}`)) return;
     this.db
       .prepare(
         "INSERT INTO office_memory VALUES(?,?,?,?) ON CONFLICT(kind,id) DO UPDATE SET data=excluded.data",

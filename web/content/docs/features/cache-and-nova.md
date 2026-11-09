@@ -152,7 +152,7 @@ you can start that service and retry.
 
 After Nova completes an answer, try “Send this to my WhatsApp,” “Email this to me,”
 or “Send the report via Teams.” WhatsApp, Outlook/Exchange email, Teams, Slack,
-Discord and Signal use the connectors configured in **Settings > Connectors**. WhatsApp self
+Discord and Signal use the connectors configured in **Connections**, under **Results go to**,. WhatsApp self
 messages go to the linked account; email to yourself uses the connected tenant
 account. Other requests use the connector's saved destination. Personal Teams
 messages require an explicit configured chat destination.
@@ -193,7 +193,7 @@ the relevant report, then displays its content and destination for review. It do
 not send anything until you click **Confirm send**. You do not need to ask for the
 list separately first.
 
-| Connector | Setup in Settings > Connectors | Example after retrieving a result |
+| Connector | Setup in Connections | Example after retrieving a result |
 | --- | --- | --- |
 | WhatsApp | Link the account with QR and choose a target | “Send this to my WhatsApp” |
 | Outlook / Exchange email | Connect the tenant, set recipients and test consent | “Email this to me” |

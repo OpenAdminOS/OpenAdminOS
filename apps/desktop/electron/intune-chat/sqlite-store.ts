@@ -430,6 +430,44 @@ export class IntelligenceSqliteStore {
     this.db.close();
   }
 
+  /**
+   * The persistence choke point for tenant data: the host sets it to its
+   * tenant lifecycle, which refuses a write for a tenant that is being
+   * disconnected or that comes from work of an older generation of it.
+   */
+  private tenantWriteGuard: ((tenantId: string, what: string) => void) | undefined;
+
+  setTenantWriteGuard(guard: ((tenantId: string, what: string) => void) | undefined): void {
+    this.tenantWriteGuard = guard;
+  }
+
+  /** A conversation with no tenant (null) belongs to no tenant, so no Disconnect guards it. */
+  private assertTenantWritable(tenantId: string | null | undefined, what: string): void {
+    if (tenantId) this.tenantWriteGuard?.(tenantId, what);
+  }
+
+  /** A conversation row belongs to its tenant and, for a multi-tenant job, to every tenant of that job. */
+  private assertConversationWritable(conversationId: string, what: string): void {
+    if (!this.tenantWriteGuard) return;
+    const row = this.db
+      .prepare("SELECT tenant_id, multi_tenant_job_id FROM chat_conversations WHERE id = ?")
+      .get(conversationId) as { tenant_id?: string | null; multi_tenant_job_id?: string | null } | undefined;
+    if (!row) return;
+    this.assertTenantWritable(row.tenant_id, what);
+    if (row.multi_tenant_job_id) this.assertJobTenantsWritable(row.multi_tenant_job_id, what);
+  }
+
+  private assertJobTenantsWritable(jobId: string, what: string): void {
+    if (!this.tenantWriteGuard) return;
+    const row = this.db
+      .prepare("SELECT resolved_tenant_ids_json FROM multi_tenant_jobs WHERE id = ?")
+      .get(jobId) as { resolved_tenant_ids_json?: string } | undefined;
+    if (!row?.resolved_tenant_ids_json) return;
+    let tenantIds: unknown;
+    try { tenantIds = JSON.parse(row.resolved_tenant_ids_json); } catch { return; }
+    if (Array.isArray(tenantIds)) for (const tenantId of tenantIds) if (typeof tenantId === "string") this.assertTenantWritable(tenantId, what);
+  }
+
   listConversations(tenantId?: string): IntuneChatConversation[] {
     const scope = conversationTenantScope(tenantId, "chat_conversations");
     const rows = this.db
@@ -489,6 +527,8 @@ export class IntelligenceSqliteStore {
     tenantScope?: TenantScope;
     multiTenantJobId?: string;
   }): IntuneChatConversation {
+    this.assertTenantWritable(input.tenantId, "chat conversation");
+    if (input.multiTenantJobId) this.assertJobTenantsWritable(input.multiTenantJobId, "chat conversation");
     this.db
       .prepare(
         `INSERT INTO chat_conversations (
@@ -520,6 +560,7 @@ export class IntelligenceSqliteStore {
   }
 
   renameConversation(id: string, title: string, now: string): IntuneChatConversation {
+    this.assertConversationWritable(id, "chat conversation");
     const result = this.db
       .prepare(
         `UPDATE chat_conversations
@@ -542,6 +583,7 @@ export class IntelligenceSqliteStore {
     pinned: boolean,
     now: string,
   ): IntuneChatConversation {
+    this.assertConversationWritable(id, "chat conversation");
     const result = this.db
       .prepare(
         `UPDATE chat_conversations
@@ -588,6 +630,7 @@ export class IntelligenceSqliteStore {
   }
 
   touchConversation(id: string, title: string | undefined, now: string): void {
+    this.assertConversationWritable(id, "chat conversation");
     if (title) {
       this.db
         .prepare(
@@ -608,6 +651,7 @@ export class IntelligenceSqliteStore {
   }
 
   insertMessage(message: IntuneChatMessage): void {
+    this.assertConversationWritable(message.conversationId, "chat message");
     this.db
       .prepare(
         `INSERT INTO chat_messages (
@@ -665,6 +709,7 @@ export class IntelligenceSqliteStore {
   }
 
   insertToolCall(toolCall: IntuneChatToolCall): void {
+    this.assertConversationWritable(toolCall.conversationId, "chat tool call");
     this.db
       .prepare(
         `INSERT INTO chat_tool_calls (
@@ -698,6 +743,7 @@ export class IntelligenceSqliteStore {
     tenantTotal?: number;
     refreshedAt: string;
   }): void {
+    this.assertTenantWritable(input.tenantId, "graph cache");
     const snapshotId = `${input.resource}-${input.refreshedAt}-${randomUUID().slice(0, 8)}`;
     this.tenantIdentityIndexes.delete(input.tenantId);
     this.db.exec("BEGIN");
@@ -951,6 +997,7 @@ export class IntelligenceSqliteStore {
     accessDenial?: GraphAccessDenial;
     now: string;
   }): void {
+    this.assertTenantWritable(input.tenantId, "graph cache");
     this.db
       .prepare(
         `INSERT INTO graph_cache_status (
@@ -980,6 +1027,7 @@ export class IntelligenceSqliteStore {
    * in the meantime and answers surface their age honestly.
    */
   markGraphResourcesStale(tenantId: string, resources: GraphCacheResourceKind[]): number {
+    this.assertTenantWritable(tenantId, "graph cache");
     if (resources.length === 0) return 0;
     const invalidatedAt = new Date().toISOString();
     for (const resource of resources) {
@@ -1558,6 +1606,7 @@ export class IntelligenceSqliteStore {
     now: string;
     resources: readonly GraphCacheResourceKind[];
   }): DriftBaselineRecord {
+    this.assertTenantWritable(input.tenantId, "drift baseline");
     const name = normalizeDriftBaselineName(input.name);
     const existing = this.getActiveDriftBaseline(input.tenantId);
     if (existing) {
@@ -2348,6 +2397,7 @@ export class IntelligenceSqliteStore {
   }
 
   addChatTenantValues(conversationId: string, values: Iterable<string>): void {
+    this.assertConversationWritable(conversationId, "chat values");
     const insert = this.db.prepare(`INSERT OR IGNORE INTO chat_tenant_values (conversation_id, value) VALUES (?, ?)`);
     this.db.exec("BEGIN");
     try {
@@ -2511,6 +2561,7 @@ export class IntelligenceSqliteStore {
   }
 
   upsertMultiTenantJob(job: MultiTenantChatJob): MultiTenantChatJob {
+    for (const tenantId of job.resolvedTenantIds) this.assertTenantWritable(tenantId, "multi-tenant job");
     this.db
       .prepare(
         `INSERT INTO multi_tenant_jobs (
@@ -2590,6 +2641,7 @@ export class IntelligenceSqliteStore {
   }
 
   upsertMultiTenantAgentBatch(batch: MultiTenantAgentBatch): MultiTenantAgentBatch {
+    for (const tenantId of batch.resolvedTenantIds) this.assertTenantWritable(tenantId, "multi-tenant agent batch");
     this.db
       .prepare(
         `INSERT INTO multi_tenant_agent_batches (
@@ -2717,6 +2769,7 @@ export class IntelligenceSqliteStore {
     now: string;
     conversationId?: string;
   }): WorkspaceDetail {
+    this.assertTenantWritable(input.tenantId, "workspace");
     this.db.exec("BEGIN");
     try {
       this.db
@@ -2804,6 +2857,7 @@ export class IntelligenceSqliteStore {
     content: string;
     now: string;
   }): WorkspaceNote {
+    this.assertTenantWritable(this.requireWorkspaceRow(input.workspaceId).tenant_id, "workspace note");
     const workspace = this.requireWorkspaceRow(input.workspaceId);
     this.db
       .prepare(
@@ -2844,6 +2898,7 @@ export class IntelligenceSqliteStore {
   }
 
   pinWorkspaceEvidence(input: Omit<WorkspaceEvidence, "createdAt"> & { now: string }): WorkspaceEvidence {
+    this.assertTenantWritable(input.tenantId, "workspace evidence");
     const workspace = this.requireWorkspaceRow(input.workspaceId);
     if (workspace.tenant_id !== input.tenantId) {
       throw new Error("Workspace evidence tenant does not match the workspace tenant.");
@@ -2889,6 +2944,7 @@ export class IntelligenceSqliteStore {
     title: string;
     now: string;
   }): WorkspaceLink {
+    this.assertTenantWritable(input.tenantId, "workspace link");
     return this.insertWorkspaceLink({
       id: input.id,
       workspaceId: input.workspaceId,
@@ -2908,6 +2964,7 @@ export class IntelligenceSqliteStore {
     title: string;
     now: string;
   }): WorkspaceLink {
+    this.assertTenantWritable(input.tenantId, "workspace link");
     return this.insertWorkspaceLink({
       id: input.id,
       workspaceId: input.workspaceId,
@@ -2927,6 +2984,7 @@ export class IntelligenceSqliteStore {
     createEvidenceId: () => string;
     now: string;
   }): ImportMultiTenantResultToWorkspacesResult {
+    for (const mapping of input.mappings) this.assertTenantWritable(mapping.tenantId, "workspace import");
     const workspaces: WorkspaceSummary[] = [];
     const evidence: WorkspaceEvidence[] = [];
     this.db.exec("BEGIN");
@@ -3047,6 +3105,7 @@ export class IntelligenceSqliteStore {
     intervalMinutes: number;
     now: string;
   }): GraphCacheRefreshScheduleSettings {
+    this.assertTenantWritable(input.tenantId, "cache refresh schedule");
     const previous = this.getGraphCacheRefreshSchedule(input.tenantId, input.now);
     const intervalMinutes = normalizeScheduleInterval(input.intervalMinutes);
     const next: GraphCacheRefreshScheduleSettings = {
@@ -3078,6 +3137,7 @@ export class IntelligenceSqliteStore {
     success: boolean;
     error?: string;
   }): GraphCacheRefreshScheduleSettings {
+    this.assertTenantWritable(input.tenantId, "cache refresh schedule");
     const previous = this.getGraphCacheRefreshSchedule(input.tenantId, input.startedAt);
     const next: GraphCacheRefreshScheduleSettings = {
       enabled: previous.enabled,
@@ -3161,6 +3221,7 @@ export class IntelligenceSqliteStore {
     payload: unknown;
     createdAt: string;
   }): void {
+    this.assertTenantWritable(input.tenantId, "learning event");
     this.db
       .prepare(
         `INSERT INTO learning_events (
@@ -3180,6 +3241,7 @@ export class IntelligenceSqliteStore {
   }
 
   recordHostedProviderConsentAuditEvent(input: HostedProviderConsentAuditRecord): void {
+    this.assertTenantWritable(input.tenantId, "consent audit");
     this.db
       .prepare(
         `INSERT OR REPLACE INTO audit_events (
@@ -3221,6 +3283,7 @@ export class IntelligenceSqliteStore {
   }
 
   createSelfTrainingSuggestion(input: SelfTrainingSuggestion): SelfTrainingSuggestion {
+    this.assertTenantWritable(input.tenantId, "self-training suggestion");
     this.db
       .prepare(
         `INSERT OR IGNORE INTO self_training_suggestions (
@@ -3963,6 +4026,7 @@ export class IntelligenceSqliteStore {
     title: string;
     now: string;
   }): WorkspaceLink {
+    this.assertTenantWritable(input.tenantId, "workspace link");
     const workspace = this.requireWorkspaceRow(input.workspaceId);
     if (workspace.tenant_id !== input.tenantId) {
       throw new Error("Workspace link tenant does not match the workspace tenant.");

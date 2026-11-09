@@ -1,4 +1,6 @@
 import { PILOT_COPY } from "../src/shared/pilot-mode.js";
+import { TenantClosedError } from "./tenant-lifecycle.js";
+import { deliveryBlock, deliveryRuleKeyFor } from "../src/shared/delivery-destinations.js";
 import {
   assertSignedInAccount,
   createTenantSession,
@@ -84,6 +86,16 @@ interface WhatsAppWebDeliveryClient {
 }
 
 export interface RunDeliveryHost {
+  /** False once a disconnect of this tenant began (see tenant-lifecycle.ts). */
+  tenantWritable?(tenantId: string): boolean;
+  /** Run a delivery under its tenant's lease, so Disconnect refuses and drains it. */
+  tenantLease?<T>(tenantId: string, work: () => Promise<T>): Promise<T>;
+  /**
+   * The connector transport for a tenant's deliveries: a fetch that refuses
+   * every request and retry once the tenant is closing, and the check run
+   * right before a send over a transport that is not fetch.
+   */
+  connectorTransport?(tenantId: string): { fetch: typeof fetch; assertEgress: () => void };
   read(): Promise<RunDeliveryPersistedState>;
   write(state: RunDeliveryPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -115,8 +127,25 @@ export interface RunDeliveryHost {
   ): Promise<void>;
 }
 
+/** Why Teams and Outlook do not send the report of a run with no organization. */
+export const NO_ORGANIZATION_DELIVERY_SKIP =
+  "Report delivery skipped. This run had no organization, and Teams and Outlook post with an organization's Microsoft sign-in. Run the agent in an organization to send its report there.";
+
+/** Why a report is not sent once its organization is being disconnected. */
+export const DISCONNECTED_DELIVERY =
+  "Report delivery stopped: this organization was disconnected, so nothing was sent.";
+
 export class RunDeliveryService {
   private deliveryQueueProcessing: Promise<void> | undefined;
+
+  private tenantClosed(run: RunRecord): boolean {
+    return Boolean(run.tenantId && this.host.tenantWritable && !this.host.tenantWritable(run.tenantId));
+  }
+
+  /** The guarded transport for this run's connector, when it has an organization. */
+  private transportFor(run: RunRecord): { fetch?: typeof fetch; assertEgress?: () => void } {
+    return run.tenantId && this.host.connectorTransport ? this.host.connectorTransport(run.tenantId) : {};
+  }
 
   constructor(private readonly host: RunDeliveryHost) {}
 
@@ -381,6 +410,9 @@ export class RunDeliveryService {
       const queue = current.runDeliveryQueue ?? [];
       const index = queue.findIndex((item) => {
         if (item.attempts >= RUN_DELIVERY_MAX_ATTEMPTS) return false;
+        // Never claim a report of an organization that is being disconnected.
+        const owner = current.runs.find((candidate) => candidate.id === item.runId);
+        if (owner && this.tenantClosed(owner)) return false;
         const dueAt = new Date(item.nextAttemptAt).getTime();
         return !Number.isFinite(dueAt) || dueAt <= now.getTime();
       });
@@ -412,7 +444,24 @@ export class RunDeliveryService {
     if (!run || !isTerminalRunStatus(run.status)) {
       return { retryable: false };
     }
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    if (this.tenantClosed(run)) return { retryable: false, error: DISCONNECTED_DELIVERY };
+    if (!run.tenantId || !this.host.tenantLease) return this.deliverRunReport(item, persisted, run);
+    try {
+      return await this.host.tenantLease(run.tenantId, () => this.deliverRunReport(item, persisted, run));
+    } catch (error) {
+      if (error instanceof TenantClosedError) return { retryable: false, error: DISCONNECTED_DELIVERY };
+      throw error;
+    }
+  }
+
+  private async deliverRunReport(
+    item: RunDeliveryQueueItem,
+    persisted: RunDeliveryPersistedState,
+    run: RunRecord,
+  ): Promise<RunDeliveryResult> {
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
@@ -421,6 +470,20 @@ export class RunDeliveryService {
         PILOT_COPY.featureInProduction("Connector deliveries", true);
       await this.host.appendRunLog(item.runId, "warn", message);
       return { retryable: false, error: message };
+    }
+    // The decision the Connections page and the run review show: Teams
+    // and Outlook post with an organization's Microsoft sign-in, so a run
+    // with no organization never borrows the one active now.
+    const ruleKey = deliveryRuleKeyFor(item.connectorId);
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    if (
+      ruleKey &&
+      deliveryBlock(ruleKey, agent?.delivery, persisted.connectors?.[item.connectorId]?.config ?? {}, Boolean(run.tenantId)) ===
+        "no-organization"
+    ) {
+      return this.skipWithoutOrganization(run);
     }
     try {
       switch (item.connectorId) {
@@ -485,7 +548,14 @@ export class RunDeliveryService {
     });
   }
 
+  /** The designed skip for Teams and Outlook delivery of a run with no organization. */
+  private async skipWithoutOrganization(run: RunRecord): Promise<RunDeliveryResult> {
+    await this.host.appendRunLog(run.id, "warn", NO_ORGANIZATION_DELIVERY_SKIP);
+    return { retryable: false, error: NO_ORGANIZATION_DELIVERY_SKIP };
+  }
+
   private async deliverRunToTeams(run: RunRecord): Promise<RunDeliveryResult> {
+    if (!run.tenantId) return this.skipWithoutOrganization(run);
     const persisted = await this.host.read();
     const agent = persisted.installedAgents.find(
       (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
@@ -509,7 +579,9 @@ export class RunDeliveryService {
       return { retryable: false };
     }
 
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
@@ -520,6 +592,22 @@ export class RunDeliveryService {
       status: "running",
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
+
+    const teamsBlock = deliveryBlock("teams", agent.delivery, baseConfig, true);
+    if (teamsBlock === "no-target" || teamsBlock === "no-default-target") {
+      const detail =
+        teamsBlock === "no-target"
+          ? "No Microsoft Teams team and channel are set on this delivery rule."
+          : "No default Microsoft Teams team and channel are configured.";
+      await this.host.finishRunStep(run.id, stepId, "failed", detail);
+      await this.host.appendRunLog(
+        run.id,
+        "warn",
+        `Teams delivery failed: ${teamsBlock === "no-target" ? "no team and channel on the rule" : "no default team and channel configured"}.`,
+        { connectorId: "teams" },
+      );
+      return { retryable: false, error: detail };
+    }
 
     if (!tenant) {
       await this.host.finishRunStep(
@@ -597,6 +685,7 @@ export class RunDeliveryService {
         tenant: tenantSession,
         config,
         secrets: noSecrets,
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:teams-delivery:${stepId}:${iteration}`,
@@ -719,7 +808,7 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (!recipient) {
+    if (!recipient || deliveryBlock("whatsappWeb", agent.delivery, config, true)) {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -738,7 +827,9 @@ export class RunDeliveryService {
       };
     }
 
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
@@ -746,6 +837,8 @@ export class RunDeliveryService {
     try {
       const text = formatWhatsAppDeliveryMessage(run, agent, tenant);
       const auditStartedAt = Date.now();
+      // The socket is not fetch: its transport check runs right before the send.
+      this.transportFor(run).assertEgress?.();
       const result = await this.host.whatsAppWebClient().sendMessage({
         to: recipient,
         text,
@@ -813,6 +906,7 @@ export class RunDeliveryService {
   }
 
   private async deliverRunToOutlook(run: RunRecord): Promise<RunDeliveryResult> {
+    if (!run.tenantId) return this.skipWithoutOrganization(run);
     const persisted = await this.host.read();
     const agent = persisted.installedAgents.find(
       (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
@@ -833,7 +927,9 @@ export class RunDeliveryService {
       return { retryable: false };
     }
 
-    const tenantId = run.tenantId ?? persisted.activeTenantId;
+    // Only the run's own tenant labels its report; a run with no
+    // organization never borrows the one active now.
+    const tenantId = run.tenantId;
     const tenant = tenantId
       ? persisted.tenants.find((candidate) => candidate.id === tenantId)
       : undefined;
@@ -849,22 +945,8 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (!tenant) {
-      await this.host.finishRunStep(
-        run.id,
-        stepId,
-        "failed",
-        "No tenant session was available for Outlook delivery.",
-      );
-      await this.host.appendRunLog(run.id, "warn", "Outlook delivery failed: no tenant session available.", {
-        connectorId: OUTLOOK_CONNECTOR_ID,
-      });
-      return {
-        retryable: false,
-        error: "No tenant session was available for Outlook delivery.",
-      };
-    }
-    if (delivery.useDefaultRecipients === false && (!recipients || recipients.length === 0)) {
+    const outlookBlock = deliveryBlock("outlook", agent.delivery, baseConfig, true);
+    if (outlookBlock === "no-target") {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -882,7 +964,40 @@ export class RunDeliveryService {
         error: "No Outlook notification recipients are configured.",
       };
     }
+    if (outlookBlock === "no-default-target") {
+      await this.host.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No default Outlook notification recipients are configured.",
+      );
+      await this.host.appendRunLog(
+        run.id,
+        "warn",
+        "Outlook delivery failed: no default recipients configured.",
+        { connectorId: OUTLOOK_CONNECTOR_ID },
+      );
+      return {
+        retryable: false,
+        error: "No default Outlook notification recipients are configured.",
+      };
+    }
 
+    if (!tenant) {
+      await this.host.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No tenant session was available for Outlook delivery.",
+      );
+      await this.host.appendRunLog(run.id, "warn", "Outlook delivery failed: no tenant session available.", {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+      });
+      return {
+        retryable: false,
+        error: "No tenant session was available for Outlook delivery.",
+      };
+    }
     const factory = findConnectorFactory(OUTLOOK_CONNECTOR_ID);
     if (!factory) {
       await this.host.finishRunStep(
@@ -929,6 +1044,7 @@ export class RunDeliveryService {
         tenant: tenantSession,
         config: baseConfig,
         secrets: this.host.connectorSecretsFor(OUTLOOK_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:outlook-delivery:${stepId}:${iteration}`,
@@ -1036,7 +1152,6 @@ export class RunDeliveryService {
     const baseConfig = persisted.connectors?.[SLACK_CONNECTOR_ID]?.config ?? {};
     const channel =
       delivery.useDefaultChannel === false ? delivery.channel?.trim() : undefined;
-    const defaultChannel = readConfigLabel(baseConfig, "defaultChannel");
     const targetLabel = slackDeliveryTargetLabel(delivery, baseConfig);
     const stepId = await this.host.appendRunStep(run.id, {
       label: "Send run report to Slack",
@@ -1044,7 +1159,8 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (delivery.useDefaultChannel === false && !channel) {
+    const slackBlock = deliveryBlock("slack", agent.delivery, baseConfig, true);
+    if (slackBlock === "no-target") {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -1056,7 +1172,7 @@ export class RunDeliveryService {
       });
       return { retryable: false, error: "No Slack notification channel is configured." };
     }
-    if (delivery.useDefaultChannel !== false && !defaultChannel) {
+    if (slackBlock === "no-default-target") {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -1096,6 +1212,7 @@ export class RunDeliveryService {
         tenant: createLocalOnlyTenantSession(),
         config: baseConfig,
         secrets: this.host.connectorSecretsFor(SLACK_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:slack-delivery:${stepId}:${iteration}`,
@@ -1227,6 +1344,7 @@ export class RunDeliveryService {
         tenant: createLocalOnlyTenantSession(),
         config: baseConfig,
         secrets: this.host.connectorSecretsFor(DISCORD_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:discord-delivery:${stepId}:${iteration}`,
@@ -1336,7 +1454,7 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (!recipient) {
+    if (deliveryBlock("signal", agent.delivery, baseConfig, true)) {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -1373,6 +1491,7 @@ export class RunDeliveryService {
         tenant: createLocalOnlyTenantSession(),
         config: baseConfig,
         secrets: this.host.connectorSecretsFor(SIGNAL_CONNECTOR_ID),
+        ...this.transportFor(run),
         log: () => undefined,
         idempotencyKeyFor: (stepId, iteration) =>
           `${run.id}:signal-delivery:${stepId}:${iteration}`,

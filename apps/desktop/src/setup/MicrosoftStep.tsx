@@ -260,7 +260,7 @@ function ServiceRow({ service, checked, connected, partial, onToggle }: { servic
         <input id={id} type="checkbox" checked={checked} disabled={connected} onChange={onToggle} className="service-check peer absolute inset-0" />
         <IconCheck size={12} className="pointer-events-none absolute left-[2px] top-[2px] hidden text-[var(--color-bg)] peer-checked:block" />
       </span>
-      <ServiceMark service={service.id} title={service.title} size={30} off={!connected} />
+      <ServiceMark serviceId={service.id} size="lg" off={!connected} />
       <span className="min-w-0">
         <span className="block text-base font-medium leading-5 text-[var(--color-text)]">{service.title}</span>
         <span className="mt-0.5 block text-sm leading-5 text-[var(--color-text-soft)]">{service.summary}</span>
@@ -333,7 +333,7 @@ function ConnectedResult({
         <ul aria-label={MICROSOFT_STEP_COPY.connected} className="mt-5 divide-y divide-[var(--color-border-soft)] rounded-lg bg-[var(--color-surface)] px-3 ring-1 ring-inset ring-[var(--color-border-soft)]">
           {services.map(({ service, status, parts }) => (
             <li key={service.id} data-service={service.id} className="grid grid-cols-[30px_minmax(0,1fr)] gap-x-3 py-3">
-              <ServiceMark service={service.id} title={service.title} size={30} />
+              <ServiceMark serviceId={service.id} size="lg" />
               <span className="min-w-0">
                 <span className="block text-base font-medium leading-5 text-[var(--color-text)]">
                   {status === "partial" ? MICROSOFT_STEP_COPY.partial(service.title) : service.title}
@@ -426,7 +426,7 @@ function MicrosoftStage({
             onClick={state === "connected" ? undefined : () => onToggle(service.id)}
           >
             <span className="ms-node-tile flex items-center justify-center font-medium">
-              <ServiceLogo service={service.id} title={service.title} size={28} />
+              <ServiceLogo service={service.id} size={28} />
             </span>
             <span className="scan-node-plate mt-1.5 flex flex-col items-center rounded-[6px] px-1.5">
               <span className="ms-node-name text-sm font-medium leading-[18px]">{service.title}</span>

@@ -6,3 +6,4 @@ export * from "./providers";
 export * from "./settings";
 export * from "./setup";
 export * from "./trust";
+export * from "./connections";

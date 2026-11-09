@@ -6,6 +6,7 @@
 - [Installation](getting-started/installation.md)
 - [First run](getting-started/first-run.md)
 - [Connect a tenant](getting-started/connect-tenant.md)
+- [Organizations and Connections](getting-started/organizations.md)
 - [Connect with the shared app](getting-started/connect-shared-app.md)
 - [Own app registration](getting-started/own-app-registration.md)
 

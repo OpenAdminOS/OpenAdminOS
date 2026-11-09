@@ -347,7 +347,7 @@ export function humanizeMsalError(
     return "Microsoft sign-in timed out after five minutes. Start again when you are ready.";
   }
   if (lower.includes("user_cancelled") || lower.includes("cancelled by user")) {
-    return "Sign-in was cancelled in the browser. Try again from Settings → Tenants.";
+    return "Sign-in was cancelled in the browser. Try again from Connections.";
   }
   if (hasAadstsCode(lower, "50011") || hasAadstsCode(lower, "500113")) {
     return app.custom
@@ -401,7 +401,7 @@ export function humanizeMsalError(
     return "Couldn't reach Microsoft's sign-in endpoint. Check your internet connection (proxy / VPN / DNS) and try again.";
   }
   if (lower.includes("interaction_required") || lower.includes("invalid_grant")) {
-    return "The previous sign-in session expired. Reconnect from Settings → Tenants and complete the consent prompt.";
+    return "The previous sign-in session expired. Reconnect from Connections and complete the consent prompt.";
   }
   if (
     lower.includes("secure storage") ||

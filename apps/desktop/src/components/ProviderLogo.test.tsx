@@ -69,7 +69,7 @@ describe("ServiceMark", () => {
   it("shows Microsoft's icon for Intune, Entra and Defender, in both appearances, and letters for another service", () => {
     for (const id of SERVICES) {
       expect(serviceLogoKind(id), id).toBe("logo");
-      const { container, unmount } = render(<ServiceMark service={id} title={id} size={22} />);
+      const { container, unmount } = render(<ServiceMark serviceId={id} size="md" />);
       const logo = container.querySelector(`[data-service-logo='${id}']`)!;
       expect(logo, id).toHaveAttribute("data-kind", "logo");
       const images = logo.querySelectorAll("img");
@@ -80,21 +80,21 @@ describe("ServiceMark", () => {
       unmount();
     }
     expect(serviceLogoKind("jamf")).toBe("neutral");
-    const { container } = render(<ServiceLogo service="jamf" title="Jamf Pro" size={16} />);
+    const { container } = render(<ServiceLogo service="jamf" size={16} />);
     expect(container.querySelector("[data-kind='neutral']")).toHaveTextContent("Ja");
   });
 
   it("keeps a service that is not connected dashed, with the icon unchanged inside", () => {
-    const { container } = render(<ServiceMark service="intune" title="Intune" size={30} off />);
-    const mark = container.querySelector(".service-mark")!;
+    const { container } = render(<ServiceMark serviceId="intune" size="lg" off />);
+    const mark = container.querySelector(".svc-mark")!;
     expect(mark).toHaveAttribute("data-off", "true");
     expect(mark.querySelector("img")).not.toBeNull();
   });
 
   it("is decorative next to a visible name, and named when it stands alone", () => {
-    const { container } = render(<ServiceMark service="entra" title="Entra" />);
-    expect(container.querySelector(".service-mark")).toHaveAttribute("aria-hidden", "true");
-    render(<ServiceMark service="defender" title="Defender" label="Defender" />);
+    const { container } = render(<ServiceMark serviceId="entra" />);
+    expect(container.querySelector(".svc-mark")).toHaveAttribute("aria-hidden", "true");
+    render(<ServiceMark serviceId="defender" label="Defender" />);
     expect(screen.getByRole("img", { name: "Defender" })).toBeInTheDocument();
   });
 });

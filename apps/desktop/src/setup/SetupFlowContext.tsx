@@ -36,6 +36,14 @@ export interface SetupOpenOptions {
 }
 
 interface SetupFlowValue {
+  /**
+   * Hard constraint 3: nothing reads or writes a service unless it is
+   * connected in the active organization. These gates open setup when no
+   * organization is active, for work that always reads a service: cache
+   * refresh, Changes, schedules and Chat. An agent run does not call them
+   * without an organization; its preflight names the services instead,
+   * and only an agent that calls no service API starts without one.
+   */
   requireTenant(intent?: PendingIntent): boolean;
   requireTenantAndProvider(intent?: PendingIntent): boolean;
   /** Opens tenant setup on the sign-in choice with neither app chosen. */

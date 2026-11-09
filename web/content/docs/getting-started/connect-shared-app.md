@@ -9,7 +9,7 @@ The OpenAdminOS app is a published multi-tenant app registration with client ID 
 
 ## Choose Services
 
-1. Start connecting a tenant from the Connect Microsoft 365 step on first launch, Chat's not-connected card, the tenant menu, Settings, Tenants, or any action that needs a tenant. They all open the same dialog.
+1. Start connecting a tenant from the Connect Microsoft 365 step on first launch, Chat's not-connected card, the organization menu, Connections, or any action that needs a tenant. They all open the same dialog.
 2. Choose **OpenAdminOS app**.
 3. Under **Services**, select at least one of Intune, Entra and Defender. From Chat's not-connected card, the service and part the question needs are already selected; from anywhere else nothing is preselected.
 4. Expand a service to review its parts, each exact Microsoft Graph scope, and why it is needed. Clear the parts your team should not read. A service checkbox shows a mixed state when only some of its parts are selected.
@@ -27,9 +27,9 @@ Consent does not add rights. Permissions are delegated, so OpenAdminOS can only 
 
 ## Add A Service Later
 
-Settings, Tenants lists each service as **Connected**, **Partial** or **Not connected**. Choose **Add access** on a service, pick the parts, and choose **Continue to Microsoft**. Microsoft asks for consent to that service's scopes only, and they are added to the scopes the tenant already has. Your other services stay as they are.
+Connections lists each service as **Connected**, **Partial** or **Not connected**. Choose **Add access** on a service, pick the parts, and choose **Continue to Microsoft**. Microsoft asks for consent to that service's scopes only, and they are added to the scopes the tenant already has. Your other services stay as they are.
 
-The same dialog opens from the "not connected" notices on agent pages, in run reviews and on pages that need a service. Chat answers a question about a service that is not connected with its name, for example "Defender is not connected for this tenant. Add it in Settings, Tenants.", without calling Microsoft Graph.
+The same dialog opens from the "not connected" notices on agent pages, in run reviews and on pages that need a service. Chat answers a question about a service that is not connected with its name, for example "Defender is not connected for this tenant. Add it in Connections.", without calling Microsoft Graph.
 
 ## Agents And Run-Time Consent
 

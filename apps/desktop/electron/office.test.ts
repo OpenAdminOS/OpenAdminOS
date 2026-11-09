@@ -755,3 +755,45 @@ test('handoffs retain host-owned ancestor evidence and reject foreign ancestors'
     assert.throws(() => (f.service as any).taskContext(p, [review], f.context), /another tenant/);
   } finally { await f.close(); }
 });
+
+test("an organization being disconnected: Agent Team save, start, tick and ask are refused, and an answer that arrives after closing is not stored", async () => {
+  const f = await fixture();
+  const { TenantLifecycle, TenantClosedError } = await import("./tenant-lifecycle.js");
+  const lifecycle = new TenantLifecycle(() => undefined);
+  f.host.tenantWritable = (tenantId) => lifecycle.isWritable(tenantId);
+  f.host.tenantLease = (tenantId, work) => lifecycle.withTenantLease(tenantId, () => work());
+  try {
+    const {
+      personas: [p],
+    } = await f.service.save({ ...f.input, intervalMinutes: null });
+    await f.service.start(p.id);
+    f.context.runs[0].status = "completed";
+    await f.service.tick();
+    // An answer in flight when closing begins: drained, and not stored.
+    let finish!: (text: string) => void;
+    let asked = false;
+    f.host.complete = async () => {
+      asked = true;
+      return new Promise((resolve) => (finish = resolve));
+    };
+    const answer = f.service.ask({ id: p.id, question: "Why?" }).catch((error: unknown) => error);
+    while (!asked) await new Promise((resolve) => setImmediate(resolve));
+    const messagesBefore = f.service.state().messages!.length;
+    lifecycle.close("tenant-a");
+    const drained = lifecycle.drain("tenant-a", 1000);
+    finish("Late answer.");
+    await answer;
+    assert.deepEqual(await drained, { drained: true, pending: 0 });
+    assert.equal(f.service.state().messages!.length, messagesBefore);
+    // New work is refused before it starts.
+    const calls = f.calls.length;
+    await assert.rejects(f.service.save({ ...f.input, id: p.id, intervalMinutes: null }), TenantClosedError);
+    await assert.rejects(f.service.start(p.id), TenantClosedError);
+    await assert.rejects(f.service.ask({ id: p.id, question: "Again?" }), TenantClosedError);
+    f.advance(24 * 60 * 60 * 1000);
+    await f.service.tick();
+    assert.equal(f.calls.length, calls);
+  } finally {
+    await f.close();
+  }
+});

@@ -34,12 +34,12 @@ const SUGGESTIONS: Suggestion[] = [
   {
     match: (e) => /401|unauthor|expired token|interaction_required/i.test(e),
     title: "Tenant token expired",
-    body: "Disconnect and reconnect the tenant from Settings → Tenants. MSAL caches a refresh token but Graph can revoke it independently.",
+    body: "Disconnect and reconnect the tenant from Connections. MSAL caches a refresh token but Graph can revoke it independently.",
   },
   {
-    match: (e) => /tenant.*not connected|no tenant/i.test(e),
-    title: "No tenant connected",
-    body: "Open Settings → Tenants and connect a Microsoft 365 tenant before running agents.",
+    match: (e) => /tenant.*not connected|no tenant|no organization with microsoft 365/i.test(e),
+    title: "No organization with Microsoft 365",
+    body: "Choose an organization in the organization switcher, or connect a Microsoft 365 tenant in Connections, before running agents.",
   },
   {
     match: (e) => /yaml|manifest|schema|invalid/i.test(e),

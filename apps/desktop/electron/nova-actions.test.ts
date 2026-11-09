@@ -1,12 +1,12 @@
 import { strict as assert } from 'node:assert';
 import { it } from 'node:test';
 import type { AppState, ConnectorSummary } from '@openadminos/agent-sdk';
-import { novaActionIntent, novaMessageParts, prepareNovaAction, type NovaActionHost } from './nova-actions.js';
+import { NOVA_ORGANIZATION_CHANGED, novaActionIntent, novaMessageParts, prepareNovaAction, type NovaActionHost } from './nova-actions.js';
 const state = { activeTenantId: 'tenant-a', activeProviderId: 'ollama', tenants: [{ id: 'tenant-a', displayName: 'Test tenant', username: 'admin@example.test' }], installedAgents: [{ name: 'Find inactive devices', slug: 'find-inactive-devices' }] } as AppState;
 function fixture() {
   const sends: unknown[] = [], runs: unknown[] = [];
   const connectors = ['whatsapp-web','outlook','teams','slack','discord','signal'].map(id => ({ descriptor: { id, name: id }, status: "connected", config: { defaultRecipient: 'group@example.test', defaultRecipients: 'other@example.test', defaultTeamId: 'team', defaultChannelId: 'channel', defaultChannel: 'slack-channel' } })) as unknown as ConnectorSummary[];
-  const host: NovaActionHost = { connectors: async () => connectors, send: async input => { sends.push(input); return {}; }, startRun: async (...args) => { runs.push(args); return { id: 'run-test' } as never; } };
+  const host: NovaActionHost = { activeTenantId: async () => state.activeTenantId, connectors: async () => connectors, send: async input => { sends.push(input); return {}; }, startRun: async (...args) => { runs.push(args); return { id: 'run-test' } as never; } };
   return { host, sends, runs, connectors };
 }
 it('recognizes direct send requests without treating capability questions or evidence as commands', () => {
@@ -124,4 +124,22 @@ it('matches named Teams channels against configuration without silently substitu
   assert.match(action!.preview.body, /Device A\n- Device B/);
   await assert.rejects(prepareNovaAction('Send this via Teams to the Finance channel', 'Evidence', state, f.host), /select Finance/);
   assert.equal(f.sends.length, 0);
+});
+
+it('refuses a run or send prepared in one organization after a switch to another (Muse round 3)', async () => {
+  const f = fixture();
+  let active: string | undefined = 'tenant-a';
+  const host: NovaActionHost = { ...f.host, activeTenantId: async () => active };
+  const run = await prepareNovaAction('run Find inactive devices', undefined, state, host);
+  const send = await prepareNovaAction('send this via Slack', 'Verified report', state, host);
+  active = 'tenant-b';
+  await assert.rejects(run!.execute(new AbortController().signal), (error: Error) => error.message === NOVA_ORGANIZATION_CHANGED);
+  await assert.rejects(send!.execute(new AbortController().signal), (error: Error) => error.message === NOVA_ORGANIZATION_CHANGED);
+  active = undefined;
+  await assert.rejects(run!.execute(new AbortController().signal), (error: Error) => error.message === NOVA_ORGANIZATION_CHANGED);
+  assert.deepEqual(f.runs, []);
+  assert.deepEqual(f.sends, []);
+  active = 'tenant-a';
+  await run!.execute(new AbortController().signal);
+  assert.equal(f.runs.length, 1);
 });

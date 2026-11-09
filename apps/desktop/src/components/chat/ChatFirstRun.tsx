@@ -26,7 +26,7 @@ import { useSetupFlow } from "../../setup/SetupFlowContext";
 import { useAppState } from "../../state";
 import { McpServerDialog } from "../marketplace/McpServerDialog";
 import { ServiceAccessDialog } from "../ServiceAccess";
-import { ServiceMark } from "../ServiceMark";
+import { ReferenceMark, ServiceMark } from "../ServiceMark";
 import { Button } from "../Button";
 import { useToast } from "../Toast";
 import { IconCheck, IconShield } from "../icons";
@@ -158,7 +158,7 @@ export function NoTenantChatHome({
   const columns = [
     { key: "works", heading: FIRST_RUN_CHAT_COPY.worksNow, mark: null, questions: [...FIRST_RUN_CHAT_COPY.worksNowStarters] },
     ...(needs
-      ? [{ key: "needs", heading: FIRST_RUN_CHAT_COPY.needs(needs.service.title), mark: <ServiceMark service={needs.service.id} title={needs.service.title} size={17} off />, questions: needs.questions }]
+      ? [{ key: "needs", heading: FIRST_RUN_CHAT_COPY.needs(needs.service.title), mark: <ServiceMark serviceId={needs.service.id} size="sm" off />, questions: needs.questions }]
       : []),
   ];
 
@@ -212,9 +212,7 @@ export function NoTenantChatHome({
           <ul className="mt-2 divide-y divide-[var(--color-border-soft)]">
             {shown.map((server) => (
               <li key={server.id} className="flex items-center gap-3 px-2 py-2.5">
-                <span aria-hidden="true" className="service-mark inline-flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-[6px] text-[11px] font-medium">
-                  {server.name.split(/\s+/).map((word) => word[0]).join("").slice(0, 2)}
-                </span>
+                <ReferenceMark name={server.host} />
                 <div className="min-w-0 flex-1">
                   <div className="text-base text-[var(--color-text)]">{server.name}</div>
                   <div className="text-xs text-[var(--color-text-muted)]">{FIRST_RUN_CHAT_COPY.referenceHost(server.host)}</div>
@@ -401,9 +399,9 @@ export function NotConnectedCard({
     <section aria-labelledby={headingId} className="grid grid-cols-[30px_minmax(0,1fr)] gap-x-3 rounded-lg bg-[var(--color-surface)] p-4 ring-1 ring-inset ring-[var(--color-border-soft)]">
       {/* The service it needs, dashed because it is not connected (mockup 32, section E). */}
       {markService ? (
-        <ServiceMark service={markService.id} title={markService.title} size={30} off />
+        <ServiceMark serviceId={markService.id} size="lg" off />
       ) : (
-        <span aria-hidden="true" className="service-mark inline-flex h-[30px] w-[30px] items-center justify-center rounded-[8px]" data-off="true">
+        <span aria-hidden="true" className="svc-mark" data-service="reference" data-size="lg" data-off="true">
           <IconShield size={14} />
         </span>
       )}

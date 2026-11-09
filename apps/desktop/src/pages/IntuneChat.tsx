@@ -39,6 +39,7 @@ import {
   useConversationsOptional,
   ConversationWorkspaceProvider,
   chatToolHosts,
+  novaVoiceSentence,
   useDataBoundaryOptional,
   useShellChromeOptional,
   useUpdateStateOptional,
@@ -2086,6 +2087,7 @@ function IntuneChatContent() {
                         tenant={messageTenant}
                         multiTenant={messageConversation?.scopeKind === "multi-tenant"}
                         regenerateDisabled={sending || !previousUserPromptForMessage(displayedMessages, message)}
+                        editDisabled={sending}
                         onCopy={() => void handleCopyMessage(message)}
                         onEditPrompt={() => handleEditPrompt(message)}
                         onRegenerate={() => void handleRegenerateResponse(message)}
@@ -2387,14 +2389,10 @@ function ChatComposer({
       ? FIRST_RUN_CHAT_COPY.placeholderNoModel
       : FIRST_RUN_CHAT_COPY.placeholderNoTenant;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-  // The hosted line names the provider and where it processes prompts before any reference is added.
-  const goesTo = activeProvider ? promptsGoTo(activeProvider, Boolean(activeTenant)) : `${activeTenant ? "Prompts and tenant data go" : "Prompts go"} to the selected provider`;
-  const baseSentence = activeTenant ? FIRST_RUN_CHAT_COPY.hostedTenantSentence(goesTo) : FIRST_RUN_CHAT_COPY.hostedNoTenantSentence(goesTo);
-  const toolHostsSentence = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
-  const hostedSentence = `${baseSentence}${toolHostsSentence}`;
-  // The shield's tooltip adds what the location depends on; the line under the composer stays short.
+  // The same sentence as Connections; the shield's tooltip adds what the location depends on.
+  const hostedSentence = hostedComposerSentence(dataBoundary, activeProvider, Boolean(activeTenant));
   const locationDetail = activeProvider ? providerDataLocationDetail(activeProvider) : undefined;
-  const hostedTooltip = `${baseSentence}${locationDetail ? ` ${locationDetail}` : ""}${toolHostsSentence}`;
+  const hostedTooltip = `${hostedSentence}${locationDetail ? ` ${locationDetail}` : ""}`;
 
   return (
     <div className="relative">
@@ -4337,6 +4335,7 @@ function ChatMessageBubble({
   tenant,
   multiTenant,
   regenerateDisabled,
+  editDisabled,
   onCopy,
   onEditPrompt,
   onRegenerate,
@@ -4352,6 +4351,8 @@ function ChatMessageBubble({
   tenant?: TenantRecord;
   multiTenant: boolean;
   regenerateDisabled: boolean;
+  /** A send is still finishing, so Edit would be ignored; it waits instead. */
+  editDisabled: boolean;
   onCopy: () => void;
   onEditPrompt: () => void;
   onRegenerate: () => void;
@@ -4390,6 +4391,7 @@ function ChatMessageBubble({
               label="Edit and resend prompt"
               tooltip={`Edit · ${timestamp}`}
               icon={<IconPencil size={12} />}
+              disabled={editDisabled}
               onClick={onEditPrompt}
             />
           </div>
@@ -5078,4 +5080,24 @@ function scrollLatestUserNearTop(
   if (typeof scrollRoot.scrollTo === "function") scrollRoot.scrollTo({ top, behavior: "auto" });
   else scrollRoot.scrollTop = top;
   return scrollRoot.scrollHeight - scrollRoot.scrollTop - scrollRoot.clientHeight >= 56;
+}
+
+/**
+ * The composer's hosted sentence. Hosted voice names its own destination,
+ * keeps a local chat model local and still names a hosted chat model;
+ * without an organization no tenant data is sent; references stay named.
+ */
+export function hostedComposerSentence(
+  boundary: DataBoundary,
+  provider: Pick<ProviderSummary, "id" | "name" | "isLocal"> | undefined,
+  hasOrganization: boolean,
+): string {
+  const toolNote = boundary.kind !== "none" && boundary.toolHostsNote ? ` ${boundary.toolHostsNote}` : "";
+  if (boundary.kind === "hosted" && boundary.isVoiceHosted) {
+    const chat = provider && !provider.isLocal ? ` ${promptsGoTo(provider, hasOrganization)} while this model is selected.` : "";
+    return `${novaVoiceSentence(hasOrganization, provider?.isLocal ? provider.name : undefined)}${chat}${toolNote}`;
+  }
+  return hasOrganization
+    ? `${provider ? promptsGoTo(provider, true) : "Prompts and tenant data go to the selected provider"} while this model is selected.${toolNote}`
+    : `${provider ? promptsGoTo(provider) : "Prompts go to the selected provider"} while this model is selected. No organization is active, so no tenant data is included.${toolNote}`;
 }

@@ -32,6 +32,7 @@ import {
   type RequestedScope,
   type RunRecord,
   type StartRunOptions,
+  type TenantCleanupSummary,
   type TenantRecord,
 } from "../shared/openAdminOS";
 
@@ -75,7 +76,18 @@ interface AppStateContextValue {
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
-  disconnectTenant: (id: string) => Promise<void>;
+  /** Make an organization active, or choose "No organization" with null. */
+  setActiveOrganization: (id: string | null) => Promise<void>;
+  renameOrganization: (id: string, name: string) => Promise<void>;
+  assignAgentSchedule: (slug: string, organizationId: string) => Promise<void>;
+  dismissOrganizationMigrationNotice: () => Promise<void>;
+  /**
+   * Disconnect a tenant. Resolves with its pending cleanup when the
+   * organization was removed but its cleanup did not finish.
+   */
+  disconnectTenant: (id: string) => Promise<TenantCleanupSummary | undefined>;
+  /** Retry a pending disconnect cleanup. Resolves with it when still pending. */
+  retryTenantCleanup: (id: string) => Promise<TenantCleanupSummary | undefined>;
   removeSavedAppRegistration: (clientId: string, directoryTenantId?: string) => Promise<void>;
   updateAgentSettings: (
     slug: string,
@@ -631,18 +643,80 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
   }, []);
 
-  const disconnectTenant = useCallback(async (id: string) => {
+  const setActiveOrganization = useCallback(async (id: string | null) => {
     const api = getOpenAdminOSApi();
     if (!api) return;
+    setError(null);
+    try {
+      const nextState = await api.setActiveOrganization(id);
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      const organizationError = toError(caughtError);
+      setError(organizationError);
+      throw organizationError;
+    }
+  }, []);
+
+  // These throw to the caller, which shows the reason next to the control.
+  const renameOrganization = useCallback(async (id: string, name: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) throw new Error("Organizations are unavailable in browser development.");
+    const nextState = await api.renameOrganization(id, name).catch((caught: unknown) => {
+      throw toError(caught);
+    });
+    setState(nextState);
+  }, []);
+
+  const assignAgentSchedule = useCallback(async (slug: string, organizationId: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) throw new Error("Schedules are unavailable in browser development.");
+    const nextState = await api.assignAgentSchedule(slug, organizationId).catch((caught: unknown) => {
+      throw toError(caught);
+    });
+    setState(nextState);
+  }, []);
+
+  const dismissOrganizationMigrationNotice = useCallback(async () => {
+    const api = getOpenAdminOSApi();
+    if (!api) throw new Error("Schedules are unavailable in browser development.");
+    const nextState = await api.dismissOrganizationMigrationNotice().catch((caught: unknown) => {
+      throw toError(caught);
+    });
+    setState(nextState);
+  }, []);
+
+  const disconnectTenant = useCallback(async (id: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) return undefined;
     setError(null);
     try {
       const nextState = await api.disconnectTenant(id);
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
+      return nextState.tenantCleanups?.find((cleanup) => cleanup.tenantId === id);
     } catch (caughtError) {
       const tenantError = toError(caughtError);
       setError(tenantError);
+      // What changed on the host is shown even when the call failed.
+      await api.getAppState().then((fresh) => {
+        setState(fresh);
+        setRegistryAgents(fresh.registryAgents);
+      }).catch(() => undefined);
       throw tenantError;
+    }
+  }, []);
+
+  const retryTenantCleanup = useCallback(async (id: string) => {
+    const api = getOpenAdminOSApi();
+    if (!api) return undefined;
+    try {
+      const nextState = await api.retryTenantCleanup(id);
+      setState(nextState);
+      return nextState.tenantCleanups?.find((cleanup) => cleanup.tenantId === id);
+    } catch (caughtError) {
+      await api.getAppState().then(setState).catch(() => undefined);
+      throw toError(caughtError);
     }
   }, []);
 
@@ -1158,7 +1232,12 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       cancelConnectTenant,
       getRequestedScopes,
       setActiveTenant,
+      setActiveOrganization,
+      renameOrganization,
+      assignAgentSchedule,
+      dismissOrganizationMigrationNotice,
       disconnectTenant,
+      retryTenantCleanup,
       removeSavedAppRegistration,
       updateAgentSettings,
       updateAgentSchedule,
@@ -1188,6 +1267,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       cancelTenantCheck,
       addSampleTenant,
       disconnectTenant,
+      retryTenantCleanup,
       removeSavedAppRegistration,
       draftAgentManifest,
       error,
@@ -1210,6 +1290,10 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setUsageTelemetryEnabled,
       setRegistrySource,
       setActiveTenant,
+      setActiveOrganization,
+      renameOrganization,
+      assignAgentSchedule,
+      dismissOrganizationMigrationNotice,
       startRun,
       state,
       submitAgentCommunitySubmission,

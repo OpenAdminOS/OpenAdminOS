@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { ServiceMark } from "./ServiceMark";
 import { useNavigate } from "react-router";
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
@@ -100,7 +101,16 @@ export function tenantCheckButtonLabel(progress: TenantCheckProgress | undefined
  * The check the host is running for a tenant, with its Cancel. Shown
  * wherever the tenant's check state is shown, whichever view started it.
  */
-export function TenantCheckStatus({ tenant, className = "mt-2" }: { tenant: TenantRecord; className?: string }) {
+export function TenantCheckStatus({
+  tenant,
+  className = "mt-2",
+  inMenu = false,
+}: {
+  tenant: TenantRecord;
+  className?: string;
+  /** Inside a menu, Cancel is a menu item so arrow keys reach it. */
+  inMenu?: boolean;
+}) {
   const { cancelTenantCheck } = useAppState();
   const progress = useTenantCheckProgress(tenant.id);
   const [cancelling, setCancelling] = useState(false);
@@ -121,6 +131,7 @@ export function TenantCheckStatus({ tenant, className = "mt-2" }: { tenant: Tena
         variant="secondary"
         disabled={cancelling}
         aria-label={SERVICE_COPY.cancelCheckFor(tenant.displayName)}
+        {...(inMenu ? { role: "menuitem", tabIndex: -1 } : {})}
         onClick={() => {
           setCancelling(true);
           void cancelTenantCheck(tenant.id).catch(() => setCancelling(false));
@@ -506,8 +517,8 @@ export function ServiceNotConnectedPanel({
           ))}
         </ul>
         <div className="mt-4 flex justify-end">
-          <Button size="sm" variant="ghost" onClick={() => navigate("/settings/tenants")}>
-            Open Settings, Tenants
+          <Button size="sm" variant="ghost" onClick={() => navigate("/connections")}>
+            Open Connections
           </Button>
         </div>
       </section>
@@ -542,26 +553,42 @@ export function ServiceChips({ services }: { services: readonly ServiceId[] }) {
 export function ServiceNotConnectedNotice({
   tenant,
   serviceIds,
+  primary = false,
+  id,
 }: {
   tenant: TenantRecord;
   serviceIds: readonly ServiceId[];
+  /** In the run review the fix is the one filled button. */
+  primary?: boolean;
+  /** Lets a dialog name this notice as its description. */
+  id?: string;
 }) {
   const [adding, setAdding] = useState<ServiceId | null>(null);
   if (serviceIds.length === 0) return null;
   const titles = serviceIds.map((id) => serviceById(id).title);
   const ownRegistration = usesOwnRegistration(tenant);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/25">
-      <div className="min-w-0 text-sm leading-relaxed text-[var(--color-text)]">
+    // Missing access is neutral and dashed, never amber: amber means data leaves this device.
+    // Not an alert: it holds its own fix, so a dialog uses it as its description instead.
+    <div id={id} className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-inset ring-[var(--color-border-soft)]">
+      <ServiceMark serviceId={serviceIds[0]!} size="lg" off />
+      <div className="min-w-0 flex-1 text-sm leading-relaxed text-[var(--color-text)]">
         <span className="font-medium">{SERVICE_COPY.needsNotConnected(titles)}</span>{" "}
         <span className="text-[var(--color-text-soft)]">{SERVICE_COPY.needsNotConnectedBody(tenant.displayName)}</span>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
-        {serviceIds.map((id) => (
-          <Button key={id} size="sm" variant="secondary" onClick={() => setAdding(id)}>
+        {serviceIds.map((serviceId, index) => (
+          // One filled button even when several services are missing: the first fix.
+          <Button
+            key={serviceId}
+            size="sm"
+            variant={primary && index === 0 ? "primary" : "secondary"}
+            {...(primary && index === 0 ? { "data-autofocus": true } : {})}
+            onClick={() => setAdding(serviceId)}
+          >
             {ownRegistration
-              ? SERVICE_COPY.addPermissionsAction(serviceById(id).title)
-              : SERVICE_COPY.addAction(serviceById(id).title)}
+              ? SERVICE_COPY.addPermissionsAction(serviceById(serviceId).title)
+              : SERVICE_COPY.addAction(serviceById(serviceId).title)}
           </Button>
         ))}
       </div>

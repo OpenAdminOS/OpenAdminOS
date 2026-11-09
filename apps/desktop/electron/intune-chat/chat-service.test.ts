@@ -1934,7 +1934,7 @@ it("answers an ungranted area deterministically without calling Graph", async ()
     });
     assert.equal(
       result.assistantMessage.content,
-      "This needs Intune devices and configuration, which is not granted for Directory team. Add it in Settings, Tenants.",
+      "This needs Intune devices and configuration, which is not granted for Directory team. Add it in Connections.",
     );
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);
@@ -2003,7 +2003,7 @@ it("names a service that is not connected instead of a scope", async () => {
     });
     assert.equal(
       result.assistantMessage.content,
-      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+      "Defender is not connected for this tenant. Add it in Connections.",
     );
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);
@@ -2066,7 +2066,7 @@ it("treats a partly granted Defender part as not connected in Chat", async () =>
     const result = await store.sendIntuneChatMessage({ content: "Show recent security alerts" });
     assert.equal(
       result.assistantMessage.content,
-      "Defender is not connected for this tenant. Add it in Settings, Tenants.",
+      "Defender is not connected for this tenant. Add it in Connections.",
     );
     assert.equal(graphCalls, 0);
     assert.equal(llmCalls, 0);
@@ -2132,7 +2132,7 @@ for (const path of ["send", "stream"] as const) {
       assert.equal(result.assistantMessage.status, "completed");
       assert.equal(
         result.assistantMessage.content,
-        "No managed devices are cached.\n\nNot included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Settings, Tenants.",
+        "No managed devices are cached.\n\nNot included in this answer: Defender alerts and Defender incidents. Defender is not connected for this tenant. Add it in Connections.",
       );
       assert.equal(graphPaths.some((entry) => entry.includes("/security/")), false);
       const messages = await store.getIntuneChatMessages(result.conversation.id);

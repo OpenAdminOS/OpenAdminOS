@@ -423,7 +423,7 @@ it("refuses to start an agent whose service is not connected for the tenant", as
   await h.host.write({ ...h.state(), installedAgents: [agent], activeTenantId: "tenant-a", tenants: [intuneOnly] as any });
   await assert.rejects(
     h.service.startRun("score", {}),
-    /^Error: Secure score prioritizer needs Defender, which is not connected for Contoso\. Add it in Settings, Tenants, then run the agent again\.$/,
+    /^Error: Secure score prioritizer needs Defender, which is not connected for Contoso\. Add it in Connections, then run the agent again\.$/,
   );
   assert.deepEqual(h.state().runs, []);
 

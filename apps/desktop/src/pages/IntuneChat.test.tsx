@@ -918,7 +918,7 @@ describe("IntuneChat agent picker", () => {
 });
 
 describe("IntuneChat hosted-provider disclosure", () => {
-  const sentence = "Prompts and tenant data leave this device through Codex; location set by your account.";
+  const sentence = "Prompts and tenant data leave this device through Codex; location set by your account while this model is selected.";
   const CODEX_LOCATION_DETAIL = "Codex sends prompts to OpenAI, or to the endpoint its configuration selects. Processing follows your workspace's data residency setting.";
   const conversation: IntuneChatConversation = {
     id: "conversation-hosted", title: "Stale devices", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
@@ -959,6 +959,14 @@ describe("IntuneChat hosted-provider disclosure", () => {
     expect(screen.getByRole("note")).toHaveTextContent(sentence);
     expect(screen.getByRole("button", { name: "Where data goes" })).toHaveAttribute("aria-expanded", "true");
   });
+  it("says no tenant data is sent with a hosted model and no organization (design round review, Muse D)", async () => {
+    const { activeTenantId: _none, ...state } = createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge: makeMockBridge({}, state) });
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent("Prompts leave this device through Codex; location set by your account while this model is selected. No organization is active, so no tenant data is included.");
+    expect(note).not.toHaveTextContent("tenant data go to");
+  });
+
   it("adds the MCP disclosure to the hosted sentence and the shield tooltip when MCP servers are on", async () => {
     const bridge = makeMockBridge(
       { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },
@@ -998,10 +1006,10 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", {
       name: "Ask about your Microsoft 365 tenant",
     });
-    expect(document.querySelector("header")?.textContent ?? "").not.toContain("OpenAI");
+    expect(document.querySelector("header")?.textContent ?? "").not.toContain("Prompts and tenant data go to");
     // A new conversation shows the hosted sentence in full under the composer.
     expect(await screen.findByRole("note")).toHaveTextContent(
-      "Prompts and tenant data leave this device through Codex; location set by your account.",
+      "Prompts and tenant data leave this device through Codex; location set by your account while this model is selected.",
     );
 
     await user.type(composer, "Which Windows devices are stale?");
@@ -2314,4 +2322,54 @@ describe("IntuneChat live run", () => {
     expect(await within(log).findByText(/Onboarding has three parts/, {}, { timeout: 4000 })).toBeInTheDocument();
     expect(await screen.findByRole("button", { name: /4 steps/ }, { timeout: 4000 })).toBeInTheDocument();
   });
+});
+
+describe("IntuneChat edit while a send is finishing (review round 4)", () => {
+  it("keeps Edit disabled until the send settles, then loads the prompt into the composer", async () => {
+    const user = userEvent.setup();
+    const bridge = streamingBridge(createMockAppState());
+    // The conversation reload after the answer is slow: the send has not
+    // finished although the answer is already shown.
+    const list = vi.mocked(bridge.listIntuneChatConversations);
+    const original = list.getMockImplementation()!;
+    let release!: () => void;
+    const held = new Promise<void>((done) => (release = done));
+    let calls = 0;
+    list.mockImplementation(async (...args) => {
+      calls += 1;
+      if (calls > 1) await held;
+      return original(...args);
+    });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+    const prompt = "Which managed devices have not synced in the last 7 days?";
+    await user.type(composer, prompt);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await screen.findByText(/17 of 119 managed devices have not checked in/);
+    const edit = screen.getByRole("button", { name: "Edit and resend prompt" });
+    expect(edit).toBeDisabled();
+    await act(async () => release());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Edit and resend prompt" })).toBeEnabled());
+    await user.click(screen.getByRole("button", { name: "Edit and resend prompt" }));
+    expect(screen.getByRole("combobox", { name: "Ask about your Microsoft 365 tenant" })).toHaveValue(prompt);
+  });
+});
+
+it("says Azure OpenAI answers through the Azure OpenAI API in the hosted confirmation (design round review 2, Muse D)", async () => {
+  const user = userEvent.setup();
+  const azure = { ...mockProviders.find((provider) => provider.id === "azure-openai")!, status: "available" as const, models: ["gpt-4o"], defaultModel: "gpt-4o" };
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({
+      activeProviderId: "azure-openai",
+      providers: mockProviders.map((provider) => (provider.id === "azure-openai" ? azure : provider)),
+    }),
+  );
+  renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+  const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+  await user.type(composer, "Which Windows devices are stale?");
+  await user.click(screen.getByRole("button", { name: "Send" }));
+  const dialog = await screen.findByRole("dialog", { name: "Send this question to Azure OpenAI?" });
+  expect(dialog).toHaveTextContent("Azure OpenAI answers through the Azure OpenAI API.");
+  expect(dialog).not.toHaveTextContent("Azure OpenAI answers through Azure OpenAI.");
 });

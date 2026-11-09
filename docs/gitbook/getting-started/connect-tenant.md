@@ -14,7 +14,7 @@ The connect dialog starts with two equal choices. Neither is selected for you.
 | **OpenAdminOS app** | Your organization allows the published multi-tenant app. You pick services and parts before Microsoft consent. | [Connect with the shared app](connect-shared-app.md) |
 | **Your own app registration** | You want a tenant-owned registration. Its granted permissions decide which services are on. | [Own app registration](own-app-registration.md) |
 
-Neither choice uses a client secret, and in both cases tokens are stored on your device only. Settings, Tenants and the tenant menu show which app each tenant is connected with.
+Neither choice uses a client secret, and in both cases tokens are stored on your device only. Connections and the organization menu show which app each tenant is connected with.
 
 ## Tenant Scope
 

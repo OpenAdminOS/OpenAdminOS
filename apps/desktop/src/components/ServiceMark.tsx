@@ -1,6 +1,13 @@
 import defenderIcon from "../assets/service-logos/defender-for-cloud.svg";
 import entraIcon from "../assets/service-logos/entra-id-color.svg";
 import intuneIcon from "../assets/service-logos/intune.svg";
+import {
+  AVAILABLE_SERVICES,
+  serviceById,
+  serviceStatus,
+  type ServiceId,
+  type TenantRecord,
+} from "../shared/openAdminOS";
 
 /**
  * Microsoft's product icon for each service, unmodified (sources in
@@ -18,8 +25,16 @@ export function serviceLogoKind(service: string): "logo" | "neutral" {
   return ICONS[service] ? "logo" : "neutral";
 }
 
+function titleOf(service: string): string {
+  try {
+    return serviceById(service as ServiceId).title;
+  } catch {
+    return service;
+  }
+}
+
 /** The service's icon alone, for a surface that draws its own tile, such as the onboarding stage. */
-export function ServiceLogo({ service, title, size, label }: { service: string; title: string; size: number; label?: string }) {
+export function ServiceLogo({ service, size, label }: { service: string; size: number; label?: string }) {
   const icon = ICONS[service];
   const a11y = label ? { role: "img" as const, "aria-label": label } : { "aria-hidden": true as const };
   if (icon) {
@@ -31,42 +46,71 @@ export function ServiceLogo({ service, title, size, label }: { service: string; 
   }
   return (
     <span {...a11y} data-service-logo={service} data-kind="neutral" className="inline-flex shrink-0 items-center justify-center font-medium" style={{ width: size, height: size, fontSize: Math.max(9, Math.round(size * 0.5)) }}>
-      {title.slice(0, 2)}
+      {titleOf(service).slice(0, 2)}
     </span>
   );
 }
 
-const INNER: Readonly<Record<17 | 22 | 30, number>> = { 17: 13, 22: 16, 30: 20 };
+const INNER: Readonly<Record<"sm" | "md" | "lg", number>> = { sm: 13, md: 16, lg: 20 };
 
 /**
  * A Microsoft 365 service as its icon on a small tile (mockup 32). A
  * service that is not connected is always a dashed tile, wherever it
- * shows; the icon inside stays as Microsoft provides it.
+ * shows; the icon inside stays as Microsoft provides it. Decorative next
+ * to a visible name; `label` names it when it stands alone.
  */
 export function ServiceMark({
-  service,
-  title,
-  size = 22,
+  serviceId,
+  size = "md",
   off = false,
   label,
 }: {
-  service: string;
-  title: string;
-  size?: 17 | 22 | 30;
+  serviceId: ServiceId | string;
+  size?: "sm" | "md" | "lg";
   off?: boolean;
-  /** Only when no visible name sits next to the mark. */
   label?: string;
 }) {
   const a11y = label ? { role: "img" as const, "aria-label": label } : { "aria-hidden": true as const };
   return (
-    <span
-      {...a11y}
-      data-off={off ? "true" : undefined}
-      data-service={service}
-      className="service-mark inline-flex shrink-0 items-center justify-center text-[var(--color-text-muted)]"
-      style={{ width: size, height: size, borderRadius: size >= 30 ? 8 : size >= 22 ? 6 : 5 }}
-    >
-      <ServiceLogo service={service} title={title} size={INNER[size]} />
+    <span {...a11y} className="svc-mark" data-service={serviceId} data-size={size} data-off={off ? "true" : undefined}>
+      <ServiceLogo service={serviceId} size={INNER[size]} />
     </span>
+  );
+}
+
+/**
+ * Two letters for a reference or connector tile. A host name leads with its
+ * brand, the label before the top-level domain, so it never reads like a
+ * product name: learn.microsoft.com is ML (not LM, which is LM Studio) and
+ * www.kqlsearch.com is KQ. Any other name uses the initials of its first
+ * two words.
+ */
+export function referenceMarkText(name: string): string {
+  const trimmed = name.trim();
+  if (/^[\w-]+(\.[\w-]+)+$/.test(trimmed)) {
+    const labels = trimmed.toLowerCase().split(".").filter((label) => label !== "www");
+    const brand = labels.length >= 2 ? labels[labels.length - 2]! : labels[0]!;
+    const sub = labels.length >= 3 ? labels[0] : undefined;
+    return (sub ? `${brand[0]}${sub[0]}` : brand.slice(0, 2)).toUpperCase();
+  }
+  const words = trimmed.split(/\s+/).filter(Boolean);
+  return (words.length >= 2 ? `${words[0]![0]}${words[1]![0]}` : (words[0] ?? "?").slice(0, 2)).toUpperCase();
+}
+
+/** Tile for a public reference or result connector, from its name. */
+export function ReferenceMark({ name, size = "md", off = false }: { name: string; size?: "sm" | "md" | "lg"; off?: boolean }) {
+  const text = referenceMarkText(name);
+  return (
+    <span aria-hidden="true" className="svc-mark" data-service="reference" data-size={size} data-off={off ? "true" : undefined}>
+      {off ? "" : text.toUpperCase()}
+    </span>
+  );
+}
+
+/** Services with at least one part granted for the tenant, in registry order. */
+export function connectedServiceIds(tenant: TenantRecord | undefined): ServiceId[] {
+  if (!tenant) return [];
+  return AVAILABLE_SERVICES.filter((service) => serviceStatus(tenant, service.id) !== "missing").map(
+    (service) => service.id,
   );
 }

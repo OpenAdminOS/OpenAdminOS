@@ -5,7 +5,7 @@ export {
   useConversationsOptional,
   type ConversationPanelMode,
 } from "./conversations";
-export { DataBoundaryProvider, chatToolHosts, useDataBoundary, useDataBoundaryOptional, type DataBoundary } from "./data-boundary";
+export { DataBoundaryProvider, chatToolHosts, deriveDataBoundary, novaVoiceSentence, useDataBoundary, useDataBoundaryOptional, type DataBoundary } from "./data-boundary";
 export { UpdateStateProvider, useUpdateState, useUpdateStateOptional } from "./update-state";
 export {
   ShellChromeProvider,

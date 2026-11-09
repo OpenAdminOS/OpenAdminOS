@@ -809,10 +809,10 @@ export function missingServiceCopy(
   );
   if (missingServices.length > 0) {
     const titles = missingServices.map((service) => service.title);
-    return `${formatServiceList(titles)} ${titles.length === 1 ? "is" : "are"} not connected for this tenant. Add ${titles.length === 1 ? "it" : "them"} in Settings, Tenants.`;
+    return `${formatServiceList(titles)} ${titles.length === 1 ? "is" : "are"} not connected for this tenant. Add ${titles.length === 1 ? "it" : "them"} in Connections.`;
   }
   const labels = parts.map(partLabel);
-  return `This needs ${formatServiceList(labels)}, which ${labels.length === 1 ? "is" : "are"} not granted for ${tenant.displayName ?? "this tenant"}. Add ${labels.length === 1 ? "it" : "them"} in Settings, Tenants.`;
+  return `This needs ${formatServiceList(labels)}, which ${labels.length === 1 ? "is" : "are"} not granted for ${tenant.displayName ?? "this tenant"}. Add ${labels.length === 1 ? "it" : "them"} in Connections.`;
 }
 
 /**
@@ -1052,5 +1052,28 @@ export function scopesNotCoveredByServices(
   const declared = new Set(services);
   return scopesRequiringService(scopes).filter(
     (scope) => !servicesOwningScope(scope).some((id) => declared.has(id)),
+  );
+}
+
+/**
+ * True only for an agent that calls no service API at all: no scopes, not
+ * even the baseline sign-in scopes, no services, no connectors and no
+ * Graph operations, and read-only. Only such an agent runs without an
+ * organization. `services: []` alone is not enough, because an agent with
+ * that declaration may still use the sign-in scopes such as `User.Read`.
+ */
+export function agentCallsNoServiceApi(agent: {
+  scopes: readonly string[];
+  services?: readonly ServiceId[];
+  mode?: string;
+  connectors?: readonly unknown[];
+  graphOperations?: readonly unknown[];
+}): boolean {
+  return (
+    agent.scopes.length === 0 &&
+    agentServiceIds(agent).length === 0 &&
+    (agent.connectors?.length ?? 0) === 0 &&
+    (agent.graphOperations?.length ?? 0) === 0 &&
+    agent.mode !== "write"
   );
 }

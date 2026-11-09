@@ -1,5 +1,6 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import Settings from "./Settings";
@@ -14,7 +15,7 @@ import {
   DEFAULT_AZURE_OPENAI_API_VERSION,
   type SetAzureOpenAIProviderConfigInput,
 } from "../shared/openAdminOS";
-import { PROVIDER_DETECTION_COPY, SERVICE_COPY, SETUP_COPY } from "../copy";
+import { PROVIDER_DETECTION_COPY } from "../copy";
 import { setAnswerFont } from "../styles/answer-font";
 import { setDensity } from "../styles/density";
 
@@ -106,6 +107,18 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(heading).toHaveFocus());
   });
 
+  it("sends a legacy Tenants or Connectors section link to Connections", async () => {
+    renderRoute(
+      <Routes>
+        <Route path="/settings/:section?" element={<Settings />} />
+        <Route path="/connections" element={<ConnectionsLocation />} />
+      </Routes>,
+      { path: "*", route: "/settings?section=connectors&connector=jira", bridge: makeMockBridge() },
+    );
+    expect(await screen.findByTestId("location")).toHaveTextContent("/connections?connector=jira");
+    expect(screen.queryByRole("navigation", { name: "Settings sections" })).not.toBeInTheDocument();
+  });
+
   it("applies themes immediately and supports arrow-key selection", async () => {
     const user = userEvent.setup();
     const setAppearance = vi.fn(async () => undefined);
@@ -172,21 +185,6 @@ describe("Settings provider section", () => {
         value: originalScrollTo,
       });
     }
-  });
-
-  it("opens and closes a connector drawer from its URL", async () => {
-    const user = userEvent.setup();
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/connectors?connector=jira",
-      bridge: makeMockBridge(),
-    });
-
-    expect(await screen.findByRole("dialog", { name: "Jira" })).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Close drawer" }));
-    await waitFor(() => {
-      expect(screen.queryByRole("dialog", { name: "Jira" })).not.toBeInTheDocument();
-    });
   });
 
   it("enables the gateway, shows its one-time token, revokes a client, and disables it", async () => {
@@ -260,6 +258,27 @@ describe("Settings provider section", () => {
     });
   });
 
+  it("never moves focus away from the search while the section opens (design round)", async () => {
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge: makeMockBridge() });
+    // The admin starts typing before the section has scrolled into view:
+    // focus lands in the search in the same frame as the first render.
+    const search = screen.getByRole("combobox", { name: "Search settings" });
+    search.focus();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+    expect(search).toHaveFocus();
+  });
+
+  it("focuses the chosen section's heading after a deliberate choice (design round review, Muse T)", async () => {
+    const user = userEvent.setup();
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge: makeMockBridge() });
+    const nav = await screen.findByRole("navigation", { name: "Settings sections" });
+    const target = within(nav).getAllByRole("button").find((button) => button.getAttribute("aria-current") !== "location")!;
+    await user.click(target);
+    await waitFor(() => expect(document.activeElement?.id ?? "").toMatch(/^settings-heading-/));
+  });
+
   it("finds a setting from the shared catalog and focuses the rendered row", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge();
@@ -277,6 +296,25 @@ describe("Settings provider section", () => {
 
     const row = await screen.findByText("Tenant cache");
     await waitFor(() => expect(row.closest(".setting-row")).toHaveFocus());
+  });
+
+  it("finds tenant and connector topics and leads to Connections", async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <Routes>
+        <Route path="/settings/:section?" element={<Settings />} />
+        <Route path="/connections" element={<ConnectionsLocation />} />
+      </Routes>,
+      { path: "*", route: "/settings/providers", bridge: makeMockBridge() },
+    );
+    const search = await screen.findByRole("combobox", { name: "Search settings" });
+    await user.type(search, "slack");
+    expect(await screen.findByRole("option", { name: /Result connectors/ })).toBeInTheDocument();
+    expect(screen.queryByText(/No settings match this search/)).not.toBeInTheDocument();
+    await user.clear(search);
+    await user.type(search, "tenants");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("location")).toHaveTextContent("/connections");
   });
 
   it("opens contextual tenant setup before refreshing an empty tenant cache", async () => {
@@ -341,15 +379,16 @@ describe("Settings provider section", () => {
     expect(providersSection).not.toBeNull();
     const providerView = within(providersSection as HTMLElement);
     expect(providerView.getByText("Ollama")).toBeInTheDocument();
-    expect(providerView.getByText("OpenAI")).toBeInTheDocument();
+    expect(providerView.getByText("Codex")).toBeInTheDocument();
     expect(providerView.getAllByText("Connected")).toHaveLength(2);
     expect(providerView.getAllByText("Active")).toHaveLength(5);
     expect(providerView.getAllByText("Not installed")).toHaveLength(3);
     expect(providerView.queryByText("Coming soon")).not.toBeInTheDocument();
-    expect(providerView.getAllByText("Hosted via CLI").length).toBeGreaterThan(0);
-    expect(providerView.getByText("Hosted API")).toBeInTheDocument();
+    expect(providerView.getByText("Prompts leave this device through Codex; location set by your account")).toBeInTheDocument();
+    expect(providerView.getByText("Prompts go to Azure OpenAI · location set by your deployment type")).toBeInTheDocument();
+    expect(providerView.queryByText("Hosted via CLI")).not.toBeInTheDocument();
 
-    await user.click(providerView.getByRole("radio", { name: "Set OpenAI active" }));
+    await user.click(providerView.getByRole("radio", { name: "Set Codex active" }));
 
     await waitFor(() => {
       expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai");
@@ -381,11 +420,11 @@ describe("Settings provider section", () => {
     expect(within(detected).queryByText("Anthropic")).not.toBeInTheDocument();
     // The detected provider also leads the full list, and stays inactive.
     const radios = screen.getAllByRole("radio", { name: /^Set .* active$/ });
-    expect(radios[0]).toHaveAccessibleName("Set OpenAI active");
+    expect(radios[0]).toHaveAccessibleName("Set Codex active");
     expect(radios[0]).not.toBeChecked();
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
 
-    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("OpenAI") }));
+    await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("Codex") }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
   });
 
@@ -785,215 +824,9 @@ describe("Settings provider section", () => {
       expect(refreshRetrievalIndex).toHaveBeenCalledTimes(1);
     });
   });
-
-  it("keeps the disconnect confirmation open and surfaces deletion failures", async () => {
-    const user = userEvent.setup();
-    const disconnectTenant = vi.fn(async () => {
-      throw new Error("The local state file could not be written.");
-    });
-    const bridge = makeMockBridge({ disconnectTenant }, createMockAppState());
-
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
-      bridge,
-    });
-
-    await user.click(await screen.findByRole("button", { name: "Contoso IT actions" }));
-    await user.click(screen.getByRole("menuitem", { name: "Disconnect" }));
-    await user.click(
-      screen.getByRole("button", { name: "Disconnect and delete local data" }),
-    );
-
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "The local state file could not be written.",
-    );
-    expect(
-      screen.getByRole("dialog", { name: /Disconnect Contoso IT/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows connected services and adds a missing service through reviewed consent", async () => {
-    const user = userEvent.setup();
-    const base = createMockAppState();
-    const tenant = {
-      ...base.tenants[0]!,
-      grantedScopes: [
-        "graph:User.Read.All",
-        "graph:GroupMember.Read.All",
-        "graph:Organization.Read.All",
-      ],
-    };
-    const state = createMockAppState({ tenants: [tenant] });
-    const addTenantAccess = vi.fn(async () => state);
-    const bridge = makeMockBridge({ addTenantAccess }, state);
-
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
-      bridge,
-    });
-
-    const services = await screen.findByRole("region", { name: "Contoso IT services" });
-    const rows = within(services).getAllByRole("listitem");
-    expect(rows.map((row) => row.textContent)).toEqual([
-      expect.stringMatching(/^IntunePartial1 of 3 parts/),
-      expect.stringMatching(/^EntraPartial1 of 6 parts/),
-      expect.stringMatching(/^DefenderNot connected0 of 2 parts/),
-    ]);
-    // The shared app never offers Check again; consent adds access.
-    expect(within(services).queryByRole("button", { name: SERVICE_COPY.checkAgain })).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Add Intune access" }));
-    expect(screen.getByRole("dialog", { name: "Add Intune access" })).toBeInTheDocument();
-    expect(screen.getByText("7 delegated read scopes")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Continue to Microsoft" }));
-    await waitFor(() =>
-      expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", ["intune.devices", "intune.apps"]),
-    );
-  });
-
-  it("adds a single missing part from its row", async () => {
-    const user = userEvent.setup();
-    const base = createMockAppState();
-    const tenant = {
-      ...base.tenants[0]!,
-      grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"],
-    };
-    const state = createMockAppState({ tenants: [tenant] });
-    const addTenantAccess = vi.fn(async () => state);
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
-      bridge: makeMockBridge({ addTenantAccess }, state),
-    });
-
-    await user.click(await screen.findByRole("button", { name: "Add Entra sign-in logs" }));
-    const dialog = screen.getByRole("dialog", { name: "Add Entra access" });
-    expect(within(dialog).getByRole("checkbox", { name: "Sign-in logs" })).toBeChecked();
-    expect(within(dialog).getByRole("checkbox", { name: "Devices" })).not.toBeChecked();
-    await user.click(within(dialog).getByRole("button", { name: "Continue to Microsoft" }));
-    await waitFor(() => expect(addTenantAccess).toHaveBeenCalledWith("tenant-1", ["entra.signins"]));
-  });
-
-  it("lists missing permissions for an own registration with the extend script, snippet and Check again", async () => {
-    const user = userEvent.setup();
-    const base = createMockAppState();
-    const clientId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-    const tenant = {
-      ...base.tenants[0]!,
-      appRegistration: { kind: "custom" as const, clientId },
-      grantedScopes: ["graph:User.Read.All", "graph:GroupMember.Read.All", "graph:Organization.Read.All"],
-    };
-    const state = createMockAppState({ tenants: [tenant] });
-    const refreshTenantGrants = vi.fn(async () => state);
-    const bridge = makeMockBridge({ refreshTenantGrants }, state);
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
-      bridge,
-    });
-
-    const services = await screen.findByRole("region", { name: "Contoso IT services" });
-    expect(within(services).getByText(/Missing: SecurityAlert\.Read\.All, SecurityIncident\.Read\.All, SecurityEvents\.Read\.All/)).toBeInTheDocument();
-    await user.click(within(services).getByRole("button", { name: SERVICE_COPY.checkAgain }));
-    await waitFor(() => expect(refreshTenantGrants).toHaveBeenCalledWith("tenant-1"));
-
-    await user.click(within(services).getByRole("button", { name: "Add Defender permissions" }));
-    const dialog = screen.getByRole("dialog", { name: "Add Defender permissions" });
-    expect(within(dialog).queryByRole("button", { name: "Continue to Microsoft" })).not.toBeInTheDocument();
-    await user.click(within(dialog).getByRole("button", { name: "Copy script" }));
-    const script = vi.mocked(bridge.writeClipboardText).mock.calls.at(-1)?.[0] ?? "";
-    expect(script).toContain(`$clientId = '${clientId}'`);
-    expect(script).toContain("Get-MgApplication");
-    expect(script).toContain("'SecurityAlert.Read.All'");
-    expect(script).not.toContain("'DeviceManagementApps.Read.All'");
-    await user.click(within(dialog).getByRole("button", { name: "Copy JSON snippet" }));
-    const json = JSON.parse(vi.mocked(bridge.writeClipboardText).mock.calls.at(-1)?.[0] ?? "[]");
-    expect(json[0].resourceAppId).toBe("00000003-0000-0000-c000-000000000000");
-    expect(json[0].resourceAccess).toContainEqual({ id: "bc257fb8-46b4-4b15-8713-01e91bfbe4ea", type: "Scope" });
-    await user.click(within(dialog).getByRole("button", { name: SERVICE_COPY.checkAgain }));
-    await waitFor(() => expect(refreshTenantGrants).toHaveBeenCalledTimes(2));
-  });
-
-  it("shows each tenant's app registration and removes a saved registration", async () => {
-    const user = userEvent.setup();
-    const base = createMockAppState();
-    const customTenant = {
-      ...base.tenants[0]!,
-      appRegistration: {
-        kind: "custom" as const,
-        clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-        label: "Contoso admin app",
-      },
-    };
-    const state = createMockAppState({
-      tenants: [customTenant],
-      savedAppRegistrations: [
-        {
-          clientId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-          label: "Contoso admin app",
-          lastUsedAt: "2026-11-03T10:00:00.000Z",
-        },
-        {
-          clientId: "11111111-2222-4333-8444-555555555555",
-          directoryTenantId: "fabrikam.onmicrosoft.com",
-          lastUsedAt: "2026-11-01T10:00:00.000Z",
-        },
-      ],
-    });
-    const bridge = makeMockBridge({}, state);
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
-      bridge,
-    });
-
-    expect(await screen.findByText("Own app registration · Contoso admin app")).toHaveAttribute(
-      "title",
-      "Own app registration Contoso admin app, client ID aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-    );
-    const saved = screen.getByRole("region", { name: SETUP_COPY.savedRegistrationsSettingsTitle });
-    expect(saved).toHaveTextContent("Tenants already connected with it keep working.");
-    expect(within(saved).getByText("fabrikam.onmicrosoft.com")).toBeInTheDocument();
-
-    await user.click(
-      within(saved).getByRole("button", {
-        name: SETUP_COPY.removeSavedRegistration("11111111-2222-4333-8444-555555555555"),
-      }),
-    );
-    expect(bridge.removeSavedAppRegistration).toHaveBeenCalledWith(
-      "11111111-2222-4333-8444-555555555555",
-      "fabrikam.onmicrosoft.com",
-    );
-    await waitFor(() =>
-      expect(within(saved).queryByText("fabrikam.onmicrosoft.com")).not.toBeInTheDocument(),
-    );
-    expect(screen.getByText("Own app registration · Contoso admin app")).toBeInTheDocument();
-  });
-
-  it("surfaces a failed removal of a saved registration with a recovery path", async () => {
-    const user = userEvent.setup();
-    const state = createMockAppState({
-      savedAppRegistrations: [
-        { clientId: "11111111-2222-4333-8444-555555555555", lastUsedAt: "2026-11-01T10:00:00.000Z" },
-      ],
-    });
-    const removeSavedAppRegistration = vi.fn(async () => {
-      throw new Error("The local state file could not be written.");
-    });
-    renderRoute(<Settings />, {
-      path: "/settings/:section?",
-      route: "/settings/tenants",
-      bridge: makeMockBridge({ removeSavedAppRegistration }, state),
-    });
-
-    await user.click(
-      await screen.findByRole("button", {
-        name: SETUP_COPY.removeSavedRegistration("11111111-2222-4333-8444-555555555555"),
-      }),
-    );
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /The saved registration was not removed\. .*Try again\./,
-    );
-  });
 });
+
+function ConnectionsLocation() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname + location.search}</div>;
+}

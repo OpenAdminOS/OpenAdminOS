@@ -132,7 +132,7 @@ export const outlookConnector: ConnectorFactory<OutlookConnectorCapabilities> =
     async build(
       ctx: ConnectorBuildContext,
     ): Promise<ConnectorInstance<OutlookConnectorCapabilities>> {
-      const client = createOutlookGraphClient({ tenant: ctx.tenant });
+      const client = createOutlookGraphClient({ tenant: ctx.tenant, ...(ctx.fetch ? { fetchImpl: ctx.fetch } : {}) });
       return {
         descriptor: outlookDescriptor,
         status: "connected",

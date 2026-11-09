@@ -12,7 +12,7 @@
 import type { DetectedEntraTier, TenantLicense } from "@openadminos/agent-sdk";
 
 /**
- * SKU part numbers we surface in the Settings → Tenants license panel.
+ * SKU part numbers we surface in the Connections license panel.
  * Limited to the SKUs an admin would actually reason about when
  * deciding "will the agents work" — Microsoft 365 / Office 365
  * Business + Enterprise tiers, EMS bundles, and the standalone Azure

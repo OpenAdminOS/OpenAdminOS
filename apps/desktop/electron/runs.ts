@@ -1,3 +1,4 @@
+import { TENANT_CLOSED_COPY } from "./tenant-lifecycle.js";
 import { createHash, randomUUID } from "node:crypto";
 
 import {
@@ -11,8 +12,11 @@ import {
   tenantSatisfiesRequirement,
 } from "@openadminos/runtime";
 import {
+  agentCallsNoServiceApi,
   agentServiceIds,
   formatServiceList,
+  organizationForTenant,
+  serviceById,
   invalidAgentManifestCopy,
   missingServicesForAgent,
   uncoveredScopesCopy,
@@ -30,6 +34,7 @@ import {
   type RunStepStatus,
   type SecretAccessor,
   type StartRunOptions,
+  type OrganizationRecord,
   type TenantRecord,
   type TenantSession,
 } from "@openadminos/agent-sdk";
@@ -55,9 +60,63 @@ export interface RunPersistedState {
   runs: RunRecord[];
   tenants: TenantRecord[];
   activeTenantId?: string;
+  organizations?: OrganizationRecord[];
 }
 
+/**
+ * Why an agent cannot start with no organization active. Only an agent
+ * that calls no service API runs without one; `services: []` with the
+ * sign-in scopes still needs an organization.
+ */
+export function noOrganizationRunCopy(agent: Pick<AgentSummary, "name" | "scopes" | "services">): string {
+  const titles = agentServiceIds(agent).map((id) => serviceById(id).title);
+  const needs = titles.length > 0
+    ? `reads ${formatServiceList(titles)}`
+    : "uses the Microsoft 365 sign-in";
+  return `No organization is active. ${agent.name} ${needs}, so it runs only in an organization where that is connected. Choose or add an organization in Connections, then run it again.`;
+}
+
+export const OTHER_ORGANIZATION_RUN_COPY =
+  "That run belongs to an organization that is not active. Switch to it in the organization menu, then run the agent again.";
+export const SCHEDULE_OTHER_ORGANIZATION_COPY =
+  "This schedule belongs to another organization. It runs only while that organization is active.";
+export const UNASSIGNED_SCHEDULE_RUN_COPY =
+  "This schedule is unassigned, so it is paused. Assign it to an organization on the agent page, then run it.";
+
+/** Why a reviewed plan cannot be applied while another organization, or none, is active. */
+export function planOtherOrganizationCopy(organizationName: string): string {
+  return `This plan was prepared in ${organizationName}, which is not the active organization. The plan is kept unchanged. Switch to ${organizationName} to review and apply it.`;
+}
+
+/** Why a plan prepared with no organization cannot be applied. It is never retargeted. */
+export const PLAN_NO_ORGANIZATION_COPY =
+  "This plan was prepared with no organization, so it cannot be applied. The plan is kept unchanged. Run the agent again in an organization to prepare a plan you can apply.";
+
+/**
+ * A start refused because its organization is not the active one, or its
+ * schedule is unassigned. For a scheduled start this is waiting, not a
+ * failure: the scheduler records nothing and keeps the due slot.
+ */
+export class OrganizationBoundaryError extends Error {
+  override readonly name = "OrganizationBoundaryError";
+}
+
+/** Why nothing new starts or applies for an organization that is being disconnected. */
+export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
+
 export interface RunServiceHost {
+  /**
+   * False once a disconnect of this tenant began, and for work of an
+   * older generation of it (see tenant-lifecycle.ts).
+   */
+  tenantWritable?(tenantId: string): boolean;
+  /**
+   * Run a tenant's work under its lease: refused when the tenant is not
+   * open, drained by Disconnect, and `signal` fires when it starts closing.
+   */
+  tenantLease?<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T>;
+  /** The guarded connector transport for a tenant's runs (see tenant-lifecycle.ts). */
+  connectorTransport?(tenantId: string): { fetch: typeof fetch; assertEgress: () => void };
   read(): Promise<RunPersistedState>;
   write(state: RunPersistedState): Promise<void>;
   serialize<T>(task: () => Promise<T>): Promise<T>;
@@ -109,6 +168,32 @@ export interface RunServiceHost {
 
 export class RunService {
   private readonly controllers = new Map<string, AbortController>();
+  /** The work driving each run, so a disconnect can wait for it to stop. */
+  private readonly drives = new Map<string, Promise<void>>();
+
+  /** Admission: a clear refusal before anything is written for a closing tenant. */
+  private assertTenantOpen(tenantId: string | undefined): void {
+    if (tenantId && this.host.tenantWritable && !this.host.tenantWritable(tenantId)) throw new OrganizationBoundaryError(TENANT_DISCONNECTING_COPY);
+  }
+
+  /**
+   * Drive a run under its tenant's lease. When the tenant starts closing,
+   * the lease signal cancels the run and Disconnect waits for the drive.
+   */
+  private track(runId: string, tenantId: string | undefined, start: () => Promise<void>): void {
+    const leased = tenantId && this.host.tenantLease
+      ? this.host.tenantLease(tenantId, async (signal) => {
+          const stop = () => this.controllers.get(runId)?.abort(signal.reason);
+          signal.addEventListener("abort", stop, { once: true });
+          try { return await start(); } finally { signal.removeEventListener("abort", stop); }
+        })
+      : start();
+    const settled = leased.catch(() => undefined).finally(() => {
+      if (this.drives.get(runId) === settled) this.drives.delete(runId);
+    });
+    this.drives.set(runId, settled);
+  }
+
   private readonly progress = new Map<string, { snapshot: RunRecord; waiters: Array<{ resolve(): void; reject(error: unknown): void }> }>();
   private readonly progressDrains = new Set<string>();
 
@@ -209,9 +294,17 @@ export class RunService {
     return result;
   }
 
+  /**
+   * Queue a run. `boundary.activeOrganizationOnly` is set for every start
+   * that comes from the renderer: it may only pin the active tenant.
+   * Host-owned callers (multi-tenant batches, Agent Team) pin their own
+   * tenants. A scheduled start is always held to the active organization,
+   * checked here under the same lock that queues the run.
+   */
   async startRun(
     agentSlug: string,
     options: StartRunOptions = {},
+    boundary: { activeOrganizationOnly?: boolean } = {},
   ): Promise<RunRecord> {
     const queued = await this.host.serialize(async () => {
       const persisted = await this.host.read();
@@ -226,11 +319,13 @@ export class RunService {
       // manually, from Chat or from a schedule.
       const manifestError = this.host.agentManifestError?.(agent);
       if (manifestError) throw new Error(invalidAgentManifestCopy(agent.name, manifestError));
-      // Pilot runs use prepared text instead of a provider, and only the
+    // Pilot runs use prepared text instead of a provider, and only the
       // pilot agents can run on the pilot tenant. Refuse everything else
       // before any provider or Graph work.
       const requestedTenantId =
         typeof options.tenantId === "string" ? options.tenantId : persisted.activeTenantId;
+      // Admission closes before a disconnect drains its work, under this lock.
+      this.assertTenantOpen(requestedTenantId);
       const pilotRun = persisted.tenants.some(
         (tenant) => tenant.id === requestedTenantId && tenant.kind === "sample",
       );
@@ -245,6 +340,35 @@ export class RunService {
       }
       if ((options.dryRun || options.runForRealOfRunId) && options.trigger === "schedule") {
         throw new Error("Dry runs and Run for real are manual run options. Open the agent to run it manually.");
+      }
+      // An installed agent's schedule. Agent Team persona recurrence also
+      // starts with trigger "schedule", but it is host-owned (`office` is
+      // set, and the renderer cannot pass it) and keeps the persona's own
+      // validated tenant binding; whether personas move to organizations is
+      // an open question for the maintainer.
+      const agentSchedule = options.trigger === "schedule" && !options.office;
+      // Hard constraint 3: a start the renderer asks for, and every
+      // installed-agent scheduled start, runs only in the organization
+      // active right now.
+      if (
+        (boundary.activeOrganizationOnly || agentSchedule) &&
+        options.tenantId !== undefined &&
+        options.tenantId !== persisted.activeTenantId
+      ) {
+        throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
+      }
+      // Pilot mode refuses schedules with its own production message first.
+      if (pilotRun && options.trigger === "schedule") {
+        throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
+      }
+      if (agentSchedule) {
+        const active = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
+        if (!agent.schedule?.organizationId) {
+          throw new OrganizationBoundaryError(UNASSIGNED_SCHEDULE_RUN_COPY);
+        }
+        if (!active || agent.schedule.organizationId !== active.id) {
+          throw new OrganizationBoundaryError(SCHEDULE_OTHER_ORGANIZATION_COPY);
+        }
       }
       if (options.dryRun && (options.office || options.officeContext)) {
         throw new Error("Dry runs are available from the agent page or Chat. Run this assignment from Agent Team normally.");
@@ -300,6 +424,15 @@ export class RunService {
         }
         if (!this.host.buildPilotLlm) {
           throw new Error("Pilot mode is unavailable in this build. Connect your tenant to run agents.");
+        }
+        // Run for real takes the dry run's tenant after the checks above; a
+        // pilot run is stamped with the pilot tenant only if that matches,
+        // and a renderer start only in the active organization.
+        if (
+          (options.tenantId !== undefined && options.tenantId !== requestedTenantId) ||
+          (boundary.activeOrganizationOnly && requestedTenantId !== persisted.activeTenantId)
+        ) {
+          throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
         }
         if (options.dryRun) {
           const manifest = loadAgentManifestPreview(agent)?.manifest;
@@ -404,7 +537,9 @@ export class RunService {
       // user here in the first place, but defend in depth.
       //   - explicit id  -> validate it exists and pin it
       //   - omitted      -> default to currently-active tenant
-      let pinnedTenantId: string;
+      //   - none active  -> only an agent that calls no service API runs,
+      //                     manually, with no tenant at all
+      let pinnedTenantId: string | undefined;
       if (typeof options.tenantId === "string") {
         const exists = persisted.tenants.some((tenant) => tenant.id === options.tenantId);
         if (!exists) {
@@ -413,10 +548,24 @@ export class RunService {
         pinnedTenantId = options.tenantId;
       } else if (persisted.activeTenantId) {
         pinnedTenantId = persisted.activeTenantId;
-      } else {
-        throw new Error(
-          "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
-        );
+      } else if (
+        !agentCallsNoServiceApi(agent) ||
+        options.trigger === "schedule" ||
+        options.office ||
+        options.officeContext ||
+        options.retryOfRunId
+      ) {
+        throw new Error(noOrganizationRunCopy(agent));
+      }
+      // Run for real and Team retries take the tenant of the original run;
+      // a renderer start, and an installed-agent scheduled start, still
+      // runs only in the active organization.
+      if (
+        (boundary.activeOrganizationOnly || agentSchedule) &&
+        pinnedTenantId !== undefined &&
+        pinnedTenantId !== persisted.activeTenantId
+      ) {
+        throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
       }
 
       // Entra ID tier preflight: if the agent declares a required tier
@@ -458,7 +607,7 @@ export class RunService {
         const titles = missingServices.map((service) => service.title);
         const one = titles.length === 1;
         throw new Error(
-          `${agent.name} needs ${formatServiceList(titles)}, which ${one ? "is" : "are"} not connected for ${runTenant.displayName}. Add ${one ? "it" : "them"} in Settings, Tenants, then run the agent again.`,
+          `${agent.name} needs ${formatServiceList(titles)}, which ${one ? "is" : "are"} not connected for ${runTenant.displayName}. Add ${one ? "it" : "them"} in Connections, then run the agent again.`,
         );
       }
 
@@ -479,7 +628,7 @@ export class RunService {
         slug: agent.slug, version: agent.version, manifest: agent.provenance?.manifestSha256,
         settings: agent.settings, personaId: options.office?.personaId, officeAssessment:options.officeContext?.assessmentKey })).digest("hex");
       if (options.retryOfRunId) queuedRun.retryOfRunId = options.retryOfRunId;
-      queuedRun.tenantId = pinnedTenantId;
+      if (pinnedTenantId) queuedRun.tenantId = pinnedTenantId;
       queuedRun.trigger = options.trigger ?? "manual";
       if (options.office) queuedRun.office = options.office;
       if (options.officeContext) {
@@ -537,12 +686,12 @@ export class RunService {
       this.host.intelligenceStore.touchConversation(options.source.conversationId, undefined, now);
     }
 
-    void this.driveRun({
+    this.track(queued.queuedRun.id, queued.queuedRun.tenantId, () => this.driveRun({
       run: queued.queuedRun,
       agent: queued.agent,
       providerId: queued.providerId,
       model: queued.model,
-    });
+    }));
     this.host.recordLearningEventSafely({
       tenantId: queued.queuedRun.tenantId,
       agentSlug: queued.agent.slug,
@@ -595,6 +744,7 @@ export class RunService {
       tenantId: input.tenantId,
     };
     await this.host.serialize(async () => {
+      this.assertTenantOpen(input.tenantId);
       const persisted = await this.host.read();
       run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
@@ -647,6 +797,7 @@ export class RunService {
       tenantId: input.tenantId,
     };
     await this.host.serialize(async () => {
+      this.assertTenantOpen(input.tenantId);
       const persisted = await this.host.read();
       run.riskAssessment = this.assessPlan(run, persisted);
       await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
@@ -666,7 +817,18 @@ export class RunService {
     return run;
   }
 
-  async confirmRun(runId: string, phrase: string): Promise<RunRecord> {
+  /**
+   * Apply a reviewed plan. `boundary.activeOrganizationOnly` is set for
+   * every approval from the renderer, which covers agent write plans,
+   * baseline rollbacks, gateway proposals and Agent Team approvals: the
+   * plan's tenant must be the active one, checked under this lock. A
+   * refused plan is left exactly as it was; it is never retargeted.
+   */
+  async confirmRun(
+    runId: string,
+    phrase: string,
+    boundary: { activeOrganizationOnly?: boolean } = {},
+  ): Promise<RunRecord> {
     const transition = await this.host.serialize(async () => {
       const persisted = await this.host.read();
       const run = persisted.runs.find((existing) => existing.id === runId);
@@ -674,6 +836,7 @@ export class RunService {
         throw new Error(`Run not found: ${runId}`);
       }
       assertRunCanApply(run);
+      this.assertTenantOpen(run.tenantId);
       if (run.status !== "awaiting-confirmation") {
         throw new Error(
           `Run ${runId} is not awaiting confirmation (status: ${run.status}).`,
@@ -681,6 +844,16 @@ export class RunService {
       }
       if (!run.plan) {
         throw new Error(`Run ${runId} has no plan to confirm.`);
+      }
+      // A plan with no organization has no tenant to apply to, whatever is
+      // active now; it is refused here so it stays exactly as it was.
+      if (!run.tenantId) throw new OrganizationBoundaryError(PLAN_NO_ORGANIZATION_COPY);
+      if (boundary.activeOrganizationOnly && run.tenantId !== persisted.activeTenantId) {
+        const name =
+          organizationForTenant(persisted.organizations ?? [], run.tenantId)?.name ??
+          persisted.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ??
+          "another organization";
+        throw new OrganizationBoundaryError(planOtherOrganizationCopy(name));
       }
       if (phrase !== run.plan.confirmationPhrase) {
         throw new Error("Confirmation phrase does not match.");
@@ -758,7 +931,7 @@ export class RunService {
     });
 
     if (transition.kind === "rollback") {
-      void this.driveSystemApply({ run: transition.updated });
+      this.track(transition.updated.id, transition.updated.tenantId, () => this.driveSystemApply({ run: transition.updated }));
       this.host.recordLearningEventSafely({
         tenantId: transition.updated.tenantId,
         agentSlug: transition.updated.agentSlug,
@@ -775,13 +948,13 @@ export class RunService {
       return transition.updated;
     }
 
-    void this.driveApply({
+    this.track(transition.updated.id, transition.updated.tenantId, () => this.driveApply({
       run: transition.updated,
       agent: transition.agent,
       providerId: transition.providerId,
       model: transition.model,
       plan: transition.updated.plan!,
-    });
+    }));
     this.host.recordLearningEventSafely({
       tenantId: transition.updated.tenantId,
       agentSlug: transition.agent.slug,
@@ -918,9 +1091,22 @@ export class RunService {
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
       const driver = input.agent.mode === "write" ? executePlan : executeRun;
       const baseLlm = await this.baseRunLlm(input.run, input.agent, input.providerId, input.model);
-      const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
-      const llm = this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug);
-      const stampedRun = this.stampTenant(input.run, selection.tenantId);
+      // A run without a tenant was admitted only for an agent that calls
+      // no service API. It gets no tenant session, and a Graph client
+      // that refuses every call, so nothing can reach a service.
+      // A run without a tenant whose agent now needs a service fails
+      // closed: it never falls back to the organization active now.
+      if (!input.run.tenantId && !agentCallsNoServiceApi(input.agent)) {
+        throw new Error(noOrganizationRunCopy(input.agent));
+      }
+      const selection = !input.run.tenantId
+        ? { createGraph: () => noServiceGraph(), tenantId: undefined, tenantSession: undefined }
+        : await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
+      const llm = selection.tenantId
+        ? this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug)
+        : baseLlm;
+      const stamp = (next: RunRecord) => (selection.tenantId ? this.stampTenant(next, selection.tenantId) : next);
+      const stampedRun = stamp(input.run);
       await this.persistRunSnapshot(stampedRun);
       controller.signal.throwIfAborted();
       await driver({
@@ -931,13 +1117,13 @@ export class RunService {
         model: input.model,
         llm,
         createGraph: selection.createGraph,
-        tenant: selection.tenantSession,
+        ...(selection.tenantSession ? { tenant: selection.tenantSession } : {}),
         connectorConfigs: await this.host.readConnectorConfigs(),
         connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
+        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
         confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
         realWrites: true,
-        onProgress: (next) =>
-          this.queueRunSnapshot(this.stampTenant(next, selection.tenantId)),
+        onProgress: (next) => this.queueRunSnapshot(stamp(next)),
       });
     } catch (error) {
       await this.persistFailedSnapshot(input.run, input.agent, error);
@@ -985,6 +1171,7 @@ export class RunService {
     try {
       assertRunCanApply(input.run);
       if ((await this.getRun(input.run.id))?.status === "cancelled") return;
+      if (!input.run.tenantId) throw new Error(noOrganizationRunCopy(input.agent));
       const baseLlm = await this.baseRunLlm(input.run, input.agent, input.providerId, input.model);
       const selection = await this.host.buildGraph(input.run.tenantId, input.agent.scopes, this.executionOptions(input.run, controller.signal));
       const llm = this.withOverlay(input.run, baseLlm, selection.tenantId, input.agent.slug);
@@ -1023,6 +1210,7 @@ export class RunService {
           tenant: selection.tenantSession,
           connectorConfigs: await this.host.readConnectorConfigs(),
           connectorSecretsFor: (connectorId) => this.host.connectorSecretsFor(connectorId),
+        ...(input.run.tenantId && this.host.connectorTransport ? { connectorTransport: this.host.connectorTransport(input.run.tenantId) } : {}),
           confirmCapability: (info) => requestConnectorConfirmation(info, controller.signal),
           realWrites: true,
           onProgress: (next) =>
@@ -1070,6 +1258,9 @@ export class RunService {
         input.run.external?.requiredScopes ??
         [];
       systemScopes = scopes;
+      if (!input.run.tenantId) {
+        throw new Error(`${noun} run has no organization, so it cannot apply. Prepare it again in an organization.`);
+      }
       const selection = await this.host.buildGraph(input.run.tenantId, scopes, this.executionOptions(input.run, controller.signal));
       selectionTenantId = selection.tenantId;
       const graph = selection.createGraph((level, message, metadata) => {
@@ -1201,6 +1392,9 @@ export class RunService {
     await this.host.serialize(async () => {
       const persisted = await this.host.read();
       const previous = persisted.runs.find((existing) => existing.id === run.id);
+      // A run deleted with its disconnected tenant never comes back from a
+      // late snapshot, and its report is never delivered.
+      if (!previous && run.tenantId && this.host.tenantWritable && !this.host.tenantWritable(run.tenantId)) return;
       if (previous?.status === "cancelled") {
         const steps = previous.steps.map((step) => {
           const incoming = run.steps.find((candidate) => candidate.id === step.id);
@@ -1279,7 +1473,7 @@ export class RunService {
       : undefined;
     return assessWritePlanSafely(run.plan, {
       ...(graphOperations ? { graphOperations } : {}),
-      historicalConfirmedActionCounts: run.origin !== undefined || run.tenantId === undefined ? [] : state.runs.flatMap((previous) =>
+      historicalConfirmedActionCounts: run.origin !== undefined || !run.tenantId ? [] : state.runs.flatMap((previous) =>
         previous.id !== run.id && previous.agentSlug === run.agentSlug &&
         previous.tenantId === run.tenantId && previous.confirmedAt && Array.isArray(previous.plan?.actions)
           ? [previous.plan.actions.length]
@@ -1406,4 +1600,20 @@ export class RunService {
     });
     this.host.emitStateChanged("run-step-updated", runId);
   }
+}
+
+/**
+ * The Graph client of a run with no organization. Such a run is admitted
+ * only for an agent that calls no service API, so any call is a defect in
+ * the agent, and it fails instead of reaching a tenant.
+ */
+function noServiceGraph(): RunGraphApi {
+  const refuse = async (): Promise<never> => {
+    throw new Error("This run has no organization, so it cannot call Microsoft Graph. Choose an organization with the service connected, then run the agent again.");
+  };
+  return {
+    listManagedDevices: refuse,
+    retireManagedDevice: refuse,
+    request: refuse,
+  };
 }
