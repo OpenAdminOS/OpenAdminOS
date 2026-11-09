@@ -91,7 +91,7 @@ describe("first-launch model scan screen", () => {
 
     finish();
     expect(await screen.findByRole("heading", { level: 1, name: "Claude Code is signed in on this device" })).toBeInTheDocument();
-    expect(screen.getByText(/Checked here: localhost:11434, localhost:1234, claude auth status, copilot sign-in status\. Nothing was sent to a model or a provider\./)).toBeInTheDocument();
+    expect(screen.getByText(/Checked here: localhost:11434, localhost:1234, claude auth status, copilot sign-in status\. A tool's own sign-in status command may check with its provider\. No prompt was sent to any model\./)).toBeInTheDocument();
     await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent(/Scan finished\./));
   });
 

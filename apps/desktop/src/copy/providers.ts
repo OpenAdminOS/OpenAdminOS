@@ -20,7 +20,7 @@ export const MODEL_SCAN_COPY = {
   title: "Looking for models on this device",
   titleDone: "What this device can answer with",
   subtitle:
-    "OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and ports only, and sends nothing.",
+    "OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and ports, and runs each tool's own version and sign-in status command, which may check the sign-in with its provider. No prompt is sent to any model.",
   listHeading: "On this device",
   progress: (done: number, total: number) => (total === 0 ? "Starting" : `${done} of ${total} checked`),
   checking: "checking",
@@ -30,7 +30,7 @@ export const MODEL_SCAN_COPY = {
   announce: (name: string, summary: string) => `${name}: ${summary}.`,
   finishedAnnouncement: (outcome: string) => `Scan finished. ${outcome}`,
   ledger: (targets: readonly string[]) =>
-    `Checked here: ${targets.join(", ")}. Nothing was sent to a model or a provider.`,
+    `Checked here: ${targets.join(", ")}. A tool's own sign-in status command may check with its provider. No prompt was sent to any model.`,
   localTitle: (model: string) => `${model} is ready on this device`,
   hostedReady: (name: string) => `${name} is signed in on this device`,
   availableTitle: (model: string) => `${model} is ready on this device, not selected`,
