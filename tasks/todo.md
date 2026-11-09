@@ -1843,3 +1843,7 @@ Also: a read racing a write could queue the move to organizations twice; the mig
 
 - [x] The product has no sample data; PR #175 removes pilot mode entirely after this PR merges. This PR removes its own entry points: "Preview with sample data" in the organization switcher, the Connections No organization empty state button, and "You can open it again" in the leave dialogs. A sample organization from an earlier pilot still shows labeled with Leave pilot mode. The sample organization handling code stays for #175. Tests assert there is no way into sample data from the menu or the empty state. SPEC, docs and CHANGELOG updated; switcher and No organization screenshots recaptured. (1f88fa94, 72c684ea)
 - Not changed here: the first-launch welcome's pilot choice comes from main, not this PR, and goes with the rest of pilot mode in #175.
+
+### CI
+
+- [x] CI at ab0f196 failed `buildGraph interactive fallback > uses the token when the connected account signs in`: the test waited five event loop turns for a grant write that is not awaited, and the durable write path from item 1 (open, write, sync, close, with an access added audit event) takes longer on the runner. The test now waits for the recorded grant with a deadline; six parallel runs pass locally.
