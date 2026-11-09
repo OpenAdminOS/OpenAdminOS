@@ -17,6 +17,8 @@ import {
   type ModelScanCheck,
 } from "./model-scan.js";
 import { checkLmStudio, checkOllama } from "./provider-detail.js";
+import { chmod, readFile } from "node:fs/promises";
+import { scanProviderCheck, runScanCheck } from "./model-scan.js";
 import { AppStateStore } from "./state.js";
 
 const catalog = (id: string) => providerCatalog.find((provider) => provider.id === id)!;
@@ -177,7 +179,7 @@ describe("first-launch model scan", () => {
 
     it("does not switch an admin's own choice, and reports nothing when nothing is ready", () => {
       const lmStudio: ProviderSummary = { ...catalog("lm-studio"), status: "connected", models: ["m"], defaultModel: "m" };
-      assert.equal(scanOutcome([lmStudio], { activeProviderId: "anthropic", providerChosenByUser: true }).kind, "local-ready");
+      assert.deepEqual(scanOutcome([lmStudio], { activeProviderId: "anthropic", providerChosenByUser: true }), { kind: "local-available", providerId: "lm-studio", model: "m", selectedProviderId: "anthropic" });
       // An Ollama with only embedding models is not ready.
       assert.deepEqual(scanOutcome([{ ...catalog("ollama"), status: "error", models: [] }], { activeProviderId: "ollama", providerChosenByUser: false }), { kind: "nothing" });
     });
@@ -197,8 +199,8 @@ describe("first-launch model scan", () => {
         assert.equal((await store.getAppState()).firstRunScanPending, true);
         const progress: string[] = [];
         const result = await store.scanModels((probe) => progress.push(`${probe.providerId}:${probe.state}`));
-        // Loading app state already selected the ready local provider, so the scan finds it ready.
-        assert.deepEqual(result.outcome, { kind: "local-ready", providerId: "lm-studio", model: "local-model" });
+        // App state skips provider detection while the scan is pending, so the scan selects the ready local provider.
+        assert.deepEqual(result.outcome, { kind: "local-selected", providerId: "lm-studio", model: "local-model" });
         assert.ok(progress.includes("lm-studio:found"));
         assert.ok(progress.includes("anthropic:not-found"));
         const after = await store.completeFirstRunScan();
@@ -269,5 +271,142 @@ describe("starting a local runtime from the scan", () => {
       timeoutMs: 100, intervalMs: 5,
     });
     assert.match((silent as { message: string }).message, /^Ollama did not answer within 0\.1 seconds\. Start it yourself with `ollama serve`, then scan again\.$/);
+  });
+});
+
+describe("review round 1 on PR #175", () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = originalFetch; });
+
+  async function fakeCli(dir: string, name: string, body: string): Promise<string> {
+    const path = join(dir, name);
+    await writeFile(path, `#!/bin/sh\necho "$*" >> "${join(dir, `${name}.log`)}"\n${body}\n`);
+    await chmod(path, 0o755);
+    return path;
+  }
+
+  it("keeps a remembered hosted choice and only offers the local model (finding 1)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ activeProviderId: "anthropic", providerChosenByUser: true, installedAgents: [], runs: [], tenants: [] }));
+    const providers = providerCatalog.map((provider) =>
+      provider.id === "ollama" ? ollamaReady(["openadminos/openadmin-8b:latest"]) : provider.id === "anthropic" ? claudeReady : { ...provider, status: "not-installed" as const, models: [] });
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined }, providerListFactory: () => providers });
+    try {
+      const result = await store.scanModels();
+      assert.deepEqual(result.outcome, { kind: "local-available", providerId: "ollama", model: "openadminos/openadmin-8b:latest", selectedProviderId: "anthropic" });
+      assert.equal((await store.getAppState()).activeProviderId, "anthropic");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("runs only each CLI's version and sign-in status, and never Copilot's model catalog (finding 2)", { skip: process.platform === "win32" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-scan-cli-"));
+    try {
+      const binaries = {
+        anthropic: await fakeCli(dir, "claude", 'echo "9.9.9 (Claude Code)"'),
+        openai: await fakeCli(dir, "codex", 'echo "codex-cli 9.9.9"'),
+        copilot: await fakeCli(dir, "copilot", 'echo "9.9.9"'),
+        gemini: await fakeCli(dir, "gemini", 'echo "9.9.9"'),
+      } as const;
+      for (const [id, binaryPath] of Object.entries(binaries)) {
+        await scanProviderCheck(catalog(id), { binaryPath });
+      }
+      const allowed: Record<string, string[]> = {
+        claude: ["--version", "auth status --text"],
+        codex: ["--version", "login status"],
+        copilot: ["--version"],
+        gemini: ["--version"],
+      };
+      for (const [name, args] of Object.entries(allowed)) {
+        const calls = (await readFile(join(dir, `${name}.log`), "utf8")).trim().split("\n");
+        for (const call of calls) assert.ok(args.includes(call), `${name} ran "${call}"`);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("loads app state without provider detection while the first-run scan is pending (finding 3)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    const original = process.env.OPENAGENTS_OLLAMA_URL;
+    process.env.OPENAGENTS_OLLAMA_URL = "http://10.20.30.40:11434";
+    const urls: string[] = [];
+    globalThis.fetch = (async (input: string | URL | Request) => { urls.push(String(input)); throw new Error("must not fetch"); }) as typeof fetch;
+    let listed = false;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      // A provider check that never answers must not hold up the first screen.
+      providerListFactory: () => { listed = true; return new Promise<ProviderSummary[]>(() => undefined); },
+    });
+    try {
+      const started = Date.now();
+      const state = await store.getAppState();
+      assert.equal(state.firstRunScanPending, true);
+      assert.ok(Date.now() - started < 2_000);
+      assert.equal(listed, false);
+      assert.deepEqual(urls.filter((url) => !/^http:\/\/(127\.0\.0\.1|localhost)/.test(url)), []);
+    } finally {
+      if (original === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = original;
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not contact an off-device Ollama even through the shared check (finding 3)", async () => {
+    const original = process.env.OPENAGENTS_OLLAMA_URL;
+    process.env.OPENAGENTS_OLLAMA_URL = "http://10.20.30.40:11434";
+    let fetched = false;
+    globalThis.fetch = (async () => { fetched = true; throw new Error("must not fetch"); }) as typeof fetch;
+    try {
+      const summary = await scanProviderCheck(catalog("ollama"));
+      assert.equal(fetched, false);
+      assert.equal(scanProbeFromProvider(summary).state, "could-not-check");
+    } finally {
+      if (original === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = original;
+    }
+  });
+
+  it("kills a CLI that does not answer when the check times out (finding 4)", { skip: process.platform === "win32" }, async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-scan-hang-"));
+    try {
+      const pidFile = join(dir, "pid");
+      const claude = await fakeCli(dir, "claude", `echo $$ > "${pidFile}"\nexec sleep 30`);
+      const probe = await runScanCheck(
+        { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", run: (signal) => scanProviderCheck(catalog("anthropic"), { signal, binaryPath: claude }).then((summary) => scanProbeFromProvider(summary)) },
+        300,
+      );
+      assert.equal(probe.state, "could-not-check");
+      const pid = Number((await readFile(pidFile, "utf8")).trim());
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      assert.throws(() => process.kill(pid, 0), "the hanging CLI must be killed");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not count LM Studio with no loaded model as ready (finding 5)", () => {
+    const empty: ProviderSummary = { ...catalog("lm-studio"), status: "connected", models: [] };
+    const line = scanProbeFromProvider(empty);
+    assert.equal(line.ready, false);
+    assert.equal(line.summary, "Running, no model loaded");
+    assert.deepEqual(scanOutcome([empty], { activeProviderId: "ollama", providerChosenByUser: false }), { kind: "nothing" });
+  });
+
+  it("reports a failed check as could not check, not as a negative result (finding 7)", async () => {
+    delete process.env.OPENAGENTS_OLLAMA_URL;
+    globalThis.fetch = (async () => new Response("unavailable", { status: 503 })) as typeof fetch;
+    const http = scanProbeFromProvider(await scanProviderCheck(catalog("ollama")));
+    assert.equal(http.state, "could-not-check");
+    const cli = scanProbeFromProvider({ ...catalog("anthropic"), status: "error", detail: "Claude Code could not be checked.", models: [], cli: { state: "request-failed" } });
+    assert.equal(cli.state, "could-not-check");
+    assert.deepEqual(cli.facts, ["Claude Code could not be checked."]);
+    const signedOut = scanProbeFromProvider({ ...catalog("anthropic"), status: "error", models: [], cli: { state: "signed-out" } });
+    assert.equal(signedOut.state, "found");
+    assert.equal(signedOut.summary, "Installed, not signed in");
   });
 });

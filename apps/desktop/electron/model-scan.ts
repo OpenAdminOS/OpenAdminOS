@@ -16,6 +16,7 @@ import {
 } from "@openadminos/runtime";
 
 import { LOCAL_AUTO_SELECT_ORDER, isProviderReady } from "../src/shared/provider-detection.js";
+import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, checkLmStudio, checkOllama } from "./provider-detail.js";
 
 /**
  * The first-launch model scan (SPEC.md 4a, first launch). Every check runs
@@ -145,11 +146,11 @@ export function scanOutcome(
     const candidate = providers.find((provider) => provider.id === id);
     if (candidate?.isLocal !== true || !isProviderReady(candidate)) continue;
     const model = preferredModel(candidate);
-    return {
-      kind: input.providerChosenByUser || input.pilot ? "local-ready" : "local-selected",
-      providerId: candidate.id,
-      ...(model ? { model } : {}),
-    };
+    // The admin's own choice stays selected: a local model is only offered.
+    if (input.providerChosenByUser || input.pilot) {
+      return { kind: "local-available", providerId: candidate.id, ...(model ? { model } : {}), selectedProviderId: input.activeProviderId };
+    }
+    return { kind: "local-selected", providerId: candidate.id, ...(model ? { model } : {}) };
   }
   const hosted = providers
     .filter((provider) => !provider.isLocal && isProviderReady(provider))
@@ -203,6 +204,12 @@ export function scanProbeFromProvider(
         ...(provider.id === "ollama" ? { hasOpenAdmin8B: openAdmin } : {}),
       };
     }
+    if (provider.checkFailed) {
+      return { ...base, state: "could-not-check", ready: false, summary: "Could not check", facts: [provider.detail ?? `${base.name} did not answer as expected. Retry to check again.`] };
+    }
+    if (provider.status === "connected") {
+      return { ...base, state: "found", ready: false, summary: "Running, no model loaded", facts: [provider.id === "ollama" ? "Pull a model, for example `ollama pull openadminos/openadmin-8b`, then scan again." : "Load a model in LM Studio, then scan again."] };
+    }
     if (provider.status === "error") {
       return { ...base, state: "found", ready: false, summary: "Running, no text model", facts: [provider.detail ?? "Install a text-generation model, then scan again."], ...(provider.id === "ollama" ? { hasOpenAdmin8B: false } : {}) };
     }
@@ -232,11 +239,17 @@ export function scanProbeFromProvider(
 
   // Hosted CLIs: the CLI's own version and sign-in status, never a model call.
   const cliState = provider.cli?.state;
+  if (provider.checkFailed || cliState === "request-failed") {
+    return { ...base, state: "could-not-check", ready: false, summary: "Could not check", facts: [provider.detail ?? `${base.name} did not answer. Retry to check again.`] };
+  }
   if (provider.status === "not-installed" || cliState === "not-installed") {
     return { ...base, state: "not-found", ready: false, summary: "Not installed", facts: [] };
   }
   const version = provider.cli?.version ? [`Version ${provider.cli.version}`] : [];
   if (ready) return { ...base, state: "found", ready, summary: "Signed in", facts: version };
+  if (cliState === "check-required" && provider.id === "copilot") {
+    return { ...base, state: "found", ready: false, summary: "Installed", facts: [...version, "OpenAdminOS checks its sign-in when you select it."] };
+  }
   if (cliState === "signed-out") return { ...base, state: "found", ready: false, summary: "Installed, not signed in", facts: [...version, ...(provider.detail ? [provider.detail] : [])] };
   return { ...base, state: "found", ready: false, summary: "Installed, sign-in not confirmed", facts: [...version, ...(provider.detail ? [provider.detail] : [])] };
 }
@@ -320,6 +333,37 @@ export function buildModelScanChecks(input: {
         },
       };
     });
+}
+
+/**
+ * The scan's check for one provider: the existing check, limited to this
+ * device, stoppable through `signal`, and for Copilot its installation
+ * only. CLI checks run `--version` and the CLI's own sign-in status only.
+ */
+export async function scanProviderCheck(
+  provider: ProviderSummary,
+  options: { signal?: AbortSignal; binaryPath?: string; azure?: () => Promise<ProviderSummary> } = {},
+): Promise<ProviderSummary> {
+  const base = { ...(options.signal ? { signal: options.signal } : {}), ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}) };
+  switch (provider.id) {
+    case "ollama":
+      return checkOllama(provider, { ...base, localOnly: true });
+    case "lm-studio":
+      return checkLmStudio(provider, { ...base, localOnly: true });
+    case "anthropic":
+      return checkClaudeCode(provider, base);
+    case "openai":
+      return checkCodex(provider, base);
+    case "copilot":
+    case "gemini":
+      return checkAdditionalCli(provider, { ...base, scan: true });
+    case "apple-foundation":
+      return checkAppleFoundation(provider);
+    case "azure-openai":
+      return options.azure ? options.azure() : { ...provider, status: "not-installed", models: [] };
+    default:
+      return provider;
+  }
 }
 
 function formatSeconds(ms: number): string {

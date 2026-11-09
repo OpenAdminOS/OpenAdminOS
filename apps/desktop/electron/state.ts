@@ -221,7 +221,9 @@ import { PILOT_AGENT_SLUGS, PILOT_COPY } from "../src/shared/pilot-mode.js";
 import { pickLocalProviderToAutoSelect } from "../src/shared/provider-detection.js";
 import {
   MODEL_SCAN_RETRY_TIMEOUT_MS,
+  MODEL_SCAN_TIMEOUT_MS,
   buildModelScanChecks,
+  scanProviderCheck,
   runModelScan,
   runtimeLaunch,
   startLocalRuntime,
@@ -3034,8 +3036,12 @@ export class AppStateStore {
   }
 
   async getAppState(): Promise<AppState> {
-    const providers = await this.listProviders();
-    const persisted = await this.autoSelectLocalProvider(await this.read(), providers);
+    // While the first-launch scan is pending, app state loads without
+    // provider detection: the scan does that, bounded and local only, and
+    // the first screen does not wait for every provider check.
+    const pendingScan = (await this.read()).firstRunScan === "pending";
+    const providers = pendingScan ? providerCatalog.map((provider) => ({ ...provider })) : await this.listProviders();
+    const persisted = pendingScan ? await this.read() : await this.autoSelectLocalProvider(await this.read(), providers);
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
       providers[0];
@@ -3327,7 +3333,7 @@ export class AppStateStore {
     }
     return buildModelScanChecks({
       catalog: providerCatalog,
-      check: async (providerId) => {
+      check: async (providerId, signal) => {
         // Tests and smoke runs inject the provider list, as for listProviders.
         if (this.providerListFactory) {
           const listed = (await this.providerListFactory()).find((provider) => provider.id === providerId);
@@ -3337,7 +3343,10 @@ export class AppStateStore {
         }
         const entry = providerCatalog.find((provider) => provider.id === providerId)!;
         // Azure OpenAI's check reads the saved configuration only.
-        const summary = await this.checkProviderEntry(entry, azureOpenAIConfig, azureOpenAIConfigError);
+        const summary = await scanProviderCheck(entry, {
+          signal,
+          azure: () => this.checkProviderEntry(entry, azureOpenAIConfig, azureOpenAIConfigError),
+        });
         found.set(providerId, summary);
         return summary;
       },
@@ -3358,12 +3367,22 @@ export class AppStateStore {
     return { probes, outcome, startedAt, finishedAt: this.clock().toISOString() };
   }
 
-  async retryModelScanProbe(providerId: ProviderId): Promise<ModelScanProbe> {
+  /**
+   * Runs one check again with a longer timeout, and the others with the
+   * scan timeout, then applies the outcome: a check that now succeeds can
+   * change what the scan leads with.
+   */
+  async retryModelScanProbe(providerId: ProviderId): Promise<ModelScanResult> {
     if (!isProviderId(providerId)) throw new Error(`Unknown provider: ${String(providerId)}`);
-    const checks = await this.modelScanChecks(new Map());
-    const check = checks.find((entry) => entry.providerId === providerId);
-    if (!check) throw new Error(`${providerId} is not checked on this device.`);
-    return runScanCheck(check, MODEL_SCAN_RETRY_TIMEOUT_MS);
+    const startedAt = this.clock().toISOString();
+    const found = new Map<ProviderId, ProviderSummary>();
+    const checks = await this.modelScanChecks(found);
+    if (!checks.some((entry) => entry.providerId === providerId)) throw new Error(`${providerId} is not checked on this device.`);
+    const probes = await Promise.all(
+      checks.map((check) => runScanCheck(check, check.providerId === providerId ? MODEL_SCAN_RETRY_TIMEOUT_MS : MODEL_SCAN_TIMEOUT_MS)),
+    );
+    const outcome = await this.applyModelScanOutcome([...found.values()]);
+    return { probes, outcome, startedAt, finishedAt: this.clock().toISOString() };
   }
 
   private async applyModelScanOutcome(providers: ProviderSummary[]): Promise<ModelScanOutcome> {

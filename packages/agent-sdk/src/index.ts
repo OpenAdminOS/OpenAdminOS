@@ -21,6 +21,12 @@ export interface ProviderSummary {
   isLocal: boolean;
   status: ProviderStatus;
   detail?: string;
+  /**
+   * The check itself failed (an HTTP error, an unreachable or refused
+   * endpoint, a CLI that errored), as opposed to completing with a
+   * negative result. The model scan shows it as could not check.
+   */
+  checkFailed?: boolean;
   models: string[];
   defaultModel?: string;
   cli?: {
@@ -61,6 +67,11 @@ export interface ModelScanProbe {
 export type ModelScanOutcome =
   | { kind: "local-selected"; providerId: ProviderId; model?: string }
   | { kind: "local-ready"; providerId: ProviderId; model?: string }
+  /**
+   * A ready local model was found while the admin's own choice, another
+   * provider, stays selected. Nothing local is promised until they switch.
+   */
+  | { kind: "local-available"; providerId: ProviderId; model?: string; selectedProviderId: ProviderId }
   | { kind: "hosted-detected"; providerIds: ProviderId[] }
   | { kind: "nothing" };
 
@@ -2893,7 +2904,7 @@ export interface OpenAdminOSApi {
    */
   startLocalRuntime?(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan: ModelScanResult }>;
   /** Runs one check of the scan again, with a longer timeout. */
-  retryModelScanProbe?(providerId: ProviderId): Promise<ModelScanProbe>;
+  retryModelScanProbe?(providerId: ProviderId): Promise<ModelScanResult>;
   onModelScanProgress?(listener: (probe: ModelScanProbe) => void): () => void;
   /** Records that the first-launch scan was finished or skipped. */
   completeFirstRunScan?(): Promise<AppState>;

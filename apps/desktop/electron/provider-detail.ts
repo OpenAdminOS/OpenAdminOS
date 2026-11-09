@@ -4,6 +4,7 @@ import {
   probeAppleFoundationLlm,
   probeClaudeCodeLlm,
   probeCodexLlm,
+  probeCopilotInstallation,
   probeCopilotLlm,
   probeGeminiLlm,
   type CliProbe,
@@ -48,11 +49,25 @@ export function isProviderId(value: unknown): value is ProviderId {
 
 
 
-export async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
+/** Options for a check run by the first-launch scan. */
+export interface ScanCheckOptions {
+  /** Stops the check and its requests or processes. */
+  signal?: AbortSignal;
+  /** Never contact an endpoint outside this device. */
+  localOnly?: boolean;
+  /** A CLI binary to use instead of discovery (tests). */
+  binaryPath?: string;
+}
+
+export async function checkOllama(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
   const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyOllamaEndpoint(endpoint);
+  if (options.localOnly && !endpointTrust.isLocal) {
+    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+  }
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
+  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   const trustedProvider = endpointTrust.isLocal
     ? provider
     : {
@@ -71,6 +86,7 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
       return {
         ...trustedProvider,
         status: "error",
+        checkFailed: true,
         detail: ollamaEndpointDetail(
           endpointTrust,
           `Ollama responded with HTTP ${response.status}`,
@@ -89,6 +105,7 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
     let unverified = false;
     const showController = new AbortController();
     const showTimeout = setTimeout(() => showController.abort(), OLLAMA_SHOW_TIMEOUT_MS);
+    options.signal?.addEventListener("abort", () => showController.abort(), { once: true });
     const supported = await Promise.all(installed.map(async ({ name: model, digest }) => {
       const key = digest ? `${endpoint}\0${model}\0${digest}` : undefined;
       const known = key ? ollamaCompletionSupport.get(key) : undefined;
@@ -116,6 +133,8 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
     return {
       ...trustedProvider,
       status: models.length ? "connected" : "error",
+      // Capabilities that could not be read are a failed check, not "no text model".
+      ...(models.length === 0 && unverified ? { checkFailed: true } : {}),
       detail: ollamaEndpointDetail(
         endpointTrust,
         models.length > 0
@@ -180,9 +199,12 @@ export async function checkAppleFoundation(provider: ProviderSummary): Promise<P
 
 
 
-export async function checkLmStudio(provider: ProviderSummary): Promise<ProviderSummary> {
+export async function checkLmStudio(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
   const endpoint = resolveLmStudioEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyLmStudioEndpoint(endpoint);
+  if (options.localOnly && !endpointTrust.isLocal) {
+    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `LM Studio is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+  }
   const trustedProvider = endpointTrust.isLocal
     ? provider
     : {
@@ -197,6 +219,7 @@ export async function checkLmStudio(provider: ProviderSummary): Promise<Provider
     return {
       ...trustedProvider,
       status: probe.status === "error" ? "error" : "not-installed",
+      ...(probe.status === "error" ? { checkFailed: true } : {}),
       detail: lmStudioEndpointDetail(
         endpointTrust,
         probe.detail ??
@@ -298,8 +321,8 @@ export function lmStudioEndpointDetail(
 
 
 
-export async function checkClaudeCode(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe = await probeClaudeCodeLlm();
+export async function checkClaudeCode(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const probe = await probeClaudeCodeLlm({ ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}), ...(options.signal ? { signal: options.signal } : {}) });
   const cli: ProviderSummary["cli"] = {
     binaryPath: probe.binaryPath, version: probe.version,
     state: !probe.installed ? "not-installed" : probe.ready ? "ready" : probe.failure ?? "request-failed",
@@ -336,8 +359,8 @@ export async function checkClaudeCode(provider: ProviderSummary): Promise<Provid
 
 
 
-export async function checkCodex(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe = await probeCodexLlm();
+export async function checkCodex(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const probe = await probeCodexLlm({ ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}), ...(options.signal ? { signal: options.signal } : {}) });
   const cli: ProviderSummary["cli"] = {
     binaryPath: probe.binaryPath, version: probe.version,
     state: !probe.installed ? "not-installed" : probe.ready ? "ready" : probe.failure ?? "request-failed",
@@ -372,8 +395,12 @@ export async function checkCodex(provider: ProviderSummary): Promise<ProviderSum
   };
 }
 
-export async function checkAdditionalCli(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe: CliProbe = provider.id === "copilot" ? await probeCopilotLlm() : await probeGeminiLlm();
+export async function checkAdditionalCli(provider: ProviderSummary, options: ScanCheckOptions & { scan?: boolean } = {}): Promise<ProviderSummary> {
+  const cliOptions = { ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}), ...(options.signal ? { signal: options.signal } : {}) };
+  // The scan reads Copilot's installation only: its full probe starts an RPC server and lists models from GitHub.
+  const probe: CliProbe = provider.id === "copilot"
+    ? options.scan ? await probeCopilotInstallation(cliOptions) : await probeCopilotLlm(cliOptions)
+    : await probeGeminiLlm(cliOptions);
   return {
     ...provider,
     status: !probe.installed ? "not-installed" : probe.ready ? "connected" : probe.failure ? "error" : "available",
