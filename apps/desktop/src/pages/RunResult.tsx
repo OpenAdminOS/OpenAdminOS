@@ -259,6 +259,20 @@ export default function RunResult() {
         onConfirm={confirmRun}
         onReject={rejectRun}
         onRunForReal={reRun}
+        inactiveOrganization={
+          run.status === "awaiting-confirmation" && run.tenantId !== state.activeTenantId
+            ? { name: runOrganization?.name ?? tenantName, ...(runOrganization ? { id: runOrganization.id } : {}) }
+            : undefined
+        }
+        onSwitchOrganization={(organizationId) =>
+          void setActiveOrganization(organizationId).catch((caught) =>
+            toast.error(
+              ORGANIZATION_COPY.switchFailed(
+                userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
+              ),
+            ),
+          )
+        }
       />
       </>
     );
@@ -894,6 +908,8 @@ function ConfirmationPage({
   onConfirm,
   onReject,
   onRunForReal,
+  inactiveOrganization,
+  onSwitchOrganization,
 }: {
   run: RunRecord;
   displayName: string;
@@ -901,6 +917,9 @@ function ConfirmationPage({
   tenantName: string;
   trustDetail: string;
   providerIsLocal: boolean;
+  /** The plan's organization when it is not the active one. Applying waits for it. */
+  inactiveOrganization?: { name: string; id?: string } | undefined;
+  onSwitchOrganization?: (organizationId: string) => void;
   onBack: () => void;
   onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
   onReject: (runId: string) => Promise<RunRecord>;
@@ -961,6 +980,20 @@ function ConfirmationPage({
             </div>
           ) : null}
 
+          {inactiveOrganization && !dryRun && plan ? (
+            <div role="alert" className="rounded-[14px] bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-warning)]/25">
+              <div className="font-medium">{RERUN_COPY.planElsewhereTitle(inactiveOrganization.name)}</div>
+              <p className="mt-1 text-[var(--color-text-soft)]">{RERUN_COPY.planElsewhereBody(inactiveOrganization.name)}</p>
+              {inactiveOrganization.id && onSwitchOrganization ? (
+                <div className="mt-3">
+                  <Button variant="primary" onClick={() => onSwitchOrganization(inactiveOrganization.id!)}>
+                    {RERUN_COPY.switchTo(inactiveOrganization.name)}
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+
           {run.external?.requiredScopes.length ? (
             <p className="text-sm text-[var(--color-text-muted)]">
               Required scopes: {run.external.requiredScopes.join(", ")}
@@ -988,6 +1021,7 @@ function ConfirmationPage({
                 runId={run.id}
                 plan={plan}
                 requiresRiskAcknowledgement={run.riskAssessment?.status === "complete" && run.riskAssessment.flags.some((flag) => flag.severity === "danger")}
+                blocked={Boolean(inactiveOrganization)}
                 onConfirm={onConfirm}
                 onReject={onReject}
               />}
@@ -1012,11 +1046,14 @@ function TypedConfirmation({
   runId,
   plan,
   requiresRiskAcknowledgement,
+  blocked = false,
   onConfirm,
   onReject,
 }: {
   runId: string;
   plan: WritePlan;
+  /** Apply stays disabled while the plan's organization is not active. */
+  blocked?: boolean;
   requiresRiskAcknowledgement: boolean;
   onConfirm: (runId: string, phrase: string) => Promise<RunRecord>;
   onReject: (runId: string) => Promise<RunRecord>;
@@ -1025,7 +1062,7 @@ function TypedConfirmation({
   const [riskAcknowledged, setRiskAcknowledged] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const armed = typed === plan.confirmationPhrase && (!requiresRiskAcknowledgement || riskAcknowledged);
+  const armed = !blocked && typed === plan.confirmationPhrase && (!requiresRiskAcknowledgement || riskAcknowledged);
 
   const confirm = async () => {
     if (!armed || busy) return;

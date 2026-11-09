@@ -20,6 +20,7 @@ import { SAMPLE_TENANT_ID } from "./sample-tenant/dataset.js";
 import {
   noOrganizationRunCopy,
   OTHER_ORGANIZATION_RUN_COPY,
+  planOtherOrganizationCopy,
   RunService,
   SCHEDULE_OTHER_ORGANIZATION_COPY,
   UNASSIGNED_SCHEDULE_RUN_COPY,
@@ -810,5 +811,65 @@ describe("workspaces and runs with no organization (Muse round 2)", () => {
     } finally {
       await fixture.close();
     }
+  });
+});
+
+describe("applying a reviewed plan holds to the active organization (review round 3)", () => {
+  const plan = {
+    summary: "Disable 2 stale guests",
+    confirmationPhrase: "DISABLE 2 GUESTS",
+    actions: [{ id: "a1", kind: "graph-write", label: "Disable guest", severity: "default", request: { method: "PATCH", path: "/users/1", body: {} } }],
+  };
+  function pending(id: string, extra: Record<string, unknown> = {}): RunRecord {
+    return {
+      id, agentSlug: "stale-guest-cleanup", status: "awaiting-confirmation", queuedAt: "2026-11-09T10:00:00.000Z",
+      trigger: "manual", tenantId: woodgrove.id, providerId: "ollama", model: "test", steps: [], logs: [], plan, ...extra,
+    } as unknown as RunRecord;
+  }
+  const cases: Array<[string, RunRecord]> = [
+    ["an agent write plan", pending("run-agent")],
+    ["a baseline rollback", pending("run-rollback", { agentSlug: "baseline-rollback", origin: "baseline-rollback", rollback: { baselineId: "b1", requiredScopes: [], manualCount: 0 } })],
+    ["an external gateway proposal", pending("run-proposal", { agentSlug: "external-proposal", origin: "external-proposal", external: { clientId: "c1", clientName: "MCP client", requiredScopes: [] } })],
+    ["an Agent Team approval", pending("run-team", { office: { missionId: "m1", personaId: "p1", step: 0 } })],
+  ];
+  function harness(run: RunRecord, activeTenantId: string | undefined) {
+    const tenants = [woodgrove, fabrikam].map((tenant) => {
+      const { grantedScopes: _grants, ...rest } = tenant as Record<string, unknown>;
+      return rest;
+    }) as unknown as TenantRecord[];
+    const state: RunPersistedState = {
+      activeProviderId: "ollama",
+      installedAgents: [agent("stale-guest-cleanup", { mode: "write", scopes: ["User.ReadWrite.All"], services: ["entra"] }) as unknown as AgentSummary],
+      runs: [run],
+      tenants,
+      organizations: reconcileOrganizations({ rawOrganizations: [], rawNotice: undefined, tenants, installedAgents: [] }).organizations,
+      ...(activeTenantId ? { activeTenantId } : {}),
+    };
+    return runHarness(state);
+  }
+  for (const [label, run] of cases) {
+    for (const [stateLabel, active] of [["No organization", undefined], ["another organization", fabrikam.id]] as const) {
+      it(`refuses ${label} with ${stateLabel} active and keeps the plan untouched`, async () => {
+        const h = harness(run, active);
+        await assert.rejects(
+          h.service.confirmRun(run.id, plan.confirmationPhrase, { activeOrganizationOnly: true }),
+          (error: Error) => {
+            assert.equal(error.name, "OrganizationBoundaryError");
+            assert.equal(error.message, planOtherOrganizationCopy("Woodgrove Bank"));
+            return true;
+          },
+        );
+        assert.deepEqual(h.state().runs, [run]);
+        assert.deepEqual(h.graphBuilds, []);
+      });
+    }
+  }
+
+  it("applies the plan when its organization is active", async () => {
+    const run = pending("run-agent");
+    const h = harness(run, woodgrove.id);
+    const confirmed = await h.service.confirmRun(run.id, plan.confirmationPhrase, { activeOrganizationOnly: true });
+    assert.equal(confirmed.status, "running");
+    assert.equal(confirmed.tenantId, woodgrove.id);
   });
 });

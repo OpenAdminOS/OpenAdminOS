@@ -190,5 +190,8 @@ export const RERUN_COPY = {
       : `${where} Switch to ${organization ?? "an organization"} to run it there.`;
   },
   switchTo: (organization: string) => `Switch to ${organization}`,
+  planElsewhereTitle: (organization: string) => `This plan was prepared in ${organization}`,
+  planElsewhereBody: (organization: string) =>
+    `${organization} is not the active organization, so the plan cannot be applied now. The plan is kept unchanged. Switch to ${organization} to review and apply it.`,
   runInActive: (organization: string) => `Run in ${organization}`,
 } as const;

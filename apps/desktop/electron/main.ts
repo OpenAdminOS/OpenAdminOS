@@ -6392,9 +6392,11 @@ function registerIpcHandlers() {
   ipcMain.handle(
     "openadminos:confirm-run",
     handleTrusted((_event, runId: unknown, phrase: unknown) =>
+      // Every approval from the renderer applies only in the active organization.
       store.confirmRun(
         requireBoundedString(runId, "runId", 128),
         requireBoundedString(phrase, "confirmation phrase", 500),
+        { activeOrganizationOnly: true },
       ),
     ),
   );

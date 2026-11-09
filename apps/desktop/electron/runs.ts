@@ -82,6 +82,11 @@ export const SCHEDULE_OTHER_ORGANIZATION_COPY =
 export const UNASSIGNED_SCHEDULE_RUN_COPY =
   "This schedule is unassigned, so it is paused. Assign it to an organization on the agent page, then run it.";
 
+/** Why a reviewed plan cannot be applied while another organization, or none, is active. */
+export function planOtherOrganizationCopy(organizationName: string): string {
+  return `This plan was prepared in ${organizationName}, which is not the active organization. The plan is kept unchanged. Switch to ${organizationName} to review and apply it.`;
+}
+
 /**
  * A start refused because its organization is not the active one, or its
  * schedule is unassigned. For a scheduled start this is waiting, not a
@@ -762,7 +767,18 @@ export class RunService {
     return run;
   }
 
-  async confirmRun(runId: string, phrase: string): Promise<RunRecord> {
+  /**
+   * Apply a reviewed plan. `boundary.activeOrganizationOnly` is set for
+   * every approval from the renderer, which covers agent write plans,
+   * baseline rollbacks, gateway proposals and Agent Team approvals: the
+   * plan's tenant must be the active one, checked under this lock. A
+   * refused plan is left exactly as it was; it is never retargeted.
+   */
+  async confirmRun(
+    runId: string,
+    phrase: string,
+    boundary: { activeOrganizationOnly?: boolean } = {},
+  ): Promise<RunRecord> {
     const transition = await this.host.serialize(async () => {
       const persisted = await this.host.read();
       const run = persisted.runs.find((existing) => existing.id === runId);
@@ -777,6 +793,13 @@ export class RunService {
       }
       if (!run.plan) {
         throw new Error(`Run ${runId} has no plan to confirm.`);
+      }
+      if (boundary.activeOrganizationOnly && run.tenantId !== persisted.activeTenantId) {
+        const name =
+          organizationForTenant(persisted.organizations ?? [], run.tenantId)?.name ??
+          persisted.tenants.find((tenant) => tenant.id === run.tenantId)?.displayName ??
+          "another organization";
+        throw new OrganizationBoundaryError(planOtherOrganizationCopy(name));
       }
       if (phrase !== run.plan.confirmationPhrase) {
         throw new Error("Confirmation phrase does not match.");

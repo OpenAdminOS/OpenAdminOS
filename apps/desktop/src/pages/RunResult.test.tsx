@@ -669,3 +669,47 @@ describe("Run again for a run from another organization (review round 2)", () =>
     expect(within(dialog).getByRole("button", { name: "Run in Contoso IT" })).toBeInTheDocument();
   });
 });
+
+describe("applying a plan from another organization (review round 3)", () => {
+  const fabrikam = { ...createMockAppState().tenants[0]!, id: "tenant-2", displayName: "Fabrikam" };
+
+  for (const [label, activeTenantId] of [["No organization", undefined], ["another organization", "tenant-2"]] as const) {
+    it(`keeps Apply disabled with ${label} active and offers to switch back`, async () => {
+      const user = userEvent.setup();
+      const run = createAwaitingConfirmationRun({ tenantId: "tenant-1" });
+      const { activeTenantId: _active, ...base } = createMockAppState({
+        tenants: [createMockAppState().tenants[0]!, fabrikam],
+        installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })],
+        runs: [run],
+      });
+      const state = activeTenantId ? { ...base, activeTenantId } : base;
+      const bridge = makeMockBridge({}, state);
+      renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+      const alert = (await screen.findAllByRole("alert")).find((element) => element.textContent?.includes("This plan was prepared in Contoso IT"))!;
+      expect(alert).toHaveTextContent("Contoso IT is not the active organization, so the plan cannot be applied now. The plan is kept unchanged.");
+      await user.type(screen.getByPlaceholderText("Type here to enable Apply"), run.plan!.confirmationPhrase);
+      expect(screen.getByRole("button", { name: /^Apply / })).toBeDisabled();
+      expect(bridge.confirmRun).not.toHaveBeenCalled();
+      await user.click(within(alert).getByRole("button", { name: "Switch to Contoso IT" }));
+      await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith("org-tenant-1"));
+      // Switching never retargets the plan: no approval or new run was sent.
+      expect(bridge.confirmRun).not.toHaveBeenCalled();
+      expect(bridge.startRun).not.toHaveBeenCalled();
+    });
+  }
+
+  it("shows the host's designed refusal when the organization changed during approval", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ tenantId: "tenant-1" });
+    const message = "This plan was prepared in Contoso IT, which is not the active organization. The plan is kept unchanged. Switch to Contoso IT to review and apply it.";
+    const bridge = makeMockBridge(
+      { confirmRun: vi.fn(async () => { throw new Error(`Error invoking remote method 'openadminos:confirm-run': OrganizationBoundaryError: ${message}`); }) },
+      createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] }),
+    );
+    renderRoute(<RunResult />, { path: "/runs/:id", route: `/runs/${run.id}`, bridge });
+    await user.type(await screen.findByPlaceholderText("Type here to enable Apply"), run.plan!.confirmationPhrase);
+    await user.click(screen.getByRole("button", { name: /^Apply / }));
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
+  });
+});
