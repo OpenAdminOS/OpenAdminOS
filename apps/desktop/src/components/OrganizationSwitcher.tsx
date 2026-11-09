@@ -154,6 +154,8 @@ export function OrganizationSwitcher() {
   }, [open]);
 
   const pick = async (organizationId: string | null) => {
+    // Enter in the filter and clicks share this guard while a switch runs.
+    if (busy) return;
     if (organizationId === (active?.id ?? null)) {
       close();
       return;

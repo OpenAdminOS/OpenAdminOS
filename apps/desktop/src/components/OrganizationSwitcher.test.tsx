@@ -323,3 +323,18 @@ it("moves focus from Retry license check to the Cancel that replaces it (design 
   await user.click(screen.getByRole("menuitem", { name: SERVICE_COPY.retryLicenseCheckFor("Contoso IT") }));
   await waitFor(() => expect(screen.getByRole("menuitem", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") })).toHaveFocus());
 });
+
+it("ignores Enter in the filter while a switch runs (design round review 2, Muse E)", async () => {
+  const user = userEvent.setup();
+  const base = createMockAppState().tenants[0]!;
+  const tenants = Array.from({ length: 6 }, (_, index) => ({ ...base, id: `tenant-${index}`, displayName: `Org ${index}`, username: `admin@org${index}.example`, lastUsedAt: `2026-11-0${index + 1}T10:00:00.000Z` }));
+  const bridge = renderSwitcher(createMockAppState({ tenants, activeTenantId: tenants[0]!.id }));
+  vi.mocked(bridge.setActiveOrganization).mockImplementation(() => new Promise(() => undefined));
+  await user.click(await screen.findByRole("button", { name: /Switch organization/ }));
+  const filter = await screen.findByRole("searchbox", { name: ORGANIZATION_COPY.findOrganization });
+  await waitFor(() => expect(filter).toHaveFocus());
+  await user.type(filter, "Org 3");
+  await user.keyboard("{Enter}");
+  await user.keyboard("{Enter}");
+  expect(bridge.setActiveOrganization).toHaveBeenCalledTimes(1);
+});
