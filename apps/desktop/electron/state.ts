@@ -3,6 +3,12 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { atomicRename } from "./atomic-rename.js";
+import {
+  appendConfigurationAudit,
+  diffConfigurationAudit,
+  sanitizeConfigurationAudit,
+  type ConfigurationAuditEvent,
+} from "./configuration-audit.js";
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
@@ -424,6 +430,13 @@ interface PersistedState {
    * Connectors page can render status without re-testing on every load.
    */
   novaConnectorAudit?: Array<{ tenantId: string; timestamp: string; entry: ConnectorAuditEntry }>;
+  /**
+   * Connection, organization, provider, model, public reference and
+   * schedule assignment changes, recorded by `write()`. Kept apart from
+   * run history, so run retention never prunes them. Identifiers and
+   * names only, never tokens, secrets, prompts or tenant content.
+   */
+  configurationAudit?: ConfigurationAuditEvent[];
   connectors?: Record<
     string,
     {
@@ -7403,8 +7416,15 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * robust against any future read-side surprises.
    */
   private lastReadSnapshot: PersistedState | undefined;
+  /**
+   * Counts completed writes. A read that started before a write finished
+   * does not replace the snapshot that write left, so the snapshot is
+   * always the latest state on disk that this process knows.
+   */
+  private writeGeneration = 0;
 
   private async read(): Promise<PersistedState> {
+    const generation = this.writeGeneration;
     let raw: string;
     try {
       raw = await readFile(this.filePath, "utf8");
@@ -7626,6 +7646,10 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           state.activeModelByProviderId = sanitized;
         }
       }
+      const configurationAudit = sanitizeConfigurationAudit(
+        (parsed as { configurationAudit?: unknown }).configurationAudit,
+      );
+      if (configurationAudit) state.configurationAudit = configurationAudit;
       if (Array.isArray(parsed.novaConnectorAudit)) {
         state.novaConnectorAudit = parsed.novaConnectorAudit.filter(item => typeof item?.tenantId === "string" && typeof item.timestamp === "string" && readConnectorAuditEntry(item.entry)).slice(-200);
       }
@@ -7865,9 +7889,30 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
           };
         }
       }
-      this.lastReadSnapshot = state;
+      if (generation === this.writeGeneration) this.lastReadSnapshot = state;
       return state;
     }
+  }
+
+  /**
+   * Records what changed against the last state read or written, so every
+   * flow is covered without each one recording itself. The stored events
+   * come from that state too: only this method changes them, and a writer
+   * holding an older copy cannot drop events written since.
+   */
+  private recordConfigurationChanges(state: PersistedState): void {
+    const previous = this.lastReadSnapshot;
+    const existing = previous ? previous.configurationAudit : state.configurationAudit;
+    const recorded = previous
+      ? diffConfigurationAudit(previous, state, {
+          timestamp: this.clock().toISOString(),
+          newId: () => randomUUID(),
+          publicReferenceName: (serverId) => this.mcpCatalog.find((entry) => entry.id === serverId)?.name,
+        })
+      : [];
+    const configurationAudit = appendConfigurationAudit(existing, recorded);
+    if (configurationAudit) state.configurationAudit = configurationAudit;
+    else delete state.configurationAudit;
   }
 
   /**
@@ -7896,12 +7941,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (reconciled.notice) state.organizationMigration = reconciled.notice;
     else delete state.organizationMigration;
+    this.recordConfigurationChanges(state);
     await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     try {
       await writeFile(tmpPath, serialized, { encoding: "utf8", mode: 0o600 });
       await atomicRename(tmpPath, this.filePath);
+      this.writeGeneration += 1;
       this.lastReadSnapshot = state;
     } finally {
       await rm(tmpPath, { force: true });

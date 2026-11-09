@@ -1,0 +1,367 @@
+import {
+  grantedParts,
+  type AgentSummary,
+  type OrganizationRecord,
+  type TenantRecord,
+} from "@openadminos/agent-sdk";
+
+/**
+ * Configuration changes for the audit log: connections, organizations,
+ * provider and model, public references and schedule assignments.
+ *
+ * Events are derived by comparing the state before and after each write,
+ * so every flow that changes these settings is recorded, including the
+ * organizations that reconciliation creates and removes with a tenant.
+ * They are stored apart from run history, so run retention never prunes
+ * them. A recorded event holds identifiers, names and scope names only:
+ * never tokens, secrets, prompt text or tenant content.
+ */
+
+/** Newest events kept. Older events are dropped first. */
+export const CONFIGURATION_AUDIT_MAX_EVENTS = 10_000;
+
+export const CONFIGURATION_AUDIT_EVENT_TYPES = [
+  "microsoft365.connected",
+  "microsoft365.disconnected",
+  "microsoft365.access-added",
+  "microsoft365.access-removed",
+  "organization.created",
+  "organization.renamed",
+  "organization.switched",
+  "organization.removed",
+  "provider.changed",
+  "model.changed",
+  "public-reference.installed",
+  "public-reference.enabled",
+  "public-reference.disabled",
+  "public-reference.removed",
+  "schedule.assigned",
+  "schedule.unassigned",
+] as const;
+
+export type ConfigurationAuditEventType = (typeof CONFIGURATION_AUDIT_EVENT_TYPES)[number];
+
+export type ConfigurationAuditDetail = string | number | boolean | string[];
+
+export interface ConfigurationAuditEvent {
+  id: string;
+  timestamp: string;
+  type: ConfigurationAuditEventType;
+  organizationId?: string;
+  organizationName?: string;
+  tenantId?: string;
+  details: Record<string, ConfigurationAuditDetail>;
+}
+
+/** The parts of persisted state that configuration events are derived from. */
+export interface ConfigurationAuditSnapshot {
+  activeProviderId: string;
+  providerChosenByUser?: boolean;
+  activeModelByProviderId?: Partial<Record<string, string>>;
+  tenants: readonly TenantRecord[];
+  activeTenantId?: string;
+  organizations?: readonly OrganizationRecord[];
+  installedAgents: readonly AgentSummary[];
+  mcpServers?: Readonly<Record<string, { enabled: boolean }>>;
+}
+
+export interface ConfigurationAuditContext {
+  timestamp: string;
+  newId: () => string;
+  /** Catalog name of a public reference, when the catalog has it. */
+  publicReferenceName: (serverId: string) => string | undefined;
+}
+
+type EventSeed = Omit<ConfigurationAuditEvent, "id" | "timestamp">;
+
+function organizationOfTenant(
+  organizations: readonly OrganizationRecord[],
+  tenantId: string | undefined,
+): OrganizationRecord | undefined {
+  if (!tenantId) return undefined;
+  return organizations.find((entry) => entry.connections.microsoft365?.tenantId === tenantId);
+}
+
+function organizationFields(organization: OrganizationRecord | undefined): Pick<EventSeed, "organizationId" | "organizationName"> {
+  return organization ? { organizationId: organization.id, organizationName: organization.name } : {};
+}
+
+function sampleDetail(sample: boolean): Record<string, ConfigurationAuditDetail> {
+  return sample ? { sampleData: true } : {};
+}
+
+function grantedScopeNames(tenant: TenantRecord): Set<string> {
+  return new Set(tenant.grantedScopes ?? []);
+}
+
+function grantedPartIds(tenant: TenantRecord): Set<string> {
+  return new Set(grantedParts(tenant).map((part) => part.id));
+}
+
+function sortedDifference(left: ReadonlySet<string>, right: ReadonlySet<string>): string[] {
+  return [...left].filter((entry) => !right.has(entry)).sort();
+}
+
+/**
+ * Events for what changed between two states, in the order an admin would
+ * read them. Deterministic apart from the ids and timestamp in `context`.
+ */
+export function diffConfigurationAudit(
+  previous: ConfigurationAuditSnapshot,
+  next: ConfigurationAuditSnapshot,
+  context: ConfigurationAuditContext,
+): ConfigurationAuditEvent[] {
+  const seeds: EventSeed[] = [];
+  const previousOrganizations = previous.organizations ?? [];
+  const nextOrganizations = next.organizations ?? [];
+  const previousOrganizationById = new Map(previousOrganizations.map((entry) => [entry.id, entry]));
+  const nextOrganizationById = new Map(nextOrganizations.map((entry) => [entry.id, entry]));
+  const previousTenantById = new Map(previous.tenants.map((entry) => [entry.id, entry]));
+  const nextTenantById = new Map(next.tenants.map((entry) => [entry.id, entry]));
+
+  // Organizations created, with the Microsoft 365 connection they hold.
+  for (const organization of nextOrganizations) {
+    if (previousOrganizationById.has(organization.id)) continue;
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    seeds.push({
+      type: "organization.created",
+      ...organizationFields(organization),
+      ...(tenantId ? { tenantId } : {}),
+      details: sampleDetail(organization.kind === "sample"),
+    });
+  }
+
+  for (const tenant of next.tenants) {
+    const before = previousTenantById.get(tenant.id);
+    const reconnected = before !== undefined && before.connectionId !== tenant.connectionId;
+    const organization = organizationFields(organizationOfTenant(nextOrganizations, tenant.id));
+    const sample = sampleDetail(tenant.kind === "sample");
+    if (!before || reconnected) {
+      seeds.push({
+        type: "microsoft365.connected",
+        ...organization,
+        tenantId: tenant.id,
+        details: {
+          tenantName: tenant.displayName,
+          ...(tenant.kind === "sample" ? {} : { account: tenant.username }),
+          registration: tenant.kind === "sample" ? "sample" : tenant.appRegistration?.kind ?? "openadminos",
+          reconnected,
+          grantedScopeCount: tenant.grantedScopes?.length ?? 0,
+          ...sample,
+        },
+      });
+    }
+    if (!before) continue;
+    const beforeScopes = grantedScopeNames(before);
+    const afterScopes = grantedScopeNames(tenant);
+    const addedScopes = sortedDifference(afterScopes, beforeScopes);
+    const removedScopes = sortedDifference(beforeScopes, afterScopes);
+    const beforeParts = grantedPartIds(before);
+    const afterParts = grantedPartIds(tenant);
+    if (addedScopes.length > 0) {
+      seeds.push({
+        type: "microsoft365.access-added",
+        ...organization,
+        tenantId: tenant.id,
+        details: { scopes: addedScopes, partIds: sortedDifference(afterParts, beforeParts), ...sample },
+      });
+    }
+    if (removedScopes.length > 0) {
+      seeds.push({
+        type: "microsoft365.access-removed",
+        ...organization,
+        tenantId: tenant.id,
+        details: { scopes: removedScopes, partIds: sortedDifference(beforeParts, afterParts), ...sample },
+      });
+    }
+  }
+
+  for (const organization of nextOrganizations) {
+    const before = previousOrganizationById.get(organization.id);
+    if (!before || before.name === organization.name) continue;
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    seeds.push({
+      type: "organization.renamed",
+      ...organizationFields(organization),
+      ...(tenantId ? { tenantId } : {}),
+      details: { previousName: before.name, ...sampleDetail(organization.kind === "sample") },
+    });
+  }
+
+  // Disconnected tenants, then the organizations removed with them.
+  for (const tenant of previous.tenants) {
+    if (nextTenantById.has(tenant.id)) continue;
+    seeds.push({
+      type: "microsoft365.disconnected",
+      ...organizationFields(organizationOfTenant(previousOrganizations, tenant.id)),
+      tenantId: tenant.id,
+      details: { tenantName: tenant.displayName, ...sampleDetail(tenant.kind === "sample") },
+    });
+  }
+  for (const organization of previousOrganizations) {
+    if (nextOrganizationById.has(organization.id)) continue;
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    seeds.push({
+      type: "organization.removed",
+      ...organizationFields(organization),
+      ...(tenantId ? { tenantId } : {}),
+      details: sampleDetail(organization.kind === "sample"),
+    });
+  }
+
+  // The active organization is the one that holds the active tenant.
+  const previousActive = organizationOfTenant(previousOrganizations, previous.activeTenantId);
+  const nextActive = organizationOfTenant(nextOrganizations, next.activeTenantId);
+  if (previousActive?.id !== nextActive?.id) {
+    seeds.push({
+      type: "organization.switched",
+      ...organizationFields(nextActive),
+      ...(nextActive && next.activeTenantId ? { tenantId: next.activeTenantId } : {}),
+      details: {
+        noOrganization: nextActive === undefined,
+        ...(previousActive
+          ? { previousOrganizationId: previousActive.id, previousOrganizationName: previousActive.name }
+          : { previousNoOrganization: true }),
+        ...sampleDetail(nextActive?.kind === "sample"),
+      },
+    });
+  }
+
+  if (previous.activeProviderId !== next.activeProviderId) {
+    seeds.push({
+      type: "provider.changed",
+      details: {
+        providerId: next.activeProviderId,
+        previousProviderId: previous.activeProviderId,
+        // False when the host selected a ready local provider by itself.
+        chosenByAdmin: next.providerChosenByUser !== false,
+      },
+    });
+  }
+
+  const previousModels = previous.activeModelByProviderId ?? {};
+  const nextModels = next.activeModelByProviderId ?? {};
+  for (const providerId of [...new Set([...Object.keys(previousModels), ...Object.keys(nextModels)])].sort()) {
+    const before = previousModels[providerId];
+    const after = nextModels[providerId];
+    if (before === after) continue;
+    seeds.push({
+      type: "model.changed",
+      details: {
+        providerId,
+        // An absent model means the provider's own default.
+        model: after ?? "provider default",
+        previousModel: before ?? "provider default",
+      },
+    });
+  }
+
+  const previousServers = previous.mcpServers ?? {};
+  const nextServers = next.mcpServers ?? {};
+  const referenceDetails = (serverId: string) => {
+    const name = context.publicReferenceName(serverId);
+    return { serverId, ...(name ? { serverName: name } : {}) };
+  };
+  for (const serverId of Object.keys(nextServers).sort()) {
+    const before = previousServers[serverId];
+    const after = nextServers[serverId]!;
+    if (!before) {
+      seeds.push({ type: "public-reference.installed", details: { ...referenceDetails(serverId), enabled: after.enabled } });
+    } else if (before.enabled !== after.enabled) {
+      seeds.push({ type: after.enabled ? "public-reference.enabled" : "public-reference.disabled", details: referenceDetails(serverId) });
+    }
+  }
+  for (const serverId of Object.keys(previousServers).sort()) {
+    if (!nextServers[serverId]) seeds.push({ type: "public-reference.removed", details: referenceDetails(serverId) });
+  }
+
+  // Schedule assignments. An agent that was uninstalled is not a change of assignment.
+  const previousAgents = new Map(previous.installedAgents.map((agent) => [agent.slug || agent.id, agent]));
+  for (const agent of next.installedAgents) {
+    const before = previousAgents.get(agent.slug || agent.id);
+    if (!before) continue;
+    const beforeOrganizationId = before.schedule?.organizationId;
+    const afterOrganizationId = agent.schedule?.organizationId;
+    if (beforeOrganizationId === afterOrganizationId) continue;
+    const agentDetails = { agentSlug: agent.slug || agent.id, agentName: agent.name };
+    const previousOrganization = beforeOrganizationId
+      ? previousOrganizationById.get(beforeOrganizationId) ?? nextOrganizationById.get(beforeOrganizationId)
+      : undefined;
+    const previousFields = beforeOrganizationId
+      ? {
+          previousOrganizationId: beforeOrganizationId,
+          ...(previousOrganization ? { previousOrganizationName: previousOrganization.name } : {}),
+        }
+      : {};
+    if (afterOrganizationId) {
+      const organization = nextOrganizationById.get(afterOrganizationId);
+      const tenantId = organization?.connections.microsoft365?.tenantId;
+      seeds.push({
+        type: "schedule.assigned",
+        organizationId: afterOrganizationId,
+        ...(organization ? { organizationName: organization.name } : {}),
+        ...(tenantId ? { tenantId } : {}),
+        details: { ...agentDetails, ...previousFields },
+      });
+    } else {
+      seeds.push({
+        type: "schedule.unassigned",
+        details: { ...agentDetails, ...previousFields, scheduleRemoved: agent.schedule === undefined },
+      });
+    }
+  }
+
+  return seeds.map((seed) => ({ id: context.newId(), timestamp: context.timestamp, ...seed }));
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+const EVENT_TYPES: ReadonlySet<string> = new Set(CONFIGURATION_AUDIT_EVENT_TYPES);
+
+/** Keeps the detail fields of a recorded shape; a field of another shape is left out, not the event. */
+function sanitizeDetails(value: unknown): Record<string, ConfigurationAuditDetail> {
+  const details: Record<string, ConfigurationAuditDetail> = {};
+  for (const [key, entry] of Object.entries(isRecord(value) ? value : {})) {
+    if (typeof entry === "string" || typeof entry === "boolean" || (typeof entry === "number" && Number.isFinite(entry))) {
+      details[key] = entry;
+    } else if (Array.isArray(entry) && entry.every((item) => typeof item === "string")) {
+      details[key] = [...entry];
+    }
+  }
+  return details;
+}
+
+/** Well-formed stored events, newest kept; undefined when there are none. */
+export function sanitizeConfigurationAudit(value: unknown): ConfigurationAuditEvent[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const events: ConfigurationAuditEvent[] = [];
+  for (const raw of value) {
+    if (!isRecord(raw)) continue;
+    if (typeof raw.id !== "string" || raw.id.length === 0) continue;
+    if (typeof raw.timestamp !== "string" || !Number.isFinite(Date.parse(raw.timestamp))) continue;
+    if (typeof raw.type !== "string" || !EVENT_TYPES.has(raw.type)) continue;
+    const details = sanitizeDetails(raw.details);
+    events.push({
+      id: raw.id,
+      timestamp: raw.timestamp,
+      type: raw.type as ConfigurationAuditEventType,
+      ...(typeof raw.organizationId === "string" ? { organizationId: raw.organizationId } : {}),
+      ...(typeof raw.organizationName === "string" ? { organizationName: raw.organizationName } : {}),
+      ...(typeof raw.tenantId === "string" ? { tenantId: raw.tenantId } : {}),
+      details,
+    });
+  }
+  const kept = events.slice(-CONFIGURATION_AUDIT_MAX_EVENTS);
+  return kept.length > 0 ? kept : undefined;
+}
+
+/** Appends new events and keeps the newest `CONFIGURATION_AUDIT_MAX_EVENTS`. */
+export function appendConfigurationAudit(
+  existing: readonly ConfigurationAuditEvent[] | undefined,
+  recorded: readonly ConfigurationAuditEvent[],
+): ConfigurationAuditEvent[] | undefined {
+  const combined = [...(existing ?? []), ...recorded].slice(-CONFIGURATION_AUDIT_MAX_EVENTS);
+  return combined.length > 0 ? combined : undefined;
+}
