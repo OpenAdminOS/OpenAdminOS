@@ -1150,6 +1150,12 @@ export interface AppState {
    * screen shows before anything else, once.
    */
   firstRunScanPending?: boolean;
+  /**
+   * The first launch left the model scan for provider setup in Settings, so
+   * Connect Microsoft 365 is still to come: it shows once a model is ready
+   * and the admin leaves Settings, or on a later launch.
+   */
+  firstRunMicrosoftStepPending?: boolean;
   /** The MCP catalog with local install state. */
   mcpServers?: McpServerSummary[];
   /** Whether Chat offers tools, including MCP tools, to the selected model. */
@@ -2931,7 +2937,9 @@ export interface OpenAdminOSApi {
   /** Selects a provider and its model in one validated write. */
   setActiveProviderAndModel?(providerId: ProviderId, model: string): Promise<AppState>;
   /** Records that the first-launch scan was finished or skipped. */
-  completeFirstRunScan?(): Promise<AppState>;
+  completeFirstRunScan?(options?: { microsoftStepPending?: boolean }): Promise<AppState>;
+  /** Records that the deferred Connect Microsoft 365 step was shown and left. */
+  completeFirstRunMicrosoftStep?(): Promise<AppState>;
   /**
    * After the first-launch scan, provider listing serves the scan results;
    * this asks for every provider to be checked in full from the next read.

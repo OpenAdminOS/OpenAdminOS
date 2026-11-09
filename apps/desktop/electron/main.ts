@@ -5560,7 +5560,16 @@ function registerIpcHandlers() {
     "openadminos:model-scan-retry",
     handleTrusted((_event, providerId: unknown) => store.retryModelScanProbe(validateProviderId(providerId, "providerId"))),
   );
-  ipcMain.handle("openadminos:complete-first-run-scan", handleTrusted(() => store.completeFirstRunScan()));
+  ipcMain.handle(
+    "openadminos:complete-first-run-scan",
+    handleTrusted((_event, options: unknown) =>
+      store.completeFirstRunScan({
+        microsoftStepPending:
+          typeof options === "object" && options !== null && (options as { microsoftStepPending?: unknown }).microsoftStepPending === true,
+      }),
+    ),
+  );
+  ipcMain.handle("openadminos:complete-first-run-microsoft-step", handleTrusted(() => store.completeFirstRunMicrosoftStep()));
   ipcMain.handle("openadminos:refresh-providers", handleTrusted(() => store.refreshProviders()));
   ipcMain.handle(
     "openadminos:set-active-provider-and-model",

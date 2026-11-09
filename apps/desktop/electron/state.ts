@@ -355,6 +355,8 @@ interface PersistedState {
    * install runs the first-launch model scan once, then clears it.
    */
   firstRunScan?: "pending";
+  /** The first launch went to provider setup before Connect Microsoft 365; it shows later, once. */
+  firstRunMicrosoftStep?: "pending";
   /**
    * The local provider the host selected automatically, and whether the
    * one-time Chat notice about it was dismissed. Cleared by an explicit
@@ -3177,6 +3179,7 @@ export class AppStateStore {
       state.tenantChecks = [...this.tenantChecks.values()].map((entry) => entry.progress);
     }
     if (persisted.firstRunScan === "pending") state.firstRunScanPending = true;
+    if (persisted.firstRunMicrosoftStep === "pending") state.firstRunMicrosoftStepPending = true;
     const autoSelection = persisted.providerAutoSelection;
     if (
       autoSelection &&
@@ -3668,18 +3671,34 @@ export class AppStateStore {
   }
 
 
-  /** The first-launch scan was finished or skipped; it does not show again. */
-  async completeFirstRunScan(): Promise<AppState> {
+  /**
+   * The first-launch scan was finished or skipped; it does not show again.
+   * `microsoftStepPending` keeps Connect Microsoft 365 for later, when the
+   * scan left for provider setup instead of Chat.
+   */
+  async completeFirstRunScan(options: { microsoftStepPending?: boolean } = {}): Promise<AppState> {
     await this.serialize(async () => {
       const current = await this.read();
       if (current.firstRunScan !== "pending") return;
       const { firstRunScan: _done, ...rest } = current;
-      await this.write(rest);
+      await this.write(options.microsoftStepPending === true ? { ...rest, firstRunMicrosoftStep: "pending" } : rest);
       // Leaving the scan (Continue, Preview, Open chat) runs no discovery:
       // the scan results stay what listing serves this session.
       this.scanResultsServed = true;
     });
     this.emitStateChanged("first-run-scan-completed");
+    return this.getAppState();
+  }
+
+  /** The deferred Connect Microsoft 365 step was shown and left; it does not show again on its own. */
+  async completeFirstRunMicrosoftStep(): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      if (current.firstRunMicrosoftStep !== "pending") return;
+      const { firstRunMicrosoftStep: _done, ...rest } = current;
+      await this.write(rest);
+    });
+    this.emitStateChanged("first-run-microsoft-step-completed");
     return this.getAppState();
   }
 
@@ -7914,6 +7933,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const mcpServers = sanitizeMcpServers((parsed as { mcpServers?: unknown }).mcpServers, this.mcpCatalog);
       if (mcpServers) state.mcpServers = mcpServers;
       if ((parsed as { firstRunScan?: unknown }).firstRunScan === "pending") state.firstRunScan = "pending";
+      if ((parsed as { firstRunMicrosoftStep?: unknown }).firstRunMicrosoftStep === "pending") state.firstRunMicrosoftStep = "pending";
       const rawConnectors = (parsed as { connectors?: unknown }).connectors;
       if (
         rawConnectors &&

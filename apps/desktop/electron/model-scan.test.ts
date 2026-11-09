@@ -226,6 +226,49 @@ describe("first-launch model scan", () => {
         await rm(existing, { recursive: true, force: true });
       }
     });
+
+    it("keeps Connect Microsoft 365 pending across a provider setup detour and a restart, until it is left (PR #175 onboarding round review, 4)", async () => {
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+      const providers = providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
+      const open = () => new AppStateStore({
+        filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+        tokenStore: { read: async () => "", write: async () => undefined },
+        providerListFactory: () => providers,
+      });
+      let store = open();
+      try {
+        assert.equal((await store.getAppState()).firstRunMicrosoftStepPending, undefined);
+        const after = await store.completeFirstRunScan({ microsoftStepPending: true });
+        assert.equal(after.firstRunScanPending, undefined);
+        assert.equal(after.firstRunMicrosoftStepPending, true);
+        store.close();
+        // A later launch still owes the step.
+        store = open();
+        assert.equal((await store.getAppState()).firstRunMicrosoftStepPending, true);
+        const left = await store.completeFirstRunMicrosoftStep();
+        assert.equal(left.firstRunMicrosoftStepPending, undefined);
+        store.close();
+        store = open();
+        assert.equal((await store.getAppState()).firstRunMicrosoftStepPending, undefined);
+      } finally {
+        store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+
+      // Leaving the scan for Chat never defers the step: it follows the scan at once.
+      const direct = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+      const other = new AppStateStore({
+        filePath: join(direct, "state.json"), userDataPath: direct, statsApiUrl: "",
+        tokenStore: { read: async () => "", write: async () => undefined },
+        providerListFactory: () => providers,
+      });
+      try {
+        assert.equal((await other.completeFirstRunScan()).firstRunMicrosoftStepPending, undefined);
+      } finally {
+        other.close();
+        await rm(direct, { recursive: true, force: true });
+      }
+    });
   });
 });
 

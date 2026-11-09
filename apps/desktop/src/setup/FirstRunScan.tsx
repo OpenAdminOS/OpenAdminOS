@@ -20,6 +20,7 @@ import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } fr
 import { useAppState } from "../state";
 import { actionLabel, actionNote, modelDisplayName, optionsFromProbes, preselect, type ChoiceOption } from "./model-choice";
 import { MicrosoftStepScreen } from "./MicrosoftStep";
+import { isProviderReady } from "../shared/provider-detection";
 import { OnboardingSteps } from "./OnboardingSteps";
 
 /**
@@ -48,7 +49,7 @@ export function useModelScan(): ModelScanContextValue {
 
 /** Shows the onboarding steps in place of the shell on a fresh install, or one of them when opened again. */
 export function ModelScanGate({ children }: { children: ReactNode }) {
-  const { state, loading } = useAppState();
+  const { state, loading, refresh } = useAppState();
   const location = useLocation();
   const navigate = useNavigate();
   const [manual, setManual] = useState<"model" | "microsoft" | null>(null);
@@ -63,7 +64,33 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
     if (loading || firstRun !== null) return;
     setFirstRun(supported && state.firstRunScanPending === true && !location.pathname.startsWith("/companion"));
   }, [firstRun, loading, location.pathname, state.firstRunScanPending, supported]);
-  const screen = !supported ? null : firstRun === true ? firstRunStep : manual;
+  // A first launch that left the scan for provider setup still owes Connect
+  // Microsoft 365: it shows once a model is ready and the admin is outside
+  // Settings, in this session or a later one, and stays open until it is left.
+  const [deferredOpen, setDeferredOpen] = useState(false);
+  const [deferredDone, setDeferredDone] = useState(false);
+  const hasOrganization = state.tenants.some((tenant) => tenant.kind !== "sample");
+  const modelReady = isProviderReady(state.providers.find((provider) => provider.id === state.activeProviderId));
+  const deferredDue =
+    supported &&
+    firstRun === false &&
+    manual === null &&
+    !deferredDone &&
+    state.firstRunMicrosoftStepPending === true &&
+    !hasOrganization &&
+    modelReady &&
+    !location.pathname.startsWith("/settings") &&
+    !location.pathname.startsWith("/companion");
+  useEffect(() => {
+    if (deferredDue && !deferredOpen) setDeferredOpen(true);
+  }, [deferredDue, deferredOpen]);
+  // Connected another way meanwhile: the deferred step is no longer owed.
+  useEffect(() => {
+    if (!supported || deferredOpen || deferredDone || state.firstRunMicrosoftStepPending !== true || !hasOrganization) return;
+    setDeferredDone(true);
+    void window.openAdminOS?.completeFirstRunMicrosoftStep?.().then(() => refresh());
+  }, [deferredDone, deferredOpen, hasOrganization, refresh, state.firstRunMicrosoftStepPending, supported]);
+  const screen = !supported ? null : firstRun === true ? firstRunStep : manual ?? (deferredOpen ? "deferred-microsoft" : null);
   // Until app state says whether the first-run scan is pending, show a quiet
   // surface rather than the shell, so nothing claims a provider not yet checked.
   const deciding = supported && firstRun === null && !location.pathname.startsWith("/companion");
@@ -92,7 +119,6 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
   };
   // The scan leaving for Chat on a fresh install goes to the Microsoft 365
   // step instead, unless an organization is already connected.
-  const hasOrganization = state.tenants.some((tenant) => tenant.kind !== "sample");
   useEffect(() => {
     if (firstRunStep !== "handoff") return;
     if (hasOrganization) close("/chat");
@@ -114,6 +140,16 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
         />
       ) : screen === "microsoft" ? (
         <MicrosoftStepScreen firstRun={firstRun === true} onClose={close} />
+      ) : screen === "deferred-microsoft" ? (
+        <MicrosoftStepScreen
+          firstRun
+          onClose={(to) => {
+            setDeferredOpen(false);
+            setDeferredDone(true);
+            void window.openAdminOS?.completeFirstRunMicrosoftStep?.().then(() => refresh());
+            close(to);
+          }}
+        />
       ) : (
         children
       )}
@@ -366,7 +402,8 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     setBusy((current) => current ?? "finish");
     setActionError(null);
     try {
-      if (firstRun) await api?.completeFirstRunScan?.();
+      // Leaving for provider setup keeps Connect Microsoft 365 for when a model is ready.
+      if (firstRun) await api?.completeFirstRunScan?.(to === "/settings/providers" ? { microsoftStepPending: true } : undefined);
       await refresh();
       onClose(to);
     } catch (caught) {
