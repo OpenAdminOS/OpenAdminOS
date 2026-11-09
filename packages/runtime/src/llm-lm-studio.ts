@@ -271,7 +271,7 @@ export async function probeLmStudioLlm(
   const url = `${endpoint.replace(/\/$/, "")}/models`;
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetchLocal(url, { signal: controller.signal });
     if (!response.ok) {
       return {
         ready: false,
@@ -472,6 +472,23 @@ function describe(error: unknown): string {
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}...`;
+}
+
+/**
+ * A GET to a local server that retries once when the pooled keep-alive
+ * socket it reused had already been closed (`UND_ERR_SOCKET`, "other side
+ * closed"). A server stopped after an earlier check leaves that socket in
+ * the pool; on Linux the reuse fails before the close is noticed. The
+ * retry opens a new connection, which is refused when the server is gone.
+ */
+export async function fetchLocal(url: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    const code = (error as { cause?: { code?: unknown } } | undefined)?.cause?.code;
+    if (code !== "UND_ERR_SOCKET" || init.signal?.aborted) throw error;
+    return fetch(url, init);
+  }
 }
 
 const NOT_RUNNING_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENOTFOUND", "EADDRNOTAVAIL"]);

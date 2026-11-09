@@ -1,6 +1,7 @@
 import {
   classifyOllamaEndpoint,
   classifyLmStudioEndpoint,
+  fetchLocal,
   isConnectionRefused,
   probeAppleFoundationLlm,
   probeClaudeCodeLlm,
@@ -97,7 +98,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       };
 
   try {
-    const response = await fetch(`${endpoint}/api/tags`, {
+    const response = await fetchLocal(`${endpoint}/api/tags`, {
       signal: controller.signal,
     });
 

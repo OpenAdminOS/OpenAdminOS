@@ -86,6 +86,7 @@ export {
 export {
   classifyLmStudioEndpoint,
   createLmStudioLlm,
+  fetchLocal,
   isConnectionRefused,
   probeLmStudioLlm,
   resolveLmStudioEndpoint,

@@ -145,6 +145,22 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
     }
   });
 
+  it("reports a server stopped after an earlier check as not running, on a real socket (CI on Linux, PR #175)", async () => {
+    const { server, url } = await serve(() => undefined);
+    process.env.OPENAGENTS_OLLAMA_URL = url;
+    process.env.OPENADMINOS_LM_STUDIO_URL = `${url}/v1`;
+    try {
+      // Two checks that time out leave keep-alive sockets in fetch's pool.
+      await checkOllama(catalog("ollama"), { timeoutMs: 100 });
+      await checkLmStudio(catalog("lm-studio"), { timeoutMs: 100 });
+    } finally {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+    assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "not-found");
+    assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
+  });
+
   // The errors are injected in the shapes Node 22's fetch produces, so the
   // result does not depend on how a closed port behaves on the test host
   // (a parallel test process can take over a just-closed ephemeral port).
@@ -172,6 +188,21 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
         assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
       });
     }
+    it("not running: a stopped server whose pooled socket was reused (UND_ERR_SOCKET, then refused)", async () => {
+      let calls = 0;
+      globalThis.fetch = (async () => {
+        calls += 1;
+        throw calls % 2 === 1
+          ? fetchFailed(Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }))
+          : fetchFailed(coded("ECONNREFUSED"));
+      }) as typeof fetch;
+      process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+      process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+      assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "not-found");
+      assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
+      assert.equal(calls, 4, "each check retried once on a new connection");
+    });
+
     for (const [label, error] of failed) {
       it(`could not check: ${label}`, async () => {
         globalThis.fetch = (async () => { throw error; }) as typeof fetch;
