@@ -240,6 +240,8 @@ function writeRun(input: { status: RunRecord["status"] }): RunRecord {
       : {}),
     providerId: "ollama",
     model: "test-model",
+    // A plan always belongs to the organization it was prepared in.
+    tenantId: "tenant-confirm",
     summary: "Review the write plan.",
     steps: [],
     logs: [],
