@@ -69,8 +69,9 @@ const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: s
     detail:
       "Global deployments can process in any Azure region, Data Zone deployments within the US, EU or Asia Pacific, Standard deployments within your resource's geography.",
   },
-  copilot: { label: "GitHub Copilot · location not stated" },
-  gemini: { label: "Google Gemini API · location not stated" },
+  // Labels name the tool, not the vendor API; a CLI is the way prompts leave.
+  copilot: { label: "GitHub Copilot CLI · location not stated", through: true },
+  gemini: { label: "Gemini CLI · location not stated", through: true },
 };
 
 /** The short label: the status strip, the composer model chip and the confirmation's "Goes to". */

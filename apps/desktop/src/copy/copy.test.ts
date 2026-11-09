@@ -119,8 +119,8 @@ describe("hosted data locations (maintainer decision, 2026-11-09, refined)", () 
     expect(providerDataLocation({ id: "anthropic", name: "Claude Code" })).toBe("Claude Code · location set by your account");
     expect(providerDataLocation({ id: "openai", name: "Codex" })).toBe("Codex · location set by your account");
     expect(providerDataLocation({ id: "azure-openai", name: "Azure OpenAI" })).toBe("Azure OpenAI · location set by your deployment type");
-    expect(providerDataLocation({ id: "copilot", name: "GitHub Copilot CLI" })).toBe("GitHub Copilot · location not stated");
-    expect(providerDataLocation({ id: "gemini", name: "Gemini CLI" })).toBe("Google Gemini API · location not stated");
+    expect(providerDataLocation({ id: "copilot", name: "GitHub Copilot CLI" })).toBe("GitHub Copilot CLI · location not stated");
+    expect(providerDataLocation({ id: "gemini", name: "Gemini CLI" })).toBe("Gemini CLI · location not stated");
     expect(providerDataLocation({ name: "Example" })).toBe("Example · location not stated");
   });
 
@@ -140,6 +140,7 @@ describe("hosted data locations (maintainer decision, 2026-11-09, refined)", () 
     expect(promptsGoTo({ id: "anthropic", name: "Claude Code" })).toBe("Prompts leave this device through Claude Code; location set by your account");
     expect(promptsGoTo({ id: "openai", name: "Codex" }, true)).toBe("Prompts and tenant data leave this device through Codex; location set by your account");
     expect(promptsGoTo({ id: "azure-openai", name: "Azure OpenAI" })).toBe("Prompts go to Azure OpenAI · location set by your deployment type");
-    expect(promptsGoTo({ id: "gemini", name: "Gemini CLI" })).toBe("Prompts go to Google Gemini API · location not stated");
+    expect(promptsGoTo({ id: "gemini", name: "Gemini CLI" })).toBe("Prompts leave this device through Gemini CLI; location not stated");
+    expect(promptsGoTo({ id: "copilot", name: "GitHub Copilot CLI" })).toBe("Prompts leave this device through GitHub Copilot CLI; location not stated");
   });
 });
