@@ -1252,3 +1252,30 @@ describe("hosted model gate (review round 2, item 1)", () => {
     assert.equal(calls, 1);
   });
 });
+
+describe("code requests with nothing connected (Muse round 2, item H)", () => {
+  it("treats common request wording as a code request, and keeps run-against and tenant values out", async () => {
+    const { isExplicitDocsRequest } = await import("./planner.js");
+    for (const question of [
+      "Write a KQL query for our failed sign-ins",
+      "Can you write a KQL query for failed sign-ins?",
+      "Could you draft a PowerShell script that lists stale devices",
+      "Please write a script which shows stale devices",
+      "Generate a KQL query for risky sign-ins",
+      "Give me a PowerShell script to export compliance policies",
+      "I need you to create a query for devices without BitLocker",
+      "Help me write a Graph PowerShell script for app registrations",
+    ]) {
+      assert.equal(isExplicitDocsRequest(question), true, question);
+    }
+    for (const question of [
+      "Write a KQL query and run it against our tenant",
+      "Generate a script and execute it",
+      "Write a script that retires HR-LAPTOP-07",
+      "Which devices have not synced in 30 days?",
+      "List our stale devices",
+    ]) {
+      assert.equal(isExplicitDocsRequest(question), false, question);
+    }
+  });
+});
