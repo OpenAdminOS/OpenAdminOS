@@ -110,18 +110,20 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
   // An over-long id replaced here maps to its new id, so a schedule that
   // named it stays with the same record. A duplicate id is ambiguous and
   // is not remapped: a short one stays with the first record, which keeps
-  // it, and an over-long one shared by several records leaves a schedule
-  // naming it unassigned.
-  const rawIdCounts = new Map<string, number>();
-  for (const raw of migrated ? [] : (input.rawOrganizations as unknown[])) {
-    const rawId = isRecord(raw) && typeof raw.id === "string" ? raw.id.trim() : "";
-    if (rawId.length > 300) rawIdCounts.set(rawId, (rawIdCounts.get(rawId) ?? 0) + 1);
-  }
+  // it, and an over-long one shared by several kept records leaves a
+  // schedule naming it unassigned. Only records that are kept count: a
+  // dropped record never makes an id ambiguous.
+  const keptLongIds = new Map<string, number>();
   const replacedIds = new Map<string, string>();
   const keepId = (rawId: string, idUsable: boolean, base: string) => {
     if (idUsable) return rawId;
     const id = freshId(base);
-    if (rawIdCounts.get(rawId) === 1) replacedIds.set(rawId, id);
+    if (rawId.length > 300) {
+      const seen = (keptLongIds.get(rawId) ?? 0) + 1;
+      keptLongIds.set(rawId, seen);
+      if (seen === 1) replacedIds.set(rawId, id);
+      else replacedIds.delete(rawId);
+    }
     return id;
   };
   let kept = 0;
