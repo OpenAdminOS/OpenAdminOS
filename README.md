@@ -277,7 +277,7 @@ See [`CONTRIBUTING.md`](CONTRIBUTING.md). Bug reports, feature requests, and age
 
 MIT. See [`LICENSE`](LICENSE).
 
-Provider logos in `apps/desktop/src/assets/provider-logos/` are trademarks of their owners, used only to identify the services OpenAdminOS connects to, and are not covered by the MIT license. Their sources and terms are in that folder's [`NOTICE.md`](apps/desktop/src/assets/provider-logos/NOTICE.md).
+Product names and logos are trademarks or registered trademarks of their respective owners. OpenAdminOS is not affiliated with, endorsed by, or sponsored by any of them. The logos are not covered by the MIT license; their owners and sources are listed in [`provider-logos/NOTICE.md`](apps/desktop/src/assets/provider-logos/NOTICE.md) and [`service-logos/NOTICE.md`](apps/desktop/src/assets/service-logos/NOTICE.md).
 
 ## Who's behind it
 
