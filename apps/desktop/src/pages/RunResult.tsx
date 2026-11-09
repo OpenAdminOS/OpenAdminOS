@@ -34,14 +34,17 @@ import {
   StatusDot,
   type MenuEntry,
 } from "../components/ui";
-import { userFacingErrorReason } from "../copy";
+import { ORGANIZATION_COPY, RERUN_COPY, userFacingErrorReason } from "../copy";
+import { Modal, ModalHeader } from "../components/Modal";
 import { createPendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { copyTextToClipboard } from "../shared/clipboard";
 import { formatAgentDisplayName } from "../shared/agent-display";
 import {
+  activeOrganizationOf,
   deriveTrustState,
   providerCatalog,
+  resolveOrganizations,
   type RunRecord,
   type TenantRecord,
   type WriteAction,
@@ -70,9 +73,10 @@ export default function RunResult() {
   const navigate = useNavigate();
   const location = useLocation();
   const { id } = useParams();
-  const { state, startRun, confirmRun, rejectRun, cancelRun } = useAppState();
+  const { state, startRun, confirmRun, rejectRun, cancelRun, setActiveOrganization } = useAppState();
   const { requireTenantAndProvider } = useSetupFlow();
   const toast = useToast();
+  const [crossOrganization, setCrossOrganization] = useState(false);
   const run = state.runs.find((candidate) => candidate.id === id);
 
   const closeToRuns = () => navigate(`/runs${location.search}`);
@@ -115,7 +119,23 @@ export default function RunResult() {
     navigate(`/agents/${encodeURIComponent(slug)}/confirm`, { state: { runChoice } });
   };
 
+  // A rerun of a run from an organization that is not active asks first:
+  // switch to that organization, or run in the active one.
+  const runOrganization = run.tenantId
+    ? resolveOrganizations(state).find((organization) => organization.connections.microsoft365?.tenantId === run.tenantId)
+    : undefined;
+  const activeOrganization = activeOrganizationOf(state);
+
   const reRun = () => {
+    // Agent Team reviews its own assignments with their tenant.
+    if (!requiresTeamReview && run.tenantId && run.tenantId !== state.activeTenantId) {
+      setCrossOrganization(true);
+      return;
+    }
+    proceedRerun();
+  };
+
+  const proceedRerun = () => {
     if (requiresTeamReview) {
       navigate(
         run.office?.personaId
@@ -170,8 +190,64 @@ export default function RunResult() {
       );
   };
 
+  // Only an ordinary rerun can move to the active organization; Run for
+  // real and Team retries stay with the run's own tenant.
+  const ordinaryRerun = run.status !== "planned" && !run.officeContext;
+  const crossOrganizationDialog = (
+    <Modal open={crossOrganization} onClose={() => setCrossOrganization(false)} size="md">
+      <ModalHeader
+        title={RERUN_COPY.title(runOrganization?.name)}
+        subtitle={displayName}
+        onClose={() => setCrossOrganization(false)}
+      />
+      <div className="space-y-4 p-6">
+        <p className="text-sm leading-relaxed text-[var(--color-text-soft)]">
+          {RERUN_COPY.body(runOrganization?.name, activeOrganization?.name, ordinaryRerun)}
+        </p>
+        <div className="flex flex-wrap justify-end gap-2">
+          <Button variant="ghost" onClick={() => setCrossOrganization(false)}>Cancel</Button>
+          {ordinaryRerun && activeOrganization ? (
+            <Button
+              variant="secondary"
+              onClick={() => {
+                setCrossOrganization(false);
+                openRerunPreflight(run.agentSlug, {
+                  ...(run.providerId ? { providerId: run.providerId } : {}),
+                  ...(run.model ? { model: run.model } : {}),
+                });
+              }}
+            >
+              {RERUN_COPY.runInActive(activeOrganization.name)}
+            </Button>
+          ) : null}
+          {runOrganization ? (
+            <Button
+              variant="primary"
+              onClick={() => {
+                setCrossOrganization(false);
+                void setActiveOrganization(runOrganization.id)
+                  .then(() => proceedRerun())
+                  .catch((caught) =>
+                    toast.error(
+                      ORGANIZATION_COPY.switchFailed(
+                        userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
+                      ),
+                    ),
+                  );
+              }}
+            >
+              {RERUN_COPY.switchTo(runOrganization.name)}
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    </Modal>
+  );
+
   if (run.status === "awaiting-confirmation" || run.status === "planned") {
     return (
+      <>
+      {crossOrganizationDialog}
       <ConfirmationPage
         run={run}
         displayName={displayName}
@@ -184,10 +260,13 @@ export default function RunResult() {
         onReject={rejectRun}
         onRunForReal={reRun}
       />
+      </>
     );
   }
 
   return (
+    <>
+    {crossOrganizationDialog}
     <RunPage
       key={run.id}
       run={run}
@@ -232,6 +311,7 @@ export default function RunResult() {
           );
       }}
     />
+    </>
   );
 }
 

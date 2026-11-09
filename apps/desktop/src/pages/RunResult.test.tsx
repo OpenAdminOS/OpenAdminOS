@@ -611,3 +611,61 @@ it("opens the preflight for Run again on a run with no organization and starts i
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());
   expect(vi.mocked(bridge.startRun).mock.calls[0]?.[1]).not.toHaveProperty("tenantId");
 });
+
+describe("Run again for a run from another organization (review round 2)", () => {
+  const fabrikam = { ...createMockAppState().tenants[0]!, id: "tenant-2", displayName: "Fabrikam" };
+
+  it("offers to switch to the run's organization or run in the active one, instead of a raw refusal", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, tenantId: "tenant-2", providerId: "ollama", model: "llama3.1" });
+    const state = createMockAppState({ tenants: [createMockAppState().tenants[0]!, fabrikam], installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] });
+    const bridge = makeMockBridge({}, state);
+    renderWithPreflight(run.id, bridge);
+    await user.click(await screen.findByRole("button", { name: "Run again" }));
+    const dialog = await screen.findByRole("dialog", { name: /This run was in Fabrikam/ });
+    expect(dialog).toHaveTextContent("Fabrikam is not the active organization. An agent runs only in the active organization.");
+    await user.click(within(dialog).getByRole("button", { name: "Run in Contoso IT" }));
+    const review = await screen.findByRole("dialog", { name: /Review run/ });
+    expect(within(review).getByText("Contoso IT")).toBeInTheDocument();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+  });
+
+  it("switches to the run's organization and then opens the review there", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, tenantId: "tenant-2" });
+    const state = createMockAppState({ tenants: [createMockAppState().tenants[0]!, fabrikam], installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] });
+    const bridge = makeMockBridge({}, state);
+    renderWithPreflight(run.id, bridge);
+    await user.click(await screen.findByRole("button", { name: "Run again" }));
+    await user.click(within(await screen.findByRole("dialog", { name: /This run was in Fabrikam/ })).getByRole("button", { name: "Switch to Fabrikam" }));
+    await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith("org-tenant-2"));
+    expect(await screen.findByRole("dialog", { name: /Review run/ })).toBeInTheDocument();
+  });
+
+  it("only offers the switch for Run for real of a dry run planned in another organization", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true, tenantId: "tenant-2", finishedAt: "2026-10-31T12:00:00Z" });
+    const state = createMockAppState({ tenants: [createMockAppState().tenants[0]!, fabrikam], installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })], runs: [run] });
+    const bridge = makeMockBridge({}, state);
+    renderWithPreflight(run.id, bridge);
+    await user.click(await screen.findByRole("button", { name: /Run for real/ }));
+    const dialog = await screen.findByRole("dialog", { name: /This run was in Fabrikam/ });
+    expect(dialog).toHaveTextContent("Switch to Fabrikam to continue this run there.");
+    expect(within(dialog).queryByRole("button", { name: /Run in/ })).not.toBeInTheDocument();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+    await user.click(within(dialog).getByRole("button", { name: "Switch to Fabrikam" }));
+    await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ runForRealOfRunId: run.id, tenantId: "tenant-2" })));
+    expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
+  });
+
+  it("says when the run's organization was removed and offers the active one", async () => {
+    const user = userEvent.setup();
+    const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, tenantId: "tenant-gone" });
+    const state = createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] });
+    renderWithPreflight(run.id, makeMockBridge({}, state));
+    await user.click(await screen.findByRole("button", { name: "Run again" }));
+    const dialog = await screen.findByRole("dialog", { name: /This run's organization is not on this device/ });
+    expect(within(dialog).queryByRole("button", { name: /Switch to/ })).not.toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Run in Contoso IT" })).toBeInTheDocument();
+  });
+});

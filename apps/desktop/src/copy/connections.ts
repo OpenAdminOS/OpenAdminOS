@@ -165,3 +165,24 @@ export const SCHEDULE_ORGANIZATION_COPY = {
   assigned: (name: string) => `Schedule assigned to ${name}.`,
   noOrganizations: "Connect an organization to assign this schedule. Schedules never run in the sample organization.",
 } as const;
+
+/** Run again for a run from an organization that is not active. */
+export const RERUN_COPY = {
+  title: (organization: string | undefined) =>
+    organization ? `This run was in ${organization}` : "This run's organization is not on this device",
+  body: (organization: string | undefined, active: string | undefined, ordinary: boolean) => {
+    const where = organization
+      ? `${organization} is not the active organization. An agent runs only in the active organization.`
+      : "The organization this run was in has been removed from this device.";
+    if (!ordinary) {
+      return organization
+        ? `${where} Switch to ${organization} to continue this run there.`
+        : `${where} Open the agent to plan a new run in the active organization.`;
+    }
+    return active
+      ? `${where} Switch to ${organization ?? "it"} to run it there, or run it in ${active} after reviewing the run.`
+      : `${where} Switch to ${organization ?? "an organization"} to run it there.`;
+  },
+  switchTo: (organization: string) => `Switch to ${organization}`,
+  runInActive: (organization: string) => `Run in ${organization}`,
+} as const;
