@@ -88,6 +88,7 @@ import {
   SETTINGS_SECTIONS,
   SERVICE_COPY,
   SETUP_COPY,
+  TRADEMARK_NOTICE,
   searchSettings,
   userFacingErrorReason,
   type SettingsItemId,
@@ -5048,6 +5049,11 @@ function AboutSection() {
         label="Source code and license"
         description="OpenAdminOS is open source under the MIT license."
         control={<Button variant="ghost" size="sm" onClick={() => { void window.openAdminOS?.openExternal("https://github.com/OpenAdminOS/OpenAdminOS"); }}>View source</Button>}
+      />
+      <SettingRow
+        label="Trademarks"
+        description={TRADEMARK_NOTICE}
+        control={null}
       />
       <SettingRow
         label="Project"

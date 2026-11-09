@@ -74,3 +74,7 @@ export function searchSettings(query: string): SettingsSearchResult[] {
     .filter((entry) => terms.every((term) => entry.haystack.includes(term)))
     .map(({ haystack: _haystack, ...entry }) => entry);
 }
+
+/** Settings, About, and the README License section (maintainer wording, 2026-11-09). */
+export const TRADEMARK_NOTICE =
+  "Product names and logos are trademarks or registered trademarks of their respective owners. OpenAdminOS is not affiliated with, endorsed by, or sponsored by any of them.";

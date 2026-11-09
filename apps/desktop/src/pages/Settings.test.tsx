@@ -654,6 +654,15 @@ describe("Settings provider section", () => {
     expect(screen.getByText("Test ping sent.")).toBeInTheDocument();
   });
 
+  it("states in About that product names and logos belong to their owners", async () => {
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/about", bridge: makeMockBridge() });
+    expect(
+      await screen.findByText(
+        "Product names and logos are trademarks or registered trademarks of their respective owners. OpenAdminOS is not affiliated with, endorsed by, or sponsored by any of them.",
+      ),
+    ).toBeInTheDocument();
+  });
+
   it("switches to nightly builds from About and checks for updates", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({
