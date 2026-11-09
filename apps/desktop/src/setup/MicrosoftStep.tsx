@@ -46,8 +46,8 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
   const toast = useToast();
   const reduced = useMemo(prefersReducedMotion, []);
   const activeTenant = state.activeTenantId ? state.tenants.find((tenant) => tenant.id === state.activeTenantId) : undefined;
-  // A real tenant: the step adds to it with its own identity. The sample tenant is never one.
-  const tenant = activeTenant && activeTenant.kind !== "sample" ? activeTenant : undefined;
+  // A connected tenant: the step adds to it with its own identity.
+  const tenant = activeTenant;
   const [picked, setPicked] = useState<ReadonlySet<ServiceId>>(() => new Set());
   const [connected, setConnected] = useState<TenantRecord | null>(null);
   const [adding, setAdding] = useState<readonly string[] | null>(null);

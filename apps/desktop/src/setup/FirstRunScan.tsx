@@ -70,7 +70,7 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
   // Settings, in this session or a later one, and stays open until it is left.
   const [deferredOpen, setDeferredOpen] = useState(false);
   const [deferredDone, setDeferredDone] = useState(false);
-  const hasOrganization = state.tenants.some((tenant) => tenant.kind !== "sample");
+  const hasOrganization = state.tenants.length > 0;
   const modelReady = isProviderReady(state.providers.find((provider) => provider.id === state.activeProviderId));
   const deferredDue =
     supported &&

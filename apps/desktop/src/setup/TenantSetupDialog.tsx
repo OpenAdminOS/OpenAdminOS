@@ -45,7 +45,6 @@ import {
   includedWithLabel,
   type ScopeGroup,
 } from "./scope-groups";
-import { PILOT_COPY } from "../shared/pilot-mode";
 import { TenantCleanupNotice } from "../components/TenantCleanupNotice";
 import {
   DEFAULT_REGISTRATION_DISPLAY_NAME,
@@ -80,7 +79,6 @@ export function TenantSetupDialog({
   presetPartIds,
   onClose,
   onConnect,
-  pilotRemoved = false,
   onKeepWaiting,
   onTryAgain,
   onEditSignIn,
@@ -106,8 +104,6 @@ export function TenantSetupDialog({
   presetPartIds?: readonly string[];
   onClose: () => void;
   onConnect: (options?: ConnectTenantOptions) => void;
-  /** True after a connect that ended pilot mode and removed its data. */
-  pilotRemoved?: boolean;
   onKeepWaiting: () => void;
   onTryAgain: () => void;
   /** Return from a failed sign-in to the sign-in options. */
@@ -161,7 +157,6 @@ export function TenantSetupDialog({
       )}
       {stage === "provider" && (
         <ProviderStep
-          pilotRemoved={pilotRemoved}
           providers={providers}
           activeProviderId={activeProviderId}
           error={error}
@@ -173,7 +168,6 @@ export function TenantSetupDialog({
       )}
       {stage === "ready" && (
         <ReadyStep
-          pilotRemoved={pilotRemoved}
           tenant={activeTenant}
           delegatedPermissionCount={
             activeTenant?.grantedScopes
@@ -1037,7 +1031,6 @@ function ErrorStep({
 }
 
 function ProviderStep({
-  pilotRemoved,
   providers,
   activeProviderId,
   error,
@@ -1046,7 +1039,6 @@ function ProviderStep({
   onRecheck,
   onCancel,
 }: {
-  pilotRemoved: boolean;
   providers: ProviderSummary[];
   activeProviderId: ProviderId;
   error: string | null;
@@ -1064,7 +1056,6 @@ function ProviderStep({
   return (
     <>
       <div className="min-h-0 flex-1 overscroll-contain overflow-y-auto p-6">
-        {pilotRemoved ? <div className="-mt-4 mb-4"><PilotRemovedNote /></div> : null}
         <p className="text-base leading-6 text-[var(--color-text-soft)]">{SETUP_COPY.providerBody}</p>
         {pendingRequired && (
           <div className="mt-3 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
@@ -1137,7 +1128,6 @@ function ProviderStep({
 }
 
 function ReadyStep({
-  pilotRemoved,
   tenant,
   delegatedPermissionCount,
   intent,
@@ -1145,7 +1135,6 @@ function ReadyStep({
   onCancel,
   onResume,
 }: {
-  pilotRemoved: boolean;
   tenant: TenantRecord | undefined;
   delegatedPermissionCount: number | undefined;
   intent: PendingIntent | null;
@@ -1179,11 +1168,10 @@ function ReadyStep({
           </div>
           <Badge tone="success"><StatusDot tone="success" /> Active</Badge>
         </div>
-        {pilotRemoved ? <PilotRemovedNote /> : null}
         <p className="mt-5 text-base leading-6 text-[var(--color-text-soft)]">
           {registrationSummary}
         </p>
-        {tenant && tenant.kind !== "sample" && tenant.grantedScopes !== undefined ? (
+        {tenant && tenant.grantedScopes !== undefined ? (
           <p className="mt-3 text-sm leading-5 text-[var(--color-text-muted)]">
             {SETUP_COPY.connectedServicesSummary(
               AVAILABLE_SERVICES.filter((service) => serviceStatus(tenant, service.id) !== "missing").map(
@@ -1209,14 +1197,6 @@ function ReadyStep({
         <Button data-autofocus variant="primary" onClick={onResume}>{resumeIntentLabel(intent, agentName)}</Button>
       </DialogFooter>
     </>
-  );
-}
-
-function PilotRemovedNote() {
-  return (
-    <p role="status" className="mt-4 rounded-lg bg-[var(--color-info-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-text)] ring-1 ring-[var(--color-info)]/25">
-      {PILOT_COPY.removedAfterConnect}
-    </p>
   );
 }
 

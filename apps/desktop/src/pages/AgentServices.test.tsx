@@ -487,18 +487,6 @@ it("names the organization of a resumed run's tenant, not the active one (Muse r
   expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
 });
 
-it("shows a pilot agent's services as connected in the sample organization (Muse round 2)", async () => {
-  const sample = { ...createMockAppState().tenants[0]!, id: "openadminos-sample-tenant", displayName: "Contoso (pilot)", kind: "sample" as const };
-  const agent = createMockAgent({ id: "find-inactive-devices", slug: "find-inactive-devices", name: "Find inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
-  renderRoute(<Agents />, {
-    path: "/agents/:slug",
-    route: "/agents/find-inactive-devices",
-    bridge: makeMockBridge({}, createMockAppState({ tenants: [sample], activeTenantId: sample.id, installedAgents: [agent] })),
-  });
-  expect(await screen.findByText("Needs Intune")).toHaveClass("sr-only");
-  expect(screen.queryByText(/Intune, not connected/)).not.toBeInTheDocument();
-});
-
 describe("start errors inside the run review (review round 3)", () => {
   const draft = () => createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] });
 

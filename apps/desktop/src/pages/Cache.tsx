@@ -485,7 +485,7 @@ export function DataSettingsSection() {
         </div>
       </div>
 
-      {activeTenant && activeTenant.kind !== "sample" && unconnectedServiceIds.length > 0 ? (
+      {activeTenant && unconnectedServiceIds.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--color-border-soft)] px-5 py-4">
           <p className="min-w-0 flex-1 text-sm text-[var(--color-text-muted)]">
             {SERVICE_COPY.cacheSkipped(

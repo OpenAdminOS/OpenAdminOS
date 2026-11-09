@@ -281,7 +281,6 @@ describe("first-launch model scan screen", () => {
     expect(screen.getByText(MODEL_SCAN_COPY.installCommand)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: MODEL_SCAN_COPY.allProviders })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /sample data/i })).toBeNull();
-    expect(bridge.addSampleTenant).not.toHaveBeenCalled();
     void user;
   });
 

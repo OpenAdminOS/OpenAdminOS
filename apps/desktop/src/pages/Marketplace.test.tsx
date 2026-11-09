@@ -255,20 +255,4 @@ describe("Marketplace", () => {
       expect(within(mcp).getByRole("button", { name: new RegExp(`^${name}, MCP tool`) })).toHaveTextContent(notice);
     }
   });
-
-  it("keeps the Marketplace browsable in pilot mode with MCP install but no agent install", async () => {
-    const user = userEvent.setup();
-    render("/marketplace", {
-      tenants: [{ ...mockTenant, id: "openadminos-sample-tenant", kind: "sample", displayName: "Contoso (pilot)" }],
-      activeTenantId: "openadminos-sample-tenant",
-    });
-    const catalog = await screen.findByLabelText("Agent catalog");
-    expect(within(catalog).queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
-    expect(within(catalog).getAllByRole("button", { name: "Details" })).toHaveLength(2);
-    expect(screen.getByText("Agent install is available in production. Connect your tenant to use it.")).toBeInTheDocument();
-
-    await user.click(screen.getByRole("button", { name: /^IntuneAutomation, MCP tool/ }));
-    const dialog = await screen.findByRole("dialog", { name: "IntuneAutomation details" });
-    expect(within(dialog).getByRole("button", { name: "Install" })).toBeEnabled();
-  });
 });

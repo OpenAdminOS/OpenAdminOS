@@ -16,12 +16,23 @@ import {
   useShellChrome,
 } from "../state";
 import { TopBar } from "./TopBar";
-import { PilotBanner } from "./PilotMode";
+import { useToast } from "./Toast";
+import { useAppState } from "../state";
+import { SAMPLE_DATA_REMOVED_NOTICE } from "../copy";
 
 export { PageHeader } from "./ui/PageHeader";
 
 export function AppShell({ children }: { children: ReactNode }) {
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const { state, refresh } = useAppState();
+  const toast = useToast();
+  // Pilot mode was removed: the upgrade that deleted its sample data says so once.
+  const sampleDataRemoved = state.sampleDataRemoved === true;
+  useEffect(() => {
+    if (!sampleDataRemoved) return;
+    toast.info(SAMPLE_DATA_REMOVED_NOTICE);
+    void window.openAdminOS?.dismissSampleDataRemovedNotice?.().then(() => refresh());
+  }, [refresh, sampleDataRemoved, toast]);
   const navigate = useNavigate();
   const navigateRef = useRef(navigate);
   navigateRef.current = navigate;
@@ -103,7 +114,6 @@ function ShellLayout({
       <Sidebar onOpenPalette={() => setPaletteOpen(true)} />
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <TopBar />
-        <PilotBanner />
         <main id="main-content" tabIndex={-1} className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
           {children}
         </main>

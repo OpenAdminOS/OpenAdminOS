@@ -205,7 +205,6 @@ export const SERVICE_COPY = {
   consentNotePending: (tenant: string) =>
     `Scopes not yet granted for ${tenant} are requested when the run starts.`,
   consentNoteGranted: (tenant: string) => `Every scope listed here is granted for ${tenant}.`,
-  consentNotePilot: "Pilot mode uses the sample tenant, so no consent is requested.",
 };
 
 
@@ -248,3 +247,6 @@ export const MICROSOFT_STEP_COPY = {
   announceConnected: (organization: string, services: string) => `${organization} is connected: ${services}.`,
   reopen: "Set up Microsoft 365",
 } as const;
+
+/** Shown once after the upgrade removed pilot mode's sample data (maintainer decision, 2026-11-09). */
+export const SAMPLE_DATA_REMOVED_NOTICE = "Sample data was removed. OpenAdminOS works with your own Microsoft 365 organization.";

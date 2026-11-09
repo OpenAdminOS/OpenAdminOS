@@ -38,7 +38,6 @@ import { useAppState } from "../state";
  */
 export function licensesNotChecked(tenant: TenantRecord): boolean {
   return (
-    tenant.kind !== "sample" &&
     tenant.grantedScopes !== undefined &&
     !grantedScopeSet(tenant).has("Organization.Read.All")
   );
@@ -192,7 +191,6 @@ export function agentConsentNote(
   agent: { scopes: readonly string[]; services?: readonly ServiceId[] },
 ): string {
   if (!tenant) return SERVICE_COPY.consentNoteGeneric;
-  if (tenant.kind === "sample") return SERVICE_COPY.consentNotePilot;
   const missing = missingServicesForAgent(tenant, agentServiceIds(agent));
   if (missing.length > 0) {
     return SERVICE_COPY.consentNoteBlocked(
@@ -683,7 +681,6 @@ export function ServiceGate({
   const tenant = state.tenants.find((entry) => entry.id === state.activeTenantId);
   if (
     !tenant ||
-    tenant.kind === "sample" ||
     anyOf.some((serviceId) => serviceStatus(tenant, serviceId) !== "missing")
   ) {
     return <>{children}</>;

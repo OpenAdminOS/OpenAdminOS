@@ -48,7 +48,6 @@ import { manualRunReportDestinations } from "../shared/delivery-destinations";
 import { AgentNeedChips } from "../components/AgentNeedChips";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
-import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { isProviderImplemented } from "../shared/providers";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
@@ -121,7 +120,7 @@ export default function AgentDetail({
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { requireTenantAndProvider, openSetup } = useSetupFlow();
+  const { requireTenantAndProvider } = useSetupFlow();
   const {
     state,
     loading: appStateLoading,
@@ -182,11 +181,8 @@ export default function AgentDetail({
   const licenseMissing = agent
     ? hasLicenseShortfall(agent.requiresEntraTier, activeTenant?.entraTier)
     : false;
-  // In pilot mode only the three pilot agents run, with prepared text.
-  const pilot = activeTenant?.kind === "sample";
   const missingAgentServices =
     agent && activeTenant ? missingServicesForAgent(activeTenant, agentServiceIds(agent)) : [];
-  const pilotRunnable = pilot && Boolean(agent && isPilotAgentSlug(agent.slug));
   const pendingTenant = pendingRunChoice?.tenantId
     ? state.tenants.find((tenant) => tenant.id === pendingRunChoice.tenantId)
     : activeTenant;
@@ -224,10 +220,6 @@ export default function AgentDetail({
     providerId?: ProviderId;
     model?: string;
   }) => {
-    if (agent && pilot && !isPilotAgentSlug(agent.slug)) {
-      setRunError(PILOT_COPY.agentRefused(agent.name));
-      return;
-    }
     // With no organization the preflight opens instead of setup: it names
     // the services the agent needs, and starts an agent that calls no
     // service API. Its Connect action opens setup with this run kept.
@@ -256,7 +248,7 @@ export default function AgentDetail({
     }
     setRunError(null);
     setPendingRunChoice(choice ?? {});
-  }, [activeTenant, agent, pilot, requireTenantAndProvider]);
+  }, [activeTenant, agent, requireTenantAndProvider]);
 
   const trackDeliverySave = (save: Promise<void>): Promise<void> => {
     const tracked = save.finally(() => {
@@ -460,8 +452,7 @@ export default function AgentDetail({
     const action = searchParams.get("action");
     if (!slug) return;
     if (!agent) {
-      // Agent install is a production feature; pilot mode only shows details.
-      if (action === "install" && !pilot) setHubInstallConfirm(true);
+      if (action === "install") setHubInstallConfirm(true);
       return;
     }
     if (action === "configure") {
@@ -488,7 +479,7 @@ export default function AgentDetail({
       }
       clearAction();
     }
-  }, [agent, clearAction, pilot, preview, searchParams, slug]);
+  }, [agent, clearAction, preview, searchParams, slug]);
 
   if (!slug) return null;
 
@@ -521,8 +512,6 @@ export default function AgentDetail({
         onCloseManifest={() => setManifestOpen(false)}
         tenantTier={activeTenant?.entraTier}
         activeTenant={activeTenant}
-        pilot={pilot}
-        onConnectTenant={openSetup}
       />
     ) : (
       <Drawer open title="Agent not found" onClose={closeDrawer}>
@@ -541,7 +530,7 @@ export default function AgentDetail({
         onClose={closeDrawer}
         actions={
           <>
-            {agent.mode === "write" && (!pilot || pilotRunnable) ? (
+            {agent.mode === "write" ? (
               <Button
                 variant="secondary"
                 size="sm"
@@ -551,30 +540,15 @@ export default function AgentDetail({
                 Dry run
               </Button>
             ) : null}
-            {pilot && !pilotRunnable ? (
-              <Button variant="secondary" size="sm" title={PILOT_COPY.agentRefused(agent.name)} onClick={openSetup}>
-                {PILOT_COPY.agentConnectToRun}
-              </Button>
-            ) : pilot ? (
-              <Button
-                variant="primary"
-                size="sm"
-                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
-                onClick={() => queueRunPreflight()}
-              >
-                Run
-              </Button>
-            ) : (
-              <RunWithMenu
-                providers={state.providers}
-                activeProviderId={state.activeProviderId}
-                activeModelByProviderId={state.activeModelByProviderId}
-                disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
-                onRun={(choice) => {
-                  queueRunPreflight(choice);
-                }}
-              />
-            )}
+            <RunWithMenu
+              providers={state.providers}
+              activeProviderId={state.activeProviderId}
+              activeModelByProviderId={state.activeModelByProviderId}
+              disabled={agent.compatibility?.supported === false || Boolean(agent.manifestError)}
+              onRun={(choice) => {
+                queueRunPreflight(choice);
+              }}
+            />
             <Menu
               ariaLabel={`${agent.name} actions`}
               trigger={
@@ -661,7 +635,7 @@ export default function AgentDetail({
           {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
         </div>
         <AgentNeedChips needs={agentNeeds(agent, activeTenant, resolveOrganizations(state).length > 0)} />
-        {activeTenant && !pilot && missingAgentServices.length > 0 ? (
+        {activeTenant && missingAgentServices.length > 0 ? (
           <ServiceNotConnectedNotice
             tenant={activeTenant}
             serviceIds={missingAgentServices.map((service) => service.id)}
@@ -1090,20 +1064,18 @@ export default function AgentDetail({
           dryRun={pendingRunChoice?.dryRun === true}
           agent={agent}
           activeTenant={pendingTenant}
-          providerName={pendingTenant?.kind === "sample" ? PILOT_COPY.providerName : pendingProvider?.name ?? pendingProviderId}
+          providerName={pendingProvider?.name ?? pendingProviderId}
           providerId={pendingProviderId}
-          providerIsLocal={pendingTenant?.kind === "sample" || pendingProvider?.isLocal === true}
+          providerIsLocal={pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
-          pilot={pendingTenant?.kind === "sample"}
           organizationName={organizationForTenant(resolveOrganizations(state), pendingTenant?.id)?.name}
           organizationInactive={pendingTenant !== undefined && pendingTenant.id !== state.activeTenantId}
           hasOrganizations={resolveOrganizations(state).length > 0}
-          model={pendingTenant?.kind === "sample" ? "Prepared sample text" : pendingModel}
+          model={pendingModel}
           deliverySaving={pendingDeliverySaveCount > 0}
           // Provider readiness is checked on its own, whatever the
-          // organization state; pilot runs use prepared text.
+          // organization state.
           providerReady={
-            pendingTenant?.kind === "sample" ||
             Boolean(
               pendingProvider &&
                 isProviderImplemented(pendingProvider.id) &&
@@ -1160,8 +1132,6 @@ function HubAgentDrawer({
   onInstall,
   onViewManifest,
   onCloseManifest,
-  pilot,
-  onConnectTenant,
 }: {
   agent: RegistryAgentSummary;
   preview: AgentManifestPreview | null;
@@ -1178,8 +1148,6 @@ function HubAgentDrawer({
   onInstall: () => void;
   onViewManifest: () => void;
   onCloseManifest: () => void;
-  pilot: boolean;
-  onConnectTenant: () => void;
 }) {
   const licenseMissing = hasLicenseShortfall(agent.requiresEntraTier, tenantTier);
   return (
@@ -1190,11 +1158,7 @@ function HubAgentDrawer({
         onClose={onClose}
         actions={
           <>
-            {pilot ? (
-              <Button size="sm" variant="secondary" title={PILOT_COPY.featureInProduction("Agent install")} onClick={onConnectTenant}>
-                Connect your tenant to install
-              </Button>
-            ) : !installConfirm ? (
+            {!installConfirm ? (
               <Button
                 size="sm"
                 variant="primary"
@@ -2728,7 +2692,6 @@ function RunPreflightModal({
   providerId,
   providerIsLocal,
   requestedScopes,
-  pilot = false,
   organizationName,
   organizationInactive = false,
   hasOrganizations = false,
@@ -2749,7 +2712,6 @@ function RunPreflightModal({
   /** Why the last Start was refused; shown inside the review with a recovery action. */
   startError?: string | null;
   onOpenProviderSettings?: () => void;
-  pilot?: boolean;
   organizationName?: string | undefined;
   /** The run is pinned to an organization that is not the active one. */
   organizationInactive?: boolean;
@@ -2769,13 +2731,12 @@ function RunPreflightModal({
   onClose: () => void;
   onConfirm: () => void;
 }) {
-  // The pilot tenant has every service and never asks Microsoft for consent.
   // A service with nothing granted blocks the run; a missing part of a
   // connected service is consented when the run starts.
-  const missingServices = activeTenant && !pilot
+  const missingServices = activeTenant
     ? missingServicesForAgent(activeTenant, agentServiceIds(agent))
     : [];
-  const missingParts = activeTenant && !pilot
+  const missingParts = activeTenant
     ? missingPartsForScopes(agent.scopes, availableScopeSet(activeTenant)).filter(
         (part) => !missingServices.some((service) => service.id === part.service),
       )
@@ -2890,18 +2851,13 @@ function RunPreflightModal({
             {serviceFree
               ? "Nothing. It reads no service data."
               : `${neededTitles.length > 0 ? formatServiceList(neededTitles) : "Microsoft 365 sign-in"}, ${agent.mode === "write" ? "read and write" : "read-only"}`}
-            {pilot ? (
-              <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">
-                Pilot mode runs this agent on the fictional sample tenant with prepared text instead of a model. Changes only touch the in-memory sample data.
-              </span>
-            ) : null}
           </PreflightFact>
           <PreflightFact label="Model">
             <span className="inline-flex items-center gap-1.5">
               <ProviderLogo provider={providerId} size={14} />
               {model ?? "Provider default"}
             </span>
-            {pilot ? null : providerIsLocal ? (
+            {providerIsLocal ? (
               <span className="mt-0.5 block text-xs text-[var(--color-success)]">{`${providerName}. Prompts stay on this device.`}</span>
             ) : (
               <>

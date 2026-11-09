@@ -97,13 +97,6 @@ import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
 import { connectedStarters } from "../setup/connected-starters";
-import {
-  PILOT_COPY,
-  PILOT_STARTERS,
-  pilotPromptEntry,
-  type PilotAgentSlug,
-} from "../shared/pilot-mode";
-import { PilotProductionPage } from "../components/PilotMode";
 import Workspaces from "./Workspaces";
 
 const promptGroups = CHAT_PROMPT_GROUPS;
@@ -205,7 +198,7 @@ function IntuneChatContent() {
     setActiveModel,
     dismissProviderAutoSelectNotice,
   } = useAppState();
-  const { requireTenant, requireTenantAndProvider } = useSetupFlow();
+  const { requireTenantAndProvider } = useSetupFlow();
   const shellChrome = useShellChromeOptional();
   const dataBoundaryContext = useDataBoundaryOptional();
   const updateContext = useUpdateStateOptional();
@@ -328,7 +321,6 @@ function IntuneChatContent() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
-  const pilot = activeTenant?.kind === "sample";
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const activeModel = resolveProviderDefaultModel(
     provider,
@@ -552,13 +544,6 @@ function IntuneChatContent() {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const scrollRoot = messagesScrollRef.current;
     if (!scrollRoot || !followLatestRef.current) return;
-    // A prepared pilot answer opens with its narrative and ends with a
-    // table and follow-up chips. Following the bottom would hide the
-    // narrative, so pilot mode keeps the prompt bubble at the top instead.
-    if (pilot && scrollLatestUserToTop(scrollRoot, messages, reducedMotion ? "auto" : "smooth")) {
-      setShowScrollToLatest(false);
-      return;
-    }
     if (typeof scrollRoot.scrollTo === "function") {
       scrollRoot.scrollTo({
         top: scrollRoot.scrollHeight,
@@ -568,7 +553,7 @@ function IntuneChatContent() {
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
     }
     setShowScrollToLatest(false);
-  }, [messages, sending, shownProgress?.message, pilot]);
+  }, [messages, sending, shownProgress?.message]);
 
   useEffect(
     () => () => {
@@ -672,7 +657,7 @@ function IntuneChatContent() {
       Boolean(activeTenant) || Boolean(requestedAgentMatch) || shouldUseMultiTenantFlow(content, scopeMode);
     if (
       needsTenantSetup &&
-      !(activeTenant?.kind === "sample" ? requireTenant : requireTenantAndProvider)(
+      !requireTenantAndProvider(
         createPendingIntent({
           kind: "chat-send",
           conversationId: targetConversationId,
@@ -739,7 +724,6 @@ function IntuneChatContent() {
       (await window.openAdminOS?.previewIntuneChatSend?.({ content }).then((preview) => !preview.reachesModel).catch(() => false));
     if (
       provider &&
-      activeTenant?.kind !== "sample" &&
       !provider.isLocal &&
       !blockedOnDevice &&
       (requiresHostedChatConsent(provider, activeTenant, activeModel) || Boolean(workspaceContext))
@@ -1556,13 +1540,7 @@ function IntuneChatContent() {
     awaitingConfirmationRuns.length + openFindings.length + (updateNeedsAttention ? 1 : 0);
   const homeSuggestions = promptGroups.flatMap((group) => group.prompts).slice(0, 3);
   // After a connect, the starters come from what was connected (mockup 32, section B).
-  const starterGroups = pilot ? [] : connectedStarters(activeTenant);
-  const pilotAgentName = (slug: PilotAgentSlug) => {
-    const agent =
-      state.installedAgents.find((entry) => entry.slug === slug) ??
-      state.registryAgents.find((entry) => entry.slug === slug);
-    return agent ? formatAgentDisplayName(agent) : slug;
-  };
+  const starterGroups = connectedStarters(activeTenant);
   const unknownConversation = Boolean(
     shellLoaded &&
       routeConversationId &&
@@ -1692,14 +1670,7 @@ function IntuneChatContent() {
     disabled: unknownConversation || sending || runningMultiTenant,
   };
 
-  const renderComposer = (placement: "home" | "docked") => pilot ? (
-    <PilotComposer
-      placement={placement}
-      sending={sending}
-      disabled={unknownConversation}
-      onPick={(prompt) => void handleSend(prompt)}
-    />
-  ) : (
+  const renderComposer = (placement: "home" | "docked") => (
     <>
     {hostedConsentPrompt ? (
       <HostedChatConsentPanel
@@ -1810,15 +1781,6 @@ function IntuneChatContent() {
       />
     </>
   );
-  if (workspaceView && pilot) {
-    return (
-      <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
-        {calmTopBar}
-        <PilotProductionPage feature="Workspaces" plural />
-      </div>
-    );
-  }
-
   if (workspaceView) {
     return (
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
@@ -1855,7 +1817,7 @@ function IntuneChatContent() {
                   <h1 className="line-clamp-2 font-serif text-display font-medium tracking-[-0.015em] text-[var(--color-text)]">
                     {activeTenant.displayName}
                   </h1>
-                  <p className="mt-1.5 text-base text-[var(--color-text-muted)]">{pilot ? PILOT_COPY.dataLabel : homeFreshness}</p>
+                  <p className="mt-1.5 text-base text-[var(--color-text-muted)]">{homeFreshness}</p>
                 </div>
               </div>
             ) : (
@@ -1874,7 +1836,7 @@ function IntuneChatContent() {
                 <ModelChoice providers={state.providers} activeProviderId={state.activeProviderId} onSelectProvider={setActiveProvider} />
               </div>
             ) : null}
-            {state.providerAutoSelectNotice && !pilot ? (
+            {state.providerAutoSelectNotice ? (
               <ProviderAutoSelectNotice
                 providerName={state.providerAutoSelectNotice.providerName}
                 onOpenSettings={() => navigate("/settings/providers")}
@@ -1948,7 +1910,7 @@ function IntuneChatContent() {
             {!activeTenant && modelReady ? (
               <NoTenantChatHome state={state} disabled={sending} onAsk={(question) => void handleSend(question, null)} />
             ) : null}
-            {pilot || !activeTenant ? null : (
+            {!activeTenant ? null : (
             <div className="mt-5 space-y-1.5">
             {starterGroups.map((group) => (
               <div key={group.service.id} data-starters={group.service.id} className="flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
@@ -2097,16 +2059,7 @@ function IntuneChatContent() {
                           setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
                         }}
                       />
-                      {pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId ? (
-                        <PilotFollowUps
-                          prompt={previousUserPromptForMessage(displayedMessages, message)}
-                          disabled={sending}
-                          agentName={pilotAgentName}
-                          onPick={(prompt) => void handleSend(prompt)}
-                          onOpenAgent={(slug) => navigate(`/agents/${encodeURIComponent(slug)}`)}
-                        />
-                      ) : null}
-                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.[0] ? (
+                      {message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.[0] ? (
                         <FollowUpChip
                           followUp={message.followUps[0]}
                           usesTenant={tenantNotUsed(message) && (message.tenantFollowUps ?? []).includes(message.followUps[0])}
@@ -2114,7 +2067,7 @@ function IntuneChatContent() {
                           onPick={fillComposer}
                         />
                       ) : null}
-                      {!pilot && message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
+                      {message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
                         <SuggestedAgentsBlock
                           suggestions={suggestedAgents}
                           runningAgentSlug={runningAgentSlug}
@@ -2172,7 +2125,7 @@ function IntuneChatContent() {
                 />
               </div>
             ) : null}
-            {state.providerAutoSelectNotice && !pilot ? (
+            {state.providerAutoSelectNotice ? (
               <ProviderAutoSelectNotice
                 providerName={state.providerAutoSelectNotice.providerName}
                 onOpenSettings={() => navigate("/settings/providers")}
@@ -2639,120 +2592,6 @@ function ChatComposer({
           <span>{hostedSentence}</span>
         </div>
       )}
-    </div>
-  );
-}
-
-const PILOT_CHIP_CLASS =
-  "min-h-[30px] max-w-full rounded-lg bg-[var(--color-hover)] px-2.5 py-1 text-left text-sm leading-5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-active)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60";
-
-/**
- * Pilot mode replaces free text with prepared prompts. The text box stays
- * visible but disabled, so it is clear that production Chat is open-ended.
- */
-function PilotComposer({
-  placement,
-  sending,
-  disabled,
-  onPick,
-}: {
-  placement: "home" | "docked";
-  sending: boolean;
-  disabled: boolean;
-  onPick: (prompt: string) => void;
-}) {
-  const explanationId = `pilot-composer-explanation-${placement}`;
-  return (
-    <div className="relative">
-      <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-composer)]">
-        <div
-          role="group"
-          aria-label="Prepared prompts"
-          className={`flex flex-wrap gap-1.5 ${placement === "home" ? "" : "max-h-[76px] overflow-y-auto"}`}
-        >
-          {PILOT_STARTERS.map((starter) => (
-            <button
-              key={starter.prompt}
-              type="button"
-              disabled={sending || disabled}
-              onClick={() => onPick(starter.prompt)}
-              title={starter.prompt}
-              className={PILOT_CHIP_CLASS}
-            >
-              {placement === "home" ? (
-                <>
-                  <span className="font-medium text-[var(--color-text)]">{starter.area}</span>
-                  <span aria-hidden="true" className="opacity-60"> · </span>
-                  {suggestionLabel(starter.prompt)}
-                </>
-              ) : (
-                <span className="font-medium">{starter.area}</span>
-              )}
-            </button>
-          ))}
-        </div>
-        <label htmlFor={`intune-chat-composer-${placement}`} className="sr-only">
-          {CHAT_COPY.composerLabel}
-        </label>
-        <textarea
-          id={`intune-chat-composer-${placement}`}
-          name={`intune-chat-composer-${placement}`}
-          rows={1}
-          disabled
-          aria-describedby={explanationId}
-          placeholder={PILOT_COPY.composerExplanation}
-          className="mt-3 block min-h-[34px] w-full resize-none rounded-lg bg-[var(--color-bg-raised)] px-3 py-1.5 text-md leading-[1.55] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] disabled:cursor-not-allowed"
-        />
-        <p id={explanationId} className="sr-only">{PILOT_COPY.composerExplanation}</p>
-      </div>
-      <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
-        <IconLock size={13} />
-        <span>{PILOT_COPY.composerBoundary}</span>
-      </div>
-    </div>
-  );
-}
-
-/** Follow-up chips and the matching pilot agent under a prepared answer. */
-function PilotFollowUps({
-  prompt,
-  disabled,
-  agentName,
-  onPick,
-  onOpenAgent,
-}: {
-  prompt: string | null;
-  disabled: boolean;
-  agentName: (slug: PilotAgentSlug) => string;
-  onPick: (prompt: string) => void;
-  onOpenAgent: (slug: PilotAgentSlug) => void;
-}) {
-  const entry = prompt ? pilotPromptEntry(prompt) : undefined;
-  if (!entry || (entry.followUps.length === 0 && !entry.agentSlug)) return null;
-  return (
-    <div role="group" aria-label="Follow-up prompts" className="-mt-5 mb-[30px] flex flex-wrap gap-1.5">
-      {entry.followUps.map((followUp) => (
-        <button
-          key={followUp}
-          type="button"
-          disabled={disabled}
-          onClick={() => onPick(followUp)}
-          className={PILOT_CHIP_CLASS}
-        >
-          {suggestionLabel(followUp)}
-        </button>
-      ))}
-      {entry.agentSlug ? (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onOpenAgent(entry.agentSlug!)}
-          className={`${PILOT_CHIP_CLASS} inline-flex items-center gap-1.5 ring-1 ring-[var(--color-accent)]/35`}
-        >
-          <IconLayers size={12} className="shrink-0" />
-          {PILOT_COPY.tryAgent(agentName(entry.agentSlug))}
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -4413,7 +4252,7 @@ function ChatMessageBubble({
       ) : (
         <>
           <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} />
-          <StepSummary message={message} details={tenant?.kind === "sample" && !multiTenant ? undefined : <AnswerDetails message={message} />} />
+          <StepSummary message={message} details={<AnswerDetails message={message} />} />
         </>
       )}
       {displayContent ? <AnswerBody message={message} content={displayContent} /> : null}
@@ -4477,16 +4316,6 @@ function AnswerScopeDisclosure({
   const refreshedAt = tenantUsed ? oldestTimestamp(sources.flatMap((source) => source.refreshedAt ?? [])) : undefined;
   const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
 
-  if (tenant?.kind === "sample" && !multiTenant) {
-    return (
-      <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
-        <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
-        <span>{tenant.displayName}</span>
-        <span aria-hidden="true" className="opacity-60">·</span>
-        <span>{PILOT_COPY.answerScope}</span>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -5050,25 +4879,6 @@ function safeWebSources(trace: IntuneChatToolTraceEntry[]) {
         .map((source) => [source.url, source]),
     ).values(),
   ];
-}
-
-/**
- * Scrolls the latest user message to the top of the transcript. Returns
- * false when there is no user message to anchor to.
- */
-function scrollLatestUserToTop(
-  scrollRoot: HTMLElement,
-  messages: IntuneChatMessage[],
-  behavior: ScrollBehavior,
-): boolean {
-  const latestUser = [...messages].reverse().find((message) => message.role === "user");
-  if (!latestUser) return false;
-  const element = [...scrollRoot.querySelectorAll<HTMLElement>("[data-message-id]")].find(
-    (candidate) => candidate.dataset.messageId === latestUser.id,
-  );
-  if (!element) return false;
-  element.scrollIntoView({ block: "start", inline: "nearest", behavior });
-  return true;
 }
 
 function scrollLatestUserNearTop(

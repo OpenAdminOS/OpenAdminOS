@@ -456,14 +456,13 @@ describe("Connect Microsoft 365 after a provider setup detour (PR #175 onboardin
 });
 
 describe("what a connected organization can answer", () => {
-  it("lists connected services with their granted parts, and claims nothing for unrecorded grants or the sample tenant", () => {
+  it("lists connected services with their granted parts, and claims nothing for unrecorded grants", () => {
     const tenant = intuneTenant();
     expect(connectedServices(tenant).map((entry) => [entry.service.id, entry.status])).toEqual([
       ["intune", "connected"],
       ["entra", "partial"],
     ]);
     expect(connectedServices({ ...tenant, grantedScopes: undefined })).toEqual([]);
-    expect(connectedServices({ ...tenant, kind: "sample" })).toEqual([]);
     expect(connectedServices(undefined)).toEqual([]);
   });
 

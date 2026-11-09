@@ -5,7 +5,6 @@ import { AppShell } from "./components/AppShell";
 import { Button } from "./components/Button";
 import { IconChat, IconWarning } from "./components/icons";
 import { EmptyState } from "./components/ui";
-import { PilotProductionOnly } from "./components/PilotMode";
 import { ServiceGate } from "./components/ServiceAccess";
 
 const Office = lazy(() => import("./pages/Office"));
@@ -75,21 +74,15 @@ export default function App() {
             <Route path="/cache" element={<LegacySettingsRedirect section="data" />} />
             <Route
               path="/office"
-              element={
-                <PilotProductionOnly feature="Agent Team">
-                  <Office />
-                </PilotProductionOnly>
-              }
+              element={<Office />}
             />
             <Route
               path="/changes"
               element={
-                <PilotProductionOnly feature="Changes" plural>
-                  {/* Drift tracks Intune and Entra configuration. */}
-                  <ServiceGate anyOf={["intune", "entra"]} feature="Changes">
-                    <Changes />
-                  </ServiceGate>
-                </PilotProductionOnly>
+                // Drift tracks Intune and Entra configuration.
+                <ServiceGate anyOf={["intune", "entra"]} feature="Changes">
+                  <Changes />
+                </ServiceGate>
               }
             />
             <Route path="/fleet" element={<FleetRedirect />} />

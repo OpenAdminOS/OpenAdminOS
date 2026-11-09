@@ -17,10 +17,10 @@ export interface ConnectedService {
 /**
  * The services a connected tenant can answer from, with the parts granted.
  * A tenant connected before grants were recorded has no list to read, so
- * nothing is claimed for it; the sample tenant is never a connection.
+ * nothing is claimed for it.
  */
 export function connectedServices(tenant: TenantRecord | undefined): ConnectedService[] {
-  if (!tenant || tenant.kind === "sample" || tenant.grantedScopes === undefined) return [];
+  if (!tenant || tenant.grantedScopes === undefined) return [];
   const granted = grantedParts(tenant);
   return AVAILABLE_SERVICES.flatMap((service) => {
     const status = serviceStatus(tenant, service.id);

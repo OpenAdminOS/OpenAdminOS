@@ -29,7 +29,6 @@ import type {
 } from "../shared/openAdminOS";
 import { partIdsFor, requestedScopes } from "../shared/openAdminOS";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY } from "../copy";
-import { PILOT_COPY } from "../shared/pilot-mode";
 
 const LOCAL_NO_TENANT = "Local model. No organization. Nothing leaves this device.";
 
@@ -38,72 +37,6 @@ function LocationProbe() {
 }
 
 describe("IntuneChat guest exploration", () => {
-  it("replaces free text with prepared prompt chips in pilot mode", async () => {
-    const user = userEvent.setup();
-    const pilotTenant = {
-      id: "openadminos-sample-tenant",
-      kind: "sample" as const,
-      displayName: "Contoso (pilot)",
-      username: "admin@contoso-sample.invalid",
-      homeAccountId: "openadminos-sample-account",
-      addedAt: "2026-10-26T12:00:00.000Z",
-    };
-    const state = createMockAppState({
-      tenants: [pilotTenant],
-      activeTenantId: pilotTenant.id,
-      installedAgents: [
-        {
-          ...createMockAgent(),
-          id: "find-inactive-devices",
-          slug: "find-inactive-devices",
-          name: "Find inactive devices",
-        },
-      ],
-    });
-    const prompt = "Which managed devices have not synced in the last 7 days?";
-    const conversation: IntuneChatConversation = {
-      id: "conversation-pilot",
-      title: prompt,
-      createdAt: "2026-10-26T12:00:00.000Z",
-      updatedAt: "2026-10-26T12:00:00.000Z",
-      tenantId: pilotTenant.id,
-      scopeKind: "single-tenant",
-    };
-    const messages: IntuneChatMessage[] = [
-      { id: "user-1", conversationId: conversation.id, role: "user", content: prompt, status: "completed", createdAt: "2026-10-26T12:00:00.000Z" },
-      { id: "assistant-1", conversationId: conversation.id, role: "assistant", content: "17 of 119 managed devices have not checked in.", status: "completed", createdAt: "2026-10-26T12:00:01.000Z" },
-    ];
-    const bridge = makeMockBridge(
-      {
-        streamIntuneChatMessage: vi.fn(async () => ({
-          conversation,
-          userMessage: messages[0]!,
-          assistantMessage: messages[1]!,
-          cacheStatus: { tenantId: pilotTenant.id, resources: [] },
-        })),
-        listIntuneChatConversations: vi.fn(async () => [conversation]),
-        getIntuneChatMessages: vi.fn(async () => messages),
-      },
-      state,
-    );
-    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
-
-    const composer = await screen.findByRole("textbox", { name: "Ask about your Microsoft 365 tenant" });
-    expect(composer).toBeDisabled();
-    expect(composer).toHaveAttribute("placeholder", PILOT_COPY.composerExplanation);
-    const chips = within(screen.getByRole("group", { name: "Prepared prompts" })).getAllByRole("button");
-    expect(chips).toHaveLength(6);
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
-
-    await user.click(chips[0]!);
-    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
-    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0]).toMatchObject({ content: prompt });
-    const followUps = await screen.findByRole("group", { name: "Follow-up prompts" });
-    expect(within(followUps).getByRole("button", { name: "Which devices are both stale and noncompliant" })).toBeInTheDocument();
-    expect(within(followUps).getByRole("button", { name: "Which devices are stale in Intune but still active in Entra" })).toBeInTheDocument();
-    expect(within(followUps).getByRole("button", { name: "Try the agent: Find inactive devices" })).toBeInTheDocument();
-    expect(screen.getByText(PILOT_COPY.answerScope)).toBeInTheDocument();
-  });
 
   it("shows the new conversation title as text, not an empty rename field", async () => {
     renderRoute(<IntuneChat />, {
@@ -497,14 +430,6 @@ describe("IntuneChat new conversation routing", () => {
   });
 });
 
-const PILOT_TENANT = {
-  id: "openadminos-sample-tenant",
-  kind: "sample" as const,
-  displayName: "Contoso (pilot)",
-  username: "admin@contoso-sample.invalid",
-  homeAccountId: "openadminos-sample-account",
-  addedAt: "2026-10-26T12:00:00.000Z",
-};
 
 /** A bridge whose stream emits started and completed, like the host. */
 function streamingBridge(state: ReturnType<typeof createMockAppState>) {
@@ -562,29 +487,6 @@ function spyOnMessageScrollIntoView() {
 }
 
 describe("IntuneChat answer scroll", () => {
-  it("keeps the prompt at the top when a pilot answer arrives", async () => {
-    const user = userEvent.setup();
-    const scroll = spyOnMessageScrollIntoView();
-    try {
-      const bridge = streamingBridge(
-        createMockAppState({ tenants: [PILOT_TENANT], activeTenantId: PILOT_TENANT.id }),
-      );
-      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
-
-      const chips = within(await screen.findByRole("group", { name: "Prepared prompts" })).getAllByRole("button");
-      await user.click(chips[0]!);
-      await screen.findByText(/17 of 119 managed devices have not checked in/);
-
-      await waitFor(() =>
-        expect(scroll.anchored).toContainEqual({
-          messageId: "user-scroll",
-          options: expect.objectContaining({ block: "start" }),
-        }),
-      );
-    } finally {
-      scroll.restore();
-    }
-  });
 
   it("keeps following the latest output in production", async () => {
     const user = userEvent.setup();
@@ -628,21 +530,6 @@ describe("IntuneChat automatic provider notice", () => {
     await user.click(screen.getByRole("button", { name: PROVIDER_DETECTION_COPY.autoSelectedNoticeDismiss }));
     await waitFor(() => expect(bridge.dismissProviderAutoSelectNotice).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByText(notice)).not.toBeInTheDocument());
-  });
-
-  it("never shows in pilot mode", async () => {
-    const bridge = makeMockBridge(
-      {},
-      createMockAppState({
-        tenants: [PILOT_TENANT],
-        activeTenantId: PILOT_TENANT.id,
-        providerAutoSelectNotice: { providerId: "lm-studio", providerName: "LM Studio" },
-      }),
-    );
-    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
-
-    await screen.findByRole("group", { name: "Prepared prompts" });
-    expect(screen.queryByText(notice)).not.toBeInTheDocument();
   });
 });
 

@@ -56,8 +56,6 @@ interface SetupFlowValue {
   openSetupForParts(partIds: readonly string[], options?: SetupOpenOptions): void;
   /** Opens tenant setup with "Your own app registration" chosen, and the named parts preselected. */
   openOwnRegistration(partIds?: readonly string[], options?: SetupOpenOptions): void;
-  /** Adds or reopens the pilot tenant and makes it active. */
-  startPilot(): Promise<void>;
 }
 
 const SetupFlowContext = createContext<SetupFlowValue | null>(null);
@@ -69,7 +67,6 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     state,
     loading,
     connectTenant,
-    addSampleTenant,
     cancelConnectTenant,
     getRequestedScopes,
     setActiveProvider,
@@ -82,7 +79,6 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
   const [scopesError, setScopesError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [connectedTenant, setConnectedTenant] = useState<TenantRecord | undefined>();
-  const [pilotRemoved, setPilotRemoved] = useState(false);
   // Options of the last sign-in attempt, so "Try again" and "Change
   // sign-in options" never switch the admin to a different app.
   const lastOptionsRef = useRef<ConnectTenantOptions | undefined>(undefined);
@@ -120,19 +116,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     },
     [state.activeProviderId, state.providers],
   );
-  // Pilot mode never uses a provider: Chat answers prepared prompts and the
-  // pilot agents run with prepared text. Only production work needs one.
-  const providerReadyForIntent = useCallback(
-    (candidate: PendingIntent | null | undefined) => {
-      const tenantId =
-        candidate?.kind === "agent-run" && candidate.tenantId
-          ? candidate.tenantId
-          : activeTenant?.id;
-      const tenant = state.tenants.find((entry) => entry.id === tenantId);
-      return tenant?.kind === "sample" || providerReady(candidate);
-    },
-    [activeTenant?.id, providerReady, state.tenants],
-  );
+  const providerReadyForIntent = providerReady;
 
   const loadScopes = useCallback(async () => {
     setScopes(null);
@@ -154,7 +138,6 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       onConnectedRef.current = options?.onConnected;
       setIntent(nextIntent);
       setError(null);
-      setPilotRemoved(false);
       setEditOptions(undefined);
       setPresetPartIds(partIds && partIds.length > 0 ? partIds : undefined);
       lastOptionsRef.current = undefined;
@@ -242,7 +225,6 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     setOpen(false);
     setIntent(null);
     setError(null);
-    setPilotRemoved(false);
     clearPendingIntent();
     if (wasWaiting) void cancelConnectTenant();
   }, [cancelConnectTenant, stage]);
@@ -252,10 +234,7 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     attemptIdRef.current = attemptId;
     lastOptionsRef.current = options;
     setError(null);
-    setPilotRemoved(false);
     setStage("waiting");
-    // The host removes the pilot tenant after a successful connect.
-    const hadPilot = state.tenants.some((tenant) => tenant.kind === "sample");
     try {
       const tenant = await connectTenant(options);
       if (attemptId !== attemptIdRef.current) {
@@ -272,11 +251,9 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         return;
       }
       setConnectedTenant(tenant);
-      setPilotRemoved(hadPilot && Boolean(tenant));
       // Intent-less flows (first run, status strip, Settings) continue into
       // provider selection when no provider is connected yet, so a fresh
-      // install is fully usable when the dialog closes. The new tenant is
-      // production, so pilot mode never waives the provider here.
+      // install is fully usable when the dialog closes.
       setStage(
         (!intent || intentNeedsProvider(intent)) && !providerReady(intent)
           ? "provider"
@@ -289,15 +266,6 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
     }
   }, [connectTenant, intent, providerReady, state.tenants, toast]);
 
-  const startPilot = useCallback(async () => {
-    attemptIdRef.current += 1;
-    await addSampleTenant();
-    setIntent(null);
-    setOpen(false);
-    setError(null);
-    clearPendingIntent();
-    navigate("/chat");
-  }, [addSampleTenant, navigate]);
 
   const tryAgain = useCallback(async () => {
     attemptIdRef.current += 1;
@@ -370,9 +338,8 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
       openSetup,
       openSetupForParts,
       openOwnRegistration,
-      startPilot,
     }),
-    [openOwnRegistration, openSetup, openSetupForParts, requireTenant, requireTenantAndProvider, startPilot],
+    [openOwnRegistration, openSetup, openSetupForParts, requireTenant, requireTenantAndProvider],
   );
 
   return (
@@ -394,7 +361,6 @@ export function SetupFlowProvider({ children }: { children: ReactNode }) {
         {...(presetPartIds ? { presetPartIds } : {})}
         onClose={closeFlow}
         onConnect={(options) => void startConnect(options)}
-        pilotRemoved={pilotRemoved}
         onKeepWaiting={() => setStage("waiting")}
         onTryAgain={() => void tryAgain()}
         onEditSignIn={editSignIn}

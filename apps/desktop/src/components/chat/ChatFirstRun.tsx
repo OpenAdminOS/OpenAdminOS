@@ -265,7 +265,7 @@ function writeReferencesDismissed(): void {
 
 /** Whether what a not-connected card asked for is now connected, so the admin can ask again. */
 export function notConnectedResolved(notConnected: IntuneChatNotConnected, activeTenant: TenantRecord | undefined): boolean {
-  if (!activeTenant || activeTenant.kind === "sample") return false;
+  if (!activeTenant) return false;
   if (notConnected.tenantId && notConnected.tenantId !== activeTenant.id) return false;
   const available = availableScopeSet(activeTenant);
   return notConnected.partIds.every((id) => servicePartById(id)?.scopes.every((scope) => available.has(scope.name)) ?? true);
@@ -325,7 +325,7 @@ export function NotConnectedCard({
   const noTenant = notConnected.reason === "no-tenant";
   // A no-tenant card whose Connect added a tenant with only some of the
   // services follows that tenant and offers what is still missing there.
-  const connectedSince = noTenant && activeTenant && activeTenant.kind !== "sample" ? activeTenant : undefined;
+  const connectedSince = noTenant && activeTenant ? activeTenant : undefined;
   const tenant = askedTenant ?? connectedSince;
   const resolved = notConnectedResolved(notConnected, activeTenant);
   // The next action follows what is still missing: after one service is

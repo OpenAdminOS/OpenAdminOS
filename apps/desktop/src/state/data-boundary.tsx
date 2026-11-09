@@ -14,7 +14,6 @@ import { NOTHING_LEAVES_COPY, deriveToolHostsCopy, deriveTrustCopy, promptsGoTo,
 const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
 import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
-import { PILOT_COPY } from "../shared/pilot-mode";
 
 export type DataBoundary =
   | {
@@ -106,17 +105,6 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
       ...(hosts ? { toolHosts: hosts.strip, toolHostsNote: hosts.composer } : {}),
       tooltip: `${novaVoiceSentence(Boolean(activeTenant), chatLocal ? provider?.name : undefined)}${chatSentence} Nova voice audio and shared context are active.${hosts ? ` ${hosts.detail}` : ""}`,
       isVoiceHosted: true,
-    };
-  }
-
-  // Pilot mode never sends anything to a model: Chat answers are prepared
-  // and pilot agents use prepared text, whatever provider is configured.
-  if (activeTenant?.kind === "sample") {
-    return {
-      kind: "local",
-      label: PILOT_COPY.boundaryLabel,
-      tooltip: PILOT_COPY.boundaryTooltip,
-      isVoiceHosted: false,
     };
   }
 

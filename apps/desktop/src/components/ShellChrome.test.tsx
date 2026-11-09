@@ -1,4 +1,4 @@
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -11,26 +11,20 @@ import {
 } from "../test/test-utils";
 import { DataBoundaryProvider, useDataBoundary } from "../state";
 import { AppShell } from "./AppShell";
-import { PilotProductionOnly } from "./PilotMode";
-import { PILOT_COPY } from "../shared/pilot-mode";
-
-function pilotState() {
-  return createMockAppState({
-    tenants: [
-      {
-        id: "openadminos-sample-tenant",
-        kind: "sample",
-        displayName: "Contoso (pilot)",
-        username: "admin@contoso-sample.invalid",
-        homeAccountId: "openadminos-sample-account",
-        addedAt: "2026-10-26T12:00:00.000Z",
-      },
-    ],
-    activeTenantId: "openadminos-sample-tenant",
-  });
-}
+import { SAMPLE_DATA_REMOVED_NOTICE } from "../copy";
 
 describe("shell chrome", () => {
+  it("says once that the sample data was removed by the upgrade", async () => {
+    const dismissSampleDataRemovedNotice = vi.fn(async () => createMockAppState());
+    renderRoute(<AppShell><div /></AppShell>, {
+      path: "*",
+      route: "/chat",
+      bridge: makeMockBridge({ dismissSampleDataRemovedNotice }, createMockAppState({ sampleDataRemoved: true })),
+    });
+    expect(await screen.findByText(SAMPLE_DATA_REMOVED_NOTICE)).toBeInTheDocument();
+    await waitFor(() => expect(dismissSampleDataRemovedNotice).toHaveBeenCalledOnce());
+  });
+
   it("keeps the organization, model boundary, and running work visible without a status strip", async () => {
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
@@ -208,53 +202,11 @@ describe("shell chrome", () => {
     expect(setActiveOrganization).toHaveBeenCalledWith("org-tenant-1");
   });
 
-  it("shows pilot mode chrome: sample organization label, banner, and reduced navigation", async () => {
-    renderRoute(<AppShell><div /></AppShell>, {
-      path: "*",
-      route: "/chat",
-      bridge: makeMockBridge({}, pilotState()),
-    });
-
-    const tenantButton = await screen.findByRole("button", {
-      name: /Switch organization, Contoso \(pilot\)/,
-    });
-    expect(within(tenantButton).getByText("Sample data")).toBeInTheDocument();
-    const banner = screen.getByRole("region", { name: "Pilot mode" });
-    expect(banner).toHaveTextContent(PILOT_COPY.banner);
-    expect(within(banner).getByRole("button", { name: "Connect your tenant" })).toBeInTheDocument();
-    const primary = screen.getByRole("navigation", { name: "Primary" });
-    expect(within(primary).getByRole("link", { name: "Agents" })).toBeInTheDocument();
-    expect(within(primary).getByRole("link", { name: "Runs" })).toBeInTheDocument();
-    // The Marketplace and Connections stay browsable in pilot mode.
-    expect(within(primary).getByRole("link", { name: "Marketplace" })).toBeInTheDocument();
-    expect(within(primary).getByRole("link", { name: "Connections" })).toHaveAttribute("href", "/connections");
-    expect(within(primary).queryByRole("link", { name: "Agent Team" })).not.toBeInTheDocument();
-    expect(within(primary).queryByRole("link", { name: "Changes" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Create workspace" })).not.toBeInTheDocument();
-    expect(screen.getByRole("status", { name: PILOT_COPY.boundaryLabel })).toBeInTheDocument();
-  });
-
   it("keeps the full navigation and no banner in production", async () => {
     renderRoute(<AppShell><div /></AppShell>, { path: "*", route: "/chat" });
     const primary = await screen.findByRole("navigation", { name: "Primary" });
     expect(within(primary).getByRole("link", { name: "Agent Team" })).toBeInTheDocument();
     expect(within(primary).getByRole("link", { name: "Changes" })).toBeInTheDocument();
-    expect(screen.queryByRole("region", { name: "Pilot mode" })).not.toBeInTheDocument();
-  });
-
-  it("renders the designed production page for a hidden route in pilot mode", async () => {
-    renderRoute(
-      <PilotProductionOnly feature="Agent Team">
-        <div>Team content</div>
-      </PilotProductionOnly>,
-      { path: "*", route: "/office", bridge: makeMockBridge({}, pilotState()) },
-    );
-    expect(await screen.findByRole("heading", { name: "Agent Team" })).toBeInTheDocument();
-    expect(
-      screen.getByText("Agent Team is available in production. Connect your tenant to use it."),
-    ).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Connect your tenant" })).toBeInTheDocument();
-    expect(screen.queryByText("Team content")).not.toBeInTheDocument();
   });
 
   it("names an own app registration in the organization menu (design round)", async () => {
@@ -281,7 +233,7 @@ describe("shell chrome", () => {
       appRegistration: { kind: "openadminos" as const, clientId: "14d82eec-204b-4c2f-b7e8-296a70dab67e" },
     };
     const state = createMockAppState({
-      tenants: [openAdminOSTenant, customTenant, legacyTenant, pilotState().tenants[0]!],
+      tenants: [openAdminOSTenant, customTenant, legacyTenant],
     });
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
@@ -297,64 +249,20 @@ describe("shell chrome", () => {
     expect(ours).not.toHaveTextContent(/app registration/i);
     const legacy = screen.getByRole("menuitemradio", { name: /Northwind/ });
     expect(legacy).not.toHaveTextContent(/app registration/i);
-    const pilot = screen.getByRole("menuitemradio", { name: /Contoso \(pilot\)/ });
-    expect(within(pilot).queryByText(/app registration|OpenAdminOS app/i)).not.toBeInTheDocument();
   });
 
-  it("opens the unchosen sign-in choice from the organization menu and the pilot banner", async () => {
-    const user = userEvent.setup();
-    renderRoute(<AppShell><div /></AppShell>, {
-      path: "*",
-      route: "/chat",
-      bridge: makeMockBridge({}, pilotState()),
-    });
-
-    const banner = await screen.findByRole("region", { name: "Pilot mode" });
-    await user.click(within(banner).getByRole("button", { name: "Connect your tenant" }));
-    expect(await screen.findByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
-    expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
-    await user.click(screen.getByRole("button", { name: "Cancel" }));
-
-    await user.click(screen.getByRole("button", { name: /Switch organization/ }));
-    await user.click(screen.getByRole("menuitem", { name: "Add organization" }));
-    expect(await screen.findByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
-    expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
-  });
-
-  it("offers no way into sample data from the organization menu", async () => {
+  it("offers Add organization and no sample data in the organization menu", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    const addSampleTenant = vi.fn(async () => pilotState());
     renderRoute(<AppShell><div /></AppShell>, {
       path: "*",
       route: "/chat",
-      bridge: makeMockBridge({ addSampleTenant }, emptyState),
+      bridge: makeMockBridge({}, emptyState),
     });
 
     await user.click(await screen.findByRole("button", { name: "Add an organization" }));
     expect(screen.getByRole("menuitem", { name: "Add organization" })).toBeInTheDocument();
     expect(screen.queryByRole("menuitem", { name: /sample data/i })).not.toBeInTheDocument();
-    expect(addSampleTenant).not.toHaveBeenCalled();
-  });
-
-  it("leaves pilot mode only after a confirm that says what is deleted", async () => {
-    const user = userEvent.setup();
-    const disconnectTenant = vi.fn(async () =>
-      createMockAppState({ tenants: [], activeTenantId: undefined }),
-    );
-    renderRoute(<AppShell><div /></AppShell>, {
-      path: "*",
-      route: "/chat",
-      bridge: makeMockBridge({ disconnectTenant }, pilotState()),
-    });
-
-    await user.click(await screen.findByRole("button", { name: /Switch organization, Contoso \(pilot\)/ }));
-    expect(screen.getByRole("menuitem", { name: "Add organization" })).toBeInTheDocument();
-    await user.click(screen.getByRole("menuitem", { name: "Leave pilot mode" }));
-    expect(await screen.findByText(/This deletes the fictional Contoso tenant from this device, with its pilot runs, chats/)).toBeInTheDocument();
-    expect(disconnectTenant).not.toHaveBeenCalled();
-    await user.click(screen.getByRole("button", { name: "Leave pilot mode" }));
-    expect(disconnectTenant).toHaveBeenCalledWith("openadminos-sample-tenant");
   });
 
   it("surfaces organization switch and updater retry failures", async () => {

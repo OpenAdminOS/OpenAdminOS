@@ -15,7 +15,6 @@ import { OPENADMINOS_APP_CLIENT_ID } from "../shared/openAdminOS";
 const INTUNE_PARTS = ["intune.people", "intune.devices", "intune.apps"];
 import { useSetupFlow } from "./SetupFlowContext";
 import { ORGANIZATION_COPY, PROVIDER_DETECTION_COPY, SETUP_COPY } from "../copy";
-import { PILOT_COPY } from "../shared/pilot-mode";
 
 function SetupTrigger() {
   const { requireTenant } = useSetupFlow();
@@ -250,7 +249,6 @@ describe("contextual tenant setup", () => {
     expect(
       await screen.findByText(/with 5 delegated Microsoft Graph permissions, all read-only/),
     ).toBeInTheDocument();
-    expect(screen.queryByText(PILOT_COPY.removedAfterConnect)).not.toBeInTheDocument();
   });
 
   it("connects with a custom app registration when the admin supplies one", async () => {
@@ -510,19 +508,6 @@ describe("contextual tenant setup", () => {
     await waitFor(() => expect(connectTenant).toHaveBeenCalledWith({ partIds: ["intune.devices"] }));
   });
 
-  it("starts pilot mode and returns to the app", async () => {
-    const user = userEvent.setup();
-    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    const addSampleTenant = vi.fn(async () => pilotState());
-    const bridge = makeMockBridge({ addSampleTenant }, emptyState);
-    renderSetup(bridge);
-
-    await user.click(await screen.findByRole("button", { name: "Start pilot mode" }));
-
-    await waitFor(() => expect(addSampleTenant).toHaveBeenCalledOnce());
-    expect(await screen.findByText("App content")).toBeInTheDocument();
-  });
-
   it("continues first-run setup into provider selection when no provider is connected", async () => {
     const user = userEvent.setup();
     const providers = mockProviders.map((provider) => ({
@@ -583,41 +568,6 @@ describe("contextual tenant setup", () => {
 
     await user.click(within(detected).getByRole("button", { name: PROVIDER_DETECTION_COPY.useDetected("Codex") }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
-  });
-
-  it("says pilot data was removed after connecting from pilot mode", async () => {
-    const user = userEvent.setup();
-    const connectedState = createMockAppState();
-    const bridge = makeMockBridge(
-      { connectTenant: vi.fn(async () => connectedState) },
-      pilotState(),
-    );
-    renderWithAppState(<OpenSetupButton />, { route: "/chat", bridge });
-
-    await user.click(await screen.findByRole("button", { name: "Open setup" }));
-    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
-    await user.click(
-      await screen.findByRole("button", { name: "Approve 10 read scopes and continue to Microsoft" }),
-    );
-    expect(await screen.findByText(PILOT_COPY.removedAfterConnect)).toBeInTheDocument();
-  });
-
-  it("does not ask for a provider before pilot agent runs", async () => {
-    const user = userEvent.setup();
-    const providers = mockProviders.map((provider) => ({
-      ...provider,
-      status: "error" as const,
-    }));
-    const onReady = vi.fn();
-    renderWithAppState(<RequireProviderButton onReady={onReady} />, {
-      route: "/agents",
-      bridge: makeMockBridge({}, { ...pilotState(), providers }),
-    });
-
-    await user.click(await screen.findByRole("button", { name: "Run agent" }));
-    expect(onReady).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("heading", { name: "Pick an LLM provider" })).not.toBeInTheDocument();
   });
 
   it("opens every connect entry point on two equal, unchosen sign-in choices", async () => {
@@ -799,16 +749,15 @@ describe("contextual tenant setup", () => {
 
 const OWN_REGISTRATION_ENTRY = "Use your own app registration";
 
-/** The setup entry points the app offers: Connect, own registration, a named service part, and pilot mode. */
+/** The setup entry points the app offers: Connect, own registration and a named service part. */
 function SetupEntryPoints() {
-  const { openSetup, openSetupForParts, openOwnRegistration, startPilot } = useSetupFlow();
+  const { openSetup, openSetupForParts, openOwnRegistration } = useSetupFlow();
   return (
     <div>
       <div>App content</div>
       <Button onClick={() => openSetup()}>Connect tenant</Button>
       <Button onClick={() => openOwnRegistration()}>{OWN_REGISTRATION_ENTRY}</Button>
       <Button onClick={() => openSetupForParts(["intune.devices"])}>Connect Intune devices</Button>
-      <Button onClick={() => void startPilot()}>Start pilot mode</Button>
     </div>
   );
 }
@@ -817,21 +766,6 @@ function renderSetup(bridge?: ReturnType<typeof makeMockBridge>) {
   return renderWithAppState(<SetupEntryPoints />, { route: "/chat", ...(bridge ? { bridge } : {}) });
 }
 
-function pilotState() {
-  return createMockAppState({
-    tenants: [
-      {
-        id: "openadminos-sample-tenant",
-        kind: "sample",
-        displayName: "Contoso (pilot)",
-        username: "admin@contoso-sample.invalid",
-        homeAccountId: "openadminos-sample-account",
-        addedAt: "2026-10-26T12:00:00.000Z",
-      },
-    ],
-    activeTenantId: "openadminos-sample-tenant",
-  });
-}
 
 function expectUnchosenSignIn() {
   const openAdminOS = screen.getByRole("radio", { name: "OpenAdminOS app" });
