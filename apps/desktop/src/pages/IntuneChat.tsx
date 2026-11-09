@@ -2392,7 +2392,11 @@ function ChatComposer({
   // The same sentence as Connections; the shield's tooltip adds what the location depends on.
   const hostedSentence = hostedComposerSentence(dataBoundary, activeProvider, Boolean(activeTenant));
   const locationDetail = activeProvider ? providerDataLocationDetail(activeProvider) : undefined;
-  const hostedTooltip = `${hostedSentence}${locationDetail ? ` ${locationDetail}` : ""}`;
+  // The detail follows the destination sentence, before the reference disclosure.
+  const toolHostsNote = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
+  const hostedTooltip = locationDetail && toolHostsNote && hostedSentence.endsWith(toolHostsNote)
+    ? `${hostedSentence.slice(0, -toolHostsNote.length)} ${locationDetail}${toolHostsNote}`
+    : `${hostedSentence}${locationDetail ? ` ${locationDetail}` : ""}`;
 
   return (
     <div className="relative">
@@ -4066,6 +4070,8 @@ function HostedChatConsentPanel({
     : undefined;
   const locationDetail = providerDataLocationDetail({ id: prompt.providerId });
   const through = sendsThroughTool({ id: prompt.providerId });
+  // An API named like its product answers through that API, not through itself.
+  const apiName = company === tool ? `the ${company} API` : company;
   const facts: Array<[string, string, boolean]> = [
     [HOSTED_CONFIRM_COPY.goesTo, providerDataLocation({ id: prompt.providerId, name: prompt.providerName }), true],
     // The acknowledgement is bound to the model, with or without a tenant.
@@ -4100,8 +4106,8 @@ function HostedChatConsentPanel({
             ? HOSTED_CONFIRM_COPY.bodyThroughNoTenant(tool)
             : HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, tenant)
           : noTenant
-            ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, company)
-            : HOSTED_CONFIRM_COPY.bodyTenant(tool, company, tenant)}
+            ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, apiName)
+            : HOSTED_CONFIRM_COPY.bodyTenant(tool, apiName, tenant)}
       </p>
       <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
         {facts.map(([term, value, hosted]) => (

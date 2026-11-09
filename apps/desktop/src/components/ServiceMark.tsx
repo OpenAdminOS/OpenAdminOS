@@ -29,7 +29,7 @@ function titleOf(service: string): string {
   try {
     return serviceById(service as ServiceId).title;
   } catch {
-    return service;
+    return service.charAt(0).toUpperCase() + service.slice(1);
   }
 }
 
