@@ -48,8 +48,14 @@ export const CONNECTIONS_COPY = {
   pageTitle: "Connections",
   title: (name: string) => `${name} connections`,
   lede: "What Chat and agents can read for this organization, and everything that leaves this device.",
-  noOrganization:
-    "No organization is active. Chat answers from the docs and public references; agents that read a service cannot start. Connect Microsoft 365 to add an organization, or choose one from the organization menu.",
+  ledeNone: "What Chat and agents can read, and everything that leaves this device.",
+  emptyTitle: "No organization connected",
+  emptyBody:
+    "Chat answers from the model and public references. Connect Microsoft 365 to read Intune, Entra and Defender for an organization.",
+  leavesNowHeading: "Leaves this device now",
+  reportsNowHeading: "Run reports and agent messages",
+  changeModel: "Change model",
+  references: "References",
   sampleOrganization:
     "This is the sample organization: a fictional company with built-in data and no Microsoft sign-in. Connect Microsoft 365 to add your own organization. The sample organization is removed after the first real connection.",
   map: {
@@ -87,7 +93,6 @@ export const CONNECTIONS_COPY = {
   servicesHeading: "Services",
   servicesBody: "Each service is consented on its own. Agents and Chat use only what is connected here.",
   microsoft365: "Microsoft 365",
-  microsoft365NotConnected: "Not connected. Connecting creates an organization named after the tenant.",
   connectMicrosoft365: "Connect Microsoft 365",
   otherServicesHeading: "Other services",
   otherServicesBody: "Each one has its own sign-in and is stored for this organization only.",

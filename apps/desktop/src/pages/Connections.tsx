@@ -1047,6 +1047,120 @@ function SavedRegistrationsList({
   );
 }
 
+/** The CLI or API that carries prompts, by its own name: "Claude Code", "Azure OpenAI API". */
+function channelName(channel: string | undefined): string | undefined {
+  return channel?.replace(/ to .*$/, "").replace(/^the /, "").replace(/ CLI$/, "");
+}
+
+/**
+ * Connections with no organization: the figure with the slots it will fill
+ * drawn dashed, the two ways forward, then what leaves this device now.
+ */
+function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachModel; onConnect: () => void; onShowReferences: () => void }) {
+  const navigate = useNavigate();
+  const { addSampleTenant } = useAppState();
+  const toast = useToast();
+  const [sampleBusy, setSampleBusy] = useState(false);
+  const hosted = model.model.kind === "hosted";
+  const via = channelName(model.model.channel);
+  const prompts = hosted
+    ? `${model.model.location ?? model.model.providerName ?? model.model.name}${via ? `, through ${via}` : ""}`
+    : promptsDestination(model.model);
+  return (
+    <>
+      <section className="conn-empty" aria-labelledby="connections-empty-title">
+        <figure className="conn-empty-fig" aria-labelledby="reach-map-title" aria-describedby="reach-map-description">
+          <h2 id="reach-map-title" className="sr-only">{CONNECTIONS_COPY.map.label}</h2>
+          <figcaption id="reach-map-description" className="sr-only">{reachDescription(model)}</figcaption>
+          <span className="conn-empty-col" aria-hidden="true">
+            {AVAILABLE_SERVICES.map((service) => <ServiceMark key={service.id} serviceId={service.id} off />)}
+          </span>
+          <span className="conn-empty-wire" aria-hidden="true" />
+          <DeviceTile size="lg" />
+          <span className="conn-empty-wire" aria-hidden="true" />
+          <span className="conn-empty-col" aria-hidden="true">
+            {model.referenceHosts.length === 0 ? <ReferenceMark name="" off /> : model.referenceHosts.map((host) => <ReferenceMark key={host} name={host} />)}
+          </span>
+        </figure>
+        <h2 id="connections-empty-title" className="font-serif text-lg font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.emptyTitle}</h2>
+        <p className="mt-1.5 max-w-[52ch] text-base text-[var(--color-text-soft)]">{CONNECTIONS_COPY.emptyBody}</p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <UiButton variant="primary" size="lg" onClick={onConnect}>{CONNECTIONS_COPY.connectMicrosoft365}</UiButton>
+          <UiButton
+            variant="secondary"
+            size="lg"
+            disabled={sampleBusy}
+            onClick={() => {
+              setSampleBusy(true);
+              void addSampleTenant()
+                .catch((caught) =>
+                  toast.error(
+                    ORGANIZATION_COPY.sampleFailed(userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? ""),
+                  ),
+                )
+                .finally(() => setSampleBusy(false));
+            }}
+          >
+            {ORGANIZATION_COPY.previewSample}
+          </UiButton>
+        </div>
+      </section>
+
+      <section aria-labelledby="connections-leaves-now" className="mt-8">
+        <SectionHeading id="connections-leaves-now" title={CONNECTIONS_COPY.leavesNowHeading} />
+        <ul className="conn-rows">
+          <li className="conn-row">
+            {hosted ? <ReferenceMark name={prompts.split(" ")[0] ?? ""} size="lg" /> : <ReferenceMark name="" size="lg" off />}
+            <div className="min-w-0">
+              <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.promptsNoOrganization}</div>
+              <div className={`text-sm ${hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`}>{prompts}</div>
+            </div>
+            <span />
+            <UiButton className="conn-row-action" size="sm" variant="ghost" onClick={() => navigate("/settings/providers")}>
+              {CONNECTIONS_COPY.changeModel}
+            </UiButton>
+          </li>
+          {model.voice ? (
+            <li className="conn-row">
+              <ReferenceMark name={model.voice.provider} size="lg" />
+              <div className="min-w-0">
+                <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.voice}</div>
+                <div className="text-sm text-[var(--color-warning)]">{CONNECTIONS_COPY.map.voiceDestination(model.voice.provider)}</div>
+              </div>
+              <span />
+              <span />
+            </li>
+          ) : null}
+          <li className="conn-row">
+            {model.referenceHosts[0] ? <ReferenceMark name={model.referenceHosts[0]} size="lg" /> : <ReferenceMark name="" size="lg" off />}
+            <div className="min-w-0">
+              <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.questionWords}</div>
+              <div className="truncate text-sm text-[var(--color-text-muted)]">
+                {model.referenceHosts.length > 0 ? model.referenceHosts.join(", ") : CONNECTIONS_COPY.map.noReferences}
+              </div>
+            </div>
+            <span />
+            <UiButton className="conn-row-action" size="sm" variant="ghost" onClick={onShowReferences}>
+              {CONNECTIONS_COPY.references}
+            </UiButton>
+          </li>
+          {model.reportDestinations && model.reportDestinations.length > 0 ? (
+            <li className="conn-row">
+              <ReferenceMark name={model.reportDestinations[0]!} size="lg" />
+              <div className="min-w-0">
+                <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.reportsNowHeading}</div>
+                <div className="truncate text-sm text-[var(--color-text-muted)]">{model.reportDestinations.join(", ")}</div>
+              </div>
+              <span />
+              <span />
+            </li>
+          ) : null}
+        </ul>
+      </section>
+    </>
+  );
+}
+
 type ConnectionsView = "connections" | "organizations";
 
 /**
@@ -1084,6 +1198,15 @@ export default function Connections() {
     });
   };
 
+  const showReferences = () => {
+    // The section heading takes focus so keyboard users land on it too.
+    const heading = document.getElementById("connections-references");
+    if (!heading) return;
+    heading.tabIndex = -1;
+    heading.scrollIntoView?.({ behavior: "smooth", block: "start" });
+    heading.focus({ preventScroll: true });
+  };
+
   const updateConnectorRoute = (connectorId: string | null) => {
     const next = new URLSearchParams(location.search);
     if (connectorId) next.set("connector", connectorId);
@@ -1096,7 +1219,7 @@ export default function Connections() {
     <>
       <PageHeader
         title={organization ? CONNECTIONS_COPY.title(organization.name) : CONNECTIONS_COPY.pageTitle}
-        subtitle={CONNECTIONS_COPY.lede}
+        subtitle={organization ? CONNECTIONS_COPY.lede : CONNECTIONS_COPY.ledeNone}
         wide
       />
       <PageBody>
@@ -1105,102 +1228,79 @@ export default function Connections() {
             Loading connections
           </div>
         ) : (
-        <div className="connections-page calm-page-column-wide pb-16">
-          <Tabs
-            className="mb-5"
-            ariaLabel={CONNECTIONS_COPY.viewsLabel}
-            value={view}
-            onValueChange={setView}
-            tabs={[
-              { id: "connections", label: organization?.name ?? ORGANIZATION_COPY.noOrganization, panelId: "connections-view-connections" },
-              { id: "organizations", label: CONNECTIONS_COPY.organizationsTab, panelId: "connections-view-organizations" },
-            ]}
-          />
-          {view === "organizations" ? (
-            <div role="tabpanel" id="connections-view-organizations" aria-label={CONNECTIONS_COPY.organizationsTab}>
-              <OrganizationsList state={state} onAdd={openSetup} />
-              {savedRegistrations.length > 0 ? (
-                <SavedRegistrationsList registrations={savedRegistrations} onRemove={removeSavedAppRegistration} />
-              ) : null}
-            </div>
-          ) : (
-          <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
-          {!organization ? (
-            <div role="status" className="mb-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-              {CONNECTIONS_COPY.noOrganization}
-            </div>
-          ) : sample ? (
-            <div role="status" className="mb-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
-              {CONNECTIONS_COPY.sampleOrganization}
-            </div>
-          ) : null}
-
-          <ReachMap model={reach} />
-
-          <section aria-labelledby="connections-services" className="mt-8">
-            <SectionHeading id="connections-services" title={CONNECTIONS_COPY.servicesHeading} body={CONNECTIONS_COPY.servicesBody} />
-            {organization && tenant ? (
-              <MicrosoftGroup organization={organization} tenant={tenant} />
+          <div className="connections-page calm-page-column-wide pb-16">
+            <Tabs
+              className="mb-5"
+              ariaLabel={CONNECTIONS_COPY.viewsLabel}
+              value={view}
+              onValueChange={setView}
+              tabs={[
+                { id: "connections", label: organization?.name ?? ORGANIZATION_COPY.noOrganization, panelId: "connections-view-connections" },
+                { id: "organizations", label: CONNECTIONS_COPY.organizationsTab, panelId: "connections-view-organizations" },
+              ]}
+            />
+            {view === "organizations" ? (
+              <div role="tabpanel" id="connections-view-organizations" aria-label={CONNECTIONS_COPY.organizationsTab}>
+                <OrganizationsList state={state} onAdd={openSetup} />
+                {savedRegistrations.length > 0 ? (
+                  <SavedRegistrationsList registrations={savedRegistrations} onRemove={removeSavedAppRegistration} />
+                ) : null}
+              </div>
             ) : (
-              <div>
-                <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-                  <strong className="text-sm font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.microsoft365}</strong>
-                  <span className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.microsoft365NotConnected}</span>
-                </div>
-                <ul className="divide-y divide-[var(--color-border-soft)] border-y border-[var(--color-border-soft)]">
-                  {AVAILABLE_SERVICES.map((service) => (
-                    <li key={service.id} className="grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3 py-3">
-                      <ServiceMark serviceId={service.id} size="lg" off />
-                      <div className="min-w-0">
-                        <div className="text-base font-medium text-[var(--color-text)]">{service.title}</div>
-                        <div className="text-sm text-[var(--color-text-muted)]">{service.summary}</div>
+              <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
+                {!organization ? (
+                  <NoOrganization model={reach} onConnect={openSetup} onShowReferences={showReferences} />
+                ) : (
+                  <>
+                    {sample ? (
+                      <div role="status" className="mb-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+                        {CONNECTIONS_COPY.sampleOrganization}
                       </div>
-                      <ReachState tone="off">{SERVICE_COPY.status.missing}</ReachState>
-                    </li>
-                  ))}
-                </ul>
-                <div className="mt-3">
-                  <UiButton variant="primary" size="sm" onClick={openSetup}>{CONNECTIONS_COPY.connectMicrosoft365}</UiButton>
-                </div>
+                    ) : null}
+
+                    <ReachMap model={reach} />
+
+                    <section aria-labelledby="connections-services" className="mt-8">
+                      <SectionHeading id="connections-services" title={CONNECTIONS_COPY.servicesHeading} body={CONNECTIONS_COPY.servicesBody} />
+                      {tenant ? <MicrosoftGroup organization={organization} tenant={tenant} /> : null}
+                      <div className="mb-2 mt-6 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <strong className="text-sm font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.otherServicesHeading}</strong>
+                        <span className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.otherServicesBody}</span>
+                      </div>
+                      <div className="grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3 border-y border-[var(--color-border-soft)] py-3">
+                        <span aria-hidden="true" className="svc-mark" data-size="lg" data-off="true">+</span>
+                        <div className="min-w-0">
+                          <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.addService}</div>
+                          <div className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.addServiceBody}</div>
+                        </div>
+                        <UiButton size="sm" variant="secondary" onClick={() => navigate("/marketplace")}>{CONNECTIONS_COPY.openMarketplace}</UiButton>
+                      </div>
+                    </section>
+                  </>
+                )}
+
+                <PublicReferences state={state} />
+
+                <section aria-labelledby="connections-results" className="mt-8">
+                  <SectionHeading id="connections-results" title={CONNECTIONS_COPY.resultsHeading} body={CONNECTIONS_COPY.resultsBody} />
+                  {sample ? (
+                    <p className="border-y border-[var(--color-border-soft)] py-3 text-sm text-[var(--color-text-muted)]">
+                      {PILOT_COPY.featureInProduction("Connector deliveries", true)}
+                    </p>
+                  ) : (
+                    <>
+                      <ResultDestinationsSummary destinations={destinations} loaded={Boolean(connectors)} />
+                      <ConnectorsSettingsSection
+                        connectorId={searchParams.get("connector")}
+                        onConnectorChange={updateConnectorRoute}
+                        onConnectorsLoaded={setConnectors}
+                      />
+                    </>
+                  )}
+                </section>
               </div>
             )}
-            <div className="mb-2 mt-6 flex flex-wrap items-center gap-x-3 gap-y-1">
-              <strong className="text-sm font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.otherServicesHeading}</strong>
-              <span className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.otherServicesBody}</span>
-            </div>
-            <div className="grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3 border-y border-[var(--color-border-soft)] py-3">
-              <span aria-hidden="true" className="svc-mark" data-size="lg" data-off="true">+</span>
-              <div className="min-w-0">
-                <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.addService}</div>
-                <div className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.addServiceBody}</div>
-              </div>
-              <UiButton size="sm" variant="secondary" onClick={() => navigate("/marketplace")}>{CONNECTIONS_COPY.openMarketplace}</UiButton>
-            </div>
-          </section>
-
-          <PublicReferences state={state} />
-
-          <section aria-labelledby="connections-results" className="mt-8">
-            <SectionHeading id="connections-results" title={CONNECTIONS_COPY.resultsHeading} body={CONNECTIONS_COPY.resultsBody} />
-            {sample ? (
-              <p className="border-y border-[var(--color-border-soft)] py-3 text-sm text-[var(--color-text-muted)]">
-                {PILOT_COPY.featureInProduction("Connector deliveries", true)}
-              </p>
-            ) : (
-              <>
-                <ResultDestinationsSummary destinations={destinations} loaded={Boolean(connectors)} />
-                <ConnectorsSettingsSection
-                  connectorId={searchParams.get("connector")}
-                  onConnectorChange={updateConnectorRoute}
-                  onConnectorsLoaded={setConnectors}
-                />
-              </>
-            )}
-          </section>
-
           </div>
-          )}
-        </div>
         )}
       </PageBody>
     </>

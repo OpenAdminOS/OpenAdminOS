@@ -102,16 +102,45 @@ describe("Connections reach map", () => {
     expect(reachDescription(model)).not.toContain("Region not reported");
   });
 
-  it("shows No organization with nothing read and a Connect action", async () => {
+  it("shows an empty state with Connect Microsoft 365 and no services list when no organization is active", async () => {
     const user = userEvent.setup();
     const { activeTenantId: _none, ...state } = createMockAppState({ tenants: [] });
     render({ ...state, tenants: [] });
     expect(await screen.findByRole("heading", { name: CONNECTIONS_COPY.pageTitle })).toBeInTheDocument();
-    expect(screen.getByText(CONNECTIONS_COPY.noOrganization)).toBeInTheDocument();
-    const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    expect(map).toHaveAccessibleDescription(/^No organization reads no service into this device\./);
-    await user.click(screen.getByRole("button", { name: CONNECTIONS_COPY.connectMicrosoft365 }));
+    expect(screen.getByText(CONNECTIONS_COPY.ledeNone)).toBeInTheDocument();
+    expect(screen.queryByText(CONNECTIONS_COPY.lede)).not.toBeInTheDocument();
+    const empty = screen.getByRole("region", { name: CONNECTIONS_COPY.emptyTitle });
+    expect(within(empty).getByText(CONNECTIONS_COPY.emptyBody)).toBeInTheDocument();
+    // The figure keeps its text alternative.
+    const figure = within(empty).getByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(figure).toHaveAccessibleDescription(/^No organization reads no service into this device\./);
+    // One filled button: Connect Microsoft 365. Sample data is the secondary way in.
+    expect(within(empty).getByRole("button", { name: ORGANIZATION_COPY.previewSample })).toBeInTheDocument();
+    // No services list with Not connected rows, and no empty map.
+    expect(screen.queryByRole("region", { name: CONNECTIONS_COPY.servicesHeading })).not.toBeInTheDocument();
+    expect(screen.queryByText(SERVICE_COPY.status.missing)).not.toBeInTheDocument();
+    expect(document.querySelector(".reach-map")).toBeNull();
+    const leaves = screen.getByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
+    expect(within(leaves).getByText(CONNECTIONS_COPY.map.promptsNoOrganization)).toBeInTheDocument();
+    expect(within(leaves).getByRole("button", { name: CONNECTIONS_COPY.changeModel })).toBeInTheDocument();
+    await user.click(within(empty).getByRole("button", { name: CONNECTIONS_COPY.connectMicrosoft365 }));
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("names the hosted destination in amber with no organization and opens sample data", async () => {
+    const user = userEvent.setup();
+    const { activeTenantId: _none, ...state } = createMockAppState({
+      tenants: [],
+      activeProviderId: "openai",
+      mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true } }),
+    });
+    const bridge = render({ ...state, tenants: [] });
+    const leaves = await screen.findByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
+    const prompts = within(leaves).getByText("OpenAI API · US, through Codex");
+    expect(prompts.className).toContain("--color-warning");
+    expect(within(leaves).getByText("www.kqlsearch.com")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: ORGANIZATION_COPY.previewSample }));
+    await waitFor(() => expect(bridge.addSampleTenant).toHaveBeenCalled());
   });
 });
 
@@ -633,9 +662,9 @@ describe("hosted reach copy with no organization (Muse round 2)", () => {
     expect(description).toContain("Prompts and agent context go through the Codex CLI to OpenAI. No tenant data is included, because no organization is active.");
     expect(description).not.toContain("tenant data go");
     render(state);
-    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    expect(within(map).getByText(CONNECTIONS_COPY.map.promptsNoOrganization)).toBeInTheDocument();
-    expect(within(map).queryByText(CONNECTIONS_COPY.map.prompts)).not.toBeInTheDocument();
+    const leaves = await screen.findByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
+    expect(within(leaves).getByText(CONNECTIONS_COPY.map.promptsNoOrganization)).toBeInTheDocument();
+    expect(screen.queryByText(CONNECTIONS_COPY.map.prompts)).not.toBeInTheDocument();
   });
 
   it("keeps the tenant wording when an organization is active", () => {
