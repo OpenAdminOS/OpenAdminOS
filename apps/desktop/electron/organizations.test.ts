@@ -6,6 +6,7 @@ import { describe, it } from "node:test";
 
 import {
   agentCallsNoServiceApi,
+  normalizeOrganizationName,
   reconcileOrganizations,
   scheduleRunsInActiveOrganization,
   type AgentSummary,
@@ -678,6 +679,27 @@ describe("connections of other vendors survive (review round 1)", () => {
       // This version cannot run schedules in, or switch to, an organization without Microsoft 365.
       await assert.rejects(fixture.store.assignAgentSchedule("find-inactive-devices", "org-northwind"), /cannot run schedules in that organization/);
       await assert.rejects(fixture.store.setActiveOrganization("org-northwind"), /no longer on this device/);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+describe("organization names (review round 1)", () => {
+  it("cuts a stored name by code points and never splits a surrogate pair", () => {
+    const name = `${"a".repeat(79)}😀😀`;
+    const normalized = normalizeOrganizationName(name)!;
+    assert.equal([...normalized].length, 80);
+    assert.equal(normalized.endsWith("😀"), true);
+    assert.equal(/[\uD800-\uDBFF]$/.test(normalized), false);
+  });
+
+  it("refuses a new name over 80 characters instead of cutting it, and counts emoji as one", async () => {
+    const fixture = await makeStore(currentVersionState());
+    try {
+      await assert.rejects(fixture.store.renameOrganization(`org-${woodgrove.id}`, "x".repeat(81)), /at most 80 characters/);
+      const ok = await fixture.store.renameOrganization(`org-${woodgrove.id}`, "😀".repeat(80));
+      assert.equal(ok.organizations?.[0]?.name, "😀".repeat(80));
     } finally {
       await fixture.close();
     }

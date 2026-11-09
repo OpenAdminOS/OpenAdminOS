@@ -163,6 +163,8 @@ import {
   mergeGrantedScopes,
   missingServiceCopy,
   normalizeOrganizationName,
+  ORGANIZATION_NAME_MAX_LENGTH,
+  organizationNameLength,
   organizationForTenant,
   reconcileOrganizations,
   qualifyScope,
@@ -6950,6 +6952,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const normalized = normalizeOrganizationName(name);
     if (!normalized) {
       throw new Error("Enter a name for the organization.");
+    }
+    // A new name over the limit is refused, not cut: the admin sees the name kept.
+    const collapsed = name.replace(/\s+/g, " ").trim();
+    if (organizationNameLength(collapsed) > ORGANIZATION_NAME_MAX_LENGTH) {
+      throw new Error(`Use at most ${ORGANIZATION_NAME_MAX_LENGTH} characters for the organization name.`);
     }
     await this.serialize(async () => {
       const persisted = await this.read();

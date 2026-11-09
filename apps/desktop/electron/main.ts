@@ -128,7 +128,7 @@ import type {
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
-import { providerCatalog, scheduleRunsInActiveOrganization, servicePartById } from "@openadminos/agent-sdk";
+import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, scheduleRunsInActiveOrganization, servicePartById } from "@openadminos/agent-sdk";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -6550,7 +6550,8 @@ function registerIpcHandlers() {
   ipcMain.handle("openadminos:rename-organization", handleTrusted((_event, id: unknown, name: unknown) =>
     store.renameOrganization(
       requireBoundedString(id, "organizationId", 300),
-      requireBoundedString(name, "name", 400),
+      // UTF-16 length: the stored limit counts code points, each at most two units.
+      requireBoundedString(name, "name", ORGANIZATION_NAME_MAX_LENGTH * 2),
     ),
   ),
   );

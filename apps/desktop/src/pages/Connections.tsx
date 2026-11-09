@@ -27,6 +27,7 @@ import { partShortLabel } from "../shared/agent-needs";
 import { reportDestinations, resultDestinations, unconfiguredDestinations } from "../shared/delivery-destinations";
 import {
   AVAILABLE_SERVICES,
+  ORGANIZATION_NAME_MAX_LENGTH,
   SERVICE_PARTS,
   activeOrganizationOf,
   grantedParts,
@@ -649,7 +650,7 @@ function OrganizationsList({ state }: { state: AppState }) {
                       name="organization-name"
                       autoComplete="off"
                       value={draft}
-                      maxLength={80}
+                      maxLength={ORGANIZATION_NAME_MAX_LENGTH * 2}
                       disabled={busy}
                       onChange={(event) => setDraft(event.target.value)}
                       className="h-8 min-w-[200px] rounded-md bg-[var(--color-surface)] px-2.5 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"

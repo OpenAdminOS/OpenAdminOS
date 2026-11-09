@@ -32,9 +32,17 @@ export function normalizeOrganizationName(value: unknown): string | undefined {
   // Control characters never belong in a name shown across the shell.
   const name = value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (name.length === 0) return undefined;
-  return name.length > ORGANIZATION_NAME_MAX_LENGTH
-    ? name.slice(0, ORGANIZATION_NAME_MAX_LENGTH).trim()
+  // Count and cut by code points, so a character outside the basic plane
+  // is never split into half a surrogate pair.
+  const codePoints = [...name];
+  return codePoints.length > ORGANIZATION_NAME_MAX_LENGTH
+    ? codePoints.slice(0, ORGANIZATION_NAME_MAX_LENGTH).join("").trim()
     : name;
+}
+
+/** Length of a name in code points, as the limit counts it. */
+export function organizationNameLength(name: string): number {
+  return [...name].length;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
