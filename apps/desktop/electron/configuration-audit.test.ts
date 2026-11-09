@@ -471,6 +471,25 @@ describe("legacy grants (design round review)", () => {
 });
 
 describe("configuration audit, design round review (Muse C, G, H, I, K)", () => {
+  it("records the move to organizations once while reads overlap the write that carries it", async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const fixture = await makeFixture({ tenants: [contoso], activeTenantId: contoso.id, organizations: undefined });
+      try {
+        // Reads started while the first write is in flight see the file from
+        // before the move; none of them may queue it again.
+        await Promise.all([
+          fixture.store.setActiveProvider("openai"),
+          ...Array.from({ length: 8 }, () => fixture.store.getAppState()),
+        ]);
+        await fixture.store.setActiveProvider("ollama");
+        const events = await fixture.recorded();
+        assert.equal(events.filter((event) => event.type === "organizations.migrated").length, 1);
+      } finally {
+        await fixture.close();
+      }
+    }
+  });
+
   it("records the move to organizations once, on the first write after it", async () => {
     const fixture = await makeFixture({ tenants: [contoso], activeTenantId: contoso.id, organizations: undefined });
     try {
