@@ -129,6 +129,7 @@ import type {
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
 import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, scheduleRunsInActiveOrganization, servicePartById } from "@openadminos/agent-sdk";
+import { companionUpcomingSchedules, nextRunTimeForSchedule } from "./companion-schedules.js";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -2633,28 +2634,7 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
       status: run.status,
       route: `/runs/${run.id}`,
     }));
-  // Only the active organization's schedules can run, so only they are listed and counted as due.
-  const upcomingSchedules = state.installedAgents
-    .filter(
-      (agent) =>
-        agent.schedule?.enabled === true &&
-        scheduleRunsInActiveOrganization(agent.schedule, state.activeOrganizationId),
-    )
-    .map((agent) => {
-      const latest = latestScheduledRunForAgent(state.runs, agent.slug);
-      return {
-        agentSlug: agent.slug,
-        agentName: agent.name,
-        mode: agent.mode,
-        nextRunAt: new Date(nextRunTimeForSchedule(agent.schedule, nowMs)).toISOString(),
-        intervalSeconds: agent.schedule?.intervalSeconds ?? 3600,
-        ...(latest?.status ? { lastStatus: latest.status } : {}),
-        ...(latest?.changeState ? { changeState: latest.changeState } : {}),
-        route: `/agents/${agent.slug}`,
-      };
-    })
-    .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))
-    .slice(0, 5);
+  const upcomingSchedules = companionUpcomingSchedules(state, nowMs);
   const recentActivity = state.runs
     .filter((run) => run.status !== "failed")
     .slice(0, 6)
@@ -2757,27 +2737,6 @@ async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult
   }
 
   return result;
-}
-
-function nextRunTimeForSchedule(
-  schedule: AgentSchedule | undefined,
-  nowMs = Date.now(),
-): number {
-  if (!schedule?.enabled) return Number.POSITIVE_INFINITY;
-  const lastFired = schedule.lastScheduledRunAt
-    ? new Date(schedule.lastScheduledRunAt).getTime()
-    : 0;
-  if (lastFired <= 0) return nowMs;
-  return lastFired + schedule.intervalSeconds * 1000;
-}
-
-function latestScheduledRunForAgent(
-  runs: RunRecord[],
-  agentSlug: string,
-): RunRecord | undefined {
-  return runs
-    .filter((run) => run.agentSlug === agentSlug && run.trigger === "schedule")
-    .sort((a, b) => Date.parse(b.queuedAt) - Date.parse(a.queuedAt))[0];
 }
 
 function agentNameForRun(
