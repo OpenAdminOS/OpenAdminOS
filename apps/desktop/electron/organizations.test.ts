@@ -307,9 +307,11 @@ describe("organization migration", () => {
         { id: "org-gone", name: "Gone", createdAt: "x", connections: { microsoft365: { tenantId: "gone" } } },
         // Malformed records are dropped.
         "not a record",
-        { id: "", name: "No id", connections: { microsoft365: { tenantId: fabrikam.id } } },
         // The sample kind follows the tenant, never the record.
         { id: "org-fake-sample", name: "x".repeat(200), kind: "sample", createdAt: "x", connections: { microsoft365: { tenantId: fabrikam.id } } },
+        // No id: kept under a fresh id (round 3) unless its tenant is
+        // already claimed, as here, where it loses to the record above.
+        { id: "", name: "No id", connections: { microsoft365: { tenantId: fabrikam.id } } },
       ],
       installedAgents: [agent("find-inactive-devices", { schedule: { ...schedule(), organizationId: "org-gone" } })],
     }));
@@ -663,7 +665,7 @@ describe("connections of other vendors survive (review round 1)", () => {
       organizations: [
         { id: `org-${woodgrove.id}`, name: "Woodgrove", createdAt: "2026-09-01T08:00:00.000Z", connections: { microsoft365: { tenantId: woodgrove.id }, jamf: { instanceUrl: "https://woodgrove.jamfcloud.com" } } },
         { id: "org-northwind", name: "Northwind Studio", createdAt: "2026-11-20T08:00:00.000Z", connections: { jamf: { instanceUrl: "https://northwind.jamfcloud.com" } } },
-        // Not a record: dropped.
+        // Not a record: kept as it was (round 3), a newer version may read it.
         { id: "org-broken", name: "Broken", createdAt: "x", connections: { jamf: "nope" } },
       ],
     }));
@@ -672,11 +674,11 @@ describe("connections of other vendors survive (review round 1)", () => {
       const woodgroveOrg = app.organizations?.find((organization) => organization.id === `org-${woodgrove.id}`);
       assert.deepEqual(woodgroveOrg?.connections, { jamf: { instanceUrl: "https://woodgrove.jamfcloud.com" }, microsoft365: { tenantId: woodgrove.id } });
       assert.ok(app.organizations?.some((organization) => organization.id === "org-northwind"));
-      assert.equal(app.organizations?.some((organization) => organization.id === "org-broken"), false);
+      assert.equal(app.organizations?.find((organization) => organization.id === "org-broken")?.connections.jamf, "nope");
       await fixture.store.setActiveTenant(woodgrove.id);
       const written = await fixture.file();
       assert.deepEqual(written.organizations?.find((organization) => organization.id === "org-northwind")?.connections, { jamf: { instanceUrl: "https://northwind.jamfcloud.com" } });
-      assert.equal(written.organizations?.find((organization) => organization.id === `org-${woodgrove.id}`)?.connections.jamf?.instanceUrl, "https://woodgrove.jamfcloud.com");
+      assert.deepEqual(written.organizations?.find((organization) => organization.id === `org-${woodgrove.id}`)?.connections.jamf, { instanceUrl: "https://woodgrove.jamfcloud.com" });
       // This version cannot run schedules in, or switch to, an organization without Microsoft 365.
       await assert.rejects(fixture.store.assignAgentSchedule("find-inactive-devices", "org-northwind"), /cannot run schedules in that organization/);
       await assert.rejects(fixture.store.setActiveOrganization("org-northwind"), /no longer on this device/);
@@ -898,5 +900,60 @@ describe("a run with no tenant whose agent now needs a service (Muse round 3)", 
     assert.equal(stored?.status, "failed");
     assert.equal(stored?.tenantId, undefined);
     assert.match(stored?.error ?? stored?.summary ?? "", /No organization is active\. team-script-draft reads Entra/);
+  });
+});
+
+describe("reconcile keeps what it cannot use (Muse round 3)", () => {
+  const tenants = [woodgrove, fabrikam] as unknown as TenantRecord[];
+  it("keeps records with a long or duplicate id under a fresh id, with their vendor connections", () => {
+    const { organizations } = reconcileOrganizations({
+      rawOrganizations: [
+        { id: "org-shared", name: "Woodgrove", createdAt: "x", connections: { microsoft365: { tenantId: woodgrove.id } } },
+        { id: "org-shared", name: "Fabrikam Retail", createdAt: "x", connections: { microsoft365: { tenantId: fabrikam.id }, jamf: { instanceUrl: "https://fabrikam.jamfcloud.com" } } },
+        { id: "x".repeat(301), name: "Northwind", createdAt: "x", connections: { jamf: { instanceUrl: "https://northwind.jamfcloud.com" } } },
+      ],
+      rawNotice: undefined,
+      tenants,
+      installedAgents: [],
+    });
+    const fabrikamOrg = organizations.find((organization) => organization.connections.microsoft365?.tenantId === fabrikam.id);
+    assert.equal(fabrikamOrg?.id, `org-${fabrikam.id}`);
+    assert.equal(fabrikamOrg?.name, "Fabrikam Retail");
+    assert.deepEqual(fabrikamOrg?.connections.jamf, { instanceUrl: "https://fabrikam.jamfcloud.com" });
+    const northwind = organizations.find((organization) => organization.name === "Northwind");
+    assert.equal(northwind?.id, "org-kept-1");
+    assert.deepEqual(northwind?.connections.jamf, { instanceUrl: "https://northwind.jamfcloud.com" });
+    assert.equal(new Set(organizations.map((organization) => organization.id)).size, organizations.length);
+  });
+
+  it("keeps unknown connection values that are not records", () => {
+    const { organizations } = reconcileOrganizations({
+      rawOrganizations: [
+        { id: "org-w", name: "Woodgrove", createdAt: "x", connections: { microsoft365: { tenantId: woodgrove.id }, futureFlag: true, vendorList: ["a", "b"] } },
+      ],
+      rawNotice: undefined,
+      tenants,
+      installedAgents: [],
+    });
+    const woodgroveOrg = organizations.find((organization) => organization.id === "org-w");
+    assert.equal(woodgroveOrg?.connections.futureFlag, true);
+    assert.deepEqual(woodgroveOrg?.connections.vendorList, ["a", "b"]);
+  });
+
+  it("counts only the schedules the migration moved", () => {
+    const tenantsWithOrg = [woodgrove, fabrikam] as unknown as TenantRecord[];
+    const result = reconcileOrganizations({
+      rawOrganizations: undefined,
+      rawNotice: undefined,
+      tenants: tenantsWithOrg,
+      activeTenantId: woodgrove.id,
+      installedAgents: [
+        agent("moved", { schedule: schedule() }),
+        // Assigned by a newer version before a downgrade: kept, not moved.
+        agent("kept", { schedule: { ...schedule(), organizationId: `org-${fabrikam.id}` } }),
+      ] as unknown as AgentSummary[],
+    });
+    assert.deepEqual(result.notice, { assignedCount: 1, assignedOrganizationId: `org-${woodgrove.id}`, unassignedCount: 0 });
+    assert.equal(scheduleOf(result.installedAgents, "kept")?.organizationId, `org-${fabrikam.id}`);
   });
 });

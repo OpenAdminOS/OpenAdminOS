@@ -100,16 +100,25 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
   const stored = new Map<string, OrganizationRecord>();
   const withoutMicrosoft365: OrganizationRecord[] = [];
 
+  // A record whose id is missing, too long or already taken keeps its
+  // connections under a fresh, deterministic id instead of being dropped.
+  const freshId = (base: string) => {
+    let id = base;
+    for (let suffix = 2; usedIds.has(id); suffix += 1) id = `${base}-${suffix}`;
+    return id;
+  };
+  let kept = 0;
   for (const raw of migrated ? [] : (input.rawOrganizations as unknown[])) {
     if (!isRecord(raw)) continue;
-    const id = typeof raw.id === "string" ? raw.id.trim() : "";
-    if (id.length === 0 || id.length > 300 || usedIds.has(id)) continue;
+    const rawId = typeof raw.id === "string" ? raw.id.trim() : "";
+    const idUsable = rawId.length > 0 && rawId.length <= 300 && !usedIds.has(rawId);
     const connections = isRecord(raw.connections) ? raw.connections : undefined;
     const microsoft365 = connections && isRecord(connections.microsoft365) ? connections.microsoft365 : undefined;
-    // Connections of services this version does not know stay untouched.
-    const unknown: Record<string, Record<string, unknown>> = {};
+    // Connections of services this version does not know stay untouched,
+    // whatever their shape.
+    const unknown: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(connections ?? {})) {
-      if (key !== "microsoft365" && isRecord(value)) unknown[key] = value;
+      if (key !== "microsoft365" && value !== undefined) unknown[key] = value;
     }
     const tenantId = typeof microsoft365?.tenantId === "string" ? microsoft365.tenantId : undefined;
     const tenant = tenantId ? tenantsById.get(tenantId) : undefined;
@@ -128,6 +137,8 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
       // An organization a newer version made without Microsoft 365 is kept
       // as it was; this version cannot select it.
       if (Object.keys(unknown).length > 0) {
+        kept += 1;
+        const id = idUsable ? rawId : freshId(`org-kept-${kept}`);
         usedIds.add(id);
         withoutMicrosoft365.push({
           id,
@@ -139,6 +150,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
       continue;
     }
     const fallback = organizationFromTenant(tenant);
+    const id = idUsable ? rawId : freshId(fallback.id);
     usedIds.add(id);
     claimedTenants.add(tenant.id);
     stored.set(tenant.id, {
@@ -181,11 +193,11 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     const valid = typeof current === "string" && organizationIds.has(current) && !sampleIds.has(current);
     if (migrated) {
       // A schedule that already names a valid organization was assigned
-      // by a newer version; keep it.
-      const target = valid ? current : activeRealOrganization?.id;
-      if (target) {
+      // by a newer version; keep it, and do not count it as moved.
+      if (valid) return agent;
+      if (activeRealOrganization) {
         assignedCount += 1;
-        return { ...agent, schedule: { ...rest, organizationId: target } };
+        return { ...agent, schedule: { ...rest, organizationId: activeRealOrganization.id } };
       }
       unassignedCount += 1;
       return { ...agent, schedule: rest };

@@ -777,7 +777,7 @@ export interface OrganizationConnections {
    * Connections of services this version does not know, kept as they were
    * so a connection made by a newer version survives a downgrade.
    */
-  [vendorService: string]: Record<string, unknown> | undefined;
+  [vendorService: string]: unknown;
 }
 
 /**
