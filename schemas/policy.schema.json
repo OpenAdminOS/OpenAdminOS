@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://openadminos.com/schemas/policy/v1.schema.json",
+  "title": "OpenAdminOS IT policy file, version 1",
+  "description": "Managed configuration that an IT department deploys as policy.json. The machine file wins over the user file, key by key. A setting the policy sets is locked unless \"lock\" says otherwise. OpenAdminOS reports every problem with the file and the line, and does not apply an invalid key.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Optional link to this schema, for editors."
+    },
+    "version": {
+      "const": 1,
+      "description": "The policy format. Version 1 is the only one."
+    },
+    "allowedProviders": {
+      "type": "array",
+      "description": "The AI providers this device may use. Any other provider is not offered or selectable, and the app refuses it for Chat, agents and provider tests.",
+      "items": { "$ref": "#/$defs/providerId" },
+      "uniqueItems": true
+    },
+    "defaultProvider": {
+      "$ref": "#/$defs/providerId",
+      "description": "The provider to use. Locked, it is the only provider. Unlocked, it applies until the admin picks another one. Must be in allowedProviders when both are set."
+    },
+    "defaultModel": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 200,
+      "description": "The model of defaultProvider, as the provider names it (for example llama3.1:8b in Ollama). Requires defaultProvider."
+    },
+    "allowedPublicReferences": {
+      "type": "array",
+      "description": "The public references (MCP servers in the Marketplace) this device may install and use. An empty list allows none.",
+      "items": { "$ref": "#/$defs/publicReferenceId" },
+      "uniqueItems": true
+    },
+    "appRegistration": {
+      "type": "object",
+      "description": "Your own Entra app registration, pre-seeded for Microsoft 365 sign-in. Locked, sign-in uses only this registration.",
+      "additionalProperties": false,
+      "required": ["clientId"],
+      "properties": {
+        "clientId": {
+          "type": "string",
+          "pattern": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "description": "Application (client) ID."
+        },
+        "tenantId": {
+          "type": "string",
+          "pattern": "^[0-9a-zA-Z.-]{1,100}$",
+          "description": "Directory (tenant) ID or verified domain. Required for a single-tenant app."
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Name shown in the app."
+        }
+      }
+    },
+    "skipFirstRunScan": {
+      "type": "boolean",
+      "description": "Skip the first-run model scan when the policy's provider is ready, and open Chat with it."
+    },
+    "lock": {
+      "type": "array",
+      "description": "Setting keys the admin cannot change in the app. Without this key, every setting the file sets is locked. An empty list locks nothing.",
+      "items": { "$ref": "#/$defs/settingKey" },
+      "uniqueItems": true
+    }
+  },
+  "dependentRequired": {
+    "defaultModel": ["defaultProvider"]
+  },
+  "$defs": {
+    "providerId": {
+      "enum": ["ollama", "apple-foundation", "lm-studio", "anthropic", "openai", "copilot", "gemini", "azure-openai"]
+    },
+    "publicReferenceId": {
+      "enum": ["microsoft-learn", "kql-search", "intuneautomation", "release-communications", "windowsforum", "endoflife-ai"]
+    },
+    "settingKey": {
+      "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan"]
+    }
+  }
+}
