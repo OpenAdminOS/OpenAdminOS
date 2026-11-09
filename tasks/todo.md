@@ -1,15 +1,15 @@
 # Current active plan
 
-- [ ] Managed configuration, issue #176 (branch `managed/policy-file`). Built: policy file paths, schema, parsing with line numbers, precedence, main-process enforcement for providers, models, public references and the app registration, Settings and notice UI, configuration audit events, IT admin docs.
+- [ ] Managed configuration, issue #176 (branch `managed/policy-file`, PR #177). Built: policy file paths, schema, parsing with line numbers, precedence, main-process enforcement for providers, models, public references and the app registration, Settings and notice UI, configuration audit events, IT admin docs.
 
   Acceptance criteria:
   1. With a policy that allows only local providers, no hosted provider is offered or selectable anywhere, and the main process refuses one for Chat, agents and tests.
-  2. With a policy that sets a provider and model, a fresh install skips the scan and opens Chat with that model.
+  2. With a policy that sets a provider and model and `skipFirstRunScan`, a fresh install whose policy provider is ready skips the scan, opens at Connect Microsoft 365, then Chat with that model.
   3. A setting the policy sets shows "Set by your IT department" and cannot be changed.
   4. An invalid policy file shows a designed error naming the file, the line and the problem (Settings and a one-time notice); only invalid keys fall back to no policy.
   5. Policy load, change, removal and problems are recorded in the configuration audit.
 
-  - [ ] TODO(#175): first-run scan integration. PR #175 (first-run model scan) was not merged when this was built. After it merges: merge `origin/main`, make the scan skip itself when `skipFirstRunScan` is true and the policy provider is ready (open Chat with the policy model), and make the scan list only `state.providers` (already filtered by policy in `AppStateStore.listProviders`). Criterion 2 depends on this.
+  - [x] First-run scan integration (after #175 merged): the scan checks only allowed providers and keeps the policy provider selected, a locked provider shows as set by IT in the model choice, and `skipFirstRunScan` with a ready policy provider skips the scan and opens at Connect Microsoft 365.
 
 - [ ] Chat hardening mega PR (branch `fix/chat-hardening`, decision Ugur 2026-10-25: one PR for all findings) from the [2026-10-24 full Chat test](./chat-full-test-2026-10-24.md) including the live addendum.
 
@@ -1617,6 +1617,294 @@ Round 2 fixes confirmed. No blocking findings.
 
 1. [x] Schedule migration had no destination when no real tenant is active or pilot mode is active. Such schedules now stay paused and unassigned until the admin assigns them, never to the sample organization; criterion 11 requires migration tests for all three states.
 2. [x] The KQL example said "newest first" but sorts by failure count. Copy now says "largest groups first".
+
+## Part A implementation: Chat without sign-in (2026-11-08)
+
+Branch `first-run/without-sign-in`. Criteria 1, 2, 3, 4 and 12 above; part B (organizations, Connections, agents, schedules, hard constraint 3, preflight) is a separate branch. The scope is still a tenant in this part.
+
+- [x] Remove the first-launch welcome; Chat opens with nothing configured and no dialog opens on its own (criterion 1)
+- [x] Inline model choice in Chat when no model is ready, with "Preview with sample data" (criterion 1)
+- [x] Chat sends with a model and no tenant; docs questions answer with no Graph call (criterion 2)
+- [x] Not-connected card in the transcript for tenant and mixed questions with no tenant or with the service not connected; Connect preselects the service part, own registration, ask an admin (criterion 3)
+- [x] Empty Chat starters labeled Works now or Needs a service, reference suggestions with hosts, strip and composer name the provider and region (criterion 4)
+- [x] Hosted send without a tenant asks for its own confirmation, bound in main to no tenant plus provider and refused with tenant context (criterion 12)
+- [x] First-launch model scan screen (scope change from the maintainer, 2026-11-09): parallel local-only checks with timeouts and Retry, outcome under the provider rules, Scan again in Settings, Providers; mockup 32 section B updated
+- [x] Renderer and main tests per criterion, screenshots light and dark, SPEC, CHANGELOG, docs
+
+## PR #175 review round 1 (separate Claude evaluator, GPT-6.1-Sol and Muse Wonder Full, 2026-11-09)
+
+Reviewed commit 692241f. Each fix has a regression test. Findings 1 to 7 touch the same scan functions, so they landed in three layered commits (runtime 0e46f1b, host 9c2702a, screen 0eb25e5) instead of one per finding; each test names its finding.
+
+Blocking
+1. [x] The scan promised local answers while a remembered hosted choice stayed selected. A local model found next to the admin's own choice is now `local-available`: shown as "ready on this device, not selected" with an explicit switch; nothing is switched. Host and renderer tests.
+2. [x] The Copilot probe listed models from GitHub. The scan uses an install-only Copilot probe (`copilot --version`); a fake-CLI test pins the arguments each CLI runs during the scan.
+3. [x] App state ran unbounded provider detection, including off-device endpoints, before the scan. While the scan is pending, app state loads without provider detection, and scan checks never contact an Ollama or LM Studio endpoint off the device. Tests with a stalled provider list and an off-device `OPENAGENTS_OLLAMA_URL` with a fetch spy.
+
+Should fix
+4. [x] Timeouts did not stop probes. The scan timeout aborts the check; Claude Code and Codex probes kill their CLI and try no further binaries, CLI discovery terminates `--version`, Ollama requests abort. Tested with a hanging fake CLI that must be killed. Not done: the Apple Foundation helper probe still runs to its own 10 second limit.
+5. [x] LM Studio with no loaded model counted as ready. It is now "Running, no model loaded" and not ready, in the scan and in shared provider readiness.
+6. [x] A successful Retry kept the old outcome. Retry returns the whole scan with its outcome applied; renderer test for a timed-out hosted tool found on Retry.
+7. [x] Failed checks were shown as negative results. HTTP errors, unreadable capabilities and CLI request failures are could not check with Retry; signed out stays a found, negative result.
+8. [x] A multi-service card offered only the first service. It offers Add for each service still missing and Ask again once none is; tested by granting two services in sequence.
+9. [x] A blocked tenant question asked for the hosted confirmation. The host requires no confirmation for a question blocked before any model call, and the renderer skips the dialog through a preview. With the tool loop the model classifies the question, so the question is sent and the confirmation stays.
+10. [x] The remembered no-tenant confirmation ignored the model. It is keyed by provider and model now. Response: the tenant-bound key has never included the model; it is unchanged here so remembered tenant decisions keep working.
+K. [x] Status commands may contact the vendor. The scan copy says each tool's own sign-in status command may check with its provider and that no prompt is sent; the arguments are pinned by test; the 2.5 second timeout covers version and status together.
+L. [x] No in-flight guard. A second scan shares the running one, and progress carries a scan id the window filters on. Host and renderer tests.
+M. [x] Code requests with "our" or "which" got the card. With nothing connected, any request to write a query or script is docs; tests for both phrasings; SPEC note updated.
+
+Missing tests: added the positive no-tenant acknowledgement on the stream path. Response: the card's Connect, own registration, Ask an admin to approve and Ask again actions, and "no sign-in prompt for a docs question with no tenant", are covered by the IntuneChat renderer tests added in a254571 ("connects with the part preselected ... asks again only when chosen", "opens the own registration path from the card", "copies a message with the admin consent link", "sends a docs starter at once with no tenant, no setup dialog and no hosted confirmation").
+
+Nits
+N. [x] Card heading ids use `useId`; tested with two cards for one part.
+O. [x] SPEC scan bullet says Gemini shows "sign-in not confirmed" until a Test.
+P. [x] Nova voice with no tenant names the voice surface; tested.
+Q. [x] `.cmd` shims are accepted on Windows. No test: the lookup reads the real file system.
+R. [x] Leftover double block removed.
+
+## PR #175 review round 2 (GPT-6.1-Sol and Claude evaluator, head 324eff4, 2026-11-09)
+
+Blocking
+1. [x] Hosted sends bypass confirmation: preview and execution classify differently. One shared routing decision; consent enforced right before every hosted model call; deterministic-path test on both send paths.
+2. [x] Startup discovery while the scan is pending (Office tick, menu bar, schedulers). Gate every background discovery path; test the startup sequence from a fresh store.
+
+Should fix
+3. [x] Start LM Studio polls `/v1/v1/models`. Poll `${endpoint}/models`; test the store wiring with a stub server.
+4. [x] Cancellation gaps: `discoverCli` spawns before checking the signal, Claude wrapper child survives, LM Studio drops the signal, Apple helper not abortable.
+5. [x] Azure secret read blocks the whole scan; move into Azure's bounded check.
+6. [x] HTTP failures look like install results; separate refused from timeout, parse and protocol failures.
+7. [x] Retry and Start bypass the scan generation and in-flight guard; Start failure should not run a full scan.
+8. [x] A failed Start of the secondary runtime is invisible.
+9. [x] Manual scan with an enabled reference still says "Nothing leaves this device".
+10. [x] Say that a started runtime keeps running after quit.
+11. [x] Copilot row shows a command that no longer runs; show what actually runs per row.
+
+## PR #175 Muse Wonder Full round 2 (head 324eff4, run on Node 26)
+
+Blocking
+A. [x] `listProviders` has no first-run gate (setActiveModel, list-providers IPC, testProvider, send preview).
+B. [x] A shared in-flight scan drops the second caller's progress and scan id.
+
+Should fix
+C. [x] Pending app state reports unchecked providers as available; show not checked and a loading surface.
+D. [x] switchLocal sets provider and model in two calls; one host call with rollback.
+E. [x] Exit actions stay enabled while an action is busy.
+F. [x] Clear start and action errors on a new run.
+G. [x] Inner HTTP timeouts, Azure and Apple failures map to negative results; pass the remaining budget; Apple SIGKILL escalation.
+H. [x] Code-authoring detection needs a leading write or draft; widen request prefixes and verbs.
+I. [x] Voice-hosted boundary passes no provider id or noTenant flag.
+J. [x] Subtitle and ledger overstate what ran; state per row what ran.
+K. [x] Cap concurrent Ollama `/api/show` calls.
+L. [x] Focus management on open, settle, retry and close.
+M. [x] The global key handler settles on Enter and Space from buttons.
+N. [x] Continue to Chat before settle.
+
+Nits
+O. [x] Windows Start: `.cmd`, `windowsHide`, missing `lms`.
+P. [x] No-tenant multi-service card after a partial connect; card with a removed tenant.
+Q. [x] Remember label and consent payload should name the model; host verifies it.
+R. [x] Hosted with-tenant strip, boundary and confirmBody name the region.
+S. [x] The sample data link misses its suffix.
+T. [x] Tests: host Retry and concurrency, Codex and Copilot or Gemini hang-kill, tool-loop no-consent, empty `/models` integration.
+
+### Round 2 responses
+
+Review items (one commit each where practical, each with a regression test):
+- 1: `a03b21ca`. `noTenantRoute` is shared by preview and send; `gateHostedLlm` refuses every hosted model call until the confirmation is verified, on both send paths.
+- 2: `8f7b49c2`. While the first-run scan is pending, background discovery (Office tick, menu bar, schedulers) serves scan results or `not-checked`; startup tested from a fresh store.
+- 3, 7, 8, 10, 11: `c3887561`, `f29fcb4c`. Ready check polls `${endpoint}/models`; Retry and Start go through the single-flight queue and carry a generation; a failed Start returns its message without a scan and shows on its own row; the Start note says the runtime keeps running after quit; each row states what ran.
+- 4, 5, 6: `fb99c078`. Signals checked before every spawn, process-group kill for CLI wrappers, LM Studio and Apple helper stoppable, Azure settings read inside its bounded check, refused separated from timeout, parse and protocol failures.
+- 9: `c3887561`. A scan with an enabled reference names the reference hosts instead of "Nothing leaves this device".
+
+Muse round 2 items:
+- A to G, J to N, S, T: `8f7b49c2`, `c3887561`, `f29fcb4c`, `fb99c078`.
+- H: `51b1139d`. Request prefixes (can you, please, I need, help me) and verbs (write, draft, generate, create, build, make, give me, show me, produce) count as a code request.
+- I: `685c70a7`. The voice boundary passes the OpenAI provider id and the no-tenant flag.
+- O: `c43b9a0f`. Start spawns through the shared CLI launcher (`windowsHide`, `.exe` before `.cmd`, a refused batch launcher returns its reason); LM Studio installed without `lms` gets its own message.
+- P: `f4ee27e0`. A no-tenant card follows the tenant a partial connect added and offers Add per missing service; a card whose tenant was removed offers Connect.
+- Q: `1fba983b`. The consent payload carries the model; the host refuses a no-tenant confirmation for another model, and a tenant confirmation that names another model; the no-tenant remember label names provider and model.
+- R: `1a56406c`. Hosted with-tenant strip, boundary and confirmation name the documented data location, or "region not stated".
+
+## PR #175 CI on Linux (head 259d36d, run 42589502276, Node 22)
+
+1. [x] `model-scan-cancel.test.ts` "only a refused connection as not running" got could not check on Linux. Reproduced in a `node:22` Linux container: the earlier timed-out checks left keep-alive sockets in fetch's pool, and after the server stopped the next check reused one and failed with `UND_ERR_SOCKET` ("other side closed") instead of `ECONNREFUSED`. That is an app bug on real machines too (Ollama or LM Studio stopped between two checks reads as could not check). `fetchLocal` retries once on a new connection after `UND_ERR_SOCKET`, which is then refused; used by the Ollama tags check and the LM Studio probe. `isConnectionRefused` also reads an AggregateError without a top-level code (`localhost` refused on IPv6 and IPv4) and counts it only when every address was refused. Tests: the real-socket sequence, plus injected refused, stale-then-refused and failed shapes, so the result does not depend on the host.
+2. [x] `model-scan.test.ts` "runs no provider detection outside the scan" asserted every catalog provider connected after the scan; off macOS Apple Intelligence is not checked and stays not checked. The test pins the local endpoints to loopback and asserts per provider: connected when the scan checked it, not checked otherwise, and no detection outside the scan.
+
+## PR #175 review round 3 (GPT-6.1-Sol, head 259d36d, 2026-11-09)
+
+Blocking
+1. [x] Leaving the scan restarts unrestricted discovery: `completeFirstRunScan` clears the gate and `getAppState` runs full provider discovery on every exit (Continue, Preview, Open chat). Keep serving the scan results after the first run; detect a provider only when the admin acts on it (select, test, refresh in Settings). Tests for every exit path.
+
+Should fix
+2. [x] Gemini and Copilot wrapper children survive cancellation: discovery spawns without its own process group. New process group on POSIX, tree kill on Windows; test with wrappers that start children.
+3. [x] Start can return a scan from before the runtime was ready by joining an in-flight scan. Queue a fresh scan after readiness; test Start overlapping a scan.
+4. [x] HTTP Retry stops at about 2.3 s: Ollama and LM Studio always get the first-scan budget. Pass the current check's budget; test a 3 s response on Retry.
+5. [x] Apple helper failures show as "Not available": handle `checkFailed` before provider-specific negatives; end-to-end test.
+6. [x] The scan can name a model Chat does not use (Ollama with Qwen chosen and OpenAdmin 8B installed). Resolve the saved model; prefer OpenAdmin 8B only when none was chosen; multi-model test.
+7. [x] The LM Studio launcher test failed once under load; make it deterministic.
+
+### Muse Wonder Full round 3 (head 259d36d, Node 22, no blocking findings)
+
+Confirms GPT 3, 4 and 5, with additions: run the whole of Start inside the exclusive queue so two windows cannot spawn the same runtime twice (3); an Azure check that fails (invalid saved endpoint, status `error`) is could not check with its detail and Retry, not "Not configured" (5).
+
+M1. [x] Gemini `testProvider` bypasses the pending scan gate and sends the smoke prompt. Refuse `testProvider` while the scan is pending; require a real ready status for every provider before a test prompt; pending startup test with a CLI spawn spy.
+M2. [x] Pre-settle exit actions ignore busy: disable Continue and the scan error actions while busy; a finishing flag in `finish`, `preview`, `useHosted` and `switchLocal`.
+M3. [x] The closing ledger lists a refused off-device endpoint as something that ran. Exclude it or label it not contacted.
+M4. [x] SPEC says "A click, Skip or any key settles at once"; it is Escape, Skip or a click.
+
+### Round 3 responses
+
+- 1: `a1e9987d`. After `completeFirstRunScan` listing keeps serving the scan results for the session; `setActiveProvider`, `testProvider` and saving Azure settings check that one provider in full; Refresh providers in Settings (new `refreshProviders` IPC) checks all again. Test: every exit (Continue, Open chat with a local model, Preview, Office tick, model choice) runs no provider factory call; testing or selecting checks only that provider; refresh checks all.
+- M1: `6db17ea1`. `testProvider` returns a designed refusal while the scan is pending, and needs a ready status (connected; Azure available; an installed Gemini, also after a failed request, because a request is how its sign-in is confirmed). The pending startup test has a Gemini CLI spawn spy and an LLM factory spy.
+- 2: `151bc56f`. Provider CLIs spawn in their own process group on macOS and Linux; `terminateCli` sends SIGTERM to the group, then SIGKILL after 500 ms; Windows uses `taskkill /T /F`, shared with the Claude and Codex kill path. Tests: Gemini and Copilot wrappers that start a child and wait, and a stopped Gemini request.
+- 3 and 7: `9b1d45ae`. All of Start runs in the scan queue, skips the spawn when the runtime already answers, and returns a fresh scan. Test: Start overlapping a slow scan returns a scan with LM Studio ready, and two Starts launch once. The launcher test's stub answers only after `lms` ran, so "started" means launched (no timing on the log write).
+- 4: `4cf80ee2`. A check's budget reaches the Ollama tags and capability requests and the LM Studio probe. Test: an Ollama answering after 3 seconds is could not check in the scan and found on Retry.
+- 5: `7e05f23c`. `checkFailed` is handled before any provider-specific negative; an Azure endpoint that is not a URL and an unreadable Azure config are failed checks. Tests: every provider, Azure invalid URL, and a failing Apple helper end to end through the scan on macOS.
+- 6: `5fb4ea5c`. The outcome resolves the saved model for the provider; OpenAdmin 8B only when no model was chosen and the scan sets it. Tests: saved model, chosen provider without a model, nothing chosen, removed saved model, and the store outcome against Chat's model.
+- M2: `2cc605f9`. Continue and the scan error actions are disabled while busy; a finishing guard in `finish`, `preview`, `useHosted`, `switchLocal` and Start.
+- M3: `1d0bc8d3`. Probes carry `notContacted`; the closing line lists only what ran and names refused endpoints as not contacted.
+- M4: SPEC says Escape, Skip or a click.
+
+
+## PR #175 review round 4 (GPT-6.1-Sol, head feafb9a, 2026-11-09)
+
+Blocking
+1. [x] Manual rescans restart unrestricted discovery: only a completed first run enters the scan-results mode, so Scan again after a restart is followed by full discovery (off-device endpoints, Copilot's network probe). Every scan enters it; completed-profile regression test.
+
+Should fix
+2. [x] Gemini's successful Test leaves activation disabled: the cached summary is not refreshed after the request. Refresh it after success and failure; tests for both.
+3. [x] "Show all providers" exits during Start, and `finish` allows navigation while Start polls. Disable every exit during active operations; extend the busy-exit test.
+4. [x] First-run screenshot capture waits for text the screen never renders ("What this device can answer with"). Wait for the settled scan and its controls, remove the unused constant, run the capture once.
+
+### Muse Wonder Full round 4 (head feafb9a, Node 22, no blocking findings)
+
+Its four should-fix items are GPT's round 4 items 1 to 4. Additions:
+
+A. [x] The busy-exit fix also covers the row Retry button and the set-up buttons; every exit and action is disabled while an action or a Retry runs.
+B. [x] Windows tree kill cannot reach a child whose wrapper already exited (`taskkill /T` cannot resolve a dead pid). Narrow the `terminateCli` comment and SPEC to what Windows guarantees, or use a Job Object.
+
+### Round 4 responses
+
+- 1: `192c6558`. Every scan and Retry enters the scan-results mode, not only a completed first run. Tests in a completed profile: after Scan again, app state, listing and the Office tick run no provider factory call until Refresh providers; off-device Ollama and LM Studio endpoints the scan named not contacted are never fetched afterwards.
+- 2: `c7837970`. After a Gemini Test, while listing serves cached results, Gemini is checked again. Tests with a Gemini CLI spy: a successful Test shows connected; a failed one shows error, signed out.
+- 3: `8f13e630`. Show all providers and the other set-up buttons are disabled while busy, and `finish` refuses while an action runs. The busy-exit test covers Show all providers.
+- 4: `40614d82`. The capture waits for the settled phase and the two exits by their labels; `titleDone` removed; the capture script pins the device scale to 1 so a Retina Mac also produces 1280x800; the capture fixture's Ollama is stopped (not "running, no text model" with a "not running" detail). `npm run screenshots:first-run` passed: 18 screenshots. Renderer test pins what the capture waits for.
+- A: `23ae4d6e`. One scan action at a time: exits, Start, the switches and the row Retry wait for any action or Retry in progress. Tests: during a Retry, the exits, Use Claude Code and Start are disabled; during a Start, Retry is. The round 2 ordering test now runs Retries one after another and still checks that an older numbered result is ignored.
+- B: `309b8bfd`. Comment and SPEC state that on Windows `taskkill /T` ends the tree while the wrapper runs and does not reach a child left by a wrapper that already exited; a Job Object would close that. No behaviour change, so no new test.
+
+- CI on e94b9cc failed once in `run-confirmation.test.ts` (not changed in this PR): the rollback-run test saw the run fail, removed its folder, and the run's last state write then hit ENOENT after the test ended. The fixture now waits for the store's write queue to settle before removing the folder.
+
+## PR #175 review round 5 (GPT-6.1-Sol, head 3b2af39, 2026-11-09)
+
+Blocking
+1. [x] Manual scans allow unrestricted discovery while they run: the scan-results mode starts only after the probes finish, so an overlapping app state read during Scan again in a completed profile fetched an off-device endpoint. Enter it when a Scan, Retry or Start is requested; test background reads during a delayed manual scan.
+
+Should fix
+2. [x] The renderer scan fixture can drop completion: `finish()` does nothing before the scan effect installs its callback. Await `startModelScan` before finishing; a premature finish fails loudly.
+
+Nit
+3. [x] Public docs describe superseded behaviour: first-run says any key skips (Escape does), connect-shared-app says nothing is preselected (Chat's not-connected card preselects the service and part). Fix both, regenerate `web/content/docs`, `docs:check` clean.
+4. [x] A Claude cancellation host test failed once in a combined run; make it deterministic if reproducible.
+
+### Muse Wonder Full round 5 (head 3b2af39, no blocking or should-fix findings)
+
+A. [x] With no tenant, `getGraphCacheStatus()` without an id rejects through IPC and logs "Error occurred in handler" on every no-tenant conversation reload. Without an id and without an active tenant, return an empty status; an explicit unknown id still throws.
+B. [x] A scan check that times out can be missing from the served listing (its aborted summary lands after the copy), so Settings shows not checked while the scan row said Could not check. On timeout, record a failed-check summary for that provider.
+
+### Round 5 responses
+
+- 1: `6f0162cd`. `scanModels`, `retryModelScanProbe` and `startLocalRuntime` enter the scan-results mode when asked for, before any probe runs. Test: in a completed profile, Scan again is held on a slow LM Studio while app state, listing and the Office tick run; the off-device Ollama endpoint is never fetched (fails without the fix).
+- 2: `c0ca5bb3`. The fixture's `finish()` waits for the window to call `startModelScan` and throws when it never does; every call site awaits it. Test: a premature finish rejects.
+- 3: `9dba38f4`. First run says Escape, Skip or a click; connect-shared-app says Chat's not-connected card preselects the service and part. `web/content/docs` regenerated, `docs:check` clean.
+- 4: `b853d29b`. The wrapper-kill tests wait for the wrapper's child, then stop the check through its signal (the path the timeout uses) instead of racing a 1.5 s timeout against a loaded machine; `gone` waits up to 5 s for the system to reap. The timeout itself is still covered by a separate `runScanCheck` case.
+- A: `77e8a25b`. `getGraphCacheStatus()` without an id and without an active tenant returns an empty status; an explicit unknown id still throws. Test in the no-tenant harness.
+- B: `c260f99c`. After a scan or Retry, a check that ended could not check without a summary (timed out, refused off-device endpoint) is served as a failed check with its row's reason. Test: a check that never answers is listed with `checkFailed` and the row's fact, not "not checked".
+
+
+## PR #175 design and enterprise round (maintainer decision, 2026-11-09)
+
+Inputs: design spec and mockup 32 (revision 2) in the maintainer's scratchpad (`design-spec.md`, `32-connections-first-run.html`, `after/sec-*-0[0-4].png`, `-11.png`). The mockup is committed by PR #174, not here. PR #174 merges first; after it lands, merge main and adopt `DeviceTile`, the motion tokens, the organization vocabulary, `providerDataLocation` and the audit events (step 4 below, on the maintainer's signal).
+
+Design plan (fixed by the brief, not reinvented): production tokens only; one memorable element, the orbit; one filled button per view and it is the next step; green means it stays on this device, amber means it leaves; type on the production scale (12, 13, 14, 16, 24, 34); radii from tokens; motion as one orchestrated 2.4 s sequence that reduced motion skips to its end state.
+
+Acceptance criteria
+1. [x] A, scan running: header wordmark 16 serif and "Skip scan" ghost sm; grid 7fr/5fr, gap 48 (32 below 1000), max 1180, right column max 440, both centred; title `text-display`; one-sentence intro; progress text plus 8-segment bar; check list 32 px rows (mark, name, status right), no buttons and no monospace targets, `aria-live` source; nodes 44 px with label plates; node states per spec; settled not-found nodes 32 px without status, muted name, no opacity; device tile accent fill; 2 rings, conic sweep, staggered nodes, about 2.4 s; reduced motion renders the end state; Escape, Skip scan or a click settles.
+2. [x] B, scan result: one radio group of found options, local first; the first local option that can answer or be started is preselected; hosted never preselected and always shows where prompts go; only hosted found means nothing preselected and a disabled "Choose a model" button; one primary button whose label follows the choice ("Start Ollama and open Chat", "Use Claude Code", "Open Chat", "Get OpenAdmin 8B" when Ollama has no model, with "No model yet" on the row); note under the button; spinner while starting; a failed start writes its reason under its row in danger; titles per outcome; Continue and Preview as quiet links; "What ran" disclosure and "Scan again"; selection mirrored in the orbit; Retry for a check that could not finish; no page scroll at 1280x800.
+3. [x] C, empty Chat: destination stated once under the composer (plus the top bar chip); the "Answering with" line removed; starters as two columns of plain rows with headings, the needs column with a dashed service mark; one column below 600 px.
+4. [x] D, hosted send confirmation inline above the composer: title, one sentence, definition list (Goes to in amber, What is sent, Stays here), the remember checkbox naming the model, primary "Send to <provider>", ghost Cancel, link "Use a model on this device"; Enter sends, Escape cancels and returns focus; nothing cut off at 960x720.
+5. [x] E, not-connected card: service mark (`data-off`) instead of the shield, title 16/500, permissions in a quieter disclosure, actions in weight order (primary Connect, secondary own registration, ghost Ask an admin), body indented to the title.
+6. [x] L, Settings, Providers agrees with the scan: an installed runtime that is not running reads "Installed, not running" in both.
+7. [x] The in-Chat model choice uses the scan's choice list component.
+8. [x] Enterprise: proxy and offline failures name the host that could not be reached, whether a system proxy applies, and the recovery step, on Microsoft sign-in in the setup dialog, the model download (OpenAdmin 8B setup and the local index model), the scan's Start, and the Marketplace install and check paths. Tests for each path.
+9. [x] Region wording: "Anthropic API · US", "OpenAI API · US", "region not stated" for Copilot and Gemini, "your resource's region" for Azure OpenAI, in `providerDataLocation`.
+10. [x] Visual check: scan and Chat screens recaptured light and dark at 1280 and 960 (`npm run screenshots:first-run` plus new-state captures), each compared with the mockup.
+11. [x] After #174 (on the maintainer's signal): merge main; `DeviceTile` and motion tokens in the scan; organization wording for the active scope ("No organization"); the no-scope hosted acknowledgement bound to "no organization"; one set of provider display names; provider and model changes recorded through #174's audit events; rerun everything.
+
+### Design and enterprise round: results
+
+- 9: `a5eb97d3`. `providerDataLocation`: "Anthropic API · US", "OpenAI API · US", "GitHub Copilot · region not stated", "Google Gemini API · region not stated", "Azure OpenAI · your resource's region". Test pins every value.
+- 6 (L): `4fec6624`. `ProviderSummary.installed` from the Ollama and LM Studio checks (local files); Settings shows "Installed, not running" and no install guide; the scan reads the same field. Tests on both sides.
+- 1, 2 (A, B): `7d8527b6`. Scan rewritten: one 2.4 s sequence, check list, node states and plates, settled not-found nodes, accent device tile (the `DeviceTile` swap waits for #174), `ModelChoiceList` with `optionsFromProbes`, `preselect`, `actionLabel` and `actionNote` in `src/setup/model-choice.ts`; selection mirrored in the orbit; "What ran" disclosure. 28 scan screen tests and 4 option builder tests.
+- 7: `62da8beb` and `bc119112`. Chat's `ModelChoice` renders the same list from `optionsFromProviders`; in Chat the start button reads "Start Ollama".
+- 3 (C): `3d5116d9`. Destination stated once under the composer; "Answering with" line removed; starters as two columns of plain rows (one service per column, with a dashed `ServiceMark`); references as a divided list of two.
+- 4 (D): `08cb86d5`. Inline `HostedChatConsentPanel` above the composer; focus on "Send to <company>", Escape cancels and returns to the composer. Tests for the no-tenant and tenant variants, the reference hosts, and Escape.
+- 5 (E): `a8dfdb75`. Service mark, permissions disclosure, actions in weight order, body indented to the title.
+- 8: `e46d08b7`. `electron/network-failure.ts` classifies and words the failure; wired into Microsoft sign-in (`signInFailure`, with `resolveProxy` from Electron's session), the scan's Start (loopback host named), the local index model download (no longer silent; Settings, Privacy shows it) and the Marketplace index and manifest fetches. Tests: classification, each message shape, a store-level sign-in failure, the index model download through a stub Ollama, a Marketplace install and an index refresh.
+- 10: captures in the scratchpad `design-final/` (scan at 1280 and 960 in light and dark, Chat empty, hosted confirmation, not-connected card and the no-model choice at 1280x800 and 960x720 in light and dark), compared with mockup frames A to E; the confirmation fits at 960x720. The not-connected card was reached in a live check with Anthropic through Claude Code (`claude-sonnet-5`); the question carried no tenant data. `npm run screenshots:first-run` recapture listed with the hand-back.
+- Open: 11 waits for the maintainer's signal after #174 merges.
+
+### Hosted location wording, second decision (maintainer, 2026-11-09)
+
+"Anthropic API · US" and "OpenAI API · US" were wrong: Anthropic API inference defaults to global unless the workspace restricts it to the US, Azure OpenAI depends on the deployment type, OpenAI follows workspace data residency, and a CLI decides its own channel (Claude Code can use Bedrock or Vertex, Codex a custom endpoint).
+- [x] `providerDataLocation` keeps the short label ("Claude Code · location set by your account", "Codex · location set by your account", "Azure OpenAI · location set by your deployment type", "GitHub Copilot CLI · location not stated", "Gemini CLI · location not stated" (labels name the tool, corrected by the maintainer)); `providerDataLocationDetail` holds the detail. Same values as PR #174.
+- [x] `promptsGoTo`: for a CLI "Prompts leave this device through Claude Code; location set by your account", for an API "Prompts go to <label>". Used by the scan rows, Chat's choice list, the composer line and the boundary.
+- [x] Detail in the status strip and composer tooltips, the hosted send confirmation (under Goes to) and the scan's What ran. The confirmation names a CLI as the tool ("Send this question through Claude Code?", "Send through Claude Code"). Nova voice says its audio goes to OpenAI and that processing follows the workspace's data residency.
+- [x] Tests, SPEC and the first-run docs updated; scan and Chat recaptured.
+
+### Provider logos (maintainer request, 2026-11-09)
+
+- [x] Guidelines checked: LM Studio brand page permits referring to LM Studio with its marks; GitHub permits a GitHub logo to show an integration (its official logo archive includes the Copilot icon in black and white); Ollama publishes none (Simple Icons CC0 path, monochrome as Ollama's own mark). Anthropic and OpenAI require prior permission, Google requires an approved request, Azure icons are for diagrams, training and documentation only, and Apple does not allow its logo: those keep a neutral mark.
+- [x] `apps/desktop/src/assets/provider-logos/` with the SVG files and `NOTICE.md` (owner, source URL, retrieval date, terms followed, and why the others are neutral); a line in the README License section.
+- [x] `ProviderLogo` (provider id, size, optional label): two variants switched on `data-mode`, `aria-hidden` next to a visible name, `role="img"` with the provider name when shown alone. Used in the scan orbit and choice list (scan and Chat) and Settings, Providers. No new dependency.
+- [x] Orbit: a node is a surface circle with the mark inside; ready on this device is a soft green fill with a full ring so a logo stays on a quiet surface; a not-found node fades through ring, surface and name, never by dimming a logo.
+- [x] Tests for the mapping, the variants, the accessible label and the Apple neutral case. Scan (running and settled) and Chat's model choice recaptured at 1280x800 light and 960 px dark.
+- [x] Step 4: after main is merged, `ProviderLogo` on #174's provider marks (the Connections reach map row and the organization surfaces that show a provider).
+
+### Real logos for every provider and service (maintainer decision, 2026-11-09)
+
+- [x] Official files fetched unmodified: Claude spark (Anthropic press kit), OpenAI Blossom black and white (openai.com/brand), Gemini colour PNG (Google Workspace logo archive; Google publishes no SVG), Azure OpenAI, Intune and Defender for Cloud (Azure Architecture Icons V25), Entra ID colour (Entra architecture icons), Apple Intelligence (developer.apple.com icon; Apple offers no separate download). Microsoft has no Defender XDR icon in its downloads, so Defender shows Defender for Cloud.
+- [x] `ProviderLogo` shows a logo for every `ProviderId`, a neutral mark only for an unknown provider; an optical `scale` for files with built-in clear space. `ServiceMark` and `ServiceLogo` show the Microsoft icons on the not-connected card, Chat starters and the Microsoft 365 step.
+- [x] Disclaimer in Settings, About, the README License section and both NOTICE files (`provider-logos/`, `service-logos/`), which list owner, source URL and retrieval date and how to request removal.
+- [x] Tests: every provider and service resolves to its logo, light and dark variants or one file on both, accessible labels.
+- [x] Step 4: the same logos on #174's provider and service marks (reach map, service rows, switcher, Agents chips, run review).
+
+
+## Remove pilot mode and sample data (maintainer decision, 2026-11-09; step 4, done after #174 merged)
+
+Supersedes the 2026-11-01 pilot decision and the 2026-11-08 block where they keep sample data. Done in this PR now: every entry point is gone (the scan, Chat's model choice, Settings, Tenants and the tenant menu); `startPilot` in `SetupFlowContext` and `PILOT_COPY` have no callers left. The rest waits for #174, which adds sample-organization code.
+
+Plan (after merging main):
+1. [x] Inventory on the merged tree: `git grep -il "pilot\|sample-tenant\|SAMPLE_TENANT\|kind === \"sample\""` across `apps/desktop/src`, `apps/desktop/electron`, `packages`, `scripts`, `docs/gitbook`, plus #174's sample-organization code. Today's list: `electron/sample-tenant/` (dataset, Graph backend, answers, pilot answers, pilot LLM), `electron/intune-chat/pilot-chat.ts`, the pilot branches in `state.ts` (`addSampleTenant`, sample checks), `service.ts`, `planner.ts`, `runs.ts`, `run-delivery*.ts`, drift (`rollback.ts`, `tracked-resources.ts`), `main.ts` and `preload.cts` (IPC), `src/components/PilotMode.tsx`, `src/pages/PilotAgentsHome.tsx`, `src/shared/pilot-mode.ts`, the pilot branches in `App.tsx`, `AppShell.tsx`, `Sidebar.tsx`, `TenantSwitcher.tsx`, `ServiceAccess.tsx`, `SchedulesPausedNotice.tsx`, `AgentHubList.tsx`, `IntuneChat.tsx`, `Agents*.tsx`, `AgentDetail.tsx`, `Marketplace.tsx`, `RunResult.tsx`, `Runs.tsx`, `Schedules.tsx`, `Settings.tsx`, `SetupFlowContext.tsx` (`startPilot`), `TenantSetupDialog.tsx` (`pilotRemoved`), copy in `copy/setup.ts` and `copy/trust.ts`, and about 40 test files.
+2. [x] Remove the sample tenant and its fake Graph backend, the pilot agents and prepared prompts, the pilot banners and routes, the `kind: "sample"` tenant type and every branch on it, and #174's sample-organization equivalents. Keep the agent SDK types stable or version them.
+3. [x] One-time upgrade step in `AppStateStore` on load: when a persisted tenant has `kind: "sample"`, remove it with its runs, conversations, workspaces, drift records and Graph cache rows (SQLite), clear it as the active tenant, write once, and show a one-line notice: "Sample data was removed. OpenAdminOS works with your own Microsoft 365 organization." Idempotent; tested from a state file that has a sample tenant, runs, conversations and cache rows.
+4. [x] Capture script: remove the pilot screenshots (`pilot-chat`, `pilot-agents`, `pilot-agent-report`, `pilot-write-confirm`, `pilot-hidden-route`) and their steps from `electron/first-run-capture.ts` and `scripts/capture-first-run-screenshots.mjs`; add the Microsoft 365 step frames.
+5. [x] Docs: remove the pilot pages and mentions (`docs/gitbook`, `web/content/docs` via `npm run docs:generate`), SPEC (pilot mode sections marked superseded), README, the marketing site sections that mention sample data, and the CHANGELOG line.
+6. [x] Tests: delete pilot tests, keep coverage for the upgrade step, run the full suites under Node 22, and check `npm run screenshots:first-run`.
+
+Done (step 4, 2026-11-09):
+- [x] Merged `origin/organizations/connections` (PR #174), then `origin/main` after it merged. Conflicts resolved so both PRs work: one `ServiceMark` on #174's API with Microsoft's icons, #174's data boundary and composer sentence with this branch's no-organization variants and location detail, the inline hosted confirmation with the model, tenant leases and the model choke point for sends with a tenant (`leasedScope`, none for a send with no organization), Settings without tenants, mockup 32 revision 2 plus section B2.
+- [x] `DeviceTile` and motion tokens in the scan and Connect Microsoft 365; organization wording across Chat, the not-connected card, trust copy and the hosted confirmation; provider and model changes from the scan and Chat's model choice audited through #174's state-diff audit (test); Connect Microsoft 365 reopens from Connections.
+- [x] Real logos on #174's surfaces: reach map and connection rows (`ProviderMark`), service rows, organization switcher, need chips, run review (tests).
+- [x] Pilot mode removed: SDK `kind: "sample"`, `RunRecord.pilot`, `addSampleTenant` and "pilot-active"; `electron/sample-tenant/`, `pilot-chat.ts`, `PilotMode.tsx`, `PilotAgentsHome.tsx`, `shared/pilot-mode.ts`; every branch on them in runs, deliveries, audit, state, Chat, Agents, Connections, switcher, sidebar, run pages and reports; pilot copy; pilot docs; capture shots and the paused-schedules shot that only existed for pilot; pilot-only tests (bundled agents on the sample graph included, since the fake Graph is gone; the qa-graph gate still checks agents).
+- [x] One-time upgrade `removeLegacySampleData` at launch with the notice "Sample data was removed. OpenAdminOS works with your own Microsoft 365 organization." (tests: removal of runs, conversations and organization, no sign-in removal, notice once, idempotent, id-only detection, no-op without pilot).
+
+
+## PR #175 onboarding round review (GPT-6.1-Sol at 6865d05)
+
+- [x] 1 (blocking): reopening Connect Microsoft 365 with a tenant keeps its identity. The picked services' missing parts go through the existing Add access dialog (now able to take several services): `addTenantAccess(tenantId, missing parts)` for the shared app, the extend script and Check again for an own registration; no new connect flow, no baseline sign-in scopes, no "Use our own app registration". Ask an admin to approve builds consent for that tenant (`/<tenantId>/v2.0/adminconsent`) and that client ID. Tests assert the parts, scopes, client ID and tenant for Add access, Copy script, Check again and Ask an admin, for the shared app and an own registration.
+- [x] 2: partly connected is not connected. The step distinguishes `serviceStatus` connected from partial; a partial service reads "Partly connected", stays selectable, and asks only for its missing parts. Test: reopening after an Intune-only connect completes Entra with exactly the parts not granted through Intune.
+- [x] 3: Chat's model choice uses `isProviderReady`. A running Ollama without a model offers Get OpenAdmin 8B; a running LM Studio without a loaded model offers the scan's load-model recovery, whose Scan again checks providers again in place. Unit and Chat tests.
+- [x] 4: Get OpenAdmin 8B and all providers keep Connect Microsoft 365 pending (`firstRunMicrosoftStep: "pending"`, IPC `complete-first-run-microsoft-step`). The step shows once the active model is ready and the admin is outside Settings, in that session or on a later launch, and clears when left or when a tenant is connected another way. Store test across a restart; gate tests for the detour, the return, a later launch and no ready model. Quitting during the step stays as the SPEC says; the step remains reachable from Settings, Tenants (Connections after step 4).
+- [x] 5: the hosted send confirmation shows the model in both variants and the tenant-bound remember line names it. Tests assert both.
 
 ## PR #174 review round 1 (Claude evaluator, GPT-6.1-Sol and Muse Wonder Full, 2026-11-09)
 

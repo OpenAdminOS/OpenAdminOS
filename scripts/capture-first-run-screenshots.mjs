@@ -15,18 +15,14 @@ const userDataDir = await mkdtemp(join(tmpdir(), "openadminos-first-run-capture-
 // Screenshots land in <outDir>/app. The default keeps them outside the repo.
 const outDir = resolve(
   process.env.OPENADMINOS_FIRST_RUN_SCREENSHOT_OUT_DIR ??
-    join(homedir(), ".cache", "oaos-pilot", "shots"),
+    join(homedir(), ".cache", "oaos-first-run", "shots"),
 );
 const names = [
-  "welcome",
+  "first-run-scan",
+  "first-run-microsoft",
+  "first-run-microsoft-picked",
   "connect-permissions",
   "own-registration",
-  "pilot-chat",
-  "pilot-agents",
-  "pilot-agent-report",
-  "pilot-write-confirm",
-  "pilot-hidden-route",
-  "schedules-paused",
 ];
 const expectedFiles = names.flatMap((name) =>
   ["light", "dark"].map((theme) => join(outDir, "app", `${name}-${theme}.png`)),
@@ -49,7 +45,8 @@ try {
   pipeProcess(renderer, "renderer");
   await waitForHttp(rendererUrl, 20_000);
 
-  const electronArgs = ["apps/desktop"];
+  // Screenshots are 1280x800 on every display, a Retina Mac included.
+  const electronArgs = ["--force-device-scale-factor=1", "apps/desktop"];
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
   electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,

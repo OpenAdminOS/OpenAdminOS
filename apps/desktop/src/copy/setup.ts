@@ -1,30 +1,6 @@
 import type { PendingIntent } from "../setup/pending-intent";
 import { formatServiceList } from "../shared/openAdminOS";
 
-export const WELCOME_COPY = {
-  title: "Welcome to OpenAdminOS",
-  subtitle: "Try it on sample data first, or connect your Microsoft 365 tenant now.",
-  pilotTitle: "Start in pilot mode",
-  pilotBody:
-    "Explore a fictional company's tenant. No Microsoft sign-in, no AI setup. Prepared prompts and three agents show how OpenAdminOS works.",
-  pilotBullets: [
-    "Sample data, clearly labeled",
-    "Nothing leaves this device",
-    "Switch to production any time",
-  ],
-  pilotAction: "Start pilot mode",
-  pilotStarting: "Starting pilot mode",
-  pilotFailed: "Pilot mode did not start.",
-  connectTitle: "Connect your tenant",
-  connectBody:
-    "Production. Ask anything about your own tenant and use every agent. Needs a Microsoft sign-in and one-time admin approval for read access.",
-  connectAction: "Connect tenant",
-  ownRegistrationLink:
-    "Your organization blocks third-party apps? Use your own app registration.",
-  footer: "Read-only by default. Write actions always ask for your confirmation.",
-  skip: "Skip for now",
-} as const;
-
 export const SETUP_COPY = {
   title: "Connect a Microsoft 365 tenant",
   subtitle: "Review the read access OpenAdminOS requests before Microsoft sign-in.",
@@ -55,10 +31,6 @@ export const SETUP_COPY = {
   cancelled: "Sign-in cancelled. Nothing was connected.",
   lateSuccess: (tenantName: string) =>
     `Tenant ${tenantName} connected. Your earlier action was not resumed.`,
-  guestChatHint:
-    "No tenant connected. You can draft a question now; connecting happens when you send.",
-  guestComposerPlaceholder:
-    "Ask about devices, users, apps, policies, sign-ins, or identity. Connect a tenant when you send.",
   signInChoiceLegend: "Sign in with",
   signInChoiceHint:
     "Choose the Entra app registration that signs you in. The read permissions below are the same for both. Access can be revoked from Enterprise applications at any time.",
@@ -233,6 +205,48 @@ export const SERVICE_COPY = {
   consentNotePending: (tenant: string) =>
     `Scopes not yet granted for ${tenant} are requested when the run starts.`,
   consentNoteGranted: (tenant: string) => `Every scope listed here is granted for ${tenant}.`,
-  consentNotePilot: "Pilot mode uses the sample tenant, so no consent is requested.",
 };
 
+
+/** The two onboarding steps on first launch: a model, then Microsoft 365 (SPEC.md 4a, first launch). */
+export const ONBOARDING_COPY = {
+  stepsLabel: "Setup steps",
+  steps: ["Model", "Microsoft 365"] as const,
+  done: "done",
+} as const;
+
+/** The second onboarding step, Connect Microsoft 365 (mockup 32, section B). */
+export const MICROSOFT_STEP_COPY = {
+  title: "Connect Microsoft 365",
+  body: "Pick the services you manage. OpenAdminOS asks Microsoft for read-only access to those, and nothing else.",
+  servicesLabel: "Services you manage",
+  noneYet: "Pick a service to see the read-only permissions it needs.",
+  signIn: "Sign in with Microsoft",
+  ownRegistration: "Use our own app registration",
+  askAdmin: "Ask an admin to approve",
+  notNow: "Not now",
+  notNowNote: "Chat works without it. A question about your own devices or users asks you to connect first.",
+  nodeOff: "Not connected",
+  nodePicked: "Selected",
+  nodeConnected: "Connected",
+  connected: "Connected",
+  partlyConnected: "Partly connected",
+  addAccess: "Add access",
+  addPermissions: "Add permissions",
+  addsToShared: (tenant: string) => `Adds to ${tenant} with the OpenAdminOS app and the account it is connected with. Microsoft asks only for the permissions listed.`,
+  addsToOwn: (tenant: string, clientId: string) =>
+    `Adds to ${tenant} with your app registration ${clientId}: add the permissions with the script, then check again.`,
+  partial: (title: string) => `${title}, partly`,
+  connectedTitle: (organization: string) => `${organization} is connected`,
+  connectedBody: "Chat answers from these services with the read-only permissions you approved. Writes always ask you first.",
+  openChat: "Open Chat",
+  signedInAs: (username: string) => `Signed in as ${username}.`,
+  enterpriseApp: (organization: string, clientId: string) =>
+    `The enterprise application OpenAdminOS (app ID ${clientId}) is now in ${organization}, with read-only delegated permissions. Find it in Entra admin center under Enterprise applications.`,
+  ownApp: (clientId: string) => `Signed in with your app registration ${clientId}.`,
+  announceConnected: (organization: string, services: string) => `${organization} is connected: ${services}.`,
+  reopen: "Set up Microsoft 365",
+} as const;
+
+/** Shown once after the upgrade removed pilot mode's sample data (maintainer decision, 2026-11-09). */
+export const SAMPLE_DATA_REMOVED_NOTICE = "Sample data was removed. OpenAdminOS works with your own Microsoft 365 organization.";

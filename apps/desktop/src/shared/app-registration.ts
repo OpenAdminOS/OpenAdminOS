@@ -29,10 +29,10 @@ function directoryFromAuthority(authority: string | undefined): string | undefin
 
 /**
  * Which app registration a tenant is connected with, as shown in Settings
- * and the tenant menu. The pilot tenant never signs in, so it has none.
+ * and the tenant menu.
  */
 export function tenantRegistrationSummary(tenant: TenantRecord): RegistrationSummary | null {
-  if (tenant.kind === "sample" || !tenant.appRegistration) return null;
+  if (!tenant.appRegistration) return null;
   const { kind, clientId, authority, label } = tenant.appRegistration;
   if (kind === "openadminos") {
     if (clientId === OPENADMINOS_APP_CLIENT_ID) {

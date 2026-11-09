@@ -15,7 +15,8 @@ export type ProviderId =
   | "copilot"
   | "gemini";
 
-export type ProviderStatus = "connected" | "available" | "not-installed" | "error";
+/** `not-checked`: not detected yet, while the first-launch model scan is pending. */
+export type ProviderStatus = "connected" | "available" | "not-installed" | "error" | "not-checked";
 
 export interface ProviderSummary {
   id: ProviderId;
@@ -24,6 +25,17 @@ export interface ProviderSummary {
   isLocal: boolean;
   status: ProviderStatus;
   detail?: string;
+  /**
+   * The check itself failed (an HTTP error, an unreachable or refused
+   * endpoint, a CLI that errored), as opposed to completing with a
+   * negative result. The model scan shows it as could not check.
+   */
+  checkFailed?: boolean;
+  /**
+   * Ollama and LM Studio: installed on this device (from local files) while
+   * its server does not answer. Settings and the model scan both read it.
+   */
+  installed?: boolean;
   models: string[];
   defaultModel?: string;
   cli?: {
@@ -31,6 +43,60 @@ export interface ProviderSummary {
     version?: string;
     state: "ready" | "check-required" | "not-installed" | "signed-out" | "access-denied" | "unsupported-version" | "request-failed";
   };
+}
+
+/** One provider check in the first-launch scan, as it resolves. */
+export type ModelScanProbeState = "checking" | "found" | "not-found" | "could-not-check";
+
+export interface ModelScanProbe {
+  providerId: ProviderId;
+  /** What the admin knows it as: Ollama, LM Studio, Claude Code, Codex. */
+  name: string;
+  /** Local runtimes keep prompts on the device; hosted CLIs send them to their provider. */
+  where: "local" | "hosted";
+  /** What the check touches on this device: a loopback address, a CLI command or a local file. */
+  target: string;
+  state: ModelScanProbeState;
+  /** One plain line, for example "Running, 3 models". */
+  summary: string;
+  /** Further plain lines: models, versions, what to do next. */
+  facts: string[];
+  /** It can answer now: running with a model, or signed in. */
+  ready: boolean;
+  models: string[];
+  /** Ollama only: OpenAdmin 8B is pulled on this device. */
+  hasOpenAdmin8B?: boolean;
+  /** The check touched nothing: its endpoint is set outside this device, so the scan refused it. */
+  notContacted?: true;
+  durationMs?: number;
+}
+
+/**
+ * What the scan leads to, under the provider rules: a ready local model is
+ * selected automatically, a hosted provider is only offered.
+ */
+export type ModelScanOutcome =
+  | { kind: "local-selected"; providerId: ProviderId; model?: string }
+  | { kind: "local-ready"; providerId: ProviderId; model?: string }
+  /**
+   * A ready local model was found while the admin's own choice, another
+   * provider, stays selected. Nothing local is promised until they switch.
+   */
+  | { kind: "local-available"; providerId: ProviderId; model?: string; selectedProviderId: ProviderId }
+  | { kind: "hosted-detected"; providerIds: ProviderId[] }
+  | { kind: "nothing" };
+
+export interface ModelScanResult {
+  probes: ModelScanProbe[];
+  outcome: ModelScanOutcome;
+  startedAt: string;
+  finishedAt: string;
+  /**
+   * Increases with every scan, Retry and Start rescan the host completes.
+   * A window applies a result only when it is newer than the last one it
+   * applied, so responses that arrive out of order never overwrite it.
+   */
+  generation?: number;
 }
 
 export interface ProviderTestResult {
@@ -669,11 +735,6 @@ export interface TenantRecord {
   addedAt: string;
   lastUsedAt?: string;
   /**
-   * Identifies the built-in fictional tenant. Absent means this is a real
-   * Microsoft 365 tenant backed by a Microsoft sign-in.
-   */
-  kind?: "sample";
-  /**
    * Detected Entra ID licensing tier for this tenant, derived from
    * `/subscribedSkus` at connection time and refreshed on a 24h
    * cadence. `unknown` means the probe hasn't run or failed (e.g.
@@ -763,8 +824,6 @@ export interface OrganizationRecord {
   id: string;
   /** Admin-visible name. Defaults to the tenant display name; renamable. */
   name: string;
-  /** The built-in sample organization that holds the pilot tenant. */
-  kind?: "sample";
   createdAt: string;
   connections: OrganizationConnections;
 }
@@ -793,7 +852,7 @@ export interface OrganizationMigrationNotice {
   /** Schedules left unassigned and paused because no real tenant was active. */
   unassignedCount: number;
   /** Why schedules were left unassigned. */
-  unassignedReason?: "no-active-tenant" | "pilot-active";
+  unassignedReason?: "no-active-tenant";
 }
 
 /**
@@ -884,11 +943,6 @@ export interface RunLogRecord {
 
 export interface RunRecord {
   dryRun?: boolean;
-  /**
-   * Set for runs on the built-in pilot tenant. Their LLM steps used
-   * prepared sample text and no model provider was contacted.
-   */
-  pilot?: true;
   /** Input settings saved at queue time for a fresh run after a dry run. */
   inputSettings?: Record<string, unknown>;
   runForRealOfRunId?: string;
@@ -1162,9 +1216,22 @@ export interface AppState {
   /**
    * Present once after the host selected a ready local provider for a user
    * who never chose one, until the user dismisses it or picks a provider.
-   * Never set in pilot mode. Hosted providers are never auto-selected.
+   * Hosted providers are never auto-selected.
    */
   providerAutoSelectNotice?: { providerId: ProviderId; providerName: string };
+  /**
+   * A fresh install has not run the first-launch model scan yet. The scan
+   * screen shows before anything else, once.
+   */
+  firstRunScanPending?: boolean;
+  /**
+   * The first launch left the model scan for provider setup in Settings, so
+   * Connect Microsoft 365 is still to come: it shows once a model is ready
+   * and the admin leaves Settings, or on a later launch.
+   */
+  firstRunMicrosoftStepPending?: boolean;
+  /** Pilot mode's sample data was removed at this launch; shown once in a one-line notice. */
+  sampleDataRemoved?: boolean;
   /** The MCP catalog with local install state. */
   mcpServers?: McpServerSummary[];
   /** Whether Chat offers tools, including MCP tools, to the selected model. */
@@ -1259,6 +1326,30 @@ export interface IntuneChatMessage {
    * the model's.
    */
   privatePrompt?: boolean;
+  /**
+   * The question needs a service that is not connected, so it was not
+   * answered and no Graph call was made. The renderer shows the
+   * not-connected card from the service registry.
+   */
+  notConnected?: IntuneChatNotConnected;
+}
+
+/**
+ * What a tenant or mixed question needs that is not connected.
+ * `no-tenant`: no tenant is connected at all. `service-missing` and
+ * `part-missing`: the active tenant has not connected the service, or one
+ * of its parts.
+ */
+export interface IntuneChatNotConnected {
+  reason: "no-tenant" | "service-missing" | "part-missing";
+  /**
+   * The service parts the question needs, in registry order. Empty when
+   * the question names no part the registry knows; the card then asks for
+   * a tenant without preselecting a service.
+   */
+  partIds: string[];
+  /** The tenant the service is missing in. Absent with `no-tenant`. */
+  tenantId?: string;
 }
 
 /**
@@ -1878,6 +1969,8 @@ export interface RetrievalStatus {
    * The index alone cannot ground answers without it.
    */
   embeddingModelInstalled?: boolean;
+  /** Why the last background download of the embedding model failed, with the fix. */
+  embeddingModelError?: string;
 }
 
 // ─── MCP write-gateway (v0.5) ────────────────────────────────────────────
@@ -2101,13 +2194,35 @@ export interface LocalDataSummary {
   lastDriftHistoryPrune?: DriftHistoryPruneResult;
 }
 
-export interface HostedProviderChatConsent {
-  tenantId: string;
-  providerId: ProviderId;
-  acknowledgedAt: string;
-  remember?: boolean;
-  workspaceContext?: HostedProviderWorkspaceContextConsent;
-}
+/**
+ * A fresh acknowledgement for one hosted-provider Chat send. It is bound
+ * either to the active tenant (`tenantId`) or to a send with no tenant
+ * connected (`noTenant`), and always to the provider and, when named, the
+ * model. The host refuses a no-tenant acknowledgement for any send that
+ * includes tenant context.
+ */
+export type HostedProviderChatConsent =
+  | {
+      tenantId: string;
+      noTenant?: undefined;
+      providerId: ProviderId;
+      /** The model the admin confirmed. When present, the host refuses a send that would use another model. */
+      model?: string;
+      acknowledgedAt: string;
+      remember?: boolean;
+      workspaceContext?: HostedProviderWorkspaceContextConsent;
+    }
+  | {
+      tenantId?: undefined;
+      /** The question, the conversation and reference results leave the device; no tenant data does. */
+      noTenant: true;
+      providerId: ProviderId;
+      /** A no-tenant decision is remembered per provider and model, so the host always checks the model. */
+      model?: string;
+      acknowledgedAt: string;
+      remember?: boolean;
+      workspaceContext?: undefined;
+    };
 
 export type TenantScope =
   | { kind: "active" }
@@ -2887,6 +3002,34 @@ export interface OpenAdminOSApi {
   listInstalledAgents(): Promise<AgentSummary[]>;
   listAgents(): Promise<AgentSummary[]>;
   listProviders(): Promise<ProviderSummary[]>;
+  /**
+   * Scans this device for models and AI tools, every check in parallel
+   * with a short timeout. Each result is also sent to `onModelScanProgress`
+   * as it resolves. Local only: loopback ports, local files and processes.
+   */
+  startModelScan?(scanId?: string): Promise<ModelScanResult>;
+  /**
+   * Starts Ollama or LM Studio found installed but not running, waits for
+   * its loopback endpoint and scans again. `message` explains a failure.
+   */
+  startLocalRuntime?(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan?: ModelScanResult }>;
+  /** Runs one check of the scan again, with a longer timeout. */
+  retryModelScanProbe?(providerId: ProviderId): Promise<ModelScanResult>;
+  /** `scanId` is the id the window passed to `startModelScan`; results of another run are ignored. */
+  onModelScanProgress?(listener: (probe: ModelScanProbe, scanId?: string) => void): () => void;
+  /** Selects a provider and its model in one validated write. */
+  setActiveProviderAndModel?(providerId: ProviderId, model: string): Promise<AppState>;
+  /** Records that the first-launch scan was finished or skipped. */
+  completeFirstRunScan?(options?: { microsoftStepPending?: boolean }): Promise<AppState>;
+  /** Records that the deferred Connect Microsoft 365 step was shown and left. */
+  completeFirstRunMicrosoftStep?(): Promise<AppState>;
+  /** Records that the notice about removed sample data was shown. */
+  dismissSampleDataRemovedNotice?(): Promise<AppState>;
+  /**
+   * After the first-launch scan, provider listing serves the scan results;
+   * this asks for every provider to be checked in full from the next read.
+   */
+  refreshProviders?(): Promise<void>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;
   getAzureOpenAIConfig(): Promise<AzureOpenAIProviderConfig>;
   setAzureOpenAIConfig(
@@ -2907,6 +3050,11 @@ export interface OpenAdminOSApi {
   sendIntuneChatMessage(
     input: SendIntuneChatMessageInput,
   ): Promise<SendIntuneChatMessageResult>;
+  /**
+   * With no tenant, whether a question would reach the model. A question
+   * blocked on the device needs no hosted confirmation.
+   */
+  previewIntuneChatSend?(input: { content: string }): Promise<{ reachesModel: boolean }>;
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,
@@ -3253,8 +3401,6 @@ export interface OpenAdminOSApi {
    * tier and licenses stay as they were.
    */
   cancelTenantCheck(tenantId: string): Promise<void>;
-  /** Add or reactivate the built-in fictional tenant. This is idempotent. */
-  addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
   /**
@@ -3262,12 +3408,9 @@ export interface OpenAdminOSApi {
    * The organization's Microsoft 365 tenant becomes the active tenant.
    */
   setActiveOrganization(id: string | null): Promise<AppState>;
-  /** Rename an organization. The sample organization keeps its name. */
+  /** Rename an organization. */
   renameOrganization(id: string, name: string): Promise<AppState>;
-  /**
-   * Assign an agent's schedule to an organization. The sample organization
-   * is refused: schedules never run in pilot mode.
-   */
+  /** Assign an agent's schedule to an organization. */
   assignAgentSchedule(slug: string, organizationId: string): Promise<AppState>;
   /** Hide the schedule migration notice. */
   dismissOrganizationMigrationNotice(): Promise<AppState>;

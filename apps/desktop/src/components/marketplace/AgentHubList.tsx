@@ -9,7 +9,6 @@ import {
   type InvalidAgentManifest,
   type RegistryAgentSummary,
 } from "../../shared/openAdminOS";
-import { PILOT_COPY } from "../../shared/pilot-mode";
 import { useAppState } from "../../state";
 import { IconShield } from "../icons";
 import { NewAgentModal } from "../NewAgentModal";
@@ -51,10 +50,9 @@ export function matchesAgentQuery(agent: RegistryAgentSummary, query: string): b
 
 /**
  * The registry agent catalog, formerly the Agents page hub tab. Install
- * and details stay on /agents/:slug; pilot mode lists agents without
- * install because agent install is a production feature.
+ * and details stay on /agents/:slug.
  */
-export function AgentHubList({ query, pilot }: { query: string; pilot: boolean }) {
+export function AgentHubList({ query }: { query: string }) {
   const navigate = useNavigate();
   const { state, registryAgents } = useAppState();
   const activeTenant = state.tenants.find((tenant) => tenant.id === state.activeTenantId);
@@ -76,7 +74,6 @@ export function AgentHubList({ query, pilot }: { query: string; pilot: boolean }
     <div>
       <div className="mb-2 flex flex-wrap items-center justify-between gap-3 text-xs text-[var(--color-text-muted)]">
         <span>{rows.length} of {registryAgents.length} agents</span>
-        {pilot ? <span>{PILOT_COPY.featureInProduction("Agent install")}</span> : null}
       </div>
       <div aria-label="Agent catalog" className="grid grid-cols-1 gap-x-7 lg:grid-cols-2">
         {rows.map((agent) => {
@@ -103,8 +100,6 @@ export function AgentHubList({ query, pilot }: { query: string; pilot: boolean }
               <div className="flex shrink-0 items-center gap-1">
                 {installed ? (
                   <Button size="sm" variant="ghost" onClick={() => openAgent(agent.slug)}>Open</Button>
-                ) : pilot ? (
-                  <Button size="sm" variant="ghost" onClick={() => openAgent(agent.slug)}>Details</Button>
                 ) : (
                   <>
                     <Button size="sm" variant="secondary" disabled={agent.compatibility?.supported === false} onClick={() => openAgent(agent.slug, "install")}>Install</Button>

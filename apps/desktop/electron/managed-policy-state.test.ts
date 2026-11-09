@@ -57,13 +57,27 @@ const catalog: McpCatalogEntry[] = [
   { ...MCP_CATALOG[0]!, id: "kql-search", name: "KQL Search", url: "http://127.0.0.1:9/kql" },
 ];
 
-async function makeFixture(options: { policy?: ManagedPolicyStatus; initial?: Record<string, unknown> } = {}) {
+/**
+ * Without `fresh`, the app is past its first run (no provider chosen yet);
+ * with it, there is no state file, so the first-run scan is pending.
+ */
+async function makeFixture(
+  options: { policy?: ManagedPolicyStatus; initial?: Record<string, unknown>; fresh?: boolean; providers?: () => ProviderSummary[] } = {},
+) {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-managed-policy-"));
   const statePath = join(dir, "state.json");
-  if (options.initial) {
+  if (!options.fresh) {
     await writeFile(
       statePath,
-      JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [], organizations: [], ...options.initial }),
+      JSON.stringify({
+        activeProviderId: "ollama",
+        providerChosenByUser: false,
+        installedAgents: [],
+        runs: [],
+        tenants: [],
+        organizations: [],
+        ...options.initial,
+      }),
       "utf8",
     );
   }
@@ -77,7 +91,7 @@ async function makeFixture(options: { policy?: ManagedPolicyStatus; initial?: Re
       statsApiUrl: "",
       appVersion: "0.8.0",
       mcpCatalog: catalog,
-      providerListFactory: () => readyProviders(),
+      providerListFactory: options.providers ?? (() => readyProviders()),
       llmFactory: async (providerId, model) => {
         llmCalls.push([providerId, model]);
         return { available: true } as never;
@@ -209,6 +223,63 @@ describe("managed policy: providers", () => {
       state = await fixture.store.getAppState();
       assert.equal(state.activeProviderId, "ollama");
       assert.equal(state.activeModelByProviderId?.["lm-studio"], "lm-studio-model");
+    } finally {
+      await fixture.close();
+    }
+  });
+});
+
+describe("managed policy: first-run scan", () => {
+  it("skips the scan on a fresh install when the policy provider is ready, and goes to Connect Microsoft 365", async () => {
+    const fixture = await makeFixture({
+      fresh: true,
+      policy: await policyOf({ defaultProvider: "ollama", defaultModel: "ollama-other", skipFirstRunScan: true }),
+    });
+    try {
+      const persisted = await fixture.persisted();
+      assert.equal(persisted.firstRunScan, undefined);
+      assert.equal(persisted.firstRunMicrosoftStep, "pending");
+      const state = await fixture.store.getAppState();
+      assert.equal(state.firstRunScanPending, undefined);
+      assert.equal(state.firstRunMicrosoftStepPending, true);
+      assert.equal(state.activeProviderId, "ollama");
+      assert.deepEqual(state.providers.map((provider) => [provider.id, provider.models]), [["ollama", ["ollama-other"]]]);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  it("runs the scan when the policy provider is not ready or the policy does not ask to skip", async () => {
+    const notReady = await makeFixture({
+      fresh: true,
+      providers: () => readyProviders().map((provider) => (provider.id === "ollama" ? { ...provider, status: "error" as const, models: [] } : provider)),
+      policy: await policyOf({ defaultProvider: "ollama", skipFirstRunScan: true }),
+    });
+    try {
+      assert.equal((await notReady.persisted()).firstRunScan, "pending");
+      assert.equal((await notReady.store.getAppState()).firstRunScanPending, true);
+    } finally {
+      await notReady.close();
+    }
+    const noSkip = await makeFixture({ fresh: true, policy: await policyOf({ defaultProvider: "ollama" }) });
+    try {
+      assert.equal((await noSkip.persisted()).firstRunScan, "pending");
+    } finally {
+      await noSkip.close();
+    }
+  });
+
+  it("checks and offers only allowed providers, and keeps the policy provider selected", async () => {
+    const fixture = await makeFixture({
+      fresh: true,
+      policy: await policyOf({ allowedProviders: ["lm-studio", "anthropic"], defaultProvider: "lm-studio", lock: ["allowedProviders"] }),
+    });
+    try {
+      const result = await fixture.store.scanModels();
+      assert.deepEqual(result.probes.map((probe) => probe.providerId).sort(), ["anthropic", "lm-studio"]);
+      const state = await fixture.store.getAppState();
+      assert.deepEqual(state.providers.map((provider) => provider.id).sort(), ["anthropic", "lm-studio"]);
+      assert.equal(state.activeProviderId, "lm-studio");
     } finally {
       await fixture.close();
     }

@@ -634,9 +634,6 @@ export function formatTeamsDeliveryMessage(
     "",
     `**Status:** ${status}`,
     `**Tenant:** ${tenant.displayName}`,
-    ...(tenant.kind === "sample"
-      ? ["**Data:** Pilot mode sample data from a fictional company"]
-      : []),
     `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `**Queued:** ${run.queuedAt}`,
   ];
@@ -677,9 +674,6 @@ export function formatWhatsAppDeliveryMessage(
     `Agent: ${agent.name}`,
     `Status: ${status}`,
     reportScopeLine(run, tenant),
-    ...(tenant?.kind === "sample"
-      ? ["Data: Pilot mode sample data from a fictional company"]
-      : []),
     `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `Queued: ${run.queuedAt}`,
   ];
@@ -720,9 +714,6 @@ export function formatOutlookDeliveryMessage(
     "",
     `**Status:** ${status}`,
     `**Tenant:** ${tenant.displayName}`,
-    ...(tenant.kind === "sample"
-      ? ["**Data:** Pilot mode sample data from a fictional company"]
-      : []),
     `**Trigger:** ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `**Queued:** ${run.queuedAt}`,
   ];
@@ -766,9 +757,6 @@ export function formatChatDeliveryMessage(
     `*Agent:* ${agent.name}`,
     `*Status:* ${status}`,
     reportScopeLine(run, tenant, (label) => `*${label}*`),
-    ...(tenant?.kind === "sample"
-      ? ["*Data:* Pilot mode sample data from a fictional company"]
-      : []),
     `*Trigger:* ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `*Queued:* ${run.queuedAt}`,
   ];
@@ -810,9 +798,6 @@ export function formatPlainDeliveryMessage(
     `Agent: ${agent.name}`,
     `Status: ${status}`,
     reportScopeLine(run, tenant),
-    ...(tenant?.kind === "sample"
-      ? ["Data: Pilot mode sample data from a fictional company"]
-      : []),
     `Trigger: ${run.trigger === "schedule" ? "Scheduled" : "Manual"}`,
     `Queued: ${run.queuedAt}`,
   ];

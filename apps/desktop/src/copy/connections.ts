@@ -14,8 +14,6 @@ export const ORGANIZATION_COPY = {
   servicesLine: (titles: readonly string[], ownRegistration: boolean) =>
     `${titles.length > 0 ? titles.join(", ") : "No services connected"}${ownRegistration ? ". Own app registration" : ""}`,
   noOrganizationDetail: "Chat answers from the docs and references",
-  sampleLabel: "Sample data",
-  sampleDetail: "Fictional company, no Microsoft sign-in",
   none: "No organizations yet.",
   noneDetail: "Chat answers from the docs and public references. Agents that read a service wait.",
   addOrganization: "Add organization",
@@ -27,7 +25,6 @@ export const ORGANIZATION_COPY = {
     hasOrganizations
       ? "No organization is active. Agents that read a service cannot start. Choose an organization."
       : "No organization yet. Connect Microsoft 365 to add one.",
-  tooltipSample: "Sample organization. Fictional company data. No Microsoft sign-in.",
   tooltipActive: (name: string, username: string) => `${name}. Signed in to Microsoft 365 as ${username}.`,
   servicesLabel: (titles: readonly string[]) =>
     titles.length > 0 ? `Services: ${titles.join(", ")}` : "No services connected",
@@ -81,7 +78,6 @@ export const ORGANIZATION_COPY = {
   renameSave: "Save name",
   renamed: "Organization renamed.",
   renameFailed: (detail: string) => `The name was not saved.${detail ? ` ${detail}` : ""} Try again.`,
-  sampleKeepsName: "The sample organization keeps its name.",
 } as const;
 
 export const CONNECTIONS_COPY = {
@@ -96,14 +92,11 @@ export const CONNECTIONS_COPY = {
   reportsNowHeading: "Run reports and agent messages",
   changeModel: "Change model",
   references: "References",
-  sampleOrganization:
-    "This is the sample organization: a fictional company with built-in data and no Microsoft sign-in. Connect Microsoft 365 to add your own organization. The sample organization is removed after the first real connection.",
   map: {
     label: "Where data goes",
     readFrom: "Reads from",
     device: "This device",
     deviceStays: "History, cache and sign-in tokens stay here",
-    deviceSample: "Sample data and history stay here",
     leaves: "Leaves this device",
     questionWords: "Words from questions",
     noReferences: "Nowhere, no public reference is on",
@@ -118,12 +111,10 @@ export const CONNECTIONS_COPY = {
     promptsNoOrganization: "Prompts and agent context",
     promptsLocal: "Nowhere, the model is local",
     promptsNoModel: "Nowhere, no model is ready",
-    promptsSample: "Nowhere, sample answers are prepared",
     noServices: "No service connected",
     modelLocal: (model: string) => `${model}, local`,
     modelHosted: (model: string) => `${model}, hosted`,
     modelNone: "No model ready",
-    modelSample: "Prepared sample answers, no model",
     partsSummary: (granted: number, total: number) => `${granted} of ${total} parts`,
     /** Nova voice with a hosted voice model, the same fact the status strip shows as "Voice · OpenAI". */
     voice: "Nova voice audio, shared context and web searches",
@@ -184,8 +175,6 @@ export const CONNECTIONS_COPY = {
 export const SCHEDULE_ORGANIZATION_COPY = {
   backgroundOff: "Background runs are off. Schedules run only while OpenAdminOS is open.",
   backgroundFailed: (detail: string) => `Background runs were not turned on. ${detail} Try again from Settings, General.`,
-  pausedSample:
-    "Schedules are paused while the sample organization is active. Switch to one of your organizations to resume.",
   pausedNone:
     "Schedules are paused while no organization is active. Choose an organization to resume its schedules.",
   waiting: (unassigned: number, elsewhere: number) =>
@@ -200,7 +189,7 @@ export const SCHEDULE_ORGANIZATION_COPY = {
       .filter(Boolean)
       .join(" "),
   migrated: (
-    notice: { assignedCount: number; unassignedCount: number; unassignedReason?: "no-active-tenant" | "pilot-active" },
+    notice: { assignedCount: number; unassignedCount: number; unassignedReason?: "no-active-tenant" },
     organizationName: string | undefined,
   ) =>
     [
@@ -208,7 +197,7 @@ export const SCHEDULE_ORGANIZATION_COPY = {
         ? `Schedules now belong to organizations. ${notice.assignedCount} ${notice.assignedCount === 1 ? "schedule moved" : "schedules moved"} to ${organizationName ?? "the organization that was active"} and ${notice.assignedCount === 1 ? "runs" : "run"} only while it is active.`
         : "Schedules now belong to organizations.",
       notice.unassignedCount > 0
-        ? `${notice.unassignedCount} ${notice.unassignedCount === 1 ? "schedule stays" : "schedules stay"} paused and unassigned because ${notice.unassignedReason === "pilot-active" ? "the sample organization was active" : "no organization was active"}. Assign each one on its agent page.`
+        ? `${notice.unassignedCount} ${notice.unassignedCount === 1 ? "schedule stays" : "schedules stay"} paused and unassigned because no organization was active. Assign each one on its agent page.`
         : "",
     ]
       .filter(Boolean)
@@ -221,7 +210,7 @@ export const SCHEDULE_ORGANIZATION_COPY = {
   assignLabel: "Assign to organization",
   assignAction: "Assign",
   assigned: (name: string) => `Schedule assigned to ${name}.`,
-  noOrganizations: "Connect an organization to assign this schedule. Schedules never run in the sample organization.",
+  noOrganizations: "Connect an organization to assign this schedule.",
 } as const;
 
 /** Run again for a run from an organization that is not active. */

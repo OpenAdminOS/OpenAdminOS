@@ -1,9 +1,16 @@
+import { access } from "node:fs/promises";
+import { homedir } from "node:os";
+import { delimiter, join } from "node:path";
+
 import {
   classifyOllamaEndpoint,
   classifyLmStudioEndpoint,
+  fetchLocal,
+  isConnectionRefused,
   probeAppleFoundationLlm,
   probeClaudeCodeLlm,
   probeCodexLlm,
+  probeCopilotInstallation,
   probeCopilotLlm,
   probeGeminiLlm,
   type CliProbe,
@@ -48,11 +55,45 @@ export function isProviderId(value: unknown): value is ProviderId {
 
 
 
-export async function checkOllama(provider: ProviderSummary): Promise<ProviderSummary> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
+/** Options for a check run by the first-launch scan. */
+export interface ScanCheckOptions {
+  /** Stops the check and its requests or processes. */
+  signal?: AbortSignal;
+  /** Never contact an endpoint outside this device. */
+  localOnly?: boolean;
+  /** A CLI binary to use instead of discovery (tests). */
+  binaryPath?: string;
+  /** How long an HTTP check may take: the scan passes its remaining budget. */
+  timeoutMs?: number;
+}
+
+/** At most this many Ollama model capability reads run at once. */
+const OLLAMA_SHOW_CONCURRENCY = 4;
+
+async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await task(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
+export async function checkOllama(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
   const endpoint = resolveOllamaEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyOllamaEndpoint(endpoint);
+  if (options.localOnly && !endpointTrust.isLocal) {
+    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+  }
+  const controller = new AbortController();
+  // With a budget (a scan check), the tags request and the capability reads share it.
+  const deadline = options.timeoutMs !== undefined ? Date.now() + options.timeoutMs : undefined;
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? OLLAMA_TAGS_TIMEOUT_MS);
+  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   const trustedProvider = endpointTrust.isLocal
     ? provider
     : {
@@ -63,7 +104,7 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
       };
 
   try {
-    const response = await fetch(`${endpoint}/api/tags`, {
+    const response = await fetchLocal(`${endpoint}/api/tags`, {
       signal: controller.signal,
     });
 
@@ -71,6 +112,7 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
       return {
         ...trustedProvider,
         status: "error",
+        checkFailed: true,
         detail: ollamaEndpointDetail(
           endpointTrust,
           `Ollama responded with HTTP ${response.status}`,
@@ -88,8 +130,9 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
     // guessing capabilities from names, which can be arbitrary local aliases.
     let unverified = false;
     const showController = new AbortController();
-    const showTimeout = setTimeout(() => showController.abort(), OLLAMA_SHOW_TIMEOUT_MS);
-    const supported = await Promise.all(installed.map(async ({ name: model, digest }) => {
+    const showTimeout = setTimeout(() => showController.abort(), deadline !== undefined ? Math.max(deadline - Date.now(), 0) : OLLAMA_SHOW_TIMEOUT_MS);
+    options.signal?.addEventListener("abort", () => showController.abort(), { once: true });
+    const supported = await mapLimited(installed, OLLAMA_SHOW_CONCURRENCY, async ({ name: model, digest }) => {
       const key = digest ? `${endpoint}\0${model}\0${digest}` : undefined;
       const known = key ? ollamaCompletionSupport.get(key) : undefined;
       if (known !== undefined) return known;
@@ -110,12 +153,14 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
         unverified = true;
         return false;
       }
-    })).finally(() => clearTimeout(showTimeout));
+    }).finally(() => clearTimeout(showTimeout));
     const models = installedModels.filter((_, i) => supported[i]);
 
     return {
       ...trustedProvider,
       status: models.length ? "connected" : "error",
+      // Capabilities that could not be read are a failed check, not "no text model".
+      ...(models.length === 0 && unverified ? { checkFailed: true } : {}),
       detail: ollamaEndpointDetail(
         endpointTrust,
         models.length > 0
@@ -127,13 +172,27 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
       models,
       defaultModel: models[0],
     };
-  } catch {
+  } catch (error) {
+    // Only a refused connection means Ollama is not running. A timeout, a
+    // stopped check or an unreadable response is a failed check.
+    if (isConnectionRefused(error)) {
+      return {
+        ...trustedProvider,
+        status: "not-installed",
+        // Settings and the scan read the same answer: installed on this device, server not running.
+        ...(endpointTrust.isLocal && (await installedOnDisk("ollama")) ? { installed: true } : {}),
+        detail: ollamaEndpointDetail(endpointTrust, `Ollama is not reachable on ${endpoint}`),
+        models: [],
+      };
+    }
+    const timedOut = error instanceof Error && error.name === "AbortError";
     return {
       ...trustedProvider,
-      status: "not-installed",
+      status: "error",
+      checkFailed: true,
       detail: ollamaEndpointDetail(
         endpointTrust,
-        `Ollama is not reachable on ${endpoint}`,
+        timedOut ? `Ollama on ${endpoint} did not answer in time.` : `Ollama on ${endpoint} answered with a response OpenAdminOS could not read.`,
       ),
       models: [],
     };
@@ -144,8 +203,11 @@ export async function checkOllama(provider: ProviderSummary): Promise<ProviderSu
 
 
 
-export async function checkAppleFoundation(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe = await probeAppleFoundationLlm();
+export async function checkAppleFoundation(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const probe = await probeAppleFoundationLlm(options.signal ? { signal: options.signal } : {});
+  if (probe.failed) {
+    return { ...provider, status: "error", checkFailed: true, detail: probe.detail ?? "The Apple Foundation helper did not answer.", models: [] };
+  }
   if (!probe.installed) {
     return {
       ...provider,
@@ -180,9 +242,12 @@ export async function checkAppleFoundation(provider: ProviderSummary): Promise<P
 
 
 
-export async function checkLmStudio(provider: ProviderSummary): Promise<ProviderSummary> {
+export async function checkLmStudio(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
   const endpoint = resolveLmStudioEndpoint().replace(/\/$/, "");
   const endpointTrust = classifyLmStudioEndpoint(endpoint);
+  if (options.localOnly && !endpointTrust.isLocal) {
+    return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `LM Studio is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
+  }
   const trustedProvider = endpointTrust.isLocal
     ? provider
     : {
@@ -191,12 +256,18 @@ export async function checkLmStudio(provider: ProviderSummary): Promise<Provider
           "Use an LM Studio-compatible endpoint outside this device. Tenant prompts leave this device when active.",
         isLocal: false,
       };
-  const probe = await probeLmStudioLlm({ endpoint });
+  const probe = await probeLmStudioLlm({
+    endpoint,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+  });
 
   if (!probe.ready) {
     return {
       ...trustedProvider,
       status: probe.status === "error" ? "error" : "not-installed",
+      ...(probe.status === "error" ? { checkFailed: true } : {}),
+      ...(probe.status !== "error" && endpointTrust.isLocal && (await installedOnDisk("lm-studio")) ? { installed: true } : {}),
       detail: lmStudioEndpointDetail(
         endpointTrust,
         probe.detail ??
@@ -244,6 +315,8 @@ export function checkAzureOpenAI(
     return {
       ...provider,
       status: "error",
+      // The saved settings could not be read as an endpoint: a failed check, not "not configured".
+      checkFailed: true,
       detail: "Azure OpenAI endpoint is not a valid URL. Check Settings.",
       models: [deployment],
       defaultModel: deployment,
@@ -298,8 +371,8 @@ export function lmStudioEndpointDetail(
 
 
 
-export async function checkClaudeCode(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe = await probeClaudeCodeLlm();
+export async function checkClaudeCode(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const probe = await probeClaudeCodeLlm({ ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}), ...(options.signal ? { signal: options.signal } : {}) });
   const cli: ProviderSummary["cli"] = {
     binaryPath: probe.binaryPath, version: probe.version,
     state: !probe.installed ? "not-installed" : probe.ready ? "ready" : probe.failure ?? "request-failed",
@@ -336,8 +409,8 @@ export async function checkClaudeCode(provider: ProviderSummary): Promise<Provid
 
 
 
-export async function checkCodex(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe = await probeCodexLlm();
+export async function checkCodex(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const probe = await probeCodexLlm({ ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}), ...(options.signal ? { signal: options.signal } : {}) });
   const cli: ProviderSummary["cli"] = {
     binaryPath: probe.binaryPath, version: probe.version,
     state: !probe.installed ? "not-installed" : probe.ready ? "ready" : probe.failure ?? "request-failed",
@@ -372,12 +445,46 @@ export async function checkCodex(provider: ProviderSummary): Promise<ProviderSum
   };
 }
 
-export async function checkAdditionalCli(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe: CliProbe = provider.id === "copilot" ? await probeCopilotLlm() : await probeGeminiLlm();
+export async function checkAdditionalCli(provider: ProviderSummary, options: ScanCheckOptions & { scan?: boolean } = {}): Promise<ProviderSummary> {
+  const cliOptions = { ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}), ...(options.signal ? { signal: options.signal } : {}) };
+  // The scan reads Copilot's installation only: its full probe starts an RPC server and lists models from GitHub.
+  const probe: CliProbe = provider.id === "copilot"
+    ? options.scan ? await probeCopilotInstallation(cliOptions) : await probeCopilotLlm(cliOptions)
+    : await probeGeminiLlm(cliOptions);
   return {
     ...provider,
     status: !probe.installed ? "not-installed" : probe.ready ? "connected" : probe.failure ? "error" : "available",
     detail: probe.detail, models: probe.models, defaultModel: probe.defaultModel,
     cli: { binaryPath: probe.binaryPath, version: probe.version, state: probe.ready ? "ready" : probe.failure ?? "check-required" },
   };
+}
+
+/** Whether a runtime is installed, from local files only: a binary on PATH or a known app location. */
+export async function installedOnDisk(providerId: "ollama" | "lm-studio", env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<boolean> {
+  const binary = providerId === "ollama" ? "ollama" : "lms";
+  const names = platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`] : [binary];
+  const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
+  const home = env.HOME ?? env.USERPROFILE ?? homedir();
+  const known =
+    providerId === "ollama"
+      ? platform === "darwin"
+        ? ["/Applications/Ollama.app", "/usr/local/bin/ollama", "/opt/homebrew/bin/ollama"]
+        : platform === "win32"
+          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "Ollama", "ollama.exe")]
+          : ["/usr/local/bin/ollama", "/usr/bin/ollama"]
+      : platform === "darwin"
+        ? ["/Applications/LM Studio.app", join(home, ".lmstudio", "bin", "lms")]
+        : platform === "win32"
+          ? [join(env.LOCALAPPDATA ?? join(home, "AppData", "Local"), "Programs", "LM Studio", "LM Studio.exe"), join(home, ".lmstudio", "bin", "lms.exe")]
+          : [join(home, ".lmstudio", "bin", "lms")];
+  const candidates = [...known, ...pathDirs.flatMap((dir) => names.map((name) => join(dir, name)))];
+  for (const candidate of candidates) {
+    try {
+      await access(candidate);
+      return true;
+    } catch {
+      // Not here.
+    }
+  }
+  return false;
 }

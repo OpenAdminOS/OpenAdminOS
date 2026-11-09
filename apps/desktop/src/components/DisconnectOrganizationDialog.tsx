@@ -6,12 +6,11 @@ import { useToast } from "./Toast";
 import { Badge } from "./ui";
 import { ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
 import type { OrganizationRecord, TenantRecord } from "../shared/openAdminOS";
-import { PILOT_COPY } from "../shared/pilot-mode";
 import { useAppState } from "../state";
 
 /**
  * Confirms disconnecting an organization's Microsoft 365 connection, which
- * deletes its local data, or leaving the sample organization.
+ * deletes its local data.
  */
 export function DisconnectOrganizationDialog({
   open,
@@ -33,7 +32,6 @@ export function DisconnectOrganizationDialog({
   useEffect(() => {
     if (open) setDeleteLocal(false);
   }, [open]);
-  const sample = tenant.kind === "sample";
   const own = tenant.appRegistration?.kind === "custom" ? tenant.appRegistration : undefined;
   const runCount = state.runs.filter((run) => run.tenantId === tenant.id).length;
   const domain = tenant.username.split("@")[1] ?? tenant.displayName;
@@ -41,53 +39,45 @@ export function DisconnectOrganizationDialog({
   return (
     <Modal open={open} onClose={() => { if (!busy) onClose(); }} size="md">
       <ModalHeader
-        title={sample ? PILOT_COPY.leaveTitle : ORGANIZATION_COPY.disconnectTitle(organization.name)}
-        subtitle={sample ? "Delete the sample organization and its local data" : ORGANIZATION_COPY.disconnectSubtitle(domain, tenant.username)}
-        badge={<Badge tone={sample ? "info" : "danger"}>Permanent local deletion</Badge>}
+        title={ORGANIZATION_COPY.disconnectTitle(organization.name)}
+        subtitle={ORGANIZATION_COPY.disconnectSubtitle(domain, tenant.username)}
+        badge={<Badge tone="danger">Permanent local deletion</Badge>}
         onClose={() => { if (!busy) onClose(); }}
       />
       <div className="space-y-4 p-6">
-        {sample ? (
-          <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-            {PILOT_COPY.leaveBody}
-          </div>
-        ) : (
-          <>
-            <section aria-labelledby="disconnect-deletes" className="text-sm leading-relaxed">
-              <h3 id="disconnect-deletes" className="font-medium text-[var(--color-text)]">{ORGANIZATION_COPY.disconnectDeletesTitle}</h3>
-              <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[var(--color-text-soft)]">
-                {ORGANIZATION_COPY.disconnectDeletes(runCount).map((item) => <li key={item}>{item}</li>)}
-              </ul>
-              <p className="mt-1.5 text-[var(--color-text-muted)]">
-                {`${ORGANIZATION_COPY.disconnectSchedules} ${ORGANIZATION_COPY.disconnectAuditKept}${wasActive ? ` ${ORGANIZATION_COPY.disconnectNoOrganizationAfter}` : ""}`}
-              </p>
-            </section>
-            <section aria-labelledby="disconnect-keeps" className="text-sm leading-relaxed">
-              <h3 id="disconnect-keeps" className="font-medium text-[var(--color-text)]">{ORGANIZATION_COPY.disconnectKeepsTitle}</h3>
-              <p className="mt-1 text-[var(--color-text-soft)]">
-                {own ? ORGANIZATION_COPY.disconnectKeepsOwn(own.label ?? own.clientId, own.clientId) : ORGANIZATION_COPY.disconnectKeepsBody}
-              </p>
-              <button
-                type="button"
-                className="mt-1 text-[var(--color-text)] underline underline-offset-2 hover:text-[var(--color-text-soft)]"
-                onClick={() => void window.openAdminOS?.openExternal(own ? ORGANIZATION_COPY.disconnectRevokeOwnUrl : ORGANIZATION_COPY.disconnectRevokeUrl)}
-              >
-                {ORGANIZATION_COPY.disconnectRevokeLink}
-              </button>
-            </section>
-            {/* Decided 2026-11-09: disconnecting always deletes the local data, after an explicit check. */}
-            <label className="flex items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3.5 py-3 text-sm text-[var(--color-text)] ring-1 ring-inset ring-[var(--color-border-soft)]">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 accent-[var(--color-danger)]"
-                checked={deleteLocal}
-                disabled={busy}
-                onChange={(event) => setDeleteLocal(event.target.checked)}
-              />
-              <span>{ORGANIZATION_COPY.disconnectConfirmLocal(organization.name)}</span>
-            </label>
-          </>
-        )}
+        <section aria-labelledby="disconnect-deletes" className="text-sm leading-relaxed">
+          <h3 id="disconnect-deletes" className="font-medium text-[var(--color-text)]">{ORGANIZATION_COPY.disconnectDeletesTitle}</h3>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-[var(--color-text-soft)]">
+            {ORGANIZATION_COPY.disconnectDeletes(runCount).map((item) => <li key={item}>{item}</li>)}
+          </ul>
+          <p className="mt-1.5 text-[var(--color-text-muted)]">
+            {`${ORGANIZATION_COPY.disconnectSchedules} ${ORGANIZATION_COPY.disconnectAuditKept}${wasActive ? ` ${ORGANIZATION_COPY.disconnectNoOrganizationAfter}` : ""}`}
+          </p>
+        </section>
+        <section aria-labelledby="disconnect-keeps" className="text-sm leading-relaxed">
+          <h3 id="disconnect-keeps" className="font-medium text-[var(--color-text)]">{ORGANIZATION_COPY.disconnectKeepsTitle}</h3>
+          <p className="mt-1 text-[var(--color-text-soft)]">
+            {own ? ORGANIZATION_COPY.disconnectKeepsOwn(own.label ?? own.clientId, own.clientId) : ORGANIZATION_COPY.disconnectKeepsBody}
+          </p>
+          <button
+            type="button"
+            className="mt-1 text-[var(--color-text)] underline underline-offset-2 hover:text-[var(--color-text-soft)]"
+            onClick={() => void window.openAdminOS?.openExternal(own ? ORGANIZATION_COPY.disconnectRevokeOwnUrl : ORGANIZATION_COPY.disconnectRevokeUrl)}
+          >
+            {ORGANIZATION_COPY.disconnectRevokeLink}
+          </button>
+        </section>
+        {/* Decided 2026-11-09: disconnecting always deletes the local data, after an explicit check. */}
+        <label className="flex items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3.5 py-3 text-sm text-[var(--color-text)] ring-1 ring-inset ring-[var(--color-border-soft)]">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-4 w-4 accent-[var(--color-danger)]"
+            checked={deleteLocal}
+            disabled={busy}
+            onChange={(event) => setDeleteLocal(event.target.checked)}
+          />
+          <span>{ORGANIZATION_COPY.disconnectConfirmLocal(organization.name)}</span>
+        </label>
         {error ? (
           <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {error}
@@ -97,7 +87,7 @@ export function DisconnectOrganizationDialog({
           <Button variant="ghost" disabled={busy} onClick={onClose}>Cancel</Button>
           <Button
             variant="danger"
-            disabled={busy || (!sample && !deleteLocal)}
+            disabled={busy || !deleteLocal}
             onClick={() => {
               setBusy(true);
               setError(null);
@@ -106,7 +96,7 @@ export function DisconnectOrganizationDialog({
                   // Removed, with its cleanup pending: a warning with what is
                   // done and what is not, never a failure.
                   if (pending) toast.warning(ORGANIZATION_COPY.disconnectedCleanupPending(organization.name, pending.error));
-                  else toast.success(sample ? "Pilot mode ended. Its sample data was deleted from this device." : ORGANIZATION_COPY.disconnected(organization.name));
+                  else toast.success(ORGANIZATION_COPY.disconnected(organization.name));
                   onClose();
                 })
                 .catch((caught) =>
@@ -116,7 +106,7 @@ export function DisconnectOrganizationDialog({
                 .finally(() => setBusy(false));
             }}
           >
-            {busy ? (sample ? "Removing" : "Disconnecting") : sample ? PILOT_COPY.leaveAction : ORGANIZATION_COPY.disconnectAction}
+            {busy ? "Disconnecting" : ORGANIZATION_COPY.disconnectAction}
           </Button>
         </div>
       </div>

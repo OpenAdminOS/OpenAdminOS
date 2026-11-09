@@ -12,7 +12,7 @@ An organization is a company you manage. It holds one Microsoft 365 tenant today
 - **Created by the first connection.** Connecting a Microsoft 365 tenant creates an organization named after the tenant. Rename it in **Connections**, under **Organizations on this device**. Connecting the same tenant again uses the same organization.
 - **One active at a time.** The organization menu in the top bar shows each organization with the services it has connected. Choose one to make it active, or choose **No organization**.
 - **No organization** is a valid state. Chat still answers from the docs and the public references you added. Agents that read a service wait until an organization with that service is active.
-- **Sample data.** A sample organization from pilot mode shows in the organization menu with a Sample data label until you leave pilot mode or connect your first organization. The menu does not open sample data.
+- **No sample data.** OpenAdminOS works only with your own organizations. Updating from a version with pilot mode removes its sample organization once, with its runs, conversations and cache, and says so in one line.
 - **Disconnecting** Microsoft 365 removes the organization and deletes its local data from this device. Data in the tenant is not changed.
 
 ## Connections
@@ -47,4 +47,4 @@ Every agent shows the services it reads. With everything connected the action sa
 
 Each schedule belongs to one organization and runs only while that organization is active. A new schedule belongs to the organization that was active when you created it. The schedule card shows its organization, or **Unassigned** with an **Assign** action.
 
-When you update from a version before organizations, schedules move to the organization of the real tenant that was active, and the schedules list says so. If no tenant or the pilot tenant was active, schedules stay paused and unassigned until you assign each one. They are never assigned to the sample organization.
+When you update from a version before organizations, schedules move to the organization of the tenant that was active, and the schedules list says so. If no tenant was active, schedules stay paused and unassigned until you assign each one.

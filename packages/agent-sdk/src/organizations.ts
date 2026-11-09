@@ -53,7 +53,6 @@ function organizationFromTenant(tenant: TenantRecord): OrganizationRecord {
   return {
     id: organizationIdForTenant(tenant.id),
     name: normalizeOrganizationName(tenant.displayName) ?? "Organization",
-    ...(tenant.kind === "sample" ? { kind: "sample" as const } : {}),
     createdAt: tenant.addedAt,
     connections: { microsoft365: { tenantId: tenant.id } },
   };
@@ -82,15 +81,13 @@ export interface OrganizationReconcileResult {
  * every tenant without one. A stored record is kept only when it is well
  * formed and its Microsoft 365 tenant still exists; an organization with
  * no connection left is removed, as a tenant's data is today. Each tenant
- * belongs to one organization, and the sample kind always follows the
- * tenant, never the stored record.
+ * belongs to one organization.
  *
  * Schedules: a state file from before organizations moves every schedule
- * to the organization of the real tenant that was active. With no tenant
- * active, or the pilot tenant active, schedules stay unassigned, which
- * pauses them until the admin assigns each one; they are never assigned
- * to the sample organization. After the move, a schedule whose
- * organization is gone or is the sample organization becomes unassigned.
+ * to the organization of the tenant that was active. With no tenant
+ * active, schedules stay unassigned, which pauses them until the admin
+ * assigns each one. After the move, a schedule whose organization is gone
+ * becomes unassigned.
  */
 export function reconcileOrganizations(input: OrganizationReconcileInput): OrganizationReconcileResult {
   const migrated = !Array.isArray(input.rawOrganizations);
@@ -185,9 +182,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     claimedTenants.add(tenant.id);
     stored.set(tenant.id, {
       id,
-      // The sample organization always carries the pilot tenant's name.
-      name: tenant.kind === "sample" ? fallback.name : normalizeOrganizationName(raw.name) ?? fallback.name,
-      ...(tenant.kind === "sample" ? { kind: "sample" as const } : {}),
+      name: normalizeOrganizationName(raw.name) ?? fallback.name,
       createdAt: typeof raw.createdAt === "string" && raw.createdAt.length > 0 ? raw.createdAt : fallback.createdAt,
       connections: { ...unknown, microsoft365: { tenantId: tenant.id } },
     });
@@ -207,12 +202,10 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
   const organizations = [...fromTenants, ...withoutMicrosoft365];
 
   const organizationIds = new Set(organizations.map((organization) => organization.id));
-  const sampleIds = new Set(organizations.filter((organization) => organization.kind === "sample").map((organization) => organization.id));
   const activeTenant = input.activeTenantId ? tenantsById.get(input.activeTenantId) : undefined;
-  const activeRealOrganization =
-    activeTenant && activeTenant.kind !== "sample"
-      ? organizations.find((organization) => organization.connections.microsoft365?.tenantId === activeTenant.id)
-      : undefined;
+  const activeRealOrganization = activeTenant
+    ? organizations.find((organization) => organization.connections.microsoft365?.tenantId === activeTenant.id)
+    : undefined;
 
   let assignedCount = 0;
   let unassignedCount = 0;
@@ -220,7 +213,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     const schedule = agent.schedule;
     if (!schedule) return agent;
     const { organizationId: current, ...rest } = schedule;
-    const valid = typeof current === "string" && organizationIds.has(current) && !sampleIds.has(current);
+    const valid = typeof current === "string" && organizationIds.has(current);
     if (migrated) {
       // A schedule that already names a valid organization was assigned
       // by a newer version; keep it, and do not count it as moved.
@@ -234,7 +227,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     }
     if (valid) return agent;
     const replacement = typeof current === "string" ? replacedIds.get(current) : undefined;
-    if (replacement && !sampleIds.has(replacement)) return { ...agent, schedule: { ...rest, organizationId: replacement } };
+    if (replacement) return { ...agent, schedule: { ...rest, organizationId: replacement } };
     return current === undefined ? agent : { ...agent, schedule: rest };
   });
 
@@ -246,7 +239,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
         ...(assignedCount > 0 && activeRealOrganization ? { assignedOrganizationId: activeRealOrganization.id } : {}),
         unassignedCount,
         ...(unassignedCount > 0
-          ? { unassignedReason: activeTenant?.kind === "sample" ? "pilot-active" as const : "no-active-tenant" as const }
+          ? { unassignedReason: "no-active-tenant" as const }
           : {}),
       };
     }
@@ -269,8 +262,9 @@ function sanitizeMigrationNotice(
   if (assignedCount === undefined || unassignedCount === undefined) return undefined;
   if (assignedCount + unassignedCount === 0) return undefined;
   const reason =
+    // "pilot-active" from before pilot mode was removed reads as no active tenant.
     value.unassignedReason === "no-active-tenant" || value.unassignedReason === "pilot-active"
-      ? value.unassignedReason
+      ? ("no-active-tenant" as const)
       : undefined;
   return {
     assignedCount,

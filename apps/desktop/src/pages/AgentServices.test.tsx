@@ -64,6 +64,9 @@ describe("agents by service", () => {
     const list = await screen.findByLabelText("Installed agents");
     expect(within(list).getByText("Needs Defender")).toBeInTheDocument();
     expect(within(list).getByText("Needs Entra")).toBeInTheDocument();
+    // Need chips carry Microsoft's icon for the service, dashed while it is missing (step 4).
+    const chip = within(list).getByText("Needs Defender").closest(".need-chip") ?? within(list).getByText("Needs Defender").parentElement!;
+    expect(chip.querySelector('.svc-mark[data-service="defender"] [data-kind="logo"] img')).not.toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Filter" }));
     expect(screen.getByRole("menuitemradio", { name: "All services" })).toHaveAttribute("aria-checked", "true");
@@ -118,6 +121,12 @@ describe("agents by service", () => {
 
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
     expect(within(dialog).getByText("Needs Defender, not connected.")).toBeInTheDocument();
+    // The run review shows the provider's logo by the model and Microsoft's icon by what it reads, dashed while not connected (step 4).
+    const facts = dialog.querySelector("dl[aria-label=\"What this run uses\"]")!;
+    expect(facts.querySelector(`[data-provider-logo="${state.activeProviderId}"][data-kind="logo"]`)).not.toBeNull();
+    const reads = facts.querySelector('.svc-mark[data-service="defender"]');
+    expect(reads).toHaveAttribute("data-off", "true");
+    expect(reads!.querySelector('[data-kind="logo"] img')).not.toBeNull();
     expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
     await user.click(within(dialog).getByRole("button", { name: "Add Defender" }));
     expect(screen.getByRole("dialog", { name: "Add Defender access" })).toBeInTheDocument();
@@ -476,18 +485,6 @@ it("names the organization of a resumed run's tenant, not the active one (Muse r
   expect(within(dialog).queryByText("Contoso IT")).not.toBeInTheDocument();
   expect(blockerOf(dialog)).toHaveTextContent("This run is set up for Fabrikam, which is not the active organization.");
   expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
-});
-
-it("shows a pilot agent's services as connected in the sample organization (Muse round 2)", async () => {
-  const sample = { ...createMockAppState().tenants[0]!, id: "openadminos-sample-tenant", displayName: "Contoso (pilot)", kind: "sample" as const };
-  const agent = createMockAgent({ id: "find-inactive-devices", slug: "find-inactive-devices", name: "Find inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
-  renderRoute(<Agents />, {
-    path: "/agents/:slug",
-    route: "/agents/find-inactive-devices",
-    bridge: makeMockBridge({}, createMockAppState({ tenants: [sample], activeTenantId: sample.id, installedAgents: [agent] })),
-  });
-  expect(await screen.findByText("Needs Intune")).toHaveClass("sr-only");
-  expect(screen.queryByText(/Intune, not connected/)).not.toBeInTheDocument();
 });
 
 describe("start errors inside the run review (review round 3)", () => {

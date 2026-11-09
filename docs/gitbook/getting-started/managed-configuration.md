@@ -64,7 +64,7 @@ The JSON Schema is in the repository at [`schemas/policy.schema.json`](https://g
 | `defaultModel` | Model name | The model of `defaultProvider`, as the provider names it (for example `llama3.1:8b` in Ollama). Requires `defaultProvider`. |
 | `allowedPublicReferences` | List of public reference ids | Only these public references are shown in the Marketplace and used by Chat. An empty list `[]` allows none. Any other one is refused before anything is sent. |
 | `appRegistration` | Object with `clientId`, optional `tenantId` and `label` | Your own Entra app registration, added to the saved registrations. `tenantId` is the Directory (tenant) ID or a verified domain, required for a single-tenant app. See [Own app registration](own-app-registration.md) for how to create it. |
-| `skipFirstRunScan` | `true` or `false` | With `true`, a fresh install whose policy provider is ready skips the first-run model scan and opens Chat with that model. |
+| `skipFirstRunScan` | `true` or `false` | With `true` and a `defaultProvider`, a fresh install checks only that provider at launch. When it is ready, the first-run model scan is skipped and the first run opens at Connect Microsoft 365, then Chat with the policy's model. When it is not ready, the scan runs as usual. |
 | `lock` | List of setting keys | The settings the admin cannot change in the app. Without `lock`, every setting the file sets is locked. With `"lock": []`, the file only sets defaults. |
 | `$schema` | Link | Optional. For editors. |
 
@@ -74,13 +74,13 @@ Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `rele
 
 ### Locked and unlocked settings
 
-- **Locked provider.** It is the only provider the app offers. The provider list in Settings shows it as **Set by your IT department** and cannot be changed.
+- **Locked provider.** It is the only provider the app offers. The first-run scan, Chat's model choice and the provider list in Settings show it as **Set by your IT department**, and it cannot be changed.
 - **Locked model.** It is the only model of that provider. If the provider does not list the model (for example it is not pulled in Ollama), the provider shows that it is missing and nothing runs until it is installed. CLI providers that do not list models are given the model by name.
 - **Locked app registration.** Sign-in uses only this registration. The OpenAdminOS app and other saved registrations are not offered, and it cannot be removed under **Connections, Organizations**.
 - **Unlocked provider or model.** Applies until the admin picks another one, then the admin's choice stays. A new unlocked default in a changed policy replaces only the policy's earlier default, never the admin's own choice.
 - **Unlocked app registration.** Added to the saved registrations once. If the admin removes it, it stays removed until the policy names a different registration.
 
-`allowedProviders` and `allowedPublicReferences` are always enforced, locked or not.
+`allowedProviders` and `allowedPublicReferences` are always enforced, locked or not. The first-run scan checks only allowed providers, and with a `defaultProvider` it never selects another one for you.
 
 ## When the File Has a Problem
 

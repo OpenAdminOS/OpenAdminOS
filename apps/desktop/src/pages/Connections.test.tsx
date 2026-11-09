@@ -100,6 +100,8 @@ describe("Connections reach map", () => {
     const row = within(map).getByText("Codex · location set by your account");
     expect(row).toHaveAttribute("title", expect.stringContaining("Codex · location set by your account"));
     expect(within(map).getByText(model.model.modelName!)).toBeInTheDocument();
+    // The prompts row carries the provider's own logo, not two letters (step 4).
+    expect(map.querySelector(`[data-service="provider"] [data-provider-logo="${hosted.id}"][data-kind="logo"]`)).not.toBeNull();
     // The description uses the same sentence as every other surface (design round review 2).
     expect(reachDescription(model)).toContain(`${promptsGoTo(hosted, true)}.`);
     expect(reachDescription(model)).toContain("Prompts and tenant data leave this device through Codex; location set by your account.");
@@ -122,7 +124,7 @@ describe("Connections reach map", () => {
     // The figure keeps its text alternative.
     const figure = within(empty).getByRole("figure", { name: CONNECTIONS_COPY.map.label });
     expect(figure).toHaveAccessibleDescription(/^No organization reads no service into this device\./);
-    // One way forward: Connect Microsoft 365. Pilot mode is being removed, so no sample data button.
+    // One way forward: Connect Microsoft 365. There is no sample data.
     expect(within(empty).getAllByRole("button").map((button) => button.textContent)).toEqual([CONNECTIONS_COPY.connectMicrosoft365]);
     expect(screen.queryByRole("button", { name: /sample data/i })).not.toBeInTheDocument();
     // No services list with Not connected rows, and no empty map.
@@ -142,12 +144,11 @@ describe("Connections reach map", () => {
       activeProviderId: "openai",
       mcpServers: createMockMcpServers({ "kql-search": { installed: true, enabled: true } }),
     });
-    const bridge = render({ ...state, tenants: [] });
+    render({ ...state, tenants: [] });
     const leaves = await screen.findByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
     const prompts = within(leaves).getByText("Codex · location set by your account");
     expect(prompts.className).toContain("--color-warning");
     expect(within(leaves).getByText("www.kqlsearch.com")).toBeInTheDocument();
-    expect(bridge.addSampleTenant).not.toHaveBeenCalled();
   });
 });
 
@@ -230,6 +231,11 @@ describe("Connections services", () => {
     expect(rows[1]).toHaveTextContent(/Entra.*\d of 6 parts/);
     expect(rows[1]).not.toHaveTextContent("Partial");
     expect(rows[2]).toHaveTextContent(/Defender.*Not connected/);
+    // Each row shows Microsoft's icon for the service; a service that is not connected keeps a dashed tile (step 4).
+    for (const [row, id] of [[rows[0]!, "intune"], [rows[1]!, "entra"], [rows[2]!, "defender"]] as const) {
+      expect(row.querySelector(`.svc-mark [data-service-logo="${id}"][data-kind="logo"] img`), id).not.toBeNull();
+    }
+    expect(rows[2]!.querySelector(".svc-mark")).toHaveAttribute("data-off", "true");
     // The shared app never offers Check again; consent adds access.
     expect(within(services).queryByRole("button", { name: SERVICE_COPY.checkAgain })).not.toBeInTheDocument();
     expect(within(rows[2]!).getByRole("button", { name: "Add Defender access" })).toHaveTextContent("Connect");
@@ -432,17 +438,6 @@ describe("Connections results and organizations", () => {
     await user.click(within(list).getByRole("button", { name: ORGANIZATION_COPY.renameSave }));
     await waitFor(() => expect(renameOrganization).toHaveBeenLastCalledWith("org-tenant-1", "Contoso"));
     expect(await screen.findByRole("heading", { name: CONNECTIONS_COPY.title("Contoso") })).toBeInTheDocument();
-  });
-
-  it("labels the sample organization and keeps its name", async () => {
-    const user = userEvent.setup();
-    const sample = { ...createMockAppState().tenants[0]!, id: "openadminos-sample-tenant", displayName: "Contoso (pilot)", kind: "sample" as const };
-    render(createMockAppState({ tenants: [sample], activeTenantId: sample.id }));
-    expect(await screen.findByText(CONNECTIONS_COPY.sampleOrganization)).toBeInTheDocument();
-    await user.click(screen.getByRole("tab", { name: CONNECTIONS_COPY.organizationsTab }));
-    const list = screen.getByRole("region", { name: CONNECTIONS_COPY.organizationsHeading });
-    expect(within(list).getByText(ORGANIZATION_COPY.sampleLabel)).toBeInTheDocument();
-    expect(within(list).queryByRole("button", { name: /Rename/ })).not.toBeInTheDocument();
   });
 
   it("shows each tenant's app registration and removes a saved registration", async () => {

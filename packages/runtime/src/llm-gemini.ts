@@ -5,7 +5,7 @@ import type { LlmOptions, LlmStreamChunk, RunLlmApi } from "@openadminos/agent-s
 import { CliEvents, CliProviderError, cliFailure, cliProviderEnv, discoverCli, requireCliVersion, spawnProvider, terminateCli, type CliProbe } from "./cli-provider.js";
 import { rpcObject } from "./cli-rpc.js";
 
-export interface GeminiProviderOptions { binaryPath?: string; defaultModel?: string; timeoutMs?: number; }
+export interface GeminiProviderOptions { binaryPath?: string; defaultModel?: string; timeoutMs?: number; signal?: AbortSignal; }
 /**
  * Picker-facing sentinel for "the CLI's configured model". The probe must
  * advertise at least one model or host pickers hide Gemini entirely, but
@@ -19,7 +19,7 @@ const keyFor = (binary: string, version: string) => `${binary}\0${version}\0${pr
 export async function probeGeminiLlm(options: GeminiProviderOptions = {}): Promise<CliProbe> {
   let detected: { binaryPath: string; version: string } | undefined;
   try {
-    detected = await discoverCli("gemini", cliProviderEnv("gemini"), options.binaryPath);
+    detected = await discoverCli("gemini", cliProviderEnv("gemini"), options.binaryPath, options.signal);
     requireCliVersion(detected.version, "0.59.0", "Gemini CLI");
     const state = verified.get(keyFor(detected.binaryPath, detected.version));
     return { installed: true, ready: Boolean(state && !(state instanceof Error)), ...detected,

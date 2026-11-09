@@ -2,14 +2,13 @@ import { describe, expect, it } from "vitest";
 import { tenantRegistrationSummary } from "./app-registration";
 import type { TenantRecord } from "./openAdminOS";
 
-const tenant = (appRegistration: TenantRecord["appRegistration"], kind?: "sample"): TenantRecord =>
+const tenant = (appRegistration: TenantRecord["appRegistration"]): TenantRecord =>
   ({
     id: "tenant-1",
     displayName: "Contoso",
     username: "admin@contoso.example",
     homeAccountId: "home",
     addedAt: "2026-11-03T10:00:00.000Z",
-    ...(kind ? { kind } : {}),
     ...(appRegistration ? { appRegistration } : {}),
   }) as TenantRecord;
 
@@ -40,8 +39,7 @@ describe("tenantRegistrationSummary", () => {
     });
   });
 
-  it("shows nothing for the pilot tenant or a tenant without a registration", () => {
-    expect(tenantRegistrationSummary(tenant(undefined, "sample"))).toBeNull();
+  it("shows nothing for a tenant without a registration", () => {
     expect(tenantRegistrationSummary(tenant(undefined))).toBeNull();
   });
 });

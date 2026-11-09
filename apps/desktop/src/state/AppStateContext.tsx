@@ -73,7 +73,6 @@ interface AppStateContextValue {
   retryTenantLicenseCheck: (tenantId: string) => Promise<AppState>;
   /** Cancels the check running for the tenant; its caller rejects. */
   cancelTenantCheck: (tenantId: string) => Promise<void>;
-  addSampleTenant: () => Promise<TenantRecord>;
   cancelConnectTenant: () => Promise<void>;
   getRequestedScopes: () => Promise<RequestedScope[]>;
   setActiveTenant: (id: string) => Promise<void>;
@@ -626,27 +625,6 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     await api.cancelTenantCheck(tenantId);
   }, []);
 
-  const addSampleTenant = useCallback(async () => {
-    const api = getOpenAdminOSApi();
-    if (!api) {
-      throw new Error("Sample data is unavailable in browser development.");
-    }
-    setError(null);
-    try {
-      const nextState = await api.addSampleTenant();
-      setState(nextState);
-      setRegistryAgents(nextState.registryAgents);
-      const tenant = nextState.tenants.find(
-        (entry) => entry.id === nextState.activeTenantId && entry.kind === "sample",
-      );
-      if (!tenant) throw new Error("The sample tenant was not added.");
-      return tenant;
-    } catch (caughtError) {
-      const tenantError = toError(caughtError);
-      setError(tenantError);
-      throw tenantError;
-    }
-  }, []);
 
   const setActiveTenant = useCallback(async (id: string) => {
     const api = getOpenAdminOSApi();
@@ -1249,7 +1227,6 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       refreshTenantGrants,
       retryTenantLicenseCheck,
       cancelTenantCheck,
-      addSampleTenant,
       cancelConnectTenant,
       getRequestedScopes,
       setActiveTenant,
@@ -1286,7 +1263,6 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       refreshTenantGrants,
       retryTenantLicenseCheck,
       cancelTenantCheck,
-      addSampleTenant,
       disconnectTenant,
       retryTenantCleanup,
       removeSavedAppRegistration,

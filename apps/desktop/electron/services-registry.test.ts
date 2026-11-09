@@ -203,7 +203,6 @@ describe("qualified scopes", () => {
   it("returns bare names per audience and all defaults when grants are unknown", () => {
     assert.deepEqual(grantedScopeSet({ grantedScopes: ["graph:User.Read.All", "Policy.Read.All"] }), new Set(["User.Read.All", "Policy.Read.All"]));
     assert.deepEqual(grantedScopeSet({}), new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES));
-    assert.deepEqual(grantedScopeSet({ kind: "sample", grantedScopes: [] }), new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES));
     assert.equal(DEFAULT_GRAPH_READ_SCOPE_NAMES.length, 20);
   });
 
@@ -285,12 +284,8 @@ describe("available scopes", () => {
     assert.equal(availableScopeSet({ grantedScopes: ["graph:Directory.Read.All"] }).has("Directory.Read.All"), true);
   });
 
-  it("treats unrecorded grants and the sample tenant as fully connected", () => {
+  it("treats unrecorded grants as fully connected", () => {
     assert.deepEqual([...availableScopeSet({})].sort(), [...DEFAULT_GRAPH_READ_SCOPE_NAMES].sort());
-    assert.deepEqual(
-      [...availableScopeSet({ kind: "sample", grantedScopes: [] })].sort(),
-      [...DEFAULT_GRAPH_READ_SCOPE_NAMES].sort(),
-    );
     assert.equal(notGrantedServiceForScopes({}, ["SecurityAlert.Read.All"]), undefined);
   });
 });
@@ -319,9 +314,8 @@ describe("missing service copy", () => {
     );
   });
 
-  it("is silent when everything is granted, for the sample tenant and for agent-only scopes", () => {
+  it("is silent when everything is granted and for agent-only scopes", () => {
     assert.equal(missingServiceCopy(peopleOnly, ["User.Read.All"]), undefined);
-    assert.equal(missingServiceCopy({ kind: "sample", grantedScopes: [] }, ["SecurityIncident.Read.All"]), undefined);
     assert.equal(missingServiceCopy(peopleOnly, ["Directory.Read.All"]), undefined);
   });
 
@@ -350,7 +344,6 @@ describe("agent services", () => {
       ["defender"],
     );
     assert.deepEqual(missingServicesForAgent({}, ["defender"]), []);
-    assert.deepEqual(missingServicesForAgent({ kind: "sample", grantedScopes: [] }, ["defender"]), []);
   });
 });
 

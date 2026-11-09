@@ -6,6 +6,8 @@ import Settings from "../pages/Settings";
 import Connections from "../pages/Connections";
 import { TenantSetupDialog } from "../setup/TenantSetupDialog";
 import { ManagedPolicyNotice } from "./ManagedPolicy";
+import { ModelChoiceList } from "./ModelChoiceList";
+import { optionsFromProviders } from "../setup/model-choice";
 import {
   createMockAppState,
   makeMockBridge,
@@ -163,5 +165,17 @@ describe("IT policy in the renderer", () => {
     expect(within(list).getByText("Set by your IT department")).toBeInTheDocument();
     expect(within(list).queryByRole("button", { name: /Remove.*Contoso IT/ })).not.toBeInTheDocument();
     expect(within(list).getByRole("button", { name: /Remove.*Old app/ })).toBeInTheDocument();
+  });
+
+  it("marks a policy-locked provider in the scan's and Chat's model choice", async () => {
+    const ollama = mockProviders.find((provider) => provider.id === "ollama")!;
+    const state = createMockAppState({ providers: [ollama], activeProviderId: "ollama", managedPolicy: lockedOllama });
+    renderWithAppState(
+      <ModelChoiceList options={optionsFromProviders([ollama])} selected="ollama" onSelect={() => undefined} />,
+      { bridge: makeMockBridge({}, state) },
+    );
+    const group = await screen.findByRole("radiogroup");
+    await waitFor(() => expect(within(group).getByText("Set by your IT department")).toBeInTheDocument());
+    expect(within(group).getAllByRole("radio")).toHaveLength(1);
   });
 });

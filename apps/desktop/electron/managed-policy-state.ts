@@ -132,7 +132,8 @@ export function applyManagedPolicyToProviders(
     .filter((provider) => managedProviderAllowed(status, provider.id))
     .map((provider) => {
       const model = managedLockedModel(status, provider.id);
-      if (!model) return provider;
+      // Not checked yet (the first-run scan is pending): nothing is known about its models.
+      if (!model || provider.status === "not-checked") return provider;
       // An empty list means the CLI picks the model, so the policy model is passed to it.
       if (provider.models.length === 0 || provider.models.includes(model)) {
         return { ...provider, models: [model], defaultModel: model };

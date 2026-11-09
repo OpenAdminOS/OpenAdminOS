@@ -8,13 +8,12 @@ import {
   type SetStateAction,
 } from "react";
 
-import { deriveToolHostsCopy, deriveTrustCopy, promptsGoTo, providerDataLocation } from "../copy";
+import { NOTHING_LEAVES_COPY, deriveToolHostsCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail } from "../copy";
 
 /** Voice runs on OpenAI's own service, not Codex; the same line as PR #175. */
 const VOICE_LOCATION_DETAIL = "Processing follows your OpenAI workspace's data residency setting.";
 import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
-import { PILOT_COPY } from "../shared/pilot-mode";
 
 export type DataBoundary =
   | {
@@ -32,6 +31,8 @@ export type DataBoundary =
       toolHosts?: string;
       /** Composer sentence naming every MCP host. */
       toolHostsNote?: string;
+      /** Status strip segment when nothing leaves the device: no reference is enabled. */
+      note?: string;
       tooltip: string;
       isVoiceHosted: false;
     }
@@ -107,17 +108,6 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
     };
   }
 
-  // Pilot mode never sends anything to a model: Chat answers are prepared
-  // and pilot agents use prepared text, whatever provider is configured.
-  if (activeTenant?.kind === "sample") {
-    return {
-      kind: "local",
-      label: PILOT_COPY.boundaryLabel,
-      tooltip: PILOT_COPY.boundaryTooltip,
-      isVoiceHosted: false,
-    };
-  }
-
   if (!provider || !["connected", "available"].includes(provider.status)) {
     const trust = deriveTrustCopy({
       scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
@@ -134,6 +124,7 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
     provider,
     ...(model ? { model } : {}),
     scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+    noTenant: !activeTenant,
     toolHosts: chatToolHosts(state),
   });
   const toolHosts = trust.toolHosts ? { toolHosts: trust.toolHosts.strip, toolHostsNote: trust.toolHosts.composer } : {};
@@ -144,6 +135,7 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
       label: `Local · ${provider.name}`,
       ...(model ? { model } : {}),
       ...toolHosts,
+      ...(trust.toolHosts ? {} : { note: NOTHING_LEAVES_COPY }),
       tooltip: `${provider.name}${model ? ` using ${model}` : ""}. ${trust.storage}${toolDetail}`,
       isVoiceHosted: false,
     };
@@ -153,7 +145,8 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
     label: `Hosted · ${providerDataLocation(provider)}`,
     ...(model ? { model } : {}),
     ...toolHosts,
-    tooltip: `${trust.boundary ?? trust.strip}${toolDetail}`,
+    // The tooltip adds what the location depends on (the account, the workspace, the deployment type).
+    tooltip: `${trust.boundary ?? trust.strip}${providerDataLocationDetail(provider) ? ` ${providerDataLocationDetail(provider)}` : ""}${toolDetail}`,
     isVoiceHosted: false,
   };
 }

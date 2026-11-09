@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
@@ -78,7 +78,9 @@ import {
   managedLockedModel,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocationDetail, sendsThroughTool } from "../copy";
+import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, promptsGoTo, providerDataLocation, providerDataLocationDetail, sendsThroughTool } from "../copy";
+import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "../components/chat/ChatFirstRun";
+import { isProviderReady } from "../shared/provider-detection";
 import {
   chatSendReducer,
   initialChatSendState,
@@ -90,7 +92,6 @@ import { hostedDisclosureKey, readHostedDisclosures, recordHostedDisclosure, sho
 import { endLiveChatRun, startLiveChatRun, updateLiveChatRun, useLiveChatRuns, type ChatProgressState } from "../state/live-chat-run";
 import { OPEN_NEW_CONVERSATION_EVENT } from "../shared/shortcuts";
 import { formatAgentDisplayName } from "../shared/agent-display";
-import { SETUP_COPY } from "../copy";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { currentReturnTo, useSetupFlow } from "../setup/SetupFlowContext";
 import { Badge, IconButton, Menu, SegmentedControl, Tooltip } from "../components/ui";
@@ -98,13 +99,7 @@ import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTi
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
-import {
-  PILOT_COPY,
-  PILOT_STARTERS,
-  pilotPromptEntry,
-  type PilotAgentSlug,
-} from "../shared/pilot-mode";
-import { PilotProductionPage } from "../components/PilotMode";
+import { connectedStarters } from "../setup/connected-starters";
 import Workspaces from "./Workspaces";
 
 const promptGroups = CHAT_PROMPT_GROUPS;
@@ -133,8 +128,9 @@ type UnifiedAgentSuggestion = {
 type HostedChatConsentPrompt = {
   content: string;
   conversationId?: string | null;
-  tenantId: string;
-  tenantName: string;
+  /** Absent when nothing is connected: the confirmation is bound to no tenant. */
+  tenantId?: string;
+  tenantName?: string;
   providerId: ProviderId;
   providerName: string;
   model?: string;
@@ -205,7 +201,7 @@ function IntuneChatContent() {
     setActiveModel,
     dismissProviderAutoSelectNotice,
   } = useAppState();
-  const { requireTenant, requireTenantAndProvider } = useSetupFlow();
+  const { requireTenantAndProvider } = useSetupFlow();
   const shellChrome = useShellChromeOptional();
   const dataBoundaryContext = useDataBoundaryOptional();
   const updateContext = useUpdateStateOptional();
@@ -328,7 +324,6 @@ function IntuneChatContent() {
   const activeTenant = state.activeTenantId
     ? state.tenants.find((tenant) => tenant.id === state.activeTenantId)
     : undefined;
-  const pilot = activeTenant?.kind === "sample";
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const activeModel = resolveProviderDefaultModel(
     provider,
@@ -337,6 +332,8 @@ function IntuneChatContent() {
   const providerReady = Boolean(
     provider && ["connected", "available"].includes(provider.status),
   );
+  // The model is the one thing Chat cannot answer without (SPEC.md 4a, 2026-11-08).
+  const modelReady = isProviderReady(provider);
   const dataBoundary = dataBoundaryContext?.boundary ?? (
     !providerReady
       ? {
@@ -550,13 +547,6 @@ function IntuneChatContent() {
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const scrollRoot = messagesScrollRef.current;
     if (!scrollRoot || !followLatestRef.current) return;
-    // A prepared pilot answer opens with its narrative and ends with a
-    // table and follow-up chips. Following the bottom would hide the
-    // narrative, so pilot mode keeps the prompt bubble at the top instead.
-    if (pilot && scrollLatestUserToTop(scrollRoot, messages, reducedMotion ? "auto" : "smooth")) {
-      setShowScrollToLatest(false);
-      return;
-    }
     if (typeof scrollRoot.scrollTo === "function") {
       scrollRoot.scrollTo({
         top: scrollRoot.scrollHeight,
@@ -566,7 +556,7 @@ function IntuneChatContent() {
       scrollRoot.scrollTop = scrollRoot.scrollHeight;
     }
     setShowScrollToLatest(false);
-  }, [messages, sending, shownProgress?.message, pilot]);
+  }, [messages, sending, shownProgress?.message]);
 
   useEffect(
     () => () => {
@@ -662,8 +652,15 @@ function IntuneChatContent() {
       conversationIdOverride !== undefined
         ? conversationIdOverride
         : activeConversationId;
+    const requestedAgentMatch = matchComposerAgent(content, state.installedAgents);
+    // With a tenant the setup flow gates the send as before. With nothing
+    // connected, a question needs only a model; agents and multi-tenant
+    // questions still need a tenant.
+    const needsTenantSetup =
+      Boolean(activeTenant) || Boolean(requestedAgentMatch) || shouldUseMultiTenantFlow(content, scopeMode);
     if (
-      !(activeTenant?.kind === "sample" ? requireTenant : requireTenantAndProvider)(
+      needsTenantSetup &&
+      !requireTenantAndProvider(
         createPendingIntent({
           kind: "chat-send",
           conversationId: targetConversationId,
@@ -675,7 +672,13 @@ function IntuneChatContent() {
       setInput(content);
       return;
     }
-    const requestedAgentMatch = matchComposerAgent(content, state.installedAgents);
+    if (!activeTenant && !modelReady) {
+      writeChatDraft(targetConversationId, content);
+      setInput(content);
+      setError(null);
+      setNotice(FIRST_RUN_CHAT_COPY.noModelSendNotice);
+      return;
+    }
     if (requestedAgentMatch?.extraInstructions) {
       writeChatDraft(targetConversationId, content);
       setInput(content);
@@ -714,20 +717,26 @@ function IntuneChatContent() {
     }
     const workspaceContext = buildWorkspaceContextInput();
     const contextSummary = workspaceContext ? workspaceContextSummary : undefined;
+    // With no tenant, a question blocked on the device (it gets the
+    // not-connected card) sends nothing, so it needs no confirmation.
+    const blockedOnDevice =
+      !activeTenant &&
+      provider &&
+      !provider.isLocal &&
+      requiresHostedChatConsent(provider, activeTenant, activeModel) &&
+      (await window.openAdminOS?.previewIntuneChatSend?.({ content }).then((preview) => !preview.reachesModel).catch(() => false));
     if (
       provider &&
-      activeTenant &&
-      activeTenant.kind !== "sample" &&
       !provider.isLocal &&
-      (requiresHostedChatConsent(provider, activeTenant) || Boolean(workspaceContext))
+      !blockedOnDevice &&
+      (requiresHostedChatConsent(provider, activeTenant, activeModel) || Boolean(workspaceContext))
     ) {
       setHostedConsentPrompt({
         content,
         ...(conversationIdOverride !== undefined
           ? { conversationId: conversationIdOverride }
           : {}),
-        tenantId: activeTenant.id,
-        tenantName: activeTenant.displayName,
+        ...(activeTenant ? { tenantId: activeTenant.id, tenantName: activeTenant.displayName } : {}),
         providerId: provider.id,
         providerName: provider.name,
         ...(activeModel ? { model: activeModel } : {}),
@@ -740,7 +749,7 @@ function IntuneChatContent() {
     }
     await executeSend(
       content,
-      rememberedHostedProviderConsent(provider, activeTenant),
+      rememberedHostedProviderConsent(provider, activeTenant, activeModel),
       conversationIdOverride,
       workspaceContext,
     );
@@ -1126,7 +1135,7 @@ function IntuneChatContent() {
     const pending = hostedConsentPrompt;
     if (!pending) return;
     if (rememberHostedConsent) {
-      rememberHostedChatConsent(pending.tenantId, pending.providerId);
+      rememberHostedChatConsent(pending.tenantId, pending.providerId, pending.model);
     }
     setHostedConsentPrompt(null);
     await executeSend(
@@ -1136,6 +1145,7 @@ function IntuneChatContent() {
         pending.providerId,
         rememberHostedConsent,
         pending.workspaceContextSummary,
+        pending.model,
       ),
       pending.conversationId,
       pending.workspaceContext,
@@ -1532,12 +1542,8 @@ function IntuneChatContent() {
   const needsYouCount =
     awaitingConfirmationRuns.length + openFindings.length + (updateNeedsAttention ? 1 : 0);
   const homeSuggestions = promptGroups.flatMap((group) => group.prompts).slice(0, 3);
-  const pilotAgentName = (slug: PilotAgentSlug) => {
-    const agent =
-      state.installedAgents.find((entry) => entry.slug === slug) ??
-      state.registryAgents.find((entry) => entry.slug === slug);
-    return agent ? formatAgentDisplayName(agent) : slug;
-  };
+  // After a connect, the starters come from what was connected (mockup 32, section B).
+  const starterGroups = connectedStarters(activeTenant);
   const unknownConversation = Boolean(
     shellLoaded &&
       routeConversationId &&
@@ -1667,14 +1673,24 @@ function IntuneChatContent() {
     disabled: unknownConversation || sending || runningMultiTenant,
   };
 
-  const renderComposer = (placement: "home" | "docked") => pilot ? (
-    <PilotComposer
-      placement={placement}
-      sending={sending}
-      disabled={unknownConversation}
-      onPick={(prompt) => void handleSend(prompt)}
-    />
-  ) : (
+  const renderComposer = (placement: "home" | "docked") => (
+    <>
+    {hostedConsentPrompt ? (
+      <HostedChatConsentPanel
+        prompt={hostedConsentPrompt}
+        remember={rememberHostedConsent}
+        onRememberChange={setRememberHostedConsent}
+        onClose={() => {
+          setHostedConsentPrompt(null);
+          window.requestAnimationFrame(() => composerRef.current?.focus());
+        }}
+        onConfirm={() => void confirmHostedConsentAndSend()}
+        onUseLocal={() => {
+          setHostedConsentPrompt(null);
+          navigate("/settings/providers");
+        }}
+      />
+    ) : null}
     <ChatComposer
       placement={placement}
       textareaRef={composerRef}
@@ -1700,6 +1716,7 @@ function IntuneChatContent() {
       suggestion={composerSuggestion?.text}
       onDismissSuggestion={() => composerSuggestion && setDismissedSuggestion(composerSuggestion.key)}
     />
+    </>
   );
 
   const homeOpen =
@@ -1740,13 +1757,6 @@ function IntuneChatContent() {
 
   const calmModals = (
     <>
-      <HostedChatConsentModal
-        prompt={hostedConsentPrompt}
-        remember={rememberHostedConsent}
-        onRememberChange={setRememberHostedConsent}
-        onClose={() => setHostedConsentPrompt(null)}
-        onConfirm={() => void confirmHostedConsentAndSend()}
-      />
       <HostedBatchConsentModal
         prompt={hostedBatchConsentPrompt}
         onClose={() => setHostedBatchConsentPrompt(null)}
@@ -1774,15 +1784,6 @@ function IntuneChatContent() {
       />
     </>
   );
-  if (workspaceView && pilot) {
-    return (
-      <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
-        {calmTopBar}
-        <PilotProductionPage feature="Workspaces" plural />
-      </div>
-    );
-  }
-
   if (workspaceView) {
     return (
       <div className="relative flex min-h-0 flex-1 overflow-hidden bg-[var(--color-bg)]">
@@ -1819,20 +1820,26 @@ function IntuneChatContent() {
                   <h1 className="line-clamp-2 font-serif text-display font-medium tracking-[-0.015em] text-[var(--color-text)]">
                     {activeTenant.displayName}
                   </h1>
-                  <p className="mt-1.5 text-base text-[var(--color-text-muted)]">{pilot ? PILOT_COPY.dataLabel : homeFreshness}</p>
+                  <p className="mt-1.5 text-base text-[var(--color-text-muted)]">{homeFreshness}</p>
                 </div>
               </div>
             ) : (
-              <div className="mb-6 max-w-[620px]">
+              // Nothing connected: Chat answers from the model and references (SPEC.md 4a, 2026-11-08).
+              <div className="mb-6 max-w-[660px]">
                 <h1 className="font-serif text-display font-medium tracking-[-0.015em] text-[var(--color-text)]">
-                  Connect a tenant to begin
+                  {FIRST_RUN_CHAT_COPY.homeTitle}
                 </h1>
                 <p className="mt-2 text-md leading-6 text-[var(--color-text-muted)]">
-                  {SETUP_COPY.guestChatHint}
+                  {FIRST_RUN_CHAT_COPY.homeSubtitle}
                 </p>
               </div>
             )}
-            {state.providerAutoSelectNotice && !pilot ? (
+            {!activeTenant && !modelReady ? (
+              <div className="mb-6">
+                <ModelChoice providers={state.providers} activeProviderId={state.activeProviderId} onSelectProvider={setActiveProvider} />
+              </div>
+            ) : null}
+            {state.providerAutoSelectNotice ? (
               <ProviderAutoSelectNotice
                 providerName={state.providerAutoSelectNotice.providerName}
                 onOpenSettings={() => navigate("/settings/providers")}
@@ -1903,10 +1910,30 @@ function IntuneChatContent() {
                 </div>
               </section>
             ) : null}
-            {pilot ? null : (
-            <div className="mt-5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
-              <span className="mr-0.5">Try</span>
-              {homeSuggestions.map((prompt) => (
+            {!activeTenant && modelReady ? (
+              <NoTenantChatHome state={state} disabled={sending} onAsk={(question) => void handleSend(question, null)} />
+            ) : null}
+            {!activeTenant ? null : (
+            <div className="mt-5 space-y-1.5">
+            {starterGroups.map((group) => (
+              <div key={group.service.id} data-starters={group.service.id} className="flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                <span className="mr-0.5">{CHAT_COPY.askAbout(group.service.title)}</span>
+                {group.prompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    disabled={sending}
+                    onClick={() => fillComposer(prompt)}
+                    className="h-[30px] max-w-[22rem] truncate rounded-lg bg-[var(--color-hover)] px-2.5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-active)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+                  >
+                    {suggestionLabel(prompt)}
+                  </button>
+                ))}
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+              {starterGroups.length === 0 ? <span className="mr-0.5">Try</span> : null}
+              {(starterGroups.length > 0 ? [] : homeSuggestions).map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
@@ -1925,6 +1952,7 @@ function IntuneChatContent() {
               >
                 Run an agent with /
               </button>
+            </div>
             </div>
             )}
           </div>
@@ -2000,6 +2028,19 @@ function IntuneChatContent() {
                   const messageTenant = messageConversation?.tenantId
                     ? state.tenants.find((tenant) => tenant.id === messageConversation.tenantId)
                     : activeTenant;
+                  if (message.role === "assistant" && message.notConnected && message.id !== shownProgressMessageId) {
+                    const question = previousUserPromptForMessage(displayedMessages, message);
+                    return (
+                      <div key={message.id} data-message-id={message.id} className="mt-3 scroll-mt-[18px]">
+                        <NotConnectedCard
+                          notConnected={message.notConnected}
+                          tenants={state.tenants}
+                          activeTenant={activeTenant}
+                          {...(question && !sending ? { onAskAgain: () => void handleSend(question, message.conversationId) } : {})}
+                        />
+                      </div>
+                    );
+                  }
                   return (
                     <div key={message.id} data-message-id={message.id} className="scroll-mt-[18px]">
                       <ChatMessageBubble
@@ -2021,16 +2062,7 @@ function IntuneChatContent() {
                           setPinWorkspaceId(attachedWorkspaceId || workspaces[0]?.id || "");
                         }}
                       />
-                      {pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId ? (
-                        <PilotFollowUps
-                          prompt={previousUserPromptForMessage(displayedMessages, message)}
-                          disabled={sending}
-                          agentName={pilotAgentName}
-                          onPick={(prompt) => void handleSend(prompt)}
-                          onOpenAgent={(slug) => navigate(`/agents/${encodeURIComponent(slug)}`)}
-                        />
-                      ) : null}
-                      {!pilot && message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.[0] ? (
+                      {message.role === "assistant" && message.status === "completed" && message.id !== shownProgressMessageId && message.followUps?.[0] ? (
                         <FollowUpChip
                           followUp={message.followUps[0]}
                           usesTenant={tenantNotUsed(message) && (message.tenantFollowUps ?? []).includes(message.followUps[0])}
@@ -2038,7 +2070,7 @@ function IntuneChatContent() {
                           onPick={fillComposer}
                         />
                       ) : null}
-                      {!pilot && message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
+                      {message.role === "assistant" && suggestedAgents.length > 0 && !dismissedSuggestionMessageIds.includes(message.id) ? (
                         <SuggestedAgentsBlock
                           suggestions={suggestedAgents}
                           runningAgentSlug={runningAgentSlug}
@@ -2096,7 +2128,7 @@ function IntuneChatContent() {
                 />
               </div>
             ) : null}
-            {state.providerAutoSelectNotice && !pilot ? (
+            {state.providerAutoSelectNotice ? (
               <ProviderAutoSelectNotice
                 providerName={state.providerAutoSelectNotice.providerName}
                 onOpenSettings={() => navigate("/settings/providers")}
@@ -2309,9 +2341,18 @@ function ChatComposer({
         ? `Ask about ${activeTenant.displayName}, or type / to run an agent`
         : "Ask about this tenant, or type / to run an agent"
       : "Ask a follow-up, or type / to run an agent"
-    : SETUP_COPY.guestComposerPlaceholder;
+    : dataBoundary.kind === "none"
+      ? FIRST_RUN_CHAT_COPY.placeholderNoModel
+      : FIRST_RUN_CHAT_COPY.placeholderNoTenant;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
+  // The same sentence as Connections; the shield's tooltip adds what the location depends on.
   const hostedSentence = hostedComposerSentence(dataBoundary, activeProvider, Boolean(activeTenant));
+  const locationDetail = activeProvider ? providerDataLocationDetail(activeProvider) : undefined;
+  // The detail follows the destination sentence, before the reference disclosure.
+  const toolHostsNote = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
+  const hostedTooltip = locationDetail && toolHostsNote && hostedSentence.endsWith(toolHostsNote)
+    ? `${hostedSentence.slice(0, -toolHostsNote.length)} ${locationDetail}${toolHostsNote}`
+    : `${hostedSentence}${locationDetail ? ` ${locationDetail}` : ""}`;
 
   return (
     <div className="relative">
@@ -2396,11 +2437,6 @@ function ChatComposer({
       ) : null}
 
       <div className="intune-chat-composer relative rounded-2xl bg-[var(--color-surface)] px-2.5 pb-2.5 pl-4 pt-3.5 shadow-[var(--shadow-composer)] transition-shadow duration-150 focus-within:shadow-[var(--shadow-composer-focus)]">
-        {!activeTenant ? (
-          <div className="mb-2 rounded-lg bg-[var(--color-warning-soft)] px-3 py-2 text-sm leading-5 text-[var(--color-warning)]">
-            {SETUP_COPY.guestChatHint}
-          </div>
-        ) : null}
         <label htmlFor={`intune-chat-composer-${placement}`} className="sr-only">
           {CHAT_COPY.composerLabel}
         </label>
@@ -2495,7 +2531,7 @@ function ChatComposer({
           />
           <span className="min-w-2 flex-1" />
           {dataBoundary.kind === "hosted" ? (
-            <Tooltip content={hostedSentence} panelClassName="max-w-72">
+            <Tooltip content={hostedTooltip} panelClassName="max-w-72">
               <button
                 type="button"
                 aria-label="Where data goes"
@@ -2547,133 +2583,18 @@ function ChatComposer({
           </button>
         </div>
       ) : dataBoundary.kind === "local" ? (
-        <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
-          <IconLock size={13} />
+        <div className="mt-2.5 flex items-center justify-center gap-1.5 text-center text-xs text-[var(--color-text-muted)]">
           <span>
-            {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : LOCAL_BOUNDARY_COPY.plain}
+            {dataBoundary.toolHostsNote ? LOCAL_BOUNDARY_COPY.withTools : activeTenant ? LOCAL_BOUNDARY_COPY.plain : LOCAL_BOUNDARY_COPY.noTenant}
             {dataBoundary.toolHostsNote ? <span className="text-[var(--color-warning)]"> {dataBoundary.toolHostsNote}</span> : null}
           </span>
         </div>
       ) : (
-        <div id={disclosureId} role="note" hidden={!(hostedDisclosureFull || disclosureOpen)} className={`mt-2.5 items-center gap-1.5 text-sm text-[var(--color-warning)] ${hostedDisclosureFull || disclosureOpen ? "flex" : ""} ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
-          <IconCloud size={13} />
+        // The destination, stated once under the composer (mockup 32, section C); the top bar chip carries it too.
+        <div id={disclosureId} role="note" hidden={!(hostedDisclosureFull || disclosureOpen)} className={`mt-2.5 items-center justify-center text-center text-xs text-[var(--color-warning)] ${hostedDisclosureFull || disclosureOpen ? "flex" : ""}`}>
           <span>{hostedSentence}</span>
         </div>
       )}
-    </div>
-  );
-}
-
-const PILOT_CHIP_CLASS =
-  "min-h-[30px] max-w-full rounded-lg bg-[var(--color-hover)] px-2.5 py-1 text-left text-sm leading-5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-active)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:opacity-60";
-
-/**
- * Pilot mode replaces free text with prepared prompts. The text box stays
- * visible but disabled, so it is clear that production Chat is open-ended.
- */
-function PilotComposer({
-  placement,
-  sending,
-  disabled,
-  onPick,
-}: {
-  placement: "home" | "docked";
-  sending: boolean;
-  disabled: boolean;
-  onPick: (prompt: string) => void;
-}) {
-  const explanationId = `pilot-composer-explanation-${placement}`;
-  return (
-    <div className="relative">
-      <div className="intune-chat-composer rounded-2xl bg-[var(--color-surface)] px-4 pb-3 pt-3.5 shadow-[var(--shadow-composer)]">
-        <div
-          role="group"
-          aria-label="Prepared prompts"
-          className={`flex flex-wrap gap-1.5 ${placement === "home" ? "" : "max-h-[76px] overflow-y-auto"}`}
-        >
-          {PILOT_STARTERS.map((starter) => (
-            <button
-              key={starter.prompt}
-              type="button"
-              disabled={sending || disabled}
-              onClick={() => onPick(starter.prompt)}
-              title={starter.prompt}
-              className={PILOT_CHIP_CLASS}
-            >
-              {placement === "home" ? (
-                <>
-                  <span className="font-medium text-[var(--color-text)]">{starter.area}</span>
-                  <span aria-hidden="true" className="opacity-60"> · </span>
-                  {suggestionLabel(starter.prompt)}
-                </>
-              ) : (
-                <span className="font-medium">{starter.area}</span>
-              )}
-            </button>
-          ))}
-        </div>
-        <label htmlFor={`intune-chat-composer-${placement}`} className="sr-only">
-          {CHAT_COPY.composerLabel}
-        </label>
-        <textarea
-          id={`intune-chat-composer-${placement}`}
-          name={`intune-chat-composer-${placement}`}
-          rows={1}
-          disabled
-          aria-describedby={explanationId}
-          placeholder={PILOT_COPY.composerExplanation}
-          className="mt-3 block min-h-[34px] w-full resize-none rounded-lg bg-[var(--color-bg-raised)] px-3 py-1.5 text-md leading-[1.55] text-[var(--color-text)] outline-none ring-1 ring-[var(--color-border-soft)] placeholder:text-[var(--color-text-placeholder)] disabled:cursor-not-allowed"
-        />
-        <p id={explanationId} className="sr-only">{PILOT_COPY.composerExplanation}</p>
-      </div>
-      <div className={`mt-2.5 flex items-center gap-1.5 text-sm text-[var(--color-text-muted)] ${placement === "home" ? "justify-start pl-1" : "justify-center"}`}>
-        <IconLock size={13} />
-        <span>{PILOT_COPY.composerBoundary}</span>
-      </div>
-    </div>
-  );
-}
-
-/** Follow-up chips and the matching pilot agent under a prepared answer. */
-function PilotFollowUps({
-  prompt,
-  disabled,
-  agentName,
-  onPick,
-  onOpenAgent,
-}: {
-  prompt: string | null;
-  disabled: boolean;
-  agentName: (slug: PilotAgentSlug) => string;
-  onPick: (prompt: string) => void;
-  onOpenAgent: (slug: PilotAgentSlug) => void;
-}) {
-  const entry = prompt ? pilotPromptEntry(prompt) : undefined;
-  if (!entry || (entry.followUps.length === 0 && !entry.agentSlug)) return null;
-  return (
-    <div role="group" aria-label="Follow-up prompts" className="-mt-5 mb-[30px] flex flex-wrap gap-1.5">
-      {entry.followUps.map((followUp) => (
-        <button
-          key={followUp}
-          type="button"
-          disabled={disabled}
-          onClick={() => onPick(followUp)}
-          className={PILOT_CHIP_CLASS}
-        >
-          {suggestionLabel(followUp)}
-        </button>
-      ))}
-      {entry.agentSlug ? (
-        <button
-          type="button"
-          disabled={disabled}
-          onClick={() => onOpenAgent(entry.agentSlug!)}
-          className={`${PILOT_CHIP_CLASS} inline-flex items-center gap-1.5 ring-1 ring-[var(--color-accent)]/35`}
-        >
-          <IconLayers size={12} className="shrink-0" />
-          {PILOT_COPY.tryAgent(agentName(entry.agentSlug))}
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -3966,169 +3887,167 @@ function PinMessageToWorkspaceModal({
   );
 }
 
-function HostedChatConsentModal({
+/**
+ * The hosted send confirmation, inline above the composer (mockup 32,
+ * section D): the typed question stays visible and nothing can be cut off
+ * at a small window. Enter sends, Escape cancels and returns to the
+ * composer.
+ */
+function HostedChatConsentPanel({
   prompt,
   remember,
   onRememberChange,
   onClose,
   onConfirm,
+  onUseLocal,
 }: {
-  prompt: HostedChatConsentPrompt | null;
+  prompt: HostedChatConsentPrompt;
   remember: boolean;
   onRememberChange: (remember: boolean) => void;
   onClose: () => void;
   onConfirm: () => void;
+  onUseLocal: () => void;
 }) {
-  const trustCopy = deriveTrustCopy({
-    provider: prompt
-      ? { id: prompt.providerId, name: prompt.providerName, isLocal: false }
-      : { name: "Hosted provider", isLocal: false },
-    ...(prompt?.model ? { model: prompt.model } : {}),
-    scope: { tenantNames: prompt ? [prompt.tenantName] : [] },
-    ...(prompt?.toolHosts ? { toolHosts: prompt.toolHosts } : {}),
-    ...(prompt?.workspaceContextSummary
-      ? {
-          attachments: {
-            workspaceTitle: prompt.workspaceContextSummary.workspaceTitle,
-            evidenceCount: prompt.workspaceContextSummary.evidenceCount,
-            noteCount: prompt.workspaceContextSummary.noteCount,
-            includesInstructions: prompt.workspaceContextSummary.includesInstructions,
-          },
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Focus starts on the primary action, so Enter sends and Escape cancels.
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLButtonElement>("[data-hosted-send]")?.focus();
+  }, []);
+  const noTenant = !prompt.tenantId;
+  const company = PROVIDER_COMPANIES[prompt.providerId] ?? prompt.providerName;
+  const tool = PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;
+  const tenant = prompt.tenantName ?? "the active tenant";
+  const workspace = prompt.workspaceContextSummary
+    ? `${prompt.workspaceContextSummary.workspaceTitle} (${prompt.workspaceContextSummary.evidenceCount} evidence, ${prompt.workspaceContextSummary.noteCount} notes)`
+    : undefined;
+  const locationDetail = providerDataLocationDetail({ id: prompt.providerId });
+  const through = sendsThroughTool({ id: prompt.providerId });
+  // An API named like its product answers through that API, not through itself.
+  const apiName = company === tool ? `the ${company} API` : company;
+  const facts: Array<[string, string, boolean]> = [
+    [HOSTED_CONFIRM_COPY.goesTo, providerDataLocation({ id: prompt.providerId, name: prompt.providerName }), true],
+    // The acknowledgement is bound to the model, with or without a tenant.
+    ...(prompt.model ? [[HOSTED_CONFIRM_COPY.model, prompt.model, false] as [string, string, boolean]] : []),
+    [HOSTED_CONFIRM_COPY.whatIsSent, noTenant ? HOSTED_CONFIRM_COPY.sentNoTenant(Boolean(prompt.toolHosts?.length)) : HOSTED_CONFIRM_COPY.sentTenant(tenant, workspace), false],
+    [HOSTED_CONFIRM_COPY.staysHere, noTenant ? HOSTED_CONFIRM_COPY.staysNoTenant : HOSTED_CONFIRM_COPY.staysTenant, false],
+  ];
+  const toolHosts = prompt.toolHosts?.length ? deriveTrustCopy({ provider: { id: prompt.providerId, name: prompt.providerName, isLocal: false }, toolHosts: prompt.toolHosts, noTenant }).toolHosts : undefined;
+  return (
+    <div
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      ref={panelRef}
+      className="hosted-confirm mb-3 rounded-lg bg-[var(--color-surface)] px-[18px] py-4 shadow-[var(--shadow-pop)]"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+        } else if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement) && !(event.target instanceof HTMLInputElement)) {
+          event.preventDefault();
+          onConfirm();
         }
-      : {}),
-  });
-  // A CLI decides where it sends prompts, so the tool is named; an API is
-  // named by its company (the same wording as PR #175).
-  const tool = prompt?.providerName ?? "Hosted provider";
-  const through = prompt ? sendsThroughTool({ id: prompt.providerId }) : false;
-  const company = (prompt && PROVIDER_COMPANIES[prompt.providerId]) ?? tool;
-  const title = through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company);
-  const lead = through
-    ? HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, prompt?.tenantName ?? "the active tenant")
-    : HOSTED_CONFIRM_COPY.bodyTenant(
-        tool,
-        // An API named like its product answers through that API, not through itself.
-        company === tool ? `the ${company} API` : company,
-        prompt?.tenantName ?? "the active tenant",
-      );
-  const locationDetail = prompt ? providerDataLocationDetail({ id: prompt.providerId }) : undefined;
-  return (
-    <Modal open={Boolean(prompt)} onClose={onClose} size="md">
-      <ModalHeader
-        title={title}
-        subtitle={prompt?.providerName ?? "Hosted provider"}
-        badge={<Badge tone="warning">Hosted</Badge>}
-        onClose={onClose}
-      />
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-          <p>{lead}</p>
-          <p className="mt-1">{trustCopy.confirmBody}</p>
-          {locationDetail ? <p className="mt-1 text-[var(--color-text-soft)]">{locationDetail}</p> : null}
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <ConsentFact label="Tenant" value={prompt?.tenantName ?? "Active tenant"} />
-          <ConsentFact label="Provider" value={prompt?.providerName ?? "Hosted provider"} />
-          <ConsentFact label="Model" value={prompt?.model ?? "Provider default"} />
-          <ConsentFact label="Stored data" value={trustCopy.storage} />
-          {prompt?.workspaceContextSummary && (
-            <ConsentFact
-              label="Workspace"
-              value={`${prompt.workspaceContextSummary.workspaceTitle} · ${prompt.workspaceContextSummary.evidenceCount} evidence · ${prompt.workspaceContextSummary.noteCount} notes`}
-            />
-          )}
-        </div>
-        <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-warning-soft)] text-[var(--color-warning)]">
-              <IconCloud size={16} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-base font-medium text-[var(--color-text)]">
-                What leaves this device
-              </div>
-              <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
-                The prompt text, selected cached Graph evidence, source freshness,
-                and answer instructions are sent to the hosted provider for this
-                response. Raw cache tables, chat history storage, and self-training
-                files remain on this device.
-                {prompt?.workspaceContextSummary
-                  ? " Selected workspace evidence, notes, and instructions are included in this response prompt."
-                  : ""}
-                {trustCopy.toolHosts ? ` ${trustCopy.toolHosts.detail}` : ""}
-              </p>
-            </div>
+      }}
+    >
+      <h2 id={titleId} className="text-base font-medium text-[var(--color-text)]">
+        {through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company)}
+      </h2>
+      <p className="mt-1 text-sm text-[var(--color-text-soft)]">
+        {through
+          ? noTenant
+            ? HOSTED_CONFIRM_COPY.bodyThroughNoTenant(tool)
+            : HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, tenant)
+          : noTenant
+            ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, apiName)
+            : HOSTED_CONFIRM_COPY.bodyTenant(tool, apiName, tenant)}
+      </p>
+      <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+        {facts.map(([term, value, hosted]) => (
+          <div key={term} className="contents">
+            <dt className="text-[var(--color-text-muted)]">{term}</dt>
+            <dd className={hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text)]"}>
+              {value}
+              {hosted && locationDetail ? <span className="mt-0.5 block text-xs text-[var(--color-text-muted)]">{locationDetail}</span> : null}
+            </dd>
           </div>
-        </div>
-        <label
-          htmlFor="remember-hosted-provider-confirmation"
-          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+        ))}
+      </dl>
+      {toolHosts ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">{toolHosts.detail}</p> : null}
+      <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-sm text-[var(--color-text-soft)]">
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(event) => onRememberChange(event.target.checked)}
+          className="mt-[3px] h-3.5 w-3.5 accent-[var(--color-accent)]"
+        />
+        <span>
+          {noTenant ? HOSTED_CONFIRM_COPY.rememberNoTenant(prompt.model ?? tool) : HOSTED_CONFIRM_COPY.rememberTenant(tenant, tool, prompt.model)}
+        </span>
+      </label>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button data-hosted-send="" variant="primary" onClick={onConfirm}>
+          {through ? HOSTED_CONFIRM_COPY.sendThrough(tool) : HOSTED_CONFIRM_COPY.send(company)}
+        </Button>
+        <Button variant="ghost" onClick={onClose}>
+          {HOSTED_CONFIRM_COPY.cancel}
+        </Button>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={onUseLocal}
+          className="rounded-sm text-sm text-[var(--color-text-soft)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
         >
-          <input
-            id="remember-hosted-provider-confirmation"
-            name="remember-hosted-provider-confirmation"
-            type="checkbox"
-            checked={remember}
-            onChange={(event) => onRememberChange(event.target.checked)}
-            className="mt-1 h-3.5 w-3.5 accent-[var(--color-accent)]"
-          />
-          <span>
-            Remember this decision for this tenant and provider on this device.
-          </span>
-        </label>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={onConfirm}>
-            {through ? HOSTED_CONFIRM_COPY.sendThrough(tool) : HOSTED_CONFIRM_COPY.send(company)}
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ConsentFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-xs font-medium text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className="mt-1 truncate text-base text-[var(--color-text)]">
-        {value}
+          {HOSTED_CONFIRM_COPY.useLocal}
+        </button>
       </div>
     </div>
   );
 }
 
+/**
+ * A hosted send asks once per tenant and provider, and once per provider
+ * for questions with nothing connected. The two are separate decisions:
+ * a remembered no-tenant confirmation never covers a send with a tenant.
+ */
 function requiresHostedChatConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
+  model?: string,
 ): provider is { id: ProviderId; isLocal: false } {
-  if (!provider || provider.isLocal || !tenant) return false;
-  return !hasRememberedHostedChatConsent(tenant.id, provider.id);
+  if (!provider || provider.isLocal) return false;
+  return !hasRememberedHostedChatConsent(tenant?.id, provider.id, model);
 }
 
 function rememberedHostedProviderConsent(
   provider: { id: ProviderId; isLocal: boolean } | undefined,
   tenant: { id: string } | undefined,
+  model?: string,
 ): HostedProviderConsentInput | undefined {
-  if (!provider || provider.isLocal || !tenant) return undefined;
-  if (!hasRememberedHostedChatConsent(tenant.id, provider.id)) return undefined;
-  return createHostedProviderConsent(tenant.id, provider.id, true);
+  if (!provider || provider.isLocal) return undefined;
+  if (!hasRememberedHostedChatConsent(tenant?.id, provider.id, model)) return undefined;
+  return createHostedProviderConsent(tenant?.id, provider.id, true, undefined, model);
 }
 
-function createHostedProviderConsent(
-  tenantId: string,
+/** `tenantId` undefined binds the confirmation to a send with no tenant. */
+export function createHostedProviderConsent(
+  tenantId: string | undefined,
   providerId: ProviderId,
   remember: boolean,
   workspaceContext?: WorkspacePromptContextSummary,
+  model?: string,
 ): HostedProviderConsentInput {
+  const acknowledgedAt = new Date().toISOString();
+  // The model the admin saw in the confirmation; the host refuses a send that would use another.
+  const named = model ? { model } : {};
+  if (!tenantId) {
+    return { noTenant: true, providerId, ...named, acknowledgedAt, ...(remember ? { remember: true } : {}) };
+  }
   return {
     tenantId,
     providerId,
-    acknowledgedAt: new Date().toISOString(),
+    ...named,
+    acknowledgedAt,
     ...(remember ? { remember: true } : {}),
     ...(workspaceContext ? { workspaceContext } : {}),
   };
@@ -4145,24 +4064,30 @@ export function createHostedBatchProviderConsent(
   };
 }
 
-function hostedChatConsentKey(tenantId: string, providerId: ProviderId): string {
-  return `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`;
+function hostedChatConsentKey(tenantId: string | undefined, providerId: ProviderId, model?: string): string {
+  // Tenant ids are GUIDs or the sample id, so the no-tenant key never
+  // collides with one. The no-tenant decision also names the model, so a
+  // model change asks again.
+  return tenantId
+    ? `openadminos:intune-chat-hosted-consent:v1:${tenantId}:${providerId}`
+    : `openadminos:intune-chat-hosted-consent:v2:no-tenant:${providerId}:${model ?? "default"}`;
 }
 
 function hasRememberedHostedChatConsent(
-  tenantId: string,
+  tenantId: string | undefined,
   providerId: ProviderId,
+  model?: string,
 ): boolean {
   try {
-    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId)) === "true";
+    return window.localStorage.getItem(hostedChatConsentKey(tenantId, providerId, model)) === "true";
   } catch {
     return false;
   }
 }
 
-function rememberHostedChatConsent(tenantId: string, providerId: ProviderId): void {
+function rememberHostedChatConsent(tenantId: string | undefined, providerId: ProviderId, model?: string): void {
   try {
-    window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId), "true");
+    window.localStorage.setItem(hostedChatConsentKey(tenantId, providerId, model), "true");
   } catch {
     // If localStorage is unavailable, the next hosted send will ask again.
   }
@@ -4341,7 +4266,7 @@ function ChatMessageBubble({
       ) : (
         <>
           <AnswerScopeDisclosure tenant={tenant} multiTenant={multiTenant} message={message} />
-          <StepSummary message={message} details={tenant?.kind === "sample" && !multiTenant ? undefined : <AnswerDetails message={message} />} />
+          <StepSummary message={message} details={<AnswerDetails message={message} />} />
         </>
       )}
       {displayContent ? <AnswerBody message={message} content={displayContent} /> : null}
@@ -4405,16 +4330,6 @@ function AnswerScopeDisclosure({
   const refreshedAt = tenantUsed ? oldestTimestamp(sources.flatMap((source) => source.refreshedAt ?? [])) : undefined;
   const scopeName = multiTenant ? "Multiple tenants" : tenant?.displayName ?? "Tenant";
 
-  if (tenant?.kind === "sample" && !multiTenant) {
-    return (
-      <div className="mb-2.5 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text-muted)]">
-        <TenantTile tenantId={tenant.id} displayName={tenant.displayName} size="xs" />
-        <span>{tenant.displayName}</span>
-        <span aria-hidden="true" className="opacity-60">·</span>
-        <span>{PILOT_COPY.answerScope}</span>
-      </div>
-    );
-  }
 
   return (
     <>
@@ -4978,25 +4893,6 @@ function safeWebSources(trace: IntuneChatToolTraceEntry[]) {
         .map((source) => [source.url, source]),
     ).values(),
   ];
-}
-
-/**
- * Scrolls the latest user message to the top of the transcript. Returns
- * false when there is no user message to anchor to.
- */
-function scrollLatestUserToTop(
-  scrollRoot: HTMLElement,
-  messages: IntuneChatMessage[],
-  behavior: ScrollBehavior,
-): boolean {
-  const latestUser = [...messages].reverse().find((message) => message.role === "user");
-  if (!latestUser) return false;
-  const element = [...scrollRoot.querySelectorAll<HTMLElement>("[data-message-id]")].find(
-    (candidate) => candidate.dataset.messageId === latestUser.id,
-  );
-  if (!element) return false;
-  element.scrollIntoView({ block: "start", inline: "nearest", behavior });
-  return true;
 }
 
 function scrollLatestUserNearTop(

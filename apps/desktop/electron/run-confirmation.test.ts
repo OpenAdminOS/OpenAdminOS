@@ -207,7 +207,16 @@ async function makeStoreFixture(input: {
     store,
     async cleanup() {
       store.close();
-      await rm(dir, { recursive: true, force: true });
+      // A run that just reached its terminal state can still be writing its
+      // last record: let the store's write queue settle before the folder goes.
+      const pending = () => (store as unknown as { writeChain: Promise<unknown> }).writeChain;
+      for (let attempt = 0; attempt < 50; attempt += 1) {
+        const chain = pending();
+        await chain;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        if (pending() === chain) break;
+      }
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     },
   };
 }
