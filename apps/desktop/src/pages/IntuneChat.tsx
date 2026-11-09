@@ -95,6 +95,7 @@ import { AnswerBody, FollowUpChip, SourceList, StepSkeleton, StepSummary, StepTi
 import { MultiTenantTile, TenantTile } from "../components/TenantTile";
 import { openNovaPanel } from "../shared/nova-panel";
 import { CHAT_PROMPT_GROUPS } from "../shared/chat-prompts";
+import { connectedStarters } from "../setup/connected-starters";
 import {
   PILOT_COPY,
   PILOT_STARTERS,
@@ -1553,6 +1554,8 @@ function IntuneChatContent() {
   const needsYouCount =
     awaitingConfirmationRuns.length + openFindings.length + (updateNeedsAttention ? 1 : 0);
   const homeSuggestions = promptGroups.flatMap((group) => group.prompts).slice(0, 3);
+  // After a connect, the starters come from what was connected (mockup 32, section B).
+  const starterGroups = pilot ? [] : connectedStarters(activeTenant);
   const pilotAgentName = (slug: PilotAgentSlug) => {
     const agent =
       state.installedAgents.find((entry) => entry.slug === slug) ??
@@ -1945,9 +1948,26 @@ function IntuneChatContent() {
               <NoTenantChatHome state={state} disabled={sending} onAsk={(question) => void handleSend(question, null)} />
             ) : null}
             {pilot || !activeTenant ? null : (
-            <div className="mt-5 flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
-              <span className="mr-0.5">Try</span>
-              {homeSuggestions.map((prompt) => (
+            <div className="mt-5 space-y-1.5">
+            {starterGroups.map((group) => (
+              <div key={group.service.id} data-starters={group.service.id} className="flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+                <span className="mr-0.5">{CHAT_COPY.askAbout(group.service.title)}</span>
+                {group.prompts.map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    disabled={sending}
+                    onClick={() => fillComposer(prompt)}
+                    className="h-[30px] max-w-[22rem] truncate rounded-lg bg-[var(--color-hover)] px-2.5 text-[var(--color-text-soft)] transition-colors hover:bg-[var(--color-active)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
+                  >
+                    {suggestionLabel(prompt)}
+                  </button>
+                ))}
+              </div>
+            ))}
+            <div className="flex flex-wrap items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
+              {starterGroups.length === 0 ? <span className="mr-0.5">Try</span> : null}
+              {(starterGroups.length > 0 ? [] : homeSuggestions).map((prompt) => (
                 <button
                   key={prompt}
                   type="button"
@@ -1966,6 +1986,7 @@ function IntuneChatContent() {
               >
                 Run an agent with /
               </button>
+            </div>
             </div>
             )}
           </div>

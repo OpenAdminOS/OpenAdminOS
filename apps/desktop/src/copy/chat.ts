@@ -1,4 +1,6 @@
 export const CHAT_COPY = {
+  /** Chat starters after a connect, one line per connected service. */
+  askAbout: (service: string) => `Ask about ${service}`,
   eyebrow: "Chat",
   emptyTitle: "What do you want to inspect?",
   emptySubtitle: "Answers come from your tenant’s own Graph data, with sources shown.",

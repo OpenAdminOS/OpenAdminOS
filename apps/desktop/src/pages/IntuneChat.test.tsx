@@ -27,6 +27,7 @@ import type {
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
+import { partIdsFor, requestedScopes } from "../shared/openAdminOS";
 import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
@@ -295,6 +296,21 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
 
     expect(await screen.findByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /sample data/i })).toBeNull();
+  });
+
+  it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const tenant = { ...base.tenants[0]!, grantedScopes: requestedScopes(partIdsFor(["defender"])).map((scope) => `graph:${scope.name}`) };
+    const bridge = makeMockBridge({}, createMockAppState({ tenants: [tenant], activeTenantId: tenant.id }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByText(CHAT_COPY.askAbout("Defender"))).toBeInTheDocument();
+    expect(screen.queryByText(CHAT_COPY.askAbout("Intune"))).toBeNull();
+    expect(screen.queryByText("Try")).toBeNull();
+    const defender = document.querySelector<HTMLElement>("[data-starters='defender']")!;
+    await user.click(within(defender).getAllByRole("button")[0]!);
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("Which high severity incidents are still open?");
   });
 
   it("cancels the inline confirmation with Escape, keeps the question and returns to the composer (design round, D)", async () => {
