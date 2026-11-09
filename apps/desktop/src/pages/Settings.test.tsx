@@ -273,7 +273,7 @@ describe("Settings provider section", () => {
     );
     const search = await screen.findByRole("combobox", { name: "Search settings" });
     await user.type(search, "slack");
-    expect(screen.getByRole("option", { name: /Result connectors/ })).toBeInTheDocument();
+    expect(await screen.findByRole("option", { name: /Result connectors/ })).toBeInTheDocument();
     expect(screen.queryByText(/No settings match this search/)).not.toBeInTheDocument();
     await user.clear(search);
     await user.type(search, "tenants");
