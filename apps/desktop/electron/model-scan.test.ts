@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 
-import { providerCatalog, resolveProviderDefaultModel, type ModelScanProbe, type ProviderSummary } from "@openadminos/agent-sdk";
+import { providerCatalog, resolveProviderDefaultModel, type ModelScanProbe, type ProviderId, type ProviderSummary } from "@openadminos/agent-sdk";
 
 import {
   buildModelScanChecks,
@@ -722,6 +722,39 @@ describe("a manual scan in a completed profile (review round 4, item 1)", () => 
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
+describe("a check that times out is served as could not check (Muse round 5, B)", () => {
+  it("lists a timed-out provider as a failed check with the scan row's reason, never as not checked", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], firstRunScan: "pending" }));
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      // Codex never answers; the others answer at once.
+      providerListFactory: async () => {
+        const list = providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
+        return list;
+      },
+    });
+    const originalChecks = (store as unknown as { modelScanChecks: (found: Map<ProviderId, ProviderSummary>) => Promise<ModelScanCheck[]> }).modelScanChecks.bind(store);
+    Object.assign(store, {
+      modelScanChecks: async (found: Map<ProviderId, ProviderSummary>) =>
+        (await originalChecks(found)).map((check) => (check.providerId === "openai" ? { ...check, run: () => new Promise<never>(() => undefined) } : check)),
+    });
+    try {
+      const result = await store.scanModels();
+      const row = result.probes.find((probe) => probe.providerId === "openai")!;
+      assert.equal(row.state, "could-not-check");
+      const listed = (await store.listProviders()).find((provider) => provider.id === "openai")!;
+      assert.notEqual(listed.status, "not-checked");
+      assert.equal(listed.checkFailed, true);
+      assert.equal(listed.detail, row.facts[0]);
+    } finally {
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }

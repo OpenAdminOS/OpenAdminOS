@@ -1588,6 +1588,29 @@ export interface AppStateStoreOptions {
   mcpCatalog?: readonly McpCatalogEntry[];
 }
 
+/**
+ * What listing serves after a scan: each provider as its check found it.
+ * A check that timed out or was refused has no summary (a stopped check's
+ * summary can land after the scan is done), so it is served as a failed
+ * check with the reason its scan row showed, never as "not checked".
+ */
+function scanResultsFor(found: ReadonlyMap<ProviderId, ProviderSummary>, probes: readonly ModelScanProbe[]): Map<ProviderId, ProviderSummary> {
+  const results = new Map(found);
+  for (const probe of probes) {
+    if (probe.state !== "could-not-check" || results.has(probe.providerId)) continue;
+    const entry = providerCatalog.find((provider) => provider.id === probe.providerId);
+    if (!entry) continue;
+    results.set(probe.providerId, {
+      ...entry,
+      status: "error",
+      checkFailed: true,
+      detail: probe.facts[0] ?? `${probe.name} could not be checked. Retry or refresh providers.`,
+      models: [],
+    });
+  }
+  return results;
+}
+
 export class AppStateStore {
   private writeChain: Promise<unknown> = Promise.resolve();
   private readonly filePath: string;
@@ -3470,7 +3493,7 @@ export class AppStateStore {
     const startedAt = this.clock().toISOString();
     const found = new Map<ProviderId, ProviderSummary>();
     const probes = await runModelScan({ checks: await this.modelScanChecks(found), ...(onProbe ? { onProbe } : {}) });
-    this.modelScanProviders = new Map(found);
+    this.modelScanProviders = scanResultsFor(found, probes);
     // Every scan, a manual one after a restart included, leaves listing on
     // its bounded results until the admin refreshes providers.
     this.scanResultsServed = true;
@@ -3497,7 +3520,7 @@ export class AppStateStore {
     const probes = await Promise.all(
       checks.map((check) => runScanCheck(check, check.providerId === providerId ? MODEL_SCAN_RETRY_TIMEOUT_MS : MODEL_SCAN_TIMEOUT_MS)),
     );
-    this.modelScanProviders = new Map(found);
+    this.modelScanProviders = scanResultsFor(found, probes);
     this.scanResultsServed = true;
     const outcome = await this.applyModelScanOutcome([...found.values()]);
     return { probes, outcome, startedAt, finishedAt: this.clock().toISOString(), generation: ++this.modelScanGeneration };
