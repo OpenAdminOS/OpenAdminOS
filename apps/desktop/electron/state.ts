@@ -3295,7 +3295,7 @@ export class AppStateStore {
     );
   }
 
-  /** Set when the first-run scan completes; cleared by `refreshProviders`. */
+  /** Set by every scan and when the first-run scan completes; cleared by `refreshProviders`. */
   private scanResultsServed = false;
 
   /**
@@ -3467,6 +3467,9 @@ export class AppStateStore {
     const found = new Map<ProviderId, ProviderSummary>();
     const probes = await runModelScan({ checks: await this.modelScanChecks(found), ...(onProbe ? { onProbe } : {}) });
     this.modelScanProviders = new Map(found);
+    // Every scan, a manual one after a restart included, leaves listing on
+    // its bounded results until the admin refreshes providers.
+    this.scanResultsServed = true;
     const outcome = await this.applyModelScanOutcome([...found.values()]);
     return { probes, outcome, startedAt, finishedAt: this.clock().toISOString(), generation: ++this.modelScanGeneration };
   }
@@ -3490,6 +3493,7 @@ export class AppStateStore {
       checks.map((check) => runScanCheck(check, check.providerId === providerId ? MODEL_SCAN_RETRY_TIMEOUT_MS : MODEL_SCAN_TIMEOUT_MS)),
     );
     this.modelScanProviders = new Map(found);
+    this.scanResultsServed = true;
     const outcome = await this.applyModelScanOutcome([...found.values()]);
     return { probes, outcome, startedAt, finishedAt: this.clock().toISOString(), generation: ++this.modelScanGeneration };
   }

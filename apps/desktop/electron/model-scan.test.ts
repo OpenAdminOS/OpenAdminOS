@@ -661,6 +661,73 @@ describe("failed checks are could not check for every provider (review round 3, 
   });
 });
 
+describe("a manual scan in a completed profile (review round 4, item 1)", () => {
+  const completedProfile = async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [], activeProviderId: "anthropic", providerChosenByUser: true }));
+    return dir;
+  };
+
+  it("serves the scan's results afterwards: no unrestricted listing until Refresh providers", async () => {
+    const dir = await completedProfile();
+    let listed = 0;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: () => { listed += 1; return providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] })); },
+    });
+    try {
+      assert.equal((await store.getAppState()).firstRunScanPending, undefined, "the first run is complete");
+      await store.scanModels();
+      const afterScan = listed;
+      await store.getAppState();
+      await store.listProviders();
+      await store.tickOffice().catch(() => undefined);
+      assert.equal(listed, afterScan, "nothing listed providers in full after Scan again");
+      await store.refreshProviders();
+      await store.listProviders();
+      assert.equal(listed, afterScan + 1);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("never contacts an off-device endpoint the scan named not contacted, after Scan again", async () => {
+    const dir = await completedProfile();
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    process.env.OPENAGENTS_OLLAMA_URL = "http://10.255.255.1:11434";
+    delete process.env.OLLAMA_HOST;
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://10.255.255.1:1234/v1";
+    const realFetch = globalThis.fetch;
+    const contacted: string[] = [];
+    globalThis.fetch = (async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+      const url = String(input instanceof Request ? input.url : input);
+      if (url.includes("10.255.255.1")) {
+        contacted.push(url);
+        throw Object.assign(new TypeError("fetch failed"), { cause: Object.assign(new Error("connect ECONNREFUSED"), { code: "ECONNREFUSED" }) });
+      }
+      return realFetch(input, init);
+    }) as typeof fetch;
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      const result = await store.scanModels();
+      assert.ok(result.probes.filter((probe) => probe.providerId === "ollama" || probe.providerId === "lm-studio").every((probe) => probe.notContacted));
+      await store.getAppState();
+      await store.listProviders();
+      assert.deepEqual(contacted, [], "no network probe reached the off-device endpoints");
+    } finally {
+      globalThis.fetch = realFetch;
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
 describe("after the first-run scan (review round 3, item 1)", () => {
   it("leaves the scan by every exit without discovery, and checks a provider in full only when the admin acts on it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
