@@ -4414,7 +4414,7 @@ export class AppStateStore {
     }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before invoking connectors.",
+        NO_MICROSOFT_365_ORGANIZATION("invoking connectors"),
       );
     }
     const tenantSession = tenant

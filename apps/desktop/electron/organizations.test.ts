@@ -1026,6 +1026,11 @@ describe("connector tests from No organization (Muse round 4)", () => {
         assert.match(error.message, /No organization with Microsoft 365 is active/);
         return true;
       });
+      // Listing Teams teams invokes the connector the same way (Muse round 5).
+      await assert.rejects(store.listConnectorTeams("teams"), (error: Error) => {
+        assert.equal(error.message, NO_MICROSOFT_365_ORGANIZATION("invoking connectors"));
+        return true;
+      });
     } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
