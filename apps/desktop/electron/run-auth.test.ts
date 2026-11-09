@@ -165,13 +165,15 @@ it("the delivery host resolves the MSAL client that connected the tenant", async
   });
   try {
     const internal = store as unknown as {
-      runDeliveryService: { host: { msalClientForTenant(tenant: unknown): unknown } };
-      msalClientFor(registration: unknown): unknown;
+      runDeliveryService: { host: { msalClientForTenant(tenant: unknown): { getTokenCache(): unknown } } };
+      msalClientFor(registration: unknown): { getTokenCache(): unknown };
     };
     const tenant = (await store.getAppState()).tenants[0]!;
+    // The tenant's client is wrapped by the token choke point; its token
+    // cache is the one of the client that connected the tenant.
     const deliveryClient = internal.runDeliveryService.host.msalClientForTenant(tenant);
-    assert.equal(deliveryClient, internal.msalClientFor(byoRegistration));
-    assert.notEqual(deliveryClient, internal.msalClientFor(undefined));
+    assert.equal(deliveryClient.getTokenCache(), internal.msalClientFor(byoRegistration).getTokenCache());
+    assert.notEqual(deliveryClient.getTokenCache(), internal.msalClientFor(undefined).getTokenCache());
     assert.deepEqual(storesFor, [byoRegistration.clientId]);
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 });

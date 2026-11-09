@@ -957,9 +957,9 @@ describe("Disconnect redesign: a partial outcome is a warning (Muse 1)", () => {
     await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
     const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
     await user.click(within(dialog).getByRole("checkbox", { name: ORGANIZATION_COPY.disconnectConfirmLocal("Contoso IT") }));
-    const reads = bridge.getAppState.mock.calls.length;
+    const reads = vi.mocked(bridge.getAppState).mock.calls.length;
     await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectAction }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("The local state file could not be written.");
-    await waitFor(() => expect(bridge.getAppState.mock.calls.length).toBeGreaterThan(reads));
+    await waitFor(() => expect(vi.mocked(bridge.getAppState).mock.calls.length).toBeGreaterThan(reads));
   });
 });
