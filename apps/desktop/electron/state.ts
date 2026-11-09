@@ -4045,6 +4045,10 @@ export class AppStateStore {
     return this.chatService.refreshGraphCache(options);
   }
 
+  async previewIntuneChatSend(input: { content: string }): Promise<{ reachesModel: boolean }> {
+    return this.chatService.previewIntuneChatSend(input);
+  }
+
   async sendIntuneChatMessage(
     input: SendIntuneChatMessageInput,
   ): Promise<SendIntuneChatMessageResult> {

@@ -592,7 +592,8 @@ export function resolveQuestionKind(
  */
 export function isExplicitDocsRequest(question: string): boolean {
   const lower = question.trim().toLowerCase();
-  return (DOCS_REFERENCE.test(lower) || CODE_AUTHORING.test(lower)) && !hasTenantReference(question);
+  // Writing a query or script asks for code, also when it says "our" or "which".
+  return CODE_AUTHORING.test(lower) || (DOCS_REFERENCE.test(lower) && !hasTenantReference(question));
 }
 
 export function classifyChatQuestion(

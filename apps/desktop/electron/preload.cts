@@ -110,6 +110,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:get-intune-chat-messages", conversationId),
   sendIntuneChatMessage: (input) =>
     ipcRenderer.invoke("openadminos:send-intune-chat-message", input),
+  previewIntuneChatSend: (input: { content: string }) =>
+    ipcRenderer.invoke("openadminos:preview-intune-chat-send", input),
   streamIntuneChatMessage: (input, onEvent, options) => {
     const streamId = options?.streamId ?? crypto.randomUUID();
     let cleanedUp = false;

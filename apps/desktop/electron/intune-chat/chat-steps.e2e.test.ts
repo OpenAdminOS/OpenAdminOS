@@ -1056,6 +1056,27 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
     }, { noTenant: true });
   });
 
+  it("treats a request to write code as docs even when it says our or which (review round 1, finding M)", async () => {
+    await withHarness(async ({ store, graphBuilds, script }) => {
+      for (const content of ["Write a KQL query for our failed sign-ins", "Write a script which shows stale devices"]) {
+        script([{ final: true, answer: "Here is the code you can run yourself." }]);
+        const message = (await store.sendIntuneChatMessage({ content })).assistantMessage;
+        assert.equal(message.questionKind, "docs", content);
+        assert.equal(message.notConnected, undefined, content);
+      }
+      assert.deepEqual(graphBuilds, []);
+    }, { noTenant: true });
+  });
+
+  it("names the voice surface when Nova is used with no tenant (finding P)", async () => {
+    await withHarness(async ({ store }) => {
+      await assert.rejects(
+        () => store.streamIntuneChatMessage({ content: "How many devices?" }, () => {}, { voice: true }),
+        /Nova voice needs a connected tenant\. Connect a Microsoft 365 tenant, or ask in Chat, which answers without one\./,
+      );
+    }, { noTenant: true });
+  });
+
   it("blocks a tenant question with no model call on deterministic retrieval, and answers a docs question there", async () => {
     await withHarness(async ({ store, prompts, graphBuilds, script }) => {
       await store.setChatInvestigationMode("always-deterministic");
@@ -1141,6 +1162,29 @@ describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
         assert.equal(message.status, "completed");
         assert.match(message.content, /deployment groups/);
         assert.deepEqual(graphBuilds, []);
+      }, { noTenant: true, provider: hosted });
+    });
+
+    it("accepts a fresh no-tenant acknowledgement on the stream path too", async () => {
+      await withHarness(async ({ store, graphBuilds, script }) => {
+        script([{ kind: "docs", sources: [], final: true, answer: "Autopatch rings are deployment groups." }]);
+        const message = (await store.streamIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent() }, () => {})).assistantMessage;
+        assert.equal(message.status, "completed");
+        assert.match(message.content, /deployment groups/);
+        assert.deepEqual(graphBuilds, []);
+      }, { noTenant: true, provider: hosted });
+    });
+
+    it("needs no confirmation for a question blocked on the device, and previews that (review round 1, finding 9)", async () => {
+      await withHarness(async ({ store, prompts, script }) => {
+        await store.setChatInvestigationMode("always-deterministic");
+        script(["Should not run."]);
+        assert.deepEqual(await store.previewIntuneChatSend({ content: DEVICE_QUESTION }), { reachesModel: false });
+        assert.deepEqual(await store.previewIntuneChatSend({ content: KQL_QUESTION }), { reachesModel: true });
+        const message = (await store.sendIntuneChatMessage({ content: DEVICE_QUESTION })).assistantMessage;
+        assert.equal(message.notConnected?.reason, "no-tenant");
+        assert.equal(prompts.length, 0);
+        await assert.rejects(() => store.sendIntuneChatMessage({ content: KQL_QUESTION }), /Hosted provider confirmation is required/);
       }, { noTenant: true, provider: hosted });
     });
 

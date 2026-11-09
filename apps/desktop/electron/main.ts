@@ -5629,6 +5629,13 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle(
+    "openadminos:preview-intune-chat-send",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) throw new Error("Chat preview input must be an object.");
+      return store.previewIntuneChatSend({ content: requireBoundedString(input.content, "content", 20_000) });
+    }),
+  );
+  ipcMain.handle(
     "openadminos:send-intune-chat-message",
     handleTrusted((_event, input: unknown) =>
       store.sendIntuneChatMessage(validateSendIntuneChatMessageInput(input)),

@@ -2928,6 +2928,11 @@ export interface OpenAdminOSApi {
   sendIntuneChatMessage(
     input: SendIntuneChatMessageInput,
   ): Promise<SendIntuneChatMessageResult>;
+  /**
+   * With no tenant, whether a question would reach the model. A question
+   * blocked on the device needs no hosted confirmation.
+   */
+  previewIntuneChatSend?(input: { content: string }): Promise<{ reachesModel: boolean }>;
   streamIntuneChatMessage(
     input: SendIntuneChatMessageInput,
     onEvent: (event: IntuneChatStreamEvent) => void,

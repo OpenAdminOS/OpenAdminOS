@@ -1924,7 +1924,9 @@ export class IntuneChatService {
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
       : undefined;
-    this.requireHostedChatConsent(
+    // A no-tenant question that is blocked before any model call sends
+    // nothing, so it needs no hosted confirmation.
+    if (!noTenant || this.noTenantSendReachesModel(content, persisted, provider, selectedModel)) this.requireHostedChatConsent(
       input,
       noTenant ? undefined : tenant,
       provider,
@@ -2001,8 +2003,8 @@ export class IntuneChatService {
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
-    const veto = docsVeto(content, history);
-    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
+    const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
+    const answerPlan = await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
     const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
     let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
@@ -2361,7 +2363,9 @@ export class IntuneChatService {
     const providerId = provider.id;
     options.signal?.throwIfAborted();
     // Nova keeps requiring a tenant.
-    if (noTenant && (options.voice || options.scope)) this.host.resolveTenant(persisted);
+    if (noTenant && (options.voice || options.scope)) {
+      throw new Error("Nova voice needs a connected tenant. Connect a Microsoft 365 tenant, or ask in Chat, which answers without one.");
+    }
     if (options.scope && (options.scope.tenantId !== tenant.id || options.scope.providerId !== providerId))
       throw new Error("Nova's tenant or provider changed. Start a new conversation.");
     const selectedModel = resolveProviderDefaultModel(
@@ -2377,7 +2381,9 @@ export class IntuneChatService {
     const workspaceContext = input.workspaceContext
       ? this.buildWorkspacePromptContext(input.workspaceContext, tenant.id, persisted)
       : undefined;
-    this.requireHostedChatConsent(
+    // A no-tenant question that is blocked before any model call sends
+    // nothing, so it needs no hosted confirmation.
+    if (!noTenant || this.noTenantSendReachesModel(content, persisted, provider, selectedModel)) this.requireHostedChatConsent(
       input,
       noTenant ? undefined : tenant,
       provider,
@@ -2482,11 +2488,11 @@ export class IntuneChatService {
     // With nothing connected, an explicit docs request is not left to the model's classification.
     const docsWithoutTenant = noTenant && !planned.hasWriteIntent && isExplicitDocsRequest(content);
     const lazyRefresh = toolsOffered && !directResources && !planned.hasWriteIntent && !docsWithoutTenant;
-    const veto = docsVeto(content, history);
+    const veto = docsWithoutTenant ? undefined : docsVeto(content, history);
     // Voice keeps its own bounded tool set and no source plan; MCP tools are Chat only.
     const answerPlan = options.voice
       ? undefined
-      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), steps });
+      : await this.planAnswer({ content, planned, tenant, conversationId: conversation.id, toolsOffered, modelClassifies: lazyRefresh, ...(veto ? { veto } : {}), ...(docsWithoutTenant ? { forceDocs: true } : {}), steps });
     const accessBlock = accessBlockTiming(restriction.blocked, answerPlan, lazyRefresh, noTenant);
     let accessBlockedMessage = accessBlock.now;
     const provenance = new PromptProvenance();
@@ -3246,6 +3252,8 @@ export class IntuneChatService {
     modelClassifies: boolean;
     /** Why a docs label is not allowed, when it is not. */
     veto?: string;
+    /** With nothing connected, a request to write a query or script is docs. */
+    forceDocs?: boolean;
     steps: ChatStepRecorder;
   }): Promise<{ mcp: { mcp?: McpChatContext }; mcpInstalled: boolean; docsSourceAvailable: boolean; readonly sources: ChatSourcePlan; kind: QuestionKindTracker; settleKind: () => void; tieInResources: GraphCacheResourceKind[] }> {
     // The first step shows at once; its detail follows when the kind and sources are known.
@@ -3254,7 +3262,9 @@ export class IntuneChatService {
     // A model that skips the tool loop is offered no MCP tools, so none is planned as a source.
     const mcp = input.toolsOffered ? installed : {};
     const servers = mcp.mcp?.servers ?? [];
-    const keywordKind = input.planned.hasWriteIntent
+    const keywordKind = input.forceDocs
+      ? "docs"
+      : input.planned.hasWriteIntent
       ? "tenant"
       : classifyChatQuestion(input.content, { plannedResources: input.planned.resources, namesSource: namedServers(input.content, servers).length > 0 });
     const context = { question: input.content, servers, docsIndexAvailable: Boolean(this.host.documentationIndexVersion?.()) };
@@ -3473,6 +3483,33 @@ export class IntuneChatService {
    * send that includes tenant context; the first send with a tenant asks
    * again with the tenant-bound confirmation.
    */
+  /**
+   * Whether a send with no tenant reaches the model, the same way the send
+   * decides it: blocked questions (a write request, a named agent, or a
+   * tenant question decided by the keyword rules without the tool loop)
+   * get their answer on the device.
+   */
+  private noTenantSendReachesModel(content: string, persisted: ChatPersistedState, provider: ProviderSummary | undefined, model: string | undefined): boolean {
+    const planned = planChatContext(content);
+    if (planned.hasWriteIntent) return false;
+    if (persisted.installedAgents.some((agent) => [agent.name, agent.slug].some((name) => name.toLowerCase() === content.toLowerCase()))) return false;
+    if (isExplicitDocsRequest(content)) return true;
+    const toolsOffered = provider ? resolveAgenticCapability({ mode: this.host.requireIntelligenceStore().getChatInvestigationSettings().mode, provider, providerId: provider.id, ...(model ? { model } : {}) }).enabled : false;
+    const directResources = voiceDeviceEvidenceIntent(content) ? ["managedDevices" as const] : voiceResourcesForQuestion(content);
+    if (toolsOffered && !directResources) return true;
+    return classifyChatQuestion(content, { plannedResources: planned.resources, namesSource: false }) === "docs";
+  }
+
+  /** For the renderer: whether a send with no tenant would reach the model and so needs a hosted confirmation. */
+  async previewIntuneChatSend(input: { content: string }): Promise<{ reachesModel: boolean }> {
+    const persisted = await this.host.read();
+    if (persisted.activeTenantId) return { reachesModel: true };
+    const providers = await this.host.listProviders();
+    const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
+    const model = resolveProviderDefaultModel(provider, persisted.activeModelByProviderId).model;
+    return { reachesModel: this.noTenantSendReachesModel(input.content.trim(), persisted, provider, model) };
+  }
+
   private requireHostedChatConsent(
     input: SendIntuneChatMessageInput,
     tenant: TenantRecord | undefined,
