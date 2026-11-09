@@ -3590,15 +3590,29 @@ export class AppStateStore {
     if (!isProviderId(providerId)) {
       throw new Error(`Unknown provider: ${String(providerId)}`);
     }
+    // While the first-launch scan is pending nothing but the scan touches a
+    // provider, so no test prompt is sent from a second window or over IPC.
+    if ((await this.read()).firstRunScan === "pending") {
+      return { providerId, ok: false, message: "The first-launch scan is still checking this device. Finish or skip it, then test again." };
+    }
     // Testing is an explicit action on this provider: it is checked in full.
     const provider = await this.detectProvider(providerId);
     if (!provider) {
       throw new Error(`Provider not found: ${providerId}`);
     }
+    // A test prompt needs a real ready status; a provider that was not
+    // checked, is missing or failed its check is not tested. Azure OpenAI is
+    // "available" once configured. Gemini CLI's sign-in is only known after
+    // a request, so an installed CLI is tested, also after a failed request
+    // (that is how a fixed sign-in is confirmed); the installed CLI reports
+    // its model, a failed or missing one reports none.
     const providerReady =
       provider.status === "connected" ||
       (provider.id === "azure-openai" && provider.status === "available") ||
-      (provider.id === "gemini" && provider.status !== "not-installed" && provider.cli?.state !== "unsupported-version");
+      (provider.id === "gemini" &&
+        (provider.status === "available" || provider.status === "error") &&
+        provider.models.length > 0 &&
+        provider.cli?.state !== "unsupported-version");
     if (!providerReady) {
       return {
         providerId,

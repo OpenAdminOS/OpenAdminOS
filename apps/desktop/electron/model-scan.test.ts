@@ -464,10 +464,24 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
     process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
     delete process.env.OLLAMA_HOST;
     process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+    // A Gemini CLI spy first on PATH: any spawn writes its arguments.
+    const originalPath = process.env.PATH;
+    let geminiLog: string | undefined;
+    if (process.platform !== "win32") {
+      geminiLog = join(dir, "gemini.log");
+      await writeFile(join(dir, "gemini"), `#!/bin/sh\necho "$*" >> "${geminiLog}"\necho 9.9.9\n`);
+      await chmod(join(dir, "gemini"), 0o755);
+      process.env.PATH = `${dir}:${originalPath ?? ""}`;
+    }
+    let llmBuilt = 0;
     const store = new AppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
       providerListFactory: () => { listed += 1; return providerCatalog.map((provider) => ({ ...provider, status: "connected" as const, models: ["m"] })); },
+      llmFactory: () => {
+        llmBuilt += 1;
+        return { available: true, defaultModel: "m", async complete() { return { text: "ok", model: "m" }; }, async *stream() { yield { delta: "", accumulated: "", done: true, model: "m" }; } };
+      },
     });
     try {
       const state = await store.getAppState();
@@ -478,6 +492,12 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
       const providers = await store.listProviders();
       assert.ok(providers.every((provider) => provider.status === "not-checked"));
       await store.testProvider("ollama").catch(() => undefined);
+      // Gemini is "not checked" here: no test prompt and no CLI spawn while the scan is pending (Muse round 3, M1).
+      const gemini = await store.testProvider("gemini");
+      assert.equal(gemini.ok, false);
+      assert.match(gemini.message ?? "", /first-launch scan is still checking/);
+      assert.equal(llmBuilt, 0, "no model was built for a test prompt");
+      if (geminiLog) await assert.rejects(() => readFile(geminiLog, "utf8"), "the Gemini CLI was never started");
       await store.setActiveModel("ollama", null).catch(() => undefined);
       await store.previewIntuneChatSend({ content: "Explain Windows Autopatch rings" }).catch(() => undefined);
       assert.equal(listed, 0, "no caller ran provider detection while the scan is pending");
@@ -498,10 +518,57 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
       }
       assert.equal(listed, afterScan);
     } finally {
-      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm], ["PATH", originalPath]] as const) {
         if (value === undefined) delete process.env[key];
         else process.env[key] = value;
       }
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+
+  it("tests a provider only from a real ready status (Muse round 3, M1)", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+    let built = 0;
+    const statuses: Record<string, ProviderSummary["status"]> = {};
+    const originalPath = process.env.PATH;
+    let geminiLog: string | undefined;
+    if (process.platform !== "win32") {
+      geminiLog = join(dir, "gemini.log");
+      await writeFile(join(dir, "gemini"), `#!/bin/sh\necho "$*" >> "${geminiLog}"\necho 9.9.9\n`);
+      await chmod(join(dir, "gemini"), 0o755);
+      process.env.PATH = `${dir}:${originalPath ?? ""}`;
+    }
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: () => providerCatalog.map((provider) => ({
+        ...provider, status: statuses[provider.id] ?? "connected", models: statuses[provider.id] === "not-installed" ? [] : ["m"],
+      })),
+      llmFactory: () => {
+        built += 1;
+        return { available: true, defaultModel: "m", async complete() { return { text: "ok", model: "m" }; }, async *stream() { yield { delta: "", accumulated: "", done: true, model: "m" }; } };
+      },
+    });
+    try {
+      for (const status of ["not-checked", "not-installed", "error"] as const) {
+        statuses.ollama = status;
+        assert.equal((await store.testProvider("ollama")).ok, false, status);
+      }
+      statuses.gemini = "not-checked";
+      assert.equal((await store.testProvider("gemini")).ok, false, "a Gemini that was not checked is not tested");
+      assert.equal(built, 0);
+      if (geminiLog) await assert.rejects(() => readFile(geminiLog, "utf8"), "the Gemini CLI was never started");
+      // An installed Gemini, also after a failed request, is tested: that is how its sign-in is confirmed.
+      if (geminiLog) {
+        statuses.gemini = "error";
+        await store.testProvider("gemini");
+        assert.ok((await readFile(geminiLog, "utf8")).split("\n").some((line) => line && line !== "--version"), "the test prompt reached the Gemini CLI");
+      }
+    } finally {
+      if (originalPath === undefined) delete process.env.PATH;
+      else process.env.PATH = originalPath;
       store.close();
       await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
