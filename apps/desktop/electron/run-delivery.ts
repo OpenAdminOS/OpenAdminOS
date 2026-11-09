@@ -115,6 +115,10 @@ export interface RunDeliveryHost {
   ): Promise<void>;
 }
 
+/** Why Teams and Outlook do not send the report of a run with no organization. */
+export const NO_ORGANIZATION_DELIVERY_SKIP =
+  "Report delivery skipped. This run had no organization, and Teams and Outlook post with an organization's Microsoft sign-in. Run the agent in an organization to send its report there.";
+
 export class RunDeliveryService {
   private deliveryQueueProcessing: Promise<void> | undefined;
 
@@ -427,10 +431,7 @@ export class RunDeliveryService {
     // Teams and Outlook post with an organization's Microsoft sign-in. A
     // run with no organization never borrows the one active now.
     if (!run.tenantId && (item.connectorId === "teams" || item.connectorId === OUTLOOK_CONNECTOR_ID)) {
-      const message =
-        "Report delivery skipped. This run had no organization, and Teams and Outlook post with an organization's Microsoft sign-in. Run the agent in an organization to send its report there.";
-      await this.host.appendRunLog(item.runId, "warn", message);
-      return { retryable: false, error: message };
+      return this.skipWithoutOrganization(run);
     }
     try {
       switch (item.connectorId) {
@@ -495,7 +496,14 @@ export class RunDeliveryService {
     });
   }
 
+  /** The designed skip for Teams and Outlook delivery of a run with no organization. */
+  private async skipWithoutOrganization(run: RunRecord): Promise<RunDeliveryResult> {
+    await this.host.appendRunLog(run.id, "warn", NO_ORGANIZATION_DELIVERY_SKIP);
+    return { retryable: false, error: NO_ORGANIZATION_DELIVERY_SKIP };
+  }
+
   private async deliverRunToTeams(run: RunRecord): Promise<RunDeliveryResult> {
+    if (!run.tenantId) return this.skipWithoutOrganization(run);
     const persisted = await this.host.read();
     const agent = persisted.installedAgents.find(
       (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
@@ -827,6 +835,7 @@ export class RunDeliveryService {
   }
 
   private async deliverRunToOutlook(run: RunRecord): Promise<RunDeliveryResult> {
+    if (!run.tenantId) return this.skipWithoutOrganization(run);
     const persisted = await this.host.read();
     const agent = persisted.installedAgents.find(
       (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,

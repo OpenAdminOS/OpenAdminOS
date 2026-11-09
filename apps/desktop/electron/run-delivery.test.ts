@@ -515,7 +515,8 @@ describe("reports of a run with no organization (review round 1)", () => {
     try {
       await store.processPendingRunDeliveries();
       assert.equal(posted.length, 1);
-      assert.match(posted[0]!, /No organization/);
+      assert.match(posted[0]!, /\*Organization:\* none/);
+      assert.doesNotMatch(posted[0]!, /Tenant:/);
       assert.doesNotMatch(posted[0]!, /Customer B/);
     } finally {
       globalThis.fetch = originalFetch;
@@ -549,7 +550,7 @@ describe("reports of a run with no organization (review round 1)", () => {
       const state = await readJson(statePath);
       const run = (state.runs as RunRecord[])[0];
       assert.equal(sent.length, 1);
-      assert.match(sent[0]!, /Tenant: No organization/);
+      assert.match(sent[0]!, /Organization: none/);
       assert.doesNotMatch(sent[0]!, /Contoso|sample data/i);
       assert.equal(run?.logs.some((log) => /available in production/i.test(log.message)), false);
     } finally {
@@ -591,4 +592,34 @@ describe("reports of a run with no organization (review round 1)", () => {
       }
     });
   }
+});
+
+describe("direct Teams and Outlook delivery of a run with no organization (Muse round 2)", () => {
+  it("uses the designed skip instead of a failed step", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-direct-"));
+    const statePath = join(dir, "state.json");
+    await writeJson(statePath, {
+      activeProviderId: "ollama",
+      installedAgents: [deliveryAgentWith({ teams: { enabled: true, useDefaultTarget: true }, outlook: { enabled: true, useDefaultRecipients: true } })],
+      runs: [completedRun("run-noorg")],
+      tenants: [],
+    });
+    const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    const internal = (store as unknown as { runDeliveryService: {
+      deliverRunToTeams(run: RunRecord): Promise<{ retryable: boolean; error?: string }>;
+      deliverRunToOutlook(run: RunRecord): Promise<{ retryable: boolean; error?: string }>;
+    } }).runDeliveryService;
+    try {
+      for (const deliver of [internal.deliverRunToTeams.bind(internal), internal.deliverRunToOutlook.bind(internal)]) {
+        const result = await deliver(completedRun("run-noorg"));
+        assert.equal(result.retryable, false);
+        assert.match(result.error ?? "", /^Report delivery skipped\. This run had no organization/);
+      }
+      const run = ((await readJson(statePath)).runs as RunRecord[])[0];
+      assert.equal(run?.steps.some((step) => step.status === "failed"), false);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
 });
