@@ -14,6 +14,8 @@ import type {
 
 export interface ClaudeCodeProviderOptions {
   binaryPath?: string;
+  /** Stops the probe and kills its CLI process, for the first-launch scan timeout. */
+  signal?: AbortSignal;
   homePath?: string;
   defaultModel?: string;
   timeoutMs?: number;
@@ -161,7 +163,7 @@ export async function probeClaudeCodeLlm(
 ): Promise<ClaudeCodeProbeResult> {
   const homePath = resolveClaudeCodeConfig(options.homePath);
   const authPath = join(expandHome(homePath ?? "~/.claude"), ".credentials.json");
-  const binaryProbe = await probeClaudeCodeBinary(options.binaryPath);
+  const binaryProbe = await probeClaudeCodeBinary(options.binaryPath, options.signal);
   const { versionResult } = binaryProbe;
 
   if (versionResult.exitCode !== 0) {
@@ -197,6 +199,7 @@ export async function probeClaudeCodeLlm(
     binaryPath: binaryProbe.binaryPath,
     args: ["auth", "status", "--text"],
     timeoutMs: 5_000,
+    ...(options.signal ? { signal: options.signal } : {}),
     env: createClaudeCodeProcessEnv({
       overrides: claudeCodeEnvOverrides(homePath),
     }),
@@ -274,7 +277,7 @@ async function resolveClaudeCodeBinary(preferredBinaryPath?: string): Promise<st
   throw new Error(detail || "Claude Code CLI is not installed or not executable.");
 }
 
-async function probeClaudeCodeBinary(preferredBinaryPath?: string): Promise<{
+async function probeClaudeCodeBinary(preferredBinaryPath?: string, signal?: AbortSignal): Promise<{
   binaryPath: string;
   versionResult: Awaited<ReturnType<typeof runProcess>>;
 }> {
@@ -286,10 +289,13 @@ async function probeClaudeCodeBinary(preferredBinaryPath?: string): Promise<{
     | undefined;
 
   for (const binaryPath of claudeCodeBinaryCandidates(preferredBinaryPath)) {
+    // A stopped check tries no further binaries.
+    if (signal?.aborted) break;
     const versionResult = await runProcess({
       binaryPath,
       args: ["--version"],
       timeoutMs: 5_000,
+      ...(signal ? { signal } : {}),
     });
     const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
     if (versionResult.exitCode === 0) return current;
@@ -571,6 +577,10 @@ async function runProcess(input: {
   signal?: AbortSignal;
 }): Promise<{ exitCode: number | "spawn-error"; stdout: string; stderr: string }> {
   return new Promise((resolveResult) => {
+    if (input.signal?.aborted) {
+      resolveResult({ exitCode: -1, stdout: "", stderr: "The check was stopped before it started." });
+      return;
+    }
     const spawned = cliSpawn(input.binaryPath, input.args, {
       cwd: input.cwd,
       env: input.env ?? createClaudeCodeProcessEnv(),

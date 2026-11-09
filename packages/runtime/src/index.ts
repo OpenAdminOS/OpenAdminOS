@@ -1437,6 +1437,6 @@ function toAgentDefinition(agent: AgentSummary): RunContext["agent"] {
   };
 }
 
-export { createCopilotLlm, probeCopilotLlm } from "./llm-copilot.js";
+export { createCopilotLlm, probeCopilotInstallation, probeCopilotLlm } from "./llm-copilot.js";
 export { createGeminiLlm, GEMINI_DEFAULT_MODEL, probeGeminiLlm } from "./llm-gemini.js";
 export type { CliProbe, CliFailure } from "./cli-provider.js";

@@ -37,7 +37,7 @@ export function cliFailure(provider: string, raw: string): CliProviderError {
   return new CliProviderError("request-failed", `${provider} could not complete the request. Check its connection in Settings and retry. If the CLI was updated, check that its version is supported.`);
 }
 
-export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.ProcessEnv, preferred?: string): Promise<{ binaryPath: string; version: string }> {
+export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.ProcessEnv, preferred?: string, signal?: AbortSignal): Promise<{ binaryPath: string; version: string }> {
   const override = preferred ?? process.env[`OPENADMINOS_${name.toUpperCase()}_BINARY`];
   const candidates: string[] = override ? [override] : [];
   if (!override) {
@@ -59,6 +59,9 @@ export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.Proces
         terminateCli(child); done({ status, stdout: output, stderr: "" });
       };
       const timer = setTimeout(() => finish(null), 8000);
+      // A stopped scan check terminates the CLI instead of leaving it running.
+      if (signal?.aborted) finish(null);
+      else signal?.addEventListener("abort", () => finish(null), { once: true });
       const append = (data: Buffer) => { output += data.toString(); if (output.length > 32_768) finish(null); };
       child.stdout.on("data", append); child.stderr.on("data", append);
       child.on("error", () => finish(null)); child.stdin.on("error", () => finish(null));
