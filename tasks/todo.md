@@ -1885,3 +1885,46 @@ Also: choke point enumeration with a closed lease (Graph, MSAL, session, connect
 ### Verification
 
 - Node 22: typecheck, electron, runtime, scripts, renderer, qa and docs:check (results in the hand-back).
+
+# Splashtop: support assistant and Open API connection (2026-11-09)
+
+Branch `splashtop/connection`, based on `main` after PR #174. Includes the two prepared commits from `splashtop/marketplace` (Splashtop Docs MCP, Coming soon card, which this branch replaces).
+
+## Decisions (maintainer, 2026-11-09)
+
+1. Support assistant without sign-in: the Splashtop Docs MCP (`docs.splashtop.com/mcp`, four reference tools) and a built-in knowledge base search over Splashtop's Zendesk Help Center (`support-splashtopbusiness.splashtop.com/api/v2/help_center/...`, public, no auth), offered to Chat as a built-in public reference with `search_articles` and `get_article`, installable in the Marketplace, off by default, with the public reference trust disclosure, third-party fencing and designed errors.
+2. Splashtop Open API as a built-in service per organization: a Team Owner or Super Admin API token, stored with safeStorage and bound to the organization, sent only to the regional host (Global/US `webapi.splashtop.com`, EU `webapi.splashtop.eu`, Oceania `webapi.splashtop.nr`, paths `/api/open/v1/...`, Bearer). Enterprise only. Connect, test, rotate and disconnect on Connections, audited. Designed errors for 401, 403, 429 and a wrong region.
+3. Reads as a service with parts (computers, inventory, users and groups, sessions and logs, policies and vulnerabilities), each a paginated read tool. Results are organization data.
+4. Writes as write plans with diff confirmation: reboot computers, delete a computer, disable a user, end a session (destructive, typed phrase), rename a computer (non-destructive). Existing write-plan and confirmation path, so organization isolation applies.
+5. Marketplace: a real Splashtop listing that opens the Connections connect step.
+6. Splashtop's real logo from its official assets, unmodified, recorded in the logos NOTICE.
+
+## Implementation decisions (implementation agent, flagged for review)
+
+- The Microsoft service registry (`services.ts`, `ServiceId`) stays Graph only. Splashtop is a vendor service defined in `packages/agent-sdk/src/splashtop.ts` with its own parts; its connection lives in `OrganizationRecord.connections.splashtop` (no secret), the token in safeStorage keyed by organization id.
+- An organization is still created by its Microsoft 365 connection on this branch, so Splashtop connects into an existing organization. A Splashtop-only organization needs the organization model to stop deriving the active organization from `activeTenantId`; flagged as `TODO(ugur)`.
+- Splashtop changes are host-built write plans queued as system runs (`origin: "splashtop-change"`), the same gate as baseline rollbacks and gateway proposals: awaiting confirmation, typed phrase, active organization only, fail-stop apply. They are prepared from Plan a change on the Connections Splashtop section (the host lists the targets from Splashtop, the admin picks them). Chat stays read-only: its write-intent block runs before the model, so Chat does not prepare changes.
+- Agent manifests cannot declare Splashtop yet: `services` is typed as Microsoft `ServiceId` across gating, QA and the schema. Agents reading or changing Splashtop is a follow-up, flagged as `TODO(ugur)`.
+
+## Acceptance criteria
+
+1. Splashtop Knowledge Base is a Marketplace listing (Built in, off by default, host `support-splashtopbusiness.splashtop.com` named in the install review). Installed and enabled, Chat offers `search_articles` and `get_article`; params pass the public reference egress checks; results are fenced as third-party content with article links as sources. 404, 429 (with the wait time), 5xx, timeouts, network failures and malformed answers each give a designed message. Tests with mocked HTTP.
+2. Splashtop Docs MCP and the knowledge base search are verified live once (no auth), recorded below.
+3. Connections shows Splashtop under Other services for the active organization: Connect (region, token, what it needs, where it goes), Test, Rotate token, Disconnect. The token is never returned to the renderer, is stored with safeStorage under the organization id, and is sent only to the chosen region's host over HTTPS with no redirects. Connect calls `users/basic_info` and saves nothing on failure. 401, 403 (plan or role), 429, a wrong region and network failures each give a designed message. Tests cover storage, host binding, region and each error.
+4. Connect, rotate and disconnect record configuration audit events with no secret. Disconnecting the organization (Microsoft 365) also deletes its Splashtop token and connection.
+5. Chat read tools for the active organization only: computers, inventory, users, groups, session logs (active and finished), team history (audit), endpoint policies and vulnerabilities, each with pagination and a row cap. Results are fenced as organization data and their values never reach a public reference query. A test proves another organization's token is never used.
+6. Plan a change (Connections) lists targets from Splashtop; each write builds a plan with one action per target showing the current value and the change; destructive kinds require `REBOOT n COMPUTERS`, `DELETE n COMPUTERS`, `DISABLE n USERS`, `END n SESSIONS`; rename requires `RENAME n COMPUTERS` and is not destructive. Confirm with a wrong phrase or from another organization is refused; apply runs in order and stops at the first error. Tests for each kind.
+7. The Marketplace Splashtop listing replaces the Coming soon card and opens the Connections connect step.
+8. Splashtop logo from official assets, recorded in the NOTICE with the disclaimer.
+9. SPEC, a Splashtop service page in the user docs, CHANGELOG and this file updated. Typecheck, electron, renderer (Node 22), runtime, qa and docs:check pass. PR opened against `main`.
+
+## Live verification
+
+- 2026-11-09, Splashtop Docs MCP (`https://docs.splashtop.com/mcp`, no auth): `initialize` (server "Splashtop API" 1.0, protocol 2025-06-18), `tools/list` (five tools; the four offered are present), `list-endpoints` (the full Open API path list used to build the client), `get-endpoint` for every endpoint OpenAdminOS calls, and `get-server-variables` (the three regional hosts). Also through OpenAdminOS's MCP host: handshake, allowlist and `search-endpoints` for reboot (`electron/splashtop/live.test.ts`).
+- 2026-11-09, Splashtop Help Center (no auth): `GET /api/v2/help_center/articles/search.json?query=reboot computer` (200, 492 results, `x-rate-limit: 700`), `GET /api/v2/help_center/en-us/articles/115000983226.json` (200, article with body HTML), a missing article (404), an empty query (refused by Zendesk with a message, OpenAdminOS refuses it before sending). Also through the built-in reference: search and article read (`electron/splashtop/live.test.ts`).
+- Not verified live: the Splashtop Open API itself. It needs an Enterprise API token, which this environment does not have. Request and answer shapes follow the endpoint specs above; tests use mocked answers in those shapes.
+
+## Review
+
+- Built as planned with these changes: writes are prepared from Plan a change on Connections, not from Chat (Chat's write-intent block runs before the model); Disconnect of Microsoft 365 removes the organization's Splashtop connection in the same write, because `reconcileOrganizations` keeps records with unknown connections when their tenant is gone; the built-in reference call is raced against its deadline so a request that ignores the abort signal cannot hang an answer.
+- Open, flagged with `TODO(ugur)`: agents and Splashtop; organizations without Microsoft 365; Splashtop on the reach map (after PR #175's service logos land).
