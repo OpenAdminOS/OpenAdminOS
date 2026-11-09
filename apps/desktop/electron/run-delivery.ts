@@ -551,6 +551,22 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
+    const teamsBlock = deliveryBlock("teams", agent.delivery, baseConfig, true);
+    if (teamsBlock === "no-target" || teamsBlock === "no-default-target") {
+      const detail =
+        teamsBlock === "no-target"
+          ? "No Microsoft Teams team and channel are set on this delivery rule."
+          : "No default Microsoft Teams team and channel are configured.";
+      await this.host.finishRunStep(run.id, stepId, "failed", detail);
+      await this.host.appendRunLog(
+        run.id,
+        "warn",
+        `Teams delivery failed: ${teamsBlock === "no-target" ? "no team and channel on the rule" : "no default team and channel configured"}.`,
+        { connectorId: "teams" },
+      );
+      return { retryable: false, error: detail };
+    }
+
     if (!tenant) {
       await this.host.finishRunStep(
         run.id,
@@ -884,22 +900,8 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (!tenant) {
-      await this.host.finishRunStep(
-        run.id,
-        stepId,
-        "failed",
-        "No tenant session was available for Outlook delivery.",
-      );
-      await this.host.appendRunLog(run.id, "warn", "Outlook delivery failed: no tenant session available.", {
-        connectorId: OUTLOOK_CONNECTOR_ID,
-      });
-      return {
-        retryable: false,
-        error: "No tenant session was available for Outlook delivery.",
-      };
-    }
-    if (deliveryBlock("outlook", agent.delivery, baseConfig, true) === "no-target") {
+    const outlookBlock = deliveryBlock("outlook", agent.delivery, baseConfig, true);
+    if (outlookBlock === "no-target") {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -917,7 +919,40 @@ export class RunDeliveryService {
         error: "No Outlook notification recipients are configured.",
       };
     }
+    if (outlookBlock === "no-default-target") {
+      await this.host.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No default Outlook notification recipients are configured.",
+      );
+      await this.host.appendRunLog(
+        run.id,
+        "warn",
+        "Outlook delivery failed: no default recipients configured.",
+        { connectorId: OUTLOOK_CONNECTOR_ID },
+      );
+      return {
+        retryable: false,
+        error: "No default Outlook notification recipients are configured.",
+      };
+    }
 
+    if (!tenant) {
+      await this.host.finishRunStep(
+        run.id,
+        stepId,
+        "failed",
+        "No tenant session was available for Outlook delivery.",
+      );
+      await this.host.appendRunLog(run.id, "warn", "Outlook delivery failed: no tenant session available.", {
+        connectorId: OUTLOOK_CONNECTOR_ID,
+      });
+      return {
+        retryable: false,
+        error: "No tenant session was available for Outlook delivery.",
+      };
+    }
     const factory = findConnectorFactory(OUTLOOK_CONNECTOR_ID);
     if (!factory) {
       await this.host.finishRunStep(

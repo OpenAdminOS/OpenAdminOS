@@ -628,12 +628,16 @@ describe("delivery decision parity with the destination list (review round 4)", 
   type Fixture = {
     name: string;
     delivery: NonNullable<AgentSummary["delivery"]>;
-    connectorId: "slack" | "discord" | "teams";
+    connectorId: "slack" | "discord" | "teams" | "outlook";
     connectorName: string;
     config: Record<string, unknown>;
     /** The health status the renderer shows; the host never reads it. */
     status: "unknown" | "error" | "needs-setup" | "connected";
     tenantless?: boolean;
+    /** The run belongs to an organization, so Teams and Outlook reach their own checks. */
+    tenantId?: string;
+    /** The designed step message when the host refuses before sending. */
+    stepDetail?: RegExp;
   };
   const fixtures: Fixture[] = [
     {
@@ -666,6 +670,24 @@ describe("delivery decision parity with the destination list (review round 4)", 
       delivery: { teams: { enabled: true } },
       connectorId: "teams", connectorName: "Microsoft Teams", config: {}, status: "connected", tenantless: true,
     },
+    {
+      name: "Teams whose rule uses the default target when no team and channel are saved (Muse round 5)",
+      delivery: { teams: { enabled: true } },
+      connectorId: "teams", connectorName: "Microsoft Teams", config: { defaultTeamId: "team-1" }, status: "connected",
+      tenantId: "tenant-parity", stepDetail: /No default Microsoft Teams team and channel are configured\./,
+    },
+    {
+      name: "Teams whose rule names a team but no channel (Muse round 5)",
+      delivery: { teams: { enabled: true, useDefaultTarget: false, teamId: "team-1" } },
+      connectorId: "teams", connectorName: "Microsoft Teams", config: { defaultTeamId: "team-1", defaultChannelId: "channel-1" }, status: "connected",
+      tenantId: "tenant-parity", stepDetail: /No Microsoft Teams team and channel are set on this delivery rule\./,
+    },
+    {
+      name: "Outlook whose rule uses default recipients when none are saved (Muse round 5)",
+      delivery: { outlook: { enabled: true } },
+      connectorId: "outlook", connectorName: "Outlook", config: { defaultRecipients: " ; " }, status: "connected",
+      tenantId: "tenant-parity", stepDetail: /No default Outlook notification recipients are configured\./,
+    },
   ];
 
   for (const fixture of fixtures) {
@@ -689,7 +711,7 @@ describe("delivery decision parity with the destination list (review round 4)", 
       await writeJson(statePath, {
         activeProviderId: "ollama",
         installedAgents: [agent],
-        runs: [completedRun("run-parity")],
+        runs: [{ ...completedRun("run-parity"), ...(fixture.tenantId ? { tenantId: fixture.tenantId } : {}) }],
         tenants: [],
         connectors: { [fixture.connectorId]: { config: fixture.config } },
         runDeliveryQueue: [{ ...connectorQueueItem("run-parity", "slack"), id: `run-parity:${fixture.connectorId}`, connectorId: fixture.connectorId }],
@@ -717,6 +739,13 @@ describe("delivery decision parity with the destination list (review round 4)", 
           ? manualRunReportDestinations(agent, false, [summary]).mayGo.includes(fixture.connectorName)
           : reportDestinations(resultDestinations([agent], [summary])).includes(fixture.connectorName);
         assert.equal(requests.length > 0, listed, `host sent ${requests.length} request(s), list says ${listed ? "may send" : "nothing is sent"}`);
+        if (fixture.stepDetail) {
+          const stored = (JSON.parse(await readFile(statePath, "utf8")) as { runs: RunRecord[] }).runs[0];
+          const step = stored?.steps.at(-1);
+          assert.equal(step?.status, "failed");
+          assert.match(step?.detail ?? "", fixture.stepDetail);
+          assert.equal((JSON.parse(await readFile(statePath, "utf8")) as { runDeliveryQueue?: unknown }).runDeliveryQueue, undefined);
+        }
       } finally {
         globalThis.fetch = originalFetch;
         store.close();

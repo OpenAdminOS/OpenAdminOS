@@ -62,6 +62,14 @@ export function deliveryBlock(
     return "no-organization";
   }
   switch (key) {
+    case "teams": {
+      // The Teams connector posts only with both a team and a channel.
+      const teams = delivery?.teams;
+      if (teams?.useDefaultTarget === false) return teams.teamId?.trim() && teams.channelId?.trim() ? undefined : "no-target";
+      return config && !(configText(config, "defaultTeamId") && configText(config, "defaultChannelId"))
+        ? "no-default-target"
+        : undefined;
+    }
     case "slack": {
       const slack = delivery?.slack;
       if (slack?.useDefaultChannel === false) return slack.channel?.trim() ? undefined : "no-target";
@@ -79,9 +87,14 @@ export function deliveryBlock(
     }
     case "outlook": {
       const outlook = delivery?.outlook;
-      return outlook?.useDefaultRecipients === false &&
-        !(outlook.recipients ?? []).some((recipient) => recipient.trim().length > 0)
-        ? "no-target"
+      if (outlook?.useDefaultRecipients === false) {
+        return (outlook.recipients ?? []).some((recipient) => recipient.trim().length > 0) ? undefined : "no-target";
+      }
+      // The Outlook connector splits its saved default recipients on commas,
+      // semicolons and new lines.
+      const defaults = configText(config ?? {}, "defaultRecipients");
+      return config && !defaults?.split(/[,\n;]/).some((recipient) => recipient.trim().length > 0)
+        ? "no-default-target"
         : undefined;
     }
     default:
