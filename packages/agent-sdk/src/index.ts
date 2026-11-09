@@ -12,7 +12,8 @@ export type ProviderId =
   | "copilot"
   | "gemini";
 
-export type ProviderStatus = "connected" | "available" | "not-installed" | "error";
+/** `not-checked`: not detected yet, while the first-launch model scan is pending. */
+export type ProviderStatus = "connected" | "available" | "not-installed" | "error" | "not-checked";
 
 export interface ProviderSummary {
   id: ProviderId;

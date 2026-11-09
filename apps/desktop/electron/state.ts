@@ -3040,7 +3040,8 @@ export class AppStateStore {
     // provider detection: the scan does that, bounded and local only, and
     // the first screen does not wait for every provider check.
     const pendingScan = (await this.read()).firstRunScan === "pending";
-    const providers = pendingScan ? providerCatalog.map((provider) => ({ ...provider })) : await this.listProviders();
+    // listProviders serves the scan's results or "not checked" while pending.
+    const providers = await this.listProviders();
     const persisted = pendingScan ? await this.read() : await this.autoSelectLocalProvider(await this.read(), providers);
     const activeProvider =
       providers.find((provider) => provider.id === persisted.activeProviderId) ??
@@ -3256,6 +3257,21 @@ export class AppStateStore {
   }
 
   async listProviders(): Promise<ProviderSummary[]> {
+    // While the first-launch scan is pending, nothing detects providers
+    // except the scan itself, which is bounded and local only. Every caller
+    // (app state, Office, the menu bar, schedulers, validators, the Chat
+    // preview) gets the scan's own results, or "not checked".
+    if ((await this.read()).firstRunScan === "pending") {
+      return providerCatalog.map(
+        (provider) =>
+          this.modelScanProviders.get(provider.id) ?? {
+            ...provider,
+            status: "not-checked",
+            detail: "Not checked yet. The first-launch scan checks it.",
+            models: [],
+          },
+      );
+    }
     if (this.providerListFactory) {
       return this.providerListFactory();
     }
@@ -3367,11 +3383,14 @@ export class AppStateStore {
   }
 
   private modelScanInFlight: Promise<ModelScanResult> | undefined;
+  /** What the latest scan found, served by `listProviders` while the first-run scan is pending. */
+  private modelScanProviders = new Map<ProviderId, ProviderSummary>();
 
   private async runModelScanOnce(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
     const startedAt = this.clock().toISOString();
     const found = new Map<ProviderId, ProviderSummary>();
     const probes = await runModelScan({ checks: await this.modelScanChecks(found), ...(onProbe ? { onProbe } : {}) });
+    this.modelScanProviders = new Map(found);
     const outcome = await this.applyModelScanOutcome([...found.values()]);
     return { probes, outcome, startedAt, finishedAt: this.clock().toISOString() };
   }
@@ -3390,6 +3409,7 @@ export class AppStateStore {
     const probes = await Promise.all(
       checks.map((check) => runScanCheck(check, check.providerId === providerId ? MODEL_SCAN_RETRY_TIMEOUT_MS : MODEL_SCAN_TIMEOUT_MS)),
     );
+    this.modelScanProviders = new Map(found);
     const outcome = await this.applyModelScanOutcome([...found.values()]);
     return { probes, outcome, startedAt, finishedAt: this.clock().toISOString() };
   }

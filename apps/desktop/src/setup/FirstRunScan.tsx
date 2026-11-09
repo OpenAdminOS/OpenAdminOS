@@ -51,10 +51,15 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
     setFirstRun(supported && state.firstRunScanPending === true && !location.pathname.startsWith("/companion"));
   }, [firstRun, loading, location.pathname, state.firstRunScanPending, supported]);
   const open = supported && (firstRun === true || manual);
+  // Until app state says whether the first-run scan is pending, show a quiet
+  // surface rather than the shell, so nothing claims a provider not yet checked.
+  const deciding = supported && firstRun === null && !location.pathname.startsWith("/companion");
   const value = useMemo<ModelScanContextValue>(() => ({ openScan: () => setManual(true) }), []);
   return (
     <ModelScanContext.Provider value={value}>
-      {open ? (
+      {deciding ? (
+        <div className="h-full w-full bg-[var(--color-bg)]" aria-busy="true" />
+      ) : open ? (
         <ModelScanScreen
           firstRun={firstRun === true}
           onClose={() => {

@@ -437,3 +437,38 @@ describe("one scan at a time (review round 1, finding L)", () => {
     }
   });
 });
+
+describe("startup while the first-run scan is pending (review round 2, items 2 and A)", () => {
+  it("runs no provider detection outside the scan: app state, Office, listing, model choice, tests and the Chat preview", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    let listed = 0;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: () => { listed += 1; return providerCatalog.map((provider) => ({ ...provider, status: "connected" as const, models: ["m"] })); },
+    });
+    try {
+      const state = await store.getAppState();
+      assert.equal(state.firstRunScanPending, true);
+      // Never-checked providers are "not checked", never available (item C).
+      assert.ok(state.providers.every((provider) => provider.status === "not-checked"));
+      await store.tickOffice().catch(() => undefined);
+      const providers = await store.listProviders();
+      assert.ok(providers.every((provider) => provider.status === "not-checked"));
+      await store.testProvider("ollama").catch(() => undefined);
+      await store.setActiveModel("ollama", null).catch(() => undefined);
+      await store.previewIntuneChatSend({ content: "Explain Windows Autopatch rings" }).catch(() => undefined);
+      assert.equal(listed, 0, "no caller ran provider detection while the scan is pending");
+
+      // The scan itself checks, and listing then serves its results.
+      await store.scanModels();
+      const afterScan = listed;
+      assert.ok(afterScan > 0);
+      assert.ok((await store.listProviders()).every((provider) => provider.status === "connected"));
+      assert.equal(listed, afterScan);
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
