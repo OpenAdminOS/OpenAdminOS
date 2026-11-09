@@ -18,10 +18,9 @@ export function SchedulesPausedNotice({ className = "" }: { className?: string }
   const [error, setError] = useState<string | null>(null);
   const organizations = resolveOrganizations(state);
   const active = activeOrganizationOf(state);
-  const sampleActive = active?.kind === "sample";
   const enabled = state.installedAgents.filter((agent) => agent.schedule?.enabled);
   const unassigned = enabled.filter(
-    (agent) => !organizations.some((organization) => organization.id === agent.schedule?.organizationId && organization.kind !== "sample"),
+    (agent) => !organizations.some((organization) => organization.id === agent.schedule?.organizationId),
   ).length;
   const elsewhere = enabled.filter(
     (agent) =>
@@ -31,7 +30,7 @@ export function SchedulesPausedNotice({ className = "" }: { className?: string }
   ).length;
   const recent = useMemo(() => {
     const realIds = new Set(
-      organizations.filter((organization) => organization.kind !== "sample").map((organization) => organization.connections.microsoft365?.tenantId),
+      organizations.map((organization) => organization.connections.microsoft365?.tenantId),
     );
     const tenant = state.tenants
       .filter((entry) => realIds.has(entry.id))
@@ -43,11 +42,7 @@ export function SchedulesPausedNotice({ className = "" }: { className?: string }
     ? organizations.find((organization) => organization.id === migration.assignedOrganizationId)
     : undefined;
 
-  const paused = sampleActive
-    ? SCHEDULE_ORGANIZATION_COPY.pausedSample
-    : !active && enabled.length > 0
-      ? SCHEDULE_ORGANIZATION_COPY.pausedNone
-      : undefined;
+  const paused = !active && enabled.length > 0 ? SCHEDULE_ORGANIZATION_COPY.pausedNone : undefined;
   const waiting = !paused && (unassigned > 0 || elsewhere > 0)
     ? SCHEDULE_ORGANIZATION_COPY.waiting(unassigned, elsewhere)
     : undefined;

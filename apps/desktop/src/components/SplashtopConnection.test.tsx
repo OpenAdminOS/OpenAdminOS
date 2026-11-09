@@ -59,6 +59,8 @@ describe("Splashtop on Connections", () => {
     const connectSplashtop = vi.fn(async () => connected(state));
     renderConnections(state, { connectSplashtop });
     const row = await screen.findByRole("region", { name: "Splashtop" });
+    // The real logo through ServiceMark, dashed while not connected.
+    expect(row.querySelector('.svc-mark[data-service="splashtop"][data-off="true"] [data-service-logo="splashtop"][data-kind="logo"]')).not.toBeNull();
     await user.click(within(row).getByRole("button", { name: "Connect Splashtop" }));
     const dialog = await screen.findByRole("dialog");
     expect(dialog).toHaveTextContent("Splashtop Enterprise");
@@ -186,6 +188,7 @@ describe("Splashtop in the Marketplace", () => {
     );
     const card = await screen.findByRole("button", { name: /^Splashtop, connection by Splashtop/ });
     expect(card).toHaveTextContent("Built in");
+    expect(card.querySelector('.svc-mark[data-service="splashtop"] [data-service-logo="splashtop"][data-kind="logo"]')).not.toBeNull();
     expect(card).toHaveTextContent("webapi.splashtop.com, .eu or .nr");
     expect(document.body.textContent).not.toMatch(/Coming soon/);
     await user.click(card);

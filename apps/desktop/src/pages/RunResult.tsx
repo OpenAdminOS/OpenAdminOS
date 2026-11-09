@@ -59,7 +59,6 @@ import {
 } from "../shared/runReport";
 import { useAppState } from "../state";
 import type { RerunChoice } from "./AgentDetail";
-import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   agentNameForRun,
   formatDate,
@@ -115,10 +114,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
     activeTenant: runTenant,
     model: run.model,
   });
-  // Pilot runs never contact a provider; their LLM steps use prepared text.
-  const runTrust = run.pilot
-    ? { ...derivedTrust, detail: PILOT_COPY.runTrust, isLocal: true }
-    : derivedTrust;
+  const runTrust = derivedTrust;
   const displayName = agent
     ? formatAgentDisplayName(agent)
     : agentNameForRun(run, state.installedAgents);
@@ -294,7 +290,7 @@ function RunResultPage({ run }: { run: RunRecord }) {
         tenant={runTenant}
         tenantName={tenantName}
         trustDetail={runTrust.detail}
-        providerIsLocal={run.pilot === true || runProvider?.isLocal === true}
+        providerIsLocal={runProvider?.isLocal === true}
         onBack={closeToRuns}
         onConfirm={confirmRun}
         onReject={rejectRun}
@@ -326,9 +322,8 @@ function RunResultPage({ run }: { run: RunRecord }) {
       run={run}
       displayName={displayName}
       tenantName={tenantName}
-      sampleData={runTenant?.kind === "sample"}
       providerName={providerNameForRun(run, state.providers)}
-      providerIsLocal={run.pilot === true ? true : runProvider?.isLocal}
+      providerIsLocal={runProvider?.isLocal}
       trustDetail={runTrust.detail}
       activeTenantId={state.activeTenantId}
       tenants={state.tenants}
@@ -387,7 +382,6 @@ function RunPage({
   run,
   displayName,
   tenantName,
-  sampleData,
   providerName,
   providerIsLocal,
   trustDetail,
@@ -403,7 +397,6 @@ function RunPage({
   run: RunRecord;
   displayName: string;
   tenantName: string;
-  sampleData: boolean;
   providerName: string;
   /** Undefined when the run recorded no provider. */
   providerIsLocal: boolean | undefined;
@@ -474,7 +467,7 @@ function RunPage({
                 {rerunLabel}
               </Button>
             ) : null}
-            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={sampleData} />
+            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
           </>
         }
       />
@@ -980,7 +973,7 @@ function ConfirmationPage({
         actions={
           <>
             <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]"><StatusDot tone={dryRun ? "info" : "warning"} />{dryRun ? "Dry run: not applied" : "Awaiting confirmation"}</span>
-            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} sampleData={tenant?.kind === "sample"} />
+            <RunActionsMenu run={run} agentName={displayName} tenantName={tenantName} />
           </>
         }
       />
@@ -1309,12 +1302,10 @@ function RunActionsMenu({
   run,
   agentName,
   tenantName,
-  sampleData,
 }: {
   run: RunRecord;
   agentName: string;
   tenantName: string;
-  sampleData: boolean;
 }) {
   const toast = useToast();
   const items: MenuEntry[] = [
@@ -1323,7 +1314,7 @@ function RunActionsMenu({
       label: "Copy report",
       icon: <IconCopy size={13} />,
       onSelect: () => {
-        void copyTextToClipboard(runReportPlaintext(run, { agentName, tenantName, sampleData }))
+        void copyTextToClipboard(runReportPlaintext(run, { agentName, tenantName }))
           .then(() => toast.success("Run report copied."))
           .catch((error) =>
             toast.error(error instanceof Error ? error.message : String(error)),
@@ -1337,7 +1328,7 @@ function RunActionsMenu({
       onSelect: () => {
         void window.openAdminOS?.saveTextFile({
           suggestedName: `${run.agentSlug}-${run.id}.json`,
-          content: runReportJson(run, { sampleData }),
+          content: runReportJson(run),
           filters: [{ name: "JSON", extensions: ["json"] }],
         });
       },
@@ -1349,7 +1340,7 @@ function RunActionsMenu({
       onSelect: () => {
         void window.openAdminOS?.saveTextFile({
           suggestedName: `${run.agentSlug}-${run.id}.md`,
-          content: runReportMarkdown(run, { agentName, tenantName, sampleData }),
+          content: runReportMarkdown(run, { agentName, tenantName }),
           filters: [{ name: "Markdown", extensions: ["md"] }],
         });
       },

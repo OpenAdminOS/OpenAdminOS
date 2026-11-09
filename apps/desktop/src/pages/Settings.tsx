@@ -1,3 +1,4 @@
+import { ProviderLogo } from "../components/ProviderLogo";
 import { THEMES, useAppearance } from "../styles/appearance";
 import { useAnswerFont } from "../styles/answer-font";
 import { useDensity } from "../styles/density";
@@ -66,6 +67,7 @@ import { copyTextToClipboard } from "../shared/clipboard";
 import { isProviderImplemented } from "../shared/providers";
 import { detectedHostedProviders } from "../shared/provider-detection";
 import { DetectedHostedProviders } from "../components/provider-setup/DetectedHostedProviders";
+import { ScanAgainButton } from "../setup/FirstRunScan";
 import { useAppState, useUpdateStateOptional } from "../state";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
@@ -74,6 +76,7 @@ import {
   promptsGoTo,
   providerDataLocationDetail,
   SETTINGS_SECTIONS,
+  TRADEMARK_NOTICE,
   SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS,
   searchSettings,
   searchSettingsLinks,
@@ -180,6 +183,11 @@ export default function Settings() {
     setUsageTelemetryEnabled,
     refresh,
   } = useAppState();
+  // An explicit refresh checks every provider in full, also right after the first-run scan.
+  const refreshProviders = useCallback(async () => {
+    await window.openAdminOS?.refreshProviders?.();
+    await refresh();
+  }, [refresh]);
   const settingsSections = SETTINGS_SECTIONS;
 
   useEffect(() => {
@@ -455,7 +463,12 @@ export default function Settings() {
               id="providers"
               visible={visibleSectionIds.has("providers")}
               query={settingsQuery}
-              action={<UiButton variant="ghost" size="sm" onClick={() => void refresh()}>Refresh providers</UiButton>}
+              action={
+                <div className="flex items-center gap-2">
+                  <ScanAgainButton />
+                  <UiButton variant="ghost" size="sm" onClick={() => void refreshProviders()}>Refresh providers</UiButton>
+                </div>
+              }
             >
               <ProvidersSection
                 providers={state.providers}
@@ -639,7 +652,9 @@ function ProviderRow({
             : { label: "Available", tone: "neutral" as const }
           : provider.status === "error"
             ? { label: cliLabel ?? "Error", tone: "danger" as const }
-            : { label: "Not installed", tone: "neutral" as const };
+            : provider.installed
+              ? { label: "Installed, not running", tone: "neutral" as const }
+              : { label: "Not installed", tone: "neutral" as const };
 
   const handleTest = async () => {
     setTesting(true);
@@ -662,6 +677,7 @@ function ProviderRow({
   return (
     <div className={`border-b border-[var(--color-border-soft)] last:border-b-0 ${implemented ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+        <ProviderLogo provider={provider.id} size={22} />
         <div className="min-w-[180px] flex-1">
           <div className="text-base font-medium text-[var(--color-text)]">{provider.name}</div>
           <p className="mt-0.5 text-sm text-[var(--color-text-muted)]" title={provider.isLocal ? undefined : providerDataLocationDetail(provider)}>{kind}</p>
@@ -729,7 +745,7 @@ function ProviderRow({
               </div>
             </div>
           ) : null}
-          {implemented && (provider.status === "not-installed" || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) ? (
+          {implemented && ((provider.status === "not-installed" && !provider.installed) || provider.cli?.state === "unsupported-version" || provider.cli?.state === "signed-out" || provider.cli?.state === "access-denied") && providerInstallGuideUrl(provider.id) ? (
             <UiButton
               className="mt-4"
               variant="ghost"
@@ -3997,8 +4013,10 @@ function PrivacySection({
                     />
                   </dl>
                   {retrievalStatus.embeddingModelInstalled === false ? (
-                    <p className="mt-2 text-sm text-[var(--color-warning)]">
-                      {retrievalStatus.ollamaReachable
+                    <p role={retrievalStatus.embeddingModelError ? "alert" : undefined} className="mt-2 text-sm text-[var(--color-warning)]">
+                      {retrievalStatus.embeddingModelError
+                        ? retrievalStatus.embeddingModelError
+                        : retrievalStatus.ollamaReachable
                         ? "The embedding model is not installed yet. It downloads automatically in the background through Ollama; answers stay ungrounded until it arrives."
                         : "Ollama isn't running, so the embedding model can't be fetched and questions can't be matched against the index. Start Ollama and it installs automatically."}
                     </p>
@@ -4563,6 +4581,11 @@ function AboutSection() {
         label="Source code and license"
         description="OpenAdminOS is open source under the MIT license."
         control={<Button variant="ghost" size="sm" onClick={() => { void window.openAdminOS?.openExternal("https://github.com/OpenAdminOS/OpenAdminOS"); }}>View source</Button>}
+      />
+      <SettingRow
+        label="Trademarks"
+        description={TRADEMARK_NOTICE}
+        control={null}
       />
       <SettingRow
         label="Project"

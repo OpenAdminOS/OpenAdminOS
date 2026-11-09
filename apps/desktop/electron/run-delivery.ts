@@ -1,4 +1,3 @@
-import { PILOT_COPY } from "../src/shared/pilot-mode.js";
 import { TenantClosedError } from "./tenant-lifecycle.js";
 import { deliveryBlock, deliveryRuleKeyFor } from "../src/shared/delivery-destinations.js";
 import {
@@ -459,18 +458,6 @@ export class RunDeliveryService {
     persisted: RunDeliveryPersistedState,
     run: RunRecord,
   ): Promise<RunDeliveryResult> {
-    // Only the run's own tenant labels its report; a run with no
-    // organization never borrows the one active now.
-    const tenantId = run.tenantId;
-    const tenant = tenantId
-      ? persisted.tenants.find((candidate) => candidate.id === tenantId)
-      : undefined;
-    if (tenant?.kind === "sample") {
-      const message =
-        PILOT_COPY.featureInProduction("Connector deliveries", true);
-      await this.host.appendRunLog(item.runId, "warn", message);
-      return { retryable: false, error: message };
-    }
     // The decision the Connections page and the run review show: Teams
     // and Outlook post with an organization's Microsoft sign-in, so a run
     // with no organization never borrows the one active now.

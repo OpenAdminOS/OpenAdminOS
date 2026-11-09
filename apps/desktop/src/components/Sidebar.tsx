@@ -18,7 +18,6 @@ import {
 import { isNightlyVersion } from "../shared/update-channel";
 import { SHORTCUTS, shortcutLabel } from "../shared/shortcuts";
 import { openNovaPanel } from "../shared/nova-panel";
-import { PILOT_COPY } from "../shared/pilot-mode";
 import { ORGANIZATION_COPY, userFacingErrorReason } from "../copy";
 import { resolveOrganizations } from "../shared/openAdminOS";
 import {
@@ -193,25 +192,21 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
     controls[next]?.focus();
   };
 
-  // Pilot mode is a guided tour: Chat, Agents, Marketplace, Connections, Runs, and Settings only.
-  const pilot = activeTenant?.kind === "sample";
   const nav: NavItem[] = [
-    ...(pilot
-      ? []
-      : [{
-          to: "/office",
-          label: "Agent Team",
-          icon: <IconAgentTeam size={14} />,
-          count: findingCount || undefined,
-          tooltip: findingCount
-            ? `${findingCount} ${findingCount === 1 ? "finding" : "findings"} to review`
-            : undefined,
-        }]),
+    {
+      to: "/office",
+      label: "Agent Team",
+      icon: <IconAgentTeam size={14} />,
+      count: findingCount || undefined,
+      tooltip: findingCount
+        ? `${findingCount} ${findingCount === 1 ? "finding" : "findings"} to review`
+        : undefined,
+    },
     { to: "/agents", label: "Agents", icon: <IconAgents size={14} /> },
     { to: "/marketplace", label: "Marketplace", icon: <IconMarketplace size={14} /> },
     { to: "/connections", label: "Connections", icon: <IconConnectors size={14} /> },
     { to: "/runs", label: "Runs", icon: <IconActivity size={14} />, count: reviewCount || undefined },
-    ...(pilot ? [] : [{ to: "/changes", label: "Changes", icon: <IconChanges size={14} /> }]),
+    { to: "/changes", label: "Changes", icon: <IconChanges size={14} /> },
   ];
 
   const isMac = window.openAdminOS?.platform === "macos";
@@ -304,7 +299,6 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
             </SidebarSection>
           ) : null}
 
-          {pilot ? null : (
           <SidebarSection
             label="Workspaces"
             count={allWorkspaces.length}
@@ -354,7 +348,6 @@ export function Sidebar({ onOpenPalette }: { onOpenPalette?: () => void }) {
               <div className="px-2.5 py-2 text-xs text-[var(--color-text-muted)]">{workspaceSearch ? "No matching workspaces." : "No workspaces yet."}</div>
             ) : null}
           </SidebarSection>
-          )}
 
           {recentGroups.map(([label, entries]) => (
             <div key={label} className="mt-3">
@@ -598,9 +591,7 @@ function AccountRow({
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-[var(--color-text)]">{activeTenant?.username ?? ORGANIZATION_COPY.noOrganization}</span>
               <span className="block text-xs text-[var(--color-text-muted)]">
-                {activeTenant?.kind === "sample"
-                  ? PILOT_COPY.modeName
-                  : `${organizationCount} organization${organizationCount === 1 ? "" : "s"}`}
+                {`${organizationCount} organization${organizationCount === 1 ? "" : "s"}`}
               </span>
             </span>
             <IconChevronRight size={11} className="text-[var(--color-text-muted)]" />

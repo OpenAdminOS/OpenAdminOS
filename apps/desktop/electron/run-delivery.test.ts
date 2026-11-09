@@ -470,14 +470,6 @@ describe("reports of a run with no organization (review round 1)", () => {
     homeAccountId: "home-b",
     addedAt: now,
   };
-  const sample = {
-    id: "openadminos-sample-tenant",
-    kind: "sample",
-    displayName: "Contoso (pilot)",
-    username: "admin@contoso.invalid",
-    homeAccountId: "sample",
-    addedAt: now,
-  };
 
   it("labels a Slack report No organization even when another organization is active now", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-noorg-"));
@@ -520,40 +512,6 @@ describe("reports of a run with no organization (review round 1)", () => {
       assert.doesNotMatch(posted[0]!, /Customer B/);
     } finally {
       globalThis.fetch = originalFetch;
-      store.close();
-      await rm(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("delivers a WhatsApp report while the sample organization is active instead of refusing it", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-noorg-sample-"));
-    const statePath = join(dir, "state.json");
-    const sent: string[] = [];
-    await writeJson(statePath, {
-      activeProviderId: "ollama",
-      installedAgents: [deliveryAgent({ enabled: true })],
-      runs: [completedRun("run-noorg")],
-      tenants: [sample],
-      activeTenantId: sample.id,
-      connectors: { "whatsapp-web": { config: { defaultTargetType: "self" } } },
-      runDeliveryQueue: [queueItem("run-noorg")],
-    });
-    const store = createStore({
-      statePath,
-      sendMessage: async ({ text }) => {
-        sent.push(text);
-        return { messageId: "m1" };
-      },
-    });
-    try {
-      await store.processPendingRunDeliveries();
-      const state = await readJson(statePath);
-      const run = (state.runs as RunRecord[])[0];
-      assert.equal(sent.length, 1);
-      assert.match(sent[0]!, /Organization: none/);
-      assert.doesNotMatch(sent[0]!, /Contoso|sample data/i);
-      assert.equal(run?.logs.some((log) => /available in production/i.test(log.message)), false);
-    } finally {
       store.close();
       await rm(dir, { recursive: true, force: true });
     }

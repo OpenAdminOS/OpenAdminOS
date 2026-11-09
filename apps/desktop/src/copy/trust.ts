@@ -13,6 +13,8 @@ export interface TrustAttachments {
 
 export interface TrustCopyInput {
   provider?: Pick<ProviderSummary, "name" | "isLocal"> & Partial<Pick<ProviderSummary, "id">>;
+  /** No organization is active: no tenant context exists to send. */
+  noTenant?: boolean;
   model?: string;
   scope?: TrustScope;
   attachments?: TrustAttachments;
@@ -33,7 +35,12 @@ export interface ToolHostsCopy {
 export const LOCAL_BOUNDARY_COPY = {
   plain: "Local model. Tenant data stays on this device.",
   withTools: "Local model. Graph and cache data stay on this device.",
+  /** Local model, nothing connected and no reference added. */
+  noTenant: "Local model. No organization. Nothing leaves this device.",
 } as const;
+
+/** The status strip segment for a local model with no reference enabled. */
+export const NOTHING_LEAVES_COPY = "nothing leaves this device";
 
 /**
  * Where a hosted provider sends prompts, as the status strip, the composer
@@ -171,6 +178,19 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
     };
   }
 
+  if (input.provider.isLocal && input.noTenant) {
+    return {
+      strip: toolHosts ? `local model · ${toolHosts.strip}` : "local-only · no data leaves this device",
+      ...(toolHosts ? { toolHosts } : {}),
+      confirmTitle: "Process your question on this device",
+      confirmBody: `${providerName}${modelDetail} will answer locally. No organization is active, so no tenant data is used.`,
+      storage: toolHosts
+        ? "The model and chat history stay on this device."
+        : "The model, prompts and chat history stay on this device.",
+      isLocal: true,
+    };
+  }
+
   if (input.provider.isLocal) {
     return {
       strip: toolHosts ? `local model · ${toolHosts.strip}` : "local-only · no data leaves this device",
@@ -188,6 +208,18 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
   }
 
   const location = providerDataLocation(input.provider);
+  if (input.noTenant) {
+    return {
+      strip: `hosted · prompts sent to ${location}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
+      ...(toolHosts ? { toolHosts } : {}),
+      boundary: `${promptsGoTo(input.provider)}. No organization is active, so no tenant data is sent.`,
+      confirmTitle: "Send your question to a hosted provider",
+      confirmBody: `${providerName}${modelDetail} will receive your question, this conversation and results from the references you added. No organization is active, so no tenant data is included.`,
+      storage: "Chat history stays on this device.",
+      isLocal: false,
+    };
+  }
+
   return {
     // Each line names where prompts are processed, not just the provider (hard constraint 1).
     strip: `hosted · tenant context sent to ${location}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,

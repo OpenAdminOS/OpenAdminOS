@@ -12,6 +12,8 @@ import type {
 
 export interface AppleFoundationProviderOptions {
   helperPath?: string;
+  /** Stops the probe and its helper process, for the first-launch scan timeout. */
+  signal?: AbortSignal;
   defaultModel?: string;
   timeoutMs?: number;
 }
@@ -19,6 +21,8 @@ export interface AppleFoundationProviderOptions {
 export interface AppleFoundationProbeResult {
   installed: boolean;
   ready: boolean;
+  /** The probe itself failed (timeout, crash, unreadable output). */
+  failed?: boolean;
   helperPath?: string;
   models: string[];
   defaultModel?: string;
@@ -153,6 +157,7 @@ export async function probeAppleFoundationLlm(
     const response = await runAppleFoundationProbe({
       helperPath,
       timeoutMs: options.timeoutMs ?? 10_000,
+      ...(options.signal ? { signal: options.signal } : {}),
     });
     const ready = response.ready === true;
     const models =
@@ -188,6 +193,8 @@ export async function probeAppleFoundationLlm(
       ready: false,
       helperPath,
       models: [],
+      // The helper ran but its probe failed: a failed check, not "not available".
+      failed: true,
       detail: error instanceof Error ? error.message : String(error),
     };
   }
@@ -265,12 +272,14 @@ export function listAppleFoundationHelperCandidates(preferredHelperPath?: string
 async function runAppleFoundationProbe(input: {
   helperPath: string;
   timeoutMs: number;
+  signal?: AbortSignal;
 }): Promise<AppleFoundationLine> {
   const lines: AppleFoundationLine[] = [];
   for await (const line of runAppleFoundationProcess({
     helperPath: input.helperPath,
     request: { command: "probe" },
     timeoutMs: input.timeoutMs,
+    ...(input.signal ? { signal: input.signal } : {}),
   })) {
     lines.push(line);
   }
@@ -353,11 +362,19 @@ async function* runAppleFoundationProcess(input: {
   const stderr: Buffer[] = [];
   let timedOut = false;
 
+  // SIGTERM first; a helper that does not exit within a second is killed.
+  const terminate = () => {
+    child.kill("SIGTERM");
+    const escalate = setTimeout(() => {
+      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
+    }, 1_000);
+    escalate.unref?.();
+  };
   const timer = setTimeout(() => {
     timedOut = true;
-    child.kill("SIGTERM");
+    terminate();
   }, input.timeoutMs);
-  const abortFromCaller = () => child.kill("SIGTERM");
+  const abortFromCaller = () => terminate();
   if (input.signal?.aborted) {
     abortFromCaller();
   } else {

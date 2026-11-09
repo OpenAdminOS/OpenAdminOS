@@ -534,6 +534,41 @@
       </ul>
     </section>
 
+    <!-- B2: Connect Microsoft 365 (PR #175) -->
+    <section class="sect" id="b2">
+      <h2>B2. First launch, step 2: Connect Microsoft 365</h2>
+      <p>The same stage after the model step, with the services around this device instead of the tools. The header reads "1 Model, 2 Microsoft 365". Nothing is preselected; here Intune and Entra are picked. Services show Microsoft's own icons; a service that is not connected is a dashed tile.</p>
+      <div class="win">
+        <div class="lights"><i></i><i></i><i></i></div>
+        <div class="scan" data-phase="settled">
+          <div class="scan-top"><svg width="22" height="22"><use href="#oa"/></svg><span class="wm">OpenAdminOS</span><span style="margin-left:auto;margin-right:auto;font-size:var(--text-sm);color:var(--color-text-muted)">&#10003; Model <span style="display:inline-block;width:24px;height:1px;background:var(--color-border);vertical-align:middle;margin:0 8px"></span> <b style="color:var(--color-text);font-weight:500">2 Microsoft 365</b></span></div>
+          <div class="scan-body">
+            <div class="stage">
+              <svg class="orbit" viewBox="0 0 100 100" aria-hidden="true"><circle class="o" cx="50" cy="50" r="38"/><circle class="o2" cx="50" cy="50" r="22"/><path d="M50 39 L50 18.4" style="fill:none;stroke:var(--color-text-muted);stroke-width:.25;stroke-dasharray:1.1 1.1"/><path d="M59.5 55.5 L77.4 65.8" style="fill:none;stroke:var(--color-text-muted);stroke-width:.25;stroke-dasharray:1.1 1.1"/></svg>
+              <div class="device xl"><svg viewBox="0 0 64 64"><use href="#oa"/></svg></div>
+              <div class="node" data-in style="left:50%;top:12%"><span class="nd" style="border-radius:13px;box-shadow:none;border:1px dashed var(--color-text-soft)"><span class="mk lg" data-s="ref">In</span></span><span class="lb">Intune</span><span class="ss">Selected</span></div>
+              <div class="node" data-in style="left:82.9%;top:69%"><span class="nd" style="border-radius:13px;box-shadow:none;border:1px dashed var(--color-text-soft)"><span class="mk lg" data-s="ref">En</span></span><span class="lb">Entra</span><span class="ss">Selected</span></div>
+              <div class="node" data-in style="left:17.1%;top:69%"><span class="nd" style="border-radius:13px;box-shadow:none;border:1px dashed var(--color-border-strong)"><span class="mk lg" data-s="ref">De</span></span><span class="lb">Defender</span><span class="ss">Not connected</span></div>
+            </div>
+            <div class="scan-col">
+              <h3 style="font:500 var(--text-display)/1.1 var(--font-serif);margin:0">Connect Microsoft 365</h3>
+              <p style="color:var(--color-text-soft)">Pick the services you manage. OpenAdminOS asks Microsoft for read-only access to those, and nothing else.</p>
+              <p style="font-size:var(--text-sm)">&#9745; Intune &nbsp; &#9745; Entra &nbsp; &#9744; Defender</p>
+              <p style="font-size:var(--text-xs);color:var(--color-text-muted)">21 read-only Microsoft Graph permissions, listed by service with the four sign-in scopes; the list scrolls so the actions stay in view.</p>
+              <p><b>Sign in with Microsoft</b> &nbsp; Use our own app registration &nbsp; Ask an admin to approve</p>
+              <p style="font-size:var(--text-sm);color:var(--color-text-muted);border-top:1px solid var(--color-border-soft);padding-top:12px">Not now. Chat works without it. A question about your own devices or users asks you to connect first.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Rendered with Microsoft's Intune, Entra ID and Defender icons in the app (letters stand in for them here). A selected service gets a dashed link to the device; after a connect its tile turns solid and the link draws in, once. The checkboxes are the accessible source; clicking a node toggles it too.</li>
+        <li>Sign in with Microsoft opens the existing connect dialog with the picked parts preselected and the app choice open. Ask an admin to approve copies the consent request with the admin consent link, shown to copy by hand when the clipboard refuses. Proxy and offline failures show the designed network message in the dialog, and the step stays.</li>
+        <li>After a connect the step shows the organization, each service with its parts, the signed-in account and the enterprise application, and Open Chat; Chat's starters then follow the connected services ("Ask about Intune").</li>
+        <li>Not now opens Chat. The step is skipped when an organization already has Microsoft 365, reopens from Connections (Set up Microsoft 365), and opened there it adds to that organization's tenant with its own account and app registration. When the first launch goes to provider setup first, the step follows once a model is ready.</li>
+      </ul>
+    </section>
+
     <!-- C: empty chat -->
     <section class="sect" id="c">
       <h2>C. Empty Chat, no organization</h2>

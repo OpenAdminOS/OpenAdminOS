@@ -5,8 +5,8 @@ import { PageBody, PageHeader } from "../components/AppShell";
 import { IconCloud, IconExternal, IconRefresh, IconSearch, IconShield, IconWarning } from "../components/icons";
 import { AgentHubList, matchesAgentQuery } from "../components/marketplace/AgentHubList";
 import { CoverArt, inkFor } from "../components/marketplace/CoverArt";
+import { ServiceMark } from "../components/ServiceMark";
 import { ListingTags, McpServerDialog } from "../components/marketplace/McpServerDialog";
-import { usePilotMode } from "../components/PilotMode";
 import { useToast } from "../components/Toast";
 import { IconButton } from "../components/ui";
 import type { McpServerSummary } from "../shared/openAdminOS";
@@ -26,7 +26,6 @@ function matchesServer(server: McpServerSummary, query: string): boolean {
 export default function Marketplace() {
   const { state, registryAgents, refreshRegistry } = useAppState();
   const toast = useToast();
-  const pilot = usePilotMode();
   const [searchParams, setSearchParams] = useSearchParams();
   const [query, setQuery] = useState("");
   const [spot, setSpot] = useState(0);
@@ -178,7 +177,7 @@ export default function Marketplace() {
               note="From the community registry. Reviewed in pull requests on GitHub."
               hidden={searching && agentMatches === 0}
             >
-              <AgentHubList query={query} pilot={pilot} />
+              <AgentHubList query={query} />
             </Shelf>
           ) : null}
 
@@ -236,9 +235,12 @@ function ConnectionListingCard() {
         <span className="absolute left-3 top-3"><ListingTags tags={["Connection", "Built in"]} /></span>
       </span>
       <span className="flex flex-1 flex-col gap-2.5 px-4 pb-4 pt-3.5">
-        <span>
-          <span className="block text-[15px] font-semibold leading-tight text-[var(--color-text)]">{listing.name}</span>
-          <span className="text-sm text-[var(--color-text-muted)]">{listing.publisher}</span>
+        <span className="flex items-center gap-2.5">
+          <ServiceMark serviceId="splashtop" size="lg" />
+          <span>
+            <span className="block text-[15px] font-semibold leading-tight text-[var(--color-text)]">{listing.name}</span>
+            <span className="text-sm text-[var(--color-text-muted)]">{listing.publisher}</span>
+          </span>
         </span>
         <span className="text-sm text-[var(--color-text-soft)]">{listing.pitch}</span>
         <span className="grid gap-1.5 text-sm text-[var(--color-text-muted)]">

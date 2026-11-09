@@ -1,5 +1,5 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
-import { cliExecutablePath, cliSpawn } from "./cli-invocation.js";
+import { cliExecutablePath, cliSpawn, killCliProcess } from "./cli-invocation.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +14,8 @@ import type {
 
 export interface ClaudeCodeProviderOptions {
   binaryPath?: string;
+  /** Stops the probe and kills its CLI process, for the first-launch scan timeout. */
+  signal?: AbortSignal;
   homePath?: string;
   defaultModel?: string;
   timeoutMs?: number;
@@ -161,7 +163,7 @@ export async function probeClaudeCodeLlm(
 ): Promise<ClaudeCodeProbeResult> {
   const homePath = resolveClaudeCodeConfig(options.homePath);
   const authPath = join(expandHome(homePath ?? "~/.claude"), ".credentials.json");
-  const binaryProbe = await probeClaudeCodeBinary(options.binaryPath);
+  const binaryProbe = await probeClaudeCodeBinary(options.binaryPath, options.signal);
   const { versionResult } = binaryProbe;
 
   if (versionResult.exitCode !== 0) {
@@ -197,6 +199,8 @@ export async function probeClaudeCodeLlm(
     binaryPath: binaryProbe.binaryPath,
     args: ["auth", "status", "--text"],
     timeoutMs: 5_000,
+    ownGroup: true,
+    ...(options.signal ? { signal: options.signal } : {}),
     env: createClaudeCodeProcessEnv({
       overrides: claudeCodeEnvOverrides(homePath),
     }),
@@ -274,7 +278,7 @@ async function resolveClaudeCodeBinary(preferredBinaryPath?: string): Promise<st
   throw new Error(detail || "Claude Code CLI is not installed or not executable.");
 }
 
-async function probeClaudeCodeBinary(preferredBinaryPath?: string): Promise<{
+async function probeClaudeCodeBinary(preferredBinaryPath?: string, signal?: AbortSignal): Promise<{
   binaryPath: string;
   versionResult: Awaited<ReturnType<typeof runProcess>>;
 }> {
@@ -286,10 +290,14 @@ async function probeClaudeCodeBinary(preferredBinaryPath?: string): Promise<{
     | undefined;
 
   for (const binaryPath of claudeCodeBinaryCandidates(preferredBinaryPath)) {
+    // A stopped check tries no further binaries.
+    if (signal?.aborted) break;
     const versionResult = await runProcess({
       binaryPath,
       args: ["--version"],
       timeoutMs: 5_000,
+      ownGroup: true,
+      ...(signal ? { signal } : {}),
     });
     const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
     if (versionResult.exitCode === 0) return current;
@@ -568,12 +576,19 @@ async function runProcess(input: {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs: number;
+  /** A probe runs in its own process group, killed as a group on abort or timeout. */
+  ownGroup?: boolean;
   signal?: AbortSignal;
 }): Promise<{ exitCode: number | "spawn-error"; stdout: string; stderr: string }> {
   return new Promise((resolveResult) => {
+    if (input.signal?.aborted) {
+      resolveResult({ exitCode: -1, stdout: "", stderr: "The check was stopped before it started." });
+      return;
+    }
     const spawned = cliSpawn(input.binaryPath, input.args, {
       cwd: input.cwd,
       env: input.env ?? createClaudeCodeProcessEnv(),
+      ...(input.ownGroup && process.platform !== "win32" ? { detached: true } : {}),
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (spawned.error) {
@@ -598,7 +613,7 @@ async function runProcess(input: {
     };
     const abortFromCaller = () => {
       if (settled) return;
-      child.kill("SIGKILL");
+      killCliProcess(child, input.ownGroup === true);
       finish({
         exitCode: -1,
         stdout,
@@ -607,7 +622,7 @@ async function runProcess(input: {
     };
     const timer = setTimeout(() => {
       if (settled) return;
-      child.kill("SIGKILL");
+      killCliProcess(child, input.ownGroup === true);
       finish({
         exitCode: -1,
         stdout,

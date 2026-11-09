@@ -48,7 +48,6 @@ import { requestConnectorConfirmation } from "./connector-confirm-bridge.js";
 import { graphCacheResourcesForWrite } from "./intune-chat/planner.js";
 import { IntelligenceSqliteStore } from "./intune-chat/sqlite-store.js";
 import { fingerprintRunOutput, stableStringify } from "./run-delivery-format.js";
-import { PILOT_COPY, isPilotAgentSlug } from "../src/shared/pilot-mode.js";
 import {
   isTerminalRunStatus,
   withSelfTrainingOverlay,
@@ -134,11 +133,6 @@ export interface RunServiceHost {
   ): provider is ProviderSummary & { status: "connected" | "available" };
   validateOfficeApproval?(run: RunRecord): Promise<void>;
   buildLlm(providerId: ProviderId, model: string | undefined): Promise<RunLlmApi>;
-  /**
-   * Prepared-text LLM for runs on the pilot tenant. Pilot runs never call
-   * `buildLlm`, so they behave the same on every machine.
-   */
-  buildPilotLlm?(agentSlug: string): RunLlmApi;
   buildGraph(
     pinnedTenantId?: string,
     agentScopes?: string[],
@@ -334,19 +328,10 @@ export class RunService {
       // manually, from Chat or from a schedule.
       const manifestError = this.host.agentManifestError?.(agent);
       if (manifestError) throw new Error(invalidAgentManifestCopy(agent.name, manifestError));
-    // Pilot runs use prepared text instead of a provider, and only the
-      // pilot agents can run on the pilot tenant. Refuse everything else
-      // before any provider or Graph work.
       const requestedTenantId =
         typeof options.tenantId === "string" ? options.tenantId : persisted.activeTenantId;
       // Admission closes before a disconnect drains its work, under this lock.
       this.assertTenantOpen(requestedTenantId);
-      const pilotRun = persisted.tenants.some(
-        (tenant) => tenant.id === requestedTenantId && tenant.kind === "sample",
-      );
-      if (pilotRun && !isPilotAgentSlug(agent.slug)) {
-        throw new Error(PILOT_COPY.agentRefused(agent.name));
-      }
       if (options.dryRun !== undefined && typeof options.dryRun !== "boolean") {
         throw new Error("startRun.dryRun must be a boolean.");
       }
@@ -371,10 +356,6 @@ export class RunService {
         options.tenantId !== persisted.activeTenantId
       ) {
         throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
-      }
-      // Pilot mode refuses schedules with its own production message first.
-      if (pilotRun && options.trigger === "schedule") {
-        throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
       }
       if (agentSchedule) {
         const active = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
@@ -428,58 +409,6 @@ export class RunService {
         if (options.tenantId && options.tenantId !== original.tenantId) throw new Error("A Team retry cannot move evidence to another tenant.");
         if (options.office || options.officeContext) throw new Error("A retry must use the original host-owned task context.");
         options = { ...options, tenantId: original.tenantId, providerId: options.providerId ?? original.providerId, model: options.model ?? original.model, officeContext: structuredClone(original.officeContext) };
-      }
-
-      if (pilotRun) {
-        if (options.office || options.officeContext || options.retryOfRunId) {
-          throw new Error(PILOT_COPY.featureInProduction("Agent Team"));
-        }
-        if (options.trigger === "schedule") {
-          throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
-        }
-        if (!this.host.buildPilotLlm) {
-          throw new Error("Pilot mode is unavailable in this build. Connect your tenant to run agents.");
-        }
-        // Run for real takes the dry run's tenant after the checks above; a
-        // pilot run is stamped with the pilot tenant only if that matches,
-        // and a renderer start only in the active organization.
-        if (
-          (options.tenantId !== undefined && options.tenantId !== requestedTenantId) ||
-          (boundary.activeOrganizationOnly && requestedTenantId !== persisted.activeTenantId)
-        ) {
-          throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
-        }
-        if (options.dryRun) {
-          const manifest = loadAgentManifestPreview(agent)?.manifest;
-          const defaults = Object.fromEntries(
-            (manifest?.definition.settings ?? [])
-              .filter(setting => setting.default !== undefined)
-              .map(setting => [setting.id, setting.default]),
-          );
-          agent = { ...agent, settings: { ...defaults, ...agent.settings } };
-        }
-        const queuedRun = createQueuedRun({
-          agent,
-          providerId: persisted.activeProviderId,
-          dryRun: options.dryRun,
-        });
-        delete queuedRun.providerId;
-        queuedRun.model = PILOT_COPY.preparedModel;
-        queuedRun.pilot = true;
-        if (options.dryRun || options.runForRealOfRunId) queuedRun.inputSettings = structuredClone(agent.settings ?? {});
-        if (options.runForRealOfRunId) queuedRun.runForRealOfRunId = options.runForRealOfRunId;
-        queuedRun.assessmentKey = createHash("sha256").update(JSON.stringify({ schema: 1,
-          slug: agent.slug, version: agent.version, manifest: agent.provenance?.manifestSha256,
-          settings: agent.settings })).digest("hex");
-        queuedRun.tenantId = requestedTenantId!;
-        queuedRun.trigger = "manual";
-        await this.host.write({ ...persisted, runs: [queuedRun, ...persisted.runs] });
-        return {
-          agent,
-          providerId: persisted.activeProviderId,
-          model: PILOT_COPY.preparedModel as string | undefined,
-          queuedRun,
-        };
       }
 
       const providers = await this.host.listProviders();
@@ -958,7 +887,7 @@ export class RunService {
         throw new Error(`Agent ${run.agentSlug} is not a write agent.`);
       }
 
-      const providers = run.pilot ? [] : await this.host.listProviders();
+      const providers = await this.host.listProviders();
       const activeProvider =
         providers.find((provider) => provider.id === persisted.activeProviderId) ??
         providers[0];
@@ -1119,22 +1048,17 @@ export class RunService {
     });
   }
 
-  /** Pilot runs use prepared text; every other run builds the provider LLM. */
+  /** Every run builds the provider LLM. */
   private async baseRunLlm(
-    run: RunRecord,
-    agent: AgentSummary,
+    _run: RunRecord,
+    _agent: AgentSummary,
     providerId: ProviderId,
     model: string | undefined,
   ): Promise<RunLlmApi> {
-    if (run.pilot) {
-      if (!this.host.buildPilotLlm) throw new Error("Pilot mode is unavailable in this build.");
-      return this.host.buildPilotLlm(agent.slug);
-    }
     return await this.host.buildLlm(providerId, model);
   }
 
-  private withOverlay(run: RunRecord, llm: RunLlmApi, tenantId: string, agentSlug: string): RunLlmApi {
-    if (run.pilot) return llm;
+  private withOverlay(_run: RunRecord, llm: RunLlmApi, tenantId: string, agentSlug: string): RunLlmApi {
     const overlay = this.host.selfTrainingPromptOverlay(tenantId, agentSlug);
     return overlay ? withSelfTrainingOverlay(llm, overlay) : llm;
   }
@@ -1566,25 +1490,10 @@ export class RunService {
 
       const wasTerminal = previous ? isTerminalRunStatus(previous.status) : false;
       const isNowTerminal = isTerminalRunStatus(run.status);
-      let nextRun =
+      const nextRun =
         isNowTerminal && run.status === "completed" && run.trigger === "schedule"
           ? this.withScheduleChangeState(run, persisted.runs)
           : run;
-      const sampleWrite =
-        isNowTerminal &&
-        run.status === "completed" &&
-        persisted.tenants.some(
-          (tenant) => tenant.id === run.tenantId && tenant.kind === "sample",
-        ) &&
-        persisted.installedAgents.some(
-          (agent) => agent.slug === run.agentSlug && agent.mode === "write",
-        );
-      if (sampleWrite && !nextRun.summary?.includes("simulated on sample data")) {
-        nextRun = {
-          ...nextRun,
-          summary: `${nextRun.summary ?? "Run completed."} The change was simulated on sample data.`,
-        };
-      }
       const exists = previous !== undefined;
       const nextRuns = exists
         ? persisted.runs.map((existing) => (existing.id === nextRun.id ? nextRun : existing))

@@ -4,23 +4,18 @@ import { useNavigate } from "react-router";
 import { useAppState } from "../state";
 import { ORGANIZATION_COPY, SERVICE_COPY, userFacingErrorReason } from "../copy";
 import { useSetupFlow } from "../setup/SetupFlowContext";
-import { Button } from "./Button";
 import {
   IconCheck,
   IconChevronDown,
-  IconClose,
   IconConnectors,
   IconPlus,
   IconRefresh,
   IconSearch,
 } from "./icons";
 import { TenantCheckStatus, useTenantCheck } from "./ServiceAccess";
-import { Modal, ModalHeader } from "./Modal";
-import { Pill } from "./Pill";
-import { connectedServiceIds } from "./ServiceMark";
+import { ServiceMark, connectedServiceIds } from "./ServiceMark";
 import { useToast } from "./Toast";
 import { Tooltip } from "./ui";
-import { PILOT_COPY } from "../shared/pilot-mode";
 import {
   activeOrganizationOf,
   resolveOrganizations,
@@ -39,23 +34,17 @@ export const ORGANIZATION_FILTER_FROM = 6;
 
 /**
  * The top-bar organization chip. Each organization shows the services it
- * runs; "No organization" is a valid choice. A sample organization from
- * an earlier pilot is labeled here and can be left, never opened.
+ * runs; "No organization" is a valid choice.
  */
 export function OrganizationSwitcher() {
   const navigate = useNavigate();
-  const { state, setActiveOrganization, disconnectTenant } = useAppState();
+  const { state, setActiveOrganization } = useAppState();
   const [query, setQuery] = useState("");
   const filterRef = useRef<HTMLInputElement | null>(null);
   const { openSetup } = useSetupFlow();
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [pendingDisconnect, setPendingDisconnect] = useState<{
-    tenantId: string;
-    name: string;
-    sample: boolean;
-  } | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -133,7 +122,6 @@ export function OrganizationSwitcher() {
   const showNoOrganization =
     organizations.length > 0 && (!showFilter || query.trim() === "" || ORGANIZATION_COPY.noOrganization.toLowerCase().includes(query.trim().toLowerCase()));
   const activeTenant = tenantOf(active);
-  const sampleActive = active?.kind === "sample";
 
   useEffect(() => {
     if (!open) return;
@@ -179,33 +167,8 @@ export function OrganizationSwitcher() {
     }
   };
 
-  const disconnect = async () => {
-    if (!pendingDisconnect) return;
-    setBusy(true);
-    try {
-      const pending = await disconnectTenant(pendingDisconnect.tenantId);
-      if (pending) toast.warning(ORGANIZATION_COPY.disconnectedCleanupPending(pendingDisconnect.name, pending.error));
-      else toast.success(
-        pendingDisconnect.sample
-          ? "Pilot mode ended. Its sample data was deleted from this device."
-          : ORGANIZATION_COPY.disconnected(pendingDisconnect.name),
-      );
-      setPendingDisconnect(null);
-    } catch (error) {
-      toast.error(
-        ORGANIZATION_COPY.disconnectFailed(
-          userFacingErrorReason(error instanceof Error ? error.message : String(error)) ?? "",
-        ),
-      );
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const tooltip = active
-    ? sampleActive
-      ? ORGANIZATION_COPY.tooltipSample
-      : `${ORGANIZATION_COPY.tooltipActive(active.name, activeTenant?.username ?? "")}${
+    ? `${ORGANIZATION_COPY.tooltipActive(active.name, activeTenant?.username ?? "")}${
           activeTenant?.tierProbeWarning
             ? ` ${SERVICE_COPY.tierProbeWarningTitle} ${activeTenant.tierProbeWarning.message}`
             : ""
@@ -240,7 +203,6 @@ export function OrganizationSwitcher() {
             <span className="min-w-0 truncate font-medium">
               {active?.name ?? ORGANIZATION_COPY.noOrganization}
             </span>
-            {sampleActive ? <Pill tone="info">{ORGANIZATION_COPY.sampleLabel}</Pill> : null}
             <IconChevronDown size={11} className="shrink-0 text-[var(--color-text-muted)]" />
           </button>
         </Tooltip>
@@ -291,14 +253,11 @@ export function OrganizationSwitcher() {
                 {shown.map((organization) => {
                   const tenant = tenantOf(organization)!;
                   const isActive = organization.id === active?.id;
-                  const sample = organization.kind === "sample";
-                  const services = sample ? [] : connectedServiceIds(tenant);
-                  const detail = sample
-                    ? ORGANIZATION_COPY.sampleDetail
-                    : ORGANIZATION_COPY.servicesLine(
-                        services.map((id) => serviceById(id).title),
-                        tenant.appRegistration?.kind === "custom",
-                      );
+                  const services = connectedServiceIds(tenant);
+                  const detail = ORGANIZATION_COPY.servicesLine(
+                    services.map((id) => serviceById(id).title),
+                    tenant.appRegistration?.kind === "custom",
+                  );
                   return (
                     <div key={organization.id} className={`rounded-md ${isActive ? "bg-[var(--color-active)]" : "hover:bg-[var(--color-hover)]"}`}>
                       <div className="flex items-center">
@@ -318,14 +277,20 @@ export function OrganizationSwitcher() {
                           <span className="min-w-0 flex-1">
                             <span className="flex min-w-0 items-center gap-1.5">
                               <span className="truncate text-md text-[var(--color-text)]">{organization.name}</span>
-                              {sample ? <Pill tone="info">{ORGANIZATION_COPY.sampleLabel}</Pill> : null}
                             </span>
-                            <span
-                              className="block truncate text-xs text-[var(--color-text-muted)]"
-                              {...(sample ? {} : { "aria-label": ORGANIZATION_COPY.servicesLabel(services.map((id) => serviceById(id).title)) })}
-                              title={detail}
-                            >
-                              {detail}
+                            <span className="flex min-w-0 items-center gap-1.5">
+                              {services.length > 0 ? (
+                                <span className="flex shrink-0 gap-0.5" aria-hidden="true">
+                                  {services.map((id) => <ServiceMark key={id} serviceId={id} size="sm" />)}
+                                </span>
+                              ) : null}
+                              <span
+                                className="block min-w-0 truncate text-xs text-[var(--color-text-muted)]"
+                                aria-label={ORGANIZATION_COPY.servicesLabel(services.map((id) => serviceById(id).title))}
+                                title={detail}
+                              >
+                                {detail}
+                              </span>
                             </span>
                             {tenant.tierProbeWarning ? (
                               <span className="block truncate text-xs text-[var(--color-text-muted)]" title={tenant.tierProbeWarning.message}>
@@ -376,21 +341,6 @@ export function OrganizationSwitcher() {
             >
               <IconPlus size={14} /> {ORGANIZATION_COPY.addOrganization}
             </button>
-            {sampleActive && activeTenant ? (
-              <button
-                type="button"
-                role="menuitem"
-                tabIndex={-1}
-                disabled={busy}
-                onClick={() => {
-                  setPendingDisconnect({ tenantId: activeTenant.id, name: active!.name, sample: true });
-                  close(false);
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <IconClose size={14} /> {PILOT_COPY.leaveAction}
-              </button>
-            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -407,35 +357,6 @@ export function OrganizationSwitcher() {
           </div>
         ) : null}
       </div>
-
-      <Modal open={pendingDisconnect !== null} onClose={() => { if (!busy) setPendingDisconnect(null); }} size="md">
-        <ModalHeader
-          title={pendingDisconnect?.sample ? PILOT_COPY.leaveTitle : ORGANIZATION_COPY.disconnectTitle(pendingDisconnect?.name ?? "")}
-          subtitle={pendingDisconnect?.name}
-          badge={
-            <Pill tone={pendingDisconnect?.sample ? "info" : "danger"}>
-              {pendingDisconnect?.sample ? ORGANIZATION_COPY.sampleLabel : "Permanent local deletion"}
-            </Pill>
-          }
-          onClose={() => setPendingDisconnect(null)}
-        />
-        <div className="space-y-4 p-6">
-          <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-            {pendingDisconnect?.sample
-              ? PILOT_COPY.leaveBody
-              : ORGANIZATION_COPY.disconnectBody}
-          </div>
-          {pendingDisconnect?.sample ? null : (
-            <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">{ORGANIZATION_COPY.disconnectNote}</p>
-          )}
-          <div className="flex justify-end gap-2">
-            <Button variant="ghost" disabled={busy} onClick={() => setPendingDisconnect(null)}>Cancel</Button>
-            <Button variant="danger" disabled={busy} onClick={() => void disconnect()}>
-              {busy ? "Removing" : pendingDisconnect?.sample ? PILOT_COPY.leaveAction : ORGANIZATION_COPY.disconnectAction}
-            </Button>
-          </div>
-        </div>
-      </Modal>
     </>
   );
 }

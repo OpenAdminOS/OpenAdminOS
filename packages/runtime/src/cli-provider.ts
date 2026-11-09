@@ -2,7 +2,7 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
-import { cliProcessEnv, cliSpawn } from "./cli-invocation.js";
+import { cliProcessEnv, cliSpawn, signalCliTree } from "./cli-invocation.js";
 
 export type CliFailure = "not-installed" | "signed-out" | "access-denied" | "unsupported-version" | "request-failed";
 export interface CliProbe {
@@ -37,7 +37,7 @@ export function cliFailure(provider: string, raw: string): CliProviderError {
   return new CliProviderError("request-failed", `${provider} could not complete the request. Check its connection in Settings and retry. If the CLI was updated, check that its version is supported.`);
 }
 
-export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.ProcessEnv, preferred?: string): Promise<{ binaryPath: string; version: string }> {
+export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.ProcessEnv, preferred?: string, signal?: AbortSignal): Promise<{ binaryPath: string; version: string }> {
   const override = preferred ?? process.env[`OPENADMINOS_${name.toUpperCase()}_BINARY`];
   const candidates: string[] = override ? [override] : [];
   if (!override) {
@@ -48,6 +48,8 @@ export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.Proces
   }
   let found = false;
   for (const candidate of [...new Set(candidates)]) {
+    // A stopped check spawns nothing more.
+    if (signal?.aborted) throw new CliProviderError("request-failed", `${name} check was stopped.`);
     if (!existsSync(candidate)) continue;
     found = true;
     const binaryPath = isAbsolute(candidate) ? candidate : resolve(candidate);
@@ -59,6 +61,9 @@ export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.Proces
         terminateCli(child); done({ status, stdout: output, stderr: "" });
       };
       const timer = setTimeout(() => finish(null), 8000);
+      // A stopped scan check terminates the CLI instead of leaving it running.
+      if (signal?.aborted) finish(null);
+      else signal?.addEventListener("abort", () => finish(null), { once: true });
       const append = (data: Buffer) => { output += data.toString(); if (output.length > 32_768) finish(null); };
       child.stdout.on("data", append); child.stderr.on("data", append);
       child.on("error", () => finish(null)); child.stdin.on("error", () => finish(null));
@@ -76,8 +81,13 @@ export function requireCliVersion(version: string, minimum: string, name: string
   if (comparison < 0 || version.includes("-")) throw new CliProviderError("unsupported-version", `${name} ${minimum} or newer (stable) is required. Update the CLI, then refresh providers.`);
 }
 
+/**
+ * Spawns a provider CLI in its own process group on macOS and Linux, so
+ * `terminateCli` also stops what a wrapper script started. Windows keeps
+ * the console-less default and stops the tree with `taskkill /T`.
+ */
 export function spawnProvider(binary: string, args: string[], env: NodeJS.ProcessEnv, cwd: string): ChildProcessWithoutNullStreams {
-  const spawned = cliSpawn(binary, args, { env, cwd, windowsHide: true, stdio: "pipe" });
+  const spawned = cliSpawn(binary, args, { env, cwd, windowsHide: true, stdio: "pipe", detached: process.platform !== "win32" });
   if (spawned.error) {
     throw new CliProviderError(
       "request-failed",
@@ -99,11 +109,16 @@ export class CliEvents<T> {
   async *[Symbol.asyncIterator]() { while (true) { if (this.error) throw this.error; if (this.queue.length) { yield this.queue.shift()!; continue; } if (this.ended) return; await new Promise<void>((r) => { this.wake = r; }); this.wake = undefined; } }
 }
 
+/**
+ * Stops a provider CLI and everything it started. macOS and Linux: SIGTERM
+ * to its process group, then SIGKILL after 500 ms for whatever is left,
+ * also when the wrapper itself already exited and left a child behind.
+ * Windows: the process tree while the wrapper runs (see `signalCliTree`).
+ */
 export function terminateCli(child: ChildProcessWithoutNullStreams) {
   child.stdin.destroy();
-  if (child.exitCode !== null) return;
-  child.kill();
-  const timer = setTimeout(() => { if (child.exitCode === null) child.kill("SIGKILL"); }, 500);
+  signalCliTree(child, "SIGTERM");
+  if (process.platform === "win32") return;
+  const timer = setTimeout(() => signalCliTree(child, "SIGKILL"), 500);
   timer.unref();
-  child.once("exit", () => clearTimeout(timer));
 }

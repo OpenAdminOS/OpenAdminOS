@@ -4,7 +4,7 @@ import { useNavigate } from "react-router";
 import { Button } from "./Button";
 import { IconChevronDown } from "./icons";
 import { Modal, ModalHeader } from "./Modal";
-import splashtopLogo from "../assets/vendor-logos/splashtop-logo-120.png";
+import { ServiceMark } from "./ServiceMark";
 import { useToast } from "./Toast";
 import { Badge, Menu } from "./ui";
 import { SPLASHTOP_COPY } from "../copy/splashtop";
@@ -40,16 +40,6 @@ function formatWhen(iso: string | undefined): string | undefined {
   return Number.isNaN(date.getTime()) ? undefined : date.toLocaleString();
 }
 
-/** Splashtop's own logo, unmodified (source in assets/vendor-logos/NOTICE.md). */
-export function SplashtopLogo({ size = 28, label }: { size?: number; label?: string }) {
-  const a11y = label ? { role: "img" as const, "aria-label": label } : { "aria-hidden": true as const };
-  return (
-    <span {...a11y} data-service-logo="splashtop" className="inline-flex shrink-0 overflow-hidden rounded-md bg-white" style={{ width: size, height: size }}>
-      <img src={splashtopLogo} alt="" draggable={false} className="h-full w-full object-contain" />
-    </span>
-  );
-}
-
 /** The Splashtop line under Other services on Connections. */
 export function SplashtopServiceRow({
   organization,
@@ -67,13 +57,12 @@ export function SplashtopServiceRow({
   const toast = useToast();
   const [dialog, setDialog] = useState<"connect" | "rotate" | "disconnect" | "plan" | null>(null);
   const [testing, setTesting] = useState(false);
-  const sample = organization.kind === "sample";
 
   useEffect(() => {
     if (!openConnect) return;
-    if (!connection && !sample) setDialog("connect");
+    if (!connection) setDialog("connect");
     onConnectHandled?.();
-  }, [connection, onConnectHandled, openConnect, sample]);
+  }, [connection, onConnectHandled, openConnect]);
 
   const test = () => {
     const api = window.openAdminOS;
@@ -92,7 +81,7 @@ export function SplashtopServiceRow({
   return (
     <section aria-label={SPLASHTOP_COPY.name} className="border-t border-[var(--color-border-soft)] py-3">
       <div className="grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3">
-        <SplashtopLogo size={30} />
+        <ServiceMark serviceId="splashtop" size="lg" off={!connection} />
         <div className="min-w-0">
           <div className="flex items-center gap-2 text-base font-medium text-[var(--color-text)]">
             {SPLASHTOP_COPY.name}
@@ -120,7 +109,7 @@ export function SplashtopServiceRow({
             ]}
           />
         ) : (
-          <Button size="sm" variant="secondary" disabled={sample} onClick={() => setDialog("connect")}>
+          <Button size="sm" variant="secondary" onClick={() => setDialog("connect")}>
             {SPLASHTOP_COPY.connect}
           </Button>
         )}

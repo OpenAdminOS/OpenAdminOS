@@ -80,10 +80,6 @@ The OpenAdminOS enterprise application (service principal) is shared by every Op
 
 An organization connected with your own app registration uses that registration, not the OpenAdminOS app. Open Entra admin center, go to Enterprise applications, select your registration by its name or application (client) ID, and remove the granted permissions or delete it. Delete the app registration itself under App registrations if nothing else uses it. Revoke the user's sessions as well to end tokens that were already issued.
 
-## Pilot Mode
-
-Pilot mode runs on fictional data served from inside the app. It has no Microsoft sign-in, no tokens, and makes no calls to Microsoft Graph.
-
 ## Related
 
 - [Local-first guarantee](local-first.md)

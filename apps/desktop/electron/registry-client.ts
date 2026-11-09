@@ -11,6 +11,7 @@
  * Cache location: <userData>/registry-cache/index.json
  */
 
+import { describeNetworkFailure, timeoutWhenAborted, type ProxyResolver } from "./network-failure.js";
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { isIP } from "node:net";
 import { join } from "node:path";
@@ -219,7 +220,7 @@ export function validateRegistrySource(
 export async function refreshRegistry(
   userDataPath: string,
   registrySource: string,
-  options: RegistrySourceValidationOptions = {},
+  options: RegistrySourceValidationOptions & { resolveProxy?: ProxyResolver } = {},
 ): Promise<RefreshResult> {
   let sourceUrl: string;
   try {
@@ -274,7 +275,10 @@ export async function refreshRegistry(
       throw new Error("Invalid index shape");
     }
   } catch (err) {
-    fetchError = err instanceof Error ? err.message : String(err);
+    // An unreachable Marketplace names its host, the proxy and the fix.
+    fetchError =
+      (await describeNetworkFailure({ what: "The Marketplace", url: indexUrl, error: timeoutWhenAborted(err), ...(options.resolveProxy ? { resolveProxy: options.resolveProxy } : {}) })) ??
+      (err instanceof Error ? err.message : String(err));
   } finally {
     clearTimeout(timer);
   }

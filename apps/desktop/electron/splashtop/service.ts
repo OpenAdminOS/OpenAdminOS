@@ -72,7 +72,6 @@ export class SplashtopService<S extends SplashtopStateLike> {
   private organization(state: S, organizationId: string): OrganizationRecord {
     const organization = resolveOrganizations(state).find((entry) => entry.id === organizationId);
     if (!organization) throw new SplashtopNotConnectedError("That organization is no longer on this device. Reopen Connections and try again.");
-    if (organization.kind === "sample") throw new SplashtopNotConnectedError("The sample organization cannot connect services.");
     return organization;
   }
 

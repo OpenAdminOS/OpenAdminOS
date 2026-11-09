@@ -106,6 +106,15 @@ describe("v0.4 copy catalog", () => {
   });
 });
 
+describe("hosted trust copy names the region (PR #175 Muse round 2, R)", () => {
+  it("names where prompts go in the strip, boundary and confirmation with a tenant", () => {
+    const copy = deriveTrustCopy({ provider: { id: "openai", name: "Codex", isLocal: false }, model: "gpt-5", scope: { tenantNames: ["Contoso"] } });
+    expect(copy.strip).toBe("hosted · tenant context sent to Codex · location set by your account");
+    expect(copy.boundary).toBe("Prompts and tenant data leave this device through Codex; location set by your account.");
+    expect(copy.confirmBody).toBe("Codex using gpt-5 (Codex · location set by your account) will receive the prompt and selected context from Contoso.");
+  });
+});
+
 describe("hosted data locations (maintainer decision, 2026-11-09, refined)", () => {
   it("says who sets the location, as the strip label, for every hosted provider", () => {
     expect(providerDataLocation({ id: "anthropic", name: "Claude Code" })).toBe("Claude Code · location set by your account");

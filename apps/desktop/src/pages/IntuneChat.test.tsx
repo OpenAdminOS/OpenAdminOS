@@ -27,116 +27,16 @@ import type {
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
-import { CHAT_COPY, PROVIDER_DETECTION_COPY, deriveTrustCopy } from "../copy";
-import { PILOT_COPY } from "../shared/pilot-mode";
+import { partIdsFor, requestedScopes } from "../shared/openAdminOS";
+import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY } from "../copy";
+
+const LOCAL_NO_TENANT = "Local model. No organization. Nothing leaves this device.";
 
 function LocationProbe() {
   return <output data-testid="location">{useLocation().pathname}</output>;
 }
 
 describe("IntuneChat guest exploration", () => {
-  it("replaces free text with prepared prompt chips in pilot mode", async () => {
-    const user = userEvent.setup();
-    const pilotTenant = {
-      id: "openadminos-sample-tenant",
-      kind: "sample" as const,
-      displayName: "Contoso (pilot)",
-      username: "admin@contoso-sample.invalid",
-      homeAccountId: "openadminos-sample-account",
-      addedAt: "2026-10-26T12:00:00.000Z",
-    };
-    const state = createMockAppState({
-      tenants: [pilotTenant],
-      activeTenantId: pilotTenant.id,
-      installedAgents: [
-        {
-          ...createMockAgent(),
-          id: "find-inactive-devices",
-          slug: "find-inactive-devices",
-          name: "Find inactive devices",
-        },
-      ],
-    });
-    const prompt = "Which managed devices have not synced in the last 7 days?";
-    const conversation: IntuneChatConversation = {
-      id: "conversation-pilot",
-      title: prompt,
-      createdAt: "2026-10-26T12:00:00.000Z",
-      updatedAt: "2026-10-26T12:00:00.000Z",
-      tenantId: pilotTenant.id,
-      scopeKind: "single-tenant",
-    };
-    const messages: IntuneChatMessage[] = [
-      { id: "user-1", conversationId: conversation.id, role: "user", content: prompt, status: "completed", createdAt: "2026-10-26T12:00:00.000Z" },
-      { id: "assistant-1", conversationId: conversation.id, role: "assistant", content: "17 of 119 managed devices have not checked in.", status: "completed", createdAt: "2026-10-26T12:00:01.000Z" },
-    ];
-    const bridge = makeMockBridge(
-      {
-        streamIntuneChatMessage: vi.fn(async () => ({
-          conversation,
-          userMessage: messages[0]!,
-          assistantMessage: messages[1]!,
-          cacheStatus: { tenantId: pilotTenant.id, resources: [] },
-        })),
-        listIntuneChatConversations: vi.fn(async () => [conversation]),
-        getIntuneChatMessages: vi.fn(async () => messages),
-      },
-      state,
-    );
-    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
-
-    const composer = await screen.findByRole("textbox", { name: "Ask about your Microsoft 365 tenant" });
-    expect(composer).toBeDisabled();
-    expect(composer).toHaveAttribute("placeholder", PILOT_COPY.composerExplanation);
-    const chips = within(screen.getByRole("group", { name: "Prepared prompts" })).getAllByRole("button");
-    expect(chips).toHaveLength(6);
-    expect(screen.queryByRole("button", { name: "Send" })).not.toBeInTheDocument();
-
-    await user.click(chips[0]!);
-    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
-    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0]).toMatchObject({ content: prompt });
-    const followUps = await screen.findByRole("group", { name: "Follow-up prompts" });
-    expect(within(followUps).getByRole("button", { name: "Which devices are both stale and noncompliant" })).toBeInTheDocument();
-    expect(within(followUps).getByRole("button", { name: "Which devices are stale in Intune but still active in Entra" })).toBeInTheDocument();
-    expect(within(followUps).getByRole("button", { name: "Try the agent: Find inactive devices" })).toBeInTheDocument();
-    expect(screen.getByText(PILOT_COPY.answerScope)).toBeInTheDocument();
-  });
-
-  it("lets a user draft from a suggestion and asks for setup only on Send", async () => {
-    const user = userEvent.setup();
-    const bridge = makeMockBridge(
-      {},
-      createMockAppState({ tenants: [], activeTenantId: undefined }),
-    );
-
-    renderRoute(<IntuneChat />, {
-      path: "/chat/:conversationId?",
-      route: "/chat",
-      bridge,
-    });
-
-    const composer = await screen.findByRole("combobox", {
-      name: "Ask about your Microsoft 365 tenant",
-    });
-    await user.click(
-      screen.getByRole("button", {
-        name: /managed devices have not synced in the las/,
-      }),
-    );
-    expect(composer).toHaveValue(
-      "Which managed devices have not synced in the last 7 days?",
-    );
-    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
-
-    await user.click(screen.getByRole("button", { name: "Send" }));
-    expect(
-      await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" }),
-    ).toBeInTheDocument();
-    expect(bridge.connectTenant).not.toHaveBeenCalled();
-    expect(composer).toHaveValue(
-      "Which managed devices have not synced in the last 7 days?",
-    );
-  });
 
   it("shows the new conversation title as text, not an empty rename field", async () => {
     renderRoute(<IntuneChat />, {
@@ -149,40 +49,317 @@ describe("IntuneChat guest exploration", () => {
     expect(screen.queryByRole("textbox", { name: "Conversation title" })).not.toBeInTheDocument();
   });
 
-  it("sends exactly once after the user explicitly resumes completed setup", async () => {
+});
+
+describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
+  const DEVICE_QUESTION = "Which devices have not synced in 30 days?";
+  const guestState = (overrides: Parameters<typeof createMockAppState>[0] = {}) =>
+    createMockAppState({ tenants: [], activeTenantId: undefined, mcpServers: createMockMcpServers(), ...overrides });
+  const guestConversation: IntuneChatConversation = {
+    id: "conversation-guest", title: DEVICE_QUESTION, createdAt: "2026-11-08T09:00:00.000Z", updatedAt: "2026-11-08T09:00:01.000Z", scopeKind: "single-tenant",
+  };
+  const cardMessages: IntuneChatMessage[] = [
+    { id: "user-g", conversationId: guestConversation.id, role: "user", content: DEVICE_QUESTION, status: "completed", createdAt: guestConversation.createdAt },
+    {
+      id: "assistant-g", conversationId: guestConversation.id, role: "assistant", status: "completed", createdAt: guestConversation.updatedAt, questionKind: "tenant",
+      content: "This needs Intune. No organization is active, so no tenant data was read. Connect Intune to answer it. Your question is kept.",
+      notConnected: { reason: "no-tenant", partIds: ["intune.devices"] },
+    },
+  ];
+  const cardBridge = (overrides: Partial<OpenAdminOSApi> = {}, state = guestState()) =>
+    makeMockBridge(
+      {
+        listIntuneChatConversations: vi.fn(async () => [guestConversation]),
+        getIntuneChatMessages: vi.fn(async () => cardMessages),
+        ...overrides,
+      },
+      state,
+    );
+
+  it("opens with two columns of starters and reference suggestions, the destination once, and no setup dialog", async () => {
+    const bridge = makeMockBridge({}, guestState());
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByRole("heading", { name: FIRST_RUN_CHAT_COPY.homeTitle })).toBeInTheDocument();
+    // The model line is gone; the composer's model menu and the line under it say it (design round, C).
+    expect(screen.queryByText(/^Answering with/)).toBeNull();
+    const starters = within(screen.getByRole("group", { name: FIRST_RUN_CHAT_COPY.startersLabel }));
+    expect(starters.getByRole("heading", { name: "Works now" })).toBeInTheDocument();
+    const needs = starters.getByRole("heading", { name: /Needs Intune/ }).closest("section")!;
+    expect(within(needs).getAllByRole("button").length).toBeGreaterThan(0);
+    expect(starters.queryByText("Needs Entra")).toBeNull();
+    expect(screen.getByText("Questions go to learn.microsoft.com")).toBeInTheDocument();
+    expect(screen.getByText("Questions go to www.kqlsearch.com")).toBeInTheDocument();
+    expect(screen.queryByText("Questions go to www.intuneautomation.com")).toBeNull();
+    expect(screen.getByText(/4 more in the/)).toBeInTheDocument();
+    expect(screen.getByText(LOCAL_NO_TENANT)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveAttribute("placeholder", FIRST_RUN_CHAT_COPY.placeholderNoTenant);
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(bridge.installMcpServer).not.toHaveBeenCalled();
+  });
+
+  it("adds a reference only through the Marketplace install review", async () => {
     const user = userEvent.setup();
-    const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
-    const connectedState = createMockAppState();
-    const bridge = makeMockBridge(
-      { connectTenant: vi.fn(async () => connectedState) },
-      emptyState,
-    );
+    const bridge = makeMockBridge({}, guestState());
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
-    renderRoute(<IntuneChat />, {
-      path: "/chat/:conversationId?",
-      route: "/chat",
-      bridge,
-    });
+    await user.click(await screen.findByRole("button", { name: "Add Microsoft Learn" }));
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(/I understand that words from my question can be sent to learn\.microsoft\.com/)).toBeInTheDocument();
+    expect(bridge.installMcpServer).not.toHaveBeenCalled();
+  });
 
-    const composer = await screen.findByRole("combobox", {
-      name: "Ask about your Microsoft 365 tenant",
-    });
-    await user.type(composer, "Which Windows devices are stale?");
-    await user.click(screen.getByRole("button", { name: "Send" }));
-    await user.click(await screen.findByRole("radio", { name: "OpenAdminOS app" }));
-    await user.click(await screen.findByRole("checkbox", { name: "Intune" }));
-    await user.click(
-      await screen.findByRole("button", {
-        name: /Approve \d+ read scopes and continue to Microsoft/,
-      }),
-    );
-    expect(
-      await screen.findByRole("button", { name: "Send your question" }),
-    ).toBeInTheDocument();
-    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+  it("sends a docs starter at once with no tenant, no setup dialog and no hosted confirmation", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, guestState());
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
 
-    await user.click(screen.getByRole("button", { name: "Send your question" }));
+    await user.click(await screen.findByRole("button", { name: /Write a KQL query for failed sign-ins/ }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    const input = vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0];
+    expect(input).toMatchObject({ content: FIRST_RUN_CHAT_COPY.worksNowStarters[0] });
+    expect(input.hostedProviderConsent).toBeUndefined();
+    expect(screen.queryByRole("heading", { name: "Connect a Microsoft 365 tenant" })).not.toBeInTheDocument();
+    expect(bridge.connectTenant).not.toHaveBeenCalled();
+  });
+
+  it("shows the not-connected card with the part, its exact permissions and the sign-in scopes", async () => {
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${guestConversation.id}`, bridge: cardBridge() });
+
+    expect(await screen.findByRole("heading", { name: "This needs Intune" })).toBeInTheDocument();
+    expect(screen.getByText(DEVICE_QUESTION)).toBeInTheDocument();
+    // The permissions sit in a quieter disclosure, grouped by part (design round, E).
+    expect(screen.getByText(/^\d+ read-only Microsoft Graph permissions$/).closest("details")).not.toHaveAttribute("open");
+    const permissions = within(screen.getByRole("list", { name: "Permissions", hidden: true }));
+    expect(permissions.getByText("Devices and configuration")).toBeInTheDocument();
+    const listed = permissions.getAllByText(/\./).map((node) => node.textContent ?? "").join(", ") + ", " + (permissions.getByText(/openid/).textContent ?? "");
+    for (const scope of ["DeviceManagementManagedDevices.Read.All", "DeviceManagementConfiguration.Read.All", "Device.Read.All", "openid", "profile", "offline_access", "User.Read"]) {
+      expect(listed).toContain(scope);
+    }
+    expect(screen.queryByText(/Other Intune parts/)).toBeNull();
+    // Actions in weight order: Connect, own registration, Ask an admin.
+    const actions = screen.getAllByRole("button").filter((button) => ["Connect Intune", NOT_CONNECTED_COPY.ownRegistration, NOT_CONNECTED_COPY.askAdmin].includes(button.textContent ?? ""));
+    expect(actions.map((button) => button.textContent)).toEqual(["Connect Intune", NOT_CONNECTED_COPY.ownRegistration, NOT_CONNECTED_COPY.askAdmin]);
+    expect(screen.getByText(NOT_CONNECTED_COPY.fine)).toBeInTheDocument();
+  });
+
+  it("connects with the part preselected and the app choice open, then asks again only when chosen", async () => {
+    const user = userEvent.setup();
+    const connectTenant = vi.fn(async () => createMockAppState());
+    const bridge = cardBridge({ connectTenant });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${guestConversation.id}`, bridge });
+
+    await user.click(await screen.findByRole("button", { name: "Connect Intune" }));
+    expect(await screen.findByRole("heading", { name: "Connect a Microsoft 365 tenant" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: "OpenAdminOS app" })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
+    await user.click(screen.getByRole("radio", { name: "OpenAdminOS app" }));
+    await user.click(await screen.findByRole("button", { name: /Approve \d+ read scopes and continue to Microsoft/ }));
+    await waitFor(() => expect(connectTenant).toHaveBeenCalledWith({ partIds: ["intune.devices"] }));
+    await user.click(await screen.findByRole("button", { name: "Done" }));
+
+    expect(await screen.findByText("Intune connected for Contoso IT")).toBeInTheDocument();
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: NOT_CONNECTED_COPY.askAgain }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0]).toMatchObject({ content: DEVICE_QUESTION, conversationId: guestConversation.id });
+  });
+
+  it("opens the own registration path from the card", async () => {
+    const user = userEvent.setup();
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${guestConversation.id}`, bridge: cardBridge() });
+
+    await user.click(await screen.findByRole("button", { name: NOT_CONNECTED_COPY.ownRegistration }));
+    expect(await screen.findByRole("radio", { name: "Your own app registration" })).toBeChecked();
+  });
+
+  it("copies a message with the admin consent link for the listed permissions", async () => {
+    const user = userEvent.setup();
+    const bridge = cardBridge();
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: `/chat/${guestConversation.id}`, bridge });
+
+    await user.click(await screen.findByRole("button", { name: NOT_CONNECTED_COPY.askAdmin }));
+    await waitFor(() => expect(bridge.writeClipboardText).toHaveBeenCalledOnce());
+    const message = vi.mocked(bridge.writeClipboardText).mock.calls[0]![0] as string;
+    const link = message.match(/https:\/\/login\.microsoftonline\.com\/\S+/)?.[0];
+    expect(link).toBeDefined();
+    const url = new URL(link!);
+    expect(url.pathname).toBe("/organizations/v2.0/adminconsent");
+    expect(url.searchParams.get("client_id")).toBe("d1de0a94-f67a-421d-8804-a235955ffd69");
+    expect(url.searchParams.get("redirect_uri")).toBe("http://localhost");
+    expect(url.searchParams.get("scope")?.split(" ")).toEqual(expect.arrayContaining([
+      "openid", "profile", "offline_access", "https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/DeviceManagementManagedDevices.Read.All",
+    ]));
+    expect(message).toMatch(/Cloud Application Administrator/);
+    expect(message).not.toMatch(/ - | – | — /);
+  });
+
+  it("shows the scan's choice list with no model, never preselects a hosted tool, and keeps the draft on Send", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, status: "not-installed" as const } : provider));
+    const bridge = makeMockBridge({}, guestState({ providers }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeInTheDocument();
+    // The same list as the first-launch scan (design round, B): local first, hosted rows say where prompts go.
+    const group = screen.getByRole("radiogroup", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle });
+    expect(within(group).getByRole("radio", { name: /^Ollama/ })).toBeChecked();
+    expect(within(group).getByRole("radio", { name: /^Codex/ })).not.toBeChecked();
+    expect(within(group).getByText("Prompts leave this device through Codex; location set by your account")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Get OpenAdmin 8B" })).toBeInTheDocument();
+    expect(bridge.setActiveProvider).not.toHaveBeenCalled();
+    const composer = screen.getByRole("combobox", { name: CHAT_COPY.composerLabel });
+    expect(composer).toHaveAttribute("placeholder", FIRST_RUN_CHAT_COPY.placeholderNoModel);
+    await user.type(composer, "Explain Autopatch rings");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    expect(await screen.findByText(FIRST_RUN_CHAT_COPY.noModelSendNotice)).toBeInTheDocument();
+    expect(composer).toHaveValue("Explain Autopatch rings");
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+
+    await user.click(within(group).getByRole("radio", { name: /^Codex/ }));
+    await user.click(screen.getByRole("button", { name: "Use Codex" }));
+    await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("openai"));
+  });
+
+  it("offers no sample data in the model choice (maintainer decision, 2026-11-09)", async () => {
+    const providers = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, status: "not-installed" as const } : provider));
+    const bridge = makeMockBridge({}, guestState({ providers }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByRole("heading", { name: FIRST_RUN_CHAT_COPY.modelChoiceTitle })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /sample data/i })).toBeNull();
+  });
+
+  it("offers LM Studio without a loaded model as a recovery, and checks providers again in place (PR #175 onboarding round review, 3)", async () => {
+    const user = userEvent.setup();
+    const providers = mockProviders.map((provider) =>
+      provider.id === "lm-studio"
+        ? { ...provider, status: "connected" as const, installed: true, models: [] }
+        : provider.isLocal
+          ? { ...provider, status: "not-installed" as const, installed: false, models: [] }
+          : { ...provider, status: "not-installed" as const },
+    );
+    const refreshProviders = vi.fn(async () => undefined);
+    const bridge = makeMockBridge({ refreshProviders }, guestState({ providers, activeProviderId: "lm-studio" }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    const row = await screen.findByRole("radio", { name: /^LM Studio/ });
+    expect(row.closest("label")).toHaveTextContent("No model yet");
+    expect(row.closest("label")).toHaveTextContent("Load a model in LM Studio, then scan again.");
+    await user.click(row);
+    await user.click(screen.getByRole("button", { name: "Scan again" }));
+    await waitFor(() => expect(refreshProviders).toHaveBeenCalledOnce());
+  });
+
+  it("offers starters for what was connected, one line per service (mockup 32, section B)", async () => {
+    const user = userEvent.setup();
+    const base = createMockAppState();
+    const tenant = { ...base.tenants[0]!, grantedScopes: requestedScopes(partIdsFor(["defender"])).map((scope) => `graph:${scope.name}`) };
+    const bridge = makeMockBridge({}, createMockAppState({ tenants: [tenant], activeTenantId: tenant.id }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByText(CHAT_COPY.askAbout("Defender"))).toBeInTheDocument();
+    expect(screen.queryByText(CHAT_COPY.askAbout("Intune"))).toBeNull();
+    expect(screen.queryByText("Try")).toBeNull();
+    const defender = document.querySelector<HTMLElement>("[data-starters='defender']")!;
+    await user.click(within(defender).getAllByRole("button")[0]!);
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("Which high severity incidents are still open?");
+  });
+
+  it("cancels the inline confirmation with Escape, keeps the question and returns to the composer (design round, D)", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel });
+    await user.type(composer, "Explain Autopatch rings");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const dialog = await screen.findByRole("dialog", { name: "Send this question through Codex?" });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Send through Codex" })).toHaveFocus());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Send this question through Codex?" })).toBeNull();
+    await waitFor(() => expect(composer).toHaveFocus());
+    expect(composer).toHaveValue("Explain Autopatch rings");
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("asks for a no-tenant hosted confirmation inline, naming the provider, where prompts go and what is sent", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+
+    expect(await screen.findByRole("note")).toHaveTextContent(
+      "Prompts leave this device through Codex; location set by your account while this model is selected. No organization is active, so no tenant data is included.",
+    );
+    await user.type(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    // Inline above the composer, so the typed question stays visible (design round, D).
+    const dialog = await screen.findByRole("dialog", { name: "Send this question through Codex?" });
+    expect(dialog).toHaveAttribute("aria-modal", "false");
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("Explain Autopatch rings");
+    expect(within(dialog).getByText("Codex answers with your existing sign-in. No organization is active, so no tenant data is included.")).toBeInTheDocument();
+    const goesTo = within(dialog).getByText("Codex · location set by your account", { exact: false });
+    // The detail says what the location depends on (maintainer decision, 2026-11-09).
+    expect(within(dialog).getByText(/^Codex sends prompts to OpenAI, or to the endpoint its configuration selects\./)).toBeInTheDocument();
+    expect(goesTo.tagName).toBe("DD");
+    expect(within(dialog).getByText("Your question and this conversation")).toBeInTheDocument();
+    expect(within(dialog).getByText("Chat history")).toBeInTheDocument();
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    // The remembered decision is per provider and model, and the label names the model (Muse round 2, Q).
+    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for questions with no organization on gpt-5" })).not.toBeChecked();
+    expect(within(dialog).getByText("Model").nextElementSibling).toHaveTextContent("gpt-5");
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Send through Codex" })).toHaveFocus());
+
+    await user.click(within(dialog).getByRole("button", { name: "Send through Codex" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    const consent = vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0].hostedProviderConsent;
+    expect(consent).toMatchObject({ noTenant: true, providerId: "openai", model: "gpt-5" });
+    expect(consent).not.toHaveProperty("tenantId");
+  });
+
+  it("sends a question blocked on the device without the hosted confirmation (review round 1, finding 9)", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge(
+      { previewIntuneChatSend: vi.fn(async () => ({ reachesModel: false })) },
+      guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }),
+    );
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), DEVICE_QUESTION);
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("dialog", { name: "Send this question through Codex?" })).not.toBeInTheDocument();
+    expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0].hostedProviderConsent).toBeUndefined();
+  });
+
+  it("asks again after a model change when the no-tenant decision was remembered for another model (finding 10)", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4", "true");
+    try {
+      const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+      await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      expect(await screen.findByRole("dialog", { name: "Send this question through Codex?" })).toBeInTheDocument();
+      expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    } finally {
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4");
+    }
+  });
+
+  it("asks again with the tenant-bound confirmation once a tenant is connected, even after remembering the no-tenant one", async () => {
+    const user = userEvent.setup();
+    window.localStorage.setItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5", "true");
+    try {
+      const bridge = makeMockBridge({}, createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+      await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), "Which Windows devices are stale?");
+      await user.click(screen.getByRole("button", { name: "Send" }));
+      const dialog = await screen.findByRole("dialog", { name: "Send this question through Codex?" });
+      expect(within(dialog).getByText(/Selected cached data from .+ is included\./)).toBeInTheDocument();
+      expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+    } finally {
+      window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5");
+    }
   });
 });
 
@@ -253,14 +430,6 @@ describe("IntuneChat new conversation routing", () => {
   });
 });
 
-const PILOT_TENANT = {
-  id: "openadminos-sample-tenant",
-  kind: "sample" as const,
-  displayName: "Contoso (pilot)",
-  username: "admin@contoso-sample.invalid",
-  homeAccountId: "openadminos-sample-account",
-  addedAt: "2026-10-26T12:00:00.000Z",
-};
 
 /** A bridge whose stream emits started and completed, like the host. */
 function streamingBridge(state: ReturnType<typeof createMockAppState>) {
@@ -318,29 +487,6 @@ function spyOnMessageScrollIntoView() {
 }
 
 describe("IntuneChat answer scroll", () => {
-  it("keeps the prompt at the top when a pilot answer arrives", async () => {
-    const user = userEvent.setup();
-    const scroll = spyOnMessageScrollIntoView();
-    try {
-      const bridge = streamingBridge(
-        createMockAppState({ tenants: [PILOT_TENANT], activeTenantId: PILOT_TENANT.id }),
-      );
-      renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
-
-      const chips = within(await screen.findByRole("group", { name: "Prepared prompts" })).getAllByRole("button");
-      await user.click(chips[0]!);
-      await screen.findByText(/17 of 119 managed devices have not checked in/);
-
-      await waitFor(() =>
-        expect(scroll.anchored).toContainEqual({
-          messageId: "user-scroll",
-          options: expect.objectContaining({ block: "start" }),
-        }),
-      );
-    } finally {
-      scroll.restore();
-    }
-  });
 
   it("keeps following the latest output in production", async () => {
     const user = userEvent.setup();
@@ -384,21 +530,6 @@ describe("IntuneChat automatic provider notice", () => {
     await user.click(screen.getByRole("button", { name: PROVIDER_DETECTION_COPY.autoSelectedNoticeDismiss }));
     await waitFor(() => expect(bridge.dismissProviderAutoSelectNotice).toHaveBeenCalledOnce());
     await waitFor(() => expect(screen.queryByText(notice)).not.toBeInTheDocument());
-  });
-
-  it("never shows in pilot mode", async () => {
-    const bridge = makeMockBridge(
-      {},
-      createMockAppState({
-        tenants: [PILOT_TENANT],
-        activeTenantId: PILOT_TENANT.id,
-        providerAutoSelectNotice: { providerId: "lm-studio", providerName: "LM Studio" },
-      }),
-    );
-    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
-
-    await screen.findByRole("group", { name: "Prepared prompts" });
-    expect(screen.queryByText(notice)).not.toBeInTheDocument();
   });
 });
 
@@ -675,6 +806,7 @@ describe("IntuneChat agent picker", () => {
 
 describe("IntuneChat hosted-provider disclosure", () => {
   const sentence = "Prompts and tenant data leave this device through Codex; location set by your account while this model is selected.";
+  const CODEX_LOCATION_DETAIL = "Codex sends prompts to OpenAI, or to the endpoint its configuration selects. Processing follows your workspace's data residency setting.";
   const conversation: IntuneChatConversation = {
     id: "conversation-hosted", title: "Stale devices", createdAt: "2026-11-04T09:00:00.000Z", updatedAt: "2026-11-04T09:01:00.000Z", tenantId: "tenant-1", scopeKind: "single-tenant",
   };
@@ -692,7 +824,8 @@ describe("IntuneChat hosted-provider disclosure", () => {
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId", route: "/chat/conversation-hosted", bridge });
     expect(await screen.findByText("Two devices are stale.")).toBeInTheDocument();
     const icon = screen.getByRole("button", { name: "Where data goes" });
-    expect(icon).toHaveAccessibleDescription(sentence);
+    // The tooltip adds what the location depends on; the line under the composer stays short.
+    expect(icon).toHaveAccessibleDescription(`${sentence} ${CODEX_LOCATION_DETAIL}`);
     expect(icon).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByRole("note")).toBeNull();
     // The status strip pill is unchanged; the composer icon opens the full sentence on demand.
@@ -734,7 +867,7 @@ describe("IntuneChat hosted-provider disclosure", () => {
     const full = `${sentence} MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com. A filter blocks known tenant names, IDs, email addresses and IP addresses, but cannot guarantee it catches every private detail.`;
     // The shield carries the full text and opens the same line.
     const icon = screen.getByRole("button", { name: "Where data goes" });
-    expect(icon).toHaveAccessibleDescription(full);
+    expect(icon).toHaveAccessibleDescription(full.replace(sentence, `${sentence} ${CODEX_LOCATION_DETAIL}`));
     await userEvent.setup().click(icon);
     expect(screen.getByRole("note")).toHaveTextContent(full);
   });
@@ -769,33 +902,16 @@ describe("IntuneChat hosted-provider consent", () => {
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(
-      await screen.findByRole("heading", {
-        name: "Send this question through Codex?",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        deriveTrustCopy({
-          provider: { id: "openai", name: "Codex", isLocal: false },
-          model: "gpt-5",
-          scope: { tenantNames: ["Contoso IT"] },
-        }).confirmBody,
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("What leaves this device")).toBeInTheDocument();
-    expect(
-      screen.getByRole("checkbox", {
-        name: "Remember this decision for this tenant and provider on this device.",
-      }),
-    ).not.toBeChecked();
+    const dialog = await screen.findByRole("dialog", { name: "Send this question through Codex?" });
+    expect(within(dialog).getByText("Codex answers with your existing sign-in. Selected cached data from Contoso IT is included.")).toBeInTheDocument();
+    expect(within(dialog).getByText("Codex · location set by your account", { exact: false })).toBeInTheDocument();
+    expect(within(dialog).getByText("Your question, this conversation and selected cached data from Contoso IT")).toBeInTheDocument();
+    // The tenant-bound acknowledgement is bound to the model too, so it names it (PR #175 onboarding round review, 5).
+    expect(within(dialog).getByText("Model").nextElementSibling).toHaveTextContent("gpt-5");
+    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for Contoso IT with Codex on gpt-5" })).not.toBeChecked();
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
 
-    // A CLI is named as the way the question leaves (the same wording as PR #175).
-    expect(screen.getByText("Codex answers with your existing sign-in. Selected cached data from Contoso IT is included.")).toBeInTheDocument();
-    const modalSendButton = screen.getAllByRole("button", { name: "Send through Codex" }).at(-1);
-    expect(modalSendButton).toBeDefined();
-    await user.click(modalSendButton!);
+    await user.click(within(dialog).getByRole("button", { name: "Send through Codex" }));
 
     await waitFor(() => {
       expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(1);
@@ -827,9 +943,7 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     await user.type(composer, "How long is the Intune compliance grace period?");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    const heading = await screen.findByText("What leaves this device");
-    const detail = heading.parentElement?.querySelector("p")?.textContent ?? "";
-    expect(detail).toContain("sent to the hosted provider for this response.");
+    const detail = (await screen.findByRole("dialog", { name: "Send this question through Codex?" })).textContent ?? "";
     expect(detail).toContain("MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com.");
     expect(detail).not.toContain("kqlsearch");
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
@@ -855,8 +969,8 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     await user.type(composer, "When does Windows Server 2016 reach end of support?");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    const heading = await screen.findByText("What leaves this device");
-    expect(heading.parentElement?.querySelector("p")?.textContent ?? "").toContain(`Words from that question can be sent to ${hosts}.`);
+    const dialog = await screen.findByRole("dialog", { name: "Send this question through Codex?" });
+    expect(dialog.textContent ?? "").toContain(`Words from that question can be sent to ${hosts}.`);
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
   });
 
@@ -867,8 +981,8 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    const heading = await screen.findByText("What leaves this device");
-    expect(heading.parentElement?.querySelector("p")?.textContent ?? "").not.toContain("MCP queries");
+    const dialog = await screen.findByRole("dialog", { name: "Send this question through Codex?" });
+    expect(dialog.textContent ?? "").not.toContain("MCP queries");
   });
 
   it("uses the mocked hosted provider state", () => {

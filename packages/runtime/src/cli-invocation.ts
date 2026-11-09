@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import {
   spawn,
   spawnSync,
+  type ChildProcess,
   type ChildProcessWithoutNullStreams,
   type SpawnOptions,
   type SpawnSyncReturns,
@@ -213,6 +214,50 @@ export function cliArgs<
  * used to reject the surrounding probe and abort the whole tenant connection.
  * Returning the error instead lets callers report a normal probe failure.
  */
+/**
+ * Stops a CLI and anything it started. A probe spawned with its own
+ * process group (`ownGroup`) is killed as a group on macOS and Linux, so a
+ * wrapper script's child cannot outlive it; otherwise, and on Windows,
+ * the process itself is killed.
+ */
+export function killCliProcess(child: ChildProcess, ownGroup: boolean): void {
+  if (ownGroup) {
+    signalCliTree(child, "SIGKILL");
+    return;
+  }
+  child.kill("SIGKILL");
+}
+
+/**
+ * Signals a CLI spawned in its own process group and everything it
+ * started. On macOS and Linux the whole group is signalled, also after the
+ * wrapper itself exited. On Windows `taskkill /T /F` ends the process tree
+ * while the wrapper still runs (any signal ends it; there is no graceful
+ * equivalent); a child whose wrapper already exited is no longer in a tree
+ * Windows can resolve, so it is not reached. A Job Object would close that
+ * gap; it is not used yet.
+ */
+export function signalCliTree(child: ChildProcess, signal: NodeJS.Signals): void {
+  const pid = child.pid;
+  if (typeof pid !== "number") return;
+  if (process.platform === "win32") {
+    if (child.exitCode !== null) return;
+    try {
+      const killer = spawn("taskkill", ["/pid", String(pid), "/T", "/F"], { windowsHide: true, stdio: "ignore", shell: false });
+      killer.on("error", () => child.kill());
+    } catch {
+      child.kill();
+    }
+    return;
+  }
+  try {
+    process.kill(-pid, signal);
+  } catch {
+    // The group is already gone; the process itself, if it still runs.
+    if (child.exitCode === null) child.kill(signal);
+  }
+}
+
 export function cliSpawn(
   binary: string,
   args: string[],

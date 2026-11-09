@@ -10,12 +10,13 @@ import { after, before, describe, it } from "node:test";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { z } from "zod";
-import { partIdsFor, qualifyScope, requestedScopes, type IntuneChatStep, type IntuneChatStreamEvent } from "@openadminos/agent-sdk";
+import { partIdsFor, providerCatalog, qualifyScope, requestedScopes, type IntuneChatStep, type IntuneChatStreamEvent } from "@openadminos/agent-sdk";
 
 import { AppStateStore } from "../state.js";
 import { MCP_CATALOG } from "../mcp/catalog.js";
 import type { IntelligenceSqliteStore } from "./sqlite-store.js";
 import { isMcpQueryWriterRequest } from "./mcp-query-writer.js";
+import { FIRST_RUN_CHAT_COPY } from "../../src/copy/chat.js";
 
 /**
  * Drives Chat end to end through the app store: question planning, the
@@ -81,6 +82,8 @@ interface Harness {
   store: AppStateStore;
   cache: IntelligenceSqliteStore;
   graphPaths: string[];
+  /** Tenants a Graph client was built for. */
+  graphBuilds: string[];
   prompts: Array<{ system: string; prompt: string }>;
   /** Prompts of the MCP query writer, which the model double answers apart from the script. */
   writerPrompts: string[];
@@ -95,14 +98,23 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
   graphResponses?: Record<string, unknown>;
   /** Granted scopes for the tenant, in place of the fixture's. */
   grantedScopes?: string[];
+  /** No tenant is connected: the state has none and no active tenant. */
+  noTenant?: boolean;
+  /** The active provider and its model, in place of Ollama with llama3.1:8b. */
+  provider?: { id: string; model: string };
 } = {}): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "openadminos-chat-steps-e2e-"));
   const statePath = join(dir, "state.json");
   await writeFile(statePath, JSON.stringify({
-    activeProviderId: "ollama", providerChosenByUser: true, activeModelByProviderId: { ollama: "llama3.1:8b" },
-    installedAgents: [], runs: [], tenants: [options.grantedScopes ? { ...tenant, grantedScopes: options.grantedScopes } : tenant], activeTenantId: tenant.id,
+    activeProviderId: options.provider?.id ?? "ollama", providerChosenByUser: true,
+    activeModelByProviderId: { [options.provider?.id ?? "ollama"]: options.provider?.model ?? "llama3.1:8b" },
+    installedAgents: [], runs: [],
+    ...(options.noTenant
+      ? { tenants: [] }
+      : { tenants: [options.grantedScopes ? { ...tenant, grantedScopes: options.grantedScopes } : tenant], activeTenantId: tenant.id }),
   }));
   const graphPaths: string[] = [];
+  const graphBuilds: string[] = [];
   const prompts: Array<{ system: string; prompt: string }> = [];
   let replies: string[] = [];
   const chunkDelayMs = options.chunkDelayMs;
@@ -128,7 +140,15 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
     filePath: statePath, userDataPath: dir, statsApiUrl: "",
     tokenStore: { read: async () => "", write: async () => undefined },
     mcpCatalog: [{ ...learn, url: `${baseUrl}/learn` }, { ...kql, url: `${baseUrl}/kql` }],
-    graphFactory: () => {
+    // A hosted provider reports its model, so the window and the host resolve the same one; no CLI on this device is probed.
+    ...(options.provider
+      ? {
+          providerListFactory: () => providerCatalog.map((entry) =>
+            entry.id === options.provider!.id ? { ...entry, status: "available" as const, models: [options.provider!.model] } : entry),
+        }
+      : {}),
+    graphFactory: (input) => {
+      graphBuilds.push(input.tenantId);
       if (options.graphError) throw new Error(options.graphError);
       return {
       listManagedDevices: async () => [],
@@ -187,8 +207,8 @@ async function withHarness(run: (harness: Harness) => Promise<void>, options: {
       ],
     });
     await run({
-      docsSearches, store, cache, graphPaths, prompts, writerPrompts,
-      script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; writerPrompts.length = 0; graphPaths.length = 0; },
+      docsSearches, store, cache, graphPaths, graphBuilds, prompts, writerPrompts,
+      script(next) { replies = next.map((item) => (typeof item === "string" ? item : JSON.stringify(item))); reply = 0; prompts.length = 0; writerPrompts.length = 0; graphPaths.length = 0; graphBuilds.length = 0; },
     });
   } finally { store.close(); await rm(dir, { recursive: true, force: true }); }
 }
@@ -941,5 +961,353 @@ describe("Chat steps, sources and follow-ups end to end", () => {
         assert.equal(prompts.length, 0, "no model call");
       }, { grantedScopes: intuneOnly });
     });
+  });
+});
+
+describe("Graph cache status with no tenant (Muse round 5, A)", () => {
+  it("reports an empty cache without an id when nothing is connected, and still refuses an unknown id", async () => {
+    await withHarness(async ({ store }) => {
+      assert.deepEqual(await store.getGraphCacheStatus(), { resources: [] });
+      await assert.rejects(() => store.getGraphCacheStatus("00000000-0000-0000-0000-000000000000"));
+    }, { noTenant: true });
+  });
+});
+
+describe("Chat with no tenant connected (SPEC.md 4a, 2026-11-08)", () => {
+  const DEVICE_QUESTION = "Which devices have not synced in 30 days?";
+  const ask = (store: AppStateStore, send: "sendIntuneChatMessage" | "streamIntuneChatMessage", input: Parameters<AppStateStore["sendIntuneChatMessage"]>[0]) =>
+    send === "sendIntuneChatMessage" ? store.sendIntuneChatMessage(input) : store.streamIntuneChatMessage(input, () => {});
+  const noTenantConsent = (providerId = "anthropic", model = "claude-sonnet-5-5") => ({ noTenant: true as const, providerId: providerId as "anthropic", model, acknowledgedAt: new Date().toISOString() });
+
+  it("answers a docs question from Microsoft Learn with no Graph call and no tenant on the conversation", async () => {
+    for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+      await withHarness(async ({ store, graphPaths, graphBuilds, prompts, script }) => {
+        script([
+          { kind: "docs", sources: ["microsoft-learn"], tool: learnTool, params: { query: "Defender for Endpoint on macOS" } },
+          { final: true, answer: "Defender on macOS needs full disk access [1]." },
+        ]);
+        const result = await ask(store, send, { content: DOCS_QUESTION });
+        assert.equal(result.assistantMessage.questionKind, "docs", send);
+        assert.equal(result.assistantMessage.status, "completed", send);
+        assert.match(result.assistantMessage.content, /full disk access/, send);
+        assert.equal(result.assistantMessage.notConnected, undefined, send);
+        // The model is told plainly that nothing is connected, so it classifies against that.
+        assert.match(prompts[0]!.system, /No organization is active, so there is no tenant data to read\./, send);
+        assert.match(prompts[0]!.system, /Tenant: none connected/, send);
+        assert.doesNotMatch(prompts[0]!.system, /You can investigate read-only tenant data/, send);
+        assert.equal(result.conversation.tenantId, undefined, send);
+        assert.equal(result.cacheStatus.tenantId, undefined, send);
+        assert.deepEqual(graphPaths, [], send);
+        assert.deepEqual(graphBuilds, [], send);
+        assert.deepEqual((await store.listIntuneChatConversations()).map((entry) => entry.id).includes(result.conversation.id), true, send);
+      }, { noTenant: true });
+    }
+  });
+
+  it("answers a docs question from the model alone when no reference or docs index is installed", async () => {
+    await withHarness(async ({ store, graphBuilds, prompts, script }) => {
+      await store.uninstallMcpServer("microsoft-learn");
+      await store.uninstallMcpServer("kql-search");
+      script([{ kind: "docs", sources: [], final: true, answer: "Autopatch rings are deployment groups that Microsoft manages." }]);
+      const message = (await store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings" })).assistantMessage;
+      assert.equal(message.questionKind, "docs");
+      assert.match(message.content, /deployment groups/);
+      assert.equal(message.notConnected, undefined);
+      assert.ok(prompts.length > 0, "the model answered");
+      assert.deepEqual(graphBuilds, []);
+    }, { noTenant: true });
+  });
+
+  it("returns the not-connected result for a tenant question, keeps the question and reads nothing", async () => {
+    for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+      await withHarness(async ({ store, cache, graphPaths, graphBuilds, script }) => {
+        script([{ kind: "tenant", sources: [], tool: "query_cache", params: { resource: "managedDevices" } }]);
+        const result = await ask(store, send, { content: DEVICE_QUESTION });
+        const message = result.assistantMessage;
+        assert.equal(message.status, "completed", send);
+        assert.deepEqual(message.notConnected, { reason: "no-tenant", partIds: ["intune.devices"] }, send);
+        assert.match(message.content, /^This needs Intune\. No organization is active, so no tenant data was read\./, send);
+        assert.equal(message.followUps, undefined, send);
+        assert.deepEqual(graphPaths, [], send);
+        assert.deepEqual(graphBuilds, [], send);
+        // The cached rows of another tenant on this device are never read into the answer.
+        assert.doesNotMatch(message.content, /MAC-0/, send);
+        const stored = cache.listMessages(result.conversation.id);
+        assert.equal(stored[0]?.role, "user", send);
+        assert.equal(stored[0]?.content, DEVICE_QUESTION, send);
+        assert.deepEqual(stored[1]?.notConnected, message.notConnected, send);
+      }, { noTenant: true });
+    }
+  });
+
+  it("returns the not-connected result for a mixed question and for a docs answer that calls a tenant tool", async () => {
+    await withHarness(async ({ store, graphBuilds, script }) => {
+      script([{ kind: "mixed", sources: ["microsoft-learn"], tool: learnTool, params: { query: "macOS compliance" } }]);
+      const mixed = (await store.sendIntuneChatMessage({ content: MIXED_QUESTION })).assistantMessage;
+      assert.equal(mixed.notConnected?.reason, "no-tenant");
+      assert.ok(mixed.notConnected?.partIds.includes("intune.devices"));
+
+      script([{ kind: "docs", sources: [], tool: "query_cache", params: { resource: "managedDevices" } }]);
+      const upgraded = (await store.sendIntuneChatMessage({ content: "How does Intune report compliance?" })).assistantMessage;
+      assert.equal(upgraded.questionKind, "mixed");
+      assert.equal(upgraded.notConnected?.reason, "no-tenant");
+      assert.deepEqual(graphBuilds, []);
+    }, { noTenant: true });
+  });
+
+  it("keeps an explicit request to write a query as docs, and still blocks it when the model reaches for tenant data", async () => {
+    await withHarness(async ({ store, prompts, graphBuilds, script }) => {
+      script([{ final: true, answer: "SigninLogs | where ResultType != \"0\" | summarize count() by UserPrincipalName" }]);
+      const docs = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
+      assert.equal(docs.questionKind, "docs");
+      assert.equal(docs.notConnected, undefined);
+      assert.match(docs.content, /SigninLogs/);
+      // The model was not asked to classify it.
+      assert.doesNotMatch(prompts[0]!.system, /Your first reply must also give the question kind/);
+
+      script([{ tool: "query_cache", params: { resource: "signIns" } }]);
+      const upgraded = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
+      assert.equal(upgraded.notConnected?.reason, "no-tenant");
+      assert.deepEqual(graphBuilds, []);
+    }, { noTenant: true });
+  });
+
+  it("treats a request to write code as docs even when it says our or which (review round 1, finding M)", async () => {
+    await withHarness(async ({ store, graphBuilds, script }) => {
+      for (const content of ["Write a KQL query for our failed sign-ins", "Write a script which shows stale devices"]) {
+        script([{ final: true, answer: "Here is the code you can run yourself." }]);
+        const message = (await store.sendIntuneChatMessage({ content })).assistantMessage;
+        assert.equal(message.questionKind, "docs", content);
+        assert.equal(message.notConnected, undefined, content);
+      }
+      assert.deepEqual(graphBuilds, []);
+    }, { noTenant: true });
+  });
+
+  it("names the voice surface when Nova is used with no tenant (finding P)", async () => {
+    await withHarness(async ({ store }) => {
+      await assert.rejects(
+        () => store.streamIntuneChatMessage({ content: "How many devices?" }, () => {}, { voice: true }),
+        /Nova voice needs an organization\. Connect Microsoft 365, or ask in Chat, which answers without one\./,
+      );
+    }, { noTenant: true });
+  });
+
+  it("blocks a tenant question with no model call on deterministic retrieval, and answers a docs question there", async () => {
+    await withHarness(async ({ store, prompts, graphBuilds, script }) => {
+      await store.setChatInvestigationMode("always-deterministic");
+      script(["Should not run."]);
+      const message = (await store.sendIntuneChatMessage({ content: DEVICE_QUESTION })).assistantMessage;
+      assert.equal(message.notConnected?.reason, "no-tenant");
+      assert.deepEqual(message.notConnected?.partIds, ["intune.devices"]);
+      assert.equal(prompts.length, 0);
+
+      script(["A KQL query for failed sign-ins filters SigninLogs on a non-zero ResultType."]);
+      const docs = (await store.sendIntuneChatMessage({ content: KQL_QUESTION })).assistantMessage;
+      assert.equal(docs.questionKind, "docs");
+      assert.equal(docs.notConnected, undefined);
+      assert.match(docs.content, /SigninLogs/);
+      // The Works now starters answer with nothing connected, also without the model's classification.
+      for (const starter of FIRST_RUN_CHAT_COPY.worksNowStarters) {
+        const answer = (await store.sendIntuneChatMessage({ content: starter })).assistantMessage;
+        assert.equal(answer.questionKind, "docs", starter);
+        assert.equal(answer.notConnected, undefined, starter);
+      }
+      assert.deepEqual(graphBuilds, []);
+    }, { noTenant: true });
+  });
+
+  it("refuses to continue a tenant conversation while no tenant is connected", async () => {
+    await withHarness(async ({ store, cache }) => {
+      const now = new Date().toISOString();
+      cache.createConversation({ id: "chat_tenant", title: "Contoso devices", tenantId: tenant.id, now });
+      await assert.rejects(
+        () => store.sendIntuneChatMessage({ content: DOCS_QUESTION, conversationId: "chat_tenant" }),
+        /belongs to a tenant/,
+      );
+      cache.createConversation({ id: "chat_legacy", title: "Old devices", tenantId: null, now });
+      cache.insertMessage({ id: "msg_legacy", conversationId: "chat_legacy", role: "assistant", content: "9 devices.", status: "completed", createdAt: now, tenantContext: true });
+      await assert.rejects(
+        () => store.sendIntuneChatMessage({ content: DOCS_QUESTION, conversationId: "chat_legacy" }),
+        /used tenant data/,
+      );
+    }, { noTenant: true });
+  });
+
+  it("binds a conversation started without a tenant to the tenant it is continued in", async () => {
+    await withHarness(async ({ store, cache, script }) => {
+      const now = new Date().toISOString();
+      cache.createConversation({ id: "chat_guest", title: "Devices not synced", tenantId: null, now });
+      script([{ kind: "docs", sources: [], final: true, answer: "Devices sync every eight hours." }]);
+      await store.sendIntuneChatMessage({ content: "How often do Intune devices sync?", conversationId: "chat_guest" });
+      assert.equal(cache.getConversation("chat_guest")?.tenantId, tenant.id);
+    });
+  });
+
+  it("returns the not-connected result with the tenant when the tenant has not connected the service", async () => {
+    await withHarness(async ({ store, graphPaths, script }) => {
+      script([{ kind: "tenant", sources: [], final: true, answer: "You have 3 open incidents." }]);
+      const message = (await store.sendIntuneChatMessage({ content: "List our open security incidents" })).assistantMessage;
+      assert.equal(message.content, "Defender is not connected for this tenant. Add it in Connections.");
+      assert.deepEqual(message.notConnected, { reason: "service-missing", partIds: ["defender.incidents"], tenantId: tenant.id });
+      assert.deepEqual(graphPaths, []);
+    }, { grantedScopes: requestedScopes(partIdsFor(["intune"])).map((scope) => qualifyScope(scope.name)) });
+  });
+
+  describe("hosted provider acknowledgement", () => {
+    const hosted = { id: "anthropic", model: "claude-sonnet-5-5" };
+
+    it("requires a fresh no-tenant acknowledgement and accepts it for a send without a tenant", async () => {
+      await withHarness(async ({ store, prompts, graphBuilds, script }) => {
+        script([{ kind: "docs", sources: [], final: true, answer: "Autopatch rings are deployment groups." }]);
+        await assert.rejects(
+          () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings" }),
+          /Hosted provider confirmation is required before Chat can send your question/,
+        );
+        assert.equal(prompts.length, 0);
+        await assert.rejects(
+          () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: { tenantId: tenant.id, providerId: "anthropic", acknowledgedAt: new Date().toISOString() } }),
+          /names a tenant, and no tenant is connected/,
+        );
+        await assert.rejects(
+          () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent("openai") }),
+          /does not match the selected provider/,
+        );
+        // The confirmation names the model; a decision for another model, or none, is refused (Muse round 2, Q).
+        await assert.rejects(
+          () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent("anthropic", "claude-opus-5-5") }),
+          /names a different model than the one selected/,
+        );
+        await assert.rejects(
+          () => store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: { noTenant: true, providerId: "anthropic", acknowledgedAt: new Date().toISOString() } }),
+          /names a different model than the one selected/,
+        );
+        assert.equal(prompts.length, 0);
+        const message = (await store.sendIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent() })).assistantMessage;
+        assert.equal(message.status, "completed");
+        assert.match(message.content, /deployment groups/);
+        assert.deepEqual(graphBuilds, []);
+      }, { noTenant: true, provider: hosted });
+    });
+
+    it("accepts a fresh no-tenant acknowledgement on the stream path too", async () => {
+      await withHarness(async ({ store, graphBuilds, script }) => {
+        script([{ kind: "docs", sources: [], final: true, answer: "Autopatch rings are deployment groups." }]);
+        const message = (await store.streamIntuneChatMessage({ content: "Explain Windows Autopatch rings", hostedProviderConsent: noTenantConsent() }, () => {})).assistantMessage;
+        assert.equal(message.status, "completed");
+        assert.match(message.content, /deployment groups/);
+        assert.deepEqual(graphBuilds, []);
+      }, { noTenant: true, provider: hosted });
+    });
+
+    it("needs no confirmation for a question blocked on the device, and previews that (review round 1, finding 9)", async () => {
+      await withHarness(async ({ store, prompts, script }) => {
+        await store.setChatInvestigationMode("always-deterministic");
+        script(["Should not run."]);
+        assert.deepEqual(await store.previewIntuneChatSend({ content: DEVICE_QUESTION }), { reachesModel: false });
+        assert.deepEqual(await store.previewIntuneChatSend({ content: KQL_QUESTION }), { reachesModel: true });
+        const message = (await store.sendIntuneChatMessage({ content: DEVICE_QUESTION })).assistantMessage;
+        assert.equal(message.notConnected?.reason, "no-tenant");
+        assert.equal(prompts.length, 0);
+        await assert.rejects(() => store.sendIntuneChatMessage({ content: KQL_QUESTION }), /Hosted provider confirmation is required/);
+      }, { noTenant: true, provider: hosted });
+    });
+
+    it("uses one routing decision for preview and send, on both send paths (review round 2, item 1)", async () => {
+      for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+        await withHarness(async ({ store, prompts, script }) => {
+          await store.setChatInvestigationMode("always-deterministic");
+          script(["Autopatch rings are deployment groups."]);
+          const question = "Explain Windows Autopatch rings";
+          // The send answers this docs question with the model, so the preview must say so.
+          assert.deepEqual(await store.previewIntuneChatSend({ content: question }), { reachesModel: true }, send);
+          await assert.rejects(() => ask(store, send, { content: question }), /Hosted provider confirmation is required/, send);
+          assert.equal(prompts.length, 0, send);
+          const answered = (await ask(store, send, { content: question, hostedProviderConsent: noTenantConsent() })).assistantMessage;
+          assert.equal(answered.status, "completed", send);
+          assert.ok(prompts.length > 0, send);
+        }, { noTenant: true, provider: hosted });
+      }
+    });
+
+    it("asks for confirmation when the tool loop classifies a tenant question (round 2, item T)", async () => {
+      await withHarness(async ({ store, prompts }) => {
+        assert.deepEqual(await store.previewIntuneChatSend({ content: DEVICE_QUESTION }), { reachesModel: true });
+        await assert.rejects(() => store.sendIntuneChatMessage({ content: DEVICE_QUESTION }), /Hosted provider confirmation is required/);
+        assert.equal(prompts.length, 0);
+      }, { noTenant: true, provider: hosted });
+    });
+
+    it("refuses a no-tenant acknowledgement for a send that includes tenant context", async () => {
+      for (const send of ["sendIntuneChatMessage", "streamIntuneChatMessage"] as const) {
+        await withHarness(async ({ store, prompts, graphBuilds, graphPaths, script }) => {
+          script([{ kind: "tenant", sources: [], final: true, answer: "9 devices." }]);
+          await assert.rejects(
+            () => ask(store, send, { content: DEVICE_QUESTION, hostedProviderConsent: noTenantConsent() }),
+            /covered a send with no organization\. This send includes tenant context, so confirm it again/,
+            send,
+          );
+          assert.equal(prompts.length, 0, send);
+          assert.deepEqual(graphBuilds, [], send);
+          assert.deepEqual(graphPaths, [], send);
+          assert.equal((await store.listIntuneChatConversations()).length, 0, send);
+          // A tenant confirmation that names another model is refused (Muse round 2, Q).
+          await assert.rejects(
+            () => ask(store, send, { content: DEVICE_QUESTION, hostedProviderConsent: { tenantId: tenant.id, providerId: "anthropic", model: "claude-opus-5-5", acknowledgedAt: new Date().toISOString() } }),
+            /names a different model than the one selected/,
+            send,
+          );
+          assert.equal(prompts.length, 0, send);
+          // The tenant-bound confirmation still works for the same send.
+          const message = (await ask(store, send, { content: DEVICE_QUESTION, hostedProviderConsent: { tenantId: tenant.id, providerId: "anthropic", model: "claude-sonnet-5-5", acknowledgedAt: new Date().toISOString() } })).assistantMessage;
+          assert.equal(message.status, "completed", send);
+        }, { provider: hosted });
+      }
+    });
+  });
+});
+
+describe("hosted model gate (review round 2, item 1)", () => {
+  it("refuses every model call until the confirmation is verified", async () => {
+    const { gateHostedLlm } = await import("./service.js");
+    let calls = 0;
+    let verified = false;
+    const gated = gateHostedLlm(
+      { complete: async () => { calls += 1; return { text: "x", model: "m" }; }, stream: () => { calls += 1; return [] as never; } },
+      () => { if (!verified) throw new Error("Hosted provider confirmation is required."); },
+    );
+    await assert.rejects(async () => gated.complete(), /confirmation is required/);
+    assert.throws(() => gated.stream(), /confirmation is required/);
+    assert.equal(calls, 0);
+    verified = true;
+    await gated.complete();
+    assert.equal(calls, 1);
+  });
+});
+
+describe("code requests with nothing connected (Muse round 2, item H)", () => {
+  it("treats common request wording as a code request, and keeps run-against and tenant values out", async () => {
+    const { isExplicitDocsRequest } = await import("./planner.js");
+    for (const question of [
+      "Write a KQL query for our failed sign-ins",
+      "Can you write a KQL query for failed sign-ins?",
+      "Could you draft a PowerShell script that lists stale devices",
+      "Please write a script which shows stale devices",
+      "Generate a KQL query for risky sign-ins",
+      "Give me a PowerShell script to export compliance policies",
+      "I need you to create a query for devices without BitLocker",
+      "Help me write a Graph PowerShell script for app registrations",
+    ]) {
+      assert.equal(isExplicitDocsRequest(question), true, question);
+    }
+    for (const question of [
+      "Write a KQL query and run it against our tenant",
+      "Generate a script and execute it",
+      "Write a script that retires HR-LAPTOP-07",
+      "Which devices have not synced in 30 days?",
+      "List our stale devices",
+    ]) {
+      assert.equal(isExplicitDocsRequest(question), false, question);
+    }
   });
 });

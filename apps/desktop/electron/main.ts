@@ -731,6 +731,8 @@ function seedFirstRunCaptureState(userDataDir: string): void {
       runs: [],
       tenants: [],
       registryInstallCountsEnabled: false,
+      // A fresh install: the first-launch model scan shows first.
+      firstRunScan: "pending",
     }, null, 2)}\n`,
     "utf8",
   );
@@ -747,32 +749,6 @@ function seedFirstRunCaptureState(userDataDir: string): void {
     }, null, 2)}\n`,
     "utf8",
   );
-}
-
-function seedFirstRunCaptureRealTenant(userDataDir: string): void {
-  const statePath = join(userDataDir, "state.json");
-  const persisted = JSON.parse(readFileSync(statePath, "utf8")) as {
-    tenants?: Array<Record<string, unknown>>;
-    activeTenantId?: string;
-  } & Record<string, unknown>;
-  const tenants = Array.isArray(persisted.tenants) ? persisted.tenants : [];
-  if (!tenants.some((tenant) => tenant.id === "first-run-real-tenant")) {
-    tenants.push({
-      id: "first-run-real-tenant",
-      displayName: "Contoso Production",
-      username: "admin@contoso.invalid",
-      homeAccountId: "first-run-real-account",
-      addedAt: "2026-10-25T10:00:00.000Z",
-      lastUsedAt: "2026-10-25T12:00:00.000Z",
-      entraTier: "p2",
-      appRegistration: {
-        kind: "openadminos",
-        clientId: "11111111-2222-4333-8444-555555555555",
-      },
-    });
-  }
-  persisted.tenants = tenants;
-  writeFileSync(statePath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
 }
 
 function loadScreenshotRegistryEntries(): ScreenshotRegistryEntry[] {
@@ -1016,7 +992,8 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
 function createFirstRunCaptureProviders(): ProviderSummary[] {
   return providerCatalog.map((provider) => ({
     ...provider,
-    status: provider.id === "ollama" ? "error" : "available",
+    // Ollama is stopped in the capture: "not-installed" is what a refused connection reports.
+    status: provider.id === "ollama" ? "not-installed" : "available",
     detail:
       provider.id === "ollama"
         ? "Ollama is not running."
@@ -1134,12 +1111,7 @@ async function runScreenshotCapture(): Promise<void> {
   window.show();
   window.focus();
   if (isFirstRunCapture) {
-    await captureFirstRunShots(window, screenshotCaptureOutDir, async () => {
-      if (!screenshotCaptureUserData) {
-        throw new Error("OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA is required.");
-      }
-      seedFirstRunCaptureRealTenant(screenshotCaptureUserData);
-    });
+    await captureFirstRunShots(window, screenshotCaptureOutDir);
     app.exit(0);
     return;
   }
@@ -3962,11 +3934,26 @@ function validateHostedProviderConsent(
       includesInstructions: value.workspaceContext.includesInstructions,
     };
   }
+  const providerId = validateProviderId(value.providerId, "hostedProviderConsent.providerId");
+  const remember = typeof value.remember === "boolean" ? { remember: value.remember } : {};
+  const model = value.model === undefined ? undefined : requireBoundedString(value.model, "hostedProviderConsent.model", 256);
+  // Bound to no tenant or to one tenant, never both: a no-tenant
+  // acknowledgement covers no tenant context and no workspace.
+  if (value.noTenant !== undefined) {
+    if (value.noTenant !== true) {
+      throw new Error("hostedProviderConsent.noTenant must be true when present.");
+    }
+    if (value.tenantId !== undefined || workspaceContext) {
+      throw new Error("hostedProviderConsent.noTenant cannot be combined with a tenant or workspace context.");
+    }
+    return { noTenant: true, providerId, ...(model !== undefined ? { model } : {}), acknowledgedAt, ...remember };
+  }
   return {
     tenantId: requireBoundedString(value.tenantId, "hostedProviderConsent.tenantId", 256),
-    providerId: validateProviderId(value.providerId, "hostedProviderConsent.providerId"),
+    providerId,
+    ...(model !== undefined ? { model } : {}),
     acknowledgedAt,
-    ...(typeof value.remember === "boolean" ? { remember: value.remember } : {}),
+    ...remember,
     ...(workspaceContext ? { workspaceContext } : {}),
   };
 }
@@ -5456,6 +5443,43 @@ function registerIpcHandlers() {
     }),
   );
   ipcMain.handle("openadminos:list-providers", handleTrusted(() => store.listProviders()));
+  // The first-launch model scan: each check is sent to the window that asked as it resolves.
+  ipcMain.handle(
+    "openadminos:model-scan",
+    handleTrusted((event, scanId: unknown) => {
+      // Progress carries the id of the scan that asked, so the window ignores an older run.
+      const id = typeof scanId === "string" && scanId.length <= 64 ? scanId : undefined;
+      return store.scanModels((probe) => {
+        if (!event.sender.isDestroyed()) event.sender.send("openadminos:model-scan-progress", { scanId: id, probe });
+      });
+    }),
+  );
+  ipcMain.handle(
+    "openadminos:model-scan-retry",
+    handleTrusted((_event, providerId: unknown) => store.retryModelScanProbe(validateProviderId(providerId, "providerId"))),
+  );
+  ipcMain.handle(
+    "openadminos:complete-first-run-scan",
+    handleTrusted((_event, options: unknown) =>
+      store.completeFirstRunScan({
+        microsoftStepPending:
+          typeof options === "object" && options !== null && (options as { microsoftStepPending?: unknown }).microsoftStepPending === true,
+      }),
+    ),
+  );
+  ipcMain.handle("openadminos:complete-first-run-microsoft-step", handleTrusted(() => store.completeFirstRunMicrosoftStep()));
+  ipcMain.handle("openadminos:dismiss-sample-data-removed-notice", handleTrusted(() => store.dismissSampleDataRemovedNotice()));
+  ipcMain.handle("openadminos:refresh-providers", handleTrusted(() => store.refreshProviders()));
+  ipcMain.handle(
+    "openadminos:set-active-provider-and-model",
+    handleTrusted((_event, providerId: unknown, model: unknown) =>
+      store.setActiveProviderAndModel(validateProviderId(providerId, "providerId"), requireBoundedString(model, "model", 256)),
+    ),
+  );
+  ipcMain.handle(
+    "openadminos:start-local-runtime",
+    handleTrusted((_event, providerId: unknown) => store.startLocalRuntime(validateProviderId(providerId, "providerId"))),
+  );
   ipcMain.handle(
     "openadminos:test-provider",
     handleTrusted((_event, providerId: unknown, model?: unknown) =>
@@ -5523,6 +5547,13 @@ function registerIpcHandlers() {
         requireBoundedString(conversationId, "conversationId", 256),
       ),
     ),
+  );
+  ipcMain.handle(
+    "openadminos:preview-intune-chat-send",
+    handleTrusted((_event, input: unknown) => {
+      if (!isPlainRecord(input)) throw new Error("Chat preview input must be an object.");
+      return store.previewIntuneChatSend({ content: requireBoundedString(input.content, "content", 20_000) });
+    }),
   );
   ipcMain.handle(
     "openadminos:send-intune-chat-message",
@@ -6505,9 +6536,6 @@ function registerIpcHandlers() {
       store.cancelTenantCheck(requireBoundedString(tenantId, "tenantId", 256)),
     ),
   );
-  ipcMain.handle("openadminos:add-sample-tenant", handleTrusted(() =>
-    store.addSampleTenant(),
-  ));
   ipcMain.handle(
     "openadminos:cancel-connect-tenant",
     handleTrusted(() => store.cancelConnectTenant()),
@@ -6891,6 +6919,8 @@ if (!gotLock) {
 
     store = new AppStateStore({
       filePath: join(userDataDir, "state.json"),
+      // Network failures name the system proxy, which OpenAdminOS's own requests do not use.
+      resolveProxy: (url) => session.defaultSession.resolveProxy(url),
       tokenStore,
       tokenStoreFor,
       legacyTokenStoresFor,
@@ -6932,13 +6962,12 @@ if (!gotLock) {
     await store.resumeTenantCleanups().catch((error) =>
       console.warn("[tenant-lifecycle] resuming cleanup failed", error),
     );
+    // Pilot mode was removed: a sample tenant from an earlier version is
+    // removed once, with its runs, conversations, cache and organization.
+    await store.removeLegacySampleData().catch((error) =>
+      console.warn("[upgrade] removing the sample data failed", error),
+    );
     await store.recoverInterruptedRuns();
-    void store.refreshPilotCacheIfStale().catch((error) => {
-      console.warn(
-        "[pilot] sample cache refresh did not start",
-        error instanceof Error ? error.message : String(error),
-      );
-    });
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
     void store.processPendingRunDeliveries();

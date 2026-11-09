@@ -99,10 +99,6 @@ function organizationFields(organization: OrganizationRecord | undefined): Pick<
   return organization ? { organizationId: organization.id, organizationName: organization.name } : {};
 }
 
-function sampleDetail(sample: boolean): Record<string, ConfigurationAuditDetail> {
-  return sample ? { sampleData: true } : {};
-}
-
 /**
  * The scopes the app treats as granted, by the same rule as the runtime:
  * a connection with no recorded grants (made before grants were recorded)
@@ -110,7 +106,7 @@ function sampleDetail(sample: boolean): Record<string, ConfigurationAuditDetail>
  */
 function grantedScopeNames(tenant: TenantRecord): Set<string> {
   return new Set(
-    tenant.kind === "sample" || tenant.grantedScopes === undefined
+    tenant.grantedScopes === undefined
       ? DEFAULT_GRAPH_READ_SCOPE_NAMES.map(qualifyScope)
       : tenant.grantedScopes.map(qualifyScope),
   );
@@ -149,7 +145,7 @@ export function diffConfigurationAudit(
       type: "organization.created",
       ...organizationFields(organization),
       ...(tenantId ? { tenantId } : {}),
-      details: sampleDetail(organization.kind === "sample"),
+      details: {},
     });
   }
 
@@ -157,7 +153,6 @@ export function diffConfigurationAudit(
     const before = previousTenantById.get(tenant.id);
     const reconnected = before !== undefined && before.connectionId !== tenant.connectionId;
     const organization = organizationFields(organizationOfTenant(nextOrganizations, tenant.id));
-    const sample = sampleDetail(tenant.kind === "sample");
     if (!before || reconnected) {
       seeds.push({
         type: "microsoft365.connected",
@@ -165,12 +160,11 @@ export function diffConfigurationAudit(
         tenantId: tenant.id,
         details: {
           tenantName: tenant.displayName,
-          ...(tenant.kind === "sample" ? {} : { account: tenant.username }),
-          registration: tenant.kind === "sample" ? "sample" : tenant.appRegistration?.kind ?? "openadminos",
+          account: tenant.username,
+          registration: tenant.appRegistration?.kind ?? "openadminos",
           reconnected,
           // Counted by the runtime's rule: no recorded grants means the default read scopes.
           grantedScopeCount: grantedScopeNames(tenant).size,
-          ...sample,
         },
       });
     }
@@ -186,7 +180,7 @@ export function diffConfigurationAudit(
         type: "microsoft365.access-added",
         ...organization,
         tenantId: tenant.id,
-        details: { scopes: addedScopes, partIds: sortedDifference(afterParts, beforeParts), ...sample },
+        details: { scopes: addedScopes, partIds: sortedDifference(afterParts, beforeParts) },
       });
     }
     if (removedScopes.length > 0) {
@@ -194,7 +188,7 @@ export function diffConfigurationAudit(
         type: "microsoft365.access-removed",
         ...organization,
         tenantId: tenant.id,
-        details: { scopes: removedScopes, partIds: sortedDifference(beforeParts, afterParts), ...sample },
+        details: { scopes: removedScopes, partIds: sortedDifference(beforeParts, afterParts) },
       });
     }
   }
@@ -207,7 +201,7 @@ export function diffConfigurationAudit(
       type: "organization.renamed",
       ...organizationFields(organization),
       ...(tenantId ? { tenantId } : {}),
-      details: { previousName: before.name, ...sampleDetail(organization.kind === "sample") },
+      details: { previousName: before.name },
     });
   }
 
@@ -218,7 +212,7 @@ export function diffConfigurationAudit(
       type: "microsoft365.disconnected",
       ...organizationFields(organizationOfTenant(previousOrganizations, tenant.id)),
       tenantId: tenant.id,
-      details: { tenantName: tenant.displayName, ...sampleDetail(tenant.kind === "sample") },
+      details: { tenantName: tenant.displayName },
     });
   }
   for (const organization of previousOrganizations) {
@@ -228,7 +222,7 @@ export function diffConfigurationAudit(
       type: "organization.removed",
       ...organizationFields(organization),
       ...(tenantId ? { tenantId } : {}),
-      details: sampleDetail(organization.kind === "sample"),
+      details: {},
     });
   }
 
@@ -278,7 +272,6 @@ export function diffConfigurationAudit(
         ...(previousActive
           ? { previousOrganizationId: previousActive.id, previousOrganizationName: previousActive.name }
           : { previousNoOrganization: true }),
-        ...sampleDetail(nextActive?.kind === "sample"),
       },
     });
   }
@@ -400,6 +393,7 @@ const EVENT_TYPES: ReadonlySet<string> = new Set(CONFIGURATION_AUDIT_EVENT_TYPES
  * other data into the export.
  */
 const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[]>> = {
+  // sampleData stays readable on events recorded before pilot mode was removed.
   "microsoft365.connected": ["tenantName", "account", "registration", "reconnected", "grantedScopeCount", "sampleData"],
   "microsoft365.disconnected": ["tenantName", "sampleData"],
   "microsoft365.access-added": ["scopes", "partIds", "sampleData"],

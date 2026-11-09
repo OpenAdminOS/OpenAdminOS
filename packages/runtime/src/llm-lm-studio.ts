@@ -8,6 +8,8 @@ import type {
 
 export interface LmStudioProviderOptions {
   endpoint?: string;
+  /** Stops the request, for the first-launch scan timeout. */
+  signal?: AbortSignal;
   defaultModel?: string;
   timeoutMs?: number;
 }
@@ -265,10 +267,11 @@ export async function probeLmStudioLlm(
   const controller = new AbortController();
   const timeoutMs = options.timeoutMs ?? 1_500;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   const url = `${endpoint.replace(/\/$/, "")}/models`;
 
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetchLocal(url, { signal: controller.signal });
     if (!response.ok) {
       return {
         ready: false,
@@ -297,16 +300,28 @@ export async function probeLmStudioLlm(
           : "LM Studio server is running but no models are loaded.",
     };
   } catch (error) {
+    // Only a refused connection means the server is not running. A timeout,
+    // a stopped check or an unreadable response is a failed check.
+    if (isConnectionRefused(error)) {
+      return {
+        ready: false,
+        endpoint,
+        isLocal: endpointTrust.isLocal,
+        models: [],
+        status: "not-running",
+        detail: "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+      };
+    }
     const aborted = error instanceof Error && error.name === "AbortError";
     return {
       ready: false,
       endpoint,
       isLocal: endpointTrust.isLocal,
       models: [],
-      status: "not-running",
+      status: "error",
       detail: aborted
         ? `LM Studio did not respond within ${timeoutMs}ms.`
-        : "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+        : "LM Studio answered with a response OpenAdminOS could not read.",
     };
   } finally {
     clearTimeout(timer);
@@ -457,4 +472,41 @@ function describe(error: unknown): string {
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}...`;
+}
+
+/**
+ * A GET to a local server that retries once when the pooled keep-alive
+ * socket it reused had already been closed (`UND_ERR_SOCKET`, "other side
+ * closed"). A server stopped after an earlier check leaves that socket in
+ * the pool; on Linux the reuse fails before the close is noticed. The
+ * retry opens a new connection, which is refused when the server is gone.
+ */
+export async function fetchLocal(url: string, init: { signal?: AbortSignal } = {}): Promise<Response> {
+  try {
+    return await fetch(url, init);
+  } catch (error) {
+    const code = (error as { cause?: { code?: unknown } } | undefined)?.cause?.code;
+    if (code !== "UND_ERR_SOCKET" || init.signal?.aborted) throw error;
+    return fetch(url, init);
+  }
+}
+
+const NOT_RUNNING_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENOTFOUND", "EADDRNOTAVAIL"]);
+
+/**
+ * A refused or unreachable loopback connection: the server is not running.
+ * `fetch` puts the socket error in `cause`. A host name with both an IPv4
+ * and an IPv6 address (`localhost`) fails with an AggregateError of one
+ * error per address; it counts only when every address was refused.
+ */
+export function isConnectionRefused(error: unknown): boolean {
+  type Coded = { code?: unknown; cause?: unknown; errors?: unknown };
+  const notRunning = (value: unknown, depth: number): boolean => {
+    if (!value || typeof value !== "object" || depth > 3) return false;
+    const { code, cause, errors } = value as Coded;
+    if (typeof code === "string" && NOT_RUNNING_CODES.has(code)) return true;
+    if (Array.isArray(errors) && errors.length > 0) return errors.every((entry) => notRunning(entry, depth + 1));
+    return notRunning(cause, depth + 1);
+  };
+  return notRunning(error, 0);
 }

@@ -6,44 +6,38 @@ export const FIRST_RUN_CAPTURE_WIDTH = 1280;
 export const FIRST_RUN_CAPTURE_HEIGHT = 800;
 
 type FirstRunCaptureAction =
-  | "wait-welcome"
+  | "wait-first-run-scan"
+  | "leave-scan"
+  | "pick-services"
+  | "leave-microsoft-step"
   | "open-connect-permissions"
   | "open-own-registration"
-  | "close-setup"
-  | "start-pilot-chat"
-  | "open-pilot-agents"
-  | "run-inactive-devices"
-  | "open-write-confirm"
-  | "open-hidden-route"
-  | "open-paused-schedules";
+  | "close-setup";
 
 export const FIRST_RUN_CAPTURE_SHOTS = [
-  "welcome",
+  "first-run-scan",
+  "first-run-microsoft",
+  "first-run-microsoft-picked",
   "connect-permissions",
   "own-registration",
-  "pilot-chat",
-  "pilot-agents",
-  "pilot-agent-report",
-  "pilot-write-confirm",
-  "pilot-hidden-route",
-  "schedules-paused",
 ] as const;
 
 // Theme changes animate colors; wait for the transition before capturing.
 const THEME_SETTLE_MS = 1500;
 
-export async function captureFirstRunShots(
-  window: BrowserWindow,
-  outDir: string,
-  preparePausedSchedules: () => Promise<void>,
-): Promise<void> {
+export async function captureFirstRunShots(window: BrowserWindow, outDir: string): Promise<void> {
   await mkdir(join(outDir, "app"), { recursive: true });
   window.setContentSize(FIRST_RUN_CAPTURE_WIDTH, FIRST_RUN_CAPTURE_HEIGHT);
   window.webContents.setBackgroundThrottling(false);
   await waitForViewport(window);
 
-  await runStep(window, "wait-welcome");
-  await captureReloadedWelcomeThemes(window, outDir);
+  await runStep(window, "wait-first-run-scan");
+  await captureThemes(window, outDir, "first-run-scan");
+  await runStep(window, "leave-scan");
+  await captureThemes(window, outDir, "first-run-microsoft");
+  await runStep(window, "pick-services");
+  await captureThemes(window, outDir, "first-run-microsoft-picked");
+  await runStep(window, "leave-microsoft-step");
 
   await runStep(window, "open-connect-permissions");
   await captureThemes(window, outDir, "connect-permissions");
@@ -53,32 +47,25 @@ export async function captureFirstRunShots(
   await captureThemes(window, outDir, "own-registration");
   await runStep(window, "close-setup");
 
-  await runStep(window, "start-pilot-chat");
-  await captureThemes(window, outDir, "pilot-chat");
-
-  await runStep(window, "open-pilot-agents");
-  await captureThemes(window, outDir, "pilot-agents");
-
-  await runStep(window, "run-inactive-devices");
-  await captureThemes(window, outDir, "pilot-agent-report");
-
-  await runStep(window, "open-write-confirm");
-  await captureThemes(window, outDir, "pilot-write-confirm");
-
-  await runStep(window, "open-hidden-route");
-  await captureThemes(window, outDir, "pilot-hidden-route");
-
-  await preparePausedSchedules();
-  const loaded = new Promise<void>((resolve) =>
-    window.webContents.once("did-finish-load", () => resolve()),
-  );
-  window.webContents.reload();
-  await loaded;
-  await waitForViewport(window);
-  await runStep(window, "open-paused-schedules");
-  await captureThemes(window, outDir, "schedules-paused");
-
   console.log(`[first-run-capture] wrote ${FIRST_RUN_CAPTURE_SHOTS.length * 2} screenshots`);
+}
+
+/**
+ * The first frame after a reload can fail with UnknownVizError while the
+ * compositor has no surface yet; a few short retries wait for it.
+ */
+async function capturePage(window: BrowserWindow): Promise<Electron.NativeImage> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      return await window.webContents.capturePage();
+    } catch (error) {
+      lastError = error;
+      window.webContents.invalidate();
+      await new Promise((resolve) => setTimeout(resolve, 300));
+    }
+  }
+  throw lastError;
 }
 
 async function captureThemes(
@@ -93,24 +80,6 @@ async function captureThemes(
   }
 }
 
-async function captureReloadedWelcomeThemes(
-  window: BrowserWindow,
-  outDir: string,
-): Promise<void> {
-  for (const theme of ["light", "dark"] as const) {
-    await setCaptureTheme(window, theme);
-    const loaded = new Promise<void>((resolve) =>
-      window.webContents.once("did-finish-load", () => resolve()),
-    );
-    window.webContents.reload();
-    await loaded;
-    await waitForViewport(window);
-    await runStep(window, "wait-welcome");
-    await prepareCaptureSurface(window);
-    await writeCapture(window, outDir, "welcome", theme);
-  }
-}
-
 async function prepareCaptureSurface(window: BrowserWindow): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 600));
   await window.webContents.executeJavaScript(
@@ -119,7 +88,7 @@ async function prepareCaptureSurface(window: BrowserWindow): Promise<void> {
   );
   for (let frame = 0; frame < 3; frame += 1) {
     window.webContents.invalidate();
-    await window.webContents.capturePage();
+    await capturePage(window);
     await new Promise((resolve) => setTimeout(resolve, 200));
   }
 }
@@ -147,10 +116,10 @@ async function writeCapture(
   theme: "light" | "dark",
 ): Promise<void> {
   window.webContents.invalidate();
-  await window.webContents.capturePage();
+  await capturePage(window);
   await new Promise((resolve) => setTimeout(resolve, 100));
   window.webContents.invalidate();
-  const image = await window.webContents.capturePage();
+  const image = await capturePage(window);
   const size = image.getSize();
   if (
     size.width !== FIRST_RUN_CAPTURE_WIDTH ||
@@ -223,30 +192,57 @@ async function firstRunCaptureStepScript(
     findButton(label)!.click();
     await delay(150);
   };
-  const navigate = async (route: string) => {
-    const expected = `#${route}`;
-    if (location.hash !== expected) location.hash = route;
-    await waitFor(() => location.hash === expected, `${route} hash`);
-    await delay(200);
-  };
 
   const scrollIntoDialogView = async (selector: string) => {
     document.querySelector<HTMLElement>(selector)?.scrollIntoView({ block: "center" });
     await delay(250);
   };
 
-  if (action === "wait-welcome") {
+  if (action === "wait-first-run-scan") {
+    // The scan has settled (its stage reports the phase) and its exits are on screen.
     await waitFor(
       () =>
-        bodyText().includes("Welcome to OpenAdminOS") &&
-        bodyText().includes("Start pilot mode") &&
-        bodyText().includes("Use your own app registration."),
-      "welcome view",
+        document.querySelector('[data-phase="settled"]') !== null &&
+        Boolean(findButton("Continue without a model")),
+      "first-run model scan settled",
     );
     return;
   }
 
+  if (action === "leave-scan") {
+    // On a fresh install the scan hands over to Connect Microsoft 365.
+    await clickButton("Continue without a model");
+    await waitFor(
+      () => document.querySelector("#microsoft-step-heading") !== null && Boolean(findButton("Not now")),
+      "Connect Microsoft 365 step",
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    return;
+  }
+
+  if (action === "pick-services") {
+    for (const service of ["intune", "entra"]) {
+      const input = document.querySelector<HTMLInputElement>(`#microsoft-step-${service}`);
+      if (!input) throw new Error(`The ${service} checkbox was not found.`);
+      if (!input.checked) input.click();
+    }
+    await waitFor(
+      () => bodyText().includes("read-only Microsoft Graph permissions") && !findButton("Sign in with Microsoft")?.disabled,
+      "picked services with their permissions",
+    );
+    (document.activeElement as HTMLElement | null)?.blur();
+    await delay(200);
+    return;
+  }
+
+  if (action === "leave-microsoft-step") {
+    await clickButton("Not now");
+    await waitFor(() => bodyText().includes("Choose a model to answer with"), "Chat with no model");
+    return;
+  }
+
   if (action === "open-connect-permissions") {
+    await clickButton("Connect a tenant");
     await clickButton("Connect tenant");
     await waitFor(
       () =>
@@ -263,7 +259,12 @@ async function firstRunCaptureStepScript(
   }
 
   if (action === "open-own-registration") {
-    await clickButton("Your organization blocks third-party apps? Use your own app registration.");
+    await clickButton("Connect a tenant");
+    await clickButton("Connect tenant");
+    const own = document.querySelector<HTMLInputElement>('input[type="radio"][value="own"]') ??
+      Array.from(document.querySelectorAll<HTMLInputElement>('input[type="radio"]')).find((input) => input.closest("label")?.textContent?.includes("Your own app registration"));
+    if (!own) throw new Error("Own registration choice was not found.");
+    own.click();
     await waitFor(
       () =>
         Boolean(document.querySelector('input[name="tenant-client-id"]')) &&
@@ -283,92 +284,5 @@ async function firstRunCaptureStepScript(
       () => !bodyText().includes("Connect a Microsoft 365 tenant"),
       "setup dialog close",
     );
-    return;
   }
-
-  if (action === "start-pilot-chat") {
-    await clickButton("Start pilot mode");
-    await waitFor(
-      () =>
-        !bodyText().includes("Welcome to OpenAdminOS") &&
-        Boolean(document.querySelector('[role="group"][aria-label="Prepared prompts"]')),
-      "pilot Chat",
-    );
-    const chip = document.querySelector<HTMLButtonElement>(
-      '[role="group"][aria-label="Prepared prompts"] button',
-    );
-    if (!chip) throw new Error("Pilot prompt chip was not found.");
-    chip.click();
-    await waitFor(
-      () =>
-        bodyText().includes("managed devices have not checked in with Intune") &&
-        Boolean(document.querySelector('[role="group"][aria-label="Follow-up prompts"]')) &&
-        bodyText().includes("In production, answers come from your tenant and the model you choose."),
-      "prepared pilot answer",
-    );
-    // Pilot Chat keeps the prompt bubble at the top when the answer
-    // arrives, so the narrative is on screen. Capture what the app shows.
-    await delay(400);
-    return;
-  }
-
-  if (action === "open-pilot-agents") {
-    await navigate("/agents");
-    await waitFor(
-      () =>
-        bodyText().includes("Available in pilot mode") &&
-        bodyText().includes("Available in production") &&
-        Boolean(findButton("Run Find inactive devices")),
-      "pilot agents",
-    );
-    return;
-  }
-
-  if (action === "run-inactive-devices") {
-    await clickButton("Run Find inactive devices");
-    await waitFor(
-      () =>
-        location.hash.startsWith("#/runs/") &&
-        bodyText().includes("Prepared sample report.") &&
-        bodyText().includes("Pilot (prepared)"),
-      "completed pilot run",
-      40000,
-    );
-    await delay(500);
-    return;
-  }
-
-  if (action === "open-write-confirm") {
-    await navigate("/agents/stale-guest-cleanup/confirm");
-    await clickButton("Start run");
-    await waitFor(
-      () =>
-        location.hash.startsWith("#/runs/") &&
-        bodyText().includes("DISABLE 5 GUESTS") &&
-        bodyText().includes("Type the phrase below to confirm"),
-      "write confirmation",
-      40000,
-    );
-    await delay(500);
-    return;
-  }
-
-  if (action === "open-hidden-route") {
-    await navigate("/office");
-    await waitFor(
-      () => bodyText().includes("Agent Team is available in production. Connect your tenant to use it."),
-      "pilot hidden route",
-    );
-    return;
-  }
-
-  await navigate("/agents");
-  await waitFor(
-    () =>
-      bodyText().includes(
-        "Schedules are paused while pilot mode is active. Switch to a connected tenant to resume.",
-      ) &&
-      bodyText().includes("Switch to Contoso Production"),
-    "paused schedules notice",
-  );
 }

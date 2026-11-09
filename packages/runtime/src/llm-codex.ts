@@ -1,5 +1,5 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
-import { cliExecutablePath, cliSpawn } from "./cli-invocation.js";
+import { cliExecutablePath, cliSpawn, killCliProcess } from "./cli-invocation.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -14,6 +14,8 @@ import type {
 
 export interface CodexProviderOptions {
   binaryPath?: string;
+  /** Stops the probe and kills its CLI process, for the first-launch scan timeout. */
+  signal?: AbortSignal;
   homePath?: string;
   defaultModel?: string;
   timeoutMs?: number;
@@ -128,7 +130,7 @@ export async function probeCodexLlm(
   const homePath = expandHome(options.homePath ?? process.env.CODEX_HOME ?? "~/.codex");
   const authPath = join(homePath, "auth.json");
 
-  const binaryProbe = await probeCodexBinary(options.binaryPath);
+  const binaryProbe = await probeCodexBinary(options.binaryPath, options.signal);
   const { versionResult } = binaryProbe;
 
   if (versionResult.exitCode !== 0) {
@@ -151,6 +153,8 @@ export async function probeCodexLlm(
     binaryPath: binaryProbe.binaryPath,
     args: ["login", "status"],
     timeoutMs: 5_000,
+    ownGroup: true,
+    ...(options.signal ? { signal: options.signal } : {}),
     env: { CODEX_HOME: homePath },
   });
   if (authResult.exitCode !== 0) {
@@ -220,7 +224,7 @@ async function resolveCodexBinary(preferredBinaryPath?: string): Promise<string>
   throw new Error(detail || "Codex CLI is not installed or not executable.");
 }
 
-async function probeCodexBinary(preferredBinaryPath?: string): Promise<{
+async function probeCodexBinary(preferredBinaryPath?: string, signal?: AbortSignal): Promise<{
   binaryPath: string;
   versionResult: Awaited<ReturnType<typeof runProcess>>;
 }> {
@@ -232,10 +236,14 @@ async function probeCodexBinary(preferredBinaryPath?: string): Promise<{
     | undefined;
 
   for (const binaryPath of codexBinaryCandidates(preferredBinaryPath)) {
+    // A stopped check tries no further binaries.
+    if (signal?.aborted) break;
     const versionResult = await runProcess({
       binaryPath,
       args: ["--version"],
       timeoutMs: 5_000,
+      ownGroup: true,
+      ...(signal ? { signal } : {}),
     });
     const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
     if (versionResult.exitCode === 0) return current;
@@ -550,11 +558,20 @@ async function runProcess(input: {
   env?: NodeJS.ProcessEnv;
   stdin?: string;
   timeoutMs: number;
+  /** A probe runs in its own process group, killed as a group on abort or timeout. */
+  ownGroup?: boolean;
+  /** Kills the process when aborted, so a timed-out probe leaves nothing running. */
+  signal?: AbortSignal;
 }): Promise<{ exitCode: number | "spawn-error"; stdout: string; stderr: string }> {
   return new Promise((resolveResult) => {
+    if (input.signal?.aborted) {
+      resolveResult({ exitCode: -1, stdout: "", stderr: "The check was stopped before it started." });
+      return;
+    }
     const spawned = cliSpawn(input.binaryPath, input.args, {
       cwd: input.cwd,
       env: createCodexProcessEnv({ overrides: input.env }),
+      ...(input.ownGroup && process.platform !== "win32" ? { detached: true } : {}),
       stdio: ["pipe", "pipe", "pipe"],
     });
     if (spawned.error) {
@@ -566,10 +583,20 @@ async function runProcess(input: {
     let stdout = "";
     let stderr = "";
     let settled = false;
+    const abort = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      killCliProcess(child, input.ownGroup === true);
+      resolveResult({ exitCode: -1, stdout, stderr: "Codex CLI check was stopped." });
+    };
+    if (input.signal?.aborted) queueMicrotask(abort);
+    else input.signal?.addEventListener("abort", abort, { once: true });
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      child.kill("SIGKILL");
+      input.signal?.removeEventListener("abort", abort);
+      killCliProcess(child, input.ownGroup === true);
       resolveResult({
         exitCode: -1,
         stdout,
@@ -589,12 +616,14 @@ async function runProcess(input: {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      input.signal?.removeEventListener("abort", abort);
       resolveResult({ exitCode: "spawn-error", stdout, stderr: error.message });
     });
     child.on("close", (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      input.signal?.removeEventListener("abort", abort);
       resolveResult({ exitCode: code ?? -1, stdout: stdout.trim(), stderr: stderr.trim() });
     });
 

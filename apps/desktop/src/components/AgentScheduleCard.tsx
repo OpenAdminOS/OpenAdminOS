@@ -284,7 +284,7 @@ function ScheduleOrganizationRow({ agent }: { agent: AgentSummary }) {
   const toast = useToast();
   // Only organizations this version can make active: not the sample, and with Microsoft 365.
   const choices = resolveOrganizations(state).filter(
-    (organization) => organization.kind !== "sample" && organization.connections.microsoft365 !== undefined,
+    (organization) => organization.connections.microsoft365 !== undefined,
   );
   const current = choices.find((organization) => organization.id === agent.schedule?.organizationId);
   const [selected, setSelected] = useState(choices[0]?.id ?? "");

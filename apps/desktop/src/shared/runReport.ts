@@ -1,10 +1,8 @@
 import type { RunRecord } from "./openAdminOS.js";
-import { PILOT_COPY } from "./pilot-mode.js";
 
 export interface RunReportContext {
   agentName?: string;
   tenantName?: string;
-  sampleData?: boolean;
 }
 
 export function runReportPlaintext(
@@ -21,7 +19,6 @@ export function runReportPlaintext(
     `Provider: ${runProviderLabel(run)}`,
     // A run with no organization says so, as delivered reports do.
     run.tenantId ? `Tenant: ${tenant}` : "Organization: none",
-    ...(ctx.sampleData ? ["Data: Pilot mode sample data from a fictional company"] : []),
   ];
 
   if (run.summary) {
@@ -63,9 +60,8 @@ export function runReportMarkdown(
     `**Status:** ${run.status === "planned" ? "Dry run: not applied" : run.status}`,
     `**Started:** ${run.queuedAt}`,
     `**Duration:** ${formatDuration(run)}`,
-    `**Provider:** ${run.pilot ? PILOT_COPY.providerName : `${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`}`,
+    `**Provider:** ${run.providerId ?? "Not available"}${run.model ? ` (\`${run.model}\`)` : ""}`,
     run.tenantId ? `**Tenant:** ${tenant}` : "**Organization:** none",
-    ...(ctx.sampleData ? ["**Data:** Pilot mode sample data from a fictional company"] : []),
   ];
 
   if (run.summary) {
@@ -105,9 +101,6 @@ export function runReportMarkdown(
  * rollbacks, carry no model text and get no note.
  */
 export function aiGeneratedNote(run: RunRecord): string | undefined {
-  // Pilot runs use prepared sample text, so the note must not claim that a
-  // model produced it.
-  if (run.pilot) return PILOT_COPY.reportNote;
   if (!run.providerId) return undefined;
   const source = run.model ? `${run.providerId} (${run.model})` : run.providerId;
   return `This report includes AI-generated text, produced in OpenAdminOS with ${source}.`;
@@ -115,23 +108,12 @@ export function aiGeneratedNote(run: RunRecord): string | undefined {
 
 export function runReportJson(
   run: RunRecord,
-  ctx: RunReportContext = {},
+  _ctx: RunReportContext = {},
 ): string {
-  return JSON.stringify(
-    ctx.sampleData
-      ? {
-          sampleData: true,
-          sampleDataNotice: "Pilot mode sample data from a fictional company",
-          run,
-        }
-      : run,
-    null,
-    2,
-  );
+  return JSON.stringify(run, null, 2);
 }
 
 function runProviderLabel(run: RunRecord): string {
-  if (run.pilot) return PILOT_COPY.providerName;
   return `${run.providerId ?? "Not available"}${run.model ? ` (${run.model})` : ""}`;
 }
 
