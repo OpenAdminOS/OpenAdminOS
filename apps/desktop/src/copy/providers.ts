@@ -29,8 +29,8 @@ export const MODEL_SCAN_COPY = {
   retryLabel: (name: string) => `Check ${name} again`,
   announce: (name: string, summary: string) => `${name}: ${summary}.`,
   finishedAnnouncement: (outcome: string) => `Scan finished. ${outcome}`,
-  ledger: (targets: readonly string[]) =>
-    `What ran: ${targets.join("; ")}. The Claude Code and Codex sign-in status commands may check with their provider. No prompt was sent to any model.`,
+  ledger: (targets: readonly string[], notContacted: readonly string[] = []) =>
+    `What ran: ${targets.join("; ")}.${notContacted.length > 0 ? ` Not contacted, set outside this device: ${notContacted.join("; ")}.` : ""} The Claude Code and Codex sign-in status commands may check with their provider. No prompt was sent to any model.`,
   localTitle: (model: string) => `${model} is ready on this device`,
   hostedReady: (name: string) => `${name} is signed in on this device`,
   availableTitle: (model: string) => `${model} is ready on this device, not selected`,

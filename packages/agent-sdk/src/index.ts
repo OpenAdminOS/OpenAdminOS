@@ -58,6 +58,8 @@ export interface ModelScanProbe {
   models: string[];
   /** Ollama only: OpenAdmin 8B is pulled on this device. */
   hasOpenAdmin8B?: boolean;
+  /** The check touched nothing: its endpoint is set outside this device, so the scan refused it. */
+  notContacted?: true;
   durationMs?: number;
 }
 

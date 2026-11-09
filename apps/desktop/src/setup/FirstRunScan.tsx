@@ -445,7 +445,9 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
 
   const platform = api?.platform;
   const draggable = platform === "macos" || platform === "windows";
-  const targets = [...new Set(rows.map((probe) => probe.target))];
+  // A refused off-device endpoint ran nothing; the closing line names it as not contacted.
+  const targets = [...new Set(rows.filter((probe) => !probe.notContacted).map((probe) => probe.target))];
+  const notContacted = [...new Set(rows.filter((probe) => probe.notContacted).map((probe) => probe.target))];
   const pick = settled && result ? recommend(result.outcome, rows) : null;
   const startingId = busy?.startsWith("start:") ? busy.slice(6) : null;
   // The local data line follows the existing trust copy: with a public
@@ -577,7 +579,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                   />
                 ))}
               </ul>
-              {settled ? <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.ledger(targets)}</p> : null}
+              {settled ? <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">{MODEL_SCAN_COPY.ledger(targets, notContacted)}</p> : null}
             </section>
           </section>
         </div>

@@ -325,6 +325,20 @@ describe("first-launch model scan screen", () => {
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
   });
 
+  it("does not list a refused off-device endpoint as something that ran (Muse round 3, M3)", async () => {
+    const probes = [
+      probe("ollama", "Ollama", "local", "10.0.0.5:11434", { state: "could-not-check", summary: "Endpoint outside this device", ready: false, notContacted: true }),
+      probe("anthropic", "Claude Code", "hosted", "claude --version, claude auth status"),
+    ];
+    const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] }, probes);
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    const ledger = await screen.findByText(/^What ran:/);
+    expect(ledger.textContent).toContain("What ran: claude --version, claude auth status.");
+    expect(ledger.textContent).toContain("Not contacted, set outside this device: 10.0.0.5:11434.");
+  });
+
   it("keeps every exit disabled while a Start is polling (Muse round 3, M2)", async () => {
     const user = userEvent.setup();
     const stopped = [probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Installed, not running", ready: false })];

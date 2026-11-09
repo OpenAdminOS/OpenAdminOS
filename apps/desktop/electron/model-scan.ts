@@ -340,6 +340,7 @@ export function buildModelScanChecks(input: {
                 ...checkingProbe(meta),
                 state: "could-not-check",
                 summary: "Endpoint outside this device",
+                notContacted: true,
                 facts: [`${meta.name} is set to ${endpoint}. The scan only checks this device. Check it in Settings, Providers.`],
               };
             }

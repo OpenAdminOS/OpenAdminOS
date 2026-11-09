@@ -124,6 +124,7 @@ describe("first-launch model scan", () => {
       assert.equal(checked, false);
       assert.equal(probe!.state, "could-not-check");
       assert.equal(probe!.summary, "Endpoint outside this device");
+      assert.equal(probe!.notContacted, true, "the closing line lists it as not contacted (Muse round 3, M3)");
       assert.match(probe!.facts[0]!, /The scan only checks this device\./);
     });
   });
