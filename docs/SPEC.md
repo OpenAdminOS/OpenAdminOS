@@ -1112,6 +1112,22 @@ JSON records the start and final hash in `hashChain`, and CSV includes the hash
 and chain metadata columns. Signed or third-party cryptographic timestamps are
 deferred.
 
+The export also includes configuration changes, with source
+`configuration-change`: Microsoft 365 connected (including a reconnect) and
+disconnected, access added or removed (the scope names and service parts),
+organization created, renamed, switched (including to No organization) and
+removed, provider changed, model changed per provider, public reference
+installed, enabled, disabled and removed, and schedule assigned to an
+organization or left unassigned. Each event carries its timestamp, kind,
+organization id and name and tenant id where they apply, and only the
+identifiers and names needed to see what changed. Events are derived in the host
+by comparing the state before and after each write to `state.json`, so every
+flow records them, including organizations created and removed with their
+tenant. They are stored in `state.json` under `configurationAudit`, apart from
+run history, so run retention never prunes them; the newest 10,000 are kept.
+They never contain tokens, secrets, prompts or tenant content. Recording and
+export are free features.
+
 Linux tenant sign-in requires a real OS secret-store backend. OpenAdminOS uses
 Electron `safeStorage` for the MSAL token cache, hosted-provider credentials,
 and connector credentials, and refuses Electron's
@@ -2330,8 +2346,16 @@ North-star metric: time from install to first successful result, target under 5 
 | Schedules | Filter and columns inside Agents, plus an agent drawer section | Recurring agent runs and their latest outcome |
 | Workspace | Chat panel and palette destination | Tenant-scoped evidence, notes, linked chats, runs, and local instructions; Workspaces live in Chat |
 | Connector | Settings section and detail drawer | External integration with setup, permissions, testing, linking, and default-target controls; Connectors live in Settings |
-| Tenant | Unchanged | The Microsoft 365 tenant |
-| Provider | Unchanged | LLM backend |
+| Organization | Concept | One company you manage; it contains connections to services |
+| Connection | Concept | An organization's link to one service, such as its Microsoft 365 tenant |
+| Service | Concept | A product an organization connects, such as Intune, Entra or Defender |
+| Part | Concept | A piece of a service with its own scopes, such as Intune devices, that is added on its own |
+| Tenant | Unchanged | Only the Microsoft 365 connection of an organization |
+| No organization | Organization switcher state | No organization is active; only agents that call no service API can run |
+| Public reference | Marketplace item | A public MCP server that Chat can consult, installed, enabled, disabled and removed in the Marketplace |
+| Result connector | Settings section | Where run results are sent, such as Teams, Outlook or Slack |
+| Provider | Unchanged | The model runtime or tool, named as admins know it: Claude Code, Codex, Apple Intelligence, Ollama, LM Studio, GitHub Copilot CLI, Gemini CLI, Azure OpenAI |
+| Data location | Status strip and provider rows | Where a hosted provider sends prompts, from `providerDataLocation`, for example "Anthropic API · US" |
 | Theme | Appearance setting | Device-local System, Light, Dark, or Midnight preference shared by renderer windows and native chrome |
 
 ### Quality implementation decisions (locked for v0.4)
