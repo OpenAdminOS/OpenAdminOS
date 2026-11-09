@@ -1,6 +1,7 @@
 import {
   classifyOllamaEndpoint,
   classifyLmStudioEndpoint,
+  isConnectionRefused,
   probeAppleFoundationLlm,
   probeClaudeCodeLlm,
   probeCodexLlm,
@@ -57,6 +58,24 @@ export interface ScanCheckOptions {
   localOnly?: boolean;
   /** A CLI binary to use instead of discovery (tests). */
   binaryPath?: string;
+  /** How long an HTTP check may take: the scan passes its remaining budget. */
+  timeoutMs?: number;
+}
+
+/** At most this many Ollama model capability reads run at once. */
+const OLLAMA_SHOW_CONCURRENCY = 4;
+
+async function mapLimited<T, R>(items: readonly T[], limit: number, task: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await task(items[index]!);
+    }
+  });
+  await Promise.all(workers);
+  return results;
 }
 
 export async function checkOllama(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
@@ -66,7 +85,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
   }
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), OLLAMA_TAGS_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? OLLAMA_TAGS_TIMEOUT_MS);
   options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   const trustedProvider = endpointTrust.isLocal
     ? provider
@@ -106,7 +125,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     const showController = new AbortController();
     const showTimeout = setTimeout(() => showController.abort(), OLLAMA_SHOW_TIMEOUT_MS);
     options.signal?.addEventListener("abort", () => showController.abort(), { once: true });
-    const supported = await Promise.all(installed.map(async ({ name: model, digest }) => {
+    const supported = await mapLimited(installed, OLLAMA_SHOW_CONCURRENCY, async ({ name: model, digest }) => {
       const key = digest ? `${endpoint}\0${model}\0${digest}` : undefined;
       const known = key ? ollamaCompletionSupport.get(key) : undefined;
       if (known !== undefined) return known;
@@ -127,7 +146,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
         unverified = true;
         return false;
       }
-    })).finally(() => clearTimeout(showTimeout));
+    }).finally(() => clearTimeout(showTimeout));
     const models = installedModels.filter((_, i) => supported[i]);
 
     return {
@@ -146,13 +165,25 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
       models,
       defaultModel: models[0],
     };
-  } catch {
+  } catch (error) {
+    // Only a refused connection means Ollama is not running. A timeout, a
+    // stopped check or an unreadable response is a failed check.
+    if (isConnectionRefused(error)) {
+      return {
+        ...trustedProvider,
+        status: "not-installed",
+        detail: ollamaEndpointDetail(endpointTrust, `Ollama is not reachable on ${endpoint}`),
+        models: [],
+      };
+    }
+    const timedOut = error instanceof Error && error.name === "AbortError";
     return {
       ...trustedProvider,
-      status: "not-installed",
+      status: "error",
+      checkFailed: true,
       detail: ollamaEndpointDetail(
         endpointTrust,
-        `Ollama is not reachable on ${endpoint}`,
+        timedOut ? `Ollama on ${endpoint} did not answer in time.` : `Ollama on ${endpoint} answered with a response OpenAdminOS could not read.`,
       ),
       models: [],
     };
@@ -163,8 +194,11 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
 
 
 
-export async function checkAppleFoundation(provider: ProviderSummary): Promise<ProviderSummary> {
-  const probe = await probeAppleFoundationLlm();
+export async function checkAppleFoundation(provider: ProviderSummary, options: ScanCheckOptions = {}): Promise<ProviderSummary> {
+  const probe = await probeAppleFoundationLlm(options.signal ? { signal: options.signal } : {});
+  if (probe.failed) {
+    return { ...provider, status: "error", checkFailed: true, detail: probe.detail ?? "The Apple Foundation helper did not answer.", models: [] };
+  }
   if (!probe.installed) {
     return {
       ...provider,
@@ -213,7 +247,11 @@ export async function checkLmStudio(provider: ProviderSummary, options: ScanChec
           "Use an LM Studio-compatible endpoint outside this device. Tenant prompts leave this device when active.",
         isLocal: false,
       };
-  const probe = await probeLmStudioLlm({ endpoint });
+  const probe = await probeLmStudioLlm({
+    endpoint,
+    ...(options.signal ? { signal: options.signal } : {}),
+    ...(options.timeoutMs ? { timeoutMs: options.timeoutMs } : {}),
+  });
 
   if (!probe.ready) {
     return {

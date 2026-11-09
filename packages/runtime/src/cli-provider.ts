@@ -48,6 +48,8 @@ export async function discoverCli(name: "copilot" | "gemini", env: NodeJS.Proces
   }
   let found = false;
   for (const candidate of [...new Set(candidates)]) {
+    // A stopped check spawns nothing more.
+    if (signal?.aborted) throw new CliProviderError("request-failed", `${name} check was stopped.`);
     if (!existsSync(candidate)) continue;
     found = true;
     const binaryPath = isAbsolute(candidate) ? candidate : resolve(candidate);

@@ -4,6 +4,7 @@ import { homedir } from "node:os";
 import {
   spawn,
   spawnSync,
+  type ChildProcess,
   type ChildProcessWithoutNullStreams,
   type SpawnOptions,
   type SpawnSyncReturns,
@@ -213,6 +214,24 @@ export function cliArgs<
  * used to reject the surrounding probe and abort the whole tenant connection.
  * Returning the error instead lets callers report a normal probe failure.
  */
+/**
+ * Stops a CLI and anything it started. A probe spawned with its own
+ * process group (`ownGroup`) is killed as a group on macOS and Linux, so a
+ * wrapper script's child cannot outlive it; otherwise, and on Windows,
+ * the process itself is killed.
+ */
+export function killCliProcess(child: ChildProcess, ownGroup: boolean): void {
+  if (ownGroup && process.platform !== "win32" && typeof child.pid === "number") {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+      return;
+    } catch {
+      // The group is already gone; fall through to the process itself.
+    }
+  }
+  child.kill("SIGKILL");
+}
+
 export function cliSpawn(
   binary: string,
   args: string[],

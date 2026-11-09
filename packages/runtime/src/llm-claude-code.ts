@@ -1,5 +1,5 @@
 import { cliFailure, type CliFailure } from "./cli-provider.js";
-import { cliExecutablePath, cliSpawn } from "./cli-invocation.js";
+import { cliExecutablePath, cliSpawn, killCliProcess } from "./cli-invocation.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -199,6 +199,7 @@ export async function probeClaudeCodeLlm(
     binaryPath: binaryProbe.binaryPath,
     args: ["auth", "status", "--text"],
     timeoutMs: 5_000,
+    ownGroup: true,
     ...(options.signal ? { signal: options.signal } : {}),
     env: createClaudeCodeProcessEnv({
       overrides: claudeCodeEnvOverrides(homePath),
@@ -295,6 +296,7 @@ async function probeClaudeCodeBinary(preferredBinaryPath?: string, signal?: Abor
       binaryPath,
       args: ["--version"],
       timeoutMs: 5_000,
+      ownGroup: true,
       ...(signal ? { signal } : {}),
     });
     const current = { binaryPath: cliExecutablePath(binaryPath), versionResult };
@@ -574,6 +576,8 @@ async function runProcess(input: {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
   timeoutMs: number;
+  /** A probe runs in its own process group, killed as a group on abort or timeout. */
+  ownGroup?: boolean;
   signal?: AbortSignal;
 }): Promise<{ exitCode: number | "spawn-error"; stdout: string; stderr: string }> {
   return new Promise((resolveResult) => {
@@ -584,6 +588,7 @@ async function runProcess(input: {
     const spawned = cliSpawn(input.binaryPath, input.args, {
       cwd: input.cwd,
       env: input.env ?? createClaudeCodeProcessEnv(),
+      ...(input.ownGroup && process.platform !== "win32" ? { detached: true } : {}),
       stdio: ["ignore", "pipe", "pipe"],
     });
     if (spawned.error) {
@@ -608,7 +613,7 @@ async function runProcess(input: {
     };
     const abortFromCaller = () => {
       if (settled) return;
-      child.kill("SIGKILL");
+      killCliProcess(child, input.ownGroup === true);
       finish({
         exitCode: -1,
         stdout,
@@ -617,7 +622,7 @@ async function runProcess(input: {
     };
     const timer = setTimeout(() => {
       if (settled) return;
-      child.kill("SIGKILL");
+      killCliProcess(child, input.ownGroup === true);
       finish({
         exitCode: -1,
         stdout,

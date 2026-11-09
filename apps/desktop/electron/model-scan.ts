@@ -32,6 +32,8 @@ import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, 
 
 export const MODEL_SCAN_TIMEOUT_MS = 2_500;
 export const MODEL_SCAN_RETRY_TIMEOUT_MS = 10_000;
+/** An HTTP check's own timeout inside the scan: just under the scan timeout. */
+const SCAN_HTTP_BUDGET_MS = MODEL_SCAN_TIMEOUT_MS - 200;
 
 export interface ModelScanCheck {
   providerId: ProviderId;
@@ -346,10 +348,11 @@ export async function scanProviderCheck(
 ): Promise<ProviderSummary> {
   const base = { ...(options.signal ? { signal: options.signal } : {}), ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}) };
   switch (provider.id) {
+    // HTTP checks get the scan's budget, so their own timeout never fires first and looks like "not running".
     case "ollama":
-      return checkOllama(provider, { ...base, localOnly: true });
+      return checkOllama(provider, { ...base, localOnly: true, timeoutMs: SCAN_HTTP_BUDGET_MS });
     case "lm-studio":
-      return checkLmStudio(provider, { ...base, localOnly: true });
+      return checkLmStudio(provider, { ...base, localOnly: true, timeoutMs: SCAN_HTTP_BUDGET_MS });
     case "anthropic":
       return checkClaudeCode(provider, base);
     case "openai":
@@ -358,7 +361,7 @@ export async function scanProviderCheck(
     case "gemini":
       return checkAdditionalCli(provider, { ...base, scan: true });
     case "apple-foundation":
-      return checkAppleFoundation(provider);
+      return checkAppleFoundation(provider, base);
     case "azure-openai":
       return options.azure ? options.azure() : { ...provider, status: "not-installed", models: [] };
     default:

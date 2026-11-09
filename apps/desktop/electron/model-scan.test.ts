@@ -89,7 +89,7 @@ describe("first-launch model scan", () => {
       const urls: string[] = [];
       globalThis.fetch = (async (input: string | URL | Request) => {
         urls.push(String(input instanceof Request ? input.url : input));
-        throw new Error("connection refused");
+        throw Object.assign(new TypeError("fetch failed"), { cause: { code: "ECONNREFUSED" } });
       }) as typeof fetch;
       delete process.env.OPENAGENTS_OLLAMA_URL;
       const checks = buildModelScanChecks({
@@ -378,7 +378,7 @@ describe("review round 1 on PR #175", () => {
       const claude = await fakeCli(dir, "claude", `echo $$ > "${pidFile}"\nexec sleep 30`);
       const probe = await runScanCheck(
         { providerId: "anthropic", name: "Claude Code", where: "hosted", target: "claude auth status", run: (signal) => scanProviderCheck(catalog("anthropic"), { signal, binaryPath: claude }).then((summary) => scanProbeFromProvider(summary)) },
-        300,
+        1500,
       );
       assert.equal(probe.state, "could-not-check");
       const pid = Number((await readFile(pidFile, "utf8")).trim());

@@ -3336,14 +3336,6 @@ export class AppStateStore {
 
   /** The first-launch scan's checks, built on `checkProviderEntry`. */
   private async modelScanChecks(found: Map<ProviderId, ProviderSummary>): Promise<ModelScanCheck[]> {
-    let azureOpenAIConfig: AzureOpenAIProviderConfig | undefined;
-    let azureOpenAIConfigError: string | undefined;
-    try {
-      // Read from local state and the OS keychain only; nothing is sent to Azure here.
-      azureOpenAIConfig = await this.getAzureOpenAIConfig();
-    } catch (error) {
-      azureOpenAIConfigError = error instanceof Error ? error.message : String(error);
-    }
     return buildModelScanChecks({
       catalog: providerCatalog,
       check: async (providerId, signal) => {
@@ -3355,10 +3347,12 @@ export class AppStateStore {
           return listed;
         }
         const entry = providerCatalog.find((provider) => provider.id === providerId)!;
-        // Azure OpenAI's check reads the saved configuration only.
+        // Azure OpenAI's check reads the saved configuration and its key from
+        // the OS keychain, inside its own bounded check: a stalled keychain
+        // read times out as could not check and holds up no other check.
         const summary = await scanProviderCheck(entry, {
           signal,
-          azure: () => this.checkProviderEntry(entry, azureOpenAIConfig, azureOpenAIConfigError),
+          azure: async () => checkAzureOpenAI(entry, await this.getAzureOpenAIConfig()),
         });
         found.set(providerId, summary);
         return summary;

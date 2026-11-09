@@ -8,6 +8,8 @@ import type {
 
 export interface LmStudioProviderOptions {
   endpoint?: string;
+  /** Stops the request, for the first-launch scan timeout. */
+  signal?: AbortSignal;
   defaultModel?: string;
   timeoutMs?: number;
 }
@@ -265,6 +267,7 @@ export async function probeLmStudioLlm(
   const controller = new AbortController();
   const timeoutMs = options.timeoutMs ?? 1_500;
   const timer = setTimeout(() => controller.abort(), timeoutMs);
+  options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   const url = `${endpoint.replace(/\/$/, "")}/models`;
 
   try {
@@ -297,16 +300,28 @@ export async function probeLmStudioLlm(
           : "LM Studio server is running but no models are loaded.",
     };
   } catch (error) {
+    // Only a refused connection means the server is not running. A timeout,
+    // a stopped check or an unreadable response is a failed check.
+    if (isConnectionRefused(error)) {
+      return {
+        ready: false,
+        endpoint,
+        isLocal: endpointTrust.isLocal,
+        models: [],
+        status: "not-running",
+        detail: "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+      };
+    }
     const aborted = error instanceof Error && error.name === "AbortError";
     return {
       ready: false,
       endpoint,
       isLocal: endpointTrust.isLocal,
       models: [],
-      status: "not-running",
+      status: "error",
       detail: aborted
         ? `LM Studio did not respond within ${timeoutMs}ms.`
-        : "LM Studio isn't running or the local server is off. Start the server from LM Studio's Developer tab, then try again.",
+        : "LM Studio answered with a response OpenAdminOS could not read.",
     };
   } finally {
     clearTimeout(timer);
@@ -457,4 +472,11 @@ function describe(error: unknown): string {
 
 function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}...`;
+}
+
+/** A refused or unreachable loopback connection: the server is not running. */
+export function isConnectionRefused(error: unknown): boolean {
+  const cause = (error as { cause?: { code?: string } } | undefined)?.cause;
+  const code = cause?.code ?? (error as { code?: string } | undefined)?.code;
+  return code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EHOSTUNREACH" || code === "ENOTFOUND" || code === "EADDRNOTAVAIL";
 }
