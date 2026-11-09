@@ -77,6 +77,7 @@ const api: OpenAdminOSApi = {
   completeFirstRunScan: (options?: { microsoftStepPending?: boolean }) =>
     ipcRenderer.invoke("openadminos:complete-first-run-scan", options ? { microsoftStepPending: options.microsoftStepPending === true } : undefined),
   completeFirstRunMicrosoftStep: () => ipcRenderer.invoke("openadminos:complete-first-run-microsoft-step"),
+  dismissSampleDataRemovedNotice: () => ipcRenderer.invoke("openadminos:dismiss-sample-data-removed-notice"),
   refreshProviders: () => ipcRenderer.invoke("openadminos:refresh-providers"),
   setActiveProviderAndModel: (providerId: ProviderId, model: string) =>
     ipcRenderer.invoke("openadminos:set-active-provider-and-model", providerId, model),
@@ -496,7 +497,6 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:retry-tenant-license-check", tenantId),
   cancelTenantCheck: (tenantId) =>
     ipcRenderer.invoke("openadminos:cancel-tenant-check", tenantId),
-  addSampleTenant: () => ipcRenderer.invoke("openadminos:add-sample-tenant"),
   cancelConnectTenant: () => ipcRenderer.invoke("openadminos:cancel-connect-tenant"),
   setActiveTenant: (id: string) =>
     ipcRenderer.invoke("openadminos:set-active-tenant", id),

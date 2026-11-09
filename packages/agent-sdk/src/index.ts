@@ -733,11 +733,6 @@ export interface TenantRecord {
   addedAt: string;
   lastUsedAt?: string;
   /**
-   * Identifies the built-in fictional tenant. Absent means this is a real
-   * Microsoft 365 tenant backed by a Microsoft sign-in.
-   */
-  kind?: "sample";
-  /**
    * Detected Entra ID licensing tier for this tenant, derived from
    * `/subscribedSkus` at connection time and refreshed on a 24h
    * cadence. `unknown` means the probe hasn't run or failed (e.g.
@@ -827,8 +822,6 @@ export interface OrganizationRecord {
   id: string;
   /** Admin-visible name. Defaults to the tenant display name; renamable. */
   name: string;
-  /** The built-in sample organization that holds the pilot tenant. */
-  kind?: "sample";
   createdAt: string;
   connections: OrganizationConnections;
 }
@@ -857,7 +850,7 @@ export interface OrganizationMigrationNotice {
   /** Schedules left unassigned and paused because no real tenant was active. */
   unassignedCount: number;
   /** Why schedules were left unassigned. */
-  unassignedReason?: "no-active-tenant" | "pilot-active";
+  unassignedReason?: "no-active-tenant";
 }
 
 /**
@@ -946,11 +939,6 @@ export interface RunLogRecord {
 
 export interface RunRecord {
   dryRun?: boolean;
-  /**
-   * Set for runs on the built-in pilot tenant. Their LLM steps used
-   * prepared sample text and no model provider was contacted.
-   */
-  pilot?: true;
   /** Input settings saved at queue time for a fresh run after a dry run. */
   inputSettings?: Record<string, unknown>;
   runForRealOfRunId?: string;
@@ -1224,7 +1212,7 @@ export interface AppState {
   /**
    * Present once after the host selected a ready local provider for a user
    * who never chose one, until the user dismisses it or picks a provider.
-   * Never set in pilot mode. Hosted providers are never auto-selected.
+   * Hosted providers are never auto-selected.
    */
   providerAutoSelectNotice?: { providerId: ProviderId; providerName: string };
   /**
@@ -1238,6 +1226,8 @@ export interface AppState {
    * and the admin leaves Settings, or on a later launch.
    */
   firstRunMicrosoftStepPending?: boolean;
+  /** Pilot mode's sample data was removed at this launch; shown once in a one-line notice. */
+  sampleDataRemoved?: boolean;
   /** The MCP catalog with local install state. */
   mcpServers?: McpServerSummary[];
   /** Whether Chat offers tools, including MCP tools, to the selected model. */
@@ -3027,6 +3017,8 @@ export interface OpenAdminOSApi {
   completeFirstRunScan?(options?: { microsoftStepPending?: boolean }): Promise<AppState>;
   /** Records that the deferred Connect Microsoft 365 step was shown and left. */
   completeFirstRunMicrosoftStep?(): Promise<AppState>;
+  /** Records that the notice about removed sample data was shown. */
+  dismissSampleDataRemovedNotice?(): Promise<AppState>;
   /**
    * After the first-launch scan, provider listing serves the scan results;
    * this asks for every provider to be checked in full from the next read.
@@ -3401,8 +3393,6 @@ export interface OpenAdminOSApi {
    * tier and licenses stay as they were.
    */
   cancelTenantCheck(tenantId: string): Promise<void>;
-  /** Add or reactivate the built-in fictional tenant. This is idempotent. */
-  addSampleTenant(): Promise<AppState>;
   cancelConnectTenant(): Promise<void>;
   setActiveTenant(id: string): Promise<AppState>;
   /**
@@ -3410,12 +3400,9 @@ export interface OpenAdminOSApi {
    * The organization's Microsoft 365 tenant becomes the active tenant.
    */
   setActiveOrganization(id: string | null): Promise<AppState>;
-  /** Rename an organization. The sample organization keeps its name. */
+  /** Rename an organization. */
   renameOrganization(id: string, name: string): Promise<AppState>;
-  /**
-   * Assign an agent's schedule to an organization. The sample organization
-   * is refused: schedules never run in pilot mode.
-   */
+  /** Assign an agent's schedule to an organization. */
   assignAgentSchedule(slug: string, organizationId: string): Promise<AppState>;
   /** Hide the schedule migration notice. */
   dismissOrganizationMigrationNotice(): Promise<AppState>;

@@ -748,32 +748,6 @@ function seedFirstRunCaptureState(userDataDir: string): void {
   );
 }
 
-function seedFirstRunCaptureRealTenant(userDataDir: string): void {
-  const statePath = join(userDataDir, "state.json");
-  const persisted = JSON.parse(readFileSync(statePath, "utf8")) as {
-    tenants?: Array<Record<string, unknown>>;
-    activeTenantId?: string;
-  } & Record<string, unknown>;
-  const tenants = Array.isArray(persisted.tenants) ? persisted.tenants : [];
-  if (!tenants.some((tenant) => tenant.id === "first-run-real-tenant")) {
-    tenants.push({
-      id: "first-run-real-tenant",
-      displayName: "Contoso Production",
-      username: "admin@contoso.invalid",
-      homeAccountId: "first-run-real-account",
-      addedAt: "2026-10-25T10:00:00.000Z",
-      lastUsedAt: "2026-10-25T12:00:00.000Z",
-      entraTier: "p2",
-      appRegistration: {
-        kind: "openadminos",
-        clientId: "11111111-2222-4333-8444-555555555555",
-      },
-    });
-  }
-  persisted.tenants = tenants;
-  writeFileSync(statePath, `${JSON.stringify(persisted, null, 2)}\n`, "utf8");
-}
-
 function loadScreenshotRegistryEntries(): ScreenshotRegistryEntry[] {
   const indexPath = findScreenshotRegistryIndexPath();
   const parsed = JSON.parse(readFileSync(indexPath, "utf8")) as {
@@ -1134,12 +1108,7 @@ async function runScreenshotCapture(): Promise<void> {
   window.show();
   window.focus();
   if (isFirstRunCapture) {
-    await captureFirstRunShots(window, screenshotCaptureOutDir, async () => {
-      if (!screenshotCaptureUserData) {
-        throw new Error("OPENADMINOS_SCREENSHOT_CAPTURE_USER_DATA is required.");
-      }
-      seedFirstRunCaptureRealTenant(screenshotCaptureUserData);
-    });
+    await captureFirstRunShots(window, screenshotCaptureOutDir);
     app.exit(0);
     return;
   }
@@ -5496,6 +5465,7 @@ function registerIpcHandlers() {
     ),
   );
   ipcMain.handle("openadminos:complete-first-run-microsoft-step", handleTrusted(() => store.completeFirstRunMicrosoftStep()));
+  ipcMain.handle("openadminos:dismiss-sample-data-removed-notice", handleTrusted(() => store.dismissSampleDataRemovedNotice()));
   ipcMain.handle("openadminos:refresh-providers", handleTrusted(() => store.refreshProviders()));
   ipcMain.handle(
     "openadminos:set-active-provider-and-model",
@@ -6509,9 +6479,6 @@ function registerIpcHandlers() {
       store.cancelTenantCheck(requireBoundedString(tenantId, "tenantId", 256)),
     ),
   );
-  ipcMain.handle("openadminos:add-sample-tenant", handleTrusted(() =>
-    store.addSampleTenant(),
-  ));
   ipcMain.handle(
     "openadminos:cancel-connect-tenant",
     handleTrusted(() => store.cancelConnectTenant()),
@@ -6938,13 +6905,12 @@ if (!gotLock) {
     await store.resumeTenantCleanups().catch((error) =>
       console.warn("[tenant-lifecycle] resuming cleanup failed", error),
     );
+    // Pilot mode was removed: a sample tenant from an earlier version is
+    // removed once, with its runs, conversations, cache and organization.
+    await store.removeLegacySampleData().catch((error) =>
+      console.warn("[upgrade] removing the sample data failed", error),
+    );
     await store.recoverInterruptedRuns();
-    void store.refreshPilotCacheIfStale().catch((error) => {
-      console.warn(
-        "[pilot] sample cache refresh did not start",
-        error instanceof Error ? error.message : String(error),
-      );
-    });
     applySandboxedCodeEnabled(await store.getSandboxedCodeEnabled());
     registerIpcHandlers();
     void store.processPendingRunDeliveries();

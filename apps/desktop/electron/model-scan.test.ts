@@ -966,11 +966,10 @@ describe("after the first-run scan (review round 3, item 1)", () => {
     try {
       await store.scanModels();
       const afterScan = listed;
-      // Every exit: Continue to Chat, Open chat with a local model, Preview with sample data, then what runs in the background.
+      // Every exit: Continue to Chat, Open chat with a local model, then what runs in the background.
       await store.completeFirstRunScan();
       await store.getAppState();
       await store.setActiveProviderAndModel("ollama", "m");
-      await store.addSampleTenant().catch(() => undefined);
       await store.tickOffice().catch(() => undefined);
       await store.setActiveModel("ollama", "m").catch(() => undefined);
       assert.equal(listed, afterScan, "no exit and no background caller ran provider detection");

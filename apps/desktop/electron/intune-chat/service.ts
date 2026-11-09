@@ -161,8 +161,6 @@ import {
 } from "./chat-steps.js";
 import { TenantValueIndex } from "./tenant-values.js";
 import { usedTenantEvidence } from "../../src/shared/chat-steps.js";
-import { answerPilotChatMessage } from "./pilot-chat.js";
-import { PILOT_COPY } from "../../src/shared/pilot-mode.js";
 
 type WorkspacePromptContextPayload = {
   summary: WorkspacePromptContextSummary;
@@ -1510,15 +1508,6 @@ export class IntuneChatService {
       activeTenantId: activeTenant.id,
     });
     const selectedTenantSet = new Set(resolvedTenantIds);
-    // Pilot Chat answers prepared prompts only and never reaches a model,
-    // so the pilot tenant cannot join a multi-tenant answer.
-    if (
-      persisted.tenants.some(
-        (tenant) => tenant.kind === "sample" && selectedTenantSet.has(tenant.id),
-      )
-    ) {
-      throw new Error(PILOT_COPY.multiTenantRejected);
-    }
     const savedQuery = input.savedQueryId
       ? store
           .listSavedMultiTenantQueries()
@@ -2033,15 +2022,6 @@ export class IntuneChatService {
     const tenant = noTenant ? NO_TENANT_SCOPE : this.host.resolveTenant(persisted);
     // A tenant send runs under the tenant's lease; Disconnect refuses and drains it. No tenant, no lease.
     return this.leasedScope(noTenant ? undefined : tenant.id, undefined, async () => {
-    if (tenant.kind === "sample") {
-      return answerPilotChatMessage({
-        message: input,
-        tenant,
-        store,
-        graph: (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
-        now: this.host.now?.() ?? new Date(),
-      });
-    }
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;
@@ -2488,17 +2468,6 @@ export class IntuneChatService {
     // A tenant send runs under the tenant's lease; Disconnect stops and drains it. No tenant, no lease.
     return this.leasedScope(noTenant ? undefined : tenant.id, options.signal, async (leaseSignal) => {
     if (leaseSignal) options = { ...options, signal: leaseSignal };
-    if (tenant.kind === "sample") {
-      return answerPilotChatMessage({
-        message: input,
-        tenant,
-        store,
-        graph: (await this.host.buildGraph(tenant.id, [])).createGraph(() => {}),
-        now: this.host.now?.() ?? new Date(),
-        onEvent,
-        ...(options.signal ? { signal: options.signal } : {}),
-      });
-    }
     const providers = await this.host.listProviders();
     const provider = this.resolveActiveProvider(providers, persisted.activeProviderId);
     const providerId = provider.id;

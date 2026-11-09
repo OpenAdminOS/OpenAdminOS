@@ -611,7 +611,7 @@ export function normalizeGraphScopeName(scope: string): string {
 
 /**
  * Union of every requestable part scope. Tenants connected before grants
- * were recorded, and the sample tenant, count as having all of these.
+ * were recorded count as having all of these.
  * `Directory.Read.All` is not among them.
  */
 export const DEFAULT_GRAPH_READ_SCOPE_NAMES: readonly string[] = [
@@ -619,7 +619,6 @@ export const DEFAULT_GRAPH_READ_SCOPE_NAMES: readonly string[] = [
 ];
 
 interface GrantSource {
-  kind?: "sample";
   grantedScopes?: readonly string[];
 }
 
@@ -628,7 +627,7 @@ export function grantedScopeSet(
   input: GrantSource,
   audience: ScopeAudience = "graph",
 ): Set<string> {
-  if (input.kind === "sample" || input.grantedScopes === undefined) {
+  if (input.grantedScopes === undefined) {
     return new Set(DEFAULT_GRAPH_READ_SCOPE_NAMES);
   }
   const granted = new Set<string>();
@@ -899,8 +898,7 @@ export function agentServiceIds(agent: {
 
 /**
  * Declared services with no part granted for the tenant, in registry
- * order. The sample tenant and tenants whose grants were never recorded
- * have every service. A partly connected service is not missing: its
+ * order. Tenants whose grants were never recorded have every service. A partly connected service is not missing: its
  * missing part is consented at run time with the OpenAdminOS app.
  */
 export function missingServicesForAgent(
@@ -918,7 +916,7 @@ export function mergeGrantedScopes(
   additions: readonly string[],
 ): string[] {
   const merged = new Set(
-    current.kind === "sample" || current.grantedScopes === undefined
+    current.grantedScopes === undefined
       ? DEFAULT_GRAPH_READ_SCOPE_NAMES.map(qualifyScope)
       : current.grantedScopes.map(qualifyScope),
   );

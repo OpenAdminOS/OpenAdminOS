@@ -45,7 +45,6 @@ import {
   findRegistryAgentById,
   effectiveAgentManifestIssue,
   listAllRegistryAgentsWithIssues,
-  listBuiltInRegistryAgents,
   listRegisteredConnectors,
   loadAgentManifestPreview,
   noSecrets,
@@ -231,9 +230,6 @@ import { defaultUpdateChannel } from "../src/shared/update-channel.js";
 import { SafeStorageConnectorSecretStore } from "./connector-secret-store.js";
 import { SafeStorageProviderSecretStore } from "./provider-secret-store.js";
 import { searchEndpoints } from "./graph-catalog.js";
-import { createSampleGraph, type SampleGraph } from "./sample-tenant/graph.js";
-import { createPilotLlm } from "./sample-tenant/pilot-llm.js";
-import { PILOT_AGENT_SLUGS, PILOT_COPY } from "../src/shared/pilot-mode.js";
 import { pickLocalProviderToAutoSelect } from "../src/shared/provider-detection.js";
 import {
   MODEL_SCAN_RETRY_TIMEOUT_MS,
@@ -249,12 +245,6 @@ import {
   scanOutcome,
   type ModelScanCheck,
 } from "./model-scan.js";
-import {
-  SAMPLE_TENANT_HOME_ACCOUNT_ID,
-  SAMPLE_TENANT_ID,
-  SAMPLE_TENANT_NAME,
-  SAMPLE_TENANT_USERNAME,
-} from "./sample-tenant/dataset.js";
 
 import {
   DEFAULT_REGISTRY_SOURCE,
@@ -374,6 +364,8 @@ interface PersistedState {
   firstRunScan?: "pending";
   /** The first launch went to provider setup before Connect Microsoft 365; it shows later, once. */
   firstRunMicrosoftStep?: "pending";
+  /** The one-time removal of pilot mode's sample tenant happened; a one-line notice says so once. */
+  sampleDataRemovedNotice?: true;
   /**
    * The local provider the host selected automatically, and whether the
    * one-time Chat notice about it was dismissed. Cleared by an explicit
@@ -735,25 +727,16 @@ const OIDC_SCOPES = new Set(["openid", "profile", "offline_access", "email"]);
 export const NO_MICROSOFT_365_ORGANIZATION = (action: string) =>
   `No organization with Microsoft 365 is active. Choose one in the organization switcher, or connect a Microsoft 365 tenant in Connections, before ${action}.`;
 
+/** The tenant id pilot mode used for its sample tenant, before pilot mode was removed. */
+export const LEGACY_SAMPLE_TENANT_ID = "openadminos-sample-tenant";
+
+/** A sample tenant written by an earlier version: marked "sample", or the pilot tenant's id. */
+function isLegacySampleTenant(tenant: TenantRecord): boolean {
+  return (tenant as { kind?: unknown }).kind === "sample" || tenant.id === LEGACY_SAMPLE_TENANT_ID;
+}
+
 const AUDIT_LOG_SCHEMA_VERSION = 1;
 const AUDIT_CHAIN_START_HASH = "0".repeat(64);
-
-function sampleRelevantLicenses(): NonNullable<TenantRecord["relevantLicenses"]> {
-  return [
-    {
-      skuPartNumber: "SPE_E5",
-      displayName: "Microsoft 365 E5",
-      enabledUnits: 80,
-      consumedUnits: 70,
-    },
-    {
-      skuPartNumber: "EMSPREMIUM",
-      displayName: "Enterprise Mobility + Security E5",
-      enabledUnits: 80,
-      consumedUnits: 65,
-    },
-  ];
-}
 
 type AuditLogEventSource =
   | "run-history"
@@ -948,20 +931,7 @@ function buildAuditLogEvents(input: AuditLogBuildInput): AuditLogEventSeed[] {
     });
   }
 
-  return events
-    .map((event) => {
-      const tenant = event.tenantId ? tenantById.get(event.tenantId) : undefined;
-      if (tenant?.kind !== "sample") return event;
-      return {
-        ...event,
-        details: {
-          ...event.details,
-          sampleData: true,
-          sampleDataNotice: "Pilot mode sample data from a fictional company",
-        },
-      };
-    })
-    .sort(compareAuditEvents);
+  return events.sort(compareAuditEvents);
 }
 
 function runAuditDetails(
@@ -1035,15 +1005,11 @@ function actorForTenant(
     };
   }
   return {
-    kind: tenant.kind === "sample" ? "local-admin" : "connected-admin",
+    kind: "connected-admin",
     tenantId: tenant.id,
     tenantName: tenant.displayName,
-    ...(tenant.kind !== "sample"
-      ? {
-          username: tenant.username,
-          homeAccountId: tenant.homeAccountId,
-        }
-      : {}),
+    username: tenant.username,
+    homeAccountId: tenant.homeAccountId,
   };
 }
 
@@ -1308,7 +1274,7 @@ function withTierProbeOutcome<T extends TenantRecord>(tenant: T, outcome: TierPr
 
 /** True when the license check would run for the tenant. */
 function needsTierProbe(tenant: TenantRecord): boolean {
-  return tenant.kind === "sample" || grantedScopeSet(tenant).has("Organization.Read.All");
+  return grantedScopeSet(tenant).has("Organization.Read.All");
 }
 
 /** The warning saved when a license check is cancelled or reaches the deadline. */
@@ -1653,11 +1619,7 @@ export interface AppStateStoreOptions {
    * development workflows. Packaged builds must leave this false.
    */
   allowDevRegistrySource?: boolean;
-  /**
-   * Test hook for the pilot tenant clock. The pilot Graph, prepared Chat
-   * answers, and pilot agent text all read time from it. Production uses
-   * the system clock.
-   */
+  /** Test hook for the clock. Production uses the system clock. */
   clock?: () => Date;
   /**
    * Test hook for the interactive Microsoft sign-in used by connectTenant.
@@ -1769,7 +1731,6 @@ export class AppStateStore {
   private readonly allowDevRegistrySource: boolean;
   private readonly clock: () => Date;
   private readonly interactiveSignIn: typeof runInteractiveFlow;
-  private sampleGraph: SampleGraph;
   private tenantConnectController: AbortController | undefined;
   /** Tenant checks and license probes in progress, by tenant ID. */
   private readonly tenantChecks = new Map<
@@ -1878,7 +1839,6 @@ export class AppStateStore {
       this.tenantCheckDeadlineMs = options.tenantCheckDeadlineMs ?? TENANT_CHECK_DEADLINE_MS;
       this.tenantDrainMs = options.tenantDrainMs ?? TENANT_DRAIN_MS;
     }
-    this.sampleGraph = createSampleGraph({ clock: this.clock });
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
     this.mcpHost = new McpHost({
       clientVersion: this.appVersion,
@@ -1984,7 +1944,6 @@ export class AppStateStore {
       providerCanRun: (provider) => host.providerCanRun(provider),
       validateOfficeApproval: run => host.officeService.validateApproval(run),
       buildLlm: (providerId, model) => host.buildLlm(providerId, model),
-      buildPilotLlm: (agentSlug) => createPilotLlm({ agentSlug, clock: host.clock }),
       buildGraph: (pinnedTenantId, agentScopes, execution) =>
         host.buildGraph(pinnedTenantId, agentScopes, execution),
       readConnectorConfigs: () => host.readConnectorConfigs(),
@@ -2095,20 +2054,6 @@ export class AppStateStore {
     });
   }
   async saveOfficePersona(input: unknown) {
-    if (input && typeof input === "object" && !Array.isArray(input)) {
-      const tenantId = (input as { tenantId?: unknown }).tenantId;
-      const persisted = await this.read();
-      if (
-        typeof tenantId === "string" &&
-        persisted.tenants.some(
-          (tenant) => tenant.id === tenantId && tenant.kind === "sample",
-        )
-      ) {
-        throw new Error(
-          PILOT_COPY.featureInProduction("Agent Team"),
-        );
-      }
-    }
     return this.officeService.save(input);
   }
   deleteOfficePersona(id: string) { return this.officeService.remove(id); }
@@ -2730,7 +2675,6 @@ export class AppStateStore {
   }
 
   private createTenantSessionForRecord(tenant: TenantRecord): TenantSession {
-    if (tenant.kind === "sample") return this.sampleTenantSession();
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     return this.guardTenantSession(tenant.id, createTenantSession({
@@ -2940,12 +2884,10 @@ export class AppStateStore {
    * rather than surfaced.
    */
   private async forgetReplacedSignIn(previous: TenantRecord, current: TenantRecord): Promise<void> {
-    if (previous.kind === "sample") return;
     const previousPartition = tokenCachePartition(previous.appRegistration);
     if (previousPartition === tokenCachePartition(current.appRegistration)) return;
     const stillUsed = (await this.read()).tenants.some(
       (tenant) =>
-        tenant.kind !== "sample" &&
         tenant.homeAccountId === previous.homeAccountId &&
         tokenCachePartition(tenant.appRegistration) === previousPartition,
     );
@@ -2965,11 +2907,6 @@ export class AppStateStore {
    * and a token that arrives after closing began is withheld.
    */
   private msalClientForTenant(tenant: TenantRecord): PublicClientApplication {
-    if (tenant.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.noSignIn,
-      );
-    }
     const client = this.msalClientFor(tenant.appRegistration);
     const lifecycle = this.tenantLifecycle;
     const guarded = new Set<PropertyKey>(["acquireTokenSilent", "acquireTokenInteractive", "acquireTokenByCode", "acquireTokenByDeviceCode", "acquireTokenByRefreshToken"]);
@@ -3019,18 +2956,6 @@ export class AppStateStore {
    */
   withTenantLease<T>(tenantId: string, work: (signal: AbortSignal) => Promise<T>): Promise<T> {
     return this.tenantLifecycle.withTenantLease(tenantId, (lease) => work(lease.signal));
-  }
-
-  private sampleTenantSession(): TenantSession {
-    return {
-      tenantId: SAMPLE_TENANT_ID,
-      username: SAMPLE_TENANT_USERNAME,
-      acquireTokenForScopes: async () => {
-        throw new Error(
-          PILOT_COPY.noSignIn,
-        );
-      },
-    };
   }
 
   private requireIntelligenceStore(): IntelligenceSqliteStore {
@@ -3351,13 +3276,13 @@ export class AppStateStore {
     }
     if (persisted.firstRunScan === "pending") state.firstRunScanPending = true;
     if (persisted.firstRunMicrosoftStep === "pending") state.firstRunMicrosoftStepPending = true;
+    if (persisted.sampleDataRemovedNotice === true) state.sampleDataRemoved = true;
     const autoSelection = persisted.providerAutoSelection;
     if (
       autoSelection &&
       !autoSelection.noticeDismissed &&
       persisted.providerChosenByUser === false &&
-      activeProvider?.id === autoSelection.providerId &&
-      !this.isPilotModeActive(persisted)
+      activeProvider?.id === autoSelection.providerId
     ) {
       state.providerAutoSelectNotice = {
         providerId: activeProvider.id,
@@ -3762,7 +3687,6 @@ export class AppStateStore {
       const outcome = scanOutcome(providers, {
         activeProviderId: current.activeProviderId,
         providerChosenByUser: current.providerChosenByUser !== false,
-        pilot: this.isPilotModeActive(current),
         ...(current.activeModelByProviderId ? { activeModelByProviderId: current.activeModelByProviderId } : {}),
       });
       const select = outcome.kind === "local-selected";
@@ -3869,6 +3793,36 @@ export class AppStateStore {
   }
 
   /** The deferred Connect Microsoft 365 step was shown and left; it does not show again on its own. */
+  /**
+   * One-time upgrade: pilot mode and its sample data were removed
+   * (maintainer decision, 2026-11-09). A sample tenant left by an earlier
+   * version goes through the same removal as Disconnect, which deletes its
+   * runs, conversations, cache and organization, and the app says so once.
+   * Idempotent: with no sample tenant left it does nothing.
+   */
+  async removeLegacySampleData(): Promise<boolean> {
+    const sample = (await this.read()).tenants.find(isLegacySampleTenant);
+    if (!sample) return false;
+    await this.disconnectTenant(sample.id);
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      await this.write({ ...persisted, sampleDataRemovedNotice: true });
+    });
+    this.emitStateChanged("sample-data-removed");
+    return true;
+  }
+
+  /** The notice about removed sample data was shown. */
+  async dismissSampleDataRemovedNotice(): Promise<AppState> {
+    await this.serialize(async () => {
+      const current = await this.read();
+      if (current.sampleDataRemovedNotice !== true) return;
+      const { sampleDataRemovedNotice: _shown, ...rest } = current;
+      await this.write(rest);
+    });
+    return this.getAppState();
+  }
+
   async completeFirstRunMicrosoftStep(): Promise<AppState> {
     await this.serialize(async () => {
       const current = await this.read();
@@ -4189,12 +4143,7 @@ export class AppStateStore {
     input: SetGraphCacheRefreshScheduleInput,
   ): Promise<GraphCacheRefreshScheduleSettings> {
     const persisted = await this.read();
-    const tenant = this.resolveTenant(persisted, input.tenantId);
-    if (tenant.kind === "sample" && input.enabled) {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Scheduling"),
-      );
-    }
+    this.resolveTenant(persisted, input.tenantId);
     return this.chatService.setGraphCacheRefreshSchedule(input);
   }
 
@@ -4556,11 +4505,6 @@ export class AppStateStore {
   async createWorkspace(input: CreateWorkspaceInput): Promise<WorkspaceDetail> {
     const persisted = await this.read();
     const tenant = this.resolveTenant(persisted, input.tenantId);
-    if (tenant.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Workspaces", true),
-      );
-    }
     return this.requireIntelligenceStore().createWorkspace({
       id: `wksp_${randomUUID()}`,
       tenantId: tenant.id,
@@ -4708,12 +4652,7 @@ export class AppStateStore {
       if (!resolvedTenantIds.has(mapping.tenantId)) {
         throw new Error(`Tenant ${mapping.tenantId} is not part of this multi-tenant result.`);
       }
-      const tenant = this.resolveTenant(persisted, mapping.tenantId);
-      if (tenant.kind === "sample") {
-        throw new Error(
-          PILOT_COPY.featureInProduction("Workspaces", true),
-        );
-      }
+      this.resolveTenant(persisted, mapping.tenantId);
       if (mapping.workspaceId) {
         const workspace = store.getWorkspace(
           mapping.workspaceId,
@@ -4781,11 +4720,6 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
-    if (tenant?.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connectors", true),
-      );
-    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         NO_MICROSOFT_365_ORGANIZATION("testing this connector"),
@@ -5006,11 +4940,6 @@ export class AppStateStore {
     const tenant = activeTenantId
       ? persisted.tenants.find((t) => t.id === activeTenantId)
       : undefined;
-    if (tenant?.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connectors", true),
-      );
-    }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
         NO_MICROSOFT_365_ORGANIZATION("invoking connectors"),
@@ -5074,11 +5003,6 @@ export class AppStateStore {
     const tenant = persisted.tenants.find(t => t.id === input.tenantId);
     const factory = findConnectorFactory(input.connectorId);
     if (!tenant || !factory) throw new Error("Tenant or connector is unavailable.");
-    if (tenant.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connector deliveries", true),
-      );
-    }
     const config = persisted.connectors?.[input.connectorId]?.config ?? {};
     if (JSON.stringify(config) !== JSON.stringify(input.config)) throw new Error("Connector settings changed. Review a new preview before sending.");
     // The connector transport refuses every request once the organization
@@ -5343,11 +5267,6 @@ export class AppStateStore {
       const activeTenant = persisted.activeTenantId
         ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
         : undefined;
-      if (activeTenant?.kind === "sample" && schedule?.enabled) {
-        throw new Error(
-          PILOT_COPY.featureInProduction("Scheduling"),
-        );
-      }
       const idx = persisted.installedAgents.findIndex(
         (agent) => agent.slug === slug || agent.id === slug,
       );
@@ -5373,7 +5292,7 @@ export class AppStateStore {
         // (`assignAgentSchedule`) assigns. The renderer never sets it here.
         const organizationId = existing.schedule
           ? existing.schedule.organizationId
-          : activeTenant && activeTenant.kind !== "sample"
+          : activeTenant
             ? organizationForTenant(persisted.organizations ?? [], activeTenant.id)?.id
             : undefined;
         next[idx] = {
@@ -5406,7 +5325,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentTeamsDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentTeamsDelivery(slug, delivery);
   }
 
@@ -5414,7 +5332,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentWhatsAppWebDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentWhatsAppWebDelivery(slug, delivery);
   }
 
@@ -5422,7 +5339,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentOutlookDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentOutlookDelivery(slug, delivery);
   }
 
@@ -5430,7 +5346,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSlackDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSlackDelivery(slug, delivery);
   }
 
@@ -5438,7 +5353,6 @@ export class AppStateStore {
     slug: string,
     delivery: AgentDiscordDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentDiscordDelivery(slug, delivery);
   }
 
@@ -5446,23 +5360,7 @@ export class AppStateStore {
     slug: string,
     delivery: AgentSignalDelivery | null,
   ): Promise<AppState> {
-    await this.assertSampleDeliveryAllowed(delivery);
     return this.runDeliveryService.updateAgentSignalDelivery(slug, delivery);
-  }
-
-  private async assertSampleDeliveryAllowed(
-    delivery: { enabled: boolean } | null,
-  ): Promise<void> {
-    if (!delivery?.enabled) return;
-    const persisted = await this.read();
-    const activeTenant = persisted.activeTenantId
-      ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
-      : undefined;
-    if (activeTenant?.kind === "sample") {
-      throw new Error(
-        PILOT_COPY.featureInProduction("Connector deliveries", true),
-      );
-    }
   }
 
   /**
@@ -5478,15 +5376,10 @@ export class AppStateStore {
     const activeTenant = persisted.activeTenantId
       ? persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId)
       : undefined;
-    // Schedules run against the active tenant. They wait in pilot mode,
-    // and without an active tenant, where every due schedule would only
+    // Schedules run against the active tenant. They wait without an
+    // active tenant, where every due schedule would only
     // record a "No tenant connected" failure. The schedules surfaces say so.
-    const pausedReason =
-      activeTenant?.kind === "sample"
-        ? "pilot mode is active"
-        : !activeTenant
-          ? "no tenant is connected"
-          : undefined;
+    const pausedReason = !activeTenant ? "no tenant is connected" : undefined;
     if (pausedReason) {
       const dueCount = persisted.installedAgents.filter(
         (agent) => agent.schedule?.enabled && nowMs >= scheduleDueAtMs(agent, nowMs),
@@ -5578,7 +5471,7 @@ export class AppStateStore {
     // only advances, like a skipped schedule.
     const current = await this.read();
     const tenantId = current.tenants.some(
-      (tenant) => tenant.id === current.activeTenantId && tenant.kind !== "sample",
+      (tenant) => tenant.id === current.activeTenantId,
     )
       ? current.activeTenantId
       : undefined;
@@ -6132,11 +6025,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async installAgent(agentId: string): Promise<AppState> {
-    // Agent install is a production feature. The renderer hides it in pilot
-    // mode; the host refuses it too so no other caller can bypass that.
-    if (this.isPilotModeActive(await this.read())) {
-      throw new Error(PILOT_COPY.featureInProduction("Agent install"));
-    }
     let installedSlug: string | undefined;
     let installIdForReport: string | undefined;
     const initialCandidate = this.listRegistryAgents().find(
@@ -6154,9 +6042,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 
     await this.serialize(async () => {
       const persisted = await this.read();
-      if (this.isPilotModeActive(persisted)) {
-        throw new Error(PILOT_COPY.featureInProduction("Agent install"));
-      }
       const existing = persisted.installedAgents.find(
         (agent) =>
           agent.id === agentId ||
@@ -6656,21 +6541,20 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
    * active one is not ready. Runs whenever provider readiness is listed for
    * app state, so a local runtime started later is picked up too. Hosted
    * providers are never selected here: that would send tenant data off the
-   * device without the user deciding it. Skipped in pilot mode.
+   * device without the user deciding it.
    */
   private async autoSelectLocalProvider(
     persisted: PersistedState,
     providers: ProviderSummary[],
   ): Promise<PersistedState> {
     if (persisted.providerChosenByUser !== false) return persisted;
-    if (this.isPilotModeActive(persisted)) return persisted;
     const candidate = pickLocalProviderToAutoSelect(providers, persisted.activeProviderId);
     if (!candidate) return persisted;
     return this.serialize(async () => {
       // Re-check against the latest state: the user may have picked a
-      // provider, or pilot mode may have started, since the first read.
+      // provider since the first read.
       const current = await this.read();
-      if (current.providerChosenByUser !== false || this.isPilotModeActive(current)) {
+      if (current.providerChosenByUser !== false) {
         return current;
       }
       const next = pickLocalProviderToAutoSelect(providers, current.activeProviderId);
@@ -6684,13 +6568,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       console.info(`[providers] selected local provider ${next.id} automatically`);
       return updated;
     });
-  }
-
-  private isPilotModeActive(persisted: PersistedState): boolean {
-    if (!persisted.activeTenantId) return false;
-    return persisted.tenants.some(
-      (tenant) => tenant.id === persisted.activeTenantId && tenant.kind === "sample",
-    );
   }
 
   async setActiveModel(
@@ -6958,14 +6835,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     // another account signing in, is saved as a tenant warning.
     void this.backgroundTierProbe(tenant);
 
-    // Connecting a real tenant ends pilot mode. The pilot tenant goes
-    // through the normal disconnect path, which purges its runs, cache,
-    // and conversations without any Microsoft sign-in call.
-    if ((await this.read()).tenants.some((entry) => entry.kind === "sample")) {
-      await this.disconnectTenant(SAMPLE_TENANT_ID);
-      await this.setActiveTenant(tenant.id);
-    }
-
     return this.getAppState();
   }
 
@@ -6996,9 +6865,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
     if (!tenant) {
       throw new Error("Tenant not found. Refresh Settings and try again.");
-    }
-    if (tenant.kind === "sample") {
-      throw new Error("The sample tenant already includes every service.");
     }
     if (tenant.appRegistration?.kind === "custom") {
       // Consent for an own registration is granted on the app itself.
@@ -7047,9 +6913,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
     if (!tenant) {
       throw new Error("Tenant not found. Refresh Settings and try again.");
-    }
-    if (tenant.kind === "sample") {
-      throw new Error("The sample tenant already includes every service.");
     }
     if (tenant.appRegistration?.kind !== "custom") {
       throw new Error(
@@ -7279,104 +7142,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     throw new TenantCheckSupersededError(current ? "reconnected" : "disconnected");
   }
 
-  async addSampleTenant(): Promise<AppState> {
-    const addedAt = new Date().toISOString();
-    let created = false;
-    const sample: TenantRecord = {
-      id: SAMPLE_TENANT_ID,
-      kind: "sample",
-      displayName: SAMPLE_TENANT_NAME,
-      username: SAMPLE_TENANT_USERNAME,
-      homeAccountId: SAMPLE_TENANT_HOME_ACCOUNT_ID,
-      addedAt,
-      lastUsedAt: addedAt,
-      entraTier: "p2",
-      entraTierDetectedAt: addedAt,
-      relevantLicenses: sampleRelevantLicenses(),
-    };
-    await this.serialize(async () => {
-      const persisted = await this.read();
-      this.openTenantForConnection(persisted, SAMPLE_TENANT_ID);
-      const existing = persisted.tenants.find((tenant) => tenant.id === SAMPLE_TENANT_ID);
-      created = !existing;
-      if (created) this.sampleGraph = createSampleGraph({ clock: this.clock });
-      const pilotAgents = this.pilotAgentsToInstall(persisted.installedAgents, addedAt);
-      const nextTenants = existing
-        ? persisted.tenants.map((tenant) =>
-            tenant.id === SAMPLE_TENANT_ID
-              ? (() => {
-                  const { appRegistration: _, ...sampleState } = tenant;
-                  return { ...sampleState, ...sample, addedAt: tenant.addedAt };
-                })()
-              : tenant,
-          )
-        : [...persisted.tenants, sample];
-      await this.write({
-        ...persisted,
-        installedAgents: [...persisted.installedAgents, ...pilotAgents],
-        tenants: nextTenants,
-        activeTenantId: SAMPLE_TENANT_ID,
-      });
-    });
-    if (created) {
-      void this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID }).catch(
-        (error) =>
-          console.warn(
-            "[sample-tenant] cache preload did not start",
-            error instanceof Error ? error.message : String(error),
-          ),
-      );
-    }
-    return this.getAppState();
-  }
-
-  /**
-   * The three pilot agents install from the bundled registry, without the
-   * Hub and without reporting an install, so pilot mode works offline and
-   * sends nothing. They stay installed after pilot mode ends.
-   */
-  private pilotAgentsToInstall(
-    installedAgents: AgentSummary[],
-    installedAt: string,
-  ): AgentSummary[] {
-    const installed = new Set(installedAgents.flatMap((agent) => [agent.slug, agent.id]));
-    const bundled = listBuiltInRegistryAgents();
-    return PILOT_AGENT_SLUGS.flatMap((slug) => {
-      if (installed.has(slug)) return [];
-      const entry = bundled.find((agent) => agent.slug === slug);
-      if (!entry) {
-        console.warn(`[pilot] bundled agent ${slug} is missing; it will not be available in pilot mode`);
-        return [];
-      }
-      const compatible = withAgentCompatibility(entry, this.appVersion);
-      const agent = toInstalledAgent(compatible, installedAt);
-      agent.provenance = buildAgentProvenance({ agent: compatible, installedAt: agent.installedAt });
-      return [agent];
-    });
-  }
-
-  /**
-   * Pilot data is materialized relative to each request, but Chat history
-   * and Settings read the SQLite cache. Refresh it when the app starts in
-   * pilot mode with a cache older than one day.
-   */
-  async refreshPilotCacheIfStale(): Promise<boolean> {
-    const persisted = await this.read();
-    const active = persisted.tenants.find((tenant) => tenant.id === persisted.activeTenantId);
-    if (active?.kind !== "sample" || !this.intelligenceStore) return false;
-    const status = await this.chatService.getGraphCacheStatus(SAMPLE_TENANT_ID);
-    const oldest = Math.min(
-      ...status.resources.map((resource) =>
-        resource.refreshedAt ? Date.parse(resource.refreshedAt) : 0,
-      ),
-    );
-    if (Number.isFinite(oldest) && this.clock().getTime() - oldest < 24 * 60 * 60 * 1000) {
-      return false;
-    }
-    await this.startGraphCachePreload({ tenantId: SAMPLE_TENANT_ID });
-    return true;
-  }
-
   cancelConnectTenant(): void {
     this.tenantConnectController?.abort();
     this.tenantConnectController = undefined;
@@ -7482,16 +7247,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     tenant: TenantRecord,
     options: { force?: boolean },
   ): Promise<Exclude<TierProbeOutcome, { kind: "failed" | "cancelled" }>> {
-    if (tenant.kind === "sample") {
-      return {
-        kind: "found",
-        fields: {
-          entraTier: "p2",
-          entraTierDetectedAt: new Date().toISOString(),
-          relevantLicenses: sampleRelevantLicenses(),
-        },
-      };
-    }
     // The probe reads /subscribedSkus. Without Organization.Read.All it
     // would open a consent prompt the admin did not ask for, so the
     // licenses are not checked until a service that includes it is
@@ -7621,9 +7376,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (!target) {
         throw new Error("That organization is no longer on this device. Reopen Connections and try again.");
       }
-      if (target.kind === "sample") {
-        throw new Error("The sample organization keeps its name. Rename an organization you connected.");
-      }
       await this.write({
         ...persisted,
         organizations: organizations.map((entry) => (entry.id === id ? { ...entry, name: normalized } : entry)),
@@ -7638,9 +7390,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       const organization = (persisted.organizations ?? []).find((entry) => entry.id === organizationId);
       if (!organization) {
         throw new Error("That organization is no longer on this device. Choose another one for this schedule.");
-      }
-      if (organization.kind === "sample") {
-        throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
       }
       if (!organization.connections.microsoft365) {
         throw new Error("This version of OpenAdminOS cannot run schedules in that organization. Choose another one, or update OpenAdminOS.");
@@ -7697,7 +7446,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         runs: persisted.runs.filter((run) => run.tenantId !== id),
         tenantRemovals: [
           ...(persisted.tenantRemovals ?? []).filter((removal) => removal.tenantId !== id),
-          tenantRemovalFor(current, new Date().toISOString(), removedRunIds),
+          tenantRemovalFor(current, new Date().toISOString(), removedRunIds, { legacySample: isLegacySampleTenant(current) }),
         ],
       };
       const deliveryQueue = (persisted.runDeliveryQueue ?? []).filter((item) => !removed.has(item.runId));
@@ -7801,7 +7550,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     });
     if (failure === undefined) {
       this.tenantLifecycle.markRemoved(id);
-      if (removal.kind === "sample") this.sampleGraph = createSampleGraph({ clock: this.clock });
     } else {
       console.warn("[tenant-lifecycle] cleanup is pending", { tenantId: id, error: failure });
     }
@@ -7961,17 +7709,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       );
     }
     const scopes = (agentScopes ?? []).filter((scope) => scope.length > 0);
-    if (tenant.kind === "sample") {
-      const tenantSession = this.sampleTenantSession();
-      return {
-        createGraph: (log) =>
-          this.graphFactory
-            ? this.graphFactory({ tenantId: tenant.id, scopes, log })
-            : this.sampleGraph,
-        tenantId: tenant.id,
-        tenantSession,
-      };
-    }
     const client = this.msalClientForTenant(tenant);
     const openBrowser = this.openBrowser;
     const tenantSession = this.guardTenantSession(tenant.id, createTenantSession({
@@ -8088,7 +7825,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     await this.serialize(async () => {
       const persisted = await this.read();
       const tenant = persisted.tenants.find((entry) => entry.id === tenantId);
-      if (!tenant || tenant.kind === "sample" || tenant.grantedScopes === undefined) return;
+      if (!tenant || tenant.grantedScopes === undefined) return;
       // A token from an earlier connection says nothing about this one.
       if (tenant.connectionId !== signedIn.connectionId) return;
       const known = new Set(tenant.grantedScopes.map(qualifyScope));
@@ -8116,14 +7853,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const persisted = await this.read();
     // A run of a tenant that was disconnected meanwhile sends no report.
     if (run.tenantId && !persisted.tenants.some((tenant) => tenant.id === run.tenantId)) return;
-    if (
-      run.tenantId &&
-      persisted.tenants.some(
-        (tenant) => tenant.id === run.tenantId && tenant.kind === "sample",
-      )
-    ) {
-      return;
-    }
     return this.runDeliveryService.enqueueRunDeliveries(run);
   }
 
@@ -8278,7 +8007,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
               // Before scheduler failures carried a tenant, a schedule that
               // fired with no tenant connected saved a tenant-less failed
               // run. No tenant removal ever matched it, so it outlived
-              // every tenant, including the pilot tenant. Every run start
+              // every tenant. Every run start
               // pins a tenant, so a tenant-less scheduled run can only be
               // one of these records.
               .filter((run) => !(run.trigger === "schedule" && !run.tenantId))
@@ -8429,6 +8158,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       if (mcpServers) state.mcpServers = mcpServers;
       if ((parsed as { firstRunScan?: unknown }).firstRunScan === "pending") state.firstRunScan = "pending";
       if ((parsed as { firstRunMicrosoftStep?: unknown }).firstRunMicrosoftStep === "pending") state.firstRunMicrosoftStep = "pending";
+      if ((parsed as { sampleDataRemovedNotice?: unknown }).sampleDataRemovedNotice === true) state.sampleDataRemovedNotice = true;
       const rawConnectors = (parsed as { connectors?: unknown }).connectors;
       if (
         rawConnectors &&

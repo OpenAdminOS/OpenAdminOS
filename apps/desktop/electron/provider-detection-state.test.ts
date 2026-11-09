@@ -11,7 +11,6 @@ import {
 } from "@openadminos/agent-sdk";
 import type { TokenCacheStorage } from "@openadminos/runtime";
 
-import { SAMPLE_TENANT_ID } from "./sample-tenant/dataset.js";
 import { AppStateStore } from "./state.js";
 
 type Readiness = Partial<Record<ProviderId, Partial<ProviderSummary>>>;
@@ -227,33 +226,6 @@ describe("provider detection", () => {
       await fixture.close();
     }
   });
-
-  it("does nothing in pilot mode", async () => {
-    const fixture = await makeFixture({ providers: {} });
-    try {
-      await fixture.store.addSampleTenant();
-      fixture.setProviders({ "lm-studio": READY_LM_STUDIO });
-      const state = await fixture.store.getAppState();
-      assert.equal(state.activeTenantId, SAMPLE_TENANT_ID);
-      assert.equal(state.activeProviderId, "ollama");
-      assert.equal(state.providerAutoSelectNotice, undefined);
-      assert.equal((await fixture.persisted()).providerAutoSelection, undefined);
-    } finally {
-      await fixture.close();
-    }
-  });
-
-  it("hides an earlier notice while pilot mode is active", async () => {
-    const fixture = await makeFixture({ providers: { "lm-studio": READY_LM_STUDIO } });
-    try {
-      assert.ok((await fixture.store.getAppState()).providerAutoSelectNotice);
-      const pilot = await fixture.store.addSampleTenant();
-      assert.equal(pilot.activeTenantId, SAMPLE_TENANT_ID);
-      assert.equal((await fixture.store.getAppState()).providerAutoSelectNotice, undefined);
-    } finally {
-      await fixture.close();
-    }
-  });
 });
 
 interface PersistedSnapshot {
@@ -306,7 +278,6 @@ async function makeFixture(options: {
       return JSON.parse(await readFile(statePath, "utf8")) as PersistedSnapshot;
     },
     async close() {
-      await store.cancelGraphCachePreload(SAMPLE_TENANT_ID).catch(() => undefined);
       for (const entry of stores) entry.close();
       await rm(dir, { recursive: true, force: true });
     },
