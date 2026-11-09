@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useNavigate } from "react-router";
 
 import { FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, providerDataLocation } from "../../copy";
@@ -17,6 +17,7 @@ import {
   type IntuneChatNotConnected,
   type ProviderId,
   type ProviderSummary,
+  type ServiceId,
   type TenantRecord,
 } from "../../shared/openAdminOS";
 import { detectedHostedProviders } from "../../shared/provider-detection";
@@ -349,7 +350,8 @@ export function NotConnectedCard({
 }) {
   const toast = useToast();
   const { openSetupForParts, openOwnRegistration } = useSetupFlow();
-  const [adding, setAdding] = useState(false);
+  const [adding, setAdding] = useState<ServiceId | null>(null);
+  const headingId = useId();
   const [copyFailed, setCopyFailed] = useState<string | null>(null);
   const parts = notConnected.partIds.flatMap((id) => {
     const part = servicePartById(id);
@@ -360,6 +362,12 @@ export function NotConnectedCard({
   const tenant = notConnected.tenantId ? tenants.find((entry) => entry.id === notConnected.tenantId) : undefined;
   const noTenant = notConnected.reason === "no-tenant";
   const resolved = notConnectedResolved(notConnected, activeTenant);
+  // The next action follows what is still missing: after one service is
+  // granted, the card offers the others, and Ask again once none is left.
+  const grantsFrom = tenant ?? (noTenant ? undefined : activeTenant);
+  const available = grantsFrom ? availableScopeSet(grantsFrom) : undefined;
+  const missingParts = available ? parts.filter((part) => !part.scopes.every((scope) => available.has(scope.name))) : parts;
+  const missingServices = servicesOfParts(missingParts.map((part) => part.id));
 
   if (resolved && activeTenant) {
     return (
@@ -415,13 +423,13 @@ export function NotConnectedCard({
   };
 
   return (
-    <section aria-labelledby={`not-connected-${notConnected.partIds.join("-") || "tenant"}`} className="rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border)]">
+    <section aria-labelledby={headingId} className="rounded-xl bg-[var(--color-surface)] p-4 ring-1 ring-[var(--color-border)]">
       <div className="flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--color-bg-raised)] text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
           <IconShield size={16} />
         </span>
         <div className="min-w-0">
-          <h3 id={`not-connected-${notConnected.partIds.join("-") || "tenant"}`} className="text-md font-semibold text-[var(--color-text)]">
+          <h3 id={headingId} className="text-md font-semibold text-[var(--color-text)]">
             {title}
           </h3>
           <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">{body}</p>
@@ -450,10 +458,12 @@ export function NotConnectedCard({
               {NOT_CONNECTED_COPY.ownRegistration}
             </Button>
           </>
-        ) : tenant && services[0] ? (
-          <Button size="sm" variant="primary" onClick={() => setAdding(true)}>
-            {NOT_CONNECTED_COPY.add(services[0].title)}
-          </Button>
+        ) : tenant ? (
+          missingServices.map((service, index) => (
+            <Button key={service.id} size="sm" variant={index === 0 ? "primary" : "secondary"} onClick={() => setAdding(service.id)}>
+              {NOT_CONNECTED_COPY.add(service.title)}
+            </Button>
+          ))
         ) : null}
         <Button size="sm" variant="ghost" leadingIcon={<IconCopy size={12} />} onClick={() => void askAdmin()}>
           {NOT_CONNECTED_COPY.askAdmin}
@@ -466,8 +476,14 @@ export function NotConnectedCard({
         </div>
       ) : null}
       <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">{NOT_CONNECTED_COPY.fine}</p>
-      {tenant && services[0] ? (
-        <ServiceAccessDialog tenant={tenant} serviceId={adding ? services[0].id : null} initialPartIds={parts.filter((part) => part.service === services[0]!.id).map((part) => part.id)} open={adding} onClose={() => setAdding(false)} />
+      {tenant ? (
+        <ServiceAccessDialog
+          tenant={tenant}
+          serviceId={adding}
+          initialPartIds={missingParts.filter((part) => part.service === adding).map((part) => part.id)}
+          open={adding !== null}
+          onClose={() => setAdding(null)}
+        />
       ) : null}
     </section>
   );
