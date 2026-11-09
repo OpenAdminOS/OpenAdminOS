@@ -324,6 +324,7 @@
     .scan .acts { display: flex; gap: 8px; margin-top: 18px; }
     .scan .keep { display: flex; gap: 12px; align-items: center; border-top: 1px solid var(--line-soft); margin-top: 16px; padding-top: 12px; color: var(--text-2); font-size: var(--fs-small); }
     .scan { padding: 18px 26px 28px; background: var(--bg); min-height: 620px; }
+    .sub-h { font: 500 18px var(--font-serif); margin: 36px 0 6px; }
     .scan-brand { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: var(--fs-small); }
     .scan-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 48px; margin-top: 34px; }
     .scan-title { font: 500 34px/1.1 var(--font-serif); letter-spacing: -0.02em; margin: 0; }
@@ -431,7 +432,7 @@
 
     <!-- B -->
     <section class="section" id="b">
-      <h2>B. First launch: the model scan</h2>
+      <h2>B. First launch: the model scan, then Microsoft 365</h2>
       <p class="lede">A fresh install opens one full-window screen before anything else. It checks this device for model runtimes and AI tools the admin is already signed in to, every check in parallel, and shows each one resolve. The model is the only thing Chat cannot work without, so it is the only setup shown up front. Here Ollama and LM Studio are installed but not running, and Claude Code and Codex are signed in.</p>
       <div class="frame">
         <div class="scan">
@@ -446,11 +447,11 @@
               <p class="lead">Signed in on this device</p>
               <h3 class="hero">Claude Code</h3>
               <p class="line">It is not selected until you choose it, because prompts leave this device when it answers.</p>
-              <p class="where">Prompts go to Anthropic API · US</p>
+              <p class="where">Prompts leave this device through Claude Code; location set by your account</p>
               <div class="acts"><button class="btn primary">Use Claude Code</button><button class="btn">Use Codex</button></div>
-              <p class="where small-w">Codex: prompts go to OpenAI API · US</p>
+              <p class="where small-w">Codex: prompts leave this device through Codex; location set by your account</p>
               <div class="keep"><span>To keep everything on this device, start Ollama.</span><button class="btn">Start Ollama</button></div>
-              <p class="small"><a class="link" href="#">Continue to Chat without a model</a> · Not ready to set up a model? <a class="link" href="#">Preview with sample data</a></p>
+              <p class="small"><a class="link" href="#">Continue without a model</a></p>
               <div class="scan-head"><span>On this device</span><a class="link" href="#">Scan again</a></div>
               <ul class="ledger">
                 <li data-tone="found"><span class="m"></span><span class="n">Ollama</span><span class="r">Installed, not running <code>localhost:11434</code></span></li>
@@ -469,7 +470,44 @@
         <li>Ollama or LM Studio installed but not running gets Start: the Ollama app on macOS or <code>ollama serve</code>, or <code>lms server start</code>, then that runtime is checked again. A failure names the command to run by hand.</li>
         <li>Local only: loopback ports, local files and each CLI's own version and sign-in status. An Ollama or LM Studio endpoint off the device is not contacted, and no prompt is sent.</li>
         <li>Outcomes follow the provider rules. A ready local model is selected and named ("OpenAdmin 8B is ready on this device", Open Chat, Nothing leaves this device). A signed-in hosted tool is offered with its residency line and needs one click, as here. With nothing found, the screen offers OpenAdmin 8B (<code>ollama run openadminos/openadmin-8b</code>), all providers, and Scan again. The model explorer (#102) replaces the provider setup link when it ships.</li>
-        <li>The scan runs once, on the first launch. Settings, Providers has Scan again. Continue to Chat without a model leads to the inline model choice in Chat.</li>
+        <li>The scan runs once, on the first launch. Settings, Providers has Scan again. Continue without a model leads to step 2 and then to the inline model choice in Chat.</li>
+        <li>No sample data (maintainer decision, 2026-11-09): nothing offers pilot mode.</li>
+      </ul>
+      <h3 class="sub-h">Step 2: Connect Microsoft 365</h3>
+      <p class="lede">The same stage, with the services around this device instead of the tools. Header: "1 Model, 2 Microsoft 365". Here Intune and Entra are picked; nothing was preselected.</p>
+      <div class="frame">
+        <div class="scan">
+          <div class="scan-brand"><span class="mark">oa</span> OpenAdminOS <span style="margin-left:auto;color:var(--text-3);font-weight:400">&#10003; Model <span style="display:inline-block;width:24px;height:1px;background:var(--line);vertical-align:middle;margin:0 8px"></span> <b style="color:var(--text)">2 Microsoft 365</b></span></div>
+          <div class="scan-grid">
+            <div class="stage" aria-hidden="true">
+              <svg viewBox="0 0 100 100"><circle cx="50" cy="50" r="38" class="orb"/><circle cx="50" cy="50" r="22" class="orb in"/><line x1="50" y1="39" x2="50" y2="18.4" class="lk" style="stroke:var(--text-3);stroke-dasharray:1.1 1.1"/><line x1="59.5" y1="55.5" x2="77.4" y2="65.8" class="lk" style="stroke:var(--text-3);stroke-dasharray:1.1 1.1"/></svg>
+              <div class="dev">oa</div>
+              <div class="nd" style="left:50%;top:12%"><span class="svc lg off intune" style="width:48px;height:48px;border-radius:13px">In</span><span class="nm">Intune</span><span class="st">Selected</span></div>
+              <div class="nd" style="left:82.9%;top:69%"><span class="svc lg off entra" style="width:48px;height:48px;border-radius:13px">En</span><span class="nm">Entra</span><span class="st">Selected</span></div>
+              <div class="nd" style="left:17.1%;top:69%"><span class="svc lg off defender" style="width:48px;height:48px;border-radius:13px">De</span><span class="nm">Defender</span><span class="st">Not connected</span></div>
+            </div>
+            <div>
+              <h3 class="hero" style="font-size:34px">Connect Microsoft 365</h3>
+              <p class="line">Pick the services you manage. OpenAdminOS asks Microsoft for read-only access to those, and nothing else.</p>
+              <ul class="ledger">
+                <li data-tone="ready"><span class="svc off intune">In</span><span class="n">&#9745; Intune</span><span class="r">Managed devices, compliance and configuration policies, apps, scripts and Autopilot.</span></li>
+                <li data-tone="ready"><span class="svc off entra">En</span><span class="n">&#9745; Entra</span><span class="r">Users, groups, app registrations, roles, Conditional Access, sign-in logs and risk signals.</span></li>
+                <li data-tone="muted"><span class="svc off defender">De</span><span class="n">&#9744; Defender</span><span class="r">Microsoft Defender alerts and incidents, and Secure Score.</span></li>
+              </ul>
+              <p class="small">21 read-only Microsoft Graph permissions: Intune <code>User.Read.All, GroupMember.Read.All, DeviceManagementManagedDevices.Read.All, ...</code> Entra <code>Application.Read.All, Policy.Read.All, AuditLog.Read.All, ...</code> Sign-in <code>openid, profile, offline_access, User.Read</code></p>
+              <div class="acts"><button class="btn primary">Sign in with Microsoft</button></div>
+              <div class="acts" style="margin-top:8px"><button class="btn">Use our own app registration</button><button class="btn">Ask an admin to approve</button></div>
+              <p class="small" style="border-top:1px solid var(--line-soft);padding-top:12px"><a class="link" href="#">Not now</a><br>Chat works without it. A question about your own devices or users asks you to connect first.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+      <ul class="notes">
+        <li>Nodes are dashed until connected. A selected service gets a dashed link to the device; after a successful connect its tile turns solid and the link draws in, once. The checkboxes are the accessible source; clicking a node toggles it too.</li>
+        <li>The permission list names every read-only permission the picked services need, a shared one once, plus the four sign-in scopes. It scrolls so the actions stay in view.</li>
+        <li>Sign in with Microsoft opens the existing connect dialog with the picked parts preselected and the app choice open. Use our own app registration opens it with that choice made. Ask an admin to approve copies the consent request with the admin consent link; when the clipboard refuses, the message is shown to copy by hand. Proxy and offline failures show the designed network message in the dialog, and the step stays.</li>
+        <li>After a connect the dialog closes and the step reads "Fabrikam is connected", lists each service with its parts, the signed-in account and the enterprise application, and offers Open Chat. Chat then shows "Ask about Intune" starters for what was connected.</li>
+        <li>Not now opens Chat; the not-connected card (section D) stays for tenant questions. The step is skipped when a tenant is already connected and reopens from Connections (Settings, Tenants until Connections ships), without the step indicator.</li>
       </ul>
     </section>
 
