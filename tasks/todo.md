@@ -1731,3 +1731,30 @@ M4. [x] SPEC says "A click, Skip or any key settles at once"; it is Escape, Skip
 - M3: `1d0bc8d3`. Probes carry `notContacted`; the closing line lists only what ran and names refused endpoints as not contacted.
 - M4: SPEC says Escape, Skip or a click.
 
+
+## PR #175 review round 4 (GPT-6.1-Sol, head feafb9a, 2026-11-09)
+
+Blocking
+1. [x] Manual rescans restart unrestricted discovery: only a completed first run enters the scan-results mode, so Scan again after a restart is followed by full discovery (off-device endpoints, Copilot's network probe). Every scan enters it; completed-profile regression test.
+
+Should fix
+2. [x] Gemini's successful Test leaves activation disabled: the cached summary is not refreshed after the request. Refresh it after success and failure; tests for both.
+3. [x] "Show all providers" exits during Start, and `finish` allows navigation while Start polls. Disable every exit during active operations; extend the busy-exit test.
+4. [x] First-run screenshot capture waits for text the screen never renders ("What this device can answer with"). Wait for the settled scan and its controls, remove the unused constant, run the capture once.
+
+### Muse Wonder Full round 4 (head feafb9a, Node 22, no blocking findings)
+
+Its four should-fix items are GPT's round 4 items 1 to 4. Additions:
+
+A. [x] The busy-exit fix also covers the row Retry button and the set-up buttons; every exit and action is disabled while an action or a Retry runs.
+B. [x] Windows tree kill cannot reach a child whose wrapper already exited (`taskkill /T` cannot resolve a dead pid). Narrow the `terminateCli` comment and SPEC to what Windows guarantees, or use a Job Object.
+
+### Round 4 responses
+
+- 1: `192c6558`. Every scan and Retry enters the scan-results mode, not only a completed first run. Tests in a completed profile: after Scan again, app state, listing and the Office tick run no provider factory call until Refresh providers; off-device Ollama and LM Studio endpoints the scan named not contacted are never fetched afterwards.
+- 2: `c7837970`. After a Gemini Test, while listing serves cached results, Gemini is checked again. Tests with a Gemini CLI spy: a successful Test shows connected; a failed one shows error, signed out.
+- 3: `8f13e630`. Show all providers and the other set-up buttons are disabled while busy, and `finish` refuses while an action runs. The busy-exit test covers Show all providers.
+- 4: `40614d82`. The capture waits for the settled phase and the two exits by their labels; `titleDone` removed; the capture script pins the device scale to 1 so a Retina Mac also produces 1280x800; the capture fixture's Ollama is stopped (not "running, no text model" with a "not running" detail). `npm run screenshots:first-run` passed: 18 screenshots. Renderer test pins what the capture waits for.
+- A: `23ae4d6e`. One scan action at a time: exits, Start, the switches and the row Retry wait for any action or Retry in progress. Tests: during a Retry, the exits, Use Claude Code and Start are disabled; during a Start, Retry is. The round 2 ordering test now runs Retries one after another and still checks that an older numbered result is ignored.
+- B: `309b8bfd`. Comment and SPEC state that on Windows `taskkill /T` ends the tree while the wrapper runs and does not reach a child left by a wrapper that already exited; a Job Object would close that. No behaviour change, so no new test.
+
