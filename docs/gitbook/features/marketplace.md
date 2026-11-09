@@ -23,7 +23,7 @@ Results come back as third-party reference material. Chat numbers and cites them
 | Microsoft Release Communications | www.microsoft.com | Microsoft | Microsoft 365 roadmap items and Azure updates, including retirements | `get_recent_m365_roadmaps`, `get_m365_roadmap_by_id`, `get_recent_azure_updates`, `get_azure_update_by_id` |
 | WindowsForum | mcp.windowsforum.com | WindowsForum.com | Windows update KB articles, release dates and known issues | `search_kb`, `get_kb_article` |
 | Splashtop API Reference | docs.splashtop.com | Splashtop | The Splashtop Open API reference: endpoints, parameters, regions | `search-endpoints`, `list-endpoints`, `get-endpoint`, `get-server-variables` |
-| Splashtop Docs | support-splashtopbusiness.splashtop.com | Splashtop | Splashtop Help Center articles. Built into OpenAdminOS: no MCP server in between | `search_articles`, `get_article` |
+| Splashtop Docs MCP | support-splashtopbusiness.splashtop.com | Splashtop | Answers questions from the Splashtop documentation, with links to the articles. Built into OpenAdminOS | `search_articles`, `get_article` |
 | endoflife.ai | mcp.endoflife.ai | EndofLife AI Inc. | End-of-life and end-of-support dates, lifecycles, upgrade paths, CISA KEV exposure | Every tool except `scan_stack` and `check_sbom` |
 
 The **Splashtop** listing is a connection, not a reference: it opens the connect step on **Connections**, where the Splashtop Open API is connected to one organization with an API token. See [Splashtop](../services/splashtop.md).

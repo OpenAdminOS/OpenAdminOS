@@ -265,7 +265,7 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     description:
       "The Splashtop Open API reference: endpoints, parameters, authentication and regions for Splashtop Enterprise. Chat can look up which endpoint lists computers, sessions or logs and how to call it. Read-only reference; it never calls the Splashtop API for you.",
     pitch: "Splashtop Open API reference: endpoints, parameters and how to call them.",
-    useFor: "Splashtop Open API questions: which endpoint to use, its parameters, authentication and regional base URLs. Not for how to set up, use or troubleshoot Splashtop products (that is Splashtop Docs), not for Microsoft 365.",
+    useFor: "Splashtop Open API questions: which endpoint to use, its parameters, authentication and regional base URLs. Not for how to set up, use or troubleshoot Splashtop products (that is Splashtop Docs MCP), not for Microsoft 365.",
     aliases: ["splashtop api", "splashtop api reference", "splashtop open api"],
     topics: ["splashtop", "remote access", "remote support", "splashtop api", "open api"],
     auth: "none",
@@ -282,14 +282,14 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   },
   {
     id: "splashtop-kb",
-    name: "Splashtop Docs",
+    name: "Splashtop Docs MCP",
     publisher: "Splashtop",
     url: SPLASHTOP_KB_URL,
     description:
-      "Splashtop's documentation at support-splashtopbusiness.splashtop.com: setup, how-to and troubleshooting articles for Splashtop Business, Enterprise, SOS and Remote Support. Built into OpenAdminOS: Chat searches the Help Center directly from this device, with no MCP server in between and no sign-in.",
-    pitch: "Splashtop documentation: setup, how-tos and troubleshooting, from support-splashtopbusiness.splashtop.com.",
-    useFor: "How to set up, use or troubleshoot Splashtop products: Streamer deployment, connection errors, SOS, file transfer, remote reboot. Not for the Splashtop API reference, not for Microsoft 365.",
-    aliases: ["splashtop", "splashtop docs", "splashtop documentation", "splashtop knowledge base", "splashtop help center", "splashtop support"],
+      "Ask questions about Splashtop and get answers from the Splashtop documentation at support-splashtopbusiness.splashtop.com: setup, deployment, how-tos and troubleshooting for Splashtop Business, Enterprise, SOS and Remote Support. Chat finds the matching articles, reads them and answers with links to the sources. Built into OpenAdminOS: the documentation is searched directly from this device, with no sign-in.",
+    pitch: "Ask about Splashtop and get answers from the Splashtop documentation, with links to the articles.",
+    useFor: "Any question about Splashtop products answered from the Splashtop documentation: setup, Streamer deployment, connection errors, SOS, file transfer, remote reboot, settings and licensing. Not for the Splashtop Open API reference, not for Microsoft 365.",
+    aliases: ["splashtop", "splashtop docs", "splashtop docs mcp", "splashtop documentation", "splashtop knowledge base", "splashtop help center", "splashtop support"],
     topics: ["splashtop", "streamer", "splashtop sos", "remote access", "remote support", "remote reboot"],
     auth: "none",
     readOnly: true,

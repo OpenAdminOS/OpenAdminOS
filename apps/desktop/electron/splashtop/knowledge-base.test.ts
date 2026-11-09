@@ -45,7 +45,7 @@ const SEARCH = {
   ],
 };
 
-describe("Splashtop Docs (built-in reference)", () => {
+describe("Splashtop Docs MCP (built-in reference)", () => {
   it("is a public, read-only catalog entry with the two tools, on Splashtop's Help Center host", () => {
     assert.ok(entry.builtin);
     assert.equal(new URL(entry.url).hostname, SPLASHTOP_KB_HOST);
@@ -59,7 +59,7 @@ describe("Splashtop Docs (built-in reference)", () => {
     const connected = await host.connect(entry);
     assert.deepEqual(connected.tools.map((tool) => tool.name), ["search_articles", "get_article"]);
     assert.deepEqual(connected.missingTools, []);
-    assert.equal(connected.serverName, "Splashtop Docs");
+    assert.equal(connected.serverName, "Splashtop Docs MCP");
     assert.equal(requests.length, 0);
   });
 

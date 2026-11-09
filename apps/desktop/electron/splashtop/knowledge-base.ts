@@ -81,10 +81,10 @@ function retryAfterText(headers: Headers): string {
 }
 
 function httpError(status: number, headers: Headers, what: string): McpHostError {
-  if (status === 404) return new McpHostError("tool-error", `The Splashtop Docs has no ${what} (HTTP 404). It may have been removed or is not published in that language.`);
-  if (status === 429) return new McpHostError("server-error", `The Splashtop Docs is limiting requests (HTTP 429). Wait ${retryAfterText(headers)}, then ask again.`);
-  if (status === 400 || status === 422) return new McpHostError("tool-error", `The Splashtop Docs did not accept the search (HTTP ${status}). Ask with a few plain product words.`);
-  return new McpHostError("server-error", `The Splashtop Docs at ${SPLASHTOP_KB_HOST} answered HTTP ${status}. Retry later.`);
+  if (status === 404) return new McpHostError("tool-error", `Splashtop Docs MCP has no ${what} (HTTP 404). It may have been removed or is not published in that language.`);
+  if (status === 429) return new McpHostError("server-error", `Splashtop Docs MCP is limiting requests (HTTP 429). Wait ${retryAfterText(headers)}, then ask again.`);
+  if (status === 400 || status === 422) return new McpHostError("tool-error", `Splashtop Docs MCP did not accept the search (HTTP ${status}). Ask with a few plain product words.`);
+  return new McpHostError("server-error", `Splashtop Docs MCP at ${SPLASHTOP_KB_HOST} answered HTTP ${status}. Retry later.`);
 }
 
 async function getJson(fetch: FetchLike, url: URL, signal: AbortSignal, what: string): Promise<Record<string, unknown>> {
@@ -94,7 +94,7 @@ async function getJson(fetch: FetchLike, url: URL, signal: AbortSignal, what: st
   } catch (error) {
     if (error instanceof McpHostError) throw error;
     signal.throwIfAborted();
-    throw new McpHostError("unreachable", `The Splashtop Docs could not be reached at ${SPLASHTOP_KB_HOST}. Check the network connection or proxy, then retry.`);
+    throw new McpHostError("unreachable", `Splashtop Docs MCP could not be reached at ${SPLASHTOP_KB_HOST}. Check the network connection or proxy, then retry.`);
   }
   if (!response.ok) {
     await response.body?.cancel().catch(() => undefined);
@@ -105,10 +105,10 @@ async function getJson(fetch: FetchLike, url: URL, signal: AbortSignal, what: st
     body = await response.json();
   } catch (error) {
     signal.throwIfAborted();
-    throw new McpHostError("server-error", `The Splashtop Docs sent an answer OpenAdminOS could not read.`);
+    throw new McpHostError("server-error", `Splashtop Docs MCP sent an answer OpenAdminOS could not read.`);
   }
   if (!body || typeof body !== "object" || Array.isArray(body)) {
-    throw new McpHostError("server-error", `The Splashtop Docs sent an answer OpenAdminOS could not read.`);
+    throw new McpHostError("server-error", `Splashtop Docs MCP sent an answer OpenAdminOS could not read.`);
   }
   return body as Record<string, unknown>;
 }
@@ -169,7 +169,7 @@ async function getArticle(args: Record<string, unknown>, fetch: FetchLike, signa
   const body = await getJson(fetch, url, signal, `article ${id} in ${locale}`);
   const article = body.article && typeof body.article === "object" ? (body.article as Record<string, unknown>) : undefined;
   const title = typeof article?.title === "string" ? oneLine(article.title, 200) : "";
-  if (!article || !title) throw new McpHostError("server-error", "The Splashtop Docs sent an article without a title. OpenAdminOS did not use it.");
+  if (!article || !title) throw new McpHostError("server-error", "Splashtop Docs MCP sent an article without a title. OpenAdminOS did not use it.");
   const text = clip(articleText(typeof article.body === "string" ? article.body : ""), ARTICLE_TEXT_LIMIT);
   const link = httpsOnHost(article.html_url);
   const data = {
@@ -185,7 +185,7 @@ async function getArticle(args: Record<string, unknown>, fetch: FetchLike, signa
 }
 
 export const SPLASHTOP_KNOWLEDGE_BASE: BuiltinReference = {
-  serverName: "Splashtop Docs",
+  serverName: "Splashtop Docs MCP",
   serverVersion: "built-in",
   tools: [
     {
@@ -217,6 +217,6 @@ export const SPLASHTOP_KNOWLEDGE_BASE: BuiltinReference = {
   call(name, args, fetch, signal) {
     if (name === "search_articles") return searchArticles(args, fetch, signal);
     if (name === "get_article") return getArticle(args, fetch, signal);
-    return Promise.reject(new McpHostError("unknown-tool", `The Splashtop Docs has no tool named ${name}. Nothing was sent.`, false));
+    return Promise.reject(new McpHostError("unknown-tool", `Splashtop Docs MCP has no tool named ${name}. Nothing was sent.`, false));
   },
 };
