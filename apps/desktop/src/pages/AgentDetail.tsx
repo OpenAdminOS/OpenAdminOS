@@ -657,7 +657,7 @@ export default function AgentDetail({
           {agent.manifestError ? <Badge tone="danger">{AGENT_COPY.invalidBadge}</Badge> : null}
           {licenseMissing ? <Badge tone="warning">License required</Badge> : null}
         </div>
-        <AgentNeedChips needs={agentNeeds(agent, pilot ? undefined : activeTenant, resolveOrganizations(state).length > 0)} />
+        <AgentNeedChips needs={agentNeeds(agent, activeTenant, resolveOrganizations(state).length > 0)} />
         {activeTenant && !pilot && missingAgentServices.length > 0 ? (
           <ServiceNotConnectedNotice
             tenant={activeTenant}
