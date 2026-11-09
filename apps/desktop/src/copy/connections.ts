@@ -65,7 +65,7 @@ export const CONNECTIONS_COPY = {
     questionWords: "Words from your questions",
     noReferences: "Nowhere, no public reference is on",
     reports: "Run reports, by delivery rule or agent step",
-    noReports: "Nowhere, no rule or step uses a connector that is set up",
+    noReports: "Nowhere, no saved rule or step sends to a connector",
     reportsLoading: "Checking result connectors",
     reportsLoadingSentence: "Where run reports go is being checked.",
     reportsFailed: "Result connectors could not be checked",
@@ -113,10 +113,10 @@ export const CONNECTIONS_COPY = {
     `${name} was not changed.${detail ? ` ${detail}` : ""} Try again.`,
   resultsHeading: "Results go to",
   resultsSent: (names: readonly string[]) =>
-    `Run reports and agent messages leave this device to ${names.length <= 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}.`,
-  resultsNone: "No run report or agent message leaves this device: no saved delivery rule or agent step uses a connector that is set up.",
+    `Run reports and agent messages can leave this device to ${names.length <= 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}. A connection test is not required for that: saved credentials are used when a report is sent.`,
+  resultsNone: "No run report or agent message leaves this device: no saved delivery rule or agent step sends to a connector.",
   resultsUnset: (names: readonly string[]) =>
-    `Saved delivery rules or agent steps use ${names.length <= 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}, which ${names.length === 1 ? "is" : "are"} not set up, so nothing is sent there. Set ${names.length === 1 ? "it" : "them"} up below.`,
+    `Saved delivery rules use ${names.length <= 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}, which ${names.length === 1 ? "has" : "have"} no destination set, so nothing is sent there. Set one below.`,
   resultsBody:
     "Where agents send finished run reports. Saved delivery rules post automatically, including for scheduled runs; agent steps that send a message show a preview first.",
   organizationsHeading: "Organizations on this device",

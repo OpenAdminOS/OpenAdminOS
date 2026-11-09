@@ -623,3 +623,105 @@ describe("direct Teams and Outlook delivery of a run with no organization (Muse 
     }
   });
 });
+
+describe("delivery decision parity with the destination list (review round 4)", () => {
+  type Fixture = {
+    name: string;
+    delivery: NonNullable<AgentSummary["delivery"]>;
+    connectorId: "slack" | "discord" | "teams";
+    connectorName: string;
+    config: Record<string, unknown>;
+    /** The health status the renderer shows; the host never reads it. */
+    status: "unknown" | "error" | "needs-setup" | "connected";
+    tenantless?: boolean;
+  };
+  const fixtures: Fixture[] = [
+    {
+      name: "a saved Slack token with no global configuration and a channel on the agent rule",
+      delivery: { slack: { enabled: true, useDefaultChannel: false, channel: "C999" } },
+      connectorId: "slack", connectorName: "Slack", config: {}, status: "unknown",
+    },
+    {
+      name: "Slack with a stale error status and a default channel",
+      delivery: { slack: { enabled: true, useDefaultChannel: true } },
+      connectorId: "slack", connectorName: "Slack", config: { defaultChannel: "C123" }, status: "error",
+    },
+    {
+      name: "Slack whose rule uses the default channel when none is saved",
+      delivery: { slack: { enabled: true, useDefaultChannel: true } },
+      connectorId: "slack", connectorName: "Slack", config: {}, status: "connected",
+    },
+    {
+      name: "Slack whose rule names an empty channel",
+      delivery: { slack: { enabled: true, useDefaultChannel: false, channel: "  " } },
+      connectorId: "slack", connectorName: "Slack", config: { defaultChannel: "C123" }, status: "connected",
+    },
+    {
+      name: "a Discord webhook saved without a test",
+      delivery: { discord: { enabled: true } },
+      connectorId: "discord", connectorName: "Discord", config: {}, status: "needs-setup",
+    },
+    {
+      name: "Teams for a run with no organization",
+      delivery: { teams: { enabled: true } },
+      connectorId: "teams", connectorName: "Microsoft Teams", config: {}, status: "connected", tenantless: true,
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    it(`sends exactly when the list says it may: ${fixture.name}`, async () => {
+      const { manualRunReportDestinations, reportDestinations, resultDestinations } = await import(
+        "../src/shared/delivery-destinations.js"
+      );
+      const dir = await mkdtemp(join(tmpdir(), "openadminos-delivery-parity-"));
+      const statePath = join(dir, "state.json");
+      const requests: string[] = [];
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        requests.push(String(input instanceof Request ? input.url : input));
+        const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+        return new Response(JSON.stringify({ ok: true, channel: body.channel, ts: "1.2", id: "1", channel_id: "2" }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch;
+      const agent = deliveryAgentWith(fixture.delivery);
+      await writeJson(statePath, {
+        activeProviderId: "ollama",
+        installedAgents: [agent],
+        runs: [completedRun("run-parity")],
+        tenants: [],
+        connectors: { [fixture.connectorId]: { config: fixture.config } },
+        runDeliveryQueue: [{ ...connectorQueueItem("run-parity", "slack"), id: `run-parity:${fixture.connectorId}`, connectorId: fixture.connectorId }],
+      });
+      const store = new AppStateStore({
+        filePath: statePath,
+        tokenStore,
+        userDataPath: dir,
+        statsApiUrl: "",
+        connectorSecretsFor: () => ({
+          get: async (key) =>
+            key === "botToken" ? "xoxb-test" : key === "webhookUrl" ? "https://discord.com/api/webhooks/123/abc" : undefined,
+          set: async () => undefined,
+          remove: async () => undefined,
+        }),
+      });
+      try {
+        await store.processPendingRunDeliveries();
+        const summary = {
+          descriptor: { id: fixture.connectorId, name: fixture.connectorName },
+          config: fixture.config,
+          status: fixture.status,
+        } as never;
+        const listed = fixture.tenantless
+          ? manualRunReportDestinations(agent, false, [summary]).mayGo.includes(fixture.connectorName)
+          : reportDestinations(resultDestinations([agent], [summary])).includes(fixture.connectorName);
+        assert.equal(requests.length > 0, listed, `host sent ${requests.length} request(s), list says ${listed ? "may send" : "nothing is sent"}`);
+      } finally {
+        globalThis.fetch = originalFetch;
+        store.close();
+        await rm(dir, { recursive: true, force: true });
+      }
+    });
+  }
+});

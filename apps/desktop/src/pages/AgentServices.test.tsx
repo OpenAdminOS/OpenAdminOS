@@ -332,11 +332,11 @@ describe("preflight without an organization (review round 1)", () => {
         discord: { enabled: true, includeManualRuns: false },
       },
     });
-    const bridge = makeMockBridge({ listConnectors: vi.fn(async () => [connectorSummary("slack")]) }, noOrganizationState([draft]));
+    const bridge = makeMockBridge({ listConnectors: vi.fn(async () => [connectorSummary("slack", "connected", { defaultChannel: "C1" })]) }, noOrganizationState([draft]));
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
     expect(dialog).toHaveTextContent("It reads no service data.");
-    await waitFor(() => expect(dialog).toHaveTextContent("Saved delivery rules send its report to Slack."));
+    await waitFor(() => expect(dialog).toHaveTextContent("Saved delivery rules can send its report to Slack."));
     expect(dialog).toHaveTextContent("Microsoft Teams is skipped: it posts with an organization's Microsoft sign-in.");
     expect(dialog).not.toHaveTextContent("cannot reach any service");
     expect(dialog).not.toHaveTextContent("Discord");
@@ -397,29 +397,46 @@ it("gives screen readers the service needs as text, not a label on a span", asyn
   expect(document.querySelector("span[aria-label^='Needs']")).toBeNull();
 });
 
-function connectorSummary(id: string, status: "connected" | "needs-setup" = "connected") {
+function connectorSummary(
+  id: string,
+  status: "connected" | "needs-setup" | "unknown" | "error" = "connected",
+  config: Record<string, unknown> = {},
+) {
   return {
     descriptor: { id, name: id, version: "1.0.0", authSource: "external", scopes: [], capabilities: [], trust: {} },
-    config: {},
+    config,
     status,
   } as never;
 }
 
-it("never promises delivery to a connector that is not set up (Muse round 2)", async () => {
+it("says nothing is sent only where the host sends nothing, whatever the health status (review round 4)", async () => {
   const draft = createMockAgent({
     id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [],
-    delivery: { slack: { enabled: true }, discord: { enabled: true } },
+    delivery: {
+      // A saved token with no global configuration and a channel on the rule: the host posts.
+      slack: { enabled: true, useDefaultChannel: false, channel: "C999" },
+      // A stale error status does not stop the host from sending.
+      discord: { enabled: true },
+      // A default recipient that was never saved: the host sends nothing.
+      signal: { enabled: true, useDefaultRecipient: true },
+    },
   });
   const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents: [draft] });
   const bridge = makeMockBridge(
-    { listConnectors: vi.fn(async () => [connectorSummary("discord"), connectorSummary("slack", "needs-setup")]) },
+    {
+      listConnectors: vi.fn(async () => [
+        connectorSummary("slack", "unknown"),
+        connectorSummary("discord", "error"),
+        connectorSummary("signal", "connected"),
+      ]),
+    },
     { ...state, tenants: [] },
   );
   renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-  await waitFor(() => expect(dialog).toHaveTextContent("Saved delivery rules send its report to Discord."));
-  expect(dialog).toHaveTextContent("Slack is not set up, so nothing is sent there.");
-  expect(dialog).not.toHaveTextContent("send its report to Slack");
+  await waitFor(() => expect(dialog).toHaveTextContent("Saved delivery rules can send its report to Slack and Discord."));
+  expect(dialog).toHaveTextContent("Signal has no destination set, so nothing is sent there.");
+  expect(dialog).not.toHaveTextContent("Slack has no destination");
 });
 
 it("names the organization of a resumed run's tenant, not the active one (Muse round 2)", async () => {
@@ -504,5 +521,5 @@ it("says the report destinations could not be checked when the connector list fa
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
   await waitFor(() => expect(dialog).toHaveTextContent("Where its report goes could not be checked: saved delivery rules may still send it."));
   expect(dialog).not.toHaveTextContent("No saved delivery rule sends its report.");
-  expect(dialog).not.toHaveTextContent("not set up, so nothing is sent there");
+  expect(dialog).not.toHaveTextContent("so nothing is sent there");
 });

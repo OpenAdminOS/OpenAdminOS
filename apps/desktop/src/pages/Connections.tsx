@@ -24,7 +24,7 @@ import { Badge, Button as UiButton, StatusDot } from "../components/ui";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
-import { reportDestinations, resultDestinations, unconfiguredDestinations } from "../shared/delivery-destinations";
+import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
 import {
   AVAILABLE_SERVICES,
   ORGANIZATION_NAME_MAX_LENGTH,
@@ -157,8 +157,8 @@ export function reachDescription(model: ReachModel): string {
       ? CONNECTIONS_COPY.map.reportsFailedSentence
       : CONNECTIONS_COPY.map.reportsLoadingSentence
     : model.reportDestinations.length > 0
-      ? `Run reports and agent messages go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
-      : "Run reports and agent messages go nowhere: no rule or step uses a connector that is set up.";
+      ? `Run reports and agent messages can go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
+      : "Run reports and agent messages go nowhere: no saved rule or step sends to a connector.";
   return `${services} ${device} ${words} ${reports}`;
 }
 
@@ -253,7 +253,7 @@ function ResultDestinationsSummary({
 }) {
   if (!loaded) return null;
   const sent = reportDestinations(destinations);
-  const unset = unconfiguredDestinations(destinations);
+  const unset = targetlessDestinations(destinations);
   return (
     <div className="mb-3 space-y-2 text-sm" data-testid="result-destinations">
       <p className="text-[var(--color-text-soft)]">

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import Connections, { buildReachModel, reachDescription } from "./Connections";
-import { reportDestinations, resultDestinations, unconfiguredDestinations } from "../shared/delivery-destinations";
+import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
 import {
   createMockAgent,
   createMockAppState,
@@ -19,10 +19,10 @@ import { AppShell } from "../components/AppShell";
 import { connectedServiceIds } from "../components/ServiceMark";
 import { SERVICE_PARTS, type AppState, type ConnectorSummary } from "../shared/openAdminOS";
 
-function connector(id: string, name: string, status: ConnectorSummary["status"] = "connected"): ConnectorSummary {
+function connector(id: string, name: string, status: ConnectorSummary["status"] = "connected", config: Record<string, unknown> = {}): ConnectorSummary {
   return {
     descriptor: { id, name, version: "1.0.0", authSource: "external", scopes: [], capabilities: [], trust: { publisher: "OpenAdminOS", verified: true } } as unknown as ConnectorSummary["descriptor"],
-    config: {},
+    config,
     status,
   };
 }
@@ -77,7 +77,7 @@ describe("Connections reach map", () => {
     const description = reachDescription(buildReachModel(state, [connector("teams", "Microsoft Teams")]));
     await waitFor(() => expect(map).toHaveAccessibleDescription(description));
     expect(description).toMatch(
-      /^Contoso IT reads Intune, connected, Entra, \d of 6 parts and Defender, not connected into this device\. The model runs on this device: llama3\.1, local\. Words from questions go to www\.kqlsearch\.com\. Run reports and agent messages go to Microsoft Teams under saved delivery rules and agent steps\.$/,
+      /^Contoso IT reads Intune, connected, Entra, \d of 6 parts and Defender, not connected into this device\. The model runs on this device: llama3\.1, local\. Words from questions go to www\.kqlsearch\.com\. Run reports and agent messages can go to Microsoft Teams under saved delivery rules and agent steps\.$/,
     );
     expect(within(map).getByText(CONNECTIONS_COPY.map.promptsLocal)).toBeInTheDocument();
   });
@@ -311,7 +311,7 @@ describe("Connections results and organizations", () => {
 });
 
 describe("one destination list for the map and Results (review round 1)", () => {
-  it("lists configured connectors used by a rule or a step, and names rules to connectors that are not set up", () => {
+  it("lists connectors a rule or a step may send to, and names rules with no destination", () => {
     const agents = [
       createMockAgent({ id: "a", slug: "a", delivery: { slack: { enabled: true }, teams: { enabled: true } } }),
       createMockAgent({ id: "b", slug: "b", connectors: [{ id: "discord" }] as never }),
@@ -319,10 +319,11 @@ describe("one destination list for the map and Results (review round 1)", () => 
     ];
     const connectors = [connector("teams", "Microsoft Teams"), connector("discord", "Discord"), connector("slack", "Slack", "needs-setup"), connector("outlook", "Outlook")];
     const destinations = resultDestinations(agents, connectors);
-    expect(reportDestinations(destinations)).toEqual(["Slack", "Microsoft Teams", "Discord"].filter((name) => name !== "Slack"));
-    expect(unconfiguredDestinations(destinations)).toEqual(["Slack"]);
-    // Nothing counts as set up before the connector list loads.
-    expect(reportDestinations(resultDestinations(agents, undefined))).toEqual([]);
+    // Slack's rule uses the default channel and none is saved, so the host sends nothing there.
+    expect(reportDestinations(destinations)).toEqual(["Microsoft Teams", "Discord"]);
+    expect(targetlessDestinations(destinations)).toEqual(["Slack"]);
+    // Before the connector list loads, a saved default channel is not ruled out.
+    expect(reportDestinations(resultDestinations(agents, undefined))).toEqual(["Microsoft Teams", "Slack", "Discord"]);
   });
 
   it("shows the same destinations in the map and the Results section", async () => {
@@ -339,7 +340,7 @@ describe("one destination list for the map and Results (review round 1)", () => 
     expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsSent(["Microsoft Teams", "Discord"]));
     expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsUnset(["Slack"]));
     const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
-    expect(map).toHaveAccessibleDescription(/Run reports and agent messages go to Microsoft Teams and Discord under saved delivery rules and agent steps\./);
+    expect(map).toHaveAccessibleDescription(/Run reports and agent messages can go to Microsoft Teams and Discord under saved delivery rules and agent steps\./);
     expect(map).not.toHaveAccessibleDescription(/Slack/);
   });
 
@@ -479,8 +480,33 @@ describe("report destinations while connectors load (Muse round 2)", () => {
   });
 
   it("reports nowhere only once the list is known", () => {
-    const state = createMockAppState({ installedAgents: [createMockAgent({ delivery: { teams: { enabled: true } } })] });
+    const state = createMockAppState({ installedAgents: [createMockAgent({ delivery: { slack: { enabled: true } } })] });
     expect(buildReachModel(state).reportDestinations).toBeNull();
     expect(buildReachModel(state, []).reportDestinations).toEqual([]);
+  });
+});
+
+describe("destinations follow what the host sends (review round 4)", () => {
+  it("lists Slack for a saved token with no global configuration and a channel on the agent rule", async () => {
+    const state = createMockAppState({
+      installedAgents: [createMockAgent({ delivery: { slack: { enabled: true, useDefaultChannel: false, channel: "C999" } } })],
+    });
+    render(state, { listConnectors: vi.fn(async () => [connector("slack", "Slack", "unknown")]) });
+    const results = await screen.findByTestId("result-destinations");
+    expect(results).toHaveTextContent(CONNECTIONS_COPY.resultsSent(["Slack"]));
+    expect(results).not.toHaveTextContent(CONNECTIONS_COPY.resultsNone);
+    const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(within(map).getByText("Slack")).toBeInTheDocument();
+    expect(map).toHaveAccessibleDescription(/Run reports and agent messages can go to Slack/);
+  });
+
+  it("keeps a connector with a stale error or needs-setup status in the list", () => {
+    const agents = [createMockAgent({ delivery: { slack: { enabled: true }, discord: { enabled: true } } })];
+    const destinations = resultDestinations(agents, [
+      connector("slack", "Slack", "error", { defaultChannel: "C123" }),
+      connector("discord", "Discord", "needs-setup"),
+    ]);
+    expect(reportDestinations(destinations)).toEqual(["Slack", "Discord"]);
+    expect(targetlessDestinations(destinations)).toEqual([]);
   });
 });

@@ -1,4 +1,5 @@
 import { PILOT_COPY } from "../src/shared/pilot-mode.js";
+import { deliveryBlock, deliveryRuleKeyFor } from "../src/shared/delivery-destinations.js";
 import {
   assertSignedInAccount,
   createTenantSession,
@@ -428,9 +429,18 @@ export class RunDeliveryService {
       await this.host.appendRunLog(item.runId, "warn", message);
       return { retryable: false, error: message };
     }
-    // Teams and Outlook post with an organization's Microsoft sign-in. A
-    // run with no organization never borrows the one active now.
-    if (!run.tenantId && (item.connectorId === "teams" || item.connectorId === OUTLOOK_CONNECTOR_ID)) {
+    // The decision the Connections page and the run review show: Teams
+    // and Outlook post with an organization's Microsoft sign-in, so a run
+    // with no organization never borrows the one active now.
+    const ruleKey = deliveryRuleKeyFor(item.connectorId);
+    const agent = persisted.installedAgents.find(
+      (candidate) => candidate.slug === run.agentSlug || candidate.id === run.agentSlug,
+    );
+    if (
+      ruleKey &&
+      deliveryBlock(ruleKey, agent?.delivery, persisted.connectors?.[item.connectorId]?.config ?? {}, Boolean(run.tenantId)) ===
+        "no-organization"
+    ) {
       return this.skipWithoutOrganization(run);
     }
     try {
@@ -739,7 +749,7 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (!recipient) {
+    if (!recipient || deliveryBlock("whatsappWeb", agent.delivery, config, true)) {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -889,7 +899,7 @@ export class RunDeliveryService {
         error: "No tenant session was available for Outlook delivery.",
       };
     }
-    if (delivery.useDefaultRecipients === false && (!recipients || recipients.length === 0)) {
+    if (deliveryBlock("outlook", agent.delivery, baseConfig, true) === "no-target") {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -1061,7 +1071,6 @@ export class RunDeliveryService {
     const baseConfig = persisted.connectors?.[SLACK_CONNECTOR_ID]?.config ?? {};
     const channel =
       delivery.useDefaultChannel === false ? delivery.channel?.trim() : undefined;
-    const defaultChannel = readConfigLabel(baseConfig, "defaultChannel");
     const targetLabel = slackDeliveryTargetLabel(delivery, baseConfig);
     const stepId = await this.host.appendRunStep(run.id, {
       label: "Send run report to Slack",
@@ -1069,7 +1078,8 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (delivery.useDefaultChannel === false && !channel) {
+    const slackBlock = deliveryBlock("slack", agent.delivery, baseConfig, true);
+    if (slackBlock === "no-target") {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -1081,7 +1091,7 @@ export class RunDeliveryService {
       });
       return { retryable: false, error: "No Slack notification channel is configured." };
     }
-    if (delivery.useDefaultChannel !== false && !defaultChannel) {
+    if (slackBlock === "no-default-target") {
       await this.host.finishRunStep(
         run.id,
         stepId,
@@ -1361,7 +1371,7 @@ export class RunDeliveryService {
       detail: `${evaluation.detail} Target: ${targetLabel}.`,
     });
 
-    if (!recipient) {
+    if (deliveryBlock("signal", agent.delivery, baseConfig, true)) {
       await this.host.finishRunStep(
         run.id,
         stepId,

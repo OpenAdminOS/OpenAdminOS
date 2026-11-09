@@ -2695,17 +2695,17 @@ function ChoiceButton({
 }
 
 /** Where the report of a run with no organization goes, from the agent's saved delivery rules. */
-function noOrganizationReportLine(destinations: { sent: string[]; skipped: string[]; notSetUp: string[] }): string {
+function noOrganizationReportLine(destinations: { mayGo: string[]; skipped: string[]; noTarget: string[] }): string {
   const list = (names: string[]) =>
     names.length <= 1 ? names[0] ?? "" : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
-  const sent = destinations.sent.length > 0
-    ? `Saved delivery rules send its report to ${list(destinations.sent)}.`
+  const sent = destinations.mayGo.length > 0
+    ? `Saved delivery rules can send its report to ${list(destinations.mayGo)}.`
     : "No saved delivery rule sends its report.";
   const skipped = destinations.skipped.length > 0
     ? ` ${list(destinations.skipped)} ${destinations.skipped.length === 1 ? "is" : "are"} skipped: ${destinations.skipped.length === 1 ? "it posts" : "they post"} with an organization's Microsoft sign-in.`
     : "";
-  const notSetUp = destinations.notSetUp.length > 0
-    ? ` ${list(destinations.notSetUp)} ${destinations.notSetUp.length === 1 ? "is" : "are"} not set up, so nothing is sent there.`
+  const notSetUp = destinations.noTarget.length > 0
+    ? ` ${list(destinations.noTarget)} ${destinations.noTarget.length === 1 ? "has" : "have"} no destination set, so nothing is sent there.`
     : "";
   return `${sent}${skipped}${notSetUp}`;
 }
