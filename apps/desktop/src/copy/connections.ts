@@ -113,6 +113,9 @@ export const CONNECTIONS_COPY = {
     `Saved delivery rules use ${names.length <= 1 ? names[0] : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`}, which ${names.length === 1 ? "has" : "have"} no destination set, so nothing is sent there. Set one below.`,
   resultsBody:
     "Where agents send finished run reports. Saved delivery rules post automatically, including for scheduled runs; agent steps that send a message show a preview first.",
+  viewsLabel: "Connections views",
+  organizationsTab: "Organizations",
+  organizationsEmpty: "No organizations on this device yet. Connect Microsoft 365 to add one.",
   organizationsHeading: "Organizations on this device",
   organizationsBody: "Each organization keeps its runs, conversations, cache, drift and schedules apart.",
   active: "Active",

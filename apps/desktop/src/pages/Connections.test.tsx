@@ -307,6 +307,10 @@ describe("Connections services", () => {
     await user.click(within(menu).getByRole("menuitem", { name: CONNECTIONS_COPY.renameOrganization }));
     const dialog = screen.getByRole("dialog", { name: CONNECTIONS_COPY.renameOrganization });
     const field = within(dialog).getByRole("textbox", { name: ORGANIZATION_COPY.renameLabel });
+    // The dialog keeps focus on the field after the menu hands focus back.
+    await waitFor(() => expect(field).toHaveFocus());
+    await new Promise((done) => window.requestAnimationFrame(() => done(undefined)));
+    await waitFor(() => expect(field).toHaveFocus());
     await user.clear(field);
     await user.type(field, "Contoso");
     await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.renameSave }));
@@ -379,7 +383,7 @@ describe("Connections results and organizations", () => {
         ...createMockAppState(),
         organizations: [{ id, name, createdAt: "2026-11-01T00:00:00.000Z", connections: { microsoft365: { tenantId: "tenant-1" } } }],
       }));
-    render(createMockAppState(), { renameOrganization });
+    render(createMockAppState(), { renameOrganization }, "/connections?view=organizations");
 
     const list = await screen.findByRole("region", { name: CONNECTIONS_COPY.organizationsHeading });
     await user.click(within(list).getByRole("button", { name: "Rename Contoso IT" }));
@@ -394,9 +398,11 @@ describe("Connections results and organizations", () => {
   });
 
   it("labels the sample organization and keeps its name", async () => {
+    const user = userEvent.setup();
     const sample = { ...createMockAppState().tenants[0]!, id: "openadminos-sample-tenant", displayName: "Contoso (pilot)", kind: "sample" as const };
     render(createMockAppState({ tenants: [sample], activeTenantId: sample.id }));
     expect(await screen.findByText(CONNECTIONS_COPY.sampleOrganization)).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: CONNECTIONS_COPY.organizationsTab }));
     const list = screen.getByRole("region", { name: CONNECTIONS_COPY.organizationsHeading });
     expect(within(list).getByText(ORGANIZATION_COPY.sampleLabel)).toBeInTheDocument();
     expect(within(list).queryByRole("button", { name: /Rename/ })).not.toBeInTheDocument();
@@ -418,6 +424,7 @@ describe("Connections results and organizations", () => {
     const bridge = render(state);
 
     expect(await screen.findByText(/Own app registration · Contoso admin app/)).toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole("tab", { name: CONNECTIONS_COPY.organizationsTab }));
     const saved = screen.getByRole("region", { name: SETUP_COPY.savedRegistrationsSettingsTitle });
     expect(within(saved).getByText("fabrikam.onmicrosoft.com")).toBeInTheDocument();
     await user.click(
@@ -436,9 +443,58 @@ describe("Connections results and organizations", () => {
       removeSavedAppRegistration: vi.fn(async () => {
         throw new Error("The local state file could not be written.");
       }),
-    });
+    }, "/connections?view=organizations");
     await user.click(await screen.findByRole("button", { name: SETUP_COPY.removeSavedRegistration("11111111-2222-4333-8444-555555555555") }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/The saved registration was not removed\. .*Try again\./);
+  });
+});
+
+describe("Organizations tab", () => {
+  const twoOrganizations = () =>
+    createMockAppState({
+      tenants: [
+        createMockAppState().tenants[0]!,
+        { ...createMockAppState().tenants[0]!, id: "tenant-2", displayName: "Fabrikam", username: "admin@fabrikam.example" },
+      ],
+      savedAppRegistrations: [{ clientId: "11111111-2222-4333-8444-555555555555", label: "Fabrikam admin app", lastUsedAt: "2026-11-01T10:00:00.000Z" }],
+    });
+
+  it("keeps organizations and saved registrations out of the organization's own view", async () => {
+    render(twoOrganizations());
+    expect(await screen.findByRole("heading", { name: CONNECTIONS_COPY.title("Contoso IT") })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Contoso IT" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("region", { name: CONNECTIONS_COPY.organizationsHeading })).not.toBeInTheDocument();
+    expect(screen.queryByRole("region", { name: SETUP_COPY.savedRegistrationsSettingsTitle })).not.toBeInTheDocument();
+    expect(screen.queryByText("Fabrikam admin app")).not.toBeInTheDocument();
+    // The organization switcher adds organizations; the page header does not.
+    expect(screen.queryByRole("button", { name: ORGANIZATION_COPY.addOrganization })).not.toBeInTheDocument();
+  });
+
+  it("lists every organization and saved registration in the Organizations tab, by keyboard too", async () => {
+    const user = userEvent.setup();
+    render(twoOrganizations());
+    const first = await screen.findByRole("tab", { name: "Contoso IT" });
+    first.focus();
+    await user.keyboard("{ArrowRight}");
+    const tab = screen.getByRole("tab", { name: CONNECTIONS_COPY.organizationsTab });
+    expect(tab).toHaveAttribute("aria-selected", "true");
+    expect(tab).toHaveFocus();
+    const panel = screen.getByRole("tabpanel", { name: CONNECTIONS_COPY.organizationsTab });
+    const list = within(panel).getByRole("region", { name: CONNECTIONS_COPY.organizationsHeading });
+    expect(within(list).getByText("Contoso IT")).toBeInTheDocument();
+    expect(within(list).getByText("Fabrikam")).toBeInTheDocument();
+    expect(within(list).getByRole("button", { name: `${CONNECTIONS_COPY.makeActive}, Fabrikam` })).toBeInTheDocument();
+    const saved = within(panel).getByRole("region", { name: SETUP_COPY.savedRegistrationsSettingsTitle });
+    expect(within(saved).getByText("Fabrikam admin app")).toBeInTheDocument();
+    expect(screen.queryByRole("figure", { name: CONNECTIONS_COPY.map.label })).not.toBeInTheDocument();
+    await user.keyboard("{ArrowLeft}");
+    expect(await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label })).toBeInTheDocument();
+  });
+
+  it("opens the Organizations tab from its URL", async () => {
+    render(twoOrganizations(), {}, "/connections?view=organizations");
+    expect(await screen.findByRole("tab", { name: CONNECTIONS_COPY.organizationsTab })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("region", { name: CONNECTIONS_COPY.organizationsHeading })).toBeInTheDocument();
   });
 });
 

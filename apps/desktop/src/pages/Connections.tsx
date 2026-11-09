@@ -21,7 +21,7 @@ import {
 } from "../components/ServiceAccess";
 import { TenantTile } from "../components/TenantTile";
 import { useToast } from "../components/Toast";
-import { Badge, Menu, StatusDot, Tooltip, Button as UiButton } from "../components/ui";
+import { Badge, Menu, StatusDot, Tabs, Tooltip, Button as UiButton } from "../components/ui";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, providerDataLocation, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
@@ -686,8 +686,10 @@ function RenameOrganizationForm({
           id={`organization-name-${organization.id}`}
           name="organization-name"
           autoComplete="off"
-          // The field opens on request, so it takes focus.
+          // The field opens on request, so it takes focus; in a dialog,
+          // data-autofocus keeps it focused once the menu closes.
           autoFocus
+          data-autofocus
           value={draft}
           maxLength={ORGANIZATION_NAME_MAX_LENGTH * 2}
           disabled={busy}
@@ -896,16 +898,21 @@ function PublicReferences({ state }: { state: AppState }) {
   );
 }
 
-function OrganizationsList({ state }: { state: AppState }) {
+function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => void }) {
   const { setActiveOrganization } = useAppState();
   const toast = useToast();
   const organizations = resolveOrganizations(state);
   const active = activeOrganizationOf(state);
   const [editing, setEditing] = useState<string | null>(null);
-  if (organizations.length === 0) return null;
   return (
-    <section aria-labelledby="connections-organizations" className="mt-8">
-      <SectionHeading id="connections-organizations" title={CONNECTIONS_COPY.organizationsHeading} body={CONNECTIONS_COPY.organizationsBody} />
+    <section aria-labelledby="connections-organizations">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <SectionHeading id="connections-organizations" title={CONNECTIONS_COPY.organizationsHeading} body={CONNECTIONS_COPY.organizationsBody} />
+        <UiButton variant="secondary" size="sm" onClick={onAdd}>{ORGANIZATION_COPY.addOrganization}</UiButton>
+      </div>
+      {organizations.length === 0 ? (
+        <p className="border-y border-[var(--color-border-soft)] py-3 text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.organizationsEmpty}</p>
+      ) : (
       <ul className="divide-y divide-[var(--color-border-soft)] border-y border-[var(--color-border-soft)]">
         {organizations.map((organization) => {
           const tenant = state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId);
@@ -924,7 +931,7 @@ function OrganizationsList({ state }: { state: AppState }) {
                     {sample ? <Badge tone="info">{ORGANIZATION_COPY.sampleLabel}</Badge> : null}
                     {isActive ? (
                       <span className="inline-flex items-center gap-1.5 text-sm text-[var(--color-text-muted)]">
-                        <StatusDot tone="success" />{CONNECTIONS_COPY.active}
+                        <StatusDot tone="neutral" />{CONNECTIONS_COPY.active}
                       </span>
                     ) : null}
                   </div>
@@ -969,6 +976,7 @@ function OrganizationsList({ state }: { state: AppState }) {
           );
         })}
       </ul>
+      )}
     </section>
   );
 }
@@ -985,7 +993,7 @@ function SavedRegistrationsList({
   const [removeError, setRemoveError] = useState<string | null>(null);
   return (
     <section aria-labelledby="saved-app-registrations-heading" className="mt-8">
-      <h2 id="saved-app-registrations-heading" className="text-base font-medium text-[var(--color-text)]">
+      <h2 id="saved-app-registrations-heading" className="text-md font-medium text-[var(--color-text)]">
         {SETUP_COPY.savedRegistrationsSettingsTitle}
       </h2>
       <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">
@@ -1039,16 +1047,19 @@ function SavedRegistrationsList({
   );
 }
 
+type ConnectionsView = "connections" | "organizations";
+
 /**
  * Connections: one page per organization. The reach map at the top shows
  * the services read into this device and everything that leaves it; the
- * lists below are the same data, with the actions that change it. Replaces
- * Settings, Tenants and Settings, Connectors.
+ * lists below are the same data, with the actions that change it. The
+ * Organizations tab lists every organization and saved app registration on
+ * this device. Replaces Settings, Tenants and Settings, Connectors.
  */
 export default function Connections() {
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { state, loading, removeSavedAppRegistration } = useAppState();
   const { openSetup } = useSetupFlow();
   // The Results section loads the connector list; the map uses the same one.
@@ -1063,6 +1074,15 @@ export default function Connections() {
     : undefined;
   const sample = organization?.kind === "sample";
   const savedRegistrations = state.savedAppRegistrations ?? [];
+  const view: ConnectionsView = searchParams.get("view") === "organizations" ? "organizations" : "connections";
+  const setView = (next: string) => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      if (next === "organizations") params.set("view", "organizations");
+      else params.delete("view");
+      return params;
+    });
+  };
 
   const updateConnectorRoute = (connectorId: string | null) => {
     const next = new URLSearchParams(location.search);
@@ -1078,9 +1098,6 @@ export default function Connections() {
         title={organization ? CONNECTIONS_COPY.title(organization.name) : CONNECTIONS_COPY.pageTitle}
         subtitle={CONNECTIONS_COPY.lede}
         wide
-        actions={
-          <UiButton variant="secondary" size="sm" onClick={openSetup}>{ORGANIZATION_COPY.addOrganization}</UiButton>
-        }
       />
       <PageBody>
         {loading ? (
@@ -1089,6 +1106,25 @@ export default function Connections() {
           </div>
         ) : (
         <div className="connections-page calm-page-column-wide pb-16">
+          <Tabs
+            className="mb-5"
+            ariaLabel={CONNECTIONS_COPY.viewsLabel}
+            value={view}
+            onValueChange={setView}
+            tabs={[
+              { id: "connections", label: organization?.name ?? ORGANIZATION_COPY.noOrganization, panelId: "connections-view-connections" },
+              { id: "organizations", label: CONNECTIONS_COPY.organizationsTab, panelId: "connections-view-organizations" },
+            ]}
+          />
+          {view === "organizations" ? (
+            <div role="tabpanel" id="connections-view-organizations" aria-label={CONNECTIONS_COPY.organizationsTab}>
+              <OrganizationsList state={state} onAdd={openSetup} />
+              {savedRegistrations.length > 0 ? (
+                <SavedRegistrationsList registrations={savedRegistrations} onRemove={removeSavedAppRegistration} />
+              ) : null}
+            </div>
+          ) : (
+          <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
           {!organization ? (
             <div role="status" className="mb-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
               {CONNECTIONS_COPY.noOrganization}
@@ -1162,11 +1198,8 @@ export default function Connections() {
             )}
           </section>
 
-          <OrganizationsList state={state} />
-
-          {savedRegistrations.length > 0 ? (
-            <SavedRegistrationsList registrations={savedRegistrations} onRemove={removeSavedAppRegistration} />
-          ) : null}
+          </div>
+          )}
         </div>
         )}
       </PageBody>
