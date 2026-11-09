@@ -589,7 +589,12 @@ function AccountRow({
         className="mt-1 w-full"
         trigger={
           <button type="button" className="flex min-h-11 w-full items-center gap-2.5 rounded-[9px] px-2.5 py-1.5 text-left hover:bg-[var(--color-hover)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--color-accent)]">
-            <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-raised)] text-xs font-semibold text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">{initials}</span>
+            {activeTenant ? (
+              <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-raised)] text-xs font-semibold text-[var(--color-text-soft)] ring-1 ring-[var(--color-border)]">{initials}</span>
+            ) : (
+              // No organization: an empty dashed tile, as in the organization chip.
+              <span aria-hidden="true" data-testid="no-organization-account" className="inline-block h-7 w-7 shrink-0 rounded-[7px] border border-dashed border-[var(--color-border-strong)]" />
+            )}
             <span className="min-w-0 flex-1">
               <span className="block truncate text-sm font-medium text-[var(--color-text)]">{activeTenant?.username ?? ORGANIZATION_COPY.noOrganization}</span>
               <span className="block text-xs text-[var(--color-text-muted)]">

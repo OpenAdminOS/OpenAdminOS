@@ -243,3 +243,10 @@ const sidebarConversation = {
   tenantId: "tenant-1",
   scopeKind: "single-tenant" as const,
 };
+
+it("shows a dashed tile, not initials, for No organization in the account menu (design round)", async () => {
+  const { activeTenantId: _none, ...state } = createMockAppState();
+  renderRoute(<AppShell><div /></AppShell>, { path: "*", route: "/chat", bridge: makeMockBridge({}, state) });
+  expect(await screen.findByTestId("no-organization-account")).toBeEmptyDOMElement();
+  expect(screen.queryByText("OA")).not.toBeInTheDocument();
+});

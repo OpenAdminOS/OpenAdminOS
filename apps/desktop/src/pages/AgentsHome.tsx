@@ -524,7 +524,7 @@ export default function AgentsHome() {
         </div>
         {/* The persistent warning with its fix comes first; one-time notes follow as plain text. */}
         {scheduledOnly && scheduledAgents.length > 0 && scheduler?.enabled === false ? (
-          <div className="mb-2 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3.5 py-2.5 text-md text-[var(--color-warning)]">
+          <div className="mb-2 flex items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-3.5 py-2 text-sm text-[var(--color-warning)]">
             <span>{SCHEDULE_ORGANIZATION_COPY.backgroundOff}</span>
             <Button
               size="sm"
