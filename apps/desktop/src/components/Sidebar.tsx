@@ -599,11 +599,11 @@ function AccountRow({
         }
         items={[
           { id: "settings", label: `Settings (${shortcutLabel("settings")})`, icon: <IconSettings size={12} />, onSelect: () => navigate("/settings") },
-          { id: "connections", label: "Connections", onSelect: () => navigate("/connections") },
+          { id: "connections", label: "Connections", icon: <IconConnectors size={12} />, onSelect: () => navigate("/connections") },
           { id: "voice", label: "Voice (Alt+V)", icon: <IconSparkle size={12} />, onSelect: openNovaPanel },
-          { id: "shortcuts", label: "Keyboard shortcuts", onSelect: () => setShortcutsOpen(true) },
+          { id: "shortcuts", label: "Keyboard shortcuts", icon: <IconCommand size={12} />, onSelect: () => setShortcutsOpen(true) },
           { type: "separator", id: "about-separator" },
-          { id: "about", label: nightly ? "About and updates · Nightly" : "About and updates", onSelect: () => navigate("/settings/about") },
+          { id: "about", label: nightly ? "About and updates · Nightly" : "About and updates", icon: <IconRefresh size={12} />, onSelect: () => navigate("/settings/about") },
         ]}
       />
       <Modal open={shortcutsOpen} onClose={() => setShortcutsOpen(false)} size="md">
