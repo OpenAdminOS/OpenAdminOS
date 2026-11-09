@@ -4077,8 +4077,12 @@ export class AppStateStore {
     if (!workspace) throw new Error(`Workspace not found: ${workspaceId}`);
     const run = persisted.runs.find((entry) => entry.id === runId);
     if (!run) throw new Error(`Run not found: ${runId}`);
-    if (run.tenantId && run.tenantId !== workspace.tenantId) {
-      throw new Error("Run tenant does not match the workspace tenant.");
+    if (run.tenantId !== workspace.tenantId) {
+      throw new Error(
+        run.tenantId
+          ? "Run tenant does not match the workspace tenant."
+          : "This run had no organization, so it cannot be linked to a workspace. Link a run from the workspace's organization.",
+      );
     }
     return store.linkWorkspaceRun({
       id: `wlink_${randomUUID()}`,

@@ -132,7 +132,9 @@ export default function Workspaces({
 
   const tenantRuns = useMemo(() => {
     if (!detail) return [];
-    return state.runs.filter((run) => !run.tenantId || run.tenantId === detail.tenantId);
+    // A workspace belongs to one tenant. A run with no organization (an
+    // agent that calls no service API) belongs to no workspace's tenant.
+    return state.runs.filter((run) => run.tenantId === detail.tenantId);
   }, [detail, state.runs]);
 
   const tenantConversations = useMemo(() => {

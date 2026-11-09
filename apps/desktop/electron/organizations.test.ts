@@ -797,3 +797,18 @@ describe("duplicate tenant claims keep unknown connections (Muse round 2)", () =
     }
   });
 });
+
+describe("workspaces and runs with no organization (Muse round 2)", () => {
+  it("never links a run with no organization to a tenant's workspace", async () => {
+    const tenantless = { ...completedRun("run-none", woodgrove.id), tenantId: undefined } as RunRecord;
+    const fixture = await makeStore(currentVersionState({ runs: [completedRun("run-woodgrove", woodgrove.id), tenantless] }));
+    try {
+      const workspace = await fixture.store.createWorkspace({ tenantId: woodgrove.id, title: "Device review" });
+      await assert.rejects(fixture.store.linkWorkspaceRun(workspace.id, "run-none"), /had no organization/);
+      const link = await fixture.store.linkWorkspaceRun(workspace.id, "run-woodgrove");
+      assert.equal(link.tenantId, woodgrove.id);
+    } finally {
+      await fixture.close();
+    }
+  });
+});
