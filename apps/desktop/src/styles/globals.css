@@ -1001,6 +1001,41 @@ select { color-scheme: inherit; }
 }
 .reach-map[data-layout="stacked"] .reach-hub-caption { position: static; width: auto; margin: 0; transform: none; }
 
+/* Connections lists: status and action columns align across every row. */
+.connections-page { container: connections / inline-size; }
+.conn-m365 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+  font-size: var(--text-sm);
+}
+.conn-rows { margin: 0; padding: 0; list-style: none; }
+.conn-rows > li + li { border-top: 1px solid var(--color-border-soft); }
+.conn-row {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr) 132px 120px;
+  align-items: center;
+  gap: 4px 14px;
+  padding: 14px 0;
+}
+.conn-row > .conn-row-action { justify-self: end; }
+@container connections (max-width: 760px) {
+  .conn-row { grid-template-columns: 30px minmax(0, 1fr) auto; }
+  .conn-row > .conn-row-state { grid-column: 2; grid-row: 2; }
+  .conn-row > .conn-row-action { grid-column: 3; grid-row: 1 / span 2; }
+}
+.conn-parts { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 4px; font-size: var(--text-xs); line-height: var(--text-xs--line-height); color: var(--color-text-soft); }
+.conn-part { display: inline-flex; align-items: center; gap: 6px; padding: 0; border: 0; background: none; font: inherit; color: inherit; }
+.conn-part::before { content: ""; width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-text-faint); }
+.conn-part[data-missing="true"] { color: var(--color-text-muted); }
+.conn-part[data-missing="true"]::before { background: transparent; box-shadow: inset 0 0 0 1px var(--color-text-faint); }
+button.conn-part { cursor: pointer; border-radius: 4px; }
+button.conn-part:hover:not(:disabled) { color: var(--color-text); text-decoration: underline; text-underline-offset: 3px; }
+button.conn-part:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--color-focus); }
+button.conn-part:disabled { cursor: default; opacity: 0.5; }
+
 .calm-section-label {
   color: var(--color-text-muted);
   font-size: 13px;

@@ -191,7 +191,8 @@ describe("Connections services", () => {
     const services = screen.getByRole("region", { name: "Contoso IT services" });
     const rows = within(services).getAllByRole("listitem");
     expect(rows[0]).toHaveTextContent(/Intune.*Connected/);
-    expect(rows[1]).toHaveTextContent(/Entra.*Partial/);
+    expect(rows[1]).toHaveTextContent(/Entra.*\d of 6 parts/);
+    expect(rows[1]).not.toHaveTextContent("Partial");
     expect(rows[2]).toHaveTextContent(/Defender.*Not connected/);
     // The shared app never offers Check again; consent adds access.
     expect(within(services).queryByRole("button", { name: SERVICE_COPY.checkAgain })).not.toBeInTheDocument();
@@ -220,7 +221,8 @@ describe("Connections services", () => {
 
     const services = await screen.findByRole("region", { name: "Contoso IT services" });
     const entra = within(services).getAllByRole("listitem")[1]!;
-    expect(entra).toHaveTextContent("Sign-in logs not connected");
+    // The missing part is a hollow dot that adds it; the button names what it adds.
+    expect(within(entra).getByRole("button", { name: SERVICE_COPY.addPartLabel("Entra sign-in logs") })).toHaveTextContent("Sign-in logs");
     expect(within(entra).getByRole("button", { name: "Add Entra access" })).toHaveTextContent("Add sign-in logs");
     await user.click(within(entra).getByRole("button", { name: "Add Entra access" }));
     const dialog = screen.getByRole("dialog", { name: "Add Entra access" });
@@ -255,7 +257,7 @@ describe("Connections services", () => {
 
     const services = await screen.findByRole("region", { name: "Contoso IT services" });
     expect(within(services).getByText(/Missing: SecurityAlert\.Read\.All, SecurityIncident\.Read\.All, SecurityEvents\.Read\.All/)).toBeInTheDocument();
-    await user.click(within(services).getByRole("button", { name: SERVICE_COPY.checkAgain }));
+    await user.click(screen.getByRole("button", { name: SERVICE_COPY.checkAgain }));
     await waitFor(() => expect(refreshTenantGrants).toHaveBeenCalledWith("tenant-1"));
 
     await user.click(within(services).getByRole("button", { name: "Add Defender permissions" }));
@@ -273,12 +275,47 @@ describe("Connections services", () => {
     });
     render(createMockAppState(), { disconnectTenant });
 
-    await user.click(await screen.findByRole("button", { name: "Disconnect" }));
+    await user.click(await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+    await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
     const dialog = screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ });
     expect(dialog).toHaveTextContent("unassigned, until you assign them to another organization");
     await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.disconnectAction }));
     expect(await within(dialog).findByRole("alert")).toHaveTextContent("The local state file could not be written.");
     expect(screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from Contoso IT/ })).toBeInTheDocument();
+  });
+
+  it("keeps permissions, rename and disconnect in the Manage menu, with no plain Disconnect button", async () => {
+    const user = userEvent.setup();
+    const renameOrganization = vi.fn(async (id: string, name: string) => ({
+      ...createMockAppState(),
+      organizations: [{ id, name, createdAt: "2026-11-01T00:00:00.000Z", connections: { microsoft365: { tenantId: "tenant-1" } } }],
+    }));
+    render(createMockAppState(), { renameOrganization });
+    const manage = await screen.findByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 });
+    expect(screen.queryByRole("button", { name: "Disconnect" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Permissions" })).not.toBeInTheDocument();
+    expect(screen.getByText("contoso.example, signed in as admin@contoso.example")).toBeInTheDocument();
+
+    await user.click(manage);
+    const menu = screen.getByRole("menu", { name: CONNECTIONS_COPY.manageMicrosoft365 });
+    expect(within(menu).getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      CONNECTIONS_COPY.permissions,
+      CONNECTIONS_COPY.renameOrganization,
+      CONNECTIONS_COPY.disconnect,
+    ]);
+    expect(within(menu).getByRole("separator")).toBeInTheDocument();
+    await user.click(within(menu).getByRole("menuitem", { name: CONNECTIONS_COPY.renameOrganization }));
+    const dialog = screen.getByRole("dialog", { name: CONNECTIONS_COPY.renameOrganization });
+    const field = within(dialog).getByRole("textbox", { name: ORGANIZATION_COPY.renameLabel });
+    await user.clear(field);
+    await user.type(field, "Contoso");
+    await user.click(within(dialog).getByRole("button", { name: ORGANIZATION_COPY.renameSave }));
+    await waitFor(() => expect(renameOrganization).toHaveBeenCalledWith("org-tenant-1", "Contoso"));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: CONNECTIONS_COPY.renameOrganization })).not.toBeInTheDocument());
+
+    await user.click(screen.getByRole("button", { name: CONNECTIONS_COPY.manageMicrosoft365 }));
+    await user.click(screen.getByRole("menuitem", { name: CONNECTIONS_COPY.disconnect }));
+    expect(screen.getByRole("dialog", { name: /Disconnect Microsoft 365 from/ })).toBeInTheDocument();
   });
 
   it("offers the Marketplace for other services and lists public references with their hosts", async () => {

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 
 import { PageBody, PageHeader } from "../components/AppShell";
-import { IconRefresh } from "../components/icons";
+import { IconChevronDown, IconRefresh } from "../components/icons";
+import { Modal, ModalHeader } from "../components/Modal";
 import { DeviceTile } from "../components/DeviceTile";
 import { DisconnectOrganizationDialog } from "../components/DisconnectOrganizationDialog";
 import { ReferenceMark, ServiceMark } from "../components/ServiceMark";
@@ -20,7 +21,7 @@ import {
 } from "../components/ServiceAccess";
 import { TenantTile } from "../components/TenantTile";
 import { useToast } from "../components/Toast";
-import { Badge, Button as UiButton, StatusDot } from "../components/ui";
+import { Badge, Menu, StatusDot, Tooltip, Button as UiButton } from "../components/ui";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, providerDataLocation, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
@@ -512,54 +513,35 @@ function ResultDestinationsSummary({
 function SectionHeading({ id, title, body }: { id: string; title: string; body?: string }) {
   return (
     <div className="mb-2">
-      <h2 id={id} className="text-base font-medium text-[var(--color-text)]">{title}</h2>
-      {body ? <p className="mt-0.5 text-sm leading-5 text-[var(--color-text-muted)]">{body}</p> : null}
+      <h2 id={id} className="text-md font-medium text-[var(--color-text)]">{title}</h2>
+      {body ? <p className="mt-1 text-sm text-[var(--color-text-muted)]">{body}</p> : null}
     </div>
   );
 }
 
-function StateText({ status }: { status: ServiceConnectionStatus }) {
-  const tone =
-    status === "connected"
-      ? "text-[var(--color-success)]"
-      : status === "partial"
-        ? "text-[var(--color-warning)]"
-        : "text-[var(--color-text-muted)]";
-  return <span className={`whitespace-nowrap text-sm ${tone}`}>{SERVICE_COPY.status[status]}</span>;
+/** Words for a service's state: "4 of 6 parts" instead of "Partial". */
+function serviceStatusText(status: ServiceConnectionStatus, granted: number, total: number): string {
+  return status === "partial" ? CONNECTIONS_COPY.map.partsSummary(granted, total) : SERVICE_COPY.status[status];
 }
 
 /** One row per Microsoft 365 service with its parts and the action that adds what is missing. */
-function MicrosoftServiceRows({ tenant }: { tenant: TenantRecord }) {
-  const { refreshTenantGrants } = useAppState();
-  const tenantCheck = useTenantCheck(tenant.id);
-  const [checkResult, setCheckResult] = useState<ReturnType<typeof checkAgainResult> | null>(null);
+function MicrosoftServiceRows({
+  tenant,
+  checkResult,
+  busy,
+}: {
+  tenant: TenantRecord;
+  checkResult: ReturnType<typeof checkAgainResult> | null;
+  busy: boolean;
+}) {
   const [access, setAccess] = useState<{ serviceId: ServiceId; partIds?: string[] } | null>(null);
   const ownRegistration = usesOwnRegistration(tenant);
   const sample = tenant.kind === "sample";
   const grantedPartIds = new Set(grantedParts(tenant).map((part) => part.id));
   return (
     <section aria-label={`${tenant.displayName} services`}>
-      {ownRegistration ? (
-        <div className="mb-2 flex flex-wrap items-center justify-end gap-2">
-          <UiButton
-            size="sm"
-            variant="secondary"
-            leadingIcon={<IconRefresh size={12} />}
-            disabled={tenantCheck.busy}
-            title={SERVICE_COPY.checkAgainHint}
-            onClick={() => {
-              setCheckResult(null);
-              void tenantCheck
-                .run(() => refreshTenantGrants(tenant.id))
-                .then((result) => setCheckResult(checkAgainResult(result, tenant.id)));
-            }}
-          >
-            {tenantCheck.running ? tenantCheckButtonLabel(tenantCheck.progress) : SERVICE_COPY.checkAgain}
-          </UiButton>
-        </div>
-      ) : null}
       <TenantCheckResultLine result={checkResult} />
-      <ul className="divide-y divide-[var(--color-border-soft)] border-y border-[var(--color-border-soft)]">
+      <ul className="conn-rows">
         {AVAILABLE_SERVICES.map((service) => {
           const status = serviceStatus(tenant, service.id);
           const parts = SERVICE_PARTS.filter((part) => part.service === service.id);
@@ -577,33 +559,26 @@ function MicrosoftServiceRows({ tenant }: { tenant: TenantRecord }) {
                   ? "Add permissions"
                   : "Add access";
           return (
-            <li key={service.id} className="grid grid-cols-[30px_minmax(0,1fr)] items-start gap-3 py-3 sm:grid-cols-[30px_minmax(0,1fr)_auto_auto] sm:items-center">
+            <li key={service.id} className="conn-row">
               <ServiceMark serviceId={service.id} size="lg" off={status === "missing"} />
               <div className="min-w-0">
                 <div className="text-base font-medium text-[var(--color-text)]">{service.title}</div>
-                <div className="text-sm text-[var(--color-text-muted)]">
-                  {status === "partial"
-                    ? CONNECTIONS_COPY.partsMissing(missing.map((part) => part.title))
-                    : service.summary}
-                </div>
-                {sample ? null : (
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                <div className="text-sm text-[var(--color-text-muted)]">{service.summary}</div>
+                {sample || status === "missing" ? null : (
+                  <div className="conn-parts">
                     {parts.map((part) =>
                       grantedPartIds.has(part.id) ? (
-                        <span key={part.id} className="inline-flex items-center gap-1.5 text-xs text-[var(--color-text-soft)]">
-                          <StatusDot tone="success" />
-                          {part.title}
-                        </span>
+                        <span key={part.id} className="conn-part">{part.title}</span>
                       ) : (
                         <button
                           key={part.id}
                           type="button"
+                          className="conn-part"
+                          data-missing="true"
                           aria-label={SERVICE_COPY.addPartLabel(`${service.title} ${partShortLabel(part)}`)}
-                          disabled={tenantCheck.busy}
+                          disabled={busy}
                           onClick={() => setAccess({ serviceId: service.id, partIds: [part.id] })}
-                          className="inline-flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-xs text-[var(--color-text-muted)] ring-1 ring-[var(--color-border-soft)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)] disabled:pointer-events-none disabled:opacity-50"
                         >
-                          <StatusDot tone="neutral" />
                           {part.title}
                         </button>
                       ),
@@ -611,13 +586,17 @@ function MicrosoftServiceRows({ tenant }: { tenant: TenantRecord }) {
                   </div>
                 )}
                 {ownRegistration && missingScopes.length > 0 ? (
-                  <p className="mt-1.5 break-words font-mono text-xs leading-5 text-[var(--color-text-muted)]">
+                  <p className="mt-1.5 break-words font-mono text-xs text-[var(--color-text-muted)]">
                     {SERVICE_COPY.missingPermissions(missingScopes)}
                   </p>
                 ) : null}
               </div>
-              <div className="col-start-2 sm:col-start-auto"><StateText status={status} /></div>
-              <div className="col-start-2 sm:col-start-auto">
+              <span className="conn-row-state">
+                <ReachState tone={serviceTone(status)}>
+                  {serviceStatusText(status, parts.length - missing.length, parts.length)}
+                </ReachState>
+              </span>
+              <span className="conn-row-action">
                 {!sample && missing.length > 0 ? (
                   <UiButton
                     size="sm"
@@ -627,7 +606,7 @@ function MicrosoftServiceRows({ tenant }: { tenant: TenantRecord }) {
                         ? SERVICE_COPY.addPermissionsTitle(service.title)
                         : SERVICE_COPY.addAccessTitle(service.title)
                     }
-                    disabled={tenantCheck.busy}
+                    disabled={busy}
                     onClick={() =>
                       setAccess(
                         missing.length === 1 && firstMissing && status !== "missing"
@@ -639,7 +618,7 @@ function MicrosoftServiceRows({ tenant }: { tenant: TenantRecord }) {
                     {actionLabel}
                   </UiButton>
                 ) : null}
-              </div>
+              </span>
             </li>
           );
         })}
@@ -664,51 +643,180 @@ function tenantDomain(tenant: TenantRecord): string {
   return tenant.username.includes("@") ? tenant.username.slice(tenant.username.lastIndexOf("@") + 1) : tenant.username;
 }
 
-/** The Microsoft 365 group: tenant facts, sign-in, licenses, then the service rows. */
+/** Renames an organization in place; used in the Organizations tab and the Manage menu. */
+function RenameOrganizationForm({
+  organization,
+  onDone,
+  onCancel,
+}: {
+  organization: OrganizationRecord;
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const { renameOrganization } = useAppState();
+  const toast = useToast();
+  const [draft, setDraft] = useState(organization.name);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div>
+      <form
+        className="flex flex-wrap items-center gap-2"
+        onSubmit={(event) => {
+          event.preventDefault();
+          setBusy(true);
+          setError(null);
+          void renameOrganization(organization.id, draft)
+            .then(() => {
+              toast.success(ORGANIZATION_COPY.renamed);
+              onDone();
+            })
+            .catch((caught) =>
+              setError(
+                ORGANIZATION_COPY.renameFailed(
+                  userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
+                ),
+              ),
+            )
+            .finally(() => setBusy(false));
+        }}
+      >
+        <label className="sr-only" htmlFor={`organization-name-${organization.id}`}>{ORGANIZATION_COPY.renameLabel}</label>
+        <input
+          id={`organization-name-${organization.id}`}
+          name="organization-name"
+          autoComplete="off"
+          // The field opens on request, so it takes focus.
+          autoFocus
+          value={draft}
+          maxLength={ORGANIZATION_NAME_MAX_LENGTH * 2}
+          disabled={busy}
+          onChange={(event) => setDraft(event.target.value)}
+          className="h-8 min-w-[200px] flex-1 rounded-md bg-[var(--color-surface)] px-2.5 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+        />
+        <UiButton size="sm" variant="primary" type="submit" disabled={busy || draft.trim().length === 0}>
+          {ORGANIZATION_COPY.renameSave}
+        </UiButton>
+        <UiButton size="sm" variant="ghost" type="button" disabled={busy} onClick={onCancel}>
+          Cancel
+        </UiButton>
+      </form>
+      {error ? <div role="alert" className="mt-1 text-sm text-[var(--color-danger)]">{error}</div> : null}
+    </div>
+  );
+}
+
+/**
+ * The Microsoft 365 group: the tenant line with a Manage menu (permissions,
+ * rename, disconnect), then the service rows.
+ */
 function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRecord; tenant: TenantRecord }) {
   const { openSetup } = useSetupFlow();
+  const { refreshTenantGrants } = useAppState();
+  const tenantCheck = useTenantCheck(tenant.id);
+  const [checkResult, setCheckResult] = useState<ReturnType<typeof checkAgainResult> | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
+  const [renaming, setRenaming] = useState(false);
   const sample = tenant.kind === "sample";
+  const ownRegistration = usesOwnRegistration(tenant);
   const registration = tenantRegistrationSummary(tenant);
   const license = entraLicenseName(tenant);
   const licenses = [...(license ? [license] : []), ...(tenant.relevantLicenses ?? []).map((entry) => entry.displayName)];
+  // The shared app is the default and goes unsaid; any other registration is named.
   const facts = sample
-    ? ["Fictional company, stored on this device"]
+    ? ORGANIZATION_COPY.sampleDetail
     : [
         tenantDomain(tenant),
-        ...(registration ? [registration.text] : []),
+        ...(registration && registration.text !== "OpenAdminOS app" ? [registration.text] : []),
         `signed in as ${tenant.username}`,
-      ];
+      ].join(", ");
+  // Not-checked licenses are explained once, by TenantLicensesNotChecked.
+  const licenseHint =
+    sample || (licenses.length === 0 && licensesNotChecked(tenant))
+      ? null
+      : licenses.length > 0
+        ? CONNECTIONS_COPY.licenses(licenses)
+        : CONNECTIONS_COPY.noLicenseDetails;
+  const factsText = (
+    <span className="min-w-0 truncate text-sm text-[var(--color-text-soft)]" title={registration?.title}>
+      {facts}
+    </span>
+  );
   return (
     <div>
-      <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <strong className="text-sm font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.microsoft365}</strong>
-        <span className="min-w-0 text-sm text-[var(--color-text-muted)]">{facts.join(" · ")}</span>
-        <span className="ml-auto flex flex-wrap gap-2">
-          {sample ? null : (
-            <UiButton variant="ghost" size="sm" onClick={openSetup}>Permissions</UiButton>
-          )}
-          <UiButton variant="ghost" size="sm" onClick={() => setDisconnecting(true)}>
-            {sample ? PILOT_COPY.leaveAction : "Disconnect"}
-          </UiButton>
+      <div className="conn-m365">
+        <strong className="shrink-0 text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.microsoft365}</strong>
+        {licenseHint ? (
+          <Tooltip content={licenseHint} side="bottom">
+            <span tabIndex={0} aria-label={`${facts}. ${licenseHint}`} className="min-w-0 truncate rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
+              {factsText}
+            </span>
+          </Tooltip>
+        ) : (
+          factsText
+        )}
+        <span className="ml-auto flex shrink-0 items-center gap-1">
+          {ownRegistration ? (
+            <UiButton
+              size="sm"
+              variant="ghost"
+              leadingIcon={<IconRefresh size={12} />}
+              disabled={tenantCheck.busy}
+              title={SERVICE_COPY.checkAgainHint}
+              onClick={() => {
+                setCheckResult(null);
+                void tenantCheck
+                  .run(() => refreshTenantGrants(tenant.id))
+                  .then((result) => setCheckResult(checkAgainResult(result, tenant.id)));
+              }}
+            >
+              {tenantCheck.running ? tenantCheckButtonLabel(tenantCheck.progress) : SERVICE_COPY.checkAgain}
+            </UiButton>
+          ) : null}
+          <Menu
+            ariaLabel={CONNECTIONS_COPY.manageMicrosoft365}
+            align="end"
+            trigger={
+              <UiButton size="sm" variant="ghost" trailingIcon={<IconChevronDown size={12} />} aria-label={CONNECTIONS_COPY.manageMicrosoft365}>
+                {CONNECTIONS_COPY.manage}
+              </UiButton>
+            }
+            items={[
+              ...(sample
+                ? []
+                : [
+                    { id: "permissions", label: CONNECTIONS_COPY.permissions, onSelect: openSetup },
+                    { id: "rename", label: CONNECTIONS_COPY.renameOrganization, onSelect: () => setRenaming(true) },
+                    { id: "manage-separator", type: "separator" as const },
+                  ]),
+              {
+                id: "disconnect",
+                label: sample ? PILOT_COPY.leaveAction : CONNECTIONS_COPY.disconnect,
+                danger: true,
+                onSelect: () => setDisconnecting(true),
+              },
+            ]}
+          />
         </span>
       </div>
-      {/* Not-checked licenses are explained once, by TenantLicensesNotChecked. */}
-      {sample || (licenses.length === 0 && licensesNotChecked(tenant)) ? null : (
-        <div className="mb-2 text-sm text-[var(--color-text-muted)]">
-          {licenses.length > 0 ? licenses.join(", ") : "No license details"}
-        </div>
-      )}
       <TenantProbeWarning tenant={tenant} />
       <TenantLicensesNotChecked tenant={tenant} />
       <TenantCheckStatus tenant={tenant} />
-      <MicrosoftServiceRows tenant={tenant} />
+      <MicrosoftServiceRows tenant={tenant} checkResult={checkResult} busy={tenantCheck.busy} />
       <DisconnectOrganizationDialog
         open={disconnecting}
         organization={organization}
         tenant={tenant}
         onClose={() => setDisconnecting(false)}
       />
+      <Modal open={renaming} onClose={() => setRenaming(false)} size="md">
+        <ModalHeader title={CONNECTIONS_COPY.renameOrganization} onClose={() => setRenaming(false)} />
+        <div className="p-6">
+          {renaming ? (
+            <RenameOrganizationForm organization={organization} onDone={() => setRenaming(false)} onCancel={() => setRenaming(false)} />
+          ) : null}
+        </div>
+      </Modal>
     </div>
   );
 }
@@ -729,7 +837,7 @@ function PublicReferences({ state }: { state: AppState }) {
           <UiButton size="sm" variant="secondary" onClick={() => navigate("/marketplace?kind=mcp")}>{CONNECTIONS_COPY.openMarketplace}</UiButton>
         </div>
       ) : (
-        <ul className="divide-y divide-[var(--color-border-soft)] border-y border-[var(--color-border-soft)]">
+        <ul className="conn-rows">
           {installed.map((server) => {
             const unusable = server.enabled && (server.missingTools?.length ?? 0) > 0;
             const stateText = !server.enabled
@@ -740,17 +848,17 @@ function PublicReferences({ state }: { state: AppState }) {
                   ? CONNECTIONS_COPY.referenceToolsOff
                   : CONNECTIONS_COPY.referenceOn;
             return (
-              <li key={server.id} className="grid grid-cols-[30px_minmax(0,1fr)] items-center gap-3 py-3 sm:grid-cols-[30px_minmax(0,1fr)_auto_auto]">
+              <li key={server.id} className="conn-row">
                 <ReferenceMark name={server.name} size="lg" />
                 <div className="min-w-0">
                   <div className="text-base font-medium text-[var(--color-text)]">{server.name}</div>
                   <div className="truncate text-sm text-[var(--color-text-muted)]">{server.host}</div>
                 </div>
-                <span className={`col-start-2 whitespace-nowrap text-sm sm:col-start-auto ${stateText === CONNECTIONS_COPY.referenceOn ? "text-[var(--color-success)]" : "text-[var(--color-text-muted)]"}`}>
-                  {stateText}
+                <span className="conn-row-state">
+                  <ReachState tone={stateText === CONNECTIONS_COPY.referenceOn ? "ok" : "off"}>{stateText}</ReachState>
                 </span>
                 <UiButton
-                  className="col-start-2 justify-self-start sm:col-start-auto"
+                  className="conn-row-action"
                   size="sm"
                   variant="ghost"
                   disabled={busy !== null}
@@ -789,14 +897,11 @@ function PublicReferences({ state }: { state: AppState }) {
 }
 
 function OrganizationsList({ state }: { state: AppState }) {
-  const { setActiveOrganization, renameOrganization } = useAppState();
+  const { setActiveOrganization } = useAppState();
   const toast = useToast();
   const organizations = resolveOrganizations(state);
   const active = activeOrganizationOf(state);
   const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
   if (organizations.length === 0) return null;
   return (
     <section aria-labelledby="connections-organizations" className="mt-8">
@@ -812,45 +917,7 @@ function OrganizationsList({ state }: { state: AppState }) {
               <TenantTile tenantId={tenant.id} displayName={organization.name} size="row" />
               <div className="min-w-[200px] flex-1">
                 {editing === organization.id ? (
-                  <form
-                    className="flex flex-wrap items-center gap-2"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      setBusy(true);
-                      setError(null);
-                      void renameOrganization(organization.id, draft)
-                        .then(() => {
-                          toast.success(ORGANIZATION_COPY.renamed);
-                          setEditing(null);
-                        })
-                        .catch((caught) =>
-                          setError(
-                            ORGANIZATION_COPY.renameFailed(
-                              userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? "",
-                            ),
-                          ),
-                        )
-                        .finally(() => setBusy(false));
-                    }}
-                  >
-                    <label className="sr-only" htmlFor={`organization-name-${organization.id}`}>{ORGANIZATION_COPY.renameLabel}</label>
-                    <input
-                      id={`organization-name-${organization.id}`}
-                      name="organization-name"
-                      autoComplete="off"
-                      value={draft}
-                      maxLength={ORGANIZATION_NAME_MAX_LENGTH * 2}
-                      disabled={busy}
-                      onChange={(event) => setDraft(event.target.value)}
-                      className="h-8 min-w-[200px] rounded-md bg-[var(--color-surface)] px-2.5 text-base text-[var(--color-text)] ring-1 ring-[var(--color-border)] focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
-                    />
-                    <UiButton size="sm" variant="primary" type="submit" disabled={busy || draft.trim().length === 0}>
-                      {ORGANIZATION_COPY.renameSave}
-                    </UiButton>
-                    <UiButton size="sm" variant="ghost" type="button" disabled={busy} onClick={() => { setEditing(null); setError(null); }}>
-                      Cancel
-                    </UiButton>
-                  </form>
+                  <RenameOrganizationForm organization={organization} onDone={() => setEditing(null)} onCancel={() => setEditing(null)} />
                 ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate text-base font-medium text-[var(--color-text)]">{organization.name}</span>
@@ -865,9 +932,6 @@ function OrganizationsList({ state }: { state: AppState }) {
                 <div className="mt-0.5 truncate text-sm text-[var(--color-text-muted)]">
                   {sample ? ORGANIZATION_COPY.sampleDetail : `${CONNECTIONS_COPY.microsoft365} · ${tenantDomain(tenant)}`}
                 </div>
-                {editing === organization.id && error ? (
-                  <div role="alert" className="mt-1 text-sm text-[var(--color-danger)]">{error}</div>
-                ) : null}
               </div>
               {editing === organization.id ? null : (
                 <span className="flex flex-wrap gap-2">
@@ -876,11 +940,7 @@ function OrganizationsList({ state }: { state: AppState }) {
                       size="sm"
                       variant="ghost"
                       aria-label={`${ORGANIZATION_COPY.renameAction} ${organization.name}`}
-                      onClick={() => {
-                        setDraft(organization.name);
-                        setError(null);
-                        setEditing(organization.id);
-                      }}
+                      onClick={() => setEditing(organization.id)}
                     >
                       {ORGANIZATION_COPY.renameAction}
                     </UiButton>
@@ -1028,7 +1088,7 @@ export default function Connections() {
             Loading connections
           </div>
         ) : (
-        <div className="calm-page-column-wide pb-16">
+        <div className="connections-page calm-page-column-wide pb-16">
           {!organization ? (
             <div role="status" className="mb-4 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
               {CONNECTIONS_COPY.noOrganization}
@@ -1059,7 +1119,7 @@ export default function Connections() {
                         <div className="text-base font-medium text-[var(--color-text)]">{service.title}</div>
                         <div className="text-sm text-[var(--color-text-muted)]">{service.summary}</div>
                       </div>
-                      <StateText status="missing" />
+                      <ReachState tone="off">{SERVICE_COPY.status.missing}</ReachState>
                     </li>
                   ))}
                 </ul>
