@@ -1,3 +1,4 @@
+import { ProviderLogo } from "../components/ProviderLogo";
 import { THEMES, useAppearance } from "../styles/appearance";
 import { useAnswerFont } from "../styles/answer-font";
 import { useDensity } from "../styles/density";
@@ -740,6 +741,7 @@ function ProviderRow({
   return (
     <div className={`border-b border-[var(--color-border-soft)] last:border-b-0 ${implemented ? "" : "opacity-60"}`}>
       <div className="flex flex-wrap items-center gap-3 px-5 py-4">
+        <ProviderLogo provider={provider.id} size={22} />
         <div className="min-w-[180px] flex-1">
           <div className="text-base font-medium text-[var(--color-text)]">{provider.name}</div>
           <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{kind}</p>

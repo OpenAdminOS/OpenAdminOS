@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "react-router";
 
 import { Button } from "../components/Button";
 import { ModelChoiceList } from "../components/ModelChoiceList";
+import { ProviderLogo, providerLogoKind } from "../components/ProviderLogo";
 import { IconLogo } from "../components/icons";
 import { MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocationDetail } from "../copy";
 import { chatToolHosts } from "../state/data-boundary";
@@ -113,17 +114,6 @@ function prefersReducedMotion(): boolean {
     return false;
   }
 }
-
-const INITIALS: Partial<Record<ProviderId, string>> = {
-  ollama: "Ol",
-  "lm-studio": "LM",
-  "apple-foundation": "Ai",
-  anthropic: "Cc",
-  openai: "Cx",
-  copilot: "Gh",
-  gemini: "Ge",
-  "azure-openai": "Az",
-};
 
 type NodeTone = "checking" | "ready" | "installed" | "muted" | "unknown" | "starting";
 
@@ -730,8 +720,8 @@ function ScanStage({
             data-selectable={canSelect ? "true" : "false"}
             onClick={canSelect ? () => onSelect(probe.providerId) : undefined}
           >
-            <span className="scan-node-dot flex items-center justify-center rounded-full text-sm font-semibold">
-              {INITIALS[probe.providerId] ?? probe.name.slice(0, 2)}
+            <span className="scan-node-dot flex items-center justify-center rounded-full text-sm font-semibold" data-kind={providerLogoKind(probe.providerId)}>
+              <ProviderLogo provider={probe.providerId} size={settled && tone === "muted" ? 16 : 22} />
             </span>
             <span className="scan-node-plate mt-1.5 flex flex-col items-center rounded-[6px] px-1.5">
               <span className="scan-node-name text-sm font-medium leading-[18px]">{probe.name}</span>

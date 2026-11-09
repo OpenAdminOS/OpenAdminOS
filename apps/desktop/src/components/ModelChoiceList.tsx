@@ -1,6 +1,7 @@
 import { useId, type ReactNode } from "react";
 
 import { MODEL_CHOICE_COPY, MODEL_SCAN_COPY } from "../copy";
+import { ProviderLogo } from "./ProviderLogo";
 import type { ProviderId } from "../shared/openAdminOS";
 import type { ChoiceOption } from "../setup/model-choice";
 
@@ -40,7 +41,7 @@ export function ModelChoiceList({
           <div key={option.providerId} data-provider={option.providerId}>
             <label
               htmlFor={id}
-              className={`grid grid-cols-[16px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-3 py-2.5 transition-colors duration-150 ${
+              className={`grid grid-cols-[16px_20px_minmax(0,1fr)_auto] items-start gap-x-3 rounded-md px-3 py-2.5 transition-colors duration-150 ${
                 option.unavailable ? "cursor-default" : "cursor-pointer hover:bg-[var(--color-hover)] has-[:checked]:bg-[var(--color-active)]"
               }`}
             >
@@ -54,6 +55,10 @@ export function ModelChoiceList({
                 onChange={() => onSelect(option.providerId)}
                 className="model-choice-radio mt-[3px]"
               />
+              {/* Decorative: the name is next to it. */}
+              <span className="mt-px">
+                <ProviderLogo provider={option.providerId} size={18} />
+              </span>
               <span className="min-w-0">
                 <span className="block text-base font-medium leading-5 text-[var(--color-text)]">{option.name}</span>
                 <span className={`mt-0.5 block text-sm leading-5 ${option.where === "hosted" && !option.unavailable ? "text-[var(--color-warning)]" : "text-[var(--color-text-soft)]"}`}>
@@ -78,7 +83,7 @@ export function ModelChoiceList({
               )}
             </label>
             {error ? (
-              <p role="alert" className="px-3 pb-2 pl-[40px] text-xs leading-5 text-[var(--color-danger)]">
+              <p role="alert" className="px-3 pb-2 pl-[72px] text-xs leading-5 text-[var(--color-danger)]">
                 {error}
               </p>
             ) : null}

@@ -1827,3 +1827,12 @@ Acceptance criteria
 - [x] Detail in the status strip and composer tooltips, the hosted send confirmation (under Goes to) and the scan's What ran. The confirmation names a CLI as the tool ("Send this question through Claude Code?", "Send through Claude Code"). Nova voice says its audio goes to OpenAI and that processing follows the workspace's data residency.
 - [x] Tests, SPEC and the first-run docs updated; scan and Chat recaptured.
 
+### Provider logos (maintainer request, 2026-11-09)
+
+- [x] Guidelines checked: LM Studio brand page permits referring to LM Studio with its marks; GitHub permits a GitHub logo to show an integration (its official logo archive includes the Copilot icon in black and white); Ollama publishes none (Simple Icons CC0 path, monochrome as Ollama's own mark). Anthropic and OpenAI require prior permission, Google requires an approved request, Azure icons are for diagrams, training and documentation only, and Apple does not allow its logo: those keep a neutral mark.
+- [x] `apps/desktop/src/assets/provider-logos/` with the SVG files and `NOTICE.md` (owner, source URL, retrieval date, terms followed, and why the others are neutral); a line in the README License section.
+- [x] `ProviderLogo` (provider id, size, optional label): two variants switched on `data-mode`, `aria-hidden` next to a visible name, `role="img"` with the provider name when shown alone. Used in the scan orbit and choice list (scan and Chat) and Settings, Providers. No new dependency.
+- [x] Orbit: a node is a surface circle with the mark inside; ready on this device is a soft green fill with a full ring so a logo stays on a quiet surface; a not-found node fades through ring, surface and name, never by dimming a logo.
+- [x] Tests for the mapping, the variants, the accessible label and the Apple neutral case. Scan (running and settled) and Chat's model choice recaptured at 1280x800 light and 960 px dark.
+- [ ] Step 4: after main is merged, `ProviderLogo` on #174's provider marks (the Connections reach map row and the organization surfaces that show a provider).
+
