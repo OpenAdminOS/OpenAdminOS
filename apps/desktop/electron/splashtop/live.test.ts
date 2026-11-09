@@ -6,12 +6,11 @@ import { mcpCatalogEntry, mcpHost } from "../mcp/catalog.js";
 import { McpHost } from "../mcp/host.js";
 
 /**
- * Live probe of the Splashtop support assistant: the Splashtop API Reference MCP
- * handshake and tool list, and one public Help Center search and article
+ * Live probe of Splashtop Docs MCP: one public Help Center search and article
  * read. No sign-in is involved. Skipped in CI, when OPENADMINOS_SKIP_LIVE
  * is set, and when the hosts do not resolve.
  */
-const IDS = ["splashtop-docs", "splashtop-kb"] as const;
+const IDS = ["splashtop-kb"] as const;
 
 async function resolves(host: string): Promise<boolean> {
   let timer: NodeJS.Timeout | undefined;
@@ -34,20 +33,6 @@ const skipReason = process.env.CI
       : "live probe skipped: offline";
 
 describe("Splashtop support assistant, live", { skip: skipReason ?? false }, () => {
-  it("Splashtop API Reference answers the handshake and lists the four reference tools", async () => {
-    const entry = mcpCatalogEntry("splashtop-docs")!;
-    const host = new McpHost({ clientVersion: "live-probe", connectTimeoutMs: 20_000 });
-    try {
-      const connected = await host.connect(entry);
-      assert.deepEqual(connected.missingTools, []);
-      assert.deepEqual(connected.tools.map((tool) => tool.name).sort(), [...entry.tools!].sort());
-      const found = await host.callTool(entry, "search-endpoints", { pattern: "reboot" });
-      assert.match(found.text, /computers\/reboot/);
-    } finally {
-      await host.closeAll();
-    }
-  });
-
   it("the Help Center search and article read answer without sign-in", async () => {
     const entry = mcpCatalogEntry("splashtop-kb")!;
     const host = new McpHost({ clientVersion: "live-probe", callTimeoutMs: 20_000 });

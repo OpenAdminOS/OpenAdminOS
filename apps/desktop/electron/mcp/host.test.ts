@@ -441,14 +441,13 @@ describe("MCP host connection paths", () => {
 });
 
 describe("MCP catalog", () => {
-  it("lists eight public read-only references over HTTPS without sign-in", () => {
+  it("lists seven public read-only references over HTTPS without sign-in", () => {
     assert.deepEqual(MCP_CATALOG.map((entry) => mcpHost(entry.url)), [
       "learn.microsoft.com",
       "www.kqlsearch.com",
       "www.intuneautomation.com",
       "www.microsoft.com",
       "mcp.windowsforum.com",
-      "docs.splashtop.com",
       "support-splashtopbusiness.splashtop.com",
       "mcp.endoflife.ai",
     ]);

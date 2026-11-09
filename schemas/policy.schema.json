@@ -79,7 +79,7 @@
       "enum": ["ollama", "apple-foundation", "lm-studio", "anthropic", "openai", "copilot", "gemini", "azure-openai"]
     },
     "publicReferenceId": {
-      "enum": ["microsoft-learn", "kql-search", "intuneautomation", "release-communications", "windowsforum", "splashtop-docs", "splashtop-kb", "endoflife-ai"]
+      "enum": ["microsoft-learn", "kql-search", "intuneautomation", "release-communications", "windowsforum", "splashtop-kb", "endoflife-ai"]
     },
     "settingKey": {
       "enum": ["allowedProviders", "defaultProvider", "defaultModel", "allowedPublicReferences", "appRegistration", "skipFirstRunScan"]
