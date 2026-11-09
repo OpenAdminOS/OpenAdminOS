@@ -1,5 +1,8 @@
 import type { McpServerAuth } from "@openadminos/agent-sdk";
 
+import type { BuiltinReference } from "./host.js";
+import { SPLASHTOP_KB_URL, SPLASHTOP_KNOWLEDGE_BASE } from "../splashtop/knowledge-base.js";
+
 /**
  * Remote MCP servers the Marketplace offers. The list lives in code until
  * a public catalog file exists. Every entry is public, read-only, needs no
@@ -138,6 +141,11 @@ export interface McpCatalogEntry {
   policy?: { label: string; url: string };
   /** Further plain statements for the install review, for example that results are community text. */
   notes?: readonly string[];
+  /**
+   * Built into OpenAdminOS: it calls the public API at `url`'s host from
+   * this device instead of connecting to an MCP server.
+   */
+  builtin?: BuiltinReference;
   /** Results are community text; Chat tells the model so with each result. */
   communityText?: true;
 }
@@ -271,6 +279,34 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     },
     operator: "ReadMe hosts this server for Splashtop and generates it from Splashtop's API documentation.",
     policy: { label: "Splashtop API documentation", url: "https://docs.splashtop.com/docs/getting-started" },
+  },
+  {
+    id: "splashtop-kb",
+    name: "Splashtop Knowledge Base",
+    publisher: "Splashtop",
+    url: SPLASHTOP_KB_URL,
+    description:
+      "Splashtop's public Help Center: how-to and troubleshooting articles for Splashtop Business, Enterprise, SOS and Remote Support. Built into OpenAdminOS: Chat searches the Help Center directly from this device, with no MCP server in between and no sign-in.",
+    pitch: "Splashtop Help Center articles: setup, connection problems and how-tos.",
+    useFor: "How to set up, use or troubleshoot Splashtop products: Streamer deployment, connection errors, SOS, file transfer, remote reboot. Not for the Splashtop API reference, not for Microsoft 365.",
+    aliases: ["splashtop knowledge base", "splashtop help center", "splashtop support"],
+    topics: ["splashtop", "streamer", "splashtop sos", "remote access", "remote support", "remote reboot"],
+    auth: "none",
+    readOnly: true,
+    tools: ["search_articles", "get_article"],
+    itemIds: { get_article: { params: ["id"], form: { kind: "number" } } },
+    queryHints: {
+      search_articles: "query takes a few product words such as reboot computer, streamer deployment or SOS connection, never names of people, computers or companies.",
+      get_article: "id is an article id that search_articles returned in this answer.",
+    },
+    results: {
+      items: [
+        { title: [["title"]], requires: ["id"], url: ["url"], text: ["snippet", "body"], facts: ["updated_at", "locale"], id: ["id"] },
+      ],
+    },
+    operator: "Splashtop runs its Help Center on Zendesk. OpenAdminOS calls its public article search and article API from this device.",
+    policy: { label: "Splashtop privacy policy", url: "https://www.splashtop.com/legal/privacy-policy" },
+    builtin: SPLASHTOP_KNOWLEDGE_BASE,
   },
   {
     id: "endoflife-ai",
