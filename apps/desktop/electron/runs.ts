@@ -279,10 +279,17 @@ export class RunService {
       if ((options.dryRun || options.runForRealOfRunId) && options.trigger === "schedule") {
         throw new Error("Dry runs and Run for real are manual run options. Open the agent to run it manually.");
       }
+      // An installed agent's schedule. Agent Team persona recurrence also
+      // starts with trigger "schedule", but it is host-owned (`office` is
+      // set, and the renderer cannot pass it) and keeps the persona's own
+      // validated tenant binding; whether personas move to organizations is
+      // an open question for the maintainer.
+      const agentSchedule = options.trigger === "schedule" && !options.office;
       // Hard constraint 3: a start the renderer asks for, and every
-      // scheduled start, runs only in the organization active right now.
+      // installed-agent scheduled start, runs only in the organization
+      // active right now.
       if (
-        (boundary.activeOrganizationOnly || options.trigger === "schedule") &&
+        (boundary.activeOrganizationOnly || agentSchedule) &&
         options.tenantId !== undefined &&
         options.tenantId !== persisted.activeTenantId
       ) {
@@ -292,7 +299,7 @@ export class RunService {
       if (pilotRun && options.trigger === "schedule") {
         throw new Error(PILOT_COPY.featureInProduction("Scheduling"));
       }
-      if (options.trigger === "schedule") {
+      if (agentSchedule) {
         const active = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
         if (!agent.schedule?.organizationId) {
           throw new Error(UNASSIGNED_SCHEDULE_RUN_COPY);
