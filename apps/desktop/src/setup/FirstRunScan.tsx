@@ -378,8 +378,12 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   // Set while the window is leaving: no second exit, Start or switch runs meanwhile.
   const finishing = useRef(false);
 
+  // `busy` here is the value when the action began: an exit pressed while a
+  // Start or another action runs is refused, so a Start's later scan never
+  // lands after the window left. Hosted and local switches call it from the
+  // render in which they started, where it is still null.
   const finish = async (to: string | null) => {
-    if (finishing.current) return;
+    if (finishing.current || busy !== null) return;
     finishing.current = true;
     setBusy((current) => current ?? "finish");
     setActionError(null);
@@ -860,7 +864,7 @@ function ScanHero({
           ) : (
             <p className="mt-5 text-sm text-[var(--color-text-muted)]">
               {MODEL_SCAN_COPY.keepLocalPrefix}{" "}
-              <button type="button" onClick={onSetUp} className={linkClass}>
+              <button type="button" disabled={busy !== null} onClick={onSetUp} className={linkClass}>
                 {MODEL_SCAN_COPY.setUpOpenAdmin}
               </button>
               .
@@ -874,7 +878,7 @@ function ScanHero({
           <p className={`mt-1 text-sm font-medium ${localLine === MODEL_SCAN_COPY.nothingLeaves ? "text-[var(--color-success)]" : "text-[var(--color-warning)]"}`}>{localLine}</p>
           <div className="mt-6 flex flex-wrap gap-2">
             {startButton(pick.probe, true)}
-            <Button variant="secondary" size="sm" onClick={onSetUp}>
+            <Button variant="secondary" size="sm" disabled={busy !== null} onClick={onSetUp}>
               {MODEL_SCAN_COPY.allProviders}
             </Button>
           </div>
@@ -887,10 +891,10 @@ function ScanHero({
             {MODEL_SCAN_COPY.installCommand}
           </code>
           <div className="mt-6 flex flex-wrap gap-2">
-            <Button variant="primary" onClick={onSetUp}>
+            <Button variant="primary" disabled={busy !== null} onClick={onSetUp}>
               {MODEL_SCAN_COPY.setUpOpenAdminAction}
             </Button>
-            <Button variant="secondary" size="sm" onClick={onSetUp}>
+            <Button variant="secondary" size="sm" disabled={busy !== null} onClick={onSetUp}>
               {MODEL_SCAN_COPY.allProviders}
             </Button>
           </div>

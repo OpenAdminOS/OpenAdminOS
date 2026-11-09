@@ -360,11 +360,14 @@ describe("first-launch model scan screen", () => {
     finish();
     await user.click((await screen.findAllByRole("button", { name: "Start Ollama" }))[0]!);
     await waitFor(() => expect(bridge.startLocalRuntime).toHaveBeenCalledOnce());
-    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.previewLink]) {
+    // Every exit, "Show all providers" included (review round 4, item 3).
+    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.previewLink, MODEL_SCAN_COPY.allProviders]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
     await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.continueWithoutModel }));
+    await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.allProviders }));
     expect(bridge.completeFirstRunScan).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { level: 1, name: "Ollama is installed on this device" })).toBeInTheDocument();
   });
 
   it("leaves once when Continue is pressed twice before it settles (Muse round 3, M2)", async () => {
