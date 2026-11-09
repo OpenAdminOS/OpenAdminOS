@@ -24,7 +24,15 @@ const splashtop: SplashtopChatContext = {
   tools: ["splashtop_list_computers", "splashtop_list_sessions"],
   read: async (tool) => ({
     tool,
-    records: [{ id: 4711, name: "WGB-FINANCE-PC07", host_name: "wgb-finance-pc07" }],
+    records: [{
+      id: 4711,
+      name: "WGB-FINANCE-PC07",
+      host_name: "wgbfin-ws-0193",
+      os_user: "jkowalski",
+      srs_owner_name: "Jana Kowalski",
+      hardware: { serial_number: "PF3KX9QZ", motherboard: { bios_serial_number: "MB-77Q-2291" } },
+      group_id: "grp-88213",
+    }],
     page: { offset: 0, limit: 25, total: 40, next: { offset: 25, limit: 25 } },
   }),
 };
@@ -36,7 +44,10 @@ describe("Splashtop tools in Chat", () => {
     const execution = await executeIntuneChatTool(ctx, "splashtop_list_computers", { limit: 25 });
     assert.equal(execution.trace.error, undefined);
     assert.equal(execution.trace.resultSummary, "1 of 40 Splashtop records returned · more available");
-    assert.equal(ctx.tenantObservations.matches("how do I fix WGB-FINANCE-PC07"), true);
+    // Every Splashtop identity field is indexed, also the snake_case ones and nested inventory serials.
+    for (const value of ["WGB-FINANCE-PC07", "wgbfin-ws-0193", "jkowalski", "Jana Kowalski", "PF3KX9QZ", "MB-77Q-2291", "grp-88213"]) {
+      assert.equal(ctx.tenantObservations.matches(`how do I fix ${value}`), true, value);
+    }
     assert.equal(tenantDataSourceForTool("splashtop_list_computers", {}), "splashtop:splashtop_list_computers");
   });
 

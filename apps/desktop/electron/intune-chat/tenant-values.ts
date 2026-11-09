@@ -10,7 +10,11 @@ import { isCommonWord, isGenericTokens, normalizeTokens } from "./mcp-stopwords.
  * is only numbers and stopwords, because names like "Windows 11" or "All
  * Users" identify nothing. givenName and surname count only as a full name.
  */
-const TENANT_NAME_KEYS = new Set(["displayName", "name", "userDisplayName"]);
+const TENANT_NAME_KEYS = new Set([
+  "displayName", "name", "userDisplayName",
+  // Splashtop Open API records (snake_case): computer, owner and account names.
+  "member_name", "srs_name", "src_name", "srs_owner_name", "computer_name", "group_name",
+]);
 
 /**
  * Descriptive keys. Their values are often ordinary words ("Sales",
@@ -27,8 +31,13 @@ const TENANT_IDENTIFIER_KEYS = new Set([
   "mailNickname", "groupTag", "hostName", "deviceName", "managedDeviceName",
   "serialNumber", "imei", "meid", "wiFiMacAddress", "ethernetMacAddress", "phoneNumber", "mobilePhone",
   "businessPhones", "otherMails", "proxyAddresses", "onPremisesDomainName", "domainName", "iccid", "udid",
+  // Splashtop Open API records (snake_case): hosts, accounts, addresses and hardware identifiers.
+  "host_name", "hostname", "src_user_email", "user_email", "os_user", "os_domain", "user_name", "username",
+  "uuid", "srs_uuid", "rds_uuid", "client_ip_addr", "server_ip_addr", "pubip", "local_ip", "ip_address",
+  "mac_address", "mac", "serial_number", "bios_serial_number", "motherboard_serial_number",
 ]);
-const ID_KEY = /I[dD]s?$/;
+/** Graph's camelCase ids (deviceId, userIds) and Splashtop's snake_case ones (group_id, server_ids). */
+const ID_KEY = /(?:I[dD]|_ids?)s?$/;
 
 /**
  * Subtrees that hold property names and change details, not identities:
