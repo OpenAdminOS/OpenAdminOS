@@ -353,6 +353,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     // The remembered decision is per provider and model, and the label names the model (Muse round 2, Q).
     expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for questions without a tenant on gpt-5" })).not.toBeChecked();
+    expect(within(dialog).getByText("Model").nextElementSibling).toHaveTextContent("gpt-5");
     await waitFor(() => expect(within(dialog).getByRole("button", { name: "Send through Codex" })).toHaveFocus());
 
     await user.click(within(dialog).getByRole("button", { name: "Send through Codex" }));
@@ -989,7 +990,9 @@ describe("IntuneChat hosted-provider consent", () => {
     expect(within(dialog).getByText("Codex answers with your existing sign-in. Selected cached data from Contoso IT is included.")).toBeInTheDocument();
     expect(within(dialog).getByText("Codex · location set by your account", { exact: false })).toBeInTheDocument();
     expect(within(dialog).getByText("Your question, this conversation and selected cached data from Contoso IT")).toBeInTheDocument();
-    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for Contoso IT with Codex" })).not.toBeChecked();
+    // The tenant-bound acknowledgement is bound to the model too, so it names it (PR #175 onboarding round review, 5).
+    expect(within(dialog).getByText("Model").nextElementSibling).toHaveTextContent("gpt-5");
+    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for Contoso IT with Codex on gpt-5" })).not.toBeChecked();
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
 
     await user.click(within(dialog).getByRole("button", { name: "Send through Codex" }));

@@ -4070,6 +4070,8 @@ function HostedChatConsentPanel({
   const through = sendsThroughTool({ id: prompt.providerId });
   const facts: Array<[string, string, boolean]> = [
     [HOSTED_CONFIRM_COPY.goesTo, providerDataLocation({ id: prompt.providerId, name: prompt.providerName }), true],
+    // The acknowledgement is bound to the model, with or without a tenant.
+    ...(prompt.model ? [[HOSTED_CONFIRM_COPY.model, prompt.model, false] as [string, string, boolean]] : []),
     [HOSTED_CONFIRM_COPY.whatIsSent, noTenant ? HOSTED_CONFIRM_COPY.sentNoTenant(Boolean(prompt.toolHosts?.length)) : HOSTED_CONFIRM_COPY.sentTenant(tenant, workspace), false],
     [HOSTED_CONFIRM_COPY.staysHere, noTenant ? HOSTED_CONFIRM_COPY.staysNoTenant : HOSTED_CONFIRM_COPY.staysTenant, false],
   ];
@@ -4123,7 +4125,7 @@ function HostedChatConsentPanel({
           className="mt-[3px] h-3.5 w-3.5 accent-[var(--color-accent)]"
         />
         <span>
-          {noTenant ? HOSTED_CONFIRM_COPY.rememberNoTenant(prompt.model ?? tool) : HOSTED_CONFIRM_COPY.rememberTenant(tenant, tool)}
+          {noTenant ? HOSTED_CONFIRM_COPY.rememberNoTenant(prompt.model ?? tool) : HOSTED_CONFIRM_COPY.rememberTenant(tenant, tool, prompt.model)}
         </span>
       </label>
       <div className="mt-4 flex flex-wrap items-center gap-2">

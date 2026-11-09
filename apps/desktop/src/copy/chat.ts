@@ -74,6 +74,8 @@ export const HOSTED_CONFIRM_COPY = {
   bodyNoTenant: (tool: string, company: string) => `${tool} answers through ${company}. Nothing is connected, so no tenant data is included.`,
   bodyTenant: (tool: string, company: string, tenant: string) => `${tool} answers through ${company}. Selected cached data from ${tenant} is included.`,
   goesTo: "Goes to",
+  /** The acknowledgement is bound to this model, in both variants. */
+  model: "Model",
   whatIsSent: "What is sent",
   staysHere: "Stays here",
   sentNoTenant: (references: boolean) => `Your question and this conversation${references ? ", and results from the references you added" : ""}`,
@@ -82,7 +84,7 @@ export const HOSTED_CONFIRM_COPY = {
   staysNoTenant: "Chat history",
   staysTenant: "Chat history and the local cache",
   rememberNoTenant: (model: string) => `Do not ask again for questions without a tenant on ${model}`,
-  rememberTenant: (tenant: string, tool: string) => `Do not ask again for ${tenant} with ${tool}`,
+  rememberTenant: (tenant: string, tool: string, model?: string) => `Do not ask again for ${tenant} with ${tool}${model ? ` on ${model}` : ""}`,
   send: (company: string) => `Send to ${company}`,
   cancel: "Cancel",
   useLocal: "Use a model on this device",
