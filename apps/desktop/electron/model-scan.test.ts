@@ -500,7 +500,8 @@ describe("review round 2: coordination and Start (items 3, 7, B)", () => {
         return providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
       },
     });
-    return { store, cleanup: async () => { store.close(); await rm(dir, { recursive: true, force: true }); } };
+    // A fresh store can still be writing its first state file when a test ends; retry the removal.
+    return { store, cleanup: async () => { store.close(); await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 }); } };
   };
 
   it("sends every progress event to each caller of a shared scan, including one that joins late (B)", async () => {
