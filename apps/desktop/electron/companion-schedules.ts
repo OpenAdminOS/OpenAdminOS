@@ -1,7 +1,9 @@
 import {
   scheduleRunsInActiveOrganization,
   type AgentSchedule,
+  type AgentSummary,
   type AppState,
+  type CompanionRunDueReadSchedulesResult,
   type CompanionScheduleItem,
   type RunRecord,
 } from "@openadminos/agent-sdk";
@@ -58,4 +60,59 @@ export function companionUpcomingSchedules(
     })
     .sort((a, b) => Date.parse(a.nextRunAt) - Date.parse(b.nextRunAt))
     .slice(0, 5);
+}
+
+/**
+ * Menu bar Run due: start every due read schedule of the active
+ * organization. Another organization's schedule, or an unassigned one,
+ * waits and is counted as waiting, never as an error.
+ */
+export async function runDueCompanionSchedules(
+  state: Pick<AppState, "installedAgents" | "runs" | "activeOrganizationId">,
+  nowMs: number,
+  host: { startScheduledRun(agent: AgentSummary): Promise<void> },
+): Promise<CompanionRunDueReadSchedulesResult> {
+  const result: CompanionRunDueReadSchedulesResult = {
+    queued: 0,
+    skippedWrite: 0,
+    skippedInFlight: 0,
+    skippedNotDue: 0,
+    waitingOtherOrganization: 0,
+    errors: [],
+  };
+  for (const agent of state.installedAgents) {
+    const schedule = agent.schedule;
+    if (!schedule?.enabled) continue;
+    if (!scheduleRunsInActiveOrganization(schedule, state.activeOrganizationId)) {
+      result.waitingOtherOrganization += 1;
+      continue;
+    }
+    if (agent.mode === "write") {
+      result.skippedWrite += 1;
+      continue;
+    }
+    if (nextRunTimeForSchedule(schedule, nowMs) > nowMs) {
+      result.skippedNotDue += 1;
+      continue;
+    }
+    const inFlight = state.runs.some(
+      (run) =>
+        run.agentSlug === agent.slug &&
+        (run.status === "queued" || run.status === "running" || run.status === "awaiting-confirmation"),
+    );
+    if (inFlight) {
+      result.skippedInFlight += 1;
+      continue;
+    }
+    try {
+      await host.startScheduledRun(agent);
+      result.queued += 1;
+    } catch (error) {
+      result.errors.push({
+        agentSlug: agent.slug,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return result;
 }

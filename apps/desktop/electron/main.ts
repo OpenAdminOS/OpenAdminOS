@@ -128,8 +128,8 @@ import type {
   WorkspaceEvidenceSourceType,
   WorkspaceStatus,
 } from "@openadminos/agent-sdk";
-import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, scheduleRunsInActiveOrganization, servicePartById } from "@openadminos/agent-sdk";
-import { companionUpcomingSchedules, nextRunTimeForSchedule } from "./companion-schedules.js";
+import { ORGANIZATION_NAME_MAX_LENGTH, providerCatalog, servicePartById } from "@openadminos/agent-sdk";
+import { companionUpcomingSchedules, runDueCompanionSchedules } from "./companion-schedules.js";
 import {
   installConnectorConfirmBridge,
   respondConnectorConfirm,
@@ -2678,47 +2678,10 @@ async function getCompanionSnapshot(): Promise<CompanionSnapshot> {
 async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult> {
   const state = await store.getAppState();
   const nowMs = Date.now();
-  const result: CompanionRunDueReadSchedulesResult = {
-    queued: 0,
-    skippedWrite: 0,
-    skippedInFlight: 0,
-    skippedNotDue: 0,
-    waitingOtherOrganization: 0,
-    errors: [],
-  };
-
-  for (const agent of state.installedAgents) {
-    const schedule = agent.schedule;
-    if (!schedule?.enabled) continue;
-    // Another organization's schedule, or an unassigned one, waits; it is
-    // not a failure of this organization's run.
-    if (!scheduleRunsInActiveOrganization(schedule, state.activeOrganizationId)) {
-      result.waitingOtherOrganization += 1;
-      continue;
-    }
-    if (agent.mode === "write") {
-      result.skippedWrite += 1;
-      continue;
-    }
-    const dueAt = nextRunTimeForSchedule(schedule, nowMs);
-    if (dueAt > nowMs) {
-      result.skippedNotDue += 1;
-      continue;
-    }
-    const inFlight = state.runs.some(
-      (run) =>
-        run.agentSlug === agent.slug &&
-        (run.status === "queued" ||
-          run.status === "running" ||
-          run.status === "awaiting-confirmation"),
-    );
-    if (inFlight) {
-      result.skippedInFlight += 1;
-      continue;
-    }
-
-    try {
+  return runDueCompanionSchedules(state, nowMs, {
+    startScheduledRun: async (agent) => {
       await store.startRun(agent.slug, { trigger: "schedule" });
+      const schedule = agent.schedule!;
       await store.updateAgentSchedule(agent.slug, {
         enabled: true,
         intervalSeconds: schedule.intervalSeconds,
@@ -2727,16 +2690,8 @@ async function runDueReadSchedules(): Promise<CompanionRunDueReadSchedulesResult
         notifyOnChangeOnly: schedule.notifyOnChangeOnly,
         lastScheduledRunAt: new Date(nowMs).toISOString(),
       });
-      result.queued += 1;
-    } catch (error) {
-      result.errors.push({
-        agentSlug: agent.slug,
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-
-  return result;
+    },
+  });
 }
 
 function agentNameForRun(
