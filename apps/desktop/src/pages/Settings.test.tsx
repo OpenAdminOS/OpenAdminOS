@@ -262,6 +262,25 @@ describe("Settings provider section", () => {
     await waitFor(() => expect(row.closest(".setting-row")).toHaveFocus());
   });
 
+  it("finds tenant and connector topics and leads to Connections", async () => {
+    const user = userEvent.setup();
+    renderRoute(
+      <Routes>
+        <Route path="/settings/:section?" element={<Settings />} />
+        <Route path="/connections" element={<ConnectionsLocation />} />
+      </Routes>,
+      { path: "*", route: "/settings/providers", bridge: makeMockBridge() },
+    );
+    const search = await screen.findByRole("combobox", { name: "Search settings" });
+    await user.type(search, "slack");
+    expect(screen.getByRole("option", { name: /Result connectors/ })).toBeInTheDocument();
+    expect(screen.queryByText(/No settings match this search/)).not.toBeInTheDocument();
+    await user.clear(search);
+    await user.type(search, "tenants");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByTestId("location")).toHaveTextContent("/connections");
+  });
+
   it("opens contextual tenant setup before refreshing an empty tenant cache", async () => {
     const user = userEvent.setup();
     const connectedState = createMockAppState();

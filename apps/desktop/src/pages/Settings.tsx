@@ -74,6 +74,9 @@ import {
   SETTINGS_SECTIONS,
   SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS,
   searchSettings,
+  searchSettingsLinks,
+  type SettingsLinkResult,
+  type SettingsSearchResult,
   userFacingErrorReason,
   type SettingsItemId,
   type SettingsSectionId,
@@ -159,7 +162,11 @@ export default function Settings() {
   const [activeSearchIndex, setActiveSearchIndex] = useState(0);
   const settingsSearchInputRef = useRef<HTMLInputElement | null>(null);
   const scrollRootRef = useRef<HTMLDivElement | null>(null);
-  const settingsResults = useMemo(() => searchSettings(settingsQuery), [settingsQuery]);
+  // Settings results first, then topics that moved to Connections.
+  const settingsResults = useMemo<Array<SettingsSearchResult | SettingsLinkResult>>(
+    () => [...searchSettings(settingsQuery), ...searchSettingsLinks(settingsQuery)],
+    [settingsQuery],
+  );
   const {
     state,
     setActiveProvider,
@@ -275,7 +282,9 @@ export default function Settings() {
     if (!settingsQuery.trim()) {
       return new Set<SettingsSectionId>(SETTINGS_SECTIONS.map((entry) => entry.id));
     }
-    return new Set<SettingsSectionId>(settingsResults.map((result) => result.section));
+    return new Set<SettingsSectionId>(
+      settingsResults.flatMap((result) => (result.kind === "link" ? [] : [result.section])),
+    );
   }, [settingsQuery, settingsResults]);
 
   const onSettingsSearchKeyDown = (event: React.KeyboardEvent<HTMLInputElement>) => {
@@ -295,10 +304,12 @@ export default function Settings() {
       const result = settingsResults[activeSearchIndex];
       if (!result) return;
       event.preventDefault();
-      selectSettingsTarget({
-        section: result.section,
-        ...(result.kind === "setting" ? { id: result.id } : {}),
-      });
+      if (result.kind === "link") navigate(result.route);
+      else
+        selectSettingsTarget({
+          section: result.section,
+          ...(result.kind === "setting" ? { id: result.id } : {}),
+        });
       setSettingsQuery("");
     } else if (event.key === "Escape") {
       setSettingsQuery("");
@@ -379,10 +390,12 @@ export default function Settings() {
                       tabIndex={-1}
                       onMouseEnter={() => setActiveSearchIndex(index)}
                       onClick={() => {
-                        selectSettingsTarget({
-                          section: result.section,
-                          ...(result.kind === "setting" ? { id: result.id } : {}),
-                        });
+                        if (result.kind === "link") navigate(result.route);
+                        else
+                          selectSettingsTarget({
+                            section: result.section,
+                            ...(result.kind === "setting" ? { id: result.id } : {}),
+                          });
                         setSettingsQuery("");
                       }}
                       className={`block w-full rounded-md px-2.5 py-2 text-left ${
@@ -420,7 +433,7 @@ export default function Settings() {
           ))}
         </nav>
         <div ref={scrollRootRef} className="app-page-body min-w-0 flex-1 overflow-y-auto animate-fade-in">
-          {settingsQuery.trim() && visibleSectionIds.size === 0 ? (
+          {settingsQuery.trim() && settingsResults.length === 0 ? (
             <div role="status" className="rounded-[10px] bg-[var(--color-surface)] px-6 py-10 text-center text-base text-[var(--color-text-muted)] ring-1 ring-[var(--color-border)]">
               No settings match this search. Try provider, cache, or privacy.
             </div>

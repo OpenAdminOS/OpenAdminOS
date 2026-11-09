@@ -75,3 +75,39 @@ export function searchSettings(query: string): SettingsSearchResult[] {
     .filter((entry) => terms.every((term) => entry.haystack.includes(term)))
     .map(({ haystack: _haystack, ...entry }) => entry);
 }
+
+/** A search result that leads out of Settings, for topics that moved. */
+export interface SettingsLinkResult {
+  id: string;
+  title: string;
+  description: string;
+  kind: "link";
+  route: string;
+}
+
+/** Topics that moved from Settings to Connections (2026-11-08), so searching Settings still finds them. */
+export const SETTINGS_LINKS = [
+  {
+    id: "link-connections-microsoft365",
+    title: "Organizations and Microsoft 365",
+    description: "Tenants, services, permissions and app registrations are in Connections.",
+    keywords: ["tenant", "tenants", "organization", "microsoft", "entra", "intune", "defender", "permissions", "consent", "app registration", "sign-in", "account"],
+    route: "/connections",
+  },
+  {
+    id: "link-connections-results",
+    title: "Result connectors",
+    description: "Teams, Outlook, Slack, Discord, Signal and WhatsApp delivery are in Connections, under Results go to.",
+    keywords: ["connector", "connectors", "teams", "outlook", "slack", "discord", "signal", "whatsapp", "delivery", "routing", "results"],
+    route: "/connections",
+  },
+] as const;
+
+export function searchSettingsLinks(query: string): SettingsLinkResult[] {
+  const terms = query.trim().toLocaleLowerCase().split(/\s+/).filter(Boolean);
+  if (terms.length === 0) return [];
+  return SETTINGS_LINKS.filter((entry) => {
+    const haystack = [entry.title, entry.description, ...entry.keywords].join(" ").toLocaleLowerCase();
+    return terms.every((term) => haystack.includes(term));
+  }).map(({ id, title, description, route }) => ({ id, title, description, kind: "link" as const, route }));
+}
