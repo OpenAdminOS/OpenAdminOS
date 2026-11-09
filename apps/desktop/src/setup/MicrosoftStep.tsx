@@ -10,6 +10,7 @@ import { copyTextToClipboard } from "../shared/clipboard";
 import {
   AVAILABLE_SERVICES,
   BASELINE_SCOPES,
+  OPENADMINOS_APP_CLIENT_ID,
   formatServiceList,
   partIdsFor,
   servicePartById,
@@ -136,16 +137,16 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
                   </div>
                 </fieldset>
                 <Permissions serviceIds={pickedIds} withSignIn={needsSignIn} />
-                <div className="mt-5 flex flex-wrap gap-2">
+                <div className="mt-5">
                   <Button variant="primary" size="lg" disabled={partIds.length === 0} onClick={() => openSetupForParts(partIds, { onConnected })}>
                     {MICROSOFT_STEP_COPY.signIn}
                   </Button>
-                  <Button variant="secondary" size="lg" disabled={partIds.length === 0} onClick={() => openOwnRegistration(partIds, { onConnected })}>
+                </div>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <Button variant="secondary" size="md" disabled={partIds.length === 0} onClick={() => openOwnRegistration(partIds, { onConnected })}>
                     {MICROSOFT_STEP_COPY.ownRegistration}
                   </Button>
-                </div>
-                <div className="mt-2">
-                  <Button variant="ghost" size="sm" disabled={partIds.length === 0} onClick={() => void askAdmin()}>
+                  <Button variant="ghost" size="md" disabled={partIds.length === 0} onClick={() => void askAdmin()}>
                     {MICROSOFT_STEP_COPY.askAdmin}
                   </Button>
                 </div>
@@ -204,21 +205,32 @@ function ServiceRow({ service, checked, connected, onToggle }: { service: Servic
   );
 }
 
-/** The read-only permissions the picked services need, grouped by service, sign-in last. */
+/**
+ * The read-only permissions the picked services need, grouped by service
+ * with sign-in last. A permission two services share is listed once, under
+ * the first, so the count and the list agree.
+ */
 function Permissions({ serviceIds, withSignIn }: { serviceIds: readonly ServiceId[]; withSignIn: boolean }) {
   if (serviceIds.length === 0) {
     return <p className="mt-3 text-sm text-[var(--color-text-muted)]">{MICROSOFT_STEP_COPY.noneYet}</p>;
   }
-  const groups = AVAILABLE_SERVICES.filter((service) => serviceIds.includes(service.id)).map((service) => ({
-    label: service.title,
-    scopes: [...new Set(partIdsFor([service.id]).flatMap((id) => servicePartById(id)?.scopes.map((scope) => scope.name) ?? []))],
-  }));
-  if (withSignIn) groups.push({ label: NOT_CONNECTED_COPY.signInPart, scopes: [...BASELINE_SCOPES] });
-  const count = new Set(groups.flatMap((group) => group.scopes)).size;
+  const listed = new Set<string>();
+  const groups: { label: string; scopes: string[] }[] = [];
+  const add = (label: string, names: readonly string[]) => {
+    const scopes = [...new Set(names)].filter((name) => !listed.has(name));
+    for (const name of scopes) listed.add(name);
+    if (scopes.length > 0) groups.push({ label, scopes });
+  };
+  for (const service of AVAILABLE_SERVICES.filter((entry) => serviceIds.includes(entry.id))) {
+    add(service.title, partIdsFor([service.id]).flatMap((id) => servicePartById(id)?.scopes.map((scope) => scope.name) ?? []));
+  }
+  if (withSignIn) add(NOT_CONNECTED_COPY.signInPart, BASELINE_SCOPES);
+  const count = listed.size;
   return (
-    <section aria-label={NOT_CONNECTED_COPY.permissionsSummary(count)} className="mt-3 rounded-lg px-3 py-2.5 ring-1 ring-inset ring-[var(--color-border-soft)]">
+    <section aria-label={NOT_CONNECTED_COPY.permissionsSummary(count)} className="mt-3 rounded-lg py-2.5 pl-3 pr-1 ring-1 ring-inset ring-[var(--color-border-soft)]">
       <p className="text-sm font-medium text-[var(--color-text-soft)]">{NOT_CONNECTED_COPY.permissionsSummary(count)}</p>
-      <ul className="mt-2 space-y-1.5">
+      {/* Capped so the actions stay in view; it scrolls, and takes focus to scroll by keyboard. */}
+      <ul tabIndex={0} aria-label="Permissions" className="permission-list mt-2 max-h-[118px] space-y-1.5 overflow-y-auto pr-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]">
         {groups.map((group) => (
           <li key={group.label} className="grid grid-cols-[76px_minmax(0,1fr)] gap-x-2">
             <span className="text-xs leading-5 text-[var(--color-text-soft)]">{group.label}</span>
@@ -263,7 +275,18 @@ function ConnectedResult({
           ))}
         </ul>
       ) : null}
-      {tenant.username ? <p className="mt-3 text-xs text-[var(--color-text-muted)]">{tenant.username}</p> : null}
+      <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">
+        {[
+          tenant.username ? MICROSOFT_STEP_COPY.signedInAs(tenant.username) : null,
+          tenant.appRegistration?.kind === "custom"
+            ? MICROSOFT_STEP_COPY.ownApp(tenant.appRegistration.clientId)
+            : tenant.appRegistration?.kind === "openadminos" && tenant.appRegistration.clientId === OPENADMINOS_APP_CLIENT_ID
+              ? MICROSOFT_STEP_COPY.enterpriseApp(tenant.displayName, tenant.appRegistration.clientId)
+              : null,
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      </p>
       <div className="mt-5">
         <Button variant="primary" size="lg" onClick={onOpenChat}>
           {MICROSOFT_STEP_COPY.openChat}

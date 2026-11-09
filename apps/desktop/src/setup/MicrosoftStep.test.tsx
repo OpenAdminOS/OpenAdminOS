@@ -6,6 +6,7 @@ import { Route, Routes, useLocation } from "react-router";
 import { MICROSOFT_STEP_COPY, MODEL_SCAN_COPY, NOT_CONNECTED_COPY } from "../copy";
 import {
   BASELINE_SCOPES,
+  OPENADMINOS_APP_CLIENT_ID,
   partIdsFor,
   requestedScopes,
   type AppState,
@@ -27,6 +28,7 @@ const intuneTenant = (): TenantRecord => ({
   id: "tenant-fabrikam",
   displayName: "Fabrikam",
   username: "admin@fabrikam.example",
+  appRegistration: { kind: "openadminos", clientId: OPENADMINOS_APP_CLIENT_ID },
   grantedScopes: qualified(requestedScopes(partIdsFor(["intune"])).map((scope) => scope.name)),
 });
 
@@ -88,6 +90,9 @@ describe("Connect Microsoft 365, the second onboarding step", () => {
     for (const name of [MICROSOFT_STEP_COPY.signIn, MICROSOFT_STEP_COPY.ownRegistration, MICROSOFT_STEP_COPY.askAdmin]) {
       expect(screen.getByRole("button", { name })).toBeDisabled();
     }
+    // electron/first-run-capture.ts picks services by these ids and leaves by Not now.
+    expect(document.querySelector("#microsoft-step-heading")).not.toBeNull();
+    for (const id of ["intune", "entra"]) expect(document.querySelector(`#microsoft-step-${id}`)).not.toBeNull();
     // Every service is dashed on the stage until it is connected.
     expect(document.querySelectorAll(".ms-node[data-state='off']")).toHaveLength(3);
   });
@@ -147,6 +152,7 @@ describe("Connect Microsoft 365, the second onboarding step", () => {
     expect(document.querySelector(".ms-node[data-service='intune']")).toHaveAttribute("data-state", "connected");
     expect(document.querySelector(".ms-node[data-service='defender']")).toHaveAttribute("data-state", "off");
     expect(screen.getByRole("status")).toHaveTextContent("Fabrikam is connected: Intune and Entra.");
+    expect(screen.getByText(/Signed in as admin@fabrikam\.example\. The enterprise application OpenAdminOS \(app ID /)).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.openChat }));
     expect(await screen.findByText("App content")).toBeInTheDocument();

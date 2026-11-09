@@ -235,6 +235,10 @@ export const MICROSOFT_STEP_COPY = {
   connectedTitle: (organization: string) => `${organization} is connected`,
   connectedBody: "Chat answers from these services with the read-only permissions you approved. Writes always ask you first.",
   openChat: "Open Chat",
+  signedInAs: (username: string) => `Signed in as ${username}.`,
+  enterpriseApp: (organization: string, clientId: string) =>
+    `The enterprise application OpenAdminOS (app ID ${clientId}) is now in ${organization}, with read-only delegated permissions. Find it in Entra admin center under Enterprise applications.`,
+  ownApp: (clientId: string) => `Signed in with your app registration ${clientId}.`,
   announceConnected: (organization: string, services: string) => `${organization} is connected: ${services}.`,
   reopen: "Set up Microsoft 365",
 } as const;
