@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Route, Routes, useLocation } from "react-router";
 import { describe, expect, it, vi } from "vitest";
@@ -241,6 +241,18 @@ describe("Settings provider section", () => {
     await waitFor(() => {
       expect(disableGateway).toHaveBeenCalledOnce();
     });
+  });
+
+  it("never moves focus away from the search while the section opens (design round)", async () => {
+    renderRoute(<Settings />, { path: "/settings/:section?", route: "/settings/providers", bridge: makeMockBridge() });
+    // The admin starts typing before the section has scrolled into view:
+    // focus lands in the search in the same frame as the first render.
+    const search = screen.getByRole("combobox", { name: "Search settings" });
+    search.focus();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+    expect(search).toHaveFocus();
   });
 
   it("finds a setting from the shared catalog and focuses the rendered row", async () => {

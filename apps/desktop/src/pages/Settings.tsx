@@ -227,10 +227,14 @@ export default function Settings() {
       if (!(heading instanceof HTMLElement)) return;
       const sectionElement = heading.closest<HTMLElement>("[data-settings-section]") ?? heading;
       scrollWithinSettings(root, sectionElement);
-      if (!focused) {
-        heading.focus({ preventScroll: true });
-        focused = true;
-      }
+      // Focus moves to the section once, and never away from a field the
+      // admin is already using, such as the settings search.
+      const elsewhere =
+        document.activeElement instanceof HTMLElement &&
+        document.activeElement !== document.body &&
+        !root.contains(document.activeElement);
+      if (!focused && !elsewhere) heading.focus({ preventScroll: true });
+      focused = true;
     };
     const scheduleScroll = () => {
       window.cancelAnimationFrame(frame);
