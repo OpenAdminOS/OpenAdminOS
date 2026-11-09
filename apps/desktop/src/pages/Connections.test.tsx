@@ -522,3 +522,16 @@ describe("destinations follow what the host sends (review round 4)", () => {
   });
 });
 
+describe("hosted voice in the map (review round 5)", () => {
+  it("shows hosted Nova voice as leaving the device while the Chat model stays local, like the strip", () => {
+    const state = createMockAppState({ mcpServers: createMockMcpServers() });
+    const strip = deriveDataBoundary(state, true);
+    expect(strip.isVoiceHosted).toBe(true);
+    const model = buildReachModel(state, [], true);
+    expect(model.voice?.provider).toBe(strip.label.replace(/^Voice · /, ""));
+    expect(reachDescription(model)).toContain(CONNECTIONS_COPY.map.voiceSentence(model.voice!.provider));
+    const quiet = buildReachModel(state, [], false);
+    expect(quiet.voice).toBeUndefined();
+    expect(reachDescription(quiet)).not.toContain("Nova voice");
+  });
+});

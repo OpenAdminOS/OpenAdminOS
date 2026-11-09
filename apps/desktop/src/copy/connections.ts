@@ -89,6 +89,10 @@ export const CONNECTIONS_COPY = {
     modelNone: "No model ready",
     modelSample: "Prepared sample answers, no model",
     partsSummary: (granted: number, total: number) => `${granted} of ${total} parts`,
+    /** Nova voice with a hosted voice model, the same fact the status strip shows as "Voice · OpenAI". */
+    voice: "Nova voice audio and shared context",
+    voiceDestination: (provider: string) => `${provider}, while Nova voice is active`,
+    voiceSentence: (provider: string) => `Nova voice is active: audio and shared context go to ${provider}.`,
   },
   servicesHeading: "Services",
   servicesBody: "Each service is consented on its own. Agents and Chat use only what is connected here.",

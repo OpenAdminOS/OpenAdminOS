@@ -45,7 +45,7 @@ import {
 import { PILOT_COPY } from "../shared/pilot-mode";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { hostedChannel } from "../shared/providers";
-import { chatToolHosts, deriveDataBoundary, useAppState } from "../state";
+import { chatToolHosts, deriveDataBoundary, useAppState, useDataBoundaryOptional } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
 
 interface ReachService {
@@ -70,9 +70,11 @@ export interface ReachModel {
   /** null while the connector list loads or when it could not be loaded. */
   reportDestinations: string[] | null;
   reportDestinationsState: "ready" | "loading" | "failed";
+  /** Set while hosted Nova voice is active, the same state the status strip uses. */
+  voice?: { provider: string; model?: string };
 }
 
-export function buildReachModel(state: AppState, connectors?: readonly ConnectorSummary[] | null): ReachModel {
+export function buildReachModel(state: AppState, connectors?: readonly ConnectorSummary[] | null, voiceHosted = false): ReachModel {
   const organization = activeOrganizationOf(state);
   const tenant = organization
     ? state.tenants.find((entry) => entry.id === organization.connections.microsoft365?.tenantId)
@@ -94,6 +96,9 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
   // The model and where prompts go come from the status strip's own
   // function, so the map and the strip cannot disagree.
   const boundary = deriveDataBoundary(state);
+  // Hosted voice is a separate destination: the strip shows it instead of
+  // the Chat model, the map shows both.
+  const voiceBoundary = voiceHosted ? deriveDataBoundary(state, true) : undefined;
   const provider = state.providers.find((entry) => entry.id === state.activeProviderId);
   const modelName = boundary.model ?? provider?.name ?? "";
   const model: ReachModel["model"] = sample
@@ -114,6 +119,9 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     // reports go; the map says so instead of saying nowhere.
     reportDestinations: sample ? [] : connectors ? reportDestinations(resultDestinations(state.installedAgents, connectors)) : null,
     reportDestinationsState: sample || connectors ? "ready" : connectors === null ? "failed" : "loading",
+    ...(voiceBoundary?.isVoiceHosted
+      ? { voice: { provider: voiceBoundary.label.replace(/^Voice · /, ""), ...(voiceBoundary.model ? { model: voiceBoundary.model } : {}) } }
+      : {}),
   };
 }
 
@@ -159,7 +167,8 @@ export function reachDescription(model: ReachModel): string {
     : model.reportDestinations.length > 0
       ? `Run reports and agent messages can go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
       : "Run reports and agent messages go nowhere: no saved rule or step sends to a connector.";
-  return `${services} ${device} ${words} ${reports}`;
+  const voice = model.voice ? ` ${CONNECTIONS_COPY.map.voiceSentence(model.voice.provider)}` : "";
+  return `${services} ${device} ${words} ${reports}${voice}`;
 }
 
 function ReachMap({ model }: { model: ReachModel }) {
@@ -238,6 +247,17 @@ function ReachMap({ model }: { model: ReachModel }) {
             {model.model.kind === "hosted" ? <span className="reach-state" data-tone="warning">Leaves</span> : null}
           </li>
         </ul>
+        {model.voice ? (
+          <>
+            <h4>{CONNECTIONS_COPY.map.voice}</h4>
+            <ul className="reach-items">
+              <li className="reach-item">
+                <span className="reach-item-text">{CONNECTIONS_COPY.map.voiceDestination(model.voice.provider)}</span>
+                <span className="reach-state" data-tone="warning">Leaves</span>
+              </li>
+            </ul>
+          </>
+        ) : null}
       </div>
     </figure>
   );
@@ -821,7 +841,8 @@ export default function Connections() {
   // The Results section loads the connector list; the map uses the same one.
   // undefined while loading, null when the list could not be loaded.
   const [connectors, setConnectors] = useState<ConnectorSummary[] | null | undefined>(undefined);
-  const reach = useMemo(() => buildReachModel(state, connectors), [connectors, state]);
+  const voiceHosted = useDataBoundaryOptional()?.boundary.isVoiceHosted ?? false;
+  const reach = useMemo(() => buildReachModel(state, connectors, voiceHosted), [connectors, state, voiceHosted]);
   const destinations = useMemo(() => resultDestinations(state.installedAgents, connectors ?? undefined), [connectors, state.installedAgents]);
   const organization = activeOrganizationOf(state);
   const tenant = organization
