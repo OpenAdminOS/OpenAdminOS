@@ -6,6 +6,8 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Added
 
+- The first run works with organizations and Connections: the scan and Connect Microsoft 365 use the shared device tile and motion, the active scope reads "No organization", Connect Microsoft 365 reopens from Connections, provider and model changes from the scan and Chat's model choice are in the audit log, and Connections, the organization switcher, need chips and the run review show the real provider and service logos.
+
 - Every provider and Microsoft 365 service shows its real logo, taken unmodified from the vendor's official files, in the scan, the model choice, Settings, Providers, the not-connected card and the Microsoft 365 step. Settings, About, the README and the logo NOTICE files say that names and logos belong to their owners and how to request removal.
 - First launch is two steps: after the model scan, Connect Microsoft 365 shows Intune, Entra and Defender around this device, lets the admin pick services (none preselected) with their read-only permissions, signs in through the existing connect flow, copies an admin consent request, or opens Chat with Not now. After a connect it shows the organization and what was connected, and Chat's starters follow those services. Sample data is no longer offered anywhere. Opened again with a tenant, it adds missing or partly connected services to that tenant with its own account and app registration, and an admin request names that tenant and client. When the first launch goes to provider setup first, the step follows once a model is ready. Chat's model choice no longer offers a runtime without a model as ready, and the hosted send confirmation names the model.
 - First run design and enterprise round: the scan settles into one choice of what answers in Chat (local first, one button), Chat reuses it, the empty Chat states the destination once, the hosted send confirmation sits above the composer, the not-connected card leads with the service it needs, Settings and the scan agree on installed runtimes, and proxy and offline failures name the host, the proxy and the fix.
@@ -57,6 +59,7 @@ All notable changes to OpenAdminOS are recorded here. Format follows [Keep a Cha
 
 ### Removed
 
+- Pilot mode and its sample data: the sample tenant and organization, the built-in fictional Graph data, prepared Chat prompts and answers, pilot agent text, the pilot banner and production-only pages. Updating from a version with pilot mode removes the sample tenant once, with its runs, conversations, cache and organization, and says so in one line.
 - Remove the GitBook sync config now that docs.openadminos.com is served by the self-hosted docs site.
 
 ### Fixed

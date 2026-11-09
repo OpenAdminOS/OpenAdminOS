@@ -53,7 +53,7 @@ If a sign-in, the Marketplace or a model download cannot reach the internet, the
 
 ## Connecting Your Tenant
 
-When you connect from the Connect Microsoft 365 step, Chat's card, the tenant switcher or Settings, or start an agent without an active tenant:
+When you connect from the Connect Microsoft 365 step, Chat's card, the organization menu or Connections, or start an agent without an active organization:
 
 1. Choose the app that signs in (the OpenAdminOS app or your own app registration), then review the read-only Microsoft Graph permissions by service. See [Authentication and permissions](../trust/authentication.md).
 2. Complete Microsoft sign-in in your system browser.
@@ -64,6 +64,6 @@ After sign-in, OpenAdminOS shows which enterprise application was added to your 
 
 ## Provider Choice
 
-Local providers (Ollama, LM Studio, Apple Foundation) keep prompts and tenant data on the device. Hosted providers (OpenAI through the Codex CLI, Anthropic through the Claude Code CLI, GitHub Copilot CLI, Gemini CLI, Azure OpenAI) send prompts off the device because the selected model is hosted. The CLI-backed providers reuse the vendor CLI's existing authentication instead of storing an API key.
+Local providers (Ollama, LM Studio, Apple Intelligence) keep prompts and tenant data on the device. Hosted providers (Claude Code, Codex, GitHub Copilot CLI, Gemini CLI, Azure OpenAI) send prompts off the device because the selected model is hosted. The CLI-backed providers reuse the vendor CLI's existing authentication instead of storing an API key.
 
 If you have not picked a provider, OpenAdminOS selects a ready local provider automatically. A detected hosted provider is suggested with a note about where data goes, and you choose it explicitly. The UI changes its data-residency messaging based on the active provider.
