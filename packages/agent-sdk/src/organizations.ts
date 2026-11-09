@@ -107,6 +107,16 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
     for (let suffix = 2; usedIds.has(id); suffix += 1) id = `${base}-${suffix}`;
     return id;
   };
+  // An over-long id replaced here maps to its new id, so a schedule that
+  // named it stays with the same record. A duplicate id is ambiguous and
+  // is not remapped: a schedule naming it keeps the first record.
+  const replacedIds = new Map<string, string>();
+  const keepId = (rawId: string, idUsable: boolean, base: string) => {
+    if (idUsable) return rawId;
+    const id = freshId(base);
+    if (rawId.length > 300 && !replacedIds.has(rawId)) replacedIds.set(rawId, id);
+    return id;
+  };
   let kept = 0;
   for (const raw of migrated ? [] : (input.rawOrganizations as unknown[])) {
     if (!isRecord(raw)) continue;
@@ -138,7 +148,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
       // as it was; this version cannot select it.
       if (Object.keys(unknown).length > 0) {
         kept += 1;
-        const id = idUsable ? rawId : freshId(`org-kept-${kept}`);
+        const id = keepId(rawId, idUsable, `org-kept-${kept}`);
         usedIds.add(id);
         withoutMicrosoft365.push({
           id,
@@ -150,7 +160,7 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
       continue;
     }
     const fallback = organizationFromTenant(tenant);
-    const id = idUsable ? rawId : freshId(fallback.id);
+    const id = keepId(rawId, idUsable, fallback.id);
     usedIds.add(id);
     claimedTenants.add(tenant.id);
     stored.set(tenant.id, {
@@ -203,6 +213,8 @@ export function reconcileOrganizations(input: OrganizationReconcileInput): Organ
       return { ...agent, schedule: rest };
     }
     if (valid) return agent;
+    const replacement = typeof current === "string" ? replacedIds.get(current) : undefined;
+    if (replacement && !sampleIds.has(replacement)) return { ...agent, schedule: { ...rest, organizationId: replacement } };
     return current === undefined ? agent : { ...agent, schedule: rest };
   });
 

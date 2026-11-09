@@ -958,6 +958,29 @@ describe("reconcile keeps what it cannot use (Muse round 3)", () => {
     assert.deepEqual(woodgroveOrg?.connections.vendorList, ["a", "b"]);
   });
 
+  it("moves a schedule with a replaced over-long id to the kept record (Muse round 4)", () => {
+    const longWoodgrove = `org-${"w".repeat(300)}`;
+    const longKept = `org-${"k".repeat(300)}`;
+    const result = reconcileOrganizations({
+      rawOrganizations: [
+        { id: longWoodgrove, name: "Woodgrove", createdAt: "x", connections: { microsoft365: { tenantId: woodgrove.id } } },
+        { id: longKept, name: "Northwind", createdAt: "x", connections: { jamf: { instanceUrl: "https://northwind.jamfcloud.com" } } },
+        { id: "org-shared", name: "Fabrikam", createdAt: "x", connections: { microsoft365: { tenantId: fabrikam.id } } },
+      ],
+      rawNotice: undefined,
+      tenants,
+      installedAgents: [
+        agent("long", { schedule: { ...schedule(), organizationId: longWoodgrove } }),
+        agent("kept", { schedule: { ...schedule(), organizationId: longKept } }),
+        agent("unknown", { schedule: { ...schedule(), organizationId: "x".repeat(400) } }),
+      ] as unknown as AgentSummary[],
+    });
+    assert.equal(scheduleOf(result.installedAgents, "long")?.organizationId, `org-${woodgrove.id}`);
+    assert.equal(scheduleOf(result.installedAgents, "kept")?.organizationId, "org-kept-1");
+    // An id that no record had stays unassigned.
+    assert.equal(scheduleOf(result.installedAgents, "unknown")?.organizationId, undefined);
+  });
+
   it("counts only the schedules the migration moved", () => {
     const tenantsWithOrg = [woodgrove, fabrikam] as unknown as TenantRecord[];
     const result = reconcileOrganizations({
