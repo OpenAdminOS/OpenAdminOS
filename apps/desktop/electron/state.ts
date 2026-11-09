@@ -676,6 +676,10 @@ function driftPruneReason(
 /** OpenID Connect scopes MSAL adds to every sign-in; never admin-consent permissions. */
 const OIDC_SCOPES = new Set(["openid", "profile", "offline_access", "email"]);
 
+/** Said when no organization with a Microsoft 365 tenant is active, including No organization. */
+export const NO_MICROSOFT_365_ORGANIZATION = (action: string) =>
+  `No organization with Microsoft 365 is active. Choose one in the organization switcher, or connect a Microsoft 365 tenant in Connections, before ${action}.`;
+
 const AUDIT_LOG_SCHEMA_VERSION = 1;
 const AUDIT_CHAIN_START_HASH = "0".repeat(64);
 
@@ -4186,7 +4190,7 @@ export class AppStateStore {
     }
     if (!tenant && factory.descriptor.authSource !== "external") {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before testing connectors.",
+        NO_MICROSOFT_365_ORGANIZATION("testing this connector"),
       );
     }
     const tenantSession = tenant
@@ -7203,7 +7207,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
       : undefined;
     if (!tenant) {
       throw new Error(
-        "No tenant connected. Connect a Microsoft 365 tenant before running agents.",
+        NO_MICROSOFT_365_ORGANIZATION("running agents"),
       );
     }
     const scopes = (agentScopes ?? []).filter((scope) => scope.length > 0);

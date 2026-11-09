@@ -27,3 +27,13 @@ describe("Graph run failure recovery", () => {
     expect(screen.queryByText("Scope or consent issue")).not.toBeInTheDocument();
   });
 });
+
+it("gives the organization recovery for a run with no organization with Microsoft 365 (Muse round 4)", () => {
+  const run: RunRecord = {
+    id: "run", agentSlug: "test", status: "failed", queuedAt: "2026-11-01T00:00:00Z", steps: [], logs: [],
+    error: "No organization with Microsoft 365 is active. Choose one in the organization switcher, or connect a Microsoft 365 tenant in Connections, before running agents.",
+  };
+  render(<RunFailureRemediation run={run} />);
+  expect(screen.getByText("No organization with Microsoft 365")).toBeInTheDocument();
+  expect(screen.queryByText("No tenant connected")).not.toBeInTheDocument();
+});

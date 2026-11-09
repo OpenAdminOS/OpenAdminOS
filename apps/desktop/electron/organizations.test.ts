@@ -998,3 +998,23 @@ describe("reconcile keeps what it cannot use (Muse round 3)", () => {
     assert.equal(scheduleOf(result.installedAgents, "kept")?.organizationId, `org-${fabrikam.id}`);
   });
 });
+
+describe("connector tests from No organization (Muse round 4)", () => {
+  it("names the organization and Microsoft 365 when no organization is active", async () => {
+    const { NO_MICROSOFT_365_ORGANIZATION } = await import("./state.js");
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-no-org-connector-"));
+    const statePath = join(dir, "state.json");
+    await writeFile(statePath, JSON.stringify({ activeProviderId: "ollama", installedAgents: [], runs: [], tenants: [] }));
+    const store = new AppStateStore({ filePath: statePath, tokenStore, userDataPath: dir, statsApiUrl: "" });
+    try {
+      await assert.rejects(store.testConnector("teams"), (error: Error) => {
+        assert.equal(error.message, NO_MICROSOFT_365_ORGANIZATION("testing this connector"));
+        assert.match(error.message, /No organization with Microsoft 365 is active/);
+        return true;
+      });
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
