@@ -132,7 +132,7 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
     }
   });
 
-  it("reports a timeout as could not check, and only a refused connection as not running", async () => {
+  it("reports a timeout as could not check", async () => {
     const { server, url } = await serve(() => undefined);
     try {
       process.env.OPENAGENTS_OLLAMA_URL = url;
@@ -143,11 +143,44 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
       server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
-    // The port is closed now: refused means not running.
-    process.env.OPENAGENTS_OLLAMA_URL = url;
-    process.env.OPENADMINOS_LM_STUDIO_URL = `${url}/v1`;
-    assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "not-found");
-    assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
+  });
+
+  // The errors are injected in the shapes Node 22's fetch produces, so the
+  // result does not depend on how a closed port behaves on the test host
+  // (a parallel test process can take over a just-closed ephemeral port).
+  describe("only a refused connection is not running (CI on Linux, PR #175)", () => {
+    const originalFetch = globalThis.fetch;
+    afterEach(() => { globalThis.fetch = originalFetch; });
+    const coded = (code: string) => Object.assign(new Error(`connect ${code} 127.0.0.1:11434`), { code });
+    const fetchFailed = (cause: unknown) => Object.assign(new TypeError("fetch failed"), { cause });
+    const refused: Array<[string, unknown]> = [
+      ["ECONNREFUSED on 127.0.0.1 (Linux and macOS)", fetchFailed(coded("ECONNREFUSED"))],
+      ["localhost refused on IPv6 and IPv4 (AggregateError with a code)", fetchFailed(Object.assign(new AggregateError([coded("ECONNREFUSED"), coded("ECONNREFUSED")]), { code: "ECONNREFUSED" }))],
+      ["localhost refused on every address (AggregateError without a code)", fetchFailed(new AggregateError([coded("ECONNREFUSED"), coded("EADDRNOTAVAIL")]))],
+    ];
+    const failed: Array<[string, unknown]> = [
+      ["a timeout", Object.assign(new Error("The operation was aborted"), { name: "AbortError" })],
+      ["a socket the server closed mid-response", fetchFailed(Object.assign(new Error("other side closed"), { code: "UND_ERR_SOCKET" }))],
+      ["one address refused and one timed out", fetchFailed(new AggregateError([coded("ECONNREFUSED"), coded("ETIMEDOUT")]))],
+    ];
+    for (const [label, error] of refused) {
+      it(`not running: ${label}`, async () => {
+        globalThis.fetch = (async () => { throw error; }) as typeof fetch;
+        process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+        process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+        assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "not-found");
+        assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "not-found");
+      });
+    }
+    for (const [label, error] of failed) {
+      it(`could not check: ${label}`, async () => {
+        globalThis.fetch = (async () => { throw error; }) as typeof fetch;
+        process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+        process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
+        assert.equal(scanProbeFromProvider(await checkOllama(catalog("ollama"))).state, "could-not-check");
+        assert.equal(scanProbeFromProvider(await checkLmStudio(catalog("lm-studio"))).state, "could-not-check");
+      });
+    }
   });
 
   it("reads at most four Ollama model capabilities at once (K)", async () => {

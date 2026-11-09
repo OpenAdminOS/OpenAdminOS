@@ -474,9 +474,22 @@ function truncate(value: string, max: number): string {
   return value.length <= max ? value : `${value.slice(0, max)}...`;
 }
 
-/** A refused or unreachable loopback connection: the server is not running. */
+const NOT_RUNNING_CODES = new Set(["ECONNREFUSED", "ECONNRESET", "EHOSTUNREACH", "ENOTFOUND", "EADDRNOTAVAIL"]);
+
+/**
+ * A refused or unreachable loopback connection: the server is not running.
+ * `fetch` puts the socket error in `cause`. A host name with both an IPv4
+ * and an IPv6 address (`localhost`) fails with an AggregateError of one
+ * error per address; it counts only when every address was refused.
+ */
 export function isConnectionRefused(error: unknown): boolean {
-  const cause = (error as { cause?: { code?: string } } | undefined)?.cause;
-  const code = cause?.code ?? (error as { code?: string } | undefined)?.code;
-  return code === "ECONNREFUSED" || code === "ECONNRESET" || code === "EHOSTUNREACH" || code === "ENOTFOUND" || code === "EADDRNOTAVAIL";
+  type Coded = { code?: unknown; cause?: unknown; errors?: unknown };
+  const notRunning = (value: unknown, depth: number): boolean => {
+    if (!value || typeof value !== "object" || depth > 3) return false;
+    const { code, cause, errors } = value as Coded;
+    if (typeof code === "string" && NOT_RUNNING_CODES.has(code)) return true;
+    if (Array.isArray(errors) && errors.length > 0) return errors.every((entry) => notRunning(entry, depth + 1));
+    return notRunning(cause, depth + 1);
+  };
+  return notRunning(error, 0);
 }

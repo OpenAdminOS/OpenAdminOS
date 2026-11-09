@@ -1690,3 +1690,8 @@ Muse round 2 items:
 - P: `f4ee27e0`. A no-tenant card follows the tenant a partial connect added and offers Add per missing service; a card whose tenant was removed offers Connect.
 - Q: `1fba983b`. The consent payload carries the model; the host refuses a no-tenant confirmation for another model, and a tenant confirmation that names another model; the no-tenant remember label names provider and model.
 - R: `1a56406c`. Hosted with-tenant strip, boundary and confirmation name the documented data location, or "region not stated".
+
+## PR #175 CI on Linux (head 259d36d, run 42589502276, Node 22)
+
+1. [x] `model-scan-cancel.test.ts` "only a refused connection as not running" got could not check on Linux. Raw `fetch` to a closed 127.0.0.1, `localhost` or ::1 port gives `ECONNREFUSED` on Linux Node 22 as on macOS, so the classification was right for real machines; the test relied on a just-closed ephemeral port that a parallel test process can take over. The refused and failed cases are now injected in the shapes Node 22's `fetch` produces, and `isConnectionRefused` also reads an AggregateError without a top-level code (`localhost` refused on IPv6 and IPv4), counting it only when every address was refused.
+2. [x] `model-scan.test.ts` "runs no provider detection outside the scan" asserted every catalog provider connected after the scan; off macOS Apple Intelligence is not checked and stays not checked. The test pins the local endpoints to loopback and asserts per provider: connected when the scan checked it, not checked otherwise, and no detection outside the scan.

@@ -457,6 +457,13 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
   it("runs no provider detection outside the scan: app state, Office, listing, model choice, tests and the Chat preview", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
     let listed = 0;
+    // Every check reads the injected list, and the local endpoints are pinned
+    // to loopback, so neither the host's CLIs nor its environment decide
+    // what the scan checks.
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, host: process.env.OLLAMA_HOST, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:11434";
+    delete process.env.OLLAMA_HOST;
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:1234/v1";
     const store = new AppStateStore({
       filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
       tokenStore: { read: async () => "", write: async () => undefined },
@@ -475,15 +482,28 @@ describe("startup while the first-run scan is pending (review round 2, items 2 a
       await store.previewIntuneChatSend({ content: "Explain Windows Autopatch rings" }).catch(() => undefined);
       assert.equal(listed, 0, "no caller ran provider detection while the scan is pending");
 
-      // The scan itself checks, and listing then serves its results.
-      await store.scanModels();
+      // The scan itself checks, and listing then serves its results: what
+      // the scan checked as it found it, the rest (Apple Intelligence off
+      // macOS) still not checked. Listing runs no detection of its own.
+      const result = await store.scanModels();
       const afterScan = listed;
       assert.ok(afterScan > 0);
-      assert.ok((await store.listProviders()).every((provider) => provider.status === "connected"));
+      const checked = new Set(result.probes.map((probe) => probe.providerId));
+      assert.deepEqual(
+        [...checked].sort(),
+        providerCatalog.map((provider) => provider.id).filter((id) => id !== "apple-foundation" || process.platform === "darwin").sort(),
+      );
+      for (const provider of await store.listProviders()) {
+        assert.equal(provider.status, checked.has(provider.id) ? "connected" : "not-checked", provider.id);
+      }
       assert.equal(listed, afterScan);
     } finally {
+      for (const [key, value] of [["OPENAGENTS_OLLAMA_URL", original.ollama], ["OLLAMA_HOST", original.host], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
       store.close();
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
     }
   });
 });
