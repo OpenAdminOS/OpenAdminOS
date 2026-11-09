@@ -17,15 +17,16 @@ One screen checks, all at once:
 - **Claude Code** and **Codex**: installed and signed in.
 - **GitHub Copilot CLI** (installed; its sign-in is checked when you select it), **Gemini CLI** (sign-in not confirmed until you test it), and a saved **Azure OpenAI** deployment.
 
-Each tool appears around your device and resolves to found, not found, or could not check; the list beside it shows what each check touched (for example `localhost:11434` or `claude auth status`). A check that does not answer within 2.5 seconds shows **Retry**. Press Escape, choose **Skip** or click to see the result at once. The scan reads local files and loopback ports and runs each CLI's own version and sign-in status command, which may check the sign-in with its provider. It sends no prompt to any model, and an Ollama or LM Studio endpoint on another machine is not contacted. If Ollama or LM Studio is installed but not running, **Start** starts it for you and checks it again.
+Each tool appears around your device and resolves to found, not found, or could not check, with one line per check beside it. Press Escape, choose **Skip scan** or click to see the result at once. The scan reads local files and loopback ports and runs each CLI's own version and sign-in status command, which may check the sign-in with its provider. It sends no prompt to any model, and an Ollama or LM Studio endpoint on another machine is not contacted. **What ran**, under the result, lists every target and command.
 
-What happens next follows the provider rules:
+The result is one choice of what answers in Chat:
 
-- A ready local model is selected for you, OpenAdmin 8B when it is pulled. Nothing leaves your device. If you already chose another provider, the local model is offered instead, and nothing changes until you switch.
-- A signed-in hosted tool, such as Claude Code, is offered with where prompts go (for example "Anthropic API · US"). It is never selected for you; choose it with one click.
-- With nothing found, the screen offers OpenAdmin 8B (`ollama run openadminos/openadmin-8b`) and all providers.
+- Models on this device come first, and the first one that can answer or be started is selected. Signed-in tools follow, each with where prompts go (for example "Prompts go to Anthropic API · US"). A hosted tool is never selected for you.
+- One button follows your choice: **Open Chat** for a ready local model, **Start Ollama and open Chat** for one that is installed but not running (it keeps running after you quit OpenAdminOS), **Use Claude Code** for a signed-in tool, or **Get OpenAdmin 8B** when Ollama has no model yet. A start that fails says why under its row.
+- A check that did not answer within 2.5 seconds shows **Retry** on its row.
+- With nothing found, the screen shows the command for OpenAdmin 8B (`ollama run openadminos/openadmin-8b`) and all providers.
 
-**Preview with sample data** opens pilot mode instead. You can run the scan again from **Settings, Providers**.
+**Continue without a model** and **Preview with sample data** are below the choice. Chat shows the same choice when no model is selected. You can run the scan again from **Settings, Providers**, which shows the same answer for each runtime as the scan, for example "Installed, not running".
 
 ## Chat Without a Tenant
 
@@ -33,7 +34,9 @@ Chat then opens with nothing connected. Questions about products, KQL, PowerShel
 
 The empty Chat suggests public references such as Microsoft Learn, each with the host it sends question words to. None is added until you add it through the Marketplace install review.
 
-With a hosted model and nothing connected, the first question asks you to confirm: it names the provider, model and region, and says that the question, the conversation and reference results leave the device, with no tenant data. The first question after you connect a tenant asks again with the tenant-bound confirmation.
+With a hosted model and nothing connected, the first question asks you to confirm, above the composer so your question stays in view: where it goes (for example "Anthropic API · US"), what is sent (your question and the conversation, and results from references you added) and what stays on this device. You can choose not to be asked again for that model. The first question after you connect a tenant asks again with the tenant-bound confirmation.
+
+If a sign-in, the Marketplace or a model download cannot reach the internet, the message names the host that could not be reached, whether this device has a system proxy (OpenAdminOS connects directly; Ollama uses the proxy set in its own environment) and what to do next.
 
 ## Pilot Mode
 
