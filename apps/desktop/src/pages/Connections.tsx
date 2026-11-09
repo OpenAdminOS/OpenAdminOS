@@ -22,7 +22,7 @@ import {
 import { TenantTile } from "../components/TenantTile";
 import { useToast } from "../components/Toast";
 import { Badge, Menu, StatusDot, Tabs, Tooltip, Button as UiButton } from "../components/ui";
-import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, providerDataLocation, providerDataLocationDetail, userFacingErrorReason } from "../copy";
+import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, promptsGoTo, providerDataLocation, providerDataLocationDetail, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
@@ -73,6 +73,8 @@ export interface ReachModel {
     modelName?: string;
     providerName?: string;
     channel?: string;
+    /** Where prompts go, in the shared sentence form (promptsGoTo). */
+    promptsSentence?: string;
     location?: string;
     /** The vendor's documented default for that location. */
     locationDetail?: string;
@@ -118,7 +120,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
       ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
       : boundary.kind === "local"
         ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerName: provider.name }
-        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerName: provider.name, channel: hostedChannel(provider), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
+        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerName: provider.name, channel: hostedChannel(provider), promptsSentence: promptsGoTo(provider, Boolean(organization) && !sample), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
     sample,
@@ -143,7 +145,7 @@ function serviceStateText(service: ReachService): string {
 }
 
 function promptsDestination(model: ReachModel["model"]): string {
-  if (model.kind === "hosted") return `${model.providerName ?? model.name}, through ${model.channel?.replace(/ to .*$/, "") ?? "its API"}`;
+  if (model.kind === "hosted") return model.location ?? model.providerName ?? model.name;
   if (model.kind === "local") return CONNECTIONS_COPY.map.promptsLocal;
   if (model.kind === "sample") return CONNECTIONS_COPY.map.promptsSample;
   return CONNECTIONS_COPY.map.promptsNoModel;
@@ -164,7 +166,7 @@ export function reachDescription(model: ReachModel): string {
     model.model.kind === "local"
       ? `The model runs on this device: ${model.model.name}.`
       : model.model.kind === "hosted"
-        ? `The model is hosted: ${model.model.name}. ${model.organizationName ? "Prompts and tenant data go" : "Prompts and agent context go"} through ${model.model.channel}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."} Prompts go to ${model.model.location ?? "the provider"}.${model.model.locationDetail ? ` ${model.model.locationDetail}` : ""}`
+        ? `The model is hosted: ${model.model.name}. ${model.model.promptsSentence ?? "Prompts go to the provider"}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."}${model.model.locationDetail ? ` ${model.model.locationDetail}` : ""}`
         : model.model.kind === "sample"
           ? "Sample answers are prepared on this device. No model is used."
           : "No model is ready.";

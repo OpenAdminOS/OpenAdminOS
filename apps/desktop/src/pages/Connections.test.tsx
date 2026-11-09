@@ -13,6 +13,7 @@ import {
   mockProviders,
   renderRoute,
 } from "../test/test-utils";
+import { promptsGoTo } from "../copy";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, deriveToolHostsCopy } from "../copy";
 import { chatToolHosts, deriveDataBoundary } from "../state";
 import { hostedChannel } from "../shared/providers";
@@ -97,9 +98,12 @@ describe("Connections reach map", () => {
     const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
     // The row names where prompts go and the model; the channel is its hint.
     const row = within(map).getByText("Codex · location set by your account");
-    expect(row).toHaveAttribute("title", expect.stringContaining(`${hosted.name}, through the Codex CLI`));
+    expect(row).toHaveAttribute("title", expect.stringContaining("Codex · location set by your account"));
     expect(within(map).getByText(model.model.modelName!)).toBeInTheDocument();
-    expect(reachDescription(model)).toContain("Prompts and tenant data go through the Codex CLI to OpenAI. Prompts go to Codex · location set by your account.");
+    // The description uses the same sentence as every other surface (design round review 2).
+    expect(reachDescription(model)).toContain(`${promptsGoTo(hosted, true)}.`);
+    expect(reachDescription(model)).toContain("Prompts and tenant data leave this device through Codex; location set by your account.");
+    expect(reachDescription(model)).not.toMatch(/the Codex CLI to OpenAI|the Claude Code CLI to Anthropic/);
     expect(reachDescription(model)).not.toContain("Region not reported");
     // The documented default sits under the location (design round review).
     expect(within(map).getByText("Codex sends prompts to OpenAI, or to the endpoint its configuration selects. Processing follows your workspace's data residency setting.")).toBeInTheDocument();
@@ -654,7 +658,8 @@ describe("hosted channel per provider type (review round 1)", () => {
       providers: mockProviders.map((provider) => (provider.id === "azure-openai" ? azure : provider)),
     });
     const model = buildReachModel(state);
-    expect(reachDescription(model)).toContain("Prompts and tenant data go through the Azure OpenAI API to your deployment.");
+    expect(reachDescription(model)).toContain(`${promptsGoTo(azure, true)}.`);
+    expect(reachDescription(model)).toContain("Prompts and tenant data go to Azure OpenAI · location set by your deployment type.");
     expect(reachDescription(model)).not.toMatch(/CLI/);
   });
 });
@@ -664,7 +669,7 @@ describe("hosted reach copy with no organization (Muse round 2)", () => {
     const { activeTenantId: _none, ...state } = createMockAppState({ activeProviderId: "openai" });
     const model = buildReachModel(state);
     const description = reachDescription(model);
-    expect(description).toContain("Prompts and agent context go through the Codex CLI to OpenAI. No tenant data is included, because no organization is active.");
+    expect(description).toContain("Prompts leave this device through Codex; location set by your account. No tenant data is included, because no organization is active.");
     expect(description).not.toContain("tenant data go");
     render(state);
     const leaves = await screen.findByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
@@ -674,7 +679,7 @@ describe("hosted reach copy with no organization (Muse round 2)", () => {
 
   it("keeps the tenant wording when an organization is active", () => {
     const description = reachDescription(buildReachModel(createMockAppState({ activeProviderId: "openai" })));
-    expect(description).toContain("Prompts and tenant data go through the Codex CLI to OpenAI.");
+    expect(description).toContain("Prompts and tenant data leave this device through Codex; location set by your account.");
     expect(description).not.toContain("No tenant data is included");
   });
 });
