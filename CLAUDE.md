@@ -70,7 +70,7 @@ Decisions that are *not* in SPEC.md should be flagged, not invented. If you're c
 
 These are non-negotiable. If you find yourself about to violate one, stop and ask.
 
-1. **Tenant data and LLM prompts never leave the user's machine when a local provider is selected.** No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. When a hosted provider is selected, the UI must honestly state where data goes (e.g., "Anthropic API · US"). Only exception: after an explicit team join, end-to-end encrypted approval and audit payloads go to the paid team service, with the status strip saying so (see SPEC.md §8b).
+1. **Tenant data and LLM prompts never leave the user's machine when a local provider is selected.** No tenant-content, prompt, run-result, analytics-event, or error-reporting telemetry. When a hosted provider is selected, the UI must honestly state where data goes (e.g., "Claude Code · location set by your account"). Only exception: after an explicit team join, end-to-end encrypted approval and audit payloads go to the paid team service, with the status strip saying so (see SPEC.md §8b).
 
 2. **Write agents always pause for diff confirmation.** No "skip this prompt" toggle. No "trust this agent" exception. Every write operation gets human-in-the-loop approval, every time. Destructive operations require typed confirmation (e.g., user must type `RETIRE 47 DEVICES` to proceed).
 
