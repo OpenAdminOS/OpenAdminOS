@@ -14,6 +14,8 @@ import {
 } from "../test/test-utils";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY } from "../copy";
 import { chatToolHosts } from "../state";
+import { AppShell } from "../components/AppShell";
+import { connectedServiceIds } from "../components/ServiceMark";
 import { SERVICE_PARTS, type AppState, type ConnectorSummary } from "../shared/openAdminOS";
 
 function connector(id: string, name: string, status: ConnectorSummary["status"] = "connected"): ConnectorSummary {
@@ -355,3 +357,25 @@ describe("one destination list for the map and Results (review round 1)", () => 
   });
 });
 
+describe("map and status strip agree (review round 1)", () => {
+  it("names the same provider, model and services as the strip and the organization switcher", async () => {
+    const hosted = mockProviders.find((provider) => !provider.isLocal && provider.status === "connected")!;
+    const state = createMockAppState({ activeProviderId: hosted.id, tenants: [partialTenant] });
+    renderRoute(
+      <AppShell>
+        <Connections />
+      </AppShell>,
+      { path: "*", route: "/connections", bridge: makeMockBridge({}, state) },
+    );
+    const strip = await screen.findByRole("status", { name: new RegExp(`Hosted · ${hosted.name}`) });
+    const model = buildReachModel(state);
+    expect(model.model.providerName).toBe(hosted.name);
+    expect(strip.getAttribute("aria-label")).toContain(model.model.name.replace(/, hosted$/, ""));
+    const map = screen.getByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(map).toHaveAccessibleDescription(new RegExp(`Prompts and tenant data go to ${hosted.name}\\.`));
+    // Services the map reads are the ones the switcher marks for this organization.
+    expect(model.services.filter((service) => service.status !== "missing").map((service) => service.serviceId)).toEqual(
+      connectedServiceIds(partialTenant),
+    );
+  });
+});
