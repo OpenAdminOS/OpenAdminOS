@@ -1014,7 +1014,8 @@ function createIntuneChatSmokeProviders(): ProviderSummary[] {
 function createFirstRunCaptureProviders(): ProviderSummary[] {
   return providerCatalog.map((provider) => ({
     ...provider,
-    status: provider.id === "ollama" ? "error" : "available",
+    // Ollama is stopped in the capture: "not-installed" is what a refused connection reports.
+    status: provider.id === "ollama" ? "not-installed" : "available",
     detail:
       provider.id === "ollama"
         ? "Ollama is not running."

@@ -220,11 +220,13 @@ async function firstRunCaptureStepScript(
   };
 
   if (action === "wait-first-run-scan") {
+    // The scan has settled (its stage reports the phase) and its exits are on screen.
     await waitFor(
       () =>
-        bodyText().includes("What this device can answer with") &&
-        bodyText().includes("Preview with sample data"),
-      "first-run model scan",
+        document.querySelector('[data-phase="settled"]') !== null &&
+        Boolean(findButton("Continue to Chat without a model")) &&
+        Boolean(findButton("Preview with sample data")),
+      "first-run model scan settled",
     );
     return;
   }

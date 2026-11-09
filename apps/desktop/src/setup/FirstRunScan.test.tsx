@@ -339,6 +339,17 @@ describe("first-launch model scan screen", () => {
     expect(ledger.textContent).toContain("Not contacted, set outside this device: 10.0.0.5:11434.");
   });
 
+  it("renders what the first-run screenshot capture waits for once settled (review round 4, item 4)", async () => {
+    // electron/first-run-capture.ts waits for the settled phase and these two exits by their exact labels.
+    const { bridge, finish } = scanBridge({ kind: "nothing" });
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    await waitFor(() => expect(document.querySelector('[data-phase="settled"]')).not.toBeNull());
+    expect(screen.getByRole("button", { name: "Continue to Chat without a model" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Preview with sample data" })).toBeInTheDocument();
+  });
+
   it("keeps every exit disabled while a Start is polling (Muse round 3, M2)", async () => {
     const user = userEvent.setup();
     const stopped = [probe("ollama", "Ollama", "local", "localhost:11434", { summary: "Installed, not running", ready: false })];

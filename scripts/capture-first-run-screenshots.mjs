@@ -49,7 +49,8 @@ try {
   pipeProcess(renderer, "renderer");
   await waitForHttp(rendererUrl, 20_000);
 
-  const electronArgs = ["apps/desktop"];
+  // Screenshots are 1280x800 on every display, a Retina Mac included.
+  const electronArgs = ["--force-device-scale-factor=1", "apps/desktop"];
   if (process.platform === "linux") electronArgs.push("--no-sandbox");
   electron = spawn(resolve(root, "node_modules/.bin/electron"), electronArgs, {
     cwd: root,

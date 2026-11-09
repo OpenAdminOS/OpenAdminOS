@@ -18,7 +18,6 @@ export const PROVIDER_DETECTION_COPY = {
 /** The first-launch model scan (SPEC.md 4a, first launch). */
 export const MODEL_SCAN_COPY = {
   title: "Looking for models on this device",
-  titleDone: "What this device can answer with",
   subtitle:
     "OpenAdminOS looks for local model runtimes and AI tools you are already signed in to. It reads local files and loopback ports and runs each tool's version command; for Claude Code and Codex also their sign-in status command, which may check with the provider. No prompt is sent to any model.",
   listHeading: "On this device",
