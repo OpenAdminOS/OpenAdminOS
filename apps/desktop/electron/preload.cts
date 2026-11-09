@@ -443,6 +443,8 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:set-active-provider", id),
   dismissProviderAutoSelectNotice: () =>
     ipcRenderer.invoke("openadminos:dismiss-provider-auto-select-notice"),
+  dismissManagedPolicyNotice: () =>
+    ipcRenderer.invoke("openadminos:dismiss-managed-policy-notice"),
   setActiveModel: (providerId: ProviderId, model: string | null) =>
     ipcRenderer.invoke("openadminos:set-active-model", providerId, model),
   reviewOfficeFinding: input => ipcRenderer.invoke("openadminos:office-review", input),

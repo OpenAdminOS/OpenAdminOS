@@ -10,7 +10,25 @@ import {
   sanitizeConfigurationAudit,
   CONFIGURATION_AUDIT_MAX_EVENTS,
   type ConfigurationAuditEvent,
+  type ManagedPolicyRecord,
 } from "./configuration-audit.js";
+import {
+  ManagedPolicyError,
+  modelLockedMessage,
+  providerLockedMessage,
+  providerNotAllowedMessage,
+  publicReferenceNotAllowedMessage,
+  registrationLockedMessage,
+} from "./managed-policy.js";
+import {
+  applyManagedPolicy,
+  applyManagedPolicyToProviders,
+  managedPolicyForRenderer,
+  markManagedRegistrations,
+  policyRegistrationKey,
+  registrationKey,
+  sanitizeManagedPolicyRecord,
+} from "./managed-policy-state.js";
 import { dirname, join } from "node:path";
 import {
   acquireTokenSilent,
@@ -193,6 +211,11 @@ import {
   type AgentTeamsDelivery,
   type AgentWhatsAppWebDelivery,
   type AppState,
+  isManagedSettingLocked,
+  managedLockedModel,
+  managedProviderAllowed,
+  managedPublicReferenceAllowed,
+  type ManagedPolicyStatus,
   type McpServerSummary,
   type ProviderId,
   type ProviderSummary,
@@ -441,6 +464,8 @@ interface PersistedState {
    * names only, never tokens, secrets, prompts or tenant content.
    */
   configurationAudit?: ConfigurationAuditEvent[];
+  /** The IT policy file as last applied, so its changes are recorded once (see managed-policy.ts). */
+  managedPolicy?: ManagedPolicyRecord;
   /**
    * Disconnects whose cleanup has not finished (see tenant-removal.ts). The
    * tenant is gone from `tenants` and refused everywhere; cleanup resumes
@@ -1632,6 +1657,8 @@ export interface AppStateStoreOptions {
   tenantDrainMs?: number;
   /** Test hook: MCP servers to offer instead of the built-in catalog. */
   mcpCatalog?: readonly McpCatalogEntry[];
+  /** The IT policy file read at launch (managed-policy.ts). Enforced here, whatever the renderer shows. */
+  managedPolicy?: ManagedPolicyStatus;
 }
 
 /** How long Disconnect waits for an organization's work to stop before cleanup goes on. */
@@ -1677,6 +1704,7 @@ export class AppStateStore {
   /** Counts uninstalls per server, so an install that was connecting meanwhile is not written back. */
   private readonly mcpUninstalls = new Map<string, number>();
   private readonly mcpCatalog: readonly McpCatalogEntry[];
+  private readonly managedPolicy: ManagedPolicyStatus | undefined;
   private retrievalIndexInstance: RetrievalIndex | undefined;
   private readonly runDeliveryService: RunDeliveryService;
   private readonly graphFactory: AppStateStoreOptions["graphFactory"] | undefined;
@@ -1808,8 +1836,11 @@ export class AppStateStore {
     }
     this.sampleGraph = createSampleGraph({ clock: this.clock });
     this.mcpCatalog = (typeof options === "string" ? undefined : options.mcpCatalog) ?? MCP_CATALOG;
+    this.managedPolicy = typeof options === "string" ? undefined : options.managedPolicy;
     this.mcpHost = new McpHost({
       clientVersion: this.appVersion,
+      // The IT policy file decides which public references may be reached at all.
+      allowed: (serverId) => managedPublicReferenceAllowed(this.managedPolicy, serverId),
       // Read again right before each call, so turning a server off stops answers already running.
       revocation: async (serverId) => {
         const installed = (await this.read()).mcpServers?.[serverId];
@@ -2145,8 +2176,16 @@ export class AppStateStore {
     return entry;
   }
 
+  /** Refuses a public reference the IT policy file does not allow, before anything is sent. */
+  private requireMcpServerAllowed(entry: McpCatalogEntry): void {
+    if (!managedPublicReferenceAllowed(this.managedPolicy, entry.id)) {
+      throw new ManagedPolicyError(publicReferenceNotAllowedMessage(entry.name));
+    }
+  }
+
+  /** The catalog, without public references the IT policy file does not allow. */
   private mcpServerSummaries(persisted: PersistedState): McpServerSummary[] {
-    return this.mcpCatalog.map((entry) => {
+    return this.mcpCatalog.filter((entry) => managedPublicReferenceAllowed(this.managedPolicy, entry.id)).map((entry) => {
       const installed = persisted.mcpServers?.[entry.id];
       const missingTools = installed ? missingMcpTools(entry, installed.tools) : [];
       return {
@@ -2212,6 +2251,7 @@ export class AppStateStore {
 
   private async connectMcpServer(serverId: string, requireInstalled: boolean): Promise<McpServerSummary[]> {
     const entry = this.requireMcpCatalogEntry(serverId);
+    this.requireMcpServerAllowed(entry);
     // Captured before the installed check: an uninstall between that read and here would otherwise go unnoticed.
     const uninstalls = this.mcpUninstalls.get(serverId) ?? 0;
     if (requireInstalled && !(await this.read()).mcpServers?.[serverId]) {
@@ -2270,6 +2310,7 @@ export class AppStateStore {
 
   async setMcpServerEnabled(serverId: string, enabled: boolean): Promise<McpServerSummary[]> {
     const entry = this.requireMcpCatalogEntry(serverId);
+    if (enabled) this.requireMcpServerAllowed(entry);
     await this.serialize(async () => {
       const current = await this.read();
       const existing = current.mcpServers?.[serverId];
@@ -2291,6 +2332,7 @@ export class AppStateStore {
     for (const entry of this.mcpCatalog) {
       const installed = persisted.mcpServers?.[entry.id];
       if (!installed?.enabled) continue;
+      if (!managedPublicReferenceAllowed(this.managedPolicy, entry.id)) continue;
       // A server without one of its allowlisted tools is skipped until a check finds it again.
       if (missingMcpTools(entry, installed.tools).length > 0) continue;
       generations.set(entry.id, this.mcpHost.generation(entry.id));
@@ -3218,7 +3260,7 @@ export class AppStateStore {
       }),
       tenants: persisted.tenants,
       organizations: persisted.organizations ?? [],
-      savedAppRegistrations: persisted.savedAppRegistrations ?? [],
+      savedAppRegistrations: markManagedRegistrations(persisted.savedAppRegistrations ?? [], this.managedPolicy),
       lastRegistryRefresh: this.lastRegistryRefresh,
       registryRefreshError: this.registryRefreshError,
       registrySource: persisted.registrySource ?? DEFAULT_REGISTRY_SOURCE,
@@ -3237,6 +3279,8 @@ export class AppStateStore {
     if (persisted.activeModelByProviderId) {
       state.activeModelByProviderId = persisted.activeModelByProviderId;
     }
+    const managedPolicy = managedPolicyForRenderer(this.managedPolicy, persisted.managedPolicy);
+    if (managedPolicy) state.managedPolicy = managedPolicy;
     if (persisted.activeTenantId) {
       state.activeTenantId = persisted.activeTenantId;
       const activeOrganization = organizationForTenant(persisted.organizations ?? [], persisted.activeTenantId);
@@ -3403,7 +3447,12 @@ export class AppStateStore {
     return this.getAzureOpenAIConfig();
   }
 
+  /** The providers the IT policy file allows, as every caller sees them. */
   async listProviders(): Promise<ProviderSummary[]> {
+    return applyManagedPolicyToProviders(await this.detectProviders(), this.managedPolicy);
+  }
+
+  private async detectProviders(): Promise<ProviderSummary[]> {
     if (this.providerListFactory) {
       return this.providerListFactory();
     }
@@ -3465,6 +3514,7 @@ export class AppStateStore {
     if (!isProviderId(providerId)) {
       throw new Error(`Unknown provider: ${String(providerId)}`);
     }
+    this.requireProviderAllowed(providerId);
     const providers = await this.listProviders();
     const provider = providers.find((entry) => entry.id === providerId);
     if (!provider) {
@@ -6144,10 +6194,50 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return existsSync(candidate);
   }
 
+  private providerName(id: ProviderId): string {
+    return providerCatalog.find((entry) => entry.id === id)?.name ?? id;
+  }
+
+  /** Refuses a provider the IT policy file does not allow, in the main process. */
+  private requireProviderAllowed(id: ProviderId): void {
+    if (managedProviderAllowed(this.managedPolicy, id)) return;
+    const locked = this.managedPolicy?.values.defaultProvider;
+    throw new ManagedPolicyError(
+      locked && isManagedSettingLocked(this.managedPolicy, "defaultProvider")
+        ? providerLockedMessage(this.providerName(locked))
+        : providerNotAllowedMessage(this.providerName(id)),
+    );
+  }
+
+  /**
+   * Applies the IT policy file read at launch: provider, model and app
+   * registration, and the record its load, change and problems are audited
+   * from. Writes only when something changed.
+   */
+  async applyManagedPolicy(): Promise<void> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const next = applyManagedPolicy(persisted, this.managedPolicy, this.clock().toISOString());
+      if (JSON.stringify(next) === JSON.stringify(persisted)) return;
+      await this.writeWithAudit(next, { policy: true });
+    });
+  }
+
+  async dismissManagedPolicyNotice(): Promise<AppState> {
+    await this.serialize(async () => {
+      const persisted = await this.read();
+      const record = persisted.managedPolicy;
+      if (!record?.issuesFingerprint || record.noticeDismissedFor === record.issuesFingerprint) return;
+      await this.write({ ...persisted, managedPolicy: { ...record, noticeDismissedFor: record.issuesFingerprint } });
+    });
+    return this.getAppState();
+  }
+
   async setActiveProvider(id: ProviderId): Promise<AppState> {
     if (!isProviderId(id)) {
       throw new Error(`Unknown provider: ${String(id)}`);
     }
+    this.requireProviderAllowed(id);
 
     await this.serialize(async () => {
       const persisted = await this.read();
@@ -6190,6 +6280,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   ): Promise<PersistedState> {
     if (persisted.providerChosenByUser !== false) return persisted;
     if (this.isPilotModeActive(persisted)) return persisted;
+    // The IT policy file's provider stays, ready or not.
+    if (this.managedPolicy?.values.defaultProvider) return persisted;
     const candidate = pickLocalProviderToAutoSelect(providers, persisted.activeProviderId);
     if (!candidate) return persisted;
     return this.serialize(async () => {
@@ -6225,6 +6317,11 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   ): Promise<AppState> {
     if (!isProviderId(providerId)) {
       throw new Error(`Unknown provider: ${String(providerId)}`);
+    }
+    this.requireProviderAllowed(providerId);
+    const lockedModel = managedLockedModel(this.managedPolicy, providerId);
+    if (lockedModel && model !== lockedModel) {
+      throw new ManagedPolicyError(modelLockedMessage(lockedModel, this.providerName(providerId)));
     }
     if (model !== null) {
       if (typeof model !== "string" || model.trim().length === 0) {
@@ -6366,6 +6463,7 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
   }
 
   async connectTenant(options: ConnectTenantOptions = {}): Promise<AppState> {
+    this.requireRegistrationAllowed(options.appRegistration);
     this.tenantConnectController?.abort();
     const controller = new AbortController();
     this.tenantConnectController = controller;
@@ -6495,6 +6593,18 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     return this.getAppState();
   }
 
+  /** A locked registration in the IT policy file is the only one sign-in may use. */
+  private requireRegistrationAllowed(registration: ConnectTenantOptions["appRegistration"]): void {
+    if (!isManagedSettingLocked(this.managedPolicy, "appRegistration")) return;
+    const managed = this.managedPolicy!.values.appRegistration!;
+    const requested = registration
+      ? registrationKey({ clientId: registration.clientId, directoryTenantId: registration.directoryTenantId })
+      : undefined;
+    if (requested !== policyRegistrationKey(this.managedPolicy)) {
+      throw new ManagedPolicyError(registrationLockedMessage(managed.label ?? managed.clientId));
+    }
+  }
+
   /**
    * Forget a remembered custom registration. Connected tenants keep their
    * own pinned registration, so their sign-in is unaffected.
@@ -6503,6 +6613,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     clientId: string,
     directoryTenantId?: string,
   ): Promise<AppState> {
+    if (
+      isManagedSettingLocked(this.managedPolicy, "appRegistration") &&
+      registrationKey({ clientId, directoryTenantId }) === policyRegistrationKey(this.managedPolicy)
+    ) {
+      throw new ManagedPolicyError(registrationLockedMessage(this.managedPolicy?.values.appRegistration?.label ?? clientId));
+    }
     await this.serialize(async () => {
       const persisted = await this.read();
       const savedAppRegistrations = forgetAppRegistration(
@@ -7380,6 +7496,12 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     providerId: ProviderId,
     model: string | undefined,
   ): Promise<RunLlmApi> {
+    // Chat, agents, Office, voice and drafts all build their model here, so the IT policy file is enforced here.
+    this.requireProviderAllowed(providerId);
+    const lockedModel = managedLockedModel(this.managedPolicy, providerId);
+    if (lockedModel && model !== undefined && model !== lockedModel) {
+      throw new ManagedPolicyError(modelLockedMessage(lockedModel, this.providerName(providerId)));
+    }
     if (this.llmFactory) {
       return await this.llmFactory(providerId, model);
     }
@@ -7933,6 +8055,8 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
         (parsed as { configurationAudit?: unknown }).configurationAudit,
       );
       if (configurationAudit) state.configurationAudit = configurationAudit;
+      const managedPolicy = sanitizeManagedPolicyRecord((parsed as { managedPolicy?: unknown }).managedPolicy);
+      if (managedPolicy) state.managedPolicy = managedPolicy;
       const tenantRemovals = sanitizeTenantRemovals((parsed as { tenantRemovals?: unknown }).tenantRemovals);
       if (tenantRemovals) {
         state.tenantRemovals = tenantRemovals;
@@ -8198,13 +8322,14 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     const previous = this.lastReadSnapshot;
     const existing = previous ? previous.configurationAudit : state.configurationAudit;
     const timestamp = this.clock().toISOString();
-    const { azureOpenAIKey } = audit;
+    const { azureOpenAIKey, policy } = audit;
     const recorded = previous
       ? diffConfigurationAudit(previous, state, {
           timestamp,
           newId: () => randomUUID(),
           publicReferenceName: (serverId) => this.mcpCatalog.find((entry) => entry.id === serverId)?.name,
           ...(azureOpenAIKey ? { azureOpenAIKey } : {}),
+          ...(policy ? { policy } : {}),
         })
       : [];
     if (this.pendingMigrationAudit && (state.organizations?.length ?? 0) > 0) {
@@ -8289,4 +8414,6 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
 /** Audit facts that belong to one write and are not visible in state, such as a key change. */
 interface WriteAudit {
   azureOpenAIKey?: "set" | "removed";
+  /** The IT policy file made this write. */
+  policy?: boolean;
 }

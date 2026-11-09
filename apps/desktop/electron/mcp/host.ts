@@ -47,7 +47,7 @@ export interface McpCallResult {
   structured?: unknown;
 }
 
-export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "tools-missing" | "redirect" | "revoked";
+export type McpHostErrorCode = "unreachable" | "timeout" | "server-error" | "tool-error" | "unknown-tool" | "tools-missing" | "redirect" | "revoked" | "not-allowed";
 
 export class McpHostError extends Error {
   /**
@@ -83,6 +83,11 @@ export interface McpHostOptions {
    * since it was installed or last checked.
    */
   listed?: (serverId: string, tools: McpToolInfo[]) => void | Promise<void>;
+  /**
+   * Whether the IT policy file allows the server. A server it does not
+   * allow is never connected to or called.
+   */
+  allowed?: (serverId: string) => boolean;
 }
 
 interface Authorization {
@@ -168,6 +173,7 @@ export class McpHost {
 
   /** Open a fresh session and list the server's tools. */
   async connect(endpoint: McpEndpoint): Promise<McpConnectResult> {
+    this.requireAllowed(endpoint);
     await this.disconnect(endpoint.id);
     const session = this.open(endpoint);
     this.sessions.set(endpoint.id, session);
@@ -223,6 +229,7 @@ export class McpHost {
     if (!isAllowedTool(endpoint, name)) {
       throw new McpHostError("unknown-tool", `OpenAdminOS does not offer ${name} from ${endpoint.name}. Nothing was sent.`, false);
     }
+    this.requireAllowed(endpoint);
     await this.authorize(endpoint, generation);
     const session = await this.session(endpoint);
     let unsaved = false;
@@ -280,6 +287,12 @@ export class McpHost {
     const data = structured !== null && typeof structured === "object" ? { structured } : {};
     if (text.length <= this.maxOutputChars) return { text, truncated: false, ...data };
     return { text: text.slice(0, this.maxOutputChars), truncated: true, ...data };
+  }
+
+  private requireAllowed(endpoint: McpEndpoint): void {
+    if (this.options.allowed && !this.options.allowed(endpoint.id)) {
+      throw new McpHostError("not-allowed", `Your IT department does not allow ${endpoint.name} on this device. Nothing was sent.`, false);
+    }
   }
 
   private authorization(id: string): Authorization {

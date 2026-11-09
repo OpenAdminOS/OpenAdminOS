@@ -41,6 +41,8 @@ import { arch as osArch, release as osRelease } from "node:os";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, join, win32 } from "node:path";
 import { AppStateStore } from "./state.js";
+import { loadManagedPolicy, resolveManagedPolicyPaths } from "./managed-policy.js";
+import { MCP_CATALOG } from "./mcp/catalog.js";
 import { SafeStorageTokenCacheStore } from "./secret-store.js";
 import {
   DEFAULT_TOKEN_CACHE_FILE,
@@ -6340,6 +6342,10 @@ function registerIpcHandlers() {
     handleTrusted(() => store.dismissProviderAutoSelectNotice()),
   );
   ipcMain.handle(
+    "openadminos:dismiss-managed-policy-notice",
+    handleTrusted(() => store.dismissManagedPolicyNotice()),
+  );
+  ipcMain.handle(
     "openadminos:set-active-model",
     handleTrusted((_event, providerId: unknown, model: unknown) =>
       store.setActiveModel(validateProviderId(providerId), validateActiveModel(model)),
@@ -6825,6 +6831,29 @@ if (!gotLock) {
       throw error;
     }
 
+    // The IT policy file is read once per launch, before anything reads the
+    // provider or the public references. Smoke and capture launches use
+    // their fixtures, never a policy on the machine that runs them.
+    const managedPolicy =
+      isFirstRunCapture || isIntuneChatSmokeLaunch || isScreenshotCaptureLaunch
+        ? undefined
+        : await loadManagedPolicy({
+            paths: resolveManagedPolicyPaths({ packaged: app.isPackaged }),
+            providerIds: providerCatalog.map((provider) => provider.id),
+            publicReferenceIds: MCP_CATALOG.map((entry) => entry.id),
+          }).catch((error: unknown) => {
+            console.error("[policy] the IT policy file could not be read", error);
+            return undefined;
+          });
+    if (managedPolicy) {
+      console.info("[policy] IT policy file applied", {
+        files: managedPolicy.files.filter((file) => file.found).map((file) => file.path),
+        keys: Object.keys(managedPolicy.values),
+        locked: managedPolicy.locked,
+        problems: managedPolicy.issues.length,
+      });
+    }
+
     installConnectorConfirmBridge({
       getMainWindow: () => mainWindow,
       connectorNameLookup: (id) =>
@@ -6849,6 +6878,7 @@ if (!gotLock) {
       allowDevRegistrySource:
         !app.isPackaged && process.env.OPENADMINOS_ALLOW_DEV_REGISTRY_SOURCE === "1",
       sandboxedCodeDefault: launchSandboxedCodeDefault,
+      ...(managedPolicy ? { managedPolicy } : {}),
       openBrowser: async (url: string) => {
         await shell.openExternal(url);
       },
@@ -6870,6 +6900,10 @@ if (!gotLock) {
           }
         : {}),
     });
+    // The policy's provider, model and registration are in state before the window reads it.
+    await store.applyManagedPolicy().catch((error) =>
+      console.error("[policy] applying the IT policy file failed", error),
+    );
     // A disconnect whose cleanup did not finish resumes first, before any
     // scheduler, Agent Team tick, gateway or delivery worker starts.
     await store.resumeTenantCleanups().catch((error) =>
