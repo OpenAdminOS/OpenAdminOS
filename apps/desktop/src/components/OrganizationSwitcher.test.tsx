@@ -279,8 +279,10 @@ describe("switcher filter and focus (design round review, Muse E and F)", () => 
     const bridge = renderSwitcher(createMockAppState({ tenants: [base, { ...base, id: "tenant-2", displayName: "Fabrikam" }] }));
     vi.mocked(bridge.setActiveOrganization).mockImplementation(() => new Promise((_resolve, reject) => (fail = reject)));
     await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
+    // Let the opening focus land on the active organization, then move as a user would.
+    await waitFor(() => expect(screen.getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus());
     const fabrikam = screen.getByRole("menuitemradio", { name: /Fabrikam/ });
-    fabrikam.focus();
+    while (document.activeElement !== fabrikam) await user.keyboard("{ArrowDown}");
     await user.keyboard("{Enter}");
     await waitFor(() => expect(fabrikam).toHaveAttribute("aria-disabled", "true"));
     expect(fabrikam).not.toBeDisabled();
