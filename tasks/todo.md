@@ -1674,3 +1674,5 @@ Already fixed by the round 2 commits above, confirmed: the Agent Team persona sc
 12. [x] Reports of a run with no organization say "Organization: none", and the direct Teams and Outlook paths use the designed skip instead of a failed step. (0f0e7cbf)
 
 CI on this branch failed the generated docs check on every push since 96eece9: git's automatic short-hash length grew to eight characters in fresh clones. Part A's fix `docs: pin generated short hashes to eight characters` is cherry-picked here so the check passes; it merges cleanly once part A lands. Earlier hand-backs reported CI as pending, not failing.
+
+The CI job then failed in the Intune Chat smoke: it, and the Agent Team presentation checks, still looked for the old Switch tenant button and top bar label. Fixed in the commit after the cherry-pick; the Intune Chat, Office and Support issue smokes pass locally.
