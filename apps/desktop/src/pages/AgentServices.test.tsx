@@ -372,7 +372,8 @@ describe("preflight without an organization (review round 1)", () => {
     const state = { ...noOrganizationState([draft]), activeProviderId: "openai" as const };
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge: makeMockBridge({}, state) });
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(dialog).toHaveTextContent("Prompts and agent context go to OpenAI API · US, through Codex. No organization is active, so no tenant data is included.");
+    expect(dialog).toHaveTextContent("Prompts and agent context go to Codex · location set by your account. No organization is active, so no tenant data is included.");
+    expect(dialog).toHaveTextContent("Codex sends prompts to OpenAI, or to the endpoint its configuration selects.");
     expect(dialog).not.toHaveTextContent("Tenant prompts");
   });
 
@@ -383,7 +384,7 @@ describe("preflight without an organization (review round 1)", () => {
       route: "/agents/devices/confirm",
       bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "openai", installedAgents: [agent] })),
     });
-    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Prompts, tenant data and agent context go to OpenAI API · US, through Codex.");
+    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Prompts, tenant data and agent context go to Codex · location set by your account.");
   });
 });
 
@@ -400,7 +401,7 @@ it("names the Azure OpenAI API, not a local CLI, in the run review", async () =>
     })),
   });
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-  expect(dialog).toHaveTextContent("go to Azure OpenAI · your resource's region");
+  expect(dialog).toHaveTextContent("go to Azure OpenAI · location set by your deployment type");
   expect(dialog).not.toHaveTextContent("local CLI");
 });
 

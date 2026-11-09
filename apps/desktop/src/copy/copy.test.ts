@@ -9,6 +9,7 @@ import {
   deriveToolHostsCopy,
   deriveTrustCopy,
   providerDataLocation,
+  providerDataLocationDetail,
   searchSettings,
 } from "./index.js";
 
@@ -53,20 +54,36 @@ describe("v0.4 copy catalog", () => {
       scope: { tenantNames: ["Contoso", "Fabrikam"] },
       attachments: { workspaceTitle: "Incident 42", evidenceCount: 2 },
     });
-    expect(hosted.strip).toBe("hosted · tenant context sent to Anthropic API · US");
-    expect(hosted.confirmBody).toContain("Claude Code (Anthropic API · US)");
+    expect(hosted.strip).toBe("hosted · tenant context sent to Claude Code · location set by your account");
+    expect(hosted.confirmBody).toContain("Prompts go to Claude Code · location set by your account.");
     expect(hosted.confirmBody).toContain("2 selected tenants");
     expect(hosted.confirmBody).toContain("2 evidence items");
   });
 
   it("names each provider's documented API location in one place", () => {
-    expect(providerDataLocation({ id: "anthropic", name: "Claude Code" })).toBe("Anthropic API · US");
-    expect(providerDataLocation({ id: "openai", name: "Codex" })).toBe("OpenAI API · US");
-    expect(providerDataLocation({ id: "copilot", name: "GitHub Copilot CLI" })).toBe("GitHub Copilot · region not stated");
-    expect(providerDataLocation({ id: "gemini", name: "Gemini CLI" })).toBe("Google Gemini API · region not stated");
-    expect(providerDataLocation({ id: "azure-openai", name: "Azure OpenAI" })).toBe("Azure OpenAI · your resource's region");
+    expect(providerDataLocation({ id: "anthropic", name: "Claude Code" })).toBe("Claude Code · location set by your account");
+    expect(providerDataLocation({ id: "openai", name: "Codex" })).toBe("Codex · location set by your account");
+    expect(providerDataLocation({ id: "copilot", name: "GitHub Copilot CLI" })).toBe("GitHub Copilot · location not stated");
+    expect(providerDataLocation({ id: "gemini", name: "Gemini CLI" })).toBe("Google Gemini · location not stated");
+    expect(providerDataLocation({ id: "azure-openai", name: "Azure OpenAI" })).toBe("Azure OpenAI · location set by your deployment type");
+    // The documented defaults, decided 2026-11-09 (design round review).
+    expect(providerDataLocationDetail({ id: "anthropic", name: "Claude Code" })).toBe(
+      "Claude Code sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex if its settings select them. On Anthropic's API, inference can run in any region by default and data at rest stays in the US; a workspace can restrict inference to the US.",
+    );
+    expect(providerDataLocationDetail({ id: "openai", name: "Codex" })).toBe(
+      "Codex sends prompts to OpenAI, or to the endpoint its configuration selects. Processing follows your workspace's data residency setting.",
+    );
+    expect(providerDataLocationDetail({ id: "azure-openai", name: "Azure OpenAI" })).toBe(
+      "Global deployments can process in any Azure region, Data Zone deployments within the US, EU or Asia Pacific, Standard deployments within your resource's geography.",
+    );
+    expect(providerDataLocationDetail({ id: "copilot", name: "GitHub Copilot CLI" })).toBeUndefined();
+    expect(providerDataLocationDetail({ id: "gemini", name: "Gemini CLI" })).toBeUndefined();
+    // The confirmation carries the detail; no surface claims a fixed region.
+    const confirm = deriveTrustCopy({ provider: { id: "anthropic", name: "Claude Code", isLocal: false } }).confirmBody;
+    expect(confirm).toContain("Prompts go to Claude Code · location set by your account. Claude Code sends prompts to Anthropic");
+    expect(confirm).not.toMatch(/API · US/);
     // An unknown provider never gets an invented region.
-    expect(providerDataLocation({ name: "Example" })).toBe("Example · region not stated");
+    expect(providerDataLocation({ name: "Example" })).toBe("Example · location not stated");
   });
 
   it("names MCP tool hosts honestly, also for a local model", () => {
@@ -81,7 +98,7 @@ describe("v0.4 copy catalog", () => {
     expect(local.storage).toBe("The model, Graph and cache data, and chat history stay on this device.");
     expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true } }).storage).toBe("Tenant data, prompts, and chat history stay on this device.");
     const hosted = deriveTrustCopy({ provider: { id: "anthropic", name: "Claude Code", isLocal: false }, toolHosts: ["learn.microsoft.com"] });
-    expect(hosted.strip).toBe("hosted · tenant context sent to Anthropic API · US · tool queries to learn.microsoft.com");
+    expect(hosted.strip).toBe("hosted · tenant context sent to Claude Code · location set by your account · tool queries to learn.microsoft.com");
     expect(deriveToolHostsCopy([])).toBeUndefined();
     expect(deriveTrustCopy({ provider: { name: "Ollama", isLocal: true }, toolHosts: [] }).strip).toBe("local-only · no data leaves this device");
     for (const value of [...stringsIn(local.toolHosts), local.storage]) {

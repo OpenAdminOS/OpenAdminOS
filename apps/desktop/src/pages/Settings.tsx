@@ -72,6 +72,7 @@ import { createPendingIntent, type PendingIntent } from "../setup/pending-intent
 import {
   SETTINGS_ITEMS,
   providerDataLocation,
+  providerDataLocationDetail,
   SETTINGS_SECTIONS,
   SETTINGS_SECTIONS_MOVED_TO_CONNECTIONS,
   searchSettings,
@@ -657,7 +658,7 @@ function ProviderRow({
       <div className="flex flex-wrap items-center gap-3 px-5 py-4">
         <div className="min-w-[180px] flex-1">
           <div className="text-base font-medium text-[var(--color-text)]">{provider.name}</div>
-          <p className="mt-0.5 text-sm text-[var(--color-text-muted)]">{kind}</p>
+          <p className="mt-0.5 text-sm text-[var(--color-text-muted)]" title={provider.isLocal ? undefined : providerDataLocationDetail(provider)}>{kind}</p>
         </div>
         <Badge tone={status.tone}>{status.label}</Badge>
         <label className="inline-flex items-center gap-2 text-sm text-[var(--color-text-soft)]">

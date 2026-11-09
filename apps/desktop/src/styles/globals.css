@@ -980,6 +980,8 @@ select { color-scheme: inherit; }
   color: var(--color-text);
 }
 .reach-row-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.reach-row[data-detail="true"] { height: auto; min-height: 32px; row-gap: 2px; padding: 6px 0; }
+.reach-row-detail { grid-column: 2 / -1; font-size: var(--text-xs); line-height: 1.45; color: var(--color-text-muted); }
 .reach-row[data-off="true"] .reach-row-title { color: var(--color-text-muted); }
 .reach-state { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; font-size: var(--text-sm); color: var(--color-text-soft); }
 .reach-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--color-text-faint); }

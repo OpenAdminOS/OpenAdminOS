@@ -587,7 +587,7 @@ it("opens the preflight for Run again on a tenant-bound run, keeps its provider 
   await user.click(await screen.findByRole("button", { name: "Run again" }));
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
   expect(within(dialog).getByText("Contoso IT")).toBeInTheDocument();
-  expect(within(dialog).getByText(/go to OpenAI API · US, through Codex/)).toBeInTheDocument();
+  expect(within(dialog).getByText(/go to Codex · location set by your account/)).toBeInTheDocument();
   expect(within(dialog).getByText("gpt-5")).toBeInTheDocument();
   expect(startRun).not.toHaveBeenCalled();
   await user.click(within(dialog).getByRole("button", { name: "Start run" }));

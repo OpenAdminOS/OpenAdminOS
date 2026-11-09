@@ -36,19 +36,44 @@ export const LOCAL_BOUNDARY_COPY = {
 } as const;
 
 /**
- * Where a hosted provider sends prompts, as the status strip, the composer
- * and the hosted confirmation name it ("Anthropic API · US").
+ * Where a hosted provider sends prompts. The app cannot see the account,
+ * workspace or deployment settings that decide the processing location, so
+ * the short label says who sets it and the detail gives the vendor's
+ * documented default (decided 2026-11-09). The label is for the status
+ * strip and composer lines; tooltips, the reach map, the run review and the
+ * hosted confirmation also show the detail.
  */
-const HOSTED_DATA_LOCATIONS: Readonly<Record<string, string>> = {
-  anthropic: "Anthropic API · US",
-  openai: "OpenAI API · US",
-  copilot: "GitHub Copilot · region not stated",
-  gemini: "Google Gemini API · region not stated",
-  "azure-openai": "Azure OpenAI · your resource's region",
+const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: string }>> = {
+  // The CLI decides the channel: Claude Code can use Amazon Bedrock or
+  // Google Vertex, Codex a configured endpoint, so the label names the CLI.
+  anthropic: {
+    label: "Claude Code · location set by your account",
+    detail:
+      "Claude Code sends prompts to Anthropic, or to Amazon Bedrock or Google Vertex if its settings select them. On Anthropic's API, inference can run in any region by default and data at rest stays in the US; a workspace can restrict inference to the US.",
+  },
+  openai: {
+    label: "Codex · location set by your account",
+    detail:
+      "Codex sends prompts to OpenAI, or to the endpoint its configuration selects. Processing follows your workspace's data residency setting.",
+  },
+  "azure-openai": {
+    label: "Azure OpenAI · location set by your deployment type",
+    detail:
+      "Global deployments can process in any Azure region, Data Zone deployments within the US, EU or Asia Pacific, Standard deployments within your resource's geography.",
+  },
+  copilot: { label: "GitHub Copilot · location not stated" },
+  gemini: { label: "Google Gemini · location not stated" },
 };
 
-export function providerDataLocation(provider: Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>): string {
-  return (provider.id && HOSTED_DATA_LOCATIONS[provider.id]) || `${provider.name} · region not stated`;
+type LocatedProvider = Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>;
+
+export function providerDataLocation(provider: LocatedProvider): string {
+  return (provider.id && HOSTED_DATA_LOCATIONS[provider.id]?.label) || `${provider.name} · location not stated`;
+}
+
+/** The vendor's documented default for the location, when it states one. */
+export function providerDataLocationDetail(provider: LocatedProvider): string | undefined {
+  return provider.id ? HOSTED_DATA_LOCATIONS[provider.id]?.detail : undefined;
 }
 
 export interface DerivedTrustCopy {
@@ -140,13 +165,14 @@ export function deriveTrustCopy(input: TrustCopyInput): DerivedTrustCopy {
   }
 
   const location = providerDataLocation(input.provider);
+  const locationDetail = providerDataLocationDetail(input.provider);
   return {
     // Each line names where prompts are processed, not just the provider (hard constraint 1).
     strip: `hosted · tenant context sent to ${location}${toolHosts ? ` · ${toolHosts.strip}` : ""}`,
     ...(toolHosts ? { toolHosts } : {}),
-    boundary: `Tenant context will be sent to ${location}${attachments ? ` with ${attachments}` : ""}.`,
+    boundary: `Tenant context will be sent to ${location}${attachments ? ` with ${attachments}` : ""}.${locationDetail ? ` ${locationDetail}` : ""}`,
     confirmTitle: "Send tenant context to hosted provider",
-    confirmBody: `${providerName}${modelDetail} (${location}) will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}.`,
+    confirmBody: `${providerName}${modelDetail} will receive the prompt and selected context from ${scope}${attachments ? `, including ${attachments}` : ""}. Prompts go to ${location}.${locationDetail ? ` ${locationDetail}` : ""}`,
     storage: "Chat history and the Graph cache stay on this device.",
     isLocal: false,
   };

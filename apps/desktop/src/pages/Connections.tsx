@@ -22,7 +22,7 @@ import {
 import { TenantTile } from "../components/TenantTile";
 import { useToast } from "../components/Toast";
 import { Badge, Menu, StatusDot, Tabs, Tooltip, Button as UiButton } from "../components/ui";
-import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, providerDataLocation, userFacingErrorReason } from "../copy";
+import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, providerDataLocation, providerDataLocationDetail, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
 import { partShortLabel } from "../shared/agent-needs";
 import { reportDestinations, resultDestinations, targetlessDestinations } from "../shared/delivery-destinations";
@@ -74,6 +74,8 @@ export interface ReachModel {
     providerName?: string;
     channel?: string;
     location?: string;
+    /** The vendor's documented default for that location. */
+    locationDetail?: string;
   };
   referenceHosts: string[];
   /** null while the connector list loads or when it could not be loaded. */
@@ -116,7 +118,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
       ? { kind: "none", name: CONNECTIONS_COPY.map.modelNone }
       : boundary.kind === "local"
         ? { kind: "local", name: CONNECTIONS_COPY.map.modelLocal(modelName), modelName, providerName: provider.name }
-        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerName: provider.name, channel: hostedChannel(provider), location: providerDataLocation(provider) };
+        : { kind: "hosted", name: CONNECTIONS_COPY.map.modelHosted(modelName), modelName, providerName: provider.name, channel: hostedChannel(provider), location: providerDataLocation(provider), ...(providerDataLocationDetail(provider) ? { locationDetail: providerDataLocationDetail(provider)! } : {}) };
   return {
     ...(organization ? { organizationName: organization.name } : {}),
     sample,
@@ -162,7 +164,7 @@ export function reachDescription(model: ReachModel): string {
     model.model.kind === "local"
       ? `The model runs on this device: ${model.model.name}.`
       : model.model.kind === "hosted"
-        ? `The model is hosted: ${model.model.name}. ${model.organizationName ? "Prompts and tenant data go" : "Prompts and agent context go"} through ${model.model.channel}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."} Prompts go to ${model.model.location ?? "the provider"}.`
+        ? `The model is hosted: ${model.model.name}. ${model.organizationName ? "Prompts and tenant data go" : "Prompts and agent context go"} through ${model.model.channel}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."} Prompts go to ${model.model.location ?? "the provider"}.${model.model.locationDetail ? ` ${model.model.locationDetail}` : ""}`
         : model.model.kind === "sample"
           ? "Sample answers are prepared on this device. No model is used."
           : "No model is ready.";
@@ -337,6 +339,7 @@ function ReachRow({
   off = false,
   title,
   titleHint,
+  detail,
   state,
 }: {
   linkId?: string;
@@ -344,13 +347,16 @@ function ReachRow({
   off?: boolean;
   title: string;
   titleHint?: string;
+  /** A second line, such as the documented default for a data location. */
+  detail?: string;
   state?: ReactNode;
 }) {
   return (
-    <li className="reach-row" data-link-id={linkId} data-off={off ? "true" : undefined}>
+    <li className="reach-row" data-link-id={linkId} data-off={off ? "true" : undefined} data-detail={detail ? "true" : undefined}>
       {mark}
       <span className="reach-row-title" title={titleHint ?? title}>{title}</span>
       {state ?? <span />}
+      {detail ? <span className="reach-row-detail">{detail}</span> : null}
     </li>
   );
 }
@@ -425,6 +431,7 @@ function ReachMap({ model }: { model: ReachModel }) {
                 mark={<ReferenceMark name={(model.model.location ?? model.model.providerName ?? model.model.name).split(" ")[0] ?? ""} />}
                 title={model.model.location ?? promptsDestination(model.model)}
                 titleHint={`${model.model.location ?? ""}, ${promptsDestination(model.model)}`}
+                {...(model.model.locationDetail ? { detail: model.model.locationDetail } : {})}
                 state={model.model.modelName ? <ReachState tone="leaves">{model.model.modelName}</ReachState> : undefined}
               />
             ) : (
@@ -1064,7 +1071,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
   const hosted = model.model.kind === "hosted";
   const via = channelName(model.model.channel);
   const prompts = hosted
-    ? `${model.model.location ?? model.model.providerName ?? model.model.name}${via ? `, through ${via}` : ""}`
+    ? model.model.location ?? `${model.model.providerName ?? model.model.name}${via ? `, through ${via}` : ""}`
     : promptsDestination(model.model);
   return (
     <>
@@ -1114,6 +1121,9 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
             <div className="min-w-0">
               <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.promptsNoOrganization}</div>
               <div className={`text-sm ${hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text-muted)]"}`}>{prompts}</div>
+              {hosted && model.model.locationDetail ? (
+                <div className="mt-0.5 text-xs leading-relaxed text-[var(--color-text-muted)]">{model.model.locationDetail}</div>
+              ) : null}
             </div>
             <span />
             <UiButton className="conn-row-action" size="sm" variant="ghost" onClick={() => navigate("/settings/providers")}>

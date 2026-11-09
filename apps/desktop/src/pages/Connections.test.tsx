@@ -95,11 +95,14 @@ describe("Connections reach map", () => {
     render(state);
     const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
     // The row names where prompts go and the model; the channel is its hint.
-    const row = within(map).getByText("OpenAI API · US");
+    const row = within(map).getByText("Codex · location set by your account");
     expect(row).toHaveAttribute("title", expect.stringContaining(`${hosted.name}, through the Codex CLI`));
     expect(within(map).getByText(model.model.modelName!)).toBeInTheDocument();
-    expect(reachDescription(model)).toContain("Prompts and tenant data go through the Codex CLI to OpenAI. Prompts go to OpenAI API · US.");
+    expect(reachDescription(model)).toContain("Prompts and tenant data go through the Codex CLI to OpenAI. Prompts go to Codex · location set by your account.");
     expect(reachDescription(model)).not.toContain("Region not reported");
+    // The documented default sits under the location (design round review).
+    expect(within(map).getByText("Codex sends prompts to OpenAI, or to the endpoint its configuration selects. Processing follows your workspace's data residency setting.")).toBeInTheDocument();
+    expect(reachDescription(model)).toContain("Processing follows your workspace's data residency setting.");
   });
 
   it("shows an empty state with Connect Microsoft 365 and no services list when no organization is active", async () => {
@@ -136,7 +139,7 @@ describe("Connections reach map", () => {
     });
     const bridge = render({ ...state, tenants: [] });
     const leaves = await screen.findByRole("region", { name: CONNECTIONS_COPY.leavesNowHeading });
-    const prompts = within(leaves).getByText("OpenAI API · US, through Codex");
+    const prompts = within(leaves).getByText("Codex · location set by your account");
     expect(prompts.className).toContain("--color-warning");
     expect(within(leaves).getByText("www.kqlsearch.com")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: ORGANIZATION_COPY.previewSample }));
