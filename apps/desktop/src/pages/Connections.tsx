@@ -21,6 +21,7 @@ import {
 } from "../components/ServiceAccess";
 import { TenantTile } from "../components/TenantTile";
 import { useToast } from "../components/Toast";
+import { SetByItBadge } from "../components/ManagedPolicy";
 import { Badge, Menu, StatusDot, Tabs, Tooltip, Button as UiButton } from "../components/ui";
 import { CONNECTIONS_COPY, ORGANIZATION_COPY, SERVICE_COPY, SETUP_COPY, promptsGoTo, providerDataLocation, providerDataLocationDetail, userFacingErrorReason } from "../copy";
 import { tenantRegistrationSummary, savedRegistrationName } from "../shared/app-registration";
@@ -33,6 +34,7 @@ import {
   activeOrganizationOf,
   grantedParts,
   grantedScopeSet,
+  isManagedSettingLocked,
   resolveOrganizations,
   serviceStatus,
   type AppState,
@@ -1068,9 +1070,12 @@ function OrganizationsList({ state, onAdd }: { state: AppState; onAdd: () => voi
 
 function SavedRegistrationsList({
   registrations,
+  registrationLocked,
   onRemove,
 }: {
   registrations: SavedAppRegistration[];
+  /** The IT policy file locks its registration, so it cannot be removed. */
+  registrationLocked: boolean;
   onRemove: (clientId: string, directoryTenantId?: string) => Promise<void>;
 }) {
   const toast = useToast();
@@ -1102,7 +1107,8 @@ function SavedRegistrationsList({
                   {entry.directoryTenantId ?? "Multi-tenant"}
                 </div>
               </div>
-              <UiButton
+              {entry.managed ? <SetByItBadge /> : null}
+              {entry.managed && registrationLocked ? null : <UiButton
                 variant="ghost"
                 size="sm"
                 aria-label={SETUP_COPY.removeSavedRegistration(name)}
@@ -1123,7 +1129,7 @@ function SavedRegistrationsList({
                 }}
               >
                 {removing === key ? "Removing" : "Remove"}
-              </UiButton>
+              </UiButton>}
             </li>
           );
         })}
@@ -1325,7 +1331,11 @@ export default function Connections() {
               <div role="tabpanel" id="connections-view-organizations" aria-label={CONNECTIONS_COPY.organizationsTab}>
                 <OrganizationsList state={state} onAdd={openSetup} />
                 {savedRegistrations.length > 0 ? (
-                  <SavedRegistrationsList registrations={savedRegistrations} onRemove={removeSavedAppRegistration} />
+                  <SavedRegistrationsList
+                    registrations={savedRegistrations}
+                    registrationLocked={isManagedSettingLocked(state.managedPolicy, "appRegistration")}
+                    onRemove={removeSavedAppRegistration}
+                  />
                 ) : null}
               </div>
             ) : (

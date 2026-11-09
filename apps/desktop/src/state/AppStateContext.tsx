@@ -56,6 +56,7 @@ interface AppStateContextValue {
   ) => Promise<void>;
   setActiveProvider: (id: ProviderId) => Promise<void>;
   dismissProviderAutoSelectNotice: () => Promise<void>;
+  dismissManagedPolicyNotice: () => Promise<void>;
   setActiveModel: (providerId: ProviderId, model: string | null) => Promise<void>;
   setRegistryInstallCountsEnabled: (enabled: boolean) => Promise<void>;
   setUsageTelemetryEnabled: (enabled: boolean) => Promise<void>;
@@ -403,6 +404,25 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
     }
     try {
       const nextState = await api.dismissProviderAutoSelectNotice();
+      setState(nextState);
+      setRegistryAgents(nextState.registryAgents);
+    } catch (caughtError) {
+      setError(toError(caughtError));
+    }
+  }, []);
+
+  const dismissManagedPolicyNotice = useCallback(async () => {
+    const api = getOpenAdminOSApi();
+    if (!api) {
+      setState((currentState) =>
+        currentState.managedPolicy
+          ? { ...currentState, managedPolicy: { ...currentState.managedPolicy, noticeDismissed: true } }
+          : currentState,
+      );
+      return;
+    }
+    try {
+      const nextState = await api.dismissManagedPolicyNotice();
       setState(nextState);
       setRegistryAgents(nextState.registryAgents);
     } catch (caughtError) {
@@ -1217,6 +1237,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveModel,
       setActiveProvider,
       dismissProviderAutoSelectNotice,
+      dismissManagedPolicyNotice,
       setRegistryInstallCountsEnabled,
       setUsageTelemetryEnabled,
       startRun,
@@ -1286,6 +1307,7 @@ export function AppStateProvider({ children }: AppStateProviderProps) {
       setActiveModel,
       setActiveProvider,
       dismissProviderAutoSelectNotice,
+      dismissManagedPolicyNotice,
       setRegistryInstallCountsEnabled,
       setUsageTelemetryEnabled,
       setRegistrySource,

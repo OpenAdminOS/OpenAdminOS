@@ -7,3 +7,4 @@ export * from "./settings";
 export * from "./setup";
 export * from "./trust";
 export * from "./connections";
+export * from "./policy";
