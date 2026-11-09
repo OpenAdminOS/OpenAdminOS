@@ -728,6 +728,53 @@ describe("a manual scan in a completed profile (review round 4, item 1)", () => 
   });
 });
 
+describe("Gemini Test refreshes what listing serves (review round 4, item 2)", { skip: process.platform === "win32" }, () => {
+  const run = async (succeeds: boolean) => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-gemini-test-"));
+    await writeFile(join(dir, "state.json"), JSON.stringify({ installedAgents: [], runs: [], tenants: [] }));
+    const request = succeeds
+      ? [
+          "cat >/dev/null",
+          `echo '{"type":"init","model":"gemini-test"}'`,
+          `echo '{"type":"message","role":"assistant","content":"OPENADMINOS_PROVIDER_OK"}'`,
+          `echo '{"type":"result","status":"success"}'`,
+        ].join("\n")
+      : "cat >/dev/null\necho 'Error: not logged in. Please login.' >&2\nexit 1";
+    await writeFile(join(dir, "gemini"), `#!/bin/sh\nif [ "$1" = "--version" ]; then echo 0.60.0; exit 0; fi\n${request}\n`);
+    await chmod(join(dir, "gemini"), 0o755);
+    const original = { path: process.env.PATH, ollama: process.env.OPENAGENTS_OLLAMA_URL, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    process.env.PATH = `${dir}:/usr/bin:/bin`;
+    process.env.OPENAGENTS_OLLAMA_URL = "http://127.0.0.1:9";
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    const gemini = async () => (await store.listProviders()).find((provider) => provider.id === "gemini")!;
+    try {
+      await store.scanModels();
+      assert.equal((await gemini()).status, "available", "found installed, sign-in not confirmed");
+      const result = await store.testProvider("gemini");
+      assert.equal(result.ok, succeeds, result.message);
+      return await gemini();
+    } finally {
+      for (const [key, value] of [["PATH", original.path], ["OPENAGENTS_OLLAMA_URL", original.ollama], ["OPENADMINOS_LM_STUDIO_URL", original.lm]] as const) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      store.close();
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  };
+
+  it("shows Gemini connected after the first successful Test, so it can be activated", async () => {
+    assert.equal((await run(true)).status, "connected");
+  });
+
+  it("shows what a failed Test found", async () => {
+    const after = await run(false);
+    assert.equal(after.status, "error");
+    assert.equal(after.cli?.state, "signed-out");
+  });
+});
+
 describe("after the first-run scan (review round 3, item 1)", () => {
   it("leaves the scan by every exit without discovery, and checks a provider in full only when the admin acts on it", async () => {
     const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));

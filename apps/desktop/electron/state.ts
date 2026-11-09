@@ -3707,6 +3707,11 @@ export class AppStateStore {
         durationMs: Date.now() - startedAt,
         message: error instanceof Error ? error.message : String(error),
       };
+    } finally {
+      // Gemini's sign-in is only known from a request, and the request just
+      // ran: while listing serves cached results, check Gemini again so
+      // Settings shows what the Test found, success or failure.
+      if (providerId === "gemini" && this.scanResultsServed) await this.detectProvider("gemini").catch(() => undefined);
     }
   }
 
