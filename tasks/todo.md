@@ -1695,3 +1695,39 @@ Muse round 2 items:
 
 1. [x] `model-scan-cancel.test.ts` "only a refused connection as not running" got could not check on Linux. Reproduced in a `node:22` Linux container: the earlier timed-out checks left keep-alive sockets in fetch's pool, and after the server stopped the next check reused one and failed with `UND_ERR_SOCKET` ("other side closed") instead of `ECONNREFUSED`. That is an app bug on real machines too (Ollama or LM Studio stopped between two checks reads as could not check). `fetchLocal` retries once on a new connection after `UND_ERR_SOCKET`, which is then refused; used by the Ollama tags check and the LM Studio probe. `isConnectionRefused` also reads an AggregateError without a top-level code (`localhost` refused on IPv6 and IPv4) and counts it only when every address was refused. Tests: the real-socket sequence, plus injected refused, stale-then-refused and failed shapes, so the result does not depend on the host.
 2. [x] `model-scan.test.ts` "runs no provider detection outside the scan" asserted every catalog provider connected after the scan; off macOS Apple Intelligence is not checked and stays not checked. The test pins the local endpoints to loopback and asserts per provider: connected when the scan checked it, not checked otherwise, and no detection outside the scan.
+
+## PR #175 review round 3 (GPT-6.1-Sol, head 259d36d, 2026-11-09)
+
+Blocking
+1. [x] Leaving the scan restarts unrestricted discovery: `completeFirstRunScan` clears the gate and `getAppState` runs full provider discovery on every exit (Continue, Preview, Open chat). Keep serving the scan results after the first run; detect a provider only when the admin acts on it (select, test, refresh in Settings). Tests for every exit path.
+
+Should fix
+2. [x] Gemini and Copilot wrapper children survive cancellation: discovery spawns without its own process group. New process group on POSIX, tree kill on Windows; test with wrappers that start children.
+3. [x] Start can return a scan from before the runtime was ready by joining an in-flight scan. Queue a fresh scan after readiness; test Start overlapping a scan.
+4. [x] HTTP Retry stops at about 2.3 s: Ollama and LM Studio always get the first-scan budget. Pass the current check's budget; test a 3 s response on Retry.
+5. [x] Apple helper failures show as "Not available": handle `checkFailed` before provider-specific negatives; end-to-end test.
+6. [x] The scan can name a model Chat does not use (Ollama with Qwen chosen and OpenAdmin 8B installed). Resolve the saved model; prefer OpenAdmin 8B only when none was chosen; multi-model test.
+7. [x] The LM Studio launcher test failed once under load; make it deterministic.
+
+### Muse Wonder Full round 3 (head 259d36d, Node 22, no blocking findings)
+
+Confirms GPT 3, 4 and 5, with additions: run the whole of Start inside the exclusive queue so two windows cannot spawn the same runtime twice (3); an Azure check that fails (invalid saved endpoint, status `error`) is could not check with its detail and Retry, not "Not configured" (5).
+
+M1. [x] Gemini `testProvider` bypasses the pending scan gate and sends the smoke prompt. Refuse `testProvider` while the scan is pending; require a real ready status for every provider before a test prompt; pending startup test with a CLI spawn spy.
+M2. [x] Pre-settle exit actions ignore busy: disable Continue and the scan error actions while busy; a finishing flag in `finish`, `preview`, `useHosted` and `switchLocal`.
+M3. [x] The closing ledger lists a refused off-device endpoint as something that ran. Exclude it or label it not contacted.
+M4. [x] SPEC says "A click, Skip or any key settles at once"; it is Escape, Skip or a click.
+
+### Round 3 responses
+
+- 1: `a1e9987d`. After `completeFirstRunScan` listing keeps serving the scan results for the session; `setActiveProvider`, `testProvider` and saving Azure settings check that one provider in full; Refresh providers in Settings (new `refreshProviders` IPC) checks all again. Test: every exit (Continue, Open chat with a local model, Preview, Office tick, model choice) runs no provider factory call; testing or selecting checks only that provider; refresh checks all.
+- M1: `6db17ea1`. `testProvider` returns a designed refusal while the scan is pending, and needs a ready status (connected; Azure available; an installed Gemini, also after a failed request, because a request is how its sign-in is confirmed). The pending startup test has a Gemini CLI spawn spy and an LLM factory spy.
+- 2: `151bc56f`. Provider CLIs spawn in their own process group on macOS and Linux; `terminateCli` sends SIGTERM to the group, then SIGKILL after 500 ms; Windows uses `taskkill /T /F`, shared with the Claude and Codex kill path. Tests: Gemini and Copilot wrappers that start a child and wait, and a stopped Gemini request.
+- 3 and 7: `9b1d45ae`. All of Start runs in the scan queue, skips the spawn when the runtime already answers, and returns a fresh scan. Test: Start overlapping a slow scan returns a scan with LM Studio ready, and two Starts launch once. The launcher test's stub answers only after `lms` ran, so "started" means launched (no timing on the log write).
+- 4: `4cf80ee2`. A check's budget reaches the Ollama tags and capability requests and the LM Studio probe. Test: an Ollama answering after 3 seconds is could not check in the scan and found on Retry.
+- 5: `7e05f23c`. `checkFailed` is handled before any provider-specific negative; an Azure endpoint that is not a URL and an unreadable Azure config are failed checks. Tests: every provider, Azure invalid URL, and a failing Apple helper end to end through the scan on macOS.
+- 6: `5fb4ea5c`. The outcome resolves the saved model for the provider; OpenAdmin 8B only when no model was chosen and the scan sets it. Tests: saved model, chosen provider without a model, nothing chosen, removed saved model, and the store outcome against Chat's model.
+- M2: `2cc605f9`. Continue and the scan error actions are disabled while busy; a finishing guard in `finish`, `preview`, `useHosted`, `switchLocal` and Start.
+- M3: `1d0bc8d3`. Probes carry `notContacted`; the closing line lists only what ran and names refused endpoints as not contacted.
+- M4: SPEC says Escape, Skip or a click.
+
