@@ -48,7 +48,7 @@ export const ORGANIZATION_COPY = {
     `Its run history (${runCount} ${runCount === 1 ? "run" : "runs"}) and queued report deliveries`,
     "Its chats, workspaces and learning records",
     "Its Agent Team missions, assignments and memory",
-    "Its part of multi-tenant chats and jobs that include it",
+    "Multi-tenant chats and jobs that include it, deleted whole, with the results for the other organizations in them",
   ],
   disconnectAuditKept: "Configuration audit entries, including this disconnect, are kept.",
   disconnectNoOrganizationAfter: "No organization will be active afterwards.",

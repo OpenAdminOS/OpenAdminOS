@@ -899,3 +899,9 @@ it("says a missing part is not granted in words, on a 24 px target (design round
   expect(missing.length).toBeGreaterThan(0);
   for (const button of missing) expect(button).toHaveTextContent(/, not granted$/);
 });
+
+it("says multi-tenant jobs are deleted whole, with other organizations' results (design round review 2)", () => {
+  expect(ORGANIZATION_COPY.disconnectDeletes(1)).toContain(
+    "Multi-tenant chats and jobs that include it, deleted whole, with the results for the other organizations in them",
+  );
+});

@@ -66,7 +66,7 @@ Chat and cache refreshes may ask you to sign in again when a session has expired
 
 ## Disconnecting And Revoking
 
-Disconnecting an organization in OpenAdminOS first stops its running agents and cache refresh, then removes its account and tokens from the local cache and deletes its local data: the Graph cache and change history, run history and queued report deliveries, chats, workspaces and learning records, Agent Team data, and its part of multi-tenant chats and jobs. Configuration audit entries are kept. The confirmation asks for an explicit check before anything is deleted.
+Disconnecting an organization in OpenAdminOS first stops everything still working for it (running agents, cache refreshes, report deliveries and its Agent Team) and starts nothing new for it, then removes its account and tokens from the local cache and deletes its local data: the Graph cache and change history, run history and queued report deliveries, chats, workspaces and learning records, and Agent Team data. Multi-tenant chats and jobs that include the organization are deleted whole, including the results for the other organizations in them. If the sign-in cannot be removed, nothing is deleted and the organization stays connected. Configuration audit entries are kept. The confirmation asks for an explicit check before anything is deleted.
 
 Disconnecting does not change anything in the tenant. The app registration and the admin consent stay, and tokens that were already issued stay valid until they expire. How to revoke access depends on how the organization was connected.
 
