@@ -38,7 +38,7 @@ function renderSwitcher(state = createMockAppState()) {
 }
 
 describe("organization switcher", () => {
-  it("lists each organization with the services it runs, sample data and the three actions", async () => {
+  it("lists each organization with the services it runs, a labeled sample organization and no way into sample data", async () => {
     const user = userEvent.setup();
     const base = createMockAppState().tenants[0]!;
     const woodgrove = { ...base, id: "tenant-woodgrove", displayName: "Woodgrove", grantedScopes: scopes("intune", "entra") };
@@ -66,7 +66,8 @@ describe("organization switcher", () => {
     expect(within(pilot).getByText(ORGANIZATION_COPY.sampleLabel)).toBeInTheDocument();
     expect(within(menu).getByRole("menuitemradio", { name: new RegExp(`^${ORGANIZATION_COPY.noOrganization}`) })).toHaveAttribute("aria-checked", "false");
     expect(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.addOrganization })).toBeInTheDocument();
-    expect(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.previewSample })).toBeInTheDocument();
+    // Pilot mode is being removed: the menu offers no way into sample data.
+    expect(within(menu).queryByRole("menuitem", { name: /sample data/i })).not.toBeInTheDocument();
     await user.click(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.manageConnections }));
     expect(screen.getByTestId("location")).toHaveTextContent("/connections");
   });

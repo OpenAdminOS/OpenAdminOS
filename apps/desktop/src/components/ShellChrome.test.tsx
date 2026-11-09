@@ -296,7 +296,7 @@ describe("shell chrome", () => {
     expect(screen.getByRole("radio", { name: "Your own app registration" })).not.toBeChecked();
   });
 
-  it("opens sample data from the organization menu", async () => {
+  it("offers no way into sample data from the organization menu", async () => {
     const user = userEvent.setup();
     const emptyState = createMockAppState({ tenants: [], activeTenantId: undefined });
     const addSampleTenant = vi.fn(async () => pilotState());
@@ -307,8 +307,9 @@ describe("shell chrome", () => {
     });
 
     await user.click(await screen.findByRole("button", { name: "Add an organization" }));
-    await user.click(screen.getByRole("menuitem", { name: "Preview with sample data" }));
-    expect(addSampleTenant).toHaveBeenCalledOnce();
+    expect(screen.getByRole("menuitem", { name: "Add organization" })).toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: /sample data/i })).not.toBeInTheDocument();
+    expect(addSampleTenant).not.toHaveBeenCalled();
   });
 
   it("leaves pilot mode only after a confirm that says what is deleted", async () => {

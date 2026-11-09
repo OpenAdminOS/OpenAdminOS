@@ -19,7 +19,6 @@ export const ORGANIZATION_COPY = {
   none: "No organizations yet.",
   noneDetail: "Chat answers from the docs and public references. Agents that read a service wait.",
   addOrganization: "Add organization",
-  previewSample: "Preview with sample data",
   manageConnections: "Manage connections",
   chipLabel: (name: string) => `Switch organization, ${name}`,
   chipLabelNone: (hasOrganizations: boolean) =>
@@ -34,8 +33,6 @@ export const ORGANIZATION_COPY = {
     titles.length > 0 ? `Services: ${titles.join(", ")}` : "No services connected",
   switchFailed: (detail: string) =>
     `Switching organizations failed.${detail ? ` ${detail}` : ""} Try again from the organization menu.`,
-  sampleFailed: (detail: string) =>
-    `Sample data did not open.${detail ? ` ${detail}` : ""} Try again from the organization menu.`,
   disconnectTitle: (name: string) => `Disconnect Microsoft 365 from ${name}`,
   disconnectBody:
     "This removes the Microsoft sign-in connection and the organization, and permanently deletes its local Graph cache, change history, chats, workspaces, run history, learning records and queued deliveries from this device. Its schedules stay on their agents, unassigned, until you assign them to another organization.",

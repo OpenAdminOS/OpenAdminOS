@@ -24,7 +24,7 @@ What you can do in pilot mode:
 
 Pilot answers and agent reports use prepared text built from the sample data. No AI model is used, so pilot mode works the same on every machine. Agent Team, Changes, Workspaces, Connectors, and schedules are available in production only.
 
-When you connect your tenant, the pilot data is removed and the app switches to production. You can open pilot mode again from the organization menu with **Preview with sample data**.
+When you connect your tenant, the pilot data is removed and the app switches to production.
 
 ## Connecting Your Tenant
 

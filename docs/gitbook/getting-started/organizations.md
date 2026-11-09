@@ -12,7 +12,7 @@ An organization is a company you manage. It holds one Microsoft 365 tenant today
 - **Created by the first connection.** Connecting a Microsoft 365 tenant creates an organization named after the tenant. Rename it in **Connections**, under **Organizations on this device**. Connecting the same tenant again uses the same organization.
 - **One active at a time.** The organization menu in the top bar shows each organization with the services it has connected. Choose one to make it active, or choose **No organization**.
 - **No organization** is a valid state. Chat still answers from the docs and the public references you added. Agents that read a service wait until an organization with that service is active.
-- **Sample data.** **Preview with sample data** in the organization menu opens the sample organization: a fictional company with built-in data and no Microsoft sign-in. It is removed after your first real connection.
+- **Sample data.** A sample organization from pilot mode shows in the organization menu with a Sample data label until you leave pilot mode or connect your first organization. The menu does not open sample data.
 - **Disconnecting** Microsoft 365 removes the organization and deletes its local data from this device. Data in the tenant is not changed.
 
 ## Connections

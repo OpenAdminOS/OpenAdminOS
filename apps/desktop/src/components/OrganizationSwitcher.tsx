@@ -10,7 +10,6 @@ import {
   IconChevronDown,
   IconClose,
   IconConnectors,
-  IconFlask,
   IconPlus,
   IconRefresh,
   IconSearch,
@@ -40,12 +39,12 @@ export const ORGANIZATION_FILTER_FROM = 6;
 
 /**
  * The top-bar organization chip. Each organization shows the services it
- * runs; "No organization" is a valid choice. Sample data is a labeled
- * organization here, opened with Preview with sample data.
+ * runs; "No organization" is a valid choice. A sample organization from
+ * an earlier pilot is labeled here and can be left, never opened.
  */
 export function OrganizationSwitcher() {
   const navigate = useNavigate();
-  const { state, addSampleTenant, setActiveOrganization, disconnectTenant } = useAppState();
+  const { state, setActiveOrganization, disconnectTenant } = useAppState();
   const [query, setQuery] = useState("");
   const filterRef = useRef<HTMLInputElement | null>(null);
   const { openSetup } = useSetupFlow();
@@ -390,33 +389,7 @@ export function OrganizationSwitcher() {
               >
                 <IconClose size={14} /> {PILOT_COPY.leaveAction}
               </button>
-            ) : (
-              <button
-                type="button"
-                role="menuitem"
-                tabIndex={-1}
-                disabled={busy}
-                onClick={() => {
-                  setBusy(true);
-                  void addSampleTenant()
-                    .then(() => {
-                      close(false);
-                      navigate("/chat");
-                    })
-                    .catch((error) =>
-                      toast.error(
-                        ORGANIZATION_COPY.sampleFailed(
-                          error instanceof Error ? userFacingErrorReason(error.message) ?? "" : "",
-                        ),
-                      ),
-                    )
-                    .finally(() => setBusy(false));
-                }}
-                className={MENU_ITEM_CLASS}
-              >
-                <IconFlask size={14} /> {ORGANIZATION_COPY.previewSample}
-              </button>
-            )}
+            ) : null}
             <button
               type="button"
               role="menuitem"
@@ -448,7 +421,7 @@ export function OrganizationSwitcher() {
         <div className="space-y-4 p-6">
           <div className="rounded-[10px] bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
             {pendingDisconnect?.sample
-              ? `${PILOT_COPY.leaveBody} You can open it again with ${ORGANIZATION_COPY.previewSample}.`
+              ? PILOT_COPY.leaveBody
               : ORGANIZATION_COPY.disconnectBody}
           </div>
           {pendingDisconnect?.sample ? null : (

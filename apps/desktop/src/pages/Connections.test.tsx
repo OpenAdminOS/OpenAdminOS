@@ -122,8 +122,9 @@ describe("Connections reach map", () => {
     // The figure keeps its text alternative.
     const figure = within(empty).getByRole("figure", { name: CONNECTIONS_COPY.map.label });
     expect(figure).toHaveAccessibleDescription(/^No organization reads no service into this device\./);
-    // One filled button: Connect Microsoft 365. Sample data is the secondary way in.
-    expect(within(empty).getByRole("button", { name: ORGANIZATION_COPY.previewSample })).toBeInTheDocument();
+    // One way forward: Connect Microsoft 365. Pilot mode is being removed, so no sample data button.
+    expect(within(empty).getAllByRole("button").map((button) => button.textContent)).toEqual([CONNECTIONS_COPY.connectMicrosoft365]);
+    expect(screen.queryByRole("button", { name: /sample data/i })).not.toBeInTheDocument();
     // No services list with Not connected rows, and no empty map.
     expect(screen.queryByRole("region", { name: CONNECTIONS_COPY.servicesHeading })).not.toBeInTheDocument();
     expect(screen.queryByText(SERVICE_COPY.status.missing)).not.toBeInTheDocument();
@@ -135,8 +136,7 @@ describe("Connections reach map", () => {
     expect(await screen.findByRole("dialog")).toBeInTheDocument();
   });
 
-  it("names the hosted destination in amber with no organization and opens sample data", async () => {
-    const user = userEvent.setup();
+  it("names the hosted destination in amber with no organization", async () => {
     const { activeTenantId: _none, ...state } = createMockAppState({
       tenants: [],
       activeProviderId: "openai",
@@ -147,8 +147,7 @@ describe("Connections reach map", () => {
     const prompts = within(leaves).getByText("Codex · location set by your account");
     expect(prompts.className).toContain("--color-warning");
     expect(within(leaves).getByText("www.kqlsearch.com")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: ORGANIZATION_COPY.previewSample }));
-    await waitFor(() => expect(bridge.addSampleTenant).toHaveBeenCalled());
+    expect(bridge.addSampleTenant).not.toHaveBeenCalled();
   });
 });
 

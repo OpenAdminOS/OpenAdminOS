@@ -1138,13 +1138,10 @@ function channelName(channel: string | undefined): string | undefined {
 
 /**
  * Connections with no organization: the figure with the slots it will fill
- * drawn dashed, the two ways forward, then what leaves this device now.
+ * drawn dashed, the way forward, then what leaves this device now.
  */
 function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachModel; onConnect: () => void; onShowReferences: () => void }) {
   const navigate = useNavigate();
-  const { addSampleTenant } = useAppState();
-  const toast = useToast();
-  const [sampleBusy, setSampleBusy] = useState(false);
   const hosted = model.model.kind === "hosted";
   const via = channelName(model.model.channel);
   const prompts = hosted
@@ -1170,23 +1167,6 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
         <p className="mt-1.5 max-w-[52ch] text-base text-[var(--color-text-soft)]">{CONNECTIONS_COPY.emptyBody}</p>
         <div className="mt-5 flex flex-wrap justify-center gap-2">
           <UiButton variant="primary" size="lg" onClick={onConnect}>{CONNECTIONS_COPY.connectMicrosoft365}</UiButton>
-          <UiButton
-            variant="secondary"
-            size="lg"
-            disabled={sampleBusy}
-            onClick={() => {
-              setSampleBusy(true);
-              void addSampleTenant()
-                .catch((caught) =>
-                  toast.error(
-                    ORGANIZATION_COPY.sampleFailed(userFacingErrorReason(caught instanceof Error ? caught.message : String(caught)) ?? ""),
-                  ),
-                )
-                .finally(() => setSampleBusy(false));
-            }}
-          >
-            {ORGANIZATION_COPY.previewSample}
-          </UiButton>
         </div>
       </section>
 

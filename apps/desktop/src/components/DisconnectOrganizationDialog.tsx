@@ -48,14 +48,9 @@ export function DisconnectOrganizationDialog({
       />
       <div className="space-y-4 p-6">
         {sample ? (
-          <>
-            <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
-              {PILOT_COPY.leaveBody}
-            </div>
-            <p className="text-sm leading-relaxed text-[var(--color-text-muted)]">
-              {`You can open it again with ${ORGANIZATION_COPY.previewSample} in the organization menu.`}
-            </p>
-          </>
+          <div className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/25">
+            {PILOT_COPY.leaveBody}
+          </div>
         ) : (
           <>
             <section aria-labelledby="disconnect-deletes" className="text-sm leading-relaxed">
