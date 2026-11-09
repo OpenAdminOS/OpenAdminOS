@@ -1,12 +1,13 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Route, Routes, useLocation } from "react-router";
+import { Route, Routes, useLocation, useNavigate } from "react-router";
 
 import { MICROSOFT_STEP_COPY, MODEL_SCAN_COPY, NOT_CONNECTED_COPY } from "../copy";
 import {
   BASELINE_SCOPES,
   OPENADMINOS_APP_CLIENT_ID,
+  grantedParts,
   partIdsFor,
   requestedScopes,
   type AppState,
@@ -258,6 +259,199 @@ describe("Connect Microsoft 365, the second onboarding step", () => {
 
     await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.notNow }));
     expect(await screen.findByText("App content")).toBeInTheDocument();
+  });
+});
+
+describe("Connect Microsoft 365 opened again with a tenant (PR #175 onboarding round review, 1 and 2)", () => {
+  beforeEach(() => document.documentElement.setAttribute("data-reduced-motion", ""));
+  afterEach(() => document.documentElement.removeAttribute("data-reduced-motion"));
+  const defenderParts = partIdsFor(["defender"]);
+  const defenderScopes = [...new Set(defenderParts.flatMap((id) => requestedScopes([id]).map((scope) => scope.name)))].filter((name) => !BASELINE_SCOPES.includes(name as never));
+  const consentUrl = (message: string) => new URL(message.match(/https:\/\/login\.microsoftonline\.com\S+/)![0]);
+
+  async function reopen(tenant: TenantRecord, overrides: Partial<OpenAdminOSApi> = {}) {
+    const user = userEvent.setup();
+    const bridge = bridgeFor(createMockAppState({ tenants: [tenant], activeTenantId: tenant.id }), overrides);
+    renderGate(bridge);
+    await user.click(await screen.findByRole("button", { name: MICROSOFT_STEP_COPY.reopen }));
+    await screen.findByRole("heading", { level: 1, name: MICROSOFT_STEP_COPY.title });
+    return { user, bridge };
+  }
+
+  it("adds a service to a tenant on the shared app through Add access: same tenant, only the missing scopes, no new sign-in", async () => {
+    const tenant = intuneTenant();
+    const withDefender = { ...tenant, grantedScopes: [...tenant.grantedScopes!, ...defenderScopes.map((name) => `graph:${name}`)] };
+    const addTenantAccess = vi.fn(async () => createMockAppState({ tenants: [withDefender], activeTenantId: tenant.id }));
+    const connectTenant = vi.fn(async () => createMockAppState());
+    const writeClipboardText = vi.fn(async (_text: string) => undefined);
+    const { user } = await reopen(tenant, { addTenantAccess, connectTenant, writeClipboardText });
+
+    await user.click(service("Defender"));
+    // The step lists only what it asks for: no sign-in scopes for a tenant that is signed in.
+    const region = screen.getByRole("region", { name: NOT_CONNECTED_COPY.permissionsSummary(defenderScopes.length) });
+    expect(region).not.toHaveTextContent("offline_access");
+    expect(screen.queryByRole("button", { name: MICROSOFT_STEP_COPY.signIn })).toBeNull();
+    expect(screen.queryByRole("button", { name: MICROSOFT_STEP_COPY.ownRegistration })).toBeNull();
+
+    // Ask an admin: consent for the shared app in this tenant, not /organizations.
+    await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.askAdmin }));
+    await waitFor(() => expect(writeClipboardText).toHaveBeenCalledOnce());
+    const url = consentUrl(writeClipboardText.mock.calls[0]![0]);
+    expect(url.pathname).toBe(`/${tenant.id}/v2.0/adminconsent`);
+    expect(url.searchParams.get("client_id")).toBe(OPENADMINOS_APP_CLIENT_ID);
+    for (const name of defenderScopes) expect(url.searchParams.get("scope")).toContain(`https://graph.microsoft.com/${name}`);
+
+    await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.addAccess }));
+    const dialog = await screen.findByRole("dialog", { name: /Add Defender access/ });
+    await user.click(within(dialog).getByRole("button", { name: "Continue to Microsoft" }));
+    await waitFor(() => expect(addTenantAccess).toHaveBeenCalledWith(tenant.id, defenderParts));
+    expect(connectTenant).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { level: 1, name: MICROSOFT_STEP_COPY.connectedTitle("Fabrikam") })).toBeInTheDocument();
+    expect(within(screen.getByRole("list", { name: MICROSOFT_STEP_COPY.connected })).getByText("Defender")).toBeInTheDocument();
+  });
+
+  it("adds a service to a tenant on its own registration through the extend script and Check again, and asks an admin for that client", async () => {
+    const ownClientId = "11111111-2222-3333-4444-555555555555";
+    const tenant: TenantRecord = { ...intuneTenant(), appRegistration: { kind: "custom", clientId: ownClientId } };
+    const withDefender = { ...tenant, grantedScopes: [...tenant.grantedScopes!, ...defenderScopes.map((name) => `graph:${name}`)] };
+    const refreshTenantGrants = vi.fn(async () => createMockAppState({ tenants: [withDefender], activeTenantId: tenant.id }));
+    const addTenantAccess = vi.fn(async () => createMockAppState());
+    const connectTenant = vi.fn(async () => createMockAppState());
+    const writeClipboardText = vi.fn(async (_text: string) => undefined);
+    const { user } = await reopen(tenant, { refreshTenantGrants, addTenantAccess, connectTenant, writeClipboardText });
+
+    await user.click(service("Defender"));
+    expect(screen.getByText(MICROSOFT_STEP_COPY.addsToOwn("Fabrikam", ownClientId))).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.askAdmin }));
+    await waitFor(() => expect(writeClipboardText).toHaveBeenCalledOnce());
+    const url = consentUrl(writeClipboardText.mock.calls[0]![0]);
+    expect(url.pathname).toBe(`/${tenant.id}/v2.0/adminconsent`);
+    expect(url.searchParams.get("client_id")).toBe(ownClientId);
+
+    await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.addPermissions }));
+    const dialog = await screen.findByRole("dialog", { name: /Add Defender permissions/ });
+    await user.click(within(dialog).getByRole("button", { name: "Copy script" }));
+    await waitFor(() => expect(writeClipboardText).toHaveBeenCalledTimes(2));
+    const script = writeClipboardText.mock.calls[1]![0];
+    expect(script).toContain(ownClientId);
+    for (const name of defenderScopes) expect(script).toContain(name);
+    expect(script).not.toContain("DeviceManagementApps.Read.All");
+
+    await user.click(within(dialog).getByRole("button", { name: "Check again" }));
+    await waitFor(() => expect(refreshTenantGrants).toHaveBeenCalledWith(tenant.id));
+    expect(addTenantAccess).not.toHaveBeenCalled();
+    expect(connectTenant).not.toHaveBeenCalled();
+    expect(await screen.findByRole("heading", { level: 1, name: MICROSOFT_STEP_COPY.connectedTitle("Fabrikam") })).toBeInTheDocument();
+  });
+
+  it("lets a partly connected service be completed after an Intune-only connect", async () => {
+    const tenant = intuneTenant();
+    const addTenantAccess = vi.fn(async () => createMockAppState({ tenants: [tenant], activeTenantId: tenant.id }));
+    const { user } = await reopen(tenant, { addTenantAccess });
+
+    // Intune's users and groups part also grants Entra's, so Entra is partly connected and still selectable.
+    const entra = service("Entra");
+    expect(entra).not.toBeChecked();
+    expect(entra).toBeEnabled();
+    expect(entra.closest("label")).toHaveTextContent(MICROSOFT_STEP_COPY.partlyConnected);
+    expect(document.querySelector(".ms-node[data-service='entra']")).toHaveAttribute("data-state", "partial");
+
+    await user.click(entra);
+    // Entra users and groups and Entra devices are already granted through Intune's scopes.
+    const granted = new Set(grantedParts(tenant).map((part) => part.id));
+    const missing = partIdsFor(["entra"]).filter((id) => !granted.has(id));
+    expect(missing).not.toContain("entra.people");
+    const region = screen.getByRole("region", { name: /read-only Microsoft Graph permission/ });
+    expect(region).toHaveTextContent("Policy.Read.All");
+    // Already granted through Intune: not asked again.
+    expect(region).not.toHaveTextContent("GroupMember.Read.All");
+    await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.addAccess }));
+    const dialog = await screen.findByRole("dialog", { name: /Add Entra access/ });
+    await user.click(within(dialog).getByRole("button", { name: "Continue to Microsoft" }));
+    await waitFor(() => expect(addTenantAccess).toHaveBeenCalledWith(tenant.id, missing));
+  });
+});
+
+describe("Connect Microsoft 365 after a provider setup detour (PR #175 onboarding round review, 4)", () => {
+  beforeEach(() => document.documentElement.setAttribute("data-reduced-motion", ""));
+  afterEach(() => document.documentElement.removeAttribute("data-reduced-motion"));
+  const ollamaNoModel: ModelScanResult = {
+    probes: [{ providerId: "ollama", name: "Ollama", where: "local", target: "localhost:11434", state: "found", summary: "Running, no model loaded", facts: [], ready: false, models: [] }],
+    outcome: { kind: "nothing" },
+    startedAt: "2026-11-09T09:00:00.000Z",
+    finishedAt: "2026-11-09T09:00:00.100Z",
+  };
+  function GoTo({ to }: { to: string }) {
+    const navigate = useNavigate();
+    return <button type="button" onClick={() => navigate(to)}>Go to {to}</button>;
+  }
+  function renderAt(bridge: OpenAdminOSApi, route: string) {
+    return renderWithAppState(
+      <ModelScanGate>
+        <Routes>
+          <Route path="*" element={<div>App content<GoTo to="/chat" /><MicrosoftStepButton /><Where /></div>} />
+        </Routes>
+      </ModelScanGate>,
+      { route, bridge },
+    );
+  }
+  const ready = (pending: boolean) =>
+    createMockAppState({
+      tenants: [],
+      activeTenantId: undefined,
+      activeProviderId: "ollama",
+      providers: createMockAppState().providers.map((provider) =>
+        provider.id === "ollama" ? { ...provider, status: "connected" as const, models: ["openadminos/openadmin-8b:latest"] } : provider,
+      ),
+      ...(pending ? { firstRunMicrosoftStepPending: true } : {}),
+    });
+
+  it("keeps the step for later when Get OpenAdmin 8B leaves the scan for Settings", async () => {
+    const user = userEvent.setup();
+    const bridge = bridgeFor(fresh(), { startModelScan: vi.fn(async () => ollamaNoModel) });
+    renderAt(bridge, "/chat");
+    await user.click(await screen.findByRole("button", { name: "Get OpenAdmin 8B" }));
+    await waitFor(() => expect(bridge.completeFirstRunScan).toHaveBeenCalledWith({ microsoftStepPending: true }));
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    expect(screen.getByTestId("where")).toHaveTextContent("/settings/providers");
+    expect(screen.queryByRole("heading", { name: MICROSOFT_STEP_COPY.title })).toBeNull();
+  });
+
+  it("shows the step once a model is ready and the admin leaves Settings, and clears it when left", async () => {
+    const user = userEvent.setup();
+    const completeFirstRunMicrosoftStep = vi.fn(async () => ready(false));
+    const bridge = bridgeFor(ready(true), { completeFirstRunMicrosoftStep });
+    renderAt(bridge, "/settings/providers");
+    // Not inside Settings, where the admin is setting up the model.
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: MICROSOFT_STEP_COPY.title })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Go to /chat" }));
+    expect(await screen.findByRole("heading", { level: 1, name: MICROSOFT_STEP_COPY.title })).toBeInTheDocument();
+    const steps = screen.getByRole("list", { name: "Setup steps" });
+    expect(within(steps).getByText("Microsoft 365").closest("li")).toHaveAttribute("aria-current", "step");
+    await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.notNow }));
+    await waitFor(() => expect(completeFirstRunMicrosoftStep).toHaveBeenCalledOnce());
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    // Still reachable afterwards from Settings, Tenants (Connections after step 4).
+    expect(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.reopen })).toBeInTheDocument();
+  });
+
+  it("shows the step on a later launch when a model is now ready", async () => {
+    renderAt(bridgeFor(ready(true)), "/chat");
+    expect(await screen.findByRole("heading", { level: 1, name: MICROSOFT_STEP_COPY.title })).toBeInTheDocument();
+  });
+
+  it("waits while no model is ready", async () => {
+    const pendingNoModel = createMockAppState({
+      tenants: [],
+      activeTenantId: undefined,
+      activeProviderId: "ollama",
+      providers: createMockAppState().providers.map((provider) => (provider.id === "ollama" ? { ...provider, status: "connected" as const, models: [] } : provider)),
+      firstRunMicrosoftStepPending: true,
+    });
+    renderAt(bridgeFor(pendingNoModel), "/chat");
+    expect(await screen.findByText("App content")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: MICROSOFT_STEP_COPY.title })).toBeNull();
   });
 });
 

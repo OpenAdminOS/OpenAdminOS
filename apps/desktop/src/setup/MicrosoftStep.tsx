@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Button } from "../components/Button";
+import { ServiceAccessDialog, usesOwnRegistration } from "../components/ServiceAccess";
 import { ServiceLogo, ServiceMark } from "../components/ServiceMark";
 import { useToast } from "../components/Toast";
 import { adminApprovalMessage } from "../components/chat/ChatFirstRun";
@@ -12,8 +13,10 @@ import {
   BASELINE_SCOPES,
   OPENADMINOS_APP_CLIENT_ID,
   formatServiceList,
+  grantedParts,
   partIdsFor,
   servicePartById,
+  serviceStatus,
   type ServiceDefinition,
   type ServiceId,
   type TenantRecord,
@@ -30,6 +33,10 @@ import { connectedServices, type ConnectedService } from "./connected-starters";
  * until they are connected. Nothing is preselected; the admin picks the
  * services they manage, sees the read-only permissions those need, and
  * signs in through the existing connect flow, or leaves it for later.
+ * Opened again with a tenant connected, it adds what is missing to that
+ * tenant with its own account and app registration (Add access, or the
+ * extend script and Check again for an own registration), never a new
+ * sign-in.
  */
 export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; onClose: (to: string | null) => void }) {
   const api = window.openAdminOS;
@@ -38,23 +45,44 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
   const toast = useToast();
   const reduced = useMemo(prefersReducedMotion, []);
   const activeTenant = state.activeTenantId ? state.tenants.find((tenant) => tenant.id === state.activeTenantId) : undefined;
-  // Opened again with a tenant already connected: its services show as connected and stay so.
-  const existing = useMemo(() => connectedServices(activeTenant), [activeTenant]);
+  // A real tenant: the step adds to it with its own identity. The sample tenant is never one.
+  const tenant = activeTenant && activeTenant.kind !== "sample" ? activeTenant : undefined;
   const [picked, setPicked] = useState<ReadonlySet<ServiceId>>(() => new Set());
   const [connected, setConnected] = useState<TenantRecord | null>(null);
+  const [adding, setAdding] = useState<readonly string[] | null>(null);
+  // What the last Add access or Check again asked for; kept after its dialog closes.
+  const [requested, setRequested] = useState<readonly string[]>([]);
   const [copyFailed, setCopyFailed] = useState<string | null>(null);
   const [announcement, setAnnouncement] = useState("");
   const headingRef = useRef<HTMLHeadingElement | null>(null);
 
   // The connected tenant as the app state now has it, so a later refresh is shown too.
-  const connectedTenant = connected ? state.tenants.find((tenant) => tenant.id === connected.id) ?? connected : undefined;
+  const connectedTenant = connected ? state.tenants.find((entry) => entry.id === connected.id) ?? connected : undefined;
   const result = useMemo(() => connectedServices(connectedTenant), [connectedTenant]);
-  const shownConnected = connectedTenant ? result : existing;
-  const connectedIds = new Set(shownConnected.map((entry) => entry.service.id));
+  // Only a fully connected service is done; a partly connected one can be completed.
+  const statusOf = (id: ServiceId) => {
+    const source = connectedTenant ?? tenant;
+    return source && source.grantedScopes !== undefined ? serviceStatus(source, id) : "missing";
+  };
+  const connectedIds = new Set(AVAILABLE_SERVICES.filter((service) => statusOf(service.id) === "connected").map((service) => service.id));
+  const partialIds = new Set(AVAILABLE_SERVICES.filter((service) => statusOf(service.id) === "partial").map((service) => service.id));
   const pickedIds = AVAILABLE_SERVICES.filter((service) => picked.has(service.id) && !connectedIds.has(service.id)).map((service) => service.id);
-  const partIds = partIdsFor(pickedIds);
-  // Sign-in scopes are requested only when no tenant is connected yet.
-  const needsSignIn = !activeTenant || activeTenant.kind === "sample";
+  // With a tenant, only the parts it has not granted yet.
+  const grantedIds = useMemo(() => new Set(tenant ? grantedParts(tenant).map((part) => part.id) : []), [tenant]);
+  const partIds = partIdsFor(pickedIds).filter((id) => !grantedIds.has(id));
+  const ownRegistration = tenant ? usesOwnRegistration(tenant) : false;
+
+  // Add access or Check again granted what was asked: the step shows what is connected now.
+  useEffect(() => {
+    if (requested.length === 0 || !tenant || connected) return;
+    const now = new Set(grantedParts(tenant).map((part) => part.id));
+    if (requested.some((id) => now.has(id))) {
+      setRequested([]);
+      onConnected(tenant);
+    }
+    // `onConnected` only sets state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [requested, tenant, connected]);
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -71,14 +99,17 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
     });
   };
 
-  const onConnected = (tenant: TenantRecord) => {
-    setConnected(tenant);
-    const services = connectedServices(tenant).map((entry) => entry.service.title);
-    setAnnouncement(MICROSOFT_STEP_COPY.announceConnected(tenant.displayName, formatServiceList(services) || tenant.displayName));
-  };
+  function onConnected(next: TenantRecord) {
+    setConnected(next);
+    const services = connectedServices(next).map((entry) => entry.service.title);
+    setAnnouncement(MICROSOFT_STEP_COPY.announceConnected(next.displayName, formatServiceList(services) || next.displayName));
+  }
 
   const askAdmin = async () => {
-    const message = adminApprovalMessage({ reason: "no-tenant", partIds }, undefined);
+    // For a connected tenant, consent for its own app registration in that tenant, never the shared app.
+    const message = tenant
+      ? adminApprovalMessage({ reason: "service-missing", partIds, tenantId: tenant.id }, tenant)
+      : adminApprovalMessage({ reason: "no-tenant", partIds }, undefined);
     setCopyFailed(null);
     try {
       await copyTextToClipboard(message);
@@ -112,7 +143,7 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
       </header>
       <main id="main-content" aria-labelledby="microsoft-step-heading" className="min-h-0 flex-1 overflow-y-auto">
         <div className="scan-grid mx-auto grid min-h-full w-full max-w-[1180px] grid-cols-1 items-center gap-x-8 gap-y-6 px-6 py-6 min-[860px]:grid-cols-[minmax(0,7fr)_minmax(0,5fr)] min-[860px]:px-12 min-[1000px]:gap-x-12">
-          <MicrosoftStage picked={new Set(pickedIds)} connected={connectedIds} justConnected={Boolean(connected)} onToggle={toggle} />
+          <MicrosoftStage picked={new Set(pickedIds)} connected={connectedIds} partial={partialIds} justConnected={Boolean(connected)} onToggle={toggle} />
           <section className="w-full min-w-0 max-w-[440px] justify-self-center min-[860px]:justify-self-start" aria-labelledby="microsoft-step-heading">
             {connectedTenant ? (
               <ConnectedResult tenant={connectedTenant} services={result} headingRef={headingRef} onOpenChat={() => onClose("/chat")} />
@@ -131,25 +162,49 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
                         service={service}
                         checked={picked.has(service.id) || connectedIds.has(service.id)}
                         connected={connectedIds.has(service.id)}
+                        partial={partialIds.has(service.id)}
                         onToggle={() => toggle(service.id)}
                       />
                     ))}
                   </div>
                 </fieldset>
-                <Permissions serviceIds={pickedIds} withSignIn={needsSignIn} />
-                <div className="mt-5">
-                  <Button variant="primary" size="lg" disabled={partIds.length === 0} onClick={() => openSetupForParts(partIds, { onConnected })}>
-                    {MICROSOFT_STEP_COPY.signIn}
-                  </Button>
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <Button variant="secondary" size="md" disabled={partIds.length === 0} onClick={() => openOwnRegistration(partIds, { onConnected })}>
-                    {MICROSOFT_STEP_COPY.ownRegistration}
-                  </Button>
-                  <Button variant="ghost" size="md" disabled={partIds.length === 0} onClick={() => void askAdmin()}>
-                    {MICROSOFT_STEP_COPY.askAdmin}
-                  </Button>
-                </div>
+                <Permissions partIds={partIds} withSignIn={!tenant} />
+                {tenant ? (
+                  <>
+                    <p className="mt-3 text-xs leading-5 text-[var(--color-text-muted)]">
+                      {ownRegistration && tenant.appRegistration
+                        ? MICROSOFT_STEP_COPY.addsToOwn(tenant.displayName, tenant.appRegistration.clientId)
+                        : MICROSOFT_STEP_COPY.addsToShared(tenant.displayName)}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button variant="primary" size="lg" disabled={partIds.length === 0} onClick={() => {
+                          setRequested(partIds);
+                          setAdding(partIds);
+                        }}>
+                        {ownRegistration ? MICROSOFT_STEP_COPY.addPermissions : MICROSOFT_STEP_COPY.addAccess}
+                      </Button>
+                      <Button variant="ghost" size="lg" disabled={partIds.length === 0} onClick={() => void askAdmin()}>
+                        {MICROSOFT_STEP_COPY.askAdmin}
+                      </Button>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="mt-5">
+                      <Button variant="primary" size="lg" disabled={partIds.length === 0} onClick={() => openSetupForParts(partIds, { onConnected })}>
+                        {MICROSOFT_STEP_COPY.signIn}
+                      </Button>
+                    </div>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <Button variant="secondary" size="md" disabled={partIds.length === 0} onClick={() => openOwnRegistration(partIds, { onConnected })}>
+                        {MICROSOFT_STEP_COPY.ownRegistration}
+                      </Button>
+                      <Button variant="ghost" size="md" disabled={partIds.length === 0} onClick={() => void askAdmin()}>
+                        {MICROSOFT_STEP_COPY.askAdmin}
+                      </Button>
+                    </div>
+                  </>
+                )}
                 {copyFailed ? (
                   <div role="alert" className="mt-3 text-sm text-[var(--color-warning)]">
                     <p>{NOT_CONNECTED_COPY.askAdminFailed}</p>
@@ -173,6 +228,16 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
           </section>
         </div>
       </main>
+      {tenant ? (
+        <ServiceAccessDialog
+          tenant={tenant}
+          serviceId={null}
+          serviceIds={pickedIds}
+          initialPartIds={adding ?? []}
+          open={adding !== null}
+          onClose={() => setAdding(null)}
+        />
+      ) : null}
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {announcement}
       </div>
@@ -181,7 +246,7 @@ export function MicrosoftStepScreen({ firstRun, onClose }: { firstRun: boolean; 
 }
 
 /** One service as a checkbox row: its mark, name and what it covers. */
-function ServiceRow({ service, checked, connected, onToggle }: { service: ServiceDefinition; checked: boolean; connected: boolean; onToggle: () => void }) {
+function ServiceRow({ service, checked, connected, partial, onToggle }: { service: ServiceDefinition; checked: boolean; connected: boolean; partial: boolean; onToggle: () => void }) {
   const id = `microsoft-step-${service.id}`;
   return (
     <label
@@ -200,7 +265,7 @@ function ServiceRow({ service, checked, connected, onToggle }: { service: Servic
         <span className="block text-base font-medium leading-5 text-[var(--color-text)]">{service.title}</span>
         <span className="mt-0.5 block text-sm leading-5 text-[var(--color-text-soft)]">{service.summary}</span>
       </span>
-      <span className="pt-px text-xs leading-5 text-[var(--color-text-muted)]">{connected ? MICROSOFT_STEP_COPY.connected : null}</span>
+      <span className="pt-px text-xs leading-5 text-[var(--color-text-muted)]">{connected ? MICROSOFT_STEP_COPY.connected : partial ? MICROSOFT_STEP_COPY.partlyConnected : null}</span>
     </label>
   );
 }
@@ -210,8 +275,8 @@ function ServiceRow({ service, checked, connected, onToggle }: { service: Servic
  * with sign-in last. A permission two services share is listed once, under
  * the first, so the count and the list agree.
  */
-function Permissions({ serviceIds, withSignIn }: { serviceIds: readonly ServiceId[]; withSignIn: boolean }) {
-  if (serviceIds.length === 0) {
+function Permissions({ partIds, withSignIn }: { partIds: readonly string[]; withSignIn: boolean }) {
+  if (partIds.length === 0) {
     return <p className="mt-3 text-sm text-[var(--color-text-muted)]">{MICROSOFT_STEP_COPY.noneYet}</p>;
   }
   const listed = new Set<string>();
@@ -221,8 +286,12 @@ function Permissions({ serviceIds, withSignIn }: { serviceIds: readonly ServiceI
     for (const name of scopes) listed.add(name);
     if (scopes.length > 0) groups.push({ label, scopes });
   };
-  for (const service of AVAILABLE_SERVICES.filter((entry) => serviceIds.includes(entry.id))) {
-    add(service.title, partIdsFor([service.id]).flatMap((id) => servicePartById(id)?.scopes.map((scope) => scope.name) ?? []));
+  for (const service of AVAILABLE_SERVICES) {
+    const parts = partIds.flatMap((id) => {
+      const part = servicePartById(id);
+      return part && part.service === service.id ? [part] : [];
+    });
+    add(service.title, parts.flatMap((part) => part.scopes.map((scope) => scope.name)));
   }
   if (withSignIn) add(NOT_CONNECTED_COPY.signInPart, BASELINE_SCOPES);
   const count = listed.size;
@@ -305,11 +374,14 @@ function ConnectedResult({
 function MicrosoftStage({
   picked,
   connected,
+  partial,
   justConnected,
   onToggle,
 }: {
   picked: ReadonlySet<ServiceId>;
   connected: ReadonlySet<ServiceId>;
+  /** Partly connected: dashed like a service that is not connected, and it can be completed. */
+  partial: ReadonlySet<ServiceId>;
   justConnected: boolean;
   onToggle: (id: ServiceId) => void;
 }) {
@@ -343,7 +415,7 @@ function MicrosoftStage({
       </div>
       {AVAILABLE_SERVICES.map((service, index) => {
         const angle = angleOf(index, count);
-        const state = connected.has(service.id) ? "connected" : picked.has(service.id) ? "picked" : "off";
+        const state = connected.has(service.id) ? "connected" : picked.has(service.id) ? "picked" : partial.has(service.id) ? "partial" : "off";
         return (
           <div
             key={service.id}
@@ -359,7 +431,13 @@ function MicrosoftStage({
             <span className="scan-node-plate mt-1.5 flex flex-col items-center rounded-[6px] px-1.5">
               <span className="ms-node-name text-sm font-medium leading-[18px]">{service.title}</span>
               <span className="ms-node-status text-xs leading-4">
-                {state === "connected" ? MICROSOFT_STEP_COPY.nodeConnected : state === "picked" ? MICROSOFT_STEP_COPY.nodePicked : MICROSOFT_STEP_COPY.nodeOff}
+                {state === "connected"
+                  ? MICROSOFT_STEP_COPY.nodeConnected
+                  : state === "picked"
+                    ? MICROSOFT_STEP_COPY.nodePicked
+                    : state === "partial"
+                      ? MICROSOFT_STEP_COPY.partlyConnected
+                      : MICROSOFT_STEP_COPY.nodeOff}
               </span>
             </span>
           </div>

@@ -231,6 +231,12 @@ export const MICROSOFT_STEP_COPY = {
   nodePicked: "Selected",
   nodeConnected: "Connected",
   connected: "Connected",
+  partlyConnected: "Partly connected",
+  addAccess: "Add access",
+  addPermissions: "Add permissions",
+  addsToShared: (tenant: string) => `Adds to ${tenant} with the OpenAdminOS app and the account it is connected with. Microsoft asks only for the permissions listed.`,
+  addsToOwn: (tenant: string, clientId: string) =>
+    `Adds to ${tenant} with your app registration ${clientId}: add the permissions with the script, then check again.`,
   partial: (title: string) => `${title}, partly`,
   connectedTitle: (organization: string) => `${organization} is connected`,
   connectedBody: "Chat answers from these services with the read-only permissions you approved. Writes always ask you first.",

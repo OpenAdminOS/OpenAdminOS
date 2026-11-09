@@ -9,6 +9,7 @@ import { copyTextToClipboard } from "../shared/clipboard";
 import {
   SERVICE_PARTS,
   agentServiceIds,
+  formatServiceList,
   grantedParts,
   grantedScopeSet,
   missingServicesForAgent,
@@ -227,24 +228,28 @@ export function ServiceStatusBadge({ status }: { status: ServiceConnectionStatus
 export function ServiceAccessDialog({
   tenant,
   serviceId,
+  serviceIds,
   initialPartIds,
   open,
   onClose,
 }: {
   tenant: TenantRecord;
   serviceId: ServiceId | null;
-  /** Parts to start with. Defaults to every missing part of the service. */
+  /** Several services at once, such as the Connect Microsoft 365 step; takes the place of `serviceId`. */
+  serviceIds?: readonly ServiceId[];
+  /** Parts to start with. Defaults to every missing part of the services. */
   initialPartIds?: readonly string[];
   open: boolean;
   onClose: () => void;
 }) {
+  const ids = serviceIds && serviceIds.length > 0 ? [...serviceIds] : serviceId ? [serviceId] : [];
   return (
-    <Modal open={open && serviceId !== null} onClose={onClose} size="md">
-      {serviceId ? (
+    <Modal open={open && ids.length > 0} onClose={onClose} size="md">
+      {ids.length > 0 ? (
         <ServiceAccessBody
-          key={`${serviceId}:${(initialPartIds ?? []).join(",")}`}
+          key={`${ids.join("+")}:${(initialPartIds ?? []).join(",")}`}
           tenant={tenant}
-          serviceId={serviceId}
+          serviceIds={ids}
           {...(initialPartIds ? { initialPartIds } : {})}
           onClose={onClose}
         />
@@ -255,20 +260,21 @@ export function ServiceAccessDialog({
 
 function ServiceAccessBody({
   tenant,
-  serviceId,
+  serviceIds,
   initialPartIds,
   onClose,
 }: {
   tenant: TenantRecord;
-  serviceId: ServiceId;
+  serviceIds: readonly ServiceId[];
   initialPartIds?: readonly string[];
   onClose: () => void;
 }) {
   const { addTenantAccess, refreshTenantGrants } = useAppState();
   const tenantCheck = useTenantCheck(tenant.id);
-  const service = serviceById(serviceId);
+  const services = serviceIds.map(serviceById);
+  const titles = formatServiceList(services.map((entry) => entry.title));
   const ownRegistration = usesOwnRegistration(tenant);
-  const missing = missingServiceParts(tenant, serviceId);
+  const missing = serviceIds.flatMap((id) => missingServiceParts(tenant, id));
   const [selected, setSelected] = useState<Set<string>>(
     () =>
       new Set(
@@ -332,7 +338,7 @@ function ServiceAccessBody({
   return (
     <>
       <ModalHeader
-        title={ownRegistration ? SERVICE_COPY.addPermissionsTitle(service.title) : SERVICE_COPY.addAccessTitle(service.title)}
+        title={ownRegistration ? SERVICE_COPY.addPermissionsTitle(titles) : SERVICE_COPY.addAccessTitle(titles)}
         subtitle={
           ownRegistration && tenant.appRegistration
             ? SERVICE_COPY.ownRegistrationSubtitle(tenant.displayName, tenant.appRegistration.clientId)
@@ -341,10 +347,10 @@ function ServiceAccessBody({
         onClose={close}
       />
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-6">
-        <p className="text-sm leading-6 text-[var(--color-text-soft)]">{service.summary}</p>
+        {services.length === 1 ? <p className="text-sm leading-6 text-[var(--color-text-soft)]">{services[0]!.summary}</p> : null}
         {missing.length === 0 ? (
           <p role="status" className="rounded-lg bg-[var(--color-success-soft)] px-3 py-2 text-sm text-[var(--color-success)]">
-            {SERVICE_COPY.alreadyConnected(service.title, tenant.displayName)}
+            {SERVICE_COPY.alreadyConnected(titles, tenant.displayName)}
           </p>
         ) : (
           <fieldset className="space-y-2">
