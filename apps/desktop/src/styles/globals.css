@@ -1072,3 +1072,17 @@ button.conn-part:disabled { cursor: default; opacity: 0.5; }
 @media (hover: none) {
   .calm-row-actions { opacity: 1; transform: none; }
 }
+
+/* Run review facts: a hairline definition list with a 120 px term column. */
+.preflight-facts { margin: 0; border-top: 1px solid var(--color-border-soft); }
+.preflight-fact {
+  display: grid;
+  grid-template-columns: 120px minmax(0, 1fr);
+  gap: 12px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-border-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.preflight-fact dt { color: var(--color-text-muted); }
+.preflight-fact dd { margin: 0; min-width: 0; color: var(--color-text); }

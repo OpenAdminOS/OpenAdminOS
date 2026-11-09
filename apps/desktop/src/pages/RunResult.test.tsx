@@ -587,7 +587,7 @@ it("opens the preflight for Run again on a tenant-bound run, keeps its provider 
   await user.click(await screen.findByRole("button", { name: "Run again" }));
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
   expect(within(dialog).getByText("Contoso IT")).toBeInTheDocument();
-  expect(within(dialog).getByText(/Codex.* · hosted/)).toBeInTheDocument();
+  expect(within(dialog).getByText(/go to OpenAI API · US, through Codex/)).toBeInTheDocument();
   expect(within(dialog).getByText("gpt-5")).toBeInTheDocument();
   expect(startRun).not.toHaveBeenCalled();
   await user.click(within(dialog).getByRole("button", { name: "Start run" }));
@@ -606,7 +606,7 @@ it("opens the preflight for Run again on a run with no organization and starts i
   renderWithPreflight(run.id, bridge);
   await user.click(await screen.findByRole("button", { name: "Run again" }));
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-  expect(within(dialog).getByRole("status")).toHaveTextContent("No organization needed.");
+  expect(within(dialog).getByText("None needed")).toBeInTheDocument();
   expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
   await user.click(within(dialog).getByRole("button", { name: "Start run" }));
   await waitFor(() => expect(bridge.startRun).toHaveBeenCalledOnce());

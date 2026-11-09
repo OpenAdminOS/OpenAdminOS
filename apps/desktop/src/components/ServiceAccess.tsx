@@ -1,4 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { ServiceMark } from "./ServiceMark";
 import { useNavigate } from "react-router";
 import { Button } from "./Button";
 import { Modal, ModalHeader } from "./Modal";
@@ -546,23 +547,28 @@ export function ServiceChips({ services }: { services: readonly ServiceId[] }) {
 export function ServiceNotConnectedNotice({
   tenant,
   serviceIds,
+  primary = false,
 }: {
   tenant: TenantRecord;
   serviceIds: readonly ServiceId[];
+  /** In the run review the fix is the one filled button. */
+  primary?: boolean;
 }) {
   const [adding, setAdding] = useState<ServiceId | null>(null);
   if (serviceIds.length === 0) return null;
   const titles = serviceIds.map((id) => serviceById(id).title);
   const ownRegistration = usesOwnRegistration(tenant);
   return (
-    <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 ring-1 ring-[var(--color-warning)]/25">
-      <div className="min-w-0 text-sm leading-relaxed text-[var(--color-text)]">
+    // Missing access is neutral and dashed, never amber: amber means data leaves this device.
+    <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 ring-1 ring-inset ring-[var(--color-border-soft)]">
+      <ServiceMark serviceId={serviceIds[0]!} size="lg" off />
+      <div className="min-w-0 flex-1 text-sm leading-relaxed text-[var(--color-text)]">
         <span className="font-medium">{SERVICE_COPY.needsNotConnected(titles)}</span>{" "}
         <span className="text-[var(--color-text-soft)]">{SERVICE_COPY.needsNotConnectedBody(tenant.displayName)}</span>
       </div>
       <div className="flex shrink-0 flex-wrap gap-2">
         {serviceIds.map((id) => (
-          <Button key={id} size="sm" variant="secondary" onClick={() => setAdding(id)}>
+          <Button key={id} size="sm" variant={primary ? "primary" : "secondary"} onClick={() => setAdding(id)}>
             {ownRegistration
               ? SERVICE_COPY.addPermissionsAction(serviceById(id).title)
               : SERVICE_COPY.addAction(serviceById(id).title)}

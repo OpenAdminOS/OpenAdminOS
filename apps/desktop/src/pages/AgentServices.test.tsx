@@ -296,10 +296,19 @@ describe("agents with service needs", () => {
 
     await user.click(await screen.findByRole("button", { name: "Connect Intune" }));
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("Inactive devices needs Intune.");
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("No organization is active.");
-    expect(within(dialog).getByText("No organization")).toBeInTheDocument();
-    expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+    // One blocker block whose fix is the only filled button (design round).
+    const blocker = within(dialog).getByRole("alert");
+    expect(blocker).toHaveTextContent("Needs Intune in an active organization");
+    expect(blocker).toHaveTextContent("No organization is active, so this agent has nothing to read.");
+    expect(blocker.querySelector(".svc-mark")).toHaveAttribute("data-off", "true");
+    expect(within(dialog).getByText("None active")).toBeInTheDocument();
+    const start = within(dialog).getByRole("button", { name: "Start run" });
+    expect(start).toBeDisabled();
+    expect(start).toHaveAttribute("data-variant", "secondary");
+    expect(dialog.querySelectorAll('[data-variant="primary"]')).toHaveLength(1);
+    expect(within(dialog).getByText("Connect Intune to start this run.")).toBeInTheDocument();
+    // Facts are a plain definition list.
+    expect(within(dialog).getByText("Reads").tagName).toBe("DT");
     // Connect opens setup instead of a run.
     await user.click(within(dialog).getByRole("button", { name: "Connect Intune" }));
     expect(await screen.findByRole("radio", { name: "OpenAdminOS app" })).toBeInTheDocument();
@@ -312,7 +321,7 @@ describe("agents with service needs", () => {
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/whoami/confirm", bridge });
 
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(within(dialog).getByRole("alert")).toHaveTextContent("Who am I needs the Microsoft 365 sign-in.");
+    expect(within(dialog).getByRole("alert")).toHaveTextContent("Needs Microsoft 365 in an active organization");
     expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
   });
 
@@ -323,8 +332,9 @@ describe("agents with service needs", () => {
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
 
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(within(dialog).getByRole("status")).toHaveTextContent("No organization needed.");
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument();
     expect(within(dialog).getByText("None needed")).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Start run" })).toHaveAttribute("data-variant", "primary");
     await user.click(within(dialog).getByRole("button", { name: "Start run" }));
     await waitFor(() => expect(bridge.startRun).toHaveBeenCalledWith("draft", expect.not.objectContaining({ tenantId: expect.anything() })));
   });
@@ -362,7 +372,7 @@ describe("preflight without an organization (review round 1)", () => {
     const state = { ...noOrganizationState([draft]), activeProviderId: "openai" as const };
     renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge: makeMockBridge({}, state) });
     const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-    expect(dialog).toHaveTextContent("Prompts and agent context are sent through the Codex CLI to OpenAI and leave this device. No organization is active, so no tenant data is included.");
+    expect(dialog).toHaveTextContent("Prompts and agent context go to OpenAI API · US, through Codex. No organization is active, so no tenant data is included.");
     expect(dialog).not.toHaveTextContent("Tenant prompts");
   });
 
@@ -373,7 +383,7 @@ describe("preflight without an organization (review round 1)", () => {
       route: "/agents/devices/confirm",
       bridge: makeMockBridge({}, createMockAppState({ activeProviderId: "openai", installedAgents: [agent] })),
     });
-    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Tenant prompts and agent context are sent through the Codex CLI to OpenAI and leave this device.");
+    expect(await screen.findByRole("dialog", { name: /Review run/ })).toHaveTextContent("Prompts, tenant data and agent context go to OpenAI API · US, through Codex.");
   });
 });
 
@@ -390,7 +400,7 @@ it("names the Azure OpenAI API, not a local CLI, in the run review", async () =>
     })),
   });
   const dialog = await screen.findByRole("dialog", { name: /Review run/ });
-  expect(dialog).toHaveTextContent("sent through the Azure OpenAI API to your deployment");
+  expect(dialog).toHaveTextContent("go to Azure OpenAI · your resource's region");
   expect(dialog).not.toHaveTextContent("local CLI");
 });
 
