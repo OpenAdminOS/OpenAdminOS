@@ -1655,3 +1655,22 @@ Reviewed head 8519540; round 1 fixes confirmed. Each fix is its own commit with 
 3. [x] The strip parity test compared with hard-coded values. The strip's boundary is now the pure `deriveDataBoundary`, used by the strip and by the reach model, and the test feeds the same states to both. (7e35952)
 4. [x] The menu bar waiting count had no test. Run due is now built in `companion-schedules.ts`, with tests for waiting schedules of another organization, unassigned ones, and no organization. (a5fd0f4)
 5. [x] Run again for a run whose organization is not active hit the host refusal as a raw error. A dialog names the run's organization and offers Switch to it, and for ordinary reruns Run in the active organization through the run review; a removed organization is named as removed. Agent Team reviews keep their own route. (4c12788)
+
+### Muse Wonder Full round 2 (reviewed 8519540)
+
+Already fixed by the round 2 commits above, confirmed: the Agent Team persona schedule blocker (662310b, integration tests through `OfficeService.tick()` and the real `RunService`), the shared strip derivation (7e35952, `deriveDataBoundary`), and the Assign selection (9f8aba2).
+
+1. [x] An organization switch during a scheduler tick consumed the due slot. Organization refusals throw `OrganizationBoundaryError`; the scheduler counts them as waiting, records no failure and keeps `lastScheduledRunAt`. The test switches organization mid-tick through the real start. (586612ef)
+2. [x] Hosted reach copy said tenant data leaves with no organization. The heading becomes "Prompts and agent context" and the text alternative says no tenant data is included. (4c269144)
+3. [x] The no-organization preflight could promise delivery to a connector that is not set up. `manualRunReportDestinations` takes the connector list; the review lists only set-up connectors and names the rest as not sending. (fe580288)
+4. [x] The second tenant check after a Run for real rewrite now also covers installed-agent scheduled starts, and a pilot Run for real is refused unless its dry run was on the pilot tenant. (6da32312)
+5. [x] A losing duplicate record's vendor connections move to the winning organization and survive the next write. (ecf1f4be)
+6. [x] The preflight names the organization of the run's tenant; when that organization is not active it says so and keeps Start disabled. (5af05ee8)
+7. [x] The reach map shows report destinations as being checked until the connector list resolves, and as not checkable when it fails, instead of saying nowhere. (7fea7d26)
+8. [x] Arrow keys from outside the switcher list go to the first or last item, and a running check's Cancel is a menu item. (b0ed8019)
+9. [x] Menu bar Run due counts only due schedules of other organizations as waiting. (28f3850d)
+10. [x] Workspace run pickers list only the workspace tenant's runs, and the host refuses to link a run with no organization. (25acd403)
+11. [x] Pilot need chips use the pilot tenant, so pilot agents' services show as connected. (47b97f09)
+12. [x] Reports of a run with no organization say "Organization: none", and the direct Teams and Outlook paths use the designed skip instead of a failed step. (0f0e7cbf)
+
+CI on this branch failed the generated docs check on every push since 96eece9: git's automatic short-hash length grew to eight characters in fresh clones. Part A's fix `docs: pin generated short hashes to eight characters` is cherry-picked here so the check passes; it merges cleanly once part A lands. Earlier hand-backs reported CI as pending, not failing.
