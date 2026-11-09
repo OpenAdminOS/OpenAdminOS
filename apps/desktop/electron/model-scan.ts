@@ -32,15 +32,16 @@ import { checkAdditionalCli, checkAppleFoundation, checkClaudeCode, checkCodex, 
 
 export const MODEL_SCAN_TIMEOUT_MS = 2_500;
 export const MODEL_SCAN_RETRY_TIMEOUT_MS = 10_000;
-/** An HTTP check's own timeout inside the scan: just under the scan timeout. */
-const SCAN_HTTP_BUDGET_MS = MODEL_SCAN_TIMEOUT_MS - 200;
+/** An HTTP check's own timeout: just under the timeout of the check it runs in, so it fails as a timeout first. */
+const httpBudget = (checkTimeoutMs: number) => Math.max(checkTimeoutMs - 200, 100);
 
 export interface ModelScanCheck {
   providerId: ProviderId;
   name: string;
   where: "local" | "hosted";
   target: string;
-  run(signal: AbortSignal): Promise<ModelScanProbe>;
+  /** `timeoutMs` is this run's whole budget: the scan timeout, or the longer one on Retry. */
+  run(signal: AbortSignal, timeoutMs: number): Promise<ModelScanProbe>;
 }
 
 export function checkingProbe(check: Pick<ModelScanCheck, "providerId" | "name" | "where" | "target">): ModelScanProbe {
@@ -80,7 +81,7 @@ export async function runScanCheck(check: ModelScanCheck, timeoutMs: number, now
     }, timeoutMs);
   });
   try {
-    const result = await Promise.race([check.run(controller.signal), timeout]);
+    const result = await Promise.race([check.run(controller.signal, timeoutMs), timeout]);
     if (result === "timeout") {
       return {
         ...checkingProbe(check),
@@ -293,7 +294,7 @@ export async function installedOnDisk(providerId: "ollama" | "lm-studio", env: N
  */
 export function buildModelScanChecks(input: {
   catalog: readonly ProviderSummary[];
-  check: (providerId: ProviderId, signal: AbortSignal) => Promise<ProviderSummary>;
+  check: (providerId: ProviderId, signal: AbortSignal, timeoutMs: number) => Promise<ProviderSummary>;
   env?: NodeJS.ProcessEnv;
   platform?: NodeJS.Platform;
   /** Whether Ollama or LM Studio is installed, from local files. Injected in tests. */
@@ -314,7 +315,7 @@ export function buildModelScanChecks(input: {
       };
       return {
         ...meta,
-        async run(signal) {
+        async run(signal, timeoutMs) {
           if (provider.id === "ollama" || provider.id === "lm-studio") {
             const trust = provider.id === "ollama" ? classifyOllamaEndpoint(endpoint!) : classifyLmStudioEndpoint(endpoint!);
             if (!trust.isLocal) {
@@ -326,12 +327,12 @@ export function buildModelScanChecks(input: {
               };
             }
             const [summary, onDisk] = await Promise.all([
-              input.check(provider.id, signal),
+              input.check(provider.id, signal, timeoutMs),
               input.onDisk ? input.onDisk(provider.id) : installedOnDisk(provider.id, env, platform),
             ]);
             return scanProbeFromProvider(summary, { installedOnDisk: onDisk, target: meta.target });
           }
-          return scanProbeFromProvider(await input.check(provider.id, signal));
+          return scanProbeFromProvider(await input.check(provider.id, signal, timeoutMs));
         },
       };
     });
@@ -344,15 +345,15 @@ export function buildModelScanChecks(input: {
  */
 export async function scanProviderCheck(
   provider: ProviderSummary,
-  options: { signal?: AbortSignal; binaryPath?: string; azure?: () => Promise<ProviderSummary> } = {},
+  options: { signal?: AbortSignal; binaryPath?: string; azure?: () => Promise<ProviderSummary>; timeoutMs?: number } = {},
 ): Promise<ProviderSummary> {
   const base = { ...(options.signal ? { signal: options.signal } : {}), ...(options.binaryPath ? { binaryPath: options.binaryPath } : {}) };
   switch (provider.id) {
     // HTTP checks get the scan's budget, so their own timeout never fires first and looks like "not running".
     case "ollama":
-      return checkOllama(provider, { ...base, localOnly: true, timeoutMs: SCAN_HTTP_BUDGET_MS });
+      return checkOllama(provider, { ...base, localOnly: true, timeoutMs: httpBudget(options.timeoutMs ?? MODEL_SCAN_TIMEOUT_MS) });
     case "lm-studio":
-      return checkLmStudio(provider, { ...base, localOnly: true, timeoutMs: SCAN_HTTP_BUDGET_MS });
+      return checkLmStudio(provider, { ...base, localOnly: true, timeoutMs: httpBudget(options.timeoutMs ?? MODEL_SCAN_TIMEOUT_MS) });
     case "anthropic":
       return checkClaudeCode(provider, base);
     case "openai":

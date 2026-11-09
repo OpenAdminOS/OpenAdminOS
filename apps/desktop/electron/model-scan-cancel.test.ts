@@ -281,6 +281,41 @@ describe("failed HTTP checks are not install results (item 6 and G)", () => {
   });
 });
 
+describe("Retry gives HTTP checks its longer budget (review round 3, item 4)", () => {
+  it("finds an Ollama that answers after 3 seconds on Retry, and not within the first scan's 2.5 seconds", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "oaos-retry-"));
+    const { server, url } = await serve((request, response) => {
+      const answer = () => request.url === "/api/tags"
+        ? response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ models: [{ name: "slow-model" }] }))
+        : response.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ capabilities: ["completion"] }));
+      // The model list is slow; its capabilities answer at once.
+      if (request.url === "/api/tags") setTimeout(answer, 3_000);
+      else answer();
+    });
+    const original = { ollama: process.env.OPENAGENTS_OLLAMA_URL, lm: process.env.OPENADMINOS_LM_STUDIO_URL };
+    process.env.OPENAGENTS_OLLAMA_URL = url;
+    process.env.OPENADMINOS_LM_STUDIO_URL = "http://127.0.0.1:9/v1";
+    const store = new AppStateStore({ filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "", tokenStore: { read: async () => "", write: async () => undefined } });
+    try {
+      const first = await store.scanModels();
+      assert.equal(first.probes.find((probe) => probe.providerId === "ollama")?.state, "could-not-check");
+      const retry = await store.retryModelScanProbe("ollama");
+      const ollama = retry.probes.find((probe) => probe.providerId === "ollama");
+      assert.equal(ollama?.ready, true, ollama?.facts.join(" "));
+      assert.deepEqual(ollama?.models, ["slow-model"]);
+    } finally {
+      if (original.ollama === undefined) delete process.env.OPENAGENTS_OLLAMA_URL;
+      else process.env.OPENAGENTS_OLLAMA_URL = original.ollama;
+      if (original.lm === undefined) delete process.env.OPENADMINOS_LM_STUDIO_URL;
+      else process.env.OPENADMINOS_LM_STUDIO_URL = original.lm;
+      store.close();
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+      await rm(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+    }
+  });
+});
+
 describe("Azure settings inside a bounded check (item 5)", () => {
   it("does not hold up the other checks when the keychain read stalls", async () => {
     const dir = await mkdtemp(join(tmpdir(), "oaos-azure-"));

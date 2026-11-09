@@ -3386,7 +3386,7 @@ export class AppStateStore {
   private async modelScanChecks(found: Map<ProviderId, ProviderSummary>): Promise<ModelScanCheck[]> {
     return buildModelScanChecks({
       catalog: providerCatalog,
-      check: async (providerId, signal) => {
+      check: async (providerId, signal, timeoutMs) => {
         // Tests and smoke runs inject the provider list, as for listProviders.
         if (this.providerListFactory) {
           const listed = (await this.providerListFactory()).find((provider) => provider.id === providerId);
@@ -3400,6 +3400,7 @@ export class AppStateStore {
         // read times out as could not check and holds up no other check.
         const summary = await scanProviderCheck(entry, {
           signal,
+          timeoutMs,
           azure: async () => checkAzureOpenAI(entry, await this.getAzureOpenAIConfig()),
         });
         found.set(providerId, summary);

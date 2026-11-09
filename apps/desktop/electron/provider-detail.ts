@@ -86,6 +86,8 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     return { ...provider, isLocal: false, status: "error", checkFailed: true, detail: `Ollama is set to ${endpoint}, outside this device, so it is not checked here.`, models: [] };
   }
   const controller = new AbortController();
+  // With a budget (a scan check), the tags request and the capability reads share it.
+  const deadline = options.timeoutMs !== undefined ? Date.now() + options.timeoutMs : undefined;
   const timeout = setTimeout(() => controller.abort(), options.timeoutMs ?? OLLAMA_TAGS_TIMEOUT_MS);
   options.signal?.addEventListener("abort", () => controller.abort(), { once: true });
   const trustedProvider = endpointTrust.isLocal
@@ -124,7 +126,7 @@ export async function checkOllama(provider: ProviderSummary, options: ScanCheckO
     // guessing capabilities from names, which can be arbitrary local aliases.
     let unverified = false;
     const showController = new AbortController();
-    const showTimeout = setTimeout(() => showController.abort(), OLLAMA_SHOW_TIMEOUT_MS);
+    const showTimeout = setTimeout(() => showController.abort(), deadline !== undefined ? Math.max(deadline - Date.now(), 0) : OLLAMA_SHOW_TIMEOUT_MS);
     options.signal?.addEventListener("abort", () => showController.abort(), { once: true });
     const supported = await mapLimited(installed, OLLAMA_SHOW_CONCURRENCY, async ({ name: model, digest }) => {
       const key = digest ? `${endpoint}\0${model}\0${digest}` : undefined;
