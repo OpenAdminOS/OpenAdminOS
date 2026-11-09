@@ -14,22 +14,28 @@ import { Button } from "../components/Button";
 import { ModelChoiceList } from "../components/ModelChoiceList";
 import { ProviderLogo, providerLogoKind } from "../components/ProviderLogo";
 import { IconLogo } from "../components/icons";
-import { MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocationDetail } from "../copy";
+import { MICROSOFT_STEP_COPY, MODEL_SCAN_COPY, deriveToolHostsCopy, providerDataLocationDetail } from "../copy";
 import { chatToolHosts } from "../state/data-boundary";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
 import { useAppState } from "../state";
 import { actionLabel, actionNote, modelDisplayName, optionsFromProbes, preselect, type ChoiceOption } from "./model-choice";
+import { MicrosoftStepScreen } from "./MicrosoftStep";
+import { OnboardingSteps } from "./OnboardingSteps";
 
 /**
  * The first-launch model scan (SPEC.md 4a, first launch): a full-window
  * screen that checks this device for model runtimes and signed-in AI tools,
  * every check in parallel, and shows each one resolve. It runs once on a
  * fresh install, before anything else, and again from Settings, Providers.
+ * On a fresh install the second step, Connect Microsoft 365, follows it
+ * before Chat opens.
  */
 
 interface ModelScanContextValue {
   /** Opens the scan screen again, from Settings, Providers. */
   openScan(): void;
+  /** Opens the Connect Microsoft 365 step again. */
+  openMicrosoftStep(): void;
 }
 
 const ModelScanContext = createContext<ModelScanContextValue | null>(null);
@@ -40,11 +46,15 @@ export function useModelScan(): ModelScanContextValue {
   return value;
 }
 
-/** Shows the scan screen in place of the shell on a fresh install, or when opened again. */
+/** Shows the onboarding steps in place of the shell on a fresh install, or one of them when opened again. */
 export function ModelScanGate({ children }: { children: ReactNode }) {
   const { state, loading } = useAppState();
   const location = useLocation();
-  const [manual, setManual] = useState(false);
+  const navigate = useNavigate();
+  const [manual, setManual] = useState<"model" | "microsoft" | null>(null);
+  // On a fresh install the Microsoft 365 step follows the model step.
+  // "handoff" waits one render for the state the scan refreshed before choosing.
+  const [firstRunStep, setFirstRunStep] = useState<"model" | "handoff" | "microsoft">("model");
   // Decided once, when app state first loads: later reloads (the scan
   // refreshes state as it selects a provider) never close or restart it.
   const [firstRun, setFirstRun] = useState<boolean | null>(null);
@@ -53,7 +63,7 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
     if (loading || firstRun !== null) return;
     setFirstRun(supported && state.firstRunScanPending === true && !location.pathname.startsWith("/companion"));
   }, [firstRun, loading, location.pathname, state.firstRunScanPending, supported]);
-  const open = supported && (firstRun === true || manual);
+  const screen = !supported ? null : firstRun === true ? firstRunStep : manual;
   // Until app state says whether the first-run scan is pending, show a quiet
   // surface rather than the shell, so nothing claims a provider not yet checked.
   const deciding = supported && firstRun === null && !location.pathname.startsWith("/companion");
@@ -63,26 +73,47 @@ export function ModelScanGate({ children }: { children: ReactNode }) {
     () => ({
       openScan: () => {
         invoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-        setManual(true);
+        setManual("model");
+      },
+      openMicrosoftStep: () => {
+        invoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        setManual("microsoft");
       },
     }),
     [],
   );
+  const close = (to: string | null) => {
+    setManual(null);
+    setFirstRun(false);
+    const target = invoker.current;
+    invoker.current = null;
+    if (to) navigate(to);
+    else if (target) window.setTimeout(() => target.focus(), 0);
+  };
+  // The scan leaving for Chat on a fresh install goes to the Microsoft 365
+  // step instead, unless an organization is already connected.
+  const hasOrganization = state.tenants.some((tenant) => tenant.kind !== "sample");
+  useEffect(() => {
+    if (firstRunStep !== "handoff") return;
+    if (hasOrganization) close("/chat");
+    else setFirstRunStep("microsoft");
+    // `close` only sets state and navigates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstRunStep, hasOrganization]);
   return (
     <ModelScanContext.Provider value={value}>
-      {deciding ? (
+      {deciding || screen === "handoff" ? (
         <div className="h-full w-full bg-[var(--color-bg)]" aria-busy="true" />
-      ) : open ? (
+      ) : screen === "model" ? (
         <ModelScanScreen
           firstRun={firstRun === true}
-          onClose={() => {
-            setManual(false);
-            setFirstRun(false);
-            const target = invoker.current;
-            invoker.current = null;
-            if (target) window.setTimeout(() => target.focus(), 0);
+          onClose={(to) => {
+            if (firstRun === true && to === "/chat") setFirstRunStep("handoff");
+            else close(to);
           }}
         />
+      ) : screen === "microsoft" ? (
+        <MicrosoftStepScreen firstRun={firstRun === true} onClose={close} />
       ) : (
         children
       )}
@@ -131,9 +162,8 @@ function statusOf(probe: ModelScanProbe, starting: boolean): string {
   return probe.summary;
 }
 
-export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onClose: () => void }) {
+export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onClose: (to: string | null) => void }) {
   const api = window.openAdminOS;
-  const navigate = useNavigate();
   const { state, refresh, setActiveProvider } = useAppState();
   const reduced = useMemo(prefersReducedMotion, []);
   const [probes, setProbes] = useState<ModelScanProbe[]>([]);
@@ -338,8 +368,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     try {
       if (firstRun) await api?.completeFirstRunScan?.();
       await refresh();
-      onClose();
-      if (to) navigate(to);
+      onClose(to);
     } catch (caught) {
       finishing.current = false;
       setBusy((current) => (current === "finish" ? null : current));
@@ -413,8 +442,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
     try {
       if (firstRun) await api?.completeFirstRunScan?.();
       await refresh();
-      onClose();
-      navigate("/chat");
+      onClose("/chat");
     } catch (caught) {
       finishing.current = false;
       setActionError(caught instanceof Error ? caught.message : String(caught));
@@ -448,12 +476,17 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
       data-phase={scanError ? "error" : settled ? "settled" : "scanning"}
     >
       <header
-        className={`flex h-[52px] shrink-0 items-center gap-2 px-4 ${draggable ? "app-region-drag" : ""} ${platform === "macos" ? "pl-[92px]" : ""}`}
+        className={`relative flex h-[52px] shrink-0 items-center gap-2 px-4 ${draggable ? "app-region-drag" : ""} ${platform === "macos" ? "pl-[92px]" : ""}`}
         style={platform === "windows" ? { paddingRight: 140 } : undefined}
       >
         <IconLogo size={21} className="text-[var(--color-text)]" />
         <span className="font-serif text-md font-medium">OpenAdminOS</span>
         <span className="flex-1" />
+        {firstRun ? (
+          <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 max-[640px]:hidden">
+            <OnboardingSteps current={0} />
+          </div>
+        ) : null}
         {!settled && !scanError ? (
           <Button size="sm" variant="ghost" className="app-region-no-drag" onClick={skip}>
             {MODEL_SCAN_COPY.skip}
@@ -836,6 +869,19 @@ function ScanResult({
   );
 }
 
+
+/** Settings: open the Connect Microsoft 365 step again. */
+export function MicrosoftStepButton() {
+  const scan = useContext(ModelScanContext);
+  const supported = typeof window.openAdminOS?.startModelScan === "function";
+  const handle = useCallback(() => scan?.openMicrosoftStep(), [scan]);
+  if (!supported || !scan) return null;
+  return (
+    <Button size="sm" variant="secondary" onClick={handle}>
+      {MICROSOFT_STEP_COPY.reopen}
+    </Button>
+  );
+}
 
 /** Settings, Providers: run the scan again. */
 export function ScanAgainButton() {

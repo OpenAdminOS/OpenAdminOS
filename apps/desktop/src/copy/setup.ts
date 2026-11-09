@@ -208,3 +208,33 @@ export const SERVICE_COPY = {
   consentNotePilot: "Pilot mode uses the sample tenant, so no consent is requested.",
 };
 
+
+/** The two onboarding steps on first launch: a model, then Microsoft 365 (SPEC.md 4a, first launch). */
+export const ONBOARDING_COPY = {
+  stepsLabel: "Setup steps",
+  steps: ["Model", "Microsoft 365"] as const,
+  done: "done",
+} as const;
+
+/** The second onboarding step, Connect Microsoft 365 (mockup 32, section B). */
+export const MICROSOFT_STEP_COPY = {
+  title: "Connect Microsoft 365",
+  body: "Pick the services you manage. OpenAdminOS asks Microsoft for read-only access to those, and nothing else.",
+  servicesLabel: "Services you manage",
+  noneYet: "Pick a service to see the read-only permissions it needs.",
+  signIn: "Sign in with Microsoft",
+  ownRegistration: "Use our own app registration",
+  askAdmin: "Ask an admin to approve",
+  notNow: "Not now",
+  notNowNote: "Chat works without it. A question about your own devices or users asks you to connect first.",
+  nodeOff: "Not connected",
+  nodePicked: "Selected",
+  nodeConnected: "Connected",
+  connected: "Connected",
+  partial: (title: string) => `${title}, partly`,
+  connectedTitle: (organization: string) => `${organization} is connected`,
+  connectedBody: "Chat answers from these services with the read-only permissions you approved. Writes always ask you first.",
+  openChat: "Open Chat",
+  announceConnected: (organization: string, services: string) => `${organization} is connected: ${services}.`,
+  reopen: "Set up Microsoft 365",
+} as const;

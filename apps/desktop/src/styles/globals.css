@@ -883,6 +883,78 @@ button:disabled {
 .model-choice-radio:checked { box-shadow: inset 0 0 0 5px var(--color-text); }
 .model-choice-radio:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
 .model-choice-radio:disabled { opacity: 0.5; }
+/* Connect Microsoft 365, the second onboarding step (mockup 32, section B):
+   the scan's stage with the services on the orbit. A service that is not
+   connected is a dashed tile; a selected one is linked to this device by a
+   dashed line; a connected one turns solid and its link draws in. Neither
+   colour of the scan applies: Microsoft 365 is where the data already is. */
+.ms-node {
+  transform: translate(-50%, -24px);
+  cursor: pointer;
+}
+.ms-node[data-state="connected"] { cursor: default; }
+.ms-node-tile {
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
+  font-size: 15px;
+  color: var(--color-text-muted);
+  background: var(--color-bg);
+  border: 1px dashed var(--color-border-strong);
+  transition: color 200ms ease, border-color 200ms ease, background-color 200ms ease;
+}
+.ms-node[data-state="picked"] .ms-node-tile {
+  color: var(--color-text);
+  border-color: var(--color-text-soft);
+}
+.ms-node[data-state="connected"] .ms-node-tile {
+  color: var(--color-text);
+  background: var(--color-bg-raised);
+  border: 1px solid transparent;
+  box-shadow: inset 0 0 0 1.5px var(--color-text-soft);
+}
+.microsoft-step[data-phase="connected"] .ms-node[data-state="connected"] .ms-node-tile { animation: scan-pop 280ms ease 200ms both; }
+.ms-node-name { color: var(--color-text-soft); }
+.ms-node[data-state="picked"] .ms-node-name,
+.ms-node[data-state="connected"] .ms-node-name { color: var(--color-text); }
+.ms-node-status { color: var(--color-text-muted); }
+.ms-node:not([data-state="connected"]):hover .ms-node-tile { border-color: var(--color-text-soft); }
+.ms-link {
+  stroke: var(--color-text-muted);
+  stroke-width: 0.25;
+  stroke-dasharray: 1.1 1.1;
+}
+.ms-link[data-state="connected"] {
+  stroke: var(--color-text-soft);
+  stroke-width: 0.36;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+.ms-link[data-state="connected"][data-animate="true"] {
+  stroke-dashoffset: 1;
+  animation: scan-link-draw 420ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+.service-check {
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px var(--color-border-strong);
+  background: var(--color-bg);
+  transition: background-color 140ms ease, box-shadow 140ms ease;
+}
+.service-check:checked { background: var(--color-text); box-shadow: none; }
+.service-check:focus-visible { outline: 2px solid var(--color-focus); outline-offset: 2px; }
+.service-check:disabled { opacity: 0.55; }
+.onboarding-steps .onboarding-step-mark { color: var(--color-text-muted); box-shadow: inset 0 0 0 1px var(--color-border-strong); }
+.onboarding-steps .onboarding-step-label { color: var(--color-text-muted); }
+.onboarding-steps .onboarding-step-rule { background: var(--color-border); }
+.onboarding-steps [data-state="current"] .onboarding-step-mark { background: var(--color-text); color: var(--color-bg); box-shadow: none; }
+.onboarding-steps [data-state="current"] .onboarding-step-label { color: var(--color-text); font-weight: 500; }
+.onboarding-steps [data-state="done"] .onboarding-step-mark { color: var(--color-text-soft); box-shadow: inset 0 0 0 1px var(--color-text-soft); }
+.onboarding-steps [data-state="done"] .onboarding-step-label { color: var(--color-text-soft); }
+.scan-screen[data-motion="reduced"] .ms-link { animation: none; stroke-dashoffset: 0; }
+.scan-screen[data-motion="reduced"] .ms-node-tile { animation: none !important; }
 @media (prefers-reduced-motion: reduce) {
   .scan-ring,
   .scan-sweep,
@@ -890,9 +962,12 @@ button:disabled {
   .scan-link,
   .scan-node-dot,
   .scan-rise,
-  .scan-list-mark {
+  .scan-list-mark,
+  .ms-link,
+  .ms-node-tile {
     animation: none !important;
   }
+  .ms-link[data-state="connected"] { stroke-dashoffset: 0; }
   .scan-rings,
   .scan-sweep { display: none; }
   .scan-link { stroke-dashoffset: 0; }

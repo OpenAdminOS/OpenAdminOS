@@ -4,8 +4,13 @@
  */
 const LETTERS: Readonly<Record<string, string>> = { intune: "In", entra: "En", defender: "De" };
 
+/** The two letters a service is marked with. */
+export function serviceLetters(service: string, title: string): string {
+  return LETTERS[service] ?? title.slice(0, 2);
+}
+
 export function ServiceMark({ service, title, size = 22, off = false }: { service: string; title: string; size?: 17 | 22 | 30; off?: boolean }) {
-  const letters = LETTERS[service] ?? title.slice(0, 2);
+  const letters = serviceLetters(service, title);
   return (
     <span
       aria-hidden="true"

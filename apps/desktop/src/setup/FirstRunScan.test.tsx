@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Route, Routes, useLocation } from "react-router";
 
-import { MODEL_SCAN_COPY } from "../copy";
+import { MICROSOFT_STEP_COPY, MODEL_SCAN_COPY } from "../copy";
 import type { ModelScanOutcome, ModelScanProbe, ModelScanResult, ProviderId } from "../shared/openAdminOS";
 import { createMockAppState, createMockMcpServers, makeMockBridge, renderWithAppState } from "../test/test-utils";
 import { ModelScanGate, ScanAgainButton } from "./FirstRunScan";
@@ -81,6 +81,12 @@ function renderGate(bridge: ReturnType<typeof makeMockBridge>) {
   );
 }
 
+/** The second onboarding step follows the scan on a fresh install; Not now opens Chat. */
+async function leaveMicrosoftStep(user: ReturnType<typeof userEvent.setup>) {
+  expect(await screen.findByRole("heading", { level: 1, name: MICROSOFT_STEP_COPY.title })).toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: MICROSOFT_STEP_COPY.notNow }));
+}
+
 const reducedMotion = () => {
   beforeEach(() => document.documentElement.setAttribute("data-reduced-motion", ""));
   afterEach(() => document.documentElement.removeAttribute("data-reduced-motion"));
@@ -156,6 +162,7 @@ describe("first-launch model scan screen", () => {
     await user.click(screen.getByRole("button", { name: "Use Claude Code" }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("anthropic"));
     await waitFor(() => expect(bridge.completeFirstRunScan).toHaveBeenCalledOnce());
+    await leaveMicrosoftStep(user);
     expect(await screen.findByText("App content")).toBeInTheDocument();
     expect(screen.getByTestId("where")).toHaveTextContent("/chat");
   });
@@ -223,6 +230,7 @@ describe("first-launch model scan screen", () => {
     await user.click(await screen.findByRole("button", { name: "Start Ollama and open Chat" }));
     await waitFor(() => expect(bridge.startLocalRuntime).toHaveBeenCalledWith("ollama"));
     await waitFor(() => expect(bridge.setActiveProviderAndModel).toHaveBeenCalledWith("ollama", "openadminos/openadmin-8b:latest"));
+    await leaveMicrosoftStep(user);
     expect(await screen.findByText("App content")).toBeInTheDocument();
     expect(screen.getByTestId("where")).toHaveTextContent("/chat");
   });
@@ -416,6 +424,7 @@ describe("first-launch model scan screen", () => {
     await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
     await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.continueToChat }));
     await waitFor(() => expect(bridge.completeFirstRunScan).toHaveBeenCalledOnce());
+    await leaveMicrosoftStep(user);
     expect(await screen.findByText("App content")).toBeInTheDocument();
     expect(bridge.setActiveProvider).not.toHaveBeenCalled();
   });
@@ -511,6 +520,7 @@ describe("first-launch model scan screen", () => {
     await waitFor(() => expect(continueButton).toBeDisabled());
     await user.click(continueButton);
     complete?.();
+    await leaveMicrosoftStep(user);
     expect(await screen.findByText("App content")).toBeInTheDocument();
     expect(bridge.completeFirstRunScan).toHaveBeenCalledOnce();
   });
