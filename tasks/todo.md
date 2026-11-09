@@ -1847,3 +1847,35 @@ Also: a read racing a write could queue the move to organizations twice; the mig
 ### CI
 
 - [x] CI at ab0f196 failed `buildGraph interactive fallback > uses the token when the connected account signs in`: the test waited five event loop turns for a grant write that is not awaited, and the durable write path from item 1 (open, write, sync, close, with an access added audit event) takes longer on the runner. The test now waits for the recorded grant with a deadline; six parallel runs pass locally.
+
+## PR #174 Disconnect redesign (reviewed 52a41d3, 2026-11-09)
+
+GPT-6.1-Sol reproduced four more Disconnect holes and one should-fix; Muse Wonder Full independently found the Chat and Nova gaps. The per-call-site guards are replaced by a structural design: the guarantee is enforced at choke points, not by callers.
+
+### Design (acceptance criteria)
+
+- [x] A. Tenant lease: `electron/tenant-lifecycle.ts` owns `open`, `closing`, `removed` with a generation. `withTenantLease` refuses a tenant that is not open, registers the work for draining, hands it a signal that fires when closing begins, and keeps the lease in async context. Routed through it: runs (schedules, rollbacks, gateway proposals and Nova run actions via `track`), cache refreshes and preloads (`collectGraphCache`), single and multi-tenant Chat sends and streams, multi-tenant agent batches, report deliveries, Nova actions and sends, gateway reads, Agent Team save, start, tick and ask. The old `closedTenants`, `tenantGenerations`, `removedTenants`, `stopRunsForTenant`, `drainTenantRefreshes`, `drainRuns`, `assertTenantOpen` per send and `guardedSecrets` are gone.
+- [x] B. Egress choke points: guarded fetch into the Graph adapter and the license probe; the tenant's MSAL client is wrapped so every acquisition is refused once closing and a token that arrives after closing began is withheld; tenant sessions for connectors go through the same check; connectors receive `ConnectorBuildContext.fetch` (every request and retry) and `assertEgress` (WhatsApp socket and Signal CLI right before a send), passed by deliveries, Nova sends, connector tests and reads, and agent runs (runtime `connectorTransport`).
+- [x] C. Persistence choke points: every tenant-scoped write in the SQLite store (conversations, messages, tool calls, values, graph cache, stale marks, drift baselines, multi-tenant jobs and batches, workspaces, learning, consent, self-training, refresh schedule) and in `office.db` checks the tenant and the lease generation; the state file filter (`tenant-removal.ts`) lets a write remove anything but drops added or changed tenants, runs, deliveries, Nova connector audit entries, active tenant and gateway binding of a tenant that is not writable. Dropped writes are logged.
+- [x] D. Two phases, persisted: phase 1 under the state lock closes the tenant and in one write removes it (runs, deliveries, active, gateway binding) and stores a removal record; phase 2 drains (bounded, 15 s), removes the sign-in, purges Agent Team and Chat data, drops the record. A failure or a quit keeps the record and the tenant closed; `resumeTenantCleanups` runs at launch before recovery, deliveries, gateway, schedulers and the Agent Team tick; Retry cleanup on Connections and in the connect flow. Reconnecting the same tenant is refused with the designed message until cleanup finished, then opens a new generation. The dialog reports done, or removed with cleanup pending and why.
+- [x] E. Tests: every reproduction, a test that enumerates the egress and persistence choke points with a closed lease, restart with a removal record, reconnect during pending cleanup.
+
+### GPT-6.1-Sol reproductions (each a regression test in `tenant-disconnect.test.ts`)
+
+1. [x] Multi-tenant Chat job waiting for its model answer: refused with the organization being disconnected, no job, conversation or messages left.
+2. [x] Teams report whose token is released after Disconnect began: no Graph request.
+3. [x] Nova multi-part Slack send interrupted by Disconnect (Muse): stops after the accepted part ("1 of 2 messages confirmed"), Disconnect waits for it, one Slack post, no audit entry added for the removed tenant.
+4. [x] Gateway read whose token is released after closure: no `/users` request, and a new gateway read is refused. Agent Team save, start, tick and ask are refused for a closing organization and an answer that arrives after closing is not stored (`office.test.ts`).
+5. [x] Should fix: a failure after the sign-in was removed (SQLite purge) leaves the organization removed with cleanup pending and why; reconnect shows the designed message; Retry cleanup finishes it; reconnect then opens a new generation.
+
+Also: choke point enumeration with a closed lease (Graph, MSAL, session, connector transport, Nova send, runs, Chat send, gateway read, cache refresh, Agent Team save, 13 SQLite writes, state file run write); a multi-tenant agent batch with a closing organization is refused and writes nothing (Muse); restart with a removal record resumes cleanup and keeps the tenant closed until then; lifecycle and write filter unit tests (`tenant-lifecycle.test.ts`).
+
+### Muse Wonder Full items
+
+1. [x] The renderer reloads state after a failed disconnect, and a partial outcome is a warning ("<name> was removed and its work stopped. Cleanup on this device is pending: <why> It resumes at the next launch, or choose Retry cleanup on Connections."), not "Disconnecting failed". Connections and the connect flow show Disconnect cleanup pending with Retry cleanup. Tests in `Connections.test.tsx` and `SetupFlowContext.test.tsx`.
+2. [x] Gateway read tools are leased; covered by reproduction 4 and the enumeration test.
+3. [x] Nits: `stopRunsForTenant` is removed (the bounded lease drain replaces it and logs work still stopping); `refreshDueGraphCaches` skips a closing tenant and does not mark its schedule, also when it starts closing mid-refresh (test); the comment at `setAzureOpenAIConfig` says a folder sync failure after the rename reports failure for a saved change; the sign-in failure now leaves the organization removed with cleanup pending, and the warning says its work stopped.
+
+### Verification
+
+- Node 22: typecheck, electron, runtime, scripts, renderer, qa and docs:check (results in the hand-back).
