@@ -1724,3 +1724,12 @@ Reviewed head a068806; round 4 fixes verified.
 
 1. [x] Blocking: the empty public reference line said nothing leaves the device with a local model until a reference is added, while a saved delivery rule still sends run reports. The line now speaks only about question words sent to reference hosts; a renderer test with a token-only Slack rule checks it. (acb3d6f6)
 2. [x] The Connections map ignored hosted Nova voice: the strip showed Voice · OpenAI while the map said prompts go nowhere. The map and its text alternative now list the voice destination from the same boundary state as the strip, with a parity test. (8c9fa904)
+
+### Muse Wonder Full round 5 (reviewed a068806)
+
+Confirms both round 5 findings above. GPT-6.1-Sol round 6 found nothing on 8ee4839.
+
+1. [x] `deliveryBlock` had no destination check for Teams or Outlook's default recipients, so the UI listed Microsoft Teams while the connector refused to post without a team and channel. Teams now needs a team and a channel, on the rule or saved as the default; Outlook on default recipients needs at least one saved recipient (split on commas, semicolons and new lines, like the connector). The Teams and Outlook senders refuse both cases with designed step messages before the tenant session, without retrying. Three Teams and Outlook fixtures join the parity test and check the step message and that nothing is requeued. Discord and declared connector steps stay may send; the SPEC note says why. (b61b2f73)
+2. [x] A plan or run stored with `tenantId: ""` is treated as no organization: the confirmation lock refuses it with the no-organization copy, the run and apply paths fail closed, and the confirmation page shows the no-organization notice with Apply disabled. Host and renderer tests. (b7592474)
+3. [x] Invoking a connector (Teams team and channel lists) with no organization active uses `NO_MICROSOFT_365_ORGANIZATION("invoking connectors")`. Test. (294bf23a)
+4. [x] An over-long id shared by several records is not remapped: both records are kept under fresh ids and a schedule naming it is left unassigned, as the comment says. Test. (68980fd8)
