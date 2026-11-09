@@ -1739,3 +1739,41 @@ Confirms both round 5 findings above. GPT-6.1-Sol round 6 found nothing on 8ee48
 Reviewed head 06949c7; the Muse round 5 fixes were verified.
 
 1. [x] Blocking: saving the first Teams default team and channel did not refresh the connector list the map and Results read, so both still said nothing is sent to Teams while the host could post there. The picker now reloads the connector list after a successful save; a renderer test saves a default and checks both disclosures (fails without the fix).
+
+## PR #174 design and enterprise round (2026-11-09)
+
+Maintainer decisions: design spec and mockup 32 revision 2 (`docs/mockups/32-connections-first-run.html`, `docs/mockups/32-connections-first-run-spec.md`, frames F to K), enterprise items from the Muse review, region wording, Muse round 6 nits. This PR merges before #175 and carries the shared pieces.
+
+### Shared pieces
+- [x] `DeviceTile` (104, 72, 40 px) and motion tokens naming existing values. (257f0f0e)
+- [x] Not connected is a dashed neutral `ServiceMark`; missing access is never amber. (f1af8193)
+- [x] Mockup revision 2 and its spec committed. (cf4a658c)
+
+### Region wording and vocabulary
+- [x] `providerDataLocation` in `copy/trust.ts`, with the same signature as PR #175: Anthropic API · US, OpenAI API · US, region not stated (Copilot, Gemini), your resource's region (Azure OpenAI). "Region not reported to OpenAdminOS" and its TODO(ugur) are gone. PR #175 still has "region set by GitHub" and "region set by Google" and should adopt these values. (0f4f07b4)
+- [x] Provider names as the scan shows them (Claude Code, Codex, Apple Intelligence, GitHub Copilot CLI, Gemini CLI); the strip, Chat composer, Chat confirmation and Settings name the location instead of "Hosted via CLI". (2643d7f2)
+- [x] Glossary in SPEC: organization, connection, service, part, tenant, No organization, public reference, result connector, provider, data location. (ff233ec6)
+
+### Design must items, frames F to K
+- [x] F: reach map around `DeviceTile lg` with computed lines (incoming solid, outgoing dashed, amber only for hosted prompts), stacked below 760 px, service rows on one grid with "4 of 6 parts", Manage menu (Permissions, Rename, Disconnect), planned connectors removed, Organizations tab for all organizations and saved registrations. (cd9a6094, 02fcdd0d, bddc2780, 4744b2a2, c0ca8dfc, e1760195)
+- [x] G: empty state with Connect Microsoft 365 above the fold, then what leaves the device now. (ca3c8320)
+- [x] H: switcher with filter from six organizations, recent first, capped scrolling list, neutral avatars, services in words, no Disconnect in rows, flask icon. (8bf5b5ee)
+- [x] I and K: plain agent rows with dashed chips for what is missing and the fix as the action; Schedules lead with the background runs warning and Turn on, then the move note as plain text, rows with next run and where results can go. (82a07c61, d4bda8e4)
+- [x] J: run review with one blocker block whose fix is the only filled button, facts as a hairline definition list, Start run a disabled secondary while blocked. (221ed212)
+- [x] Top bar chip: one short line up to a 1100 px window ("Hosted · Anthropic API · US +2 references"). (421e9903)
+
+### Enterprise items
+- [x] Audit events kept apart from run retention and included in both export formats: Microsoft 365 connected and disconnected, access added and removed, organization created, renamed, switched and removed, provider and model changed, public reference installed, enabled, disabled and removed, schedule assigned and unassigned. (0416ed50, 447e911b, ff233ec6)
+- [x] Disconnect confirmation names what is deleted and that the Entra enterprise application and admin consent remain, links the revoke steps, and needs an explicit check to delete the local data. Disconnecting always deletes the local data today, so the check confirms it rather than making it optional; TODO(ugur) in the dialog asks whether admins should be able to keep it. (e06970f6)
+
+### Muse round 6 nits
+- [x] `!run.tenantId` for the plan size history. (89884553)
+- [x] A shared over-long id counts only records that are kept. (c1297d8f)
+- [x] The hosted voice provider is structured data on the boundary. (12368ec6)
+
+### Flaky tests
+- [x] Settings search tests failed intermittently: opening a section moved focus to its heading a frame later, so typing in the search lost characters. The heading now takes focus only when focus is not already in a field outside the section; a test focuses the search in the first frame and fails without the fix. (4a850d15)
+
+### Verification
+- Screenshots in `docs/screenshots/organizations/` at 1280 and 960 px in light and dark (28 files), compared with frames F to K. Remaining differences: reference marks read LM and KC (existing ReferenceMark initials), and the large buttons use the app's existing lg size.
+- Live checks on the dev Electron build with Claude Code (`claude-sonnet-5`) as the active provider.
