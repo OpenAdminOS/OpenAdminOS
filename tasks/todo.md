@@ -1606,3 +1606,42 @@ Round 2 fixes confirmed. No blocking findings.
 
 1. [x] Schedule migration had no destination when no real tenant is active or pilot mode is active. Such schedules now stay paused and unassigned until the admin assigns them, never to the sample organization; criterion 11 requires migration tests for all three states.
 2. [x] The KQL example said "newest first" but sorts by failure count. Copy now says "largest groups first".
+
+## PR #174 review round 1 (Claude evaluator, GPT-6.1-Sol and Muse Wonder Full, 2026-11-09)
+
+Reviewed head 96eece9. Each fix is its own commit with a regression test.
+
+Blocking:
+
+1. [x] Scheduled batches could run in another organization. Run due now and Run all scheduled start scheduled runs, and the host checks inside the run lock that a scheduled start's schedule belongs to the active organization. Every renderer `start-run` call may only pin the active tenant, including Run for real and Team retries that take the original run's tenant; multi-tenant batches and Agent Team keep pinning their own tenants inside the host. (219e3bf)
+2. [x] Editing an unassigned schedule activated it. Ownership is decided only when a schedule is created; edits keep it, including unassigned; only Assign assigns. (8817ddc)
+3. [x] An explicit tenant bypassed the scheduled-start check. The check now compares the schedule's organization and any pinned tenant with the active organization and tenant. (219e3bf, same lock and check as 1)
+4. [x] No-organization runs were labeled with another organization. Delivery resolves the report context only from the run's own tenant and labels its absence No organization; tests cover Slack, WhatsApp under the sample organization, and the Teams and Outlook skip. (793739a)
+
+Should fix:
+
+5. [x] Run again bypassed the preflight. Ordinary reruns and Re-run against the current tenant open the agent's preflight with the original provider and model; Run for real and Team retries keep their flows. Tests for a tenant-bound and a tenant-less run. (1f6286d)
+6. [x] The service-free preflight said the run cannot reach any service. It now says no service data is read and lists the report destinations that apply to a manual run, naming Teams and Outlook as skipped without an organization. (639eb1c)
+7. [x] The hosted warning used tenant wording with no organization. It now says prompts and agent context go to the provider and no tenant data is included. (999bbb5)
+8. [x] Menu bar Run due reported other organizations' and unassigned schedules as errors. They are skipped and counted as waiting. (3b54f93)
+9. [x] `Schedules.tsx` was unrouted. Deleted; its tests that describe live behavior run against the Agents schedules list. (28a962a)
+
+Test gaps:
+
+10. [x] Tests prove Changes, the Data and Chat settings cache refresh, and scheduled batches refuse without an organization; Changes and the cache say No organization is active. (dc42286)
+11. [x] The status strip parity test covers the provider, model and services as well as reference hosts. (ee5d860)
+
+Muse Wonder Full:
+
+- A. [x] Regression from the first fix: a pilot scheduled start said unassigned. The pilot refusal comes first again; `pilot-mode-state.test.ts` covers it. (9cbdc84)
+- B. [x] Reach map destinations disagreed with Results. One list joins enabled delivery rules and declared connector steps with the connector list Results loads; the map names what is set up, Results says the same and names rules to connectors that are not set up; reference hosts are deduplicated for the map and the strip. Tests on both sides. (d337ef1) The status strip itself names Chat egress (provider and reference hosts) and does not list run report connectors; that is unchanged.
+- C. [x] The menu bar listed other organizations' schedules. Only the active organization's schedules are listed and counted as due (3b54f93), with the list moved into a tested module (1c46ad2).
+- D. [x] Hosted wording said local CLI for API providers. The review and the map name the channel per provider: the vendor CLI for Claude Code, Codex, Copilot and Gemini, the Azure OpenAI API for Azure. (e849512)
+- E. [x] Accessibility: need chips are visually hidden text in the row's accessible name (05c9f7a); the organization switcher focuses the active organization on open, supports arrow keys, Home and End, returns focus to the chip on Escape, Tab and choice, and its row actions are visible menu items (fdefc02).
+- F. [x] Region wording is now "Region not reported to OpenAdminOS"; the `TODO(ugur)` stays. (b1587d7)
+- G. [x] Unknown connection keys and organizations with only such connections survive reconcile; this version does not switch to them or assign schedules to them. (b58fe1c)
+- H. [x] Names are cut by code points; a new name over 80 characters is refused instead of cut; IPC and field limits match. (95ad600)
+- I. [x] Settings search finds tenant and connector topics and opens Connections. (39cbf64)
+- J. [x] No organization uses an empty dashed tile instead of a question mark. (6386e35)
+
+Verification after round 1 (Node 22): typecheck clean; electron 1026 pass, 0 fail; runtime 256 pass; scripts 18 pass; renderer 539 pass in 61 files; `npm run qa` 197 pass, 4 warn, 0 fail; `npm run docs:check` clean. Live on Anthropic through the Claude Code CLI, `claude-sonnet-5`: the real `start-run` IPC refused a start pinned to the inactive organization's tenant and a scheduled start in another organization; the reach map names "Anthropic, through the Claude Code CLI" with "Region not reported to OpenAdminOS". Screenshots refreshed in `docs/screenshots/organizations/`.
