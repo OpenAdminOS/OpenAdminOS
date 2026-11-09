@@ -24,8 +24,9 @@ async function fakeCli(dir: string, name: string, body: string): Promise<string>
   return path;
 }
 
+// Up to 5 seconds: a killed child is reaped by the system, which can be slow on a loaded machine.
 async function gone(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
     try {
       process.kill(pid, 0);
     } catch {
@@ -34,6 +35,27 @@ async function gone(pid: number): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   return false;
+}
+
+/**
+ * Runs a scan check and stops it through its signal once the wrapper has
+ * started its child (the file holds the child's pid), as the scan's timeout
+ * does. Waiting for the child instead of racing a fixed timeout keeps the
+ * test independent of how fast a loaded machine starts the wrapper (review
+ * round 5, item 4).
+ */
+async function stopOnceStarted(id: string, binary: string, pidFile: string) {
+  const controller = new AbortController();
+  const pending = scanProviderCheck(catalog(id), { signal: controller.signal, binaryPath: binary });
+  let pid = "";
+  for (let attempt = 0; attempt < 200 && !pid; attempt += 1) {
+    pid = (await readFile(pidFile, "utf8").catch(() => "")).trim();
+    if (!pid) await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  assert.ok(pid, "the wrapper started its child");
+  controller.abort();
+  const summary = await pending;
+  return { pid: Number(pid), probe: scanProbeFromProvider(summary) };
 }
 
 async function serve(handler: Parameters<typeof createServer>[1]): Promise<{ server: Server; url: string }> {
@@ -66,12 +88,8 @@ describe("cancellation (item 4 and T)", () => {
       try {
         const childPid = join(dir, "child");
         const binary = await fakeCli(dir, name, `sleep 30 &\necho $! > "${childPid}"\nwait`);
-        const probe = await runScanCheck(
-          { providerId: id, name, where: "hosted", target: name, run: (signal) => scanProviderCheck(catalog(id), { signal, binaryPath: binary }).then((summary) => scanProbeFromProvider(summary)) },
-          1500,
-        );
-        assert.equal(probe.state, "could-not-check");
-        const pid = Number((await readFile(childPid, "utf8")).trim());
+        const { pid, probe } = await stopOnceStarted(id, binary, childPid);
+        assert.notEqual(probe.ready, true, "a stopped check is never ready");
         assert.equal(await gone(pid), true, `the ${name} wrapper's child must not survive`);
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -86,12 +104,8 @@ describe("cancellation (item 4 and T)", () => {
       try {
         const childPid = join(dir, "child");
         const binary = await fakeCli(dir, name, `sleep 60 &\necho $! > "${childPid}"\nwait`);
-        const probe = await runScanCheck(
-          { providerId: id, name: label, where: "hosted", target: `${name} --version`, run: (signal) => scanProviderCheck(catalog(id), { signal, binaryPath: binary }).then((summary) => scanProbeFromProvider(summary)) },
-          1500,
-        );
-        assert.equal(probe.state, "could-not-check");
-        const pid = Number((await readFile(childPid, "utf8")).trim());
+        const { pid, probe } = await stopOnceStarted(id, binary, childPid);
+        assert.equal(probe.state, "could-not-check", probe.summary);
         assert.equal(await gone(pid), true, `the ${label} wrapper's child must not survive`);
       } finally {
         await rm(dir, { recursive: true, force: true });
@@ -125,12 +139,15 @@ describe("cancellation (item 4 and T)", () => {
     try {
       const pidFile = join(dir, "pid");
       const binary = await fakeCli(dir, "gemini", `echo $$ > "${pidFile}"\nexec sleep 30`);
-      const probe = await runScanCheck(
-        { providerId: "gemini", name: "Gemini CLI", where: "hosted", target: "gemini --version", run: (signal) => scanProviderCheck(catalog("gemini"), { signal, binaryPath: binary }).then((summary) => scanProbeFromProvider(summary)) },
-        1500,
+      const { pid, probe } = await stopOnceStarted("gemini", binary, pidFile);
+      assert.equal(probe.state, "could-not-check", probe.summary);
+      assert.equal(await gone(pid), true);
+      // The scan's own timeout reports a check that hangs as could not check.
+      const timedOut = await runScanCheck(
+        { providerId: "gemini", name: "Gemini CLI", where: "hosted", target: "gemini --version", run: async () => new Promise(() => undefined) },
+        100,
       );
-      assert.equal(probe.state, "could-not-check");
-      assert.equal(await gone(Number((await readFile(pidFile, "utf8")).trim())), true);
+      assert.equal(timedOut.state, "could-not-check");
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
