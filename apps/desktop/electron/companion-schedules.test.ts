@@ -64,3 +64,17 @@ describe("menu bar run due (review round 2)", () => {
     assert.deepEqual(result.errors, []);
   });
 });
+
+describe("menu bar run due counts only due schedules as waiting (Muse round 2)", () => {
+  it("does not count another organization's schedule that is not due yet", async () => {
+    const nowMs = Date.parse("2026-11-09T12:00:00.000Z");
+    const notDue = { ...agent("later", "org-b"), schedule: { enabled: true, intervalSeconds: 3600, lastScheduledRunAt: "2026-11-09T11:30:00.000Z", organizationId: "org-b" } } as AgentSummary;
+    const result = await runDueCompanionSchedules(
+      { installedAgents: [notDue, agent("due-elsewhere", "org-b")], runs: [], activeOrganizationId: "org-a" },
+      nowMs,
+      { startScheduledRun: async () => assert.fail("nothing may start") },
+    );
+    assert.equal(result.waitingOtherOrganization, 1);
+    assert.equal(result.skippedNotDue, 0);
+  });
+});

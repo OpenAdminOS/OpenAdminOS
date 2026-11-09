@@ -83,16 +83,19 @@ export async function runDueCompanionSchedules(
   for (const agent of state.installedAgents) {
     const schedule = agent.schedule;
     if (!schedule?.enabled) continue;
-    if (!scheduleRunsInActiveOrganization(schedule, state.activeOrganizationId)) {
+    const inActiveOrganization = scheduleRunsInActiveOrganization(schedule, state.activeOrganizationId);
+    // Only due schedules count: another organization's schedule that is
+    // not due yet neither waits nor is skipped here.
+    if (nextRunTimeForSchedule(schedule, nowMs) > nowMs) {
+      if (inActiveOrganization) result.skippedNotDue += 1;
+      continue;
+    }
+    if (!inActiveOrganization) {
       result.waitingOtherOrganization += 1;
       continue;
     }
     if (agent.mode === "write") {
       result.skippedWrite += 1;
-      continue;
-    }
-    if (nextRunTimeForSchedule(schedule, nowMs) > nowMs) {
-      result.skippedNotDue += 1;
       continue;
     }
     const inFlight = state.runs.some(
