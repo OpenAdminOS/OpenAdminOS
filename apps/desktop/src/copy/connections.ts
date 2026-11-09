@@ -67,6 +67,8 @@ export const CONNECTIONS_COPY = {
     reports: "Run reports, by delivery rule or agent step",
     noReports: "Nowhere, no rule or step uses a connector that is set up",
     prompts: "Prompts and tenant data",
+    /** With no organization nothing from a tenant is read, so only prompts leave. */
+    promptsNoOrganization: "Prompts and agent context",
     promptsLocal: "Nowhere, the model is local",
     /**
      * The region of a hosted provider. No provider reports it to

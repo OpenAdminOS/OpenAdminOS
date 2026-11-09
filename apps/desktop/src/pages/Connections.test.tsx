@@ -434,3 +434,23 @@ describe("hosted channel per provider type (review round 1)", () => {
     expect(reachDescription(model)).not.toMatch(/CLI/);
   });
 });
+
+describe("hosted reach copy with no organization (Muse round 2)", () => {
+  it("says prompts and agent context leave and no tenant data is included", async () => {
+    const { activeTenantId: _none, ...state } = createMockAppState({ activeProviderId: "openai" });
+    const model = buildReachModel(state);
+    const description = reachDescription(model);
+    expect(description).toContain("Prompts and agent context go through the Codex CLI to OpenAI. No tenant data is included, because no organization is active.");
+    expect(description).not.toContain("tenant data go");
+    render(state);
+    const map = await screen.findByRole("figure", { name: CONNECTIONS_COPY.map.label });
+    expect(within(map).getByText(CONNECTIONS_COPY.map.promptsNoOrganization)).toBeInTheDocument();
+    expect(within(map).queryByText(CONNECTIONS_COPY.map.prompts)).not.toBeInTheDocument();
+  });
+
+  it("keeps the tenant wording when an organization is active", () => {
+    const description = reachDescription(buildReachModel(createMockAppState({ activeProviderId: "openai" })));
+    expect(description).toContain("Prompts and tenant data go through the Codex CLI to OpenAI.");
+    expect(description).not.toContain("No tenant data is included");
+  });
+});

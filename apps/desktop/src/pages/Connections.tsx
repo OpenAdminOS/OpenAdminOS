@@ -140,7 +140,7 @@ export function reachDescription(model: ReachModel): string {
     model.model.kind === "local"
       ? `The model runs on this device: ${model.model.name}.`
       : model.model.kind === "hosted"
-        ? `The model is hosted: ${model.model.name}. Prompts and tenant data go through ${model.model.channel}. ${CONNECTIONS_COPY.map.hostedRegion(model.model.providerName ?? "provider")}.`
+        ? `The model is hosted: ${model.model.name}. ${model.organizationName ? "Prompts and tenant data go" : "Prompts and agent context go"} through ${model.model.channel}.${model.organizationName ? "" : " No tenant data is included, because no organization is active."} ${CONNECTIONS_COPY.map.hostedRegion(model.model.providerName ?? "provider")}.`
         : model.model.kind === "sample"
           ? "Sample answers are prepared on this device. No model is used."
           : "No model is ready.";
@@ -209,7 +209,7 @@ function ReachMap({ model }: { model: ReachModel }) {
             ))
           )}
         </ul>
-        <h4>{CONNECTIONS_COPY.map.prompts}</h4>
+        <h4>{model.organizationName ? CONNECTIONS_COPY.map.prompts : CONNECTIONS_COPY.map.promptsNoOrganization}</h4>
         <ul className="reach-items">
           <li className="reach-item" data-off={model.model.kind === "hosted" ? undefined : "true"}>
             <span className="reach-item-text">
