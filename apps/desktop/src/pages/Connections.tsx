@@ -539,7 +539,7 @@ function MicrosoftServiceRows({
   const sample = tenant.kind === "sample";
   const grantedPartIds = new Set(grantedParts(tenant).map((part) => part.id));
   return (
-    <section aria-label={`${tenant.displayName} services`}>
+    <>
       <TenantCheckResultLine result={checkResult} />
       <ul className="conn-rows">
         {AVAILABLE_SERVICES.map((service) => {
@@ -630,7 +630,7 @@ function MicrosoftServiceRows({
         open={access !== null}
         onClose={() => setAccess(null)}
       />
-    </section>
+    </>
   );
 }
 
@@ -745,7 +745,7 @@ function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRe
     </span>
   );
   return (
-    <div>
+    <section aria-label={`${tenant.displayName} services`}>
       <div className="conn-m365">
         <strong className="shrink-0 text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.microsoft365}</strong>
         {licenseHint ? (
@@ -819,7 +819,7 @@ function MicrosoftGroup({ organization, tenant }: { organization: OrganizationRe
           ) : null}
         </div>
       </Modal>
-    </div>
+    </section>
   );
 }
 
