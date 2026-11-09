@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { Route, Routes } from "react-router";
+import { Navigate, Route, Routes } from "react-router";
 import { describe, expect, it, vi } from "vitest";
 
 import Agents from "./Agents";
@@ -420,4 +420,24 @@ it("never promises delivery to a connector that is not set up (Muse round 2)", a
   await waitFor(() => expect(dialog).toHaveTextContent("Saved delivery rules send its report to Discord."));
   expect(dialog).toHaveTextContent("Slack is not set up, so nothing is sent there.");
   expect(dialog).not.toHaveTextContent("send its report to Slack");
+});
+
+it("names the organization of a resumed run's tenant, not the active one (Muse round 2)", async () => {
+  const fabrikam = { ...createMockAppState().tenants[0]!, id: "tenant-2", displayName: "Fabrikam" };
+  const agent = createMockAgent({ id: "devices", slug: "devices", name: "Inactive devices", mode: "read", scopes: ["DeviceManagementManagedDevices.Read.All"], services: ["intune"] });
+  const state = createMockAppState({ tenants: [createMockAppState().tenants[0]!, fabrikam], installedAgents: [agent] });
+  const intent = { kind: "agent-run", slug: "devices", tenantId: "tenant-2", returnTo: "/agents/devices", createdAt: new Date().toISOString() };
+  const bridge = makeMockBridge({}, state);
+  renderRoute(
+    <Routes>
+      <Route path="/start" element={<Navigate to="/agents/devices" state={{ resumePendingIntent: intent }} />} />
+      <Route path="/agents/:slug" element={<Agents />} />
+    </Routes>,
+    { path: "*", route: "/start", bridge },
+  );
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  expect(within(dialog).getByText("Fabrikam")).toBeInTheDocument();
+  expect(within(dialog).queryByText("Contoso IT")).not.toBeInTheDocument();
+  expect(within(dialog).getByRole("alert")).toHaveTextContent("This run is set up for Fabrikam, which is not the active organization.");
+  expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
 });

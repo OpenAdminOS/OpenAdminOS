@@ -50,8 +50,8 @@ import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
 import { hostedChannel } from "../shared/providers";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
-  activeOrganizationOf,
   agentCallsNoServiceApi,
+  organizationForTenant,
   formatServiceList,
   resolveOrganizations,
   serviceById,
@@ -1091,7 +1091,8 @@ export default function AgentDetail({
           providerIsLocal={pendingTenant?.kind === "sample" || pendingProvider?.isLocal === true}
           requestedScopes={requestedScopes}
           pilot={pendingTenant?.kind === "sample"}
-          organizationName={activeOrganizationOf(state)?.name}
+          organizationName={organizationForTenant(resolveOrganizations(state), pendingTenant?.id)?.name}
+          organizationInactive={pendingTenant !== undefined && pendingTenant.id !== state.activeTenantId}
           hasOrganizations={resolveOrganizations(state).length > 0}
           model={pendingTenant?.kind === "sample" ? "Prepared sample text" : pendingModel}
           deliverySaving={pendingDeliverySaveCount > 0}
@@ -2709,6 +2710,7 @@ function RunPreflightModal({
   requestedScopes,
   pilot = false,
   organizationName,
+  organizationInactive = false,
   hasOrganizations = false,
   model,
   deliverySaving,
@@ -2719,6 +2721,8 @@ function RunPreflightModal({
 }: {
   pilot?: boolean;
   organizationName?: string | undefined;
+  /** The run is pinned to an organization that is not the active one. */
+  organizationInactive?: boolean;
   hasOrganizations?: boolean;
   onConnect?: () => void;
   onOpenConnections?: () => void;
@@ -2769,7 +2773,11 @@ function RunPreflightModal({
   const serviceFree = agentCallsNoServiceApi(agent);
   const neededTitles = agentServiceIds(agent).map((id) => serviceById(id).title);
   const canStart =
-    (Boolean(activeTenant) || serviceFree) && !deliverySaving && missingServices.length === 0 && !scopeBlockCopy;
+    (Boolean(activeTenant) || serviceFree) &&
+    !organizationInactive &&
+    !deliverySaving &&
+    missingServices.length === 0 &&
+    !scopeBlockCopy;
   return (
     <Modal open={open} onClose={onClose} size="md">
       <ModalHeader
@@ -2778,6 +2786,16 @@ function RunPreflightModal({
         onClose={onClose}
       />
       <div className="space-y-4 p-6">
+        {activeTenant && organizationInactive ? (
+          <div role="alert" className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-warning)]/25">
+            {`This run is set up for ${organizationName ?? activeTenant.displayName}, which is not the active organization. Switch to it in the organization menu to start it there.`}
+            {onOpenConnections ? (
+              <div className="mt-3">
+                <Button size="sm" variant="secondary" onClick={onOpenConnections}>Choose an organization</Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
         {!activeTenant && serviceFree ? (
           <div role="status" className="rounded-lg bg-[var(--color-bg-raised)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
             No organization needed. {agent.name} calls no service API, so it runs on
