@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { PageBody, PageHeader } from "../components/AppShell";
 import { ActivityFeed } from "../components/ActivityFeed";
@@ -77,6 +77,16 @@ export default function RunResult() {
   const { requireTenantAndProvider } = useSetupFlow();
   const toast = useToast();
   const [crossOrganization, setCrossOrganization] = useState(false);
+  // Set after Switch in the cross-organization dialog; the rerun runs on the
+  // render where that organization is active, with fresh gates.
+  const [rerunAfterSwitch, setRerunAfterSwitch] = useState<string | null>(null);
+  const proceedRerunRef = useRef<(() => void) | null>(null);
+  const activeOrganizationId = activeOrganizationOf(state)?.id;
+  useEffect(() => {
+    if (!rerunAfterSwitch || activeOrganizationId !== rerunAfterSwitch) return;
+    setRerunAfterSwitch(null);
+    proceedRerunRef.current?.();
+  }, [activeOrganizationId, rerunAfterSwitch]);
   const run = state.runs.find((candidate) => candidate.id === id);
 
   const closeToRuns = () => navigate(`/runs${location.search}`);
@@ -136,6 +146,11 @@ export default function RunResult() {
   };
 
   const proceedRerun = () => {
+    proceedRerunImpl();
+  };
+  proceedRerunRef.current = proceedRerun;
+
+  const proceedRerunImpl = () => {
     if (requiresTeamReview) {
       navigate(
         run.office?.personaId
@@ -225,8 +240,11 @@ export default function RunResult() {
               variant="primary"
               onClick={() => {
                 setCrossOrganization(false);
-                void setActiveOrganization(runOrganization.id)
-                  .then(() => proceedRerun())
+                // The rerun continues once the switch reaches the app state:
+                // this closure still sees the organization before the switch.
+                const target = runOrganization.id;
+                void setActiveOrganization(target)
+                  .then(() => setRerunAfterSwitch(target))
                   .catch((caught) =>
                     toast.error(
                       ORGANIZATION_COPY.switchFailed(

@@ -726,3 +726,23 @@ it("shows a refused Run again start inside the review (review round 3)", async (
   expect(await within(dialog).findByText("The run did not start.")).toBeInTheDocument();
   expect(within(dialog).getByText(/Ollama isn't reachable/)).toBeInTheDocument();
 });
+
+it("runs Run for real after Switch from No organization without opening setup (Muse round 3)", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "planned", dryRun: true, tenantId: "tenant-1", finishedAt: "2026-10-31T12:00:00Z" });
+  const { activeTenantId: _none, ...state } = createMockAppState({
+    installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "write" })],
+    runs: [run],
+  });
+  const bridge = makeMockBridge({}, state);
+  renderWithPreflight(run.id, bridge);
+  await user.click(await screen.findByRole("button", { name: /Run for real/ }));
+  const dialog = await screen.findByRole("dialog", { name: /This run was in Contoso IT/ });
+  await user.click(within(dialog).getByRole("button", { name: "Switch to Contoso IT" }));
+  await waitFor(() => expect(bridge.setActiveOrganization).toHaveBeenCalledWith("org-tenant-1"));
+  await waitFor(() =>
+    expect(bridge.startRun).toHaveBeenCalledWith(run.agentSlug, expect.objectContaining({ runForRealOfRunId: run.id, tenantId: "tenant-1" })),
+  );
+  expect(screen.queryByRole("radio", { name: "OpenAdminOS app" })).not.toBeInTheDocument();
+  expect(bridge.startRun).toHaveBeenCalledTimes(1);
+});
