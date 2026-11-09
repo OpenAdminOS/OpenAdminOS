@@ -77,10 +77,12 @@ export function DataBoundaryProvider({ children }: { children: ReactNode }) {
     ).model;
 
     if (voiceHosted) {
+      // Voice runs on OpenAI: name its region, and say no tenant data is sent when nothing is connected.
       const trust = deriveTrustCopy({
-        provider: { name: "OpenAI", isLocal: false },
+        provider: { id: "openai", name: "OpenAI", isLocal: false },
         model: "GPT-Live-1",
         scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
+        noTenant: !activeTenant,
       });
       return {
         kind: "hosted",
