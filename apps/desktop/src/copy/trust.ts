@@ -43,6 +43,9 @@ export const LOCAL_BOUNDARY_COPY = {
  * strip and composer lines; tooltips, the reach map, the run review and the
  * hosted confirmation also show the detail.
  */
+/** Hosted Nova voice, for the same location function as chat providers. */
+export const NOVA_VOICE_PROVIDER = { id: "openai-realtime", name: "OpenAI" } as const;
+
 const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: string }>> = {
   // The CLI decides the channel: Claude Code can use Amazon Bedrock or
   // Google Vertex, Codex a configured endpoint, so the label names the CLI.
@@ -61,11 +64,16 @@ const HOSTED_DATA_LOCATIONS: Readonly<Record<string, { label: string; detail?: s
     detail:
       "Global deployments can process in any Azure region, Data Zone deployments within the US, EU or Asia Pacific, Standard deployments within your resource's geography.",
   },
+  // Nova voice talks to the OpenAI API directly, not through Codex.
+  [NOVA_VOICE_PROVIDER.id]: {
+    label: "OpenAI API · location set by your OpenAI workspace",
+    detail: "Processing follows your workspace's data residency setting.",
+  },
   copilot: { label: "GitHub Copilot · location not stated" },
   gemini: { label: "Google Gemini · location not stated" },
 };
 
-type LocatedProvider = Pick<ProviderSummary, "name"> & Partial<Pick<ProviderSummary, "id">>;
+type LocatedProvider = Pick<ProviderSummary, "name"> & { id?: string };
 
 export function providerDataLocation(provider: LocatedProvider): string {
   return (provider.id && HOSTED_DATA_LOCATIONS[provider.id]?.label) || `${provider.name} · location not stated`;

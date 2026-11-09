@@ -39,6 +39,7 @@ import {
   useConversationsOptional,
   ConversationWorkspaceProvider,
   chatToolHosts,
+  novaVoiceSentence,
   useDataBoundaryOptional,
   useShellChromeOptional,
   useUpdateStateOptional,
@@ -2307,7 +2308,14 @@ function ChatComposer({
       : "Ask a follow-up, or type / to run an agent"
     : SETUP_COPY.guestComposerPlaceholder;
   const activeProvider = providers.find((provider) => provider.id === activeProviderId);
-  const hostedSentence = `Prompts and tenant data go to ${activeProvider ? providerDataLocation(activeProvider) : "the selected provider"} while this model is selected.${dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : ""}`;
+  // Hosted voice with a local chat model names the voice destination and
+  // keeps the chat model local; without an organization no tenant data is sent.
+  const toolNote = dataBoundary.kind !== "none" && dataBoundary.toolHostsNote ? ` ${dataBoundary.toolHostsNote}` : "";
+  const hostedSentence = dataBoundary.kind === "hosted" && dataBoundary.isVoiceHosted
+    ? `${novaVoiceSentence(dataBoundary.voiceLocation ?? "the voice provider", Boolean(activeTenant), activeProvider?.isLocal ? activeProvider.name : undefined)}${toolNote}`
+    : activeTenant
+      ? `Prompts and tenant data go to ${activeProvider ? providerDataLocation(activeProvider) : "the selected provider"} while this model is selected.${toolNote}`
+      : `Prompts go to ${activeProvider ? providerDataLocation(activeProvider) : "the selected provider"} while this model is selected. No organization is active, so no tenant data is included.${toolNote}`;
 
   return (
     <div className="relative">

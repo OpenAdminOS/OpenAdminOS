@@ -713,6 +713,14 @@ describe("IntuneChat hosted-provider disclosure", () => {
     expect(screen.getByRole("note")).toHaveTextContent(sentence);
     expect(screen.getByRole("button", { name: "Where data goes" })).toHaveAttribute("aria-expanded", "true");
   });
+  it("says no tenant data is sent with a hosted model and no organization (design round review, Muse D)", async () => {
+    const { activeTenantId: _none, ...state } = createMockAppState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } });
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge: makeMockBridge({}, state) });
+    const note = await screen.findByRole("note");
+    expect(note).toHaveTextContent("Prompts go to Codex · location set by your account while this model is selected. No organization is active, so no tenant data is included.");
+    expect(note).not.toHaveTextContent("tenant data go to");
+  });
+
   it("adds the MCP disclosure to the hosted sentence and the shield tooltip when MCP servers are on", async () => {
     const bridge = makeMockBridge(
       { listIntuneChatConversations: vi.fn(async () => [conversation]), getIntuneChatMessages: answered("gpt-5") },

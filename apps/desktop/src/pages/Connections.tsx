@@ -46,7 +46,7 @@ import {
 import { PILOT_COPY } from "../shared/pilot-mode";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { hostedChannel } from "../shared/providers";
-import { chatToolHosts, deriveDataBoundary, useAppState, useDataBoundaryOptional } from "../state";
+import { chatToolHosts, deriveDataBoundary, novaVoiceSentence, useAppState, useDataBoundaryOptional } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
 
 interface ReachService {
@@ -82,7 +82,7 @@ export interface ReachModel {
   reportDestinations: string[] | null;
   reportDestinationsState: "ready" | "loading" | "failed";
   /** Set while hosted Nova voice is active, the same state the status strip uses. */
-  voice?: { provider: string; model?: string };
+  voice?: { provider: string; location: string; model?: string };
 }
 
 export function buildReachModel(state: AppState, connectors?: readonly ConnectorSummary[] | null, voiceHosted = false): ReachModel {
@@ -131,7 +131,7 @@ export function buildReachModel(state: AppState, connectors?: readonly Connector
     reportDestinations: sample ? [] : connectors ? reportDestinations(resultDestinations(state.installedAgents, connectors)) : null,
     reportDestinationsState: sample || connectors ? "ready" : connectors === null ? "failed" : "loading",
     ...(voiceBoundary?.kind === "hosted" && voiceBoundary.isVoiceHosted && voiceBoundary.voiceProvider
-      ? { voice: { provider: voiceBoundary.voiceProvider, ...(voiceBoundary.model ? { model: voiceBoundary.model } : {}) } }
+      ? { voice: { provider: voiceBoundary.voiceProvider, location: voiceBoundary.voiceLocation ?? voiceBoundary.voiceProvider, ...(voiceBoundary.model ? { model: voiceBoundary.model } : {}) } }
       : {}),
   };
 }
@@ -178,7 +178,9 @@ export function reachDescription(model: ReachModel): string {
     : model.reportDestinations.length > 0
       ? `Run reports and agent messages can go to ${listText(model.reportDestinations)} under saved delivery rules and agent steps.`
       : "Run reports and agent messages go nowhere: no saved rule or step sends to a connector.";
-  const voice = model.voice ? ` ${CONNECTIONS_COPY.map.voiceSentence(model.voice.provider)}` : "";
+  const voice = model.voice
+    ? ` ${novaVoiceSentence(model.voice.location, Boolean(model.organizationName))}${model.voice.model ? ` The voice model is ${model.voice.model}.` : ""}`
+    : "";
   return `${services} ${device} ${words} ${reports}${voice}`;
 }
 
@@ -451,7 +453,7 @@ function ReachMap({ model }: { model: ReachModel }) {
               <ReachRow
                 linkId="voice"
                 mark={<ReferenceMark name={model.voice.provider} />}
-                title={CONNECTIONS_COPY.map.voiceDestination(model.voice.provider)}
+                title={CONNECTIONS_COPY.map.voiceDestination(model.voice.location)}
                 state={model.voice.model ? <ReachState tone="leaves">{model.voice.model}</ReachState> : undefined}
               />
             </ul>
@@ -1135,7 +1137,7 @@ function NoOrganization({ model, onConnect, onShowReferences }: { model: ReachMo
               <ReferenceMark name={model.voice.provider} size="lg" />
               <div className="min-w-0">
                 <div className="text-base font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.map.voice}</div>
-                <div className="text-sm text-[var(--color-warning)]">{CONNECTIONS_COPY.map.voiceDestination(model.voice.provider)}</div>
+                <div className="text-sm text-[var(--color-warning)]">{CONNECTIONS_COPY.map.voiceDestination(model.voice.location)}</div>
               </div>
               <span />
               <span />

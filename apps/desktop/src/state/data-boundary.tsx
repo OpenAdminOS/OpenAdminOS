@@ -8,7 +8,7 @@ import {
   type SetStateAction,
 } from "react";
 
-import { deriveTrustCopy, providerDataLocation } from "../copy";
+import { NOVA_VOICE_PROVIDER, deriveTrustCopy, providerDataLocation, providerDataLocationDetail } from "../copy";
 import { resolveProviderDefaultModel, type AppState } from "../shared/openAdminOS";
 import { useAppState } from "./AppStateContext";
 import { PILOT_COPY } from "../shared/pilot-mode";
@@ -42,6 +42,8 @@ export type DataBoundary =
       isVoiceHosted: boolean;
       /** The provider that receives hosted voice audio, when voice is on. */
       voiceProvider?: string;
+      /** Where hosted voice sends audio, from the shared location function. */
+      voiceLocation?: string;
     };
 
 interface DataBoundaryContextValue {
@@ -83,17 +85,18 @@ export function deriveDataBoundary(state: AppState, voiceHosted = false): DataBo
   ).model;
 
   if (voiceHosted) {
-    const trust = deriveTrustCopy({
-      provider: { name: "OpenAI", isLocal: false },
-      model: "GPT-Live-1",
-      scope: { tenantNames: activeTenant ? [activeTenant.displayName] : [] },
-    });
+    // Hosted voice names its own destination, says whether tenant data is
+    // in scope, and keeps a local chat model honest.
+    const location = providerDataLocation(NOVA_VOICE_PROVIDER);
+    const detail = providerDataLocationDetail(NOVA_VOICE_PROVIDER);
+    const chatLocal = provider?.isLocal === true;
     return {
       kind: "hosted",
       label: "Voice · OpenAI",
       model: "GPT-Live-1",
-      voiceProvider: "OpenAI",
-      tooltip: `${trust.boundary ?? trust.strip} Nova voice audio and shared context are active.`,
+      voiceProvider: NOVA_VOICE_PROVIDER.name,
+      voiceLocation: location,
+      tooltip: `${novaVoiceSentence(location, Boolean(activeTenant), chatLocal ? provider?.name : undefined)}${detail ? ` ${detail}` : ""}`,
       isVoiceHosted: true,
     };
   }
@@ -172,4 +175,18 @@ export function useDataBoundary(): DataBoundaryContextValue {
 
 export function useDataBoundaryOptional(): DataBoundaryContextValue | undefined {
   return useContext(DataBoundaryContext);
+}
+
+/**
+ * What hosted Nova voice sends, as the strip tooltip and the composer say
+ * it: audio, shared context and its web searches, tenant data only with an
+ * organization, and a local chat model that stays on this device.
+ */
+export function novaVoiceSentence(location: string, hasOrganization: boolean, localChatModel?: string): string {
+  const what = hasOrganization
+    ? "Nova voice is active: audio, shared context with tenant data, and its web searches go to"
+    : "Nova voice is active: audio, shared context and its web searches go to";
+  const tenant = hasOrganization ? "" : " No organization is active, so no tenant data is included.";
+  const local = localChatModel ? ` The chat model, ${localChatModel}, stays on this device.` : "";
+  return `${what} ${location}.${tenant}${local}`;
 }
