@@ -1627,3 +1627,48 @@ O. [x] SPEC scan bullet says Gemini shows "sign-in not confirmed" until a Test.
 P. [x] Nova voice with no tenant names the voice surface; tested.
 Q. [x] `.cmd` shims are accepted on Windows. No test: the lookup reads the real file system.
 R. [x] Leftover double block removed.
+
+## PR #175 review round 2 (GPT-6.1-Sol and Claude evaluator, head 324eff4, 2026-11-09)
+
+Blocking
+1. [ ] Hosted sends bypass confirmation: preview and execution classify differently. One shared routing decision; consent enforced right before every hosted model call; deterministic-path test on both send paths.
+2. [ ] Startup discovery while the scan is pending (Office tick, menu bar, schedulers). Gate every background discovery path; test the startup sequence from a fresh store.
+
+Should fix
+3. [ ] Start LM Studio polls `/v1/v1/models`. Poll `${endpoint}/models`; test the store wiring with a stub server.
+4. [ ] Cancellation gaps: `discoverCli` spawns before checking the signal, Claude wrapper child survives, LM Studio drops the signal, Apple helper not abortable.
+5. [ ] Azure secret read blocks the whole scan; move into Azure's bounded check.
+6. [ ] HTTP failures look like install results; separate refused from timeout, parse and protocol failures.
+7. [ ] Retry and Start bypass the scan generation and in-flight guard; Start failure should not run a full scan.
+8. [ ] A failed Start of the secondary runtime is invisible.
+9. [ ] Manual scan with an enabled reference still says "Nothing leaves this device".
+10. [ ] Say that a started runtime keeps running after quit.
+11. [ ] Copilot row shows a command that no longer runs; show what actually runs per row.
+
+## PR #175 Muse Wonder Full round 2 (head 324eff4, run on Node 26)
+
+Blocking
+A. [ ] `listProviders` has no first-run gate (setActiveModel, list-providers IPC, testProvider, send preview).
+B. [ ] A shared in-flight scan drops the second caller's progress and scan id.
+
+Should fix
+C. [ ] Pending app state reports unchecked providers as available; show not checked and a loading surface.
+D. [ ] switchLocal sets provider and model in two calls; one host call with rollback.
+E. [ ] Exit actions stay enabled while an action is busy.
+F. [ ] Clear start and action errors on a new run.
+G. [ ] Inner HTTP timeouts, Azure and Apple failures map to negative results; pass the remaining budget; Apple SIGKILL escalation.
+H. [ ] Code-authoring detection needs a leading write or draft; widen request prefixes and verbs.
+I. [ ] Voice-hosted boundary passes no provider id or noTenant flag.
+J. [ ] Subtitle and ledger overstate what ran; state per row what ran.
+K. [ ] Cap concurrent Ollama `/api/show` calls.
+L. [ ] Focus management on open, settle, retry and close.
+M. [ ] The global key handler settles on Enter and Space from buttons.
+N. [ ] Continue to Chat before settle.
+
+Nits
+O. [ ] Windows Start: `.cmd`, `windowsHide`, missing `lms`.
+P. [ ] No-tenant multi-service card after a partial connect; card with a removed tenant.
+Q. [ ] Remember label and consent payload should name the model; host verifies it.
+R. [ ] Hosted with-tenant strip, boundary and confirmBody name the region.
+S. [ ] The sample data link misses its suffix.
+T. [ ] Tests: host Retry and concurrency, Codex and Copilot or Gemini hang-kill, tool-loop no-consent, empty `/models` integration.
