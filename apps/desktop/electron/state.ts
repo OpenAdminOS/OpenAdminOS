@@ -1,7 +1,8 @@
 import { OfficeService } from "./office.js";
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
-import { mkdir, open as openFile, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { syncDirectory, writeFileDurably } from "./durable-file.js";
 import { atomicRename } from "./atomic-rename.js";
 import {
   appendConfigurationAudit,
@@ -8040,32 +8041,23 @@ Return ONLY the YAML manifest. Do not include any commentary, headings, or markd
     };
     if (reconciled.notice) state.organizationMigration = reconciled.notice;
     else delete state.organizationMigration;
-    const recordedEvents = this.recordConfigurationChanges(state);
+    this.recordConfigurationChanges(state);
+    // Every file that holds audit history is flushed, not only the write
+    // that added events: a later unflushed replacement could lose them.
+    const durable = (state.configurationAudit?.length ?? 0) > 0;
     await mkdir(dirname(this.filePath), { recursive: true, mode: 0o700 });
     const serialized = `${JSON.stringify(state, null, 2)}\n`;
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     try {
-      await writeFile(tmpPath, serialized, { encoding: "utf8", mode: 0o600 });
-      // Audit events must survive a crash: flush the file before the rename
-      // and the directory after it.
-      if (recordedEvents > 0) await syncPath(tmpPath);
+      // Flushed through the handle that wrote it: Windows needs write access to flush.
+      await writeFileDurably(tmpPath, serialized, { durable, mode: 0o600 });
       await atomicRename(tmpPath, this.filePath);
-      if (recordedEvents > 0) await syncPath(dirname(this.filePath)).catch(() => undefined);
       this.writeGeneration += 1;
       this.lastReadSnapshot = state;
+      // A no-op on Windows; an unexpected failure is reported, not swallowed.
+      if (durable) await syncDirectory(dirname(this.filePath));
     } finally {
       await rm(tmpPath, { force: true });
     }
-  }
-}
-
-/** Flush a file or directory to disk. Directories cannot be opened for sync on Windows. */
-async function syncPath(path: string): Promise<void> {
-  if (process.platform === "win32" && !path.endsWith(".tmp")) return;
-  const handle = await openFile(path, "r");
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
   }
 }
