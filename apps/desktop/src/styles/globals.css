@@ -699,8 +699,8 @@ button:disabled {
    and a conic sweep turns while checks run, nodes enter staggered and pop
    as they resolve, found nodes draw a link to the device, and the choice
    rises in at the settle. Colour marks two facts only: green stays on this
-   device, amber leaves it. Easing values match the motion tokens PR #174
-   adds (--ease-out, --ease-in-out, --ease-spring). */
+   device, amber leaves it. Easing and durations use the shared motion tokens
+   (--ease-out, --ease-in-out, --ease-spring, --dur-state, --dur-enter). */
 @keyframes scan-device-in {
   from { opacity: 0; transform: translate(-50%, -50%) scale(0.92); }
   to { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -748,7 +748,7 @@ button:disabled {
   vector-effect: non-scaling-stroke;
   transform-origin: 50px 50px;
   transform-box: view-box;
-  animation: scan-ring-out 1.8s cubic-bezier(0.2, 0.8, 0.2, 1) infinite;
+  animation: scan-ring-out 1.8s var(--ease-out) infinite;
 }
 /* The one gradient on the screen, with a job: a 40 degree radar wedge. */
 .scan-sweep {
@@ -767,17 +767,19 @@ button:disabled {
 .scan-device {
   transform: translate(-50%, -50%);
   max-width: 104px;
-  box-shadow: 0 18px 40px -18px rgba(0, 0, 0, 0.45);
-  animation: scan-device-in 360ms cubic-bezier(0.34, 1.36, 0.64, 1) both;
+  animation: scan-device-in 360ms var(--ease-spring) both;
 }
+/* The shared DeviceTile fills the stage's 20 percent slot, at most 104 px. */
+.scan-device .device-tile { width: 100%; height: 100%; border-radius: 27%; }
+.scan-device .device-tile svg { width: 50%; height: auto; }
 /* Widths in viewBox units (the stage is about 520 px for 100 units): 1.25 px, 2.25 px selected. */
 .scan-link {
   stroke-width: 0.25;
   stroke-dasharray: 1;
   stroke-dashoffset: 1;
   opacity: 0.55;
-  animation: scan-link-draw 420ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
-  transition: opacity 240ms ease, stroke-width 240ms ease;
+  animation: scan-link-draw var(--dur-enter) var(--ease-in-out) forwards;
+  transition: opacity var(--dur-state) ease, stroke-width var(--dur-state) ease;
 }
 .scan-link[data-where="local"] { stroke: var(--color-success); }
 .scan-link[data-where="hosted"] { stroke: var(--color-warning); }
@@ -788,7 +790,7 @@ button:disabled {
 .scan-node {
   transform: translate(-50%, -22px) scale(0.8);
   opacity: 0;
-  transition: opacity 240ms ease, transform 320ms cubic-bezier(0.34, 1.36, 0.64, 1);
+  transition: opacity var(--dur-state) ease, transform 320ms var(--ease-spring);
 }
 .scan-node[data-visible="true"] {
   opacity: 1;
@@ -860,7 +862,7 @@ button:disabled {
   outline: 2px solid var(--color-text);
   outline-offset: 3px;
 }
-.scan-rise { animation: scan-rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.scan-rise { animation: scan-rise var(--dur-enter) var(--ease-out) both; }
 .scan-segment { background: var(--color-border); transition: background-color 240ms ease; }
 .scan-segment[data-done="true"] { background: var(--color-text-muted); }
 .scan-list-mark {
@@ -944,7 +946,7 @@ button:disabled {
 }
 .ms-link[data-state="connected"][data-animate="true"] {
   stroke-dashoffset: 1;
-  animation: scan-link-draw 420ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+  animation: scan-link-draw var(--dur-enter) var(--ease-in-out) forwards;
 }
 .service-check {
   appearance: none;
@@ -1200,6 +1202,7 @@ select { color-scheme: inherit; }
   color: var(--color-text-soft);
   box-shadow: inset 0 0 0 1px var(--color-border-soft);
 }
+.svc-mark[data-service="provider"],
 .svc-mark[data-service="reference"] {
   background: var(--color-surface);
   color: var(--color-text-soft);

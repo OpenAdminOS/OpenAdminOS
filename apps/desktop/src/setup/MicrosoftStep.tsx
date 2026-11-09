@@ -6,6 +6,7 @@ import { ServiceLogo, ServiceMark } from "../components/ServiceMark";
 import { useToast } from "../components/Toast";
 import { adminApprovalMessage } from "../components/chat/ChatFirstRun";
 import { IconCheck, IconLogo } from "../components/icons";
+import { DeviceTile } from "../components/DeviceTile";
 import { MICROSOFT_STEP_COPY, NOT_CONNECTED_COPY } from "../copy";
 import { copyTextToClipboard } from "../shared/clipboard";
 import {
@@ -410,8 +411,9 @@ function MicrosoftStage({
           );
         })}
       </svg>
-      <div className="scan-device absolute left-1/2 top-1/2 flex aspect-square w-[20%] items-center justify-center rounded-[27%] bg-[var(--color-accent)]">
-        <IconLogo size={44} className="text-[var(--color-on-accent)]" />
+      {/* #174's shared device tile, sized to the stage. */}
+      <div className="scan-device absolute left-1/2 top-1/2 aspect-square w-[20%]">
+        <DeviceTile size="xl" />
       </div>
       {AVAILABLE_SERVICES.map((service, index) => {
         const angle = angleOf(index, count);
