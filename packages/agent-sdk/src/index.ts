@@ -2897,7 +2897,7 @@ export interface OpenAdminOSApi {
    * with a short timeout. Each result is also sent to `onModelScanProgress`
    * as it resolves. Local only: loopback ports, local files and processes.
    */
-  startModelScan?(): Promise<ModelScanResult>;
+  startModelScan?(scanId?: string): Promise<ModelScanResult>;
   /**
    * Starts Ollama or LM Studio found installed but not running, waits for
    * its loopback endpoint and scans again. `message` explains a failure.
@@ -2905,7 +2905,8 @@ export interface OpenAdminOSApi {
   startLocalRuntime?(providerId: ProviderId): Promise<{ started: boolean; message?: string; scan: ModelScanResult }>;
   /** Runs one check of the scan again, with a longer timeout. */
   retryModelScanProbe?(providerId: ProviderId): Promise<ModelScanResult>;
-  onModelScanProgress?(listener: (probe: ModelScanProbe) => void): () => void;
+  /** `scanId` is the id the window passed to `startModelScan`; results of another run are ignored. */
+  onModelScanProgress?(listener: (probe: ModelScanProbe, scanId?: string) => void): () => void;
   /** Records that the first-launch scan was finished or skipped. */
   completeFirstRunScan?(): Promise<AppState>;
   testProvider(providerId: ProviderId, model?: string): Promise<ProviderTestResult>;

@@ -410,3 +410,30 @@ describe("review round 1 on PR #175", () => {
     assert.equal(signedOut.summary, "Installed, not signed in");
   });
 });
+
+describe("one scan at a time (review round 1, finding L)", () => {
+  it("shares a scan that is already running instead of starting a second set of checks", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "openadminos-model-scan-"));
+    let listed = 0;
+    const store = new AppStateStore({
+      filePath: join(dir, "state.json"), userDataPath: dir, statsApiUrl: "",
+      tokenStore: { read: async () => "", write: async () => undefined },
+      providerListFactory: async () => {
+        listed += 1;
+        await new Promise((resolve) => setTimeout(resolve, 30));
+        return providerCatalog.map((provider) => ({ ...provider, status: "not-installed" as const, models: [] }));
+      },
+    });
+    try {
+      const [first, second] = await Promise.all([store.scanModels(), store.scanModels()]);
+      assert.equal(first, second);
+      const checks = first.probes.length;
+      assert.equal(listed, checks, "each check ran once");
+      await store.scanModels();
+      assert.equal(listed, checks * 2, "a later scan runs again");
+    } finally {
+      store.close();
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});

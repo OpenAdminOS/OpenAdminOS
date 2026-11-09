@@ -211,9 +211,13 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
         setAnnouncement(MODEL_SCAN_COPY.announce(probe.name, probe.summary));
       });
     };
-    const unsubscribe = api.onModelScanProgress?.(reveal);
+    // Only this run's progress is shown: an older scan's events are ignored.
+    const scanId = window.crypto.randomUUID();
+    const unsubscribe = api.onModelScanProgress?.((probe, id) => {
+      if (id === scanId) reveal(probe);
+    });
     void api
-      .startModelScan()
+      .startModelScan(scanId)
       .then((scan) => {
         if (cancelled) return;
         for (const probe of scan.probes) {

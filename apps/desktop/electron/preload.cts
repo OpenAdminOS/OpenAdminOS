@@ -71,12 +71,12 @@ const api: OpenAdminOSApi = {
   setRegistryInstallCountsEnabled: (enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-registry-install-counts-enabled", enabled),
   listProviders: () => ipcRenderer.invoke("openadminos:list-providers"),
-  startModelScan: () => ipcRenderer.invoke("openadminos:model-scan"),
+  startModelScan: (scanId?: string) => ipcRenderer.invoke("openadminos:model-scan", scanId),
   retryModelScanProbe: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:model-scan-retry", providerId),
   startLocalRuntime: (providerId: ProviderId) => ipcRenderer.invoke("openadminos:start-local-runtime", providerId),
   completeFirstRunScan: () => ipcRenderer.invoke("openadminos:complete-first-run-scan"),
-  onModelScanProgress: (listener: (probe: ModelScanProbe) => void): (() => void) => {
-    const handler = (_event: unknown, probe: ModelScanProbe) => listener(probe);
+  onModelScanProgress: (listener: (probe: ModelScanProbe, scanId?: string) => void): (() => void) => {
+    const handler = (_event: unknown, payload: { scanId?: string; probe: ModelScanProbe }) => listener(payload.probe, payload.scanId);
     ipcRenderer.on("openadminos:model-scan-progress", handler);
     return () => {
       ipcRenderer.removeListener("openadminos:model-scan-progress", handler);

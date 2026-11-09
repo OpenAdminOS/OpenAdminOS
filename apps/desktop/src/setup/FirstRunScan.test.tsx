@@ -19,19 +19,21 @@ const PROBES: ModelScanProbe[] = [
 ];
 
 function scanBridge(outcome: ModelScanOutcome, probes: ModelScanProbe[] = PROBES, state = createMockAppState({ tenants: [], activeTenantId: undefined, firstRunScanPending: true })) {
-  let listener: ((probe: ModelScanProbe) => void) | undefined;
+  let listener: ((probe: ModelScanProbe, scanId?: string) => void) | undefined;
+  let currentScanId: string | undefined;
   let finish: (() => void) | undefined;
   const result: ModelScanResult = { probes, outcome, startedAt: "2026-11-09T09:00:00.000Z", finishedAt: "2026-11-09T09:00:00.120Z" };
   const bridge = makeMockBridge(
     {
-      onModelScanProgress: vi.fn((next: (probe: ModelScanProbe) => void) => {
+      onModelScanProgress: vi.fn((next: (probe: ModelScanProbe, scanId?: string) => void) => {
         listener = next;
         return () => { listener = undefined; };
       }),
-      startModelScan: vi.fn(() => new Promise<ModelScanResult>((resolve) => {
-        for (const entry of probes) listener?.({ ...entry, state: "checking", summary: "Checking", facts: [] });
+      startModelScan: vi.fn((scanId?: string) => new Promise<ModelScanResult>((resolve) => {
+        currentScanId = scanId;
+        for (const entry of probes) listener?.({ ...entry, state: "checking", summary: "Checking", facts: [] }, scanId);
         finish = () => {
-          for (const entry of probes) listener?.(entry);
+          for (const entry of probes) listener?.(entry, scanId);
           resolve(result);
         };
       })),
@@ -45,7 +47,12 @@ function scanBridge(outcome: ModelScanOutcome, probes: ModelScanProbe[] = PROBES
     },
     state,
   );
-  return { bridge, finish: () => finish?.() };
+  return {
+    bridge,
+    finish: () => finish?.(),
+    /** Sends a progress event as an older scan run would. */
+    emitForeign: (entry: ModelScanProbe) => listener?.(entry, `${currentScanId}-older`),
+  };
 }
 
 function Where() {
@@ -236,6 +243,18 @@ describe("first-launch model scan screen", () => {
     await user.click(screen.getByRole("button", { name: "Use OpenAdmin 8B" }));
     await waitFor(() => expect(bridge.setActiveProvider).toHaveBeenCalledWith("ollama"));
     await waitFor(() => expect(bridge.setActiveModel).toHaveBeenCalledWith("ollama", "openadminos/openadmin-8b:latest"));
+  });
+
+  it("ignores progress from another scan run (review round 1, finding L)", async () => {
+    const { bridge, emitForeign } = scanBridge({ kind: "nothing" });
+    renderGate(bridge);
+    await screen.findByText("0 of 4 checked");
+    emitForeign(probe("gemini", "Gemini CLI", "hosted", "gemini --version"));
+    emitForeign({ ...PROBES[2]!, summary: "Signed out elsewhere" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(screen.queryByText("Gemini CLI")).not.toBeInTheDocument();
+    expect(screen.queryByText("Signed out elsewhere")).not.toBeInTheDocument();
+    expect(screen.getByText("0 of 4 checked")).toBeInTheDocument();
   });
 
   it("does not show after the first launch, and opens again from Scan again", async () => {

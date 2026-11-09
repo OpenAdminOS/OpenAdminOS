@@ -3279,45 +3279,41 @@ export class AppStateStore {
     azureOpenAIConfig: AzureOpenAIProviderConfig | undefined,
     azureOpenAIConfigError: string | undefined,
   ): Promise<ProviderSummary> {
-    {
-      {
-        try {
-          if (provider.id === "ollama") return await checkOllama(provider);
-          if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
-          if (provider.id === "lm-studio") return await checkLmStudio(provider);
-          if (provider.id === "anthropic") return await checkClaudeCode(provider);
-          if (provider.id === "openai") return await checkCodex(provider);
-          if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);
-          if (provider.id === "azure-openai") {
-            if (azureOpenAIConfigError) {
-              return {
-                ...provider,
-                status: "error",
-                detail: azureOpenAIConfigError,
-                models: [],
-              };
-            }
-            return await checkAzureOpenAI(
-              provider,
-              azureOpenAIConfig ?? this.emptyAzureOpenAIConfig(),
-            );
-          }
-          return provider;
-        } catch (error) {
-          // A single provider check must never abort the whole app state.
-          // Tenant connection reads app state, so a probing failure here used
-          // to surface as a failed sign-in (e.g. a Windows spawn EINVAL).
+    try {
+      if (provider.id === "ollama") return await checkOllama(provider);
+      if (provider.id === "apple-foundation") return await checkAppleFoundation(provider);
+      if (provider.id === "lm-studio") return await checkLmStudio(provider);
+      if (provider.id === "anthropic") return await checkClaudeCode(provider);
+      if (provider.id === "openai") return await checkCodex(provider);
+      if (provider.id === "copilot" || provider.id === "gemini") return await checkAdditionalCli(provider);
+      if (provider.id === "azure-openai") {
+        if (azureOpenAIConfigError) {
           return {
             ...provider,
             status: "error",
-            detail:
-              error instanceof Error
-                ? error.message
-                : `${provider.name} could not be checked. Refresh providers to retry.`,
+            detail: azureOpenAIConfigError,
             models: [],
           };
         }
+        return await checkAzureOpenAI(
+          provider,
+          azureOpenAIConfig ?? this.emptyAzureOpenAIConfig(),
+        );
       }
+      return provider;
+    } catch (error) {
+      // A single provider check must never abort the whole app state.
+      // Tenant connection reads app state, so a probing failure here used
+      // to surface as a failed sign-in (e.g. a Windows spawn EINVAL).
+      return {
+        ...provider,
+        status: "error",
+        detail:
+          error instanceof Error
+            ? error.message
+            : `${provider.name} could not be checked. Refresh providers to retry.`,
+        models: [],
+      };
     }
   }
 
@@ -3360,6 +3356,19 @@ export class AppStateStore {
    * hosted providers are only offered.
    */
   async scanModels(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
+    // One scan at a time: a second request while one runs shares it, so a
+    // double click never starts a second set of checks.
+    if (this.modelScanInFlight) return this.modelScanInFlight;
+    const run = this.runModelScanOnce(onProbe).finally(() => {
+      this.modelScanInFlight = undefined;
+    });
+    this.modelScanInFlight = run;
+    return run;
+  }
+
+  private modelScanInFlight: Promise<ModelScanResult> | undefined;
+
+  private async runModelScanOnce(onProbe?: (probe: ModelScanProbe) => void): Promise<ModelScanResult> {
     const startedAt = this.clock().toISOString();
     const found = new Map<ProviderId, ProviderSummary>();
     const probes = await runModelScan({ checks: await this.modelScanChecks(found), ...(onProbe ? { onProbe } : {}) });

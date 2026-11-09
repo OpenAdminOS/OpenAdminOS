@@ -5545,11 +5545,13 @@ function registerIpcHandlers() {
   // The first-launch model scan: each check is sent to the window that asked as it resolves.
   ipcMain.handle(
     "openadminos:model-scan",
-    handleTrusted((event) =>
-      store.scanModels((probe) => {
-        if (!event.sender.isDestroyed()) event.sender.send("openadminos:model-scan-progress", probe);
-      }),
-    ),
+    handleTrusted((event, scanId: unknown) => {
+      // Progress carries the id of the scan that asked, so the window ignores an older run.
+      const id = typeof scanId === "string" && scanId.length <= 64 ? scanId : undefined;
+      return store.scanModels((probe) => {
+        if (!event.sender.isDestroyed()) event.sender.send("openadminos:model-scan-progress", { scanId: id, probe });
+      });
+    }),
   );
   ipcMain.handle(
     "openadminos:model-scan-retry",
