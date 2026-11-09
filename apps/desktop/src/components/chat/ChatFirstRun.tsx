@@ -359,15 +359,22 @@ export function NotConnectedCard({
   });
   const services = servicesOfParts(notConnected.partIds);
   const serviceNames = formatServiceList(services.map((service) => service.title));
-  const tenant = notConnected.tenantId ? tenants.find((entry) => entry.id === notConnected.tenantId) : undefined;
+  const askedTenant = notConnected.tenantId ? tenants.find((entry) => entry.id === notConnected.tenantId) : undefined;
+  // The tenant the question was about was removed since: the card offers to connect one again.
+  const tenantRemoved = Boolean(notConnected.tenantId && !askedTenant);
   const noTenant = notConnected.reason === "no-tenant";
+  // A no-tenant card whose Connect added a tenant with only some of the
+  // services follows that tenant and offers what is still missing there.
+  const connectedSince = noTenant && activeTenant && activeTenant.kind !== "sample" ? activeTenant : undefined;
+  const tenant = askedTenant ?? connectedSince;
   const resolved = notConnectedResolved(notConnected, activeTenant);
   // The next action follows what is still missing: after one service is
   // granted, the card offers the others, and Ask again once none is left.
-  const grantsFrom = tenant ?? (noTenant ? undefined : activeTenant);
+  const grantsFrom = tenant ?? (noTenant || tenantRemoved ? undefined : activeTenant);
   const available = grantsFrom ? availableScopeSet(grantsFrom) : undefined;
   const missingParts = available ? parts.filter((part) => !part.scopes.every((scope) => available.has(scope.name))) : parts;
   const missingServices = servicesOfParts(missingParts.map((part) => part.id));
+  const connectFirst = (noTenant && !connectedSince) || tenantRemoved;
 
   if (resolved && activeTenant) {
     return (
@@ -394,18 +401,25 @@ export function NotConnectedCard({
     );
   }
 
-  const title = noTenant
-    ? serviceNames
-      ? NOT_CONNECTED_COPY.needsTitle(serviceNames)
-      : NOT_CONNECTED_COPY.needsTenantTitle
-    : notConnected.reason === "service-missing"
-      ? `${serviceNames} ${services.length === 1 ? "is" : "are"} not connected for ${tenant?.displayName ?? "this tenant"}`
-      : NOT_CONNECTED_COPY.needsTitle(formatServiceList(parts.map(partLabel)));
-  const body = noTenant
-    ? serviceNames
-      ? NOT_CONNECTED_COPY.noTenantBody(serviceNames)
-      : NOT_CONNECTED_COPY.noTenantGenericBody
-    : NOT_CONNECTED_COPY.tenantBody(tenant?.displayName ?? "this tenant");
+  const missingNames = formatServiceList(missingServices.map((service) => service.title));
+  const title = connectedSince && missingNames
+    ? `${missingNames} ${missingServices.length === 1 ? "is" : "are"} not connected for ${connectedSince.displayName}`
+    : noTenant || tenantRemoved
+      ? serviceNames
+        ? NOT_CONNECTED_COPY.needsTitle(serviceNames)
+        : NOT_CONNECTED_COPY.needsTenantTitle
+      : notConnected.reason === "service-missing"
+        ? `${serviceNames} ${services.length === 1 ? "is" : "are"} not connected for ${tenant?.displayName ?? "this tenant"}`
+        : NOT_CONNECTED_COPY.needsTitle(formatServiceList(parts.map(partLabel)));
+  const body = connectedSince
+    ? NOT_CONNECTED_COPY.tenantBody(connectedSince.displayName)
+    : tenantRemoved
+      ? NOT_CONNECTED_COPY.removedTenantBody(serviceNames || "Microsoft 365")
+      : noTenant
+        ? serviceNames
+          ? NOT_CONNECTED_COPY.noTenantBody(serviceNames)
+          : NOT_CONNECTED_COPY.noTenantGenericBody
+        : NOT_CONNECTED_COPY.tenantBody(tenant?.displayName ?? "this tenant");
   const otherParts = services.flatMap((service) => {
     const rest = service.parts.filter((part) => !part.planned && !notConnected.partIds.includes(part.id));
     return rest.length > 0 ? [NOT_CONNECTED_COPY.otherParts(service.title, rest.map((part) => part.title.toLowerCase()).join(", "))] : [];
@@ -435,12 +449,12 @@ export function NotConnectedCard({
           <p className="mt-1 text-sm leading-5 text-[var(--color-text-muted)]">{body}</p>
         </div>
       </div>
-      {parts.length > 0 || noTenant ? (
+      {parts.length > 0 || connectFirst ? (
         <ul aria-label="Permissions" className="mt-3 space-y-2 border-t border-[var(--color-border-soft)] pt-3">
           {parts.map((part) => (
             <PermissionRow key={part.id} label={services.length > 1 ? partLabel(part) : part.title} scopes={part.scopes.map((scope) => scope.name)} />
           ))}
-          {noTenant ? <PermissionRow label={NOT_CONNECTED_COPY.signInPart} scopes={[...BASELINE_SCOPES]} /> : null}
+          {connectFirst ? <PermissionRow label={NOT_CONNECTED_COPY.signInPart} scopes={[...BASELINE_SCOPES]} /> : null}
           {otherParts.map((line) => (
             <li key={line} className="text-sm text-[var(--color-text-muted)]">
               {line}
@@ -449,7 +463,7 @@ export function NotConnectedCard({
         </ul>
       ) : null}
       <div className="mt-4 flex flex-wrap gap-2">
-        {noTenant ? (
+        {connectFirst ? (
           <>
             <Button size="sm" variant="primary" onClick={() => openSetupForParts(notConnected.partIds)}>
               {serviceNames ? NOT_CONNECTED_COPY.connect(serviceNames) : NOT_CONNECTED_COPY.connectTenant}

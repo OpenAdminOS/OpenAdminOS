@@ -80,6 +80,8 @@ export const NOT_CONNECTED_COPY = {
     `Chat reads this from ${services}, and nothing is connected yet. Connect ${services} to answer this. Your question is kept and no tenant data was read.`,
   noTenantGenericBody:
     "Chat reads this from your Microsoft 365 tenant, and nothing is connected yet. Connect a tenant to answer this. Your question is kept and no tenant data was read.",
+  removedTenantBody: (services: string) =>
+    `The tenant this question was about is no longer in OpenAdminOS. Connect a tenant with ${services} to answer this. Your question is kept and no tenant data was read.`,
   tenantBody: (tenant: string) =>
     `Add it for ${tenant} to answer this. Your question is kept and nothing was read from the missing service.`,
   signInPart: "Sign-in",
