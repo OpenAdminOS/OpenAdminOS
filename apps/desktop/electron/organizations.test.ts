@@ -995,6 +995,25 @@ describe("reconcile keeps what it cannot use (Muse round 3)", () => {
     assert.equal(scheduleOf(result.installedAgents, "unknown")?.organizationId, undefined);
   });
 
+  it("leaves a schedule unassigned when several records share its over-long id (Muse round 5)", () => {
+    const shared = `org-${"s".repeat(300)}`;
+    const result = reconcileOrganizations({
+      rawOrganizations: [
+        { id: shared, name: "Woodgrove", createdAt: "x", connections: { microsoft365: { tenantId: woodgrove.id } } },
+        { id: shared, name: "Fabrikam", createdAt: "x", connections: { microsoft365: { tenantId: fabrikam.id } } },
+      ],
+      rawNotice: undefined,
+      tenants,
+      installedAgents: [agent("shared", { schedule: { ...schedule(), organizationId: shared } })] as unknown as AgentSummary[],
+    });
+    // Both records are kept under fresh ids; neither takes the schedule.
+    assert.deepEqual(
+      result.organizations.map((organization) => organization.name).sort(),
+      ["Fabrikam", "Woodgrove"],
+    );
+    assert.equal(scheduleOf(result.installedAgents, "shared")?.organizationId, undefined);
+  });
+
   it("counts only the schedules the migration moved", () => {
     const tenantsWithOrg = [woodgrove, fabrikam] as unknown as TenantRecord[];
     const result = reconcileOrganizations({
