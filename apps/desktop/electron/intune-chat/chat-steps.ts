@@ -10,10 +10,17 @@ import type {
 import { definitionForResource, planChatContext } from "./planner.js";
 import { normalizeSourceUrl } from "../../src/shared/chat-steps.js";
 import { isMcpChatToolName, isTenantTool, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
+import { isSplashtopReadTool } from "../splashtop/reads.js";
 
 export const LEARN_SERVER_ID = "microsoft-learn";
 export const ON_DEVICE = "On device";
 export const MICROSOFT_GRAPH = "Microsoft Graph";
+export const SPLASHTOP_OPEN_API = "Splashtop Open API";
+
+/** "list computers" for splashtop_list_computers. */
+function splashtopToolLabel(tool: string): string {
+  return tool.replace(/^splashtop_/, "").replace(/_/g, " ");
+}
 
 /** A passage from the local docs index, as retrieval returns it. */
 export interface DocsIndexPassage {
@@ -373,6 +380,9 @@ export function toolStepStart(
     };
   }
   if (tool === "web_search") return { kind: "tool", title: "Searching the web", origin: "model", originLabel: modelLabel };
+  if (isSplashtopReadTool(tool)) {
+    return { kind: "tool", title: "Reading Splashtop", detail: splashtopToolLabel(tool), origin: "graph", originLabel: SPLASHTOP_OPEN_API };
+  }
   const copy = TOOL_STEP[tool]!;
   const label = resourceLabel(params);
   const path = tool === "graph_get" && params && typeof params === "object" ? (params as Record<string, unknown>).path : undefined;
@@ -411,6 +421,12 @@ export function toolStepFinish(entry: IntuneChatToolTraceEntry): Partial<IntuneC
     return { status: "completed", title: `Asked ${serverName}`, detail: `${tool} · ${count > 0 ? shown : `answer from ${host}`}${more}`, durationMs };
   }
   if (entry.tool === "web_search") return entry.error ? { status: "failed", title: "Web search failed", detail: entry.error, durationMs } : { status: "completed", title: "Searched the web", detail: entry.resultSummary, durationMs };
+  if (isSplashtopReadTool(entry.tool)) {
+    const what = splashtopToolLabel(entry.tool);
+    return entry.error
+      ? { status: "failed", title: "Splashtop read failed", detail: `${what} · ${entry.error}`, durationMs }
+      : { status: "completed", title: "Read Splashtop", detail: `${what} · ${entry.resultSummary}`, durationMs };
+  }
   const copy = TOOL_STEP[entry.tool];
   const label = resourceLabel(entry.params);
   if (entry.error) return { status: "failed", title: copy?.failed ?? "Tool failed", detail: entry.error, durationMs };
@@ -470,6 +486,7 @@ const REPAIR: Record<Extract<ModelStepOutcome, { kind: "repair" }>["reason"], st
 /** The plain decision of a tool call, such as "Chose to ask Microsoft Learn" or "Chose to query cached managed devices". */
 export function toolDecision(tool: IntuneChatInvestigationToolName, params: unknown, mcp: McpChatTool | undefined): string {
   if (isMcpChatToolName(tool)) return `Chose to ask ${mcp?.serverName ?? "an MCP server"}`;
+  if (isSplashtopReadTool(tool)) return `Chose to read Splashtop ${splashtopToolLabel(tool)}`;
   if (tool === "query_cache") {
     const label = resourceLabel(params);
     if (!label) return "Chose to query cached data";

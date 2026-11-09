@@ -1202,6 +1202,11 @@ select { color-scheme: inherit; }
   color: var(--color-text-soft);
   box-shadow: inset 0 0 0 1px var(--color-border-soft);
 }
+/* Splashtop's square logo has a dark wordmark, so its tile stays white in both themes. */
+.svc-mark[data-service="splashtop"] {
+  background: #fff;
+  box-shadow: inset 0 0 0 1px var(--color-border-soft);
+}
 .svc-mark[data-service="provider"],
 .svc-mark[data-service="reference"] {
   background: var(--color-surface);

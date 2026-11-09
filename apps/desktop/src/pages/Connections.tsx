@@ -53,6 +53,8 @@ import { hostedChannel } from "../shared/providers";
 import { chatToolHosts, deriveDataBoundary, novaVoiceSentence, useAppState, useDataBoundaryOptional } from "../state";
 import { ConnectorsSettingsSection } from "./Connectors";
 import { TenantCleanupNotice } from "../components/TenantCleanupNotice";
+import { SplashtopServiceRow } from "../components/SplashtopConnection";
+import { SPLASHTOP_COPY } from "../copy/splashtop";
 
 interface ReachService {
   serviceId: ServiceId;
@@ -1260,6 +1262,18 @@ export default function Connections() {
     : undefined;
   const savedRegistrations = state.savedAppRegistrations ?? [];
   const view: ConnectionsView = searchParams.get("view") === "organizations" ? "organizations" : "connections";
+  // The Marketplace Splashtop listing opens the connect step here.
+  const connectSplashtop = searchParams.get("connect") === "splashtop";
+  const clearConnectParam = useCallback(() => {
+    setSearchParams((current) => {
+      const params = new URLSearchParams(current);
+      params.delete("connect");
+      return params;
+    }, { replace: true });
+  }, [setSearchParams]);
+  const splashtopConnection = organization
+    ? state.splashtopConnections?.find((entry) => entry.organizationId === organization.id)
+    : undefined;
   const setView = (next: string) => {
     setSearchParams((current) => {
       const params = new URLSearchParams(current);
@@ -1326,7 +1340,14 @@ export default function Connections() {
             ) : (
               <div role="tabpanel" id="connections-view-connections" aria-label={organization?.name ?? ORGANIZATION_COPY.noOrganization}>
                 {!organization ? (
-                  <NoOrganization model={reach} onConnect={openMicrosoftStep ?? openSetup} onShowReferences={showReferences} />
+                  <>
+                    {connectSplashtop ? (
+                      <div role="status" className="mb-4 rounded-lg bg-[var(--color-info-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]">
+                        {SPLASHTOP_COPY.needsMicrosoft365}
+                      </div>
+                    ) : null}
+                    <NoOrganization model={reach} onConnect={openMicrosoftStep ?? openSetup} onShowReferences={showReferences} />
+                  </>
                 ) : (
                   <>
                     <ReachMap model={reach} />
@@ -1338,6 +1359,12 @@ export default function Connections() {
                         <strong className="text-sm font-medium text-[var(--color-text)]">{CONNECTIONS_COPY.otherServicesHeading}</strong>
                         <span className="text-sm text-[var(--color-text-muted)]">{CONNECTIONS_COPY.otherServicesBody}</span>
                       </div>
+                      <SplashtopServiceRow
+                        organization={organization}
+                        connection={splashtopConnection}
+                        openConnect={connectSplashtop}
+                        onConnectHandled={clearConnectParam}
+                      />
                       <div className="grid grid-cols-[30px_minmax(0,1fr)_auto] items-center gap-3 border-y border-[var(--color-border-soft)] py-3">
                         <span aria-hidden="true" className="svc-mark" data-size="lg" data-off="true">+</span>
                         <div className="min-w-0">

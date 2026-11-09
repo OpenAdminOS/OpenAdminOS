@@ -309,6 +309,18 @@ const api: OpenAdminOSApi = {
     ipcRenderer.invoke("openadminos:uninstall-mcp-server", serverId),
   setMcpServerEnabled: (serverId: string, enabled: boolean) =>
     ipcRenderer.invoke("openadminos:set-mcp-server-enabled", serverId, enabled),
+  connectSplashtop: (input: unknown) =>
+    ipcRenderer.invoke("openadminos:connect-splashtop", input),
+  testSplashtop: (organizationId: string) =>
+    ipcRenderer.invoke("openadminos:test-splashtop", organizationId),
+  rotateSplashtopToken: (input: unknown) =>
+    ipcRenderer.invoke("openadminos:rotate-splashtop-token", input),
+  disconnectSplashtop: (organizationId: string) =>
+    ipcRenderer.invoke("openadminos:disconnect-splashtop", organizationId),
+  listSplashtopChangeTargets: (organizationId: string, kind: string) =>
+    ipcRenderer.invoke("openadminos:list-splashtop-change-targets", organizationId, kind),
+  prepareSplashtopChange: (input: unknown) =>
+    ipcRenderer.invoke("openadminos:prepare-splashtop-change", input),
   exportDriftBaseline: (input) =>
     ipcRenderer.invoke("openadminos:export-drift-baseline", input),
   readDriftBundleFile: () =>

@@ -4,6 +4,7 @@ import type { ManagedPolicyStatus } from "./managed-policy.js";
 export * from "./services.js";
 export * from "./organizations.js";
 export * from "./managed-policy.js";
+export * from "./splashtop.js";
 
 export type ProviderId =
   | "ollama"
@@ -133,6 +134,17 @@ export * from "./write-limits.js";
 export * from "./graph-access.js";
 import type { WriteLimits } from "./write-limits.js";
 import type { GraphAccessDenial } from "./graph-access.js";
+import type {
+  ConnectSplashtopInput,
+  PrepareSplashtopChangeInput,
+  RotateSplashtopTokenInput,
+  SplashtopChangeTarget,
+  SplashtopChangeKind,
+  SplashtopChatToolName,
+  SplashtopConnectionRecord,
+  SplashtopConnectionSummary,
+  SplashtopRegion,
+} from "./splashtop.js";
 
 export type AgentCategory =
   | "devices"
@@ -834,6 +846,8 @@ export interface OrganizationRecord {
  */
 export interface OrganizationConnections {
   microsoft365?: { tenantId: string };
+  /** The Splashtop Open API connection. The token is never part of state. */
+  splashtop?: SplashtopConnectionRecord;
   /**
    * Connections of services this version does not know, kept as they were
    * so a connection made by a newer version survives a downgrade.
@@ -960,7 +974,7 @@ export interface RunRecord {
    * deterministically from drift; "external-proposal" plans arrive
    * through the MCP gateway and can never self-apply.
    */
-  origin?: "baseline-rollback" | "external-proposal";
+  origin?: "baseline-rollback" | "external-proposal" | "splashtop-change";
   rollback?: {
     baselineId: string;
     requiredScopes: string[];
@@ -970,6 +984,16 @@ export interface RunRecord {
   external?: {
     clientName: string;
     requiredScopes: string[];
+  };
+  /**
+   * Set for "splashtop-change" runs: a host-built Splashtop plan. It
+   * applies through the Splashtop connection of this organization only,
+   * after the same typed confirmation gate.
+   */
+  splashtop?: {
+    organizationId: string;
+    kind: SplashtopChangeKind;
+    region: SplashtopRegion;
   };
   status: RunStatus;
   queuedAt: string;
@@ -1238,6 +1262,8 @@ export interface AppState {
   chatToolUse?: ChatToolUseStatus;
   /** The IT policy file in force, when a policy file exists on this device. */
   managedPolicy?: ManagedPolicyStatus;
+  /** Splashtop connections of the organizations on this device. Never holds a token. */
+  splashtopConnections?: SplashtopConnectionSummary[];
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -1401,6 +1427,7 @@ export type IntuneChatInvestigationToolName =
   | "refresh_resource"
   | "query_drift"
   | "web_search"
+  | SplashtopChatToolName
   | McpChatToolName;
 
 /**
@@ -1436,6 +1463,8 @@ export interface McpServerSummary {
   useFor: string;
   auth: McpServerAuth;
   readOnly: true;
+  /** Built into OpenAdminOS: it calls the public API at `host` from this device, with no MCP server in between. */
+  builtIn?: true;
   installed: boolean;
   enabled: boolean;
   installedAt?: string;
@@ -3124,6 +3153,17 @@ export interface OpenAdminOSApi {
   setMcpServerEnabled?(serverId: string, enabled: boolean): Promise<McpServerSummary[]>;
   /** Reconnect to an installed server and refresh its tool list. */
   checkMcpServer?(serverId: string): Promise<McpServerSummary[]>;
+  /** Checks the token with `users/basic_info` and saves the connection only when it works. */
+  connectSplashtop?(input: ConnectSplashtopInput): Promise<SplashtopConnectionSummary>;
+  /** Calls `users/basic_info` with the stored token and records what it may reach. */
+  testSplashtop?(organizationId: string): Promise<SplashtopConnectionSummary>;
+  rotateSplashtopToken?(input: RotateSplashtopTokenInput): Promise<SplashtopConnectionSummary>;
+  /** Deletes the token and the connection. Nothing is sent to Splashtop. */
+  disconnectSplashtop?(organizationId: string): Promise<void>;
+  /** Lists what a change can target now (computers, users or active sessions), first 200. */
+  listSplashtopChangeTargets?(organizationId: string, kind: SplashtopChangeKind): Promise<SplashtopChangeTarget[]>;
+  /** Builds a Splashtop change plan and parks it for typed confirmation. Applies nothing. */
+  prepareSplashtopChange?(input: PrepareSplashtopChangeInput): Promise<RunRecord>;
   getRetrievalStatus?(): Promise<RetrievalStatus>;
   refreshRetrievalIndex?(): Promise<RetrievalStatus>;
   getRetrievalAutoInstall?(): Promise<boolean>;

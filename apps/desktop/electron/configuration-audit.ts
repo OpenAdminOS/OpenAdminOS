@@ -3,6 +3,8 @@ import {
   MANAGED_POLICY_SETTING_KEYS,
   grantedParts,
   qualifyScope,
+  splashtopConnectionOf,
+  splashtopRegion,
   type AgentSummary,
   type ManagedPolicyScope,
   type ManagedPolicySettingKey,
@@ -50,6 +52,9 @@ export const CONFIGURATION_AUDIT_EVENT_TYPES = [
   "policy.changed",
   "policy.removed",
   "policy.invalid",
+  "splashtop.connected",
+  "splashtop.token-rotated",
+  "splashtop.disconnected",
 ] as const;
 
 export type ConfigurationAuditEventType = (typeof CONFIGURATION_AUDIT_EVENT_TYPES)[number];
@@ -252,6 +257,39 @@ export function diffConfigurationAudit(
       ...organizationFields(organization),
       ...(tenantId ? { tenantId } : {}),
       details: {},
+    });
+  }
+
+  // Splashtop connections. The token is never part of state; its rotation
+  // shows as a new tokenSetAt on the same connection.
+  for (const organization of nextOrganizations) {
+    const after = splashtopConnectionOf(organization);
+    if (!after) continue;
+    const before = splashtopConnectionOf(previousOrganizationById.get(organization.id));
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    const where = { region: after.region, host: splashtopRegion(after.region).host, teamId: after.teamId };
+    if (!before || before.connectedAt !== after.connectedAt) {
+      seeds.push({
+        type: "splashtop.connected",
+        ...organizationFields(organization),
+        ...(tenantId ? { tenantId } : {}),
+        details: { ...where, ...(after.account ? { account: after.account } : {}), reconnected: before !== undefined },
+      });
+    } else if (before.tokenSetAt !== after.tokenSetAt) {
+      seeds.push({ type: "splashtop.token-rotated", ...organizationFields(organization), ...(tenantId ? { tenantId } : {}), details: where });
+    }
+  }
+  for (const organization of previousOrganizations) {
+    const before = splashtopConnectionOf(organization);
+    if (!before) continue;
+    const next = nextOrganizationById.get(organization.id);
+    if (next && splashtopConnectionOf(next)) continue;
+    const tenantId = organization.connections.microsoft365?.tenantId;
+    seeds.push({
+      type: "splashtop.disconnected",
+      ...organizationFields(organization),
+      ...(tenantId ? { tenantId } : {}),
+      details: { region: before.region, host: splashtopRegion(before.region).host, teamId: before.teamId, organizationRemoved: next === undefined },
     });
   }
 
@@ -473,6 +511,9 @@ const DETAIL_KEYS: Readonly<Record<ConfigurationAuditEventType, readonly string[
   "policy.changed": [...POLICY_DETAIL_KEYS, "changedKeys"],
   "policy.removed": ["previousKeys"],
   "policy.invalid": ["problemCount", "problems"],
+  "splashtop.connected": ["region", "host", "teamId", "account", "reconnected"],
+  "splashtop.token-rotated": ["region", "host", "teamId"],
+  "splashtop.disconnected": ["region", "host", "teamId", "organizationRemoved"],
 };
 
 /** Keeps the allowed detail fields of a recorded shape; a field of another shape is left out, not the event. */

@@ -37,6 +37,7 @@ import {
   type OrganizationRecord,
   type TenantRecord,
   type TenantSession,
+  type WriteAction,
 } from "@openadminos/agent-sdk";
 
 import {
@@ -103,6 +104,13 @@ export class OrganizationBoundaryError extends Error {
 /** Why nothing new starts or applies for an organization that is being disconnected. */
 export const TENANT_DISCONNECTING_COPY = TENANT_CLOSED_COPY;
 
+/** What a Splashtop change run needs at apply: the team and a request bound to the organization's host and token. */
+export interface SplashtopRunClient {
+  teamId: number;
+  /** Refuses anything but the request kinds the host plans, for this team. */
+  apply(action: WriteAction, signal: AbortSignal): Promise<void>;
+}
+
 export interface RunServiceHost {
   /**
    * False once a disconnect of this tenant began, and for work of an
@@ -151,6 +159,13 @@ export interface RunServiceHost {
     payload: unknown;
   }): void;
   notifyRunFinished(run: RunRecord): void;
+  /**
+   * The Splashtop connection a "splashtop-change" run applies through,
+   * read again at apply: the run's organization must still hold its
+   * tenant and the same Splashtop team and region. Throws a designed
+   * message otherwise; nothing is sent then.
+   */
+  splashtopForRun?(run: RunRecord): Promise<SplashtopRunClient>;
   /** The validation error of the agent's manifest on disk, if it is invalid. */
   agentManifestError?(agent: AgentSummary): string | undefined;
   emitStateChanged(reason: string, runId?: string): void;
@@ -747,6 +762,51 @@ export class RunService {
   }
 
   /**
+   * Queue a host-built Splashtop change plan. Like a rollback it parks at
+   * the typed confirmation gate; it applies only through the Splashtop
+   * connection of the organization that holds `tenantId`.
+   */
+  async startSplashtopChangeRun(input: {
+    tenantId: string;
+    organizationId: string;
+    kind: NonNullable<RunRecord["splashtop"]>["kind"];
+    region: NonNullable<RunRecord["splashtop"]>["region"];
+    plan: NonNullable<RunRecord["plan"]>;
+  }): Promise<RunRecord> {
+    if (input.plan.actions.length === 0) throw new Error("A Splashtop change needs at least one target.");
+    const queuedAt = new Date().toISOString();
+    const run: RunRecord = {
+      id: `run_${randomUUID()}`,
+      agentSlug: "splashtop-change",
+      origin: "splashtop-change",
+      splashtop: { organizationId: input.organizationId, kind: input.kind, region: input.region },
+      status: "awaiting-confirmation",
+      queuedAt,
+      trigger: "manual",
+      summary: input.plan.summary,
+      steps: [],
+      logs: [],
+      plan: input.plan,
+      tenantId: input.tenantId,
+    };
+    await this.host.serialize(async () => {
+      this.assertTenantOpen(input.tenantId);
+      const persisted = await this.host.read();
+      run.riskAssessment = this.assessPlan(run, persisted);
+      await this.host.write({ ...persisted, runs: [run, ...persisted.runs] });
+    });
+    this.host.recordLearningEventSafely({
+      tenantId: input.tenantId,
+      agentSlug: "splashtop-change",
+      eventType: "splashtop.change-plan-queued",
+      source: "run",
+      payload: { runId: run.id, kind: input.kind, actionCount: input.plan.actions.length },
+    });
+    this.host.emitStateChanged("splashtop-change-queued", run.id);
+    return run;
+  }
+
+  /**
    * Apply a reviewed plan. `boundary.activeOrganizationOnly` is set for
    * every approval from the renderer, which covers agent write plans,
    * baseline rollbacks, gateway proposals and Agent Team approvals: the
@@ -804,7 +864,9 @@ export class RunService {
           summary:
             run.origin === "baseline-rollback"
               ? "Rollback is applying."
-              : "Approved proposal is applying.",
+              : run.origin === "splashtop-change"
+                ? "Splashtop changes are applying."
+                : "Approved proposal is applying.",
         };
         await this.host.write({
           ...persisted,
@@ -867,7 +929,9 @@ export class RunService {
         eventType:
           transition.updated.origin === "baseline-rollback"
             ? "drift.rollback-plan-confirmed"
-            : "gateway.proposal-confirmed",
+            : transition.updated.origin === "splashtop-change"
+              ? "splashtop.change-plan-confirmed"
+              : "gateway.proposal-confirmed",
         source: "run",
         payload: {
           runId: transition.updated.id,
@@ -1164,6 +1228,7 @@ export class RunService {
    * requests; nothing is re-rendered at apply time.
    */
   private async driveSystemApply(input: { run: RunRecord }): Promise<void> {
+    if (input.run.origin === "splashtop-change") return this.driveSplashtopApply(input.run);
     const plan = input.run.plan;
     const isRollback = input.run.origin === "baseline-rollback";
     const noun = isRollback ? "Rollback" : "Proposal";
@@ -1292,6 +1357,83 @@ export class RunService {
         });
       }
       if (this.controllers.get(input.run.id) === controller) this.controllers.delete(input.run.id);
+    }
+  }
+
+  /**
+   * Apply a confirmed Splashtop change plan: in order, one request per
+   * action, through the run's own organization's connection. Fail-stop:
+   * the first error marks the run failed with an exact count, and nothing
+   * after it is attempted. No Graph token is built for this run.
+   */
+  private async driveSplashtopApply(input: RunRecord): Promise<void> {
+    const plan = input.plan;
+    const controller = new AbortController();
+    this.controllers.set(input.id, controller);
+    let applied = 0;
+    let run = input;
+    try {
+      if ((await this.getRun(input.id))?.status === "cancelled") return;
+      assertRunCanApply(input);
+      if (!plan) throw new Error("Splashtop change run has no plan.");
+      if (!this.host.splashtopForRun) throw new Error("Splashtop is not available in this build.");
+      const client = await this.host.splashtopForRun(input);
+      for (const [index, action] of plan.actions.entries()) {
+        controller.signal.throwIfAborted();
+        const step = {
+          id: `step_splashtop_${index}`,
+          runId: run.id,
+          label: action.label,
+          status: "running" as const,
+          ...(action.description ? { detail: action.description } : {}),
+          startedAt: new Date().toISOString(),
+        };
+        run = { ...run, steps: [...run.steps, step] };
+        await this.persistRunSnapshot(run);
+        try {
+          await client.apply(action, controller.signal);
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          const finishedAt = new Date().toISOString();
+          run = {
+            ...run,
+            steps: run.steps.map((existing) => existing.id === step.id ? { ...existing, status: "failed", finishedAt, detail: message } : existing),
+            status: "failed",
+            finishedAt,
+            error: message,
+            summary: `Splashtop changes stopped at "${action.label}" after applying ${applied} of ${plan.actions.length}. Nothing after it was attempted.`,
+          };
+          await this.persistRunSnapshot(run);
+          return;
+        }
+        applied += 1;
+        run = {
+          ...run,
+          steps: run.steps.map((existing) => existing.id === step.id ? { ...existing, status: "completed", finishedAt: new Date().toISOString() } : existing),
+        };
+        await this.persistRunSnapshot(run);
+      }
+      run = {
+        ...run,
+        status: "completed",
+        finishedAt: new Date().toISOString(),
+        summary: applied === 1 ? "1 Splashtop change applied." : `${applied} Splashtop changes applied.`,
+        result: { appliedActions: applied },
+      };
+      await this.persistRunSnapshot(run);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await this.persistRunSnapshot({
+        ...run,
+        status: "failed",
+        finishedAt: new Date().toISOString(),
+        summary: applied > 0
+          ? `Splashtop changes stopped after applying ${applied} of ${plan?.actions.length ?? applied}: ${message}`
+          : `Splashtop changes failed before any was applied: ${message}`,
+        error: message,
+      });
+    } finally {
+      if (this.controllers.get(input.id) === controller) this.controllers.delete(input.id);
     }
   }
 

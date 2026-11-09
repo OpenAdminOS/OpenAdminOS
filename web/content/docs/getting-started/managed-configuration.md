@@ -70,7 +70,7 @@ The JSON Schema is in the repository at [`schemas/policy.schema.json`](https://g
 
 Provider ids: `ollama`, `apple-foundation` (Apple Intelligence), `lm-studio`, `anthropic` (Claude Code), `openai` (Codex), `copilot` (GitHub Copilot CLI), `gemini` (Gemini CLI), `azure-openai`.
 
-Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `release-communications`, `windowsforum`, `endoflife-ai`.
+Public reference ids: `microsoft-learn`, `kql-search`, `intuneautomation`, `release-communications`, `windowsforum`, `splashtop-docs` (Splashtop API Reference), `splashtop-kb` (Splashtop Docs, the Help Center search), `endoflife-ai`.
 
 ### Locked and unlocked settings
 
