@@ -1,7 +1,9 @@
 import type { NotGrantedService, ServiceId } from "./services.js";
+import type { ManagedPolicyStatus } from "./managed-policy.js";
 
 export * from "./services.js";
 export * from "./organizations.js";
+export * from "./managed-policy.js";
 
 export type ProviderId =
   | "ollama"
@@ -814,6 +816,8 @@ export interface SavedAppRegistration {
   directoryTenantId?: string;
   label?: string;
   lastUsedAt: string;
+  /** Pre-seeded by the IT policy file. A locked one cannot be removed, and sign-in uses only it. */
+  managed?: boolean;
 }
 
 export interface ConnectTenantOptions {
@@ -1165,6 +1169,8 @@ export interface AppState {
   mcpServers?: McpServerSummary[];
   /** Whether Chat offers tools, including MCP tools, to the selected model. */
   chatToolUse?: ChatToolUseStatus;
+  /** The IT policy file in force, when a policy file exists on this device. */
+  managedPolicy?: ManagedPolicyStatus;
 }
 
 export type IntuneChatMessageRole = "user" | "assistant" | "tool";
@@ -3174,6 +3180,8 @@ export interface OpenAdminOSApi {
   setActiveProvider(id: ProviderId): Promise<AppState>;
   /** Hide the one-time notice about an automatically selected local provider. */
   dismissProviderAutoSelectNotice(): Promise<AppState>;
+  /** Hides the one-time notice about problems in the IT policy file until the problems change. */
+  dismissManagedPolicyNotice(): Promise<AppState>;
   /**
    * Pin the active model for the given provider. Pass `null` to revert
    * to "whichever model the provider reports first". The host validates
