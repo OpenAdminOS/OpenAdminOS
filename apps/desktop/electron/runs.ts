@@ -372,6 +372,15 @@ export class RunService {
         if (!this.host.buildPilotLlm) {
           throw new Error("Pilot mode is unavailable in this build. Connect your tenant to run agents.");
         }
+        // Run for real takes the dry run's tenant after the checks above; a
+        // pilot run is stamped with the pilot tenant only if that matches,
+        // and a renderer start only in the active organization.
+        if (
+          (options.tenantId !== undefined && options.tenantId !== requestedTenantId) ||
+          (boundary.activeOrganizationOnly && requestedTenantId !== persisted.activeTenantId)
+        ) {
+          throw new OrganizationBoundaryError(OTHER_ORGANIZATION_RUN_COPY);
+        }
         if (options.dryRun) {
           const manifest = loadAgentManifestPreview(agent)?.manifest;
           const defaults = Object.fromEntries(
@@ -496,9 +505,10 @@ export class RunService {
         throw new Error(noOrganizationRunCopy(agent));
       }
       // Run for real and Team retries take the tenant of the original run;
-      // a renderer start still runs only in the active organization.
+      // a renderer start, and an installed-agent scheduled start, still
+      // runs only in the active organization.
       if (
-        boundary.activeOrganizationOnly &&
+        (boundary.activeOrganizationOnly || agentSchedule) &&
         pinnedTenantId !== undefined &&
         pinnedTenantId !== persisted.activeTenantId
       ) {

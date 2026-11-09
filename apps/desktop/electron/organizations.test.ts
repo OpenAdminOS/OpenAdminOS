@@ -743,3 +743,31 @@ describe("organization switch during a scheduler tick (Muse round 2)", () => {
     }
   });
 });
+
+describe("tenant checks after a Run for real rewrite (Muse round 2)", () => {
+  it("refuses a pilot Run for real of a dry run planned on a real tenant", async () => {
+    const tenants = [woodgrove, pilot] as unknown as TenantRecord[];
+    const writer = agent("stale-guest-cleanup", { mode: "write", scopes: [], services: [] }) as unknown as AgentSummary;
+    const dry = {
+      id: "dry-real", agentSlug: "stale-guest-cleanup", status: "planned", dryRun: true, tenantId: woodgrove.id,
+      providerId: "ollama", model: "test", inputSettings: {}, queuedAt: "2026-11-01T00:00:00.000Z", steps: [], logs: [],
+    } as unknown as RunRecord;
+    const h = runHarness({
+      activeProviderId: "ollama",
+      installedAgents: [writer],
+      runs: [dry],
+      tenants,
+      organizations: reconcileOrganizations({ rawOrganizations: [], rawNotice: undefined, tenants, installedAgents: [] }).organizations,
+      activeTenantId: SAMPLE_TENANT_ID,
+    });
+    // Pilot runs need the prepared-text model; the start is refused before it is used.
+    (h.service as unknown as { host: Record<string, unknown> }).host.buildPilotLlm = () => {
+      throw new Error("must not run");
+    };
+    await assert.rejects(
+      h.service.startRun("stale-guest-cleanup", { runForRealOfRunId: "dry-real" }),
+      (error: Error) => error.message === OTHER_ORGANIZATION_RUN_COPY,
+    );
+    assert.deepEqual(h.state().runs.map((run) => run.id), ["dry-real"]);
+  });
+});
