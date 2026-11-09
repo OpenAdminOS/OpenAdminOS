@@ -307,7 +307,8 @@ describe("tenant checks with cancel", () => {
     live.publish({ ...before, tenantChecks: [{ tenantId: "tenant-1", kind: "license", phase: "licenses" }] });
     // The switcher shows the check with a labelled Cancel, not a second X.
     const inMenu = await within(menu).findByRole("status", { name: SERVICE_COPY.checkRunningFor("Contoso IT") });
-    expect(within(inMenu).getByRole("button", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") })).toHaveTextContent(SERVICE_COPY.cancelCheck);
+    // Inside the menu, Cancel is a menu item so arrow keys reach it.
+    expect(within(inMenu).getByRole("menuitem", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") })).toHaveTextContent(SERVICE_COPY.cancelCheck);
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("menu", { name: "Organizations" })).not.toBeInTheDocument();
 

@@ -99,7 +99,16 @@ export function tenantCheckButtonLabel(progress: TenantCheckProgress | undefined
  * The check the host is running for a tenant, with its Cancel. Shown
  * wherever the tenant's check state is shown, whichever view started it.
  */
-export function TenantCheckStatus({ tenant, className = "mt-2" }: { tenant: TenantRecord; className?: string }) {
+export function TenantCheckStatus({
+  tenant,
+  className = "mt-2",
+  inMenu = false,
+}: {
+  tenant: TenantRecord;
+  className?: string;
+  /** Inside a menu, Cancel is a menu item so arrow keys reach it. */
+  inMenu?: boolean;
+}) {
   const { cancelTenantCheck } = useAppState();
   const progress = useTenantCheckProgress(tenant.id);
   const [cancelling, setCancelling] = useState(false);
@@ -120,6 +129,7 @@ export function TenantCheckStatus({ tenant, className = "mt-2" }: { tenant: Tena
         variant="secondary"
         disabled={cancelling}
         aria-label={SERVICE_COPY.cancelCheckFor(tenant.displayName)}
+        {...(inMenu ? { role: "menuitem", tabIndex: -1 } : {})}
         onClick={() => {
           setCancelling(true);
           void cancelTenantCheck(tenant.id).catch(() => setCancelling(false));

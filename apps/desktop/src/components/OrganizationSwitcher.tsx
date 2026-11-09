@@ -81,8 +81,9 @@ export function OrganizationSwitcher() {
       event.preventDefault();
       items[(next + items.length) % items.length]?.focus();
     };
-    if (event.key === "ArrowDown") move(index + 1);
-    else if (event.key === "ArrowUp") move(index - 1);
+    // From outside the list, Down goes to the first item and Up to the last.
+    if (event.key === "ArrowDown") move(index < 0 ? 0 : index + 1);
+    else if (event.key === "ArrowUp") move(index < 0 ? items.length - 1 : index - 1);
     else if (event.key === "Home") move(0);
     else if (event.key === "End") move(items.length - 1);
     else if (event.key === "Tab") close(false);
@@ -293,7 +294,7 @@ export function OrganizationSwitcher() {
                     >
                       <IconClose size={11} />
                     </button>
-                    <TenantCheckStatus tenant={tenant} className="basis-full px-2.5 pb-1.5" />
+                    <TenantCheckStatus tenant={tenant} className="basis-full px-2.5 pb-1.5" inMenu />
                   </div>
                 );
               })

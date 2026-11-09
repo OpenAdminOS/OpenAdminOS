@@ -4,7 +4,7 @@ import { Route, Routes, useLocation } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import { OrganizationSwitcher } from "./OrganizationSwitcher";
-import { ORGANIZATION_COPY } from "../copy";
+import { ORGANIZATION_COPY, SERVICE_COPY } from "../copy";
 import { createMockAppState, makeMockBridge, renderRoute } from "../test/test-utils";
 import { SERVICE_PARTS } from "../shared/openAdminOS";
 
@@ -145,4 +145,33 @@ it("marks No organization with a neutral empty tile, not a question mark", async
   const chip = await screen.findByRole("button", { name: ORGANIZATION_COPY.chipLabelNone(true) });
   expect(within(chip).getByTestId("no-organization-mark")).toBeEmptyDOMElement();
   expect(chip).not.toHaveTextContent("?");
+});
+
+describe("switcher keyboard edge cases (Muse round 2)", () => {
+  it("goes to the last item with ArrowUp and the first with ArrowDown from outside the list", async () => {
+    const user = userEvent.setup();
+    renderSwitcher();
+    await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
+    const menu = screen.getByRole("menu", { name: ORGANIZATION_COPY.menuLabel });
+    // Let the open-time focus land first, then move focus outside the items.
+    await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus());
+    menu.setAttribute("tabindex", "-1");
+    menu.focus();
+    await user.keyboard("{ArrowUp}");
+    expect(within(menu).getByRole("menuitem", { name: ORGANIZATION_COPY.manageConnections })).toHaveFocus();
+    menu.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(within(menu).getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus();
+  });
+
+  it("reaches a running check's Cancel as a menu item", async () => {
+    const user = userEvent.setup();
+    renderSwitcher(createMockAppState({ tenantChecks: [{ tenantId: "tenant-1", kind: "license", phase: "checking" }] }));
+    await user.click(await screen.findByRole("button", { name: "Switch organization, Contoso IT" }));
+    const menu = screen.getByRole("menu", { name: ORGANIZATION_COPY.menuLabel });
+    const cancel = within(menu).getByRole("menuitem", { name: SERVICE_COPY.cancelCheckFor("Contoso IT") });
+    await waitFor(() => expect(within(menu).getByRole("menuitemradio", { name: /Contoso IT/ })).toHaveFocus());
+    for (let step = 0; step < 4 && document.activeElement !== cancel; step += 1) await user.keyboard("{ArrowDown}");
+    expect(cancel).toHaveFocus();
+  });
 });
