@@ -54,6 +54,7 @@ export const MODEL_CHOICE_COPY = {
   openChat: "Open Chat",
   use: (name: string) => `Use ${name}`,
   startAndOpen: (name: string) => `Start ${name} and open Chat`,
+  start: (name: string) => `Start ${name}`,
   getOpenAdmin: "Get OpenAdmin 8B",
   getOpenAdminNote: "Shows the one command that downloads it with Ollama.",
   scanAgain: "Scan again",

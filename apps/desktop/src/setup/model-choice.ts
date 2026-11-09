@@ -160,13 +160,14 @@ export function preselect(options: readonly ChoiceOption[]): ProviderId | null {
 }
 
 /** The primary button's label follows the chosen row. */
-export function actionLabel(option: ChoiceOption | undefined, activeProviderId?: ProviderId): string {
+export function actionLabel(option: ChoiceOption | undefined, activeProviderId?: ProviderId, place: "scan" | "chat" = "scan"): string {
   if (!option) return MODEL_CHOICE_COPY.chooseModel;
   switch (option.action) {
     case "open":
-      return option.providerId === activeProviderId ? MODEL_CHOICE_COPY.openChat : MODEL_CHOICE_COPY.use(modelDisplayName(option.model) ?? option.name);
+      return option.providerId === activeProviderId && place === "scan" ? MODEL_CHOICE_COPY.openChat : MODEL_CHOICE_COPY.use(modelDisplayName(option.model) ?? option.name);
     case "start":
-      return MODEL_CHOICE_COPY.startAndOpen(option.name);
+      // In Chat the admin is already there: the button only starts and selects it.
+      return place === "chat" ? MODEL_CHOICE_COPY.start(option.name) : MODEL_CHOICE_COPY.startAndOpen(option.name);
     case "get-model":
       return MODEL_CHOICE_COPY.getOpenAdmin;
     case "rescan":

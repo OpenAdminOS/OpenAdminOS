@@ -97,7 +97,7 @@ export function ModelChoice({
       </div>
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-2">
         <Button variant="primary" size="lg" disabled={!chosen || working !== null} onClick={() => chosen && void act(chosen)}>
-          {actionLabel(chosen, activeProviderId)}
+          {actionLabel(chosen, activeProviderId, "chat")}
         </Button>
         <button type="button" onClick={() => navigate("/settings/providers")} className={quietLink}>
           {MODEL_SCAN_COPY.allProviders}

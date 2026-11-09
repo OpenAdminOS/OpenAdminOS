@@ -44,6 +44,8 @@ describe("the choice of what answers in Chat (design round, B)", () => {
     expect(actionLabel(ollama, "ollama")).toBe("Open Chat");
     expect(actionLabel(ollama, "anthropic")).toBe("Use OpenAdmin 8B");
     expect(actionLabel(lm)).toBe("Start LM Studio and open Chat");
+    // In Chat the admin is already there.
+    expect(actionLabel(lm, undefined, "chat")).toBe("Start LM Studio");
     expect(actionNote(lm)).toBe("LM Studio keeps running after you quit OpenAdminOS.");
     expect(actionLabel(claude)).toBe("Use Claude Code");
     expect(actionNote(claude)).toBe("Uses your Claude Code sign-in. No API key is stored.");
