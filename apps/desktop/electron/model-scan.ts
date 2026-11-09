@@ -257,7 +257,7 @@ export function scanProbeFromProvider(
 /** Whether a runtime is installed, from local files only: a binary on PATH or a known app location. */
 export async function installedOnDisk(providerId: "ollama" | "lm-studio", env: NodeJS.ProcessEnv = process.env, platform: NodeJS.Platform = process.platform): Promise<boolean> {
   const binary = providerId === "ollama" ? "ollama" : "lms";
-  const names = platform === "win32" ? [`${binary}.exe`] : [binary];
+  const names = platform === "win32" ? [`${binary}.exe`, `${binary}.cmd`] : [binary];
   const pathDirs = (env.PATH ?? "").split(delimiter).filter(Boolean);
   const home = env.HOME ?? env.USERPROFILE ?? homedir();
   const known =
