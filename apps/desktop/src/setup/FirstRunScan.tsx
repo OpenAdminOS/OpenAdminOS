@@ -183,6 +183,8 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   const [startErrors, setStartErrors] = useState<Record<string, string>>({});
   const [retrying, setRetrying] = useState<ProviderId | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  // Any action or Retry in progress: every exit and every other action waits for it.
+  const activity: string | null = busy ?? (retrying ? `retry:${retrying}` : null);
   // Scan, Retry and Start results carry a host generation; an older one never overwrites a newer one.
   const latestGeneration = useRef(0);
   const headingRef = useRef<HTMLHeadingElement | null>(null);
@@ -327,7 +329,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   };
 
   const retry = async (providerId: ProviderId) => {
-    if (!api?.retryModelScanProbe) return;
+    if (!api?.retryModelScanProbe || finishing.current || activity !== null) return;
     const current = rows.find((probe) => probe.providerId === providerId);
     if (!current) return;
     setRetrying(providerId);
@@ -350,7 +352,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   };
 
   const start = async (probe: ModelScanProbe) => {
-    if (!api?.startLocalRuntime || finishing.current || busy !== null) return;
+    if (!api?.startLocalRuntime || finishing.current || activity !== null) return;
     setBusy(`start:${probe.providerId}`);
     setStartErrors(({ [probe.providerId]: _cleared, ...others }) => others);
     setAnnouncement(MODEL_SCAN_COPY.starting(probe.name));
@@ -383,7 +385,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   // lands after the window left. Hosted and local switches call it from the
   // render in which they started, where it is still null.
   const finish = async (to: string | null) => {
-    if (finishing.current || busy !== null) return;
+    if (finishing.current || activity !== null) return;
     finishing.current = true;
     setBusy((current) => current ?? "finish");
     setActionError(null);
@@ -400,7 +402,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   };
 
   const useHosted = async (providerId: ProviderId) => {
-    if (finishing.current || busy !== null) return;
+    if (finishing.current || activity !== null) return;
     setBusy(providerId);
     setActionError(null);
     try {
@@ -415,7 +417,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
 
   // An explicit switch to a local model the admin did not choose before.
   const switchLocal = async (providerId: ProviderId, model?: string) => {
-    if (finishing.current || busy !== null) return;
+    if (finishing.current || activity !== null) return;
     setBusy(providerId);
     setActionError(null);
     try {
@@ -431,7 +433,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
   };
 
   const preview = async () => {
-    if (finishing.current || busy !== null) return;
+    if (finishing.current || activity !== null) return;
     finishing.current = true;
     setBusy("preview");
     setActionError(null);
@@ -494,7 +496,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                 key={`${pick.kind}:${result?.finishedAt ?? ""}`}
                 pick={pick}
                 rows={rows}
-                busy={busy}
+                busy={activity}
                 startErrors={startErrors}
                 localLine={localLine}
                 headingRef={headingRef}
@@ -516,7 +518,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                 {!scanError ? (
                   // A scan that stalls before its checks can still be left; nothing is selected.
                   <p className="mt-6 text-sm">
-                    <button type="button" disabled={busy !== null} onClick={() => void finish("/chat")} className={linkClass}>
+                    <button type="button" disabled={activity !== null} onClick={() => void finish("/chat")} className={linkClass}>
                       {MODEL_SCAN_COPY.continueToChat}
                     </button>
                   </p>
@@ -526,10 +528,10 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                     <p className="font-medium">{MODEL_SCAN_COPY.scanFailed}</p>
                     <p className="mt-1">{scanError}</p>
                     <div className="mt-3 flex gap-2">
-                      <Button size="sm" variant="secondary" disabled={busy !== null} onClick={() => setRun((value) => value + 1)}>
+                      <Button size="sm" variant="secondary" disabled={activity !== null} onClick={() => setRun((value) => value + 1)}>
                         {MODEL_SCAN_COPY.scanAgain}
                       </Button>
-                      <Button size="sm" variant="ghost" disabled={busy !== null} onClick={() => void finish("/chat")}>
+                      <Button size="sm" variant="ghost" disabled={activity !== null} onClick={() => void finish("/chat")}>
                         {MODEL_SCAN_COPY.continueToChat}
                       </Button>
                     </div>
@@ -544,12 +546,12 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
             ) : null}
             {settled || scanError ? (
               <p className="scan-hero-in mt-6 flex flex-wrap gap-x-4 gap-y-1 text-sm text-[var(--color-text-muted)]" style={{ animationDelay: "160ms" }}>
-                <button type="button" disabled={busy !== null} onClick={() => void finish("/chat")} className={linkClass}>
+                <button type="button" disabled={activity !== null} onClick={() => void finish("/chat")} className={linkClass}>
                   {MODEL_SCAN_COPY.continueWithoutModel}
                 </button>
                 <span>
                   {MODEL_SCAN_COPY.previewPrefix}{" "}
-                  <button type="button" disabled={busy !== null} onClick={() => void preview()} className={linkClass}>
+                  <button type="button" disabled={activity !== null} onClick={() => void preview()} className={linkClass}>
                     {MODEL_SCAN_COPY.previewLink}
                   </button>{" "}
                   {MODEL_SCAN_COPY.previewSuffix}
@@ -563,7 +565,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                   {MODEL_SCAN_COPY.listHeading}
                 </h2>
                 {settled ? (
-                  <button type="button" disabled={busy !== null || retrying !== null} onClick={() => setRun((value) => value + 1)} className={`${linkClass} text-sm`}>
+                  <button type="button" disabled={activity !== null} onClick={() => setRun((value) => value + 1)} className={`${linkClass} text-sm`}>
                     {MODEL_SCAN_COPY.scanAgain}
                   </button>
                 ) : null}
@@ -576,7 +578,7 @@ export function ModelScanScreen({ firstRun, onClose }: { firstRun: boolean; onCl
                     starting={startingId === probe.providerId}
                     retrying={retrying === probe.providerId}
                     startError={startErrors[probe.providerId]}
-                    busy={busy !== null}
+                    busy={activity !== null}
                     canStart={Boolean(api?.startLocalRuntime) && (probe.providerId === "ollama" || probe.providerId === "lm-studio") && probe.summary === "Installed, not running"}
                     onRetry={() => void retry(probe.providerId)}
                     onStart={() => void start(probe)}
@@ -717,7 +719,7 @@ function ScanRow({
         ) : null}
         {/* Buttons stay mounted and are disabled while working, so keyboard focus is not lost. */}
         {probe.state === "could-not-check" || retrying ? (
-          <Button size="sm" variant="secondary" className="mt-1.5" disabled={retrying} onClick={onRetry} aria-label={MODEL_SCAN_COPY.retryLabel(probe.name)}>
+          <Button size="sm" variant="secondary" className="mt-1.5" disabled={retrying || busy} onClick={onRetry} aria-label={MODEL_SCAN_COPY.retryLabel(probe.name)}>
             {retrying ? MODEL_SCAN_COPY.checking : MODEL_SCAN_COPY.retry}
           </Button>
         ) : canStart || starting ? (

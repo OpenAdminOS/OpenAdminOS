@@ -292,12 +292,21 @@ describe("first-launch model scan screen", () => {
     finish();
     await screen.findByRole("heading", { name: MODEL_SCAN_COPY.nothingTitle });
     await user.click(screen.getByRole("button", { name: "Check Claude Code again" }));
-    await user.click(screen.getByRole("button", { name: "Check Codex again" }));
-    const newer: ModelScanResult = { probes: timedOut.map((entry) => ({ ...entry, state: "found", summary: "Signed in", ready: true })), outcome: { kind: "hosted-detected", providerIds: ["openai"] }, startedAt: "", finishedAt: "b", generation: 5 };
+    // One Retry at a time (Muse round 4, A).
+    expect(screen.getByRole("button", { name: "Check Codex again" })).toBeDisabled();
+    // Codex is found by a scan numbered 5; Claude Code still could not be checked.
+    const newer: ModelScanResult = {
+      probes: timedOut.map((entry) => (entry.providerId === "openai" ? { ...entry, state: "found", summary: "Signed in", ready: true } : entry)),
+      outcome: { kind: "hosted-detected", providerIds: ["openai"] }, startedAt: "", finishedAt: "b", generation: 5,
+    };
     const older: ModelScanResult = { probes: timedOut, outcome: { kind: "nothing" }, startedAt: "", finishedAt: "a", generation: 4 };
-    resolvers[1]!(newer);
+    resolvers[0]!(newer);
     expect(await screen.findByRole("heading", { level: 1, name: "Codex is signed in on this device" })).toBeInTheDocument();
-    resolvers[0]!(older);
+    // A later answer numbered before the one shown never replaces it.
+    const again = await screen.findByRole("button", { name: "Check Claude Code again" });
+    await waitFor(() => expect(again).toBeEnabled());
+    await user.click(again);
+    resolvers[1]!(older);
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(screen.getByRole("heading", { level: 1, name: "Codex is signed in on this device" })).toBeInTheDocument();
   });
@@ -368,6 +377,40 @@ describe("first-launch model scan screen", () => {
     await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.allProviders }));
     expect(bridge.completeFirstRunScan).not.toHaveBeenCalled();
     expect(screen.getByRole("heading", { level: 1, name: "Ollama is installed on this device" })).toBeInTheDocument();
+  });
+
+  it("locks every exit and action while a Retry runs, and Retry while a Start runs (Muse round 4, A)", async () => {
+    const user = userEvent.setup();
+    const { bridge, finish } = scanBridge({ kind: "hosted-detected", providerIds: ["anthropic"] });
+    vi.mocked(bridge.retryModelScanProbe!).mockReturnValue(new Promise(() => undefined));
+    vi.mocked(bridge.startLocalRuntime!).mockReturnValue(new Promise(() => undefined));
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    await user.click(await screen.findByRole("button", { name: MODEL_SCAN_COPY.retryLabel("GitHub Copilot CLI") }));
+    await waitFor(() => expect(bridge.retryModelScanProbe).toHaveBeenCalledOnce());
+    for (const name of [MODEL_SCAN_COPY.continueWithoutModel, MODEL_SCAN_COPY.previewLink, "Use Claude Code"]) {
+      expect(screen.getByRole("button", { name })).toBeDisabled();
+    }
+    for (const button of screen.getAllByRole("button", { name: "Start Ollama" })) expect(button).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: MODEL_SCAN_COPY.continueWithoutModel }));
+    expect(bridge.completeFirstRunScan).not.toHaveBeenCalled();
+    expect(bridge.startLocalRuntime).not.toHaveBeenCalled();
+  });
+
+  it("locks the row Retry while a Start runs (Muse round 4, A)", async () => {
+    const user = userEvent.setup();
+    const { bridge, finish } = scanBridge({ kind: "nothing" });
+    vi.mocked(bridge.startLocalRuntime!).mockReturnValue(new Promise(() => undefined));
+    renderGate(bridge);
+    await screen.findByRole("heading", { level: 1, name: MODEL_SCAN_COPY.title });
+    finish();
+    await user.click((await screen.findAllByRole("button", { name: "Start Ollama" }))[0]!);
+    await waitFor(() => expect(bridge.startLocalRuntime).toHaveBeenCalledOnce());
+    const retry = screen.getByRole("button", { name: MODEL_SCAN_COPY.retryLabel("GitHub Copilot CLI") });
+    expect(retry).toBeDisabled();
+    await user.click(retry);
+    expect(bridge.retryModelScanProbe).not.toHaveBeenCalled();
   });
 
   it("leaves once when Continue is pressed twice before it settles (Muse round 3, M2)", async () => {
