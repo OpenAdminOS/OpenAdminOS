@@ -2127,3 +2127,22 @@ describe("IntuneChat edit while a send is finishing (review round 4)", () => {
     expect(screen.getByRole("combobox", { name: "Ask about your Microsoft 365 tenant" })).toHaveValue(prompt);
   });
 });
+
+it("says Azure OpenAI answers through the Azure OpenAI API in the hosted confirmation (design round review 2, Muse D)", async () => {
+  const user = userEvent.setup();
+  const azure = { ...mockProviders.find((provider) => provider.id === "azure-openai")!, status: "available" as const, models: ["gpt-4o"], defaultModel: "gpt-4o" };
+  const bridge = makeMockBridge(
+    {},
+    createMockAppState({
+      activeProviderId: "azure-openai",
+      providers: mockProviders.map((provider) => (provider.id === "azure-openai" ? azure : provider)),
+    }),
+  );
+  renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+  const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
+  await user.type(composer, "Which Windows devices are stale?");
+  await user.click(screen.getByRole("button", { name: "Send" }));
+  const dialog = await screen.findByRole("dialog", { name: "Send this question to Azure OpenAI?" });
+  expect(dialog).toHaveTextContent("Azure OpenAI answers through the Azure OpenAI API.");
+  expect(dialog).not.toHaveTextContent("Azure OpenAI answers through Azure OpenAI.");
+});

@@ -3991,7 +3991,12 @@ function HostedChatConsentModal({
   const title = through ? HOSTED_CONFIRM_COPY.titleThrough(tool) : HOSTED_CONFIRM_COPY.title(company);
   const lead = through
     ? HOSTED_CONFIRM_COPY.bodyThroughTenant(tool, prompt?.tenantName ?? "the active tenant")
-    : HOSTED_CONFIRM_COPY.bodyTenant(tool, company, prompt?.tenantName ?? "the active tenant");
+    : HOSTED_CONFIRM_COPY.bodyTenant(
+        tool,
+        // An API named like its product answers through that API, not through itself.
+        company === tool ? `the ${company} API` : company,
+        prompt?.tenantName ?? "the active tenant",
+      );
   const locationDetail = prompt ? providerDataLocationDetail({ id: prompt.providerId }) : undefined;
   return (
     <Modal open={Boolean(prompt)} onClose={onClose} size="md">
