@@ -47,7 +47,7 @@ import { AgentNeedChips } from "../components/AgentNeedChips";
 import { createPendingIntent, type PendingIntent } from "../setup/pending-intent";
 import { useSetupFlow } from "../setup/SetupFlowContext";
 import { PILOT_COPY, isPilotAgentSlug } from "../shared/pilot-mode";
-import { hostedChannel } from "../shared/providers";
+import { hostedChannel, isProviderImplemented } from "../shared/providers";
 import { extractWhatsAppRecipientInput } from "../shared/whatsappTarget";
 import {
   agentCallsNoServiceApi,
@@ -716,7 +716,8 @@ export default function AgentDetail({
             </Button>
           </div>
         )}
-        {runError && (
+        {/* While the run review is open, it shows the error itself. */}
+        {runError && pendingRunChoice === null && (
           <div className="mb-4 flex items-start justify-between gap-3 rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 ring-1 ring-[var(--color-danger)]/30">
             <div className="text-sm leading-relaxed text-[var(--color-danger)]">
               {runError}
@@ -1096,6 +1097,22 @@ export default function AgentDetail({
           hasOrganizations={resolveOrganizations(state).length > 0}
           model={pendingTenant?.kind === "sample" ? "Prepared sample text" : pendingModel}
           deliverySaving={pendingDeliverySaveCount > 0}
+          // Provider readiness is checked on its own, whatever the
+          // organization state; pilot runs use prepared text.
+          providerReady={
+            pendingTenant?.kind === "sample" ||
+            Boolean(
+              pendingProvider &&
+                isProviderImplemented(pendingProvider.id) &&
+                (pendingProvider.status === "connected" || pendingProvider.status === "available"),
+            )
+          }
+          providerStatusDetail={pendingProvider?.detail}
+          startError={runError}
+          onOpenProviderSettings={() => {
+            setPendingRunChoice(null);
+            navigate("/settings/providers");
+          }}
           onConnect={() => {
             const choice = pendingRunChoice ?? {};
             setPendingRunChoice(null);
@@ -2716,9 +2733,19 @@ function RunPreflightModal({
   deliverySaving,
   onConnect,
   onOpenConnections,
+  providerReady = true,
+  providerStatusDetail,
+  startError,
+  onOpenProviderSettings,
   onClose,
   onConfirm,
 }: {
+  /** The run's provider can start a run now. */
+  providerReady?: boolean;
+  providerStatusDetail?: string | undefined;
+  /** Why the last Start was refused; shown inside the review with a recovery action. */
+  startError?: string | null;
+  onOpenProviderSettings?: () => void;
   pilot?: boolean;
   organizationName?: string | undefined;
   /** The run is pinned to an organization that is not the active one. */
@@ -2774,6 +2801,7 @@ function RunPreflightModal({
   const neededTitles = agentServiceIds(agent).map((id) => serviceById(id).title);
   const canStart =
     (Boolean(activeTenant) || serviceFree) &&
+    providerReady &&
     !organizationInactive &&
     !deliverySaving &&
     missingServices.length === 0 &&
@@ -2794,6 +2822,31 @@ function RunPreflightModal({
                 <Button size="sm" variant="secondary" onClick={onOpenConnections}>Choose an organization</Button>
               </div>
             ) : null}
+          </div>
+        ) : null}
+        {!providerReady ? (
+          <div role="alert" className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-text)] ring-1 ring-[var(--color-warning)]/25">
+            <div className="font-medium">{`${providerName} is not ready to run this agent.`}</div>
+            <p className="mt-1 text-[var(--color-text-soft)]">
+              {providerStatusDetail ? `${providerStatusDetail} ` : ""}Choose or start a model in provider settings, then start the run.
+            </p>
+            {onOpenProviderSettings ? (
+              <div className="mt-3">
+                <Button size="sm" variant="secondary" onClick={onOpenProviderSettings}>Open provider settings</Button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+        {startError ? (
+          <div role="alert" className="rounded-lg bg-[var(--color-danger-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-danger)] ring-1 ring-[var(--color-danger)]/30">
+            <div className="font-medium">The run did not start.</div>
+            <p className="mt-1">{startError}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button size="sm" variant="secondary" onClick={onConfirm}>Try again</Button>
+              {onOpenProviderSettings ? (
+                <Button size="sm" variant="ghost" onClick={onOpenProviderSettings}>Open provider settings</Button>
+              ) : null}
+            </div>
           </div>
         ) : null}
         {!activeTenant && serviceFree ? (

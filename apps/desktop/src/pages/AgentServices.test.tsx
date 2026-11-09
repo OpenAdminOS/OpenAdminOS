@@ -453,3 +453,39 @@ it("shows a pilot agent's services as connected in the sample organization (Muse
   expect(await screen.findByText("Needs Intune")).toHaveClass("sr-only");
   expect(screen.queryByText(/Intune, not connected/)).not.toBeInTheDocument();
 });
+
+describe("start errors inside the run review (review round 3)", () => {
+  const draft = () => createMockAgent({ id: "draft", slug: "draft", name: "Script draft", mode: "read", scopes: [], services: [] });
+
+  it("checks the provider without an organization and offers provider settings", async () => {
+    const unready = mockProviders.map((provider) => (provider.id === "ollama" ? { ...provider, status: "error" as const, detail: "Ollama isn't running. Start it with `ollama serve`." } : provider));
+    const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents: [draft()], providers: unready });
+    const bridge = makeMockBridge({}, { ...state, tenants: [] });
+    renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    const notReady = within(dialog).getAllByRole("alert").find((element) => element.textContent?.includes("is not ready to run this agent"))!;
+    expect(notReady).toHaveTextContent("Ollama isn't running. Start it with `ollama serve`.");
+    expect(within(notReady).getByRole("button", { name: "Open provider settings" })).toBeInTheDocument();
+    expect(within(dialog).getByRole("button", { name: "Start run" })).toBeDisabled();
+    expect(bridge.startRun).not.toHaveBeenCalled();
+  });
+
+  it("shows a refused start inside the review with Try again", async () => {
+    const user = userEvent.setup();
+    const { activeTenantId: _none, ...state } = createMockAppState({ installedAgents: [draft()] });
+    const startRun = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Ollama isn't reachable. Start it with `ollama serve`, then try again."))
+      .mockResolvedValueOnce({ id: "run-2", agentSlug: "draft", status: "queued", queuedAt: "2026-11-09T00:00:00.000Z", steps: [], logs: [] });
+    const bridge = makeMockBridge({ startRun }, { ...state, tenants: [] });
+    renderRoute(<Agents startRunOnOpen />, { path: "/agents/:slug/confirm", route: "/agents/draft/confirm", bridge });
+    const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+    await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+    const failure = await within(dialog).findByText("The run did not start.");
+    const alert = failure.closest("[role='alert']") as HTMLElement;
+    expect(alert).toHaveTextContent("Ollama isn't reachable. Start it with `ollama serve`, then try again.");
+    expect(within(alert).getByRole("button", { name: "Open provider settings" })).toBeInTheDocument();
+    await user.click(within(alert).getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(startRun).toHaveBeenCalledTimes(2));
+  });
+});

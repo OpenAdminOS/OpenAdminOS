@@ -713,3 +713,16 @@ describe("applying a plan from another organization (review round 3)", () => {
     expect(screen.queryByText(/Error invoking remote method/)).not.toBeInTheDocument();
   });
 });
+
+it("shows a refused Run again start inside the review (review round 3)", async () => {
+  const user = userEvent.setup();
+  const run = createAwaitingConfirmationRun({ status: "failed", plan: undefined, tenantId: "tenant-1" });
+  const startRun = vi.fn(async () => { throw new Error("Ollama isn't reachable. Start it with `ollama serve`, then try again."); });
+  const bridge = makeMockBridge({ startRun }, createMockAppState({ installedAgents: [createMockAgent({ slug: run.agentSlug, mode: "read" })], runs: [run] }));
+  renderWithPreflight(run.id, bridge);
+  await user.click(await screen.findByRole("button", { name: "Run again" }));
+  const dialog = await screen.findByRole("dialog", { name: /Review run/ });
+  await user.click(within(dialog).getByRole("button", { name: "Start run" }));
+  expect(await within(dialog).findByText("The run did not start.")).toBeInTheDocument();
+  expect(within(dialog).getByText(/Ollama isn't reachable/)).toBeInTheDocument();
+});
