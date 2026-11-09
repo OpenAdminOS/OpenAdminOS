@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useReducer, useRef, useState, type RefObject } from "react";
+import { useEffect, useId, useMemo, useReducer, useRef, useState, type RefObject } from "react";
 import { Select } from "../components/Select";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Button } from "../components/Button";
@@ -74,7 +74,7 @@ import {
   type WorkspaceSummary,
 } from "../shared/openAdminOS";
 import { copyTextToClipboard } from "../shared/clipboard";
-import { CHAT_COPY, FIRST_RUN_CHAT_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_DETECTION_COPY, chatErrorCopy, deriveTrustCopy, providerDataLocation } from "../copy";
+import { CHAT_COPY, FIRST_RUN_CHAT_COPY, HOSTED_CONFIRM_COPY, LOCAL_BOUNDARY_COPY, PROVIDER_COMPANIES, PROVIDER_DETECTION_COPY, PROVIDER_TOOL_NAMES, chatErrorCopy, deriveTrustCopy, providerDataLocation } from "../copy";
 import { ModelChoice, NoTenantChatHome, NotConnectedCard } from "../components/chat/ChatFirstRun";
 import { isProviderReady } from "../shared/provider-detection";
 import {
@@ -1696,6 +1696,23 @@ function IntuneChatContent() {
       onPick={(prompt) => void handleSend(prompt)}
     />
   ) : (
+    <>
+    {hostedConsentPrompt ? (
+      <HostedChatConsentPanel
+        prompt={hostedConsentPrompt}
+        remember={rememberHostedConsent}
+        onRememberChange={setRememberHostedConsent}
+        onClose={() => {
+          setHostedConsentPrompt(null);
+          window.requestAnimationFrame(() => composerRef.current?.focus());
+        }}
+        onConfirm={() => void confirmHostedConsentAndSend()}
+        onUseLocal={() => {
+          setHostedConsentPrompt(null);
+          navigate("/settings/providers");
+        }}
+      />
+    ) : null}
     <ChatComposer
       placement={placement}
       textareaRef={composerRef}
@@ -1721,6 +1738,7 @@ function IntuneChatContent() {
       suggestion={composerSuggestion?.text}
       onDismissSuggestion={() => composerSuggestion && setDismissedSuggestion(composerSuggestion.key)}
     />
+    </>
   );
 
   const homeOpen =
@@ -1761,13 +1779,6 @@ function IntuneChatContent() {
 
   const calmModals = (
     <>
-      <HostedChatConsentModal
-        prompt={hostedConsentPrompt}
-        remember={rememberHostedConsent}
-        onRememberChange={setRememberHostedConsent}
-        onClose={() => setHostedConsentPrompt(null)}
-        onConfirm={() => void confirmHostedConsentAndSend()}
-      />
       <HostedBatchConsentModal
         prompt={hostedBatchConsentPrompt}
         onClose={() => setHostedBatchConsentPrompt(null)}
@@ -3995,125 +4006,104 @@ function PinMessageToWorkspaceModal({
   );
 }
 
-function HostedChatConsentModal({
+/**
+ * The hosted send confirmation, inline above the composer (mockup 32,
+ * section D): the typed question stays visible and nothing can be cut off
+ * at a small window. Enter sends, Escape cancels and returns to the
+ * composer.
+ */
+function HostedChatConsentPanel({
   prompt,
   remember,
   onRememberChange,
   onClose,
   onConfirm,
+  onUseLocal,
 }: {
-  prompt: HostedChatConsentPrompt | null;
+  prompt: HostedChatConsentPrompt;
   remember: boolean;
   onRememberChange: (remember: boolean) => void;
   onClose: () => void;
   onConfirm: () => void;
+  onUseLocal: () => void;
 }) {
-  const noTenant = Boolean(prompt && !prompt.tenantId);
-  const providerForCopy = prompt
-    ? { id: prompt.providerId, name: prompt.providerName, isLocal: false }
-    : { name: "Hosted provider", isLocal: false };
-  const trustCopy = deriveTrustCopy({
-    provider: providerForCopy,
-    ...(prompt?.model ? { model: prompt.model } : {}),
-    scope: { tenantNames: prompt?.tenantName ? [prompt.tenantName] : [] },
-    noTenant,
-    ...(prompt?.toolHosts ? { toolHosts: prompt.toolHosts } : {}),
-    ...(prompt?.workspaceContextSummary
-      ? {
-          attachments: {
-            workspaceTitle: prompt.workspaceContextSummary.workspaceTitle,
-            evidenceCount: prompt.workspaceContextSummary.evidenceCount,
-            noteCount: prompt.workspaceContextSummary.noteCount,
-            includesInstructions: prompt.workspaceContextSummary.includesInstructions,
-          },
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // Focus starts on the primary action, so Enter sends and Escape cancels.
+  useEffect(() => {
+    panelRef.current?.querySelector<HTMLButtonElement>("[data-hosted-send]")?.focus();
+  }, []);
+  const noTenant = !prompt.tenantId;
+  const company = PROVIDER_COMPANIES[prompt.providerId] ?? prompt.providerName;
+  const tool = PROVIDER_TOOL_NAMES[prompt.providerId] ?? prompt.providerName;
+  const tenant = prompt.tenantName ?? "the active tenant";
+  const workspace = prompt.workspaceContextSummary
+    ? `${prompt.workspaceContextSummary.workspaceTitle} (${prompt.workspaceContextSummary.evidenceCount} evidence, ${prompt.workspaceContextSummary.noteCount} notes)`
+    : undefined;
+  const facts: Array<[string, string, boolean]> = [
+    [HOSTED_CONFIRM_COPY.goesTo, providerDataLocation({ id: prompt.providerId, name: prompt.providerName }), true],
+    [HOSTED_CONFIRM_COPY.whatIsSent, noTenant ? HOSTED_CONFIRM_COPY.sentNoTenant(Boolean(prompt.toolHosts?.length)) : HOSTED_CONFIRM_COPY.sentTenant(tenant, workspace), false],
+    [HOSTED_CONFIRM_COPY.staysHere, noTenant ? HOSTED_CONFIRM_COPY.staysNoTenant : HOSTED_CONFIRM_COPY.staysTenant, false],
+  ];
+  const toolHosts = prompt.toolHosts?.length ? deriveTrustCopy({ provider: { id: prompt.providerId, name: prompt.providerName, isLocal: false }, toolHosts: prompt.toolHosts, noTenant }).toolHosts : undefined;
+  return (
+    <div
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      ref={panelRef}
+      className="hosted-confirm mb-3 rounded-lg bg-[var(--color-surface)] px-[18px] py-4 shadow-[var(--shadow-pop)]"
+      onKeyDown={(event) => {
+        if (event.key === "Escape") {
+          event.preventDefault();
+          onClose();
+        } else if (event.key === "Enter" && !(event.target instanceof HTMLButtonElement) && !(event.target instanceof HTMLInputElement)) {
+          event.preventDefault();
+          onConfirm();
         }
-      : {}),
-  });
-  return (
-    <Modal open={Boolean(prompt)} onClose={onClose} size="md">
-      <ModalHeader
-        title={trustCopy.confirmTitle}
-        subtitle={prompt?.providerName ?? "Hosted provider"}
-        badge={<Badge tone="warning">Hosted</Badge>}
-        onClose={onClose}
-      />
-      <div className="space-y-4 p-6">
-        <div className="rounded-lg bg-[var(--color-warning-soft)] px-4 py-3 text-sm leading-relaxed text-[var(--color-warning)] ring-1 ring-[var(--color-warning)]/25">
-          {trustCopy.confirmBody}
-        </div>
-        <div className="grid gap-3 md:grid-cols-2">
-          <ConsentFact label="Tenant" value={noTenant ? "None connected" : prompt?.tenantName ?? "Active tenant"} />
-          <ConsentFact label="Provider" value={prompt?.providerName ?? "Hosted provider"} />
-          <ConsentFact label="Model" value={prompt?.model ?? "Provider default"} />
-          <ConsentFact label="Region" value={providerDataLocation(providerForCopy)} />
-          <ConsentFact label="Stored data" value={trustCopy.storage} />
-          {prompt?.workspaceContextSummary && (
-            <ConsentFact
-              label="Workspace"
-              value={`${prompt.workspaceContextSummary.workspaceTitle} · ${prompt.workspaceContextSummary.evidenceCount} evidence · ${prompt.workspaceContextSummary.noteCount} notes`}
-            />
-          )}
-        </div>
-        <div className="rounded-lg bg-[var(--color-bg-raised)] p-4 ring-1 ring-[var(--color-border-soft)]">
-          <div className="flex items-start gap-3">
-            <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[var(--color-warning-soft)] text-[var(--color-warning)]">
-              <IconCloud size={16} />
-            </div>
-            <div className="min-w-0">
-              <div className="text-base font-medium text-[var(--color-text)]">
-                What leaves this device
-              </div>
-              <p className="mt-1 text-sm leading-5 text-[var(--color-text-soft)]">
-                {noTenant
-                  ? "Your question, this conversation and results from the references you added are sent to the hosted provider for this response. Nothing is connected, so no tenant data is included. Chat history stays on this device."
-                  : "The prompt text, selected cached Graph evidence, source freshness, and answer instructions are sent to the hosted provider for this response. Raw cache tables, chat history storage, and self-training files remain on this device."}
-                {prompt?.workspaceContextSummary
-                  ? " Selected workspace evidence, notes, and instructions are included in this response prompt."
-                  : ""}
-                {trustCopy.toolHosts ? ` ${trustCopy.toolHosts.detail}` : ""}
-              </p>
-            </div>
+      }}
+    >
+      <h2 id={titleId} className="text-base font-medium text-[var(--color-text)]">
+        {HOSTED_CONFIRM_COPY.title(company)}
+      </h2>
+      <p className="mt-1 text-sm text-[var(--color-text-soft)]">
+        {noTenant ? HOSTED_CONFIRM_COPY.bodyNoTenant(tool, company) : HOSTED_CONFIRM_COPY.bodyTenant(tool, company, tenant)}
+      </p>
+      <dl className="mt-3 grid grid-cols-[88px_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-sm">
+        {facts.map(([term, value, hosted]) => (
+          <div key={term} className="contents">
+            <dt className="text-[var(--color-text-muted)]">{term}</dt>
+            <dd className={hosted ? "text-[var(--color-warning)]" : "text-[var(--color-text)]"}>{value}</dd>
           </div>
-        </div>
-        <label
-          htmlFor="remember-hosted-provider-confirmation"
-          className="flex cursor-pointer items-start gap-2.5 rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 text-sm leading-5 text-[var(--color-text-soft)] ring-1 ring-[var(--color-border-soft)]"
+        ))}
+      </dl>
+      {toolHosts ? <p className="mt-2 text-xs text-[var(--color-text-muted)]">{toolHosts.detail}</p> : null}
+      <label className="mt-3 flex cursor-pointer items-start gap-2.5 text-sm text-[var(--color-text-soft)]">
+        <input
+          type="checkbox"
+          checked={remember}
+          onChange={(event) => onRememberChange(event.target.checked)}
+          className="mt-[3px] h-3.5 w-3.5 accent-[var(--color-accent)]"
+        />
+        <span>
+          {noTenant ? HOSTED_CONFIRM_COPY.rememberNoTenant(prompt.model ?? tool) : HOSTED_CONFIRM_COPY.rememberTenant(tenant, tool)}
+        </span>
+      </label>
+      <div className="mt-4 flex flex-wrap items-center gap-2">
+        <Button data-hosted-send="" variant="primary" onClick={onConfirm}>
+          {HOSTED_CONFIRM_COPY.send(company)}
+        </Button>
+        <Button variant="ghost" onClick={onClose}>
+          {HOSTED_CONFIRM_COPY.cancel}
+        </Button>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={onUseLocal}
+          className="rounded-sm text-sm text-[var(--color-text-soft)] underline decoration-[var(--color-border-strong)] underline-offset-[3px] hover:text-[var(--color-text)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-focus)]"
         >
-          <input
-            id="remember-hosted-provider-confirmation"
-            name="remember-hosted-provider-confirmation"
-            type="checkbox"
-            checked={remember}
-            onChange={(event) => onRememberChange(event.target.checked)}
-            className="mt-1 h-3.5 w-3.5 accent-[var(--color-accent)]"
-          />
-          <span>
-            {noTenant
-              ? `Remember this decision for questions without a tenant on ${prompt?.providerName ?? "this provider"}${prompt?.model ? ` ${prompt.model}` : ""} on this device. A send with a tenant or another model asks again.`
-              : "Remember this decision for this tenant and provider on this device."}
-          </span>
-        </label>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="ghost" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button variant="primary" onClick={onConfirm}>
-            Send
-          </Button>
-        </div>
-      </div>
-    </Modal>
-  );
-}
-
-function ConsentFact({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg bg-[var(--color-bg-raised)] px-3 py-2.5 ring-1 ring-[var(--color-border-soft)]">
-      <div className="text-xs font-medium text-[var(--color-text-muted)]">
-        {label}
-      </div>
-      <div className="mt-1 truncate text-base text-[var(--color-text)]">
-        {value}
+          {HOSTED_CONFIRM_COPY.useLocal}
+        </button>
       </div>
     </div>
   );

@@ -27,7 +27,7 @@ import type {
   SendIntuneChatMessageResult,
   WorkspaceDetail,
 } from "../shared/openAdminOS";
-import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY, deriveTrustCopy } from "../copy";
+import { CHAT_COPY, FIRST_RUN_CHAT_COPY, NOT_CONNECTED_COPY, PROVIDER_DETECTION_COPY } from "../copy";
 import { PILOT_COPY } from "../shared/pilot-mode";
 
 const LOCAL_NO_TENANT = "Local model. Nothing connected. Nothing leaves this device.";
@@ -294,7 +294,23 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     await waitFor(() => expect(bridge.addSampleTenant).toHaveBeenCalledOnce());
   });
 
-  it("asks for a no-tenant hosted confirmation naming provider, model, region and what leaves", async () => {
+  it("cancels the inline confirmation with Escape, keeps the question and returns to the composer (design round, D)", async () => {
+    const user = userEvent.setup();
+    const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
+    renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
+    const composer = await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel });
+    await user.type(composer, "Explain Autopatch rings");
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const dialog = await screen.findByRole("dialog", { name: "Send this question to OpenAI?" });
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Send to OpenAI" })).toHaveFocus());
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "Send this question to OpenAI?" })).toBeNull();
+    await waitFor(() => expect(composer).toHaveFocus());
+    expect(composer).toHaveValue("Explain Autopatch rings");
+    expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
+  });
+
+  it("asks for a no-tenant hosted confirmation inline, naming the provider, where prompts go and what is sent", async () => {
     const user = userEvent.setup();
     const bridge = makeMockBridge({}, guestState({ activeProviderId: "openai", activeModelByProviderId: { openai: "gpt-5" } }));
     renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
@@ -304,20 +320,21 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     );
     await user.type(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByRole("heading", { name: "Send your question to a hosted provider" })).toBeInTheDocument();
-    expect(within(dialog).getByText("None connected")).toBeInTheDocument();
-    expect(within(dialog).getByText("gpt-5")).toBeInTheDocument();
-    expect(within(dialog).getByText("OpenAI API · US")).toBeInTheDocument();
-    expect(within(dialog).getByText(/Your question, this conversation and results from the references you added are sent to the hosted provider/)).toBeInTheDocument();
-    expect(within(dialog).getAllByText(/no tenant data is included/).length).toBeGreaterThan(0);
+    // Inline above the composer, so the typed question stays visible (design round, D).
+    const dialog = await screen.findByRole("dialog", { name: "Send this question to OpenAI?" });
+    expect(dialog).toHaveAttribute("aria-modal", "false");
+    expect(screen.getByRole("combobox", { name: CHAT_COPY.composerLabel })).toHaveValue("Explain Autopatch rings");
+    expect(within(dialog).getByText("Codex answers through OpenAI. Nothing is connected, so no tenant data is included.")).toBeInTheDocument();
+    const goesTo = within(dialog).getByText("OpenAI API · US");
+    expect(goesTo.tagName).toBe("DD");
+    expect(within(dialog).getByText("Your question and this conversation")).toBeInTheDocument();
+    expect(within(dialog).getByText("Chat history")).toBeInTheDocument();
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
-    // The remembered decision is per provider and model, and the label says so (Muse round 2, Q).
-    expect(within(dialog).getByRole("checkbox", {
-      name: "Remember this decision for questions without a tenant on OpenAI gpt-5 on this device. A send with a tenant or another model asks again.",
-    })).not.toBeChecked();
+    // The remembered decision is per provider and model, and the label names the model (Muse round 2, Q).
+    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for questions without a tenant on gpt-5" })).not.toBeChecked();
+    await waitFor(() => expect(within(dialog).getByRole("button", { name: "Send to OpenAI" })).toHaveFocus());
 
-    await user.click(within(dialog).getByRole("button", { name: "Send" }));
+    await user.click(within(dialog).getByRole("button", { name: "Send to OpenAI" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
     const consent = vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0].hostedProviderConsent;
     expect(consent).toMatchObject({ noTenant: true, providerId: "openai", model: "gpt-5" });
@@ -334,7 +351,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
     await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), DEVICE_QUESTION);
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(bridge.streamIntuneChatMessage).toHaveBeenCalledOnce());
-    expect(screen.queryByRole("heading", { name: "Send your question to a hosted provider" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Send this question to OpenAI?" })).not.toBeInTheDocument();
     expect(vi.mocked(bridge.streamIntuneChatMessage).mock.calls[0]![0].hostedProviderConsent).toBeUndefined();
   });
 
@@ -346,7 +363,7 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
       await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), "Explain Autopatch rings");
       await user.click(screen.getByRole("button", { name: "Send" }));
-      expect(await screen.findByRole("heading", { name: "Send your question to a hosted provider" })).toBeInTheDocument();
+      expect(await screen.findByRole("dialog", { name: "Send this question to OpenAI?" })).toBeInTheDocument();
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     } finally {
       window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-4");
@@ -361,7 +378,8 @@ describe("IntuneChat with nothing connected (SPEC.md 4a, 2026-11-08)", () => {
       renderRoute(<IntuneChat />, { path: "/chat/:conversationId?", route: "/chat", bridge });
       await user.type(await screen.findByRole("combobox", { name: CHAT_COPY.composerLabel }), "Which Windows devices are stale?");
       await user.click(screen.getByRole("button", { name: "Send" }));
-      expect(await screen.findByRole("heading", { name: "Send tenant context to hosted provider" })).toBeInTheDocument();
+      const dialog = await screen.findByRole("dialog", { name: "Send this question to OpenAI?" });
+      expect(within(dialog).getByText(/Selected cached data from .+ is included\./)).toBeInTheDocument();
       expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
     } finally {
       window.localStorage.removeItem("openadminos:intune-chat-hosted-consent:v2:no-tenant:openai:gpt-5");
@@ -944,31 +962,14 @@ describe("IntuneChat hosted-provider consent", () => {
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
 
-    expect(
-      await screen.findByRole("heading", {
-        name: "Send tenant context to hosted provider",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByText(
-        deriveTrustCopy({
-          provider: { id: "openai", name: "OpenAI", isLocal: false },
-          model: "gpt-5",
-          scope: { tenantNames: ["Contoso IT"] },
-        }).confirmBody,
-      ),
-    ).toBeInTheDocument();
-    expect(screen.getByText("What leaves this device")).toBeInTheDocument();
-    expect(
-      screen.getByRole("checkbox", {
-        name: "Remember this decision for this tenant and provider on this device.",
-      }),
-    ).not.toBeChecked();
+    const dialog = await screen.findByRole("dialog", { name: "Send this question to OpenAI?" });
+    expect(within(dialog).getByText("Codex answers through OpenAI. Selected cached data from Contoso IT is included.")).toBeInTheDocument();
+    expect(within(dialog).getByText("OpenAI API · US")).toBeInTheDocument();
+    expect(within(dialog).getByText("Your question, this conversation and selected cached data from Contoso IT")).toBeInTheDocument();
+    expect(within(dialog).getByRole("checkbox", { name: "Do not ask again for Contoso IT with Codex" })).not.toBeChecked();
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
 
-    const modalSendButton = screen.getAllByRole("button", { name: "Send" }).at(-1);
-    expect(modalSendButton).toBeDefined();
-    await user.click(modalSendButton!);
+    await user.click(within(dialog).getByRole("button", { name: "Send to OpenAI" }));
 
     await waitFor(() => {
       expect(bridge.streamIntuneChatMessage).toHaveBeenCalledTimes(1);
@@ -1000,9 +1001,7 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     await user.type(composer, "How long is the Intune compliance grace period?");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    const heading = await screen.findByText("What leaves this device");
-    const detail = heading.parentElement?.querySelector("p")?.textContent ?? "";
-    expect(detail).toContain("sent to the hosted provider for this response.");
+    const detail = (await screen.findByRole("dialog", { name: "Send this question to OpenAI?" })).textContent ?? "";
     expect(detail).toContain("MCP queries are written from your current question only, never from Graph or cache data. Words from that question can be sent to learn.microsoft.com.");
     expect(detail).not.toContain("kqlsearch");
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
@@ -1028,8 +1027,8 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     await user.type(composer, "When does Windows Server 2016 reach end of support?");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    const heading = await screen.findByText("What leaves this device");
-    expect(heading.parentElement?.querySelector("p")?.textContent ?? "").toContain(`Words from that question can be sent to ${hosts}.`);
+    const dialog = await screen.findByRole("dialog", { name: "Send this question to OpenAI?" });
+    expect(dialog.textContent ?? "").toContain(`Words from that question can be sent to ${hosts}.`);
     expect(bridge.streamIntuneChatMessage).not.toHaveBeenCalled();
   });
 
@@ -1040,8 +1039,8 @@ describe("IntuneChat hosted-provider consent", () => {
     const composer = await screen.findByRole("combobox", { name: "Ask about your Microsoft 365 tenant" });
     await user.type(composer, "Which Windows devices are stale?");
     await user.click(screen.getByRole("button", { name: "Send" }));
-    const heading = await screen.findByText("What leaves this device");
-    expect(heading.parentElement?.querySelector("p")?.textContent ?? "").not.toContain("MCP queries");
+    const dialog = await screen.findByRole("dialog", { name: "Send this question to OpenAI?" });
+    expect(dialog.textContent ?? "").not.toContain("MCP queries");
   });
 
   it("uses the mocked hosted provider state", () => {
