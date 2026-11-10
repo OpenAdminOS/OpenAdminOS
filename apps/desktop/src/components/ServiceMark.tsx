@@ -136,7 +136,6 @@ const KQL_SEARCH: ReferenceLogoFile = { id: "kqlsearch", light: kqlSearchIcon, w
 const INTUNE_AUTOMATION: ReferenceLogoFile = { id: "intuneautomation", light: intuneAutomationIcon };
 const WINDOWS_FORUM: ReferenceLogoFile = { id: "windowsforum", light: windowsForumIcon };
 const ENDOFLIFE_AI: ReferenceLogoFile = { id: "endoflife-ai", light: endoflifeIcon };
-const SPLASHTOP: ReferenceLogoFile = { id: "splashtop", light: splashtopIcon, whiteTile: true };
 const TEAMS: ReferenceLogoFile = { id: "microsoft-teams", light: teamsIcon };
 const OUTLOOK: ReferenceLogoFile = { id: "microsoft-outlook", light: outlookIcon };
 const SLACK: ReferenceLogoFile = { id: "slack", light: slackMark };
@@ -147,7 +146,8 @@ const WHATSAPP: ReferenceLogoFile = { id: "whatsapp", light: whatsappLogo };
 /**
  * Public reference hosts by the domain of whoever runs them. A host shows
  * a logo only when it is that domain or one of its subdomains, so a
- * lookalike such as learn-microsoft.com keeps its letters.
+ * lookalike such as learn-microsoft.com keeps its letters. A listing that
+ * names its own logo (the Splashtop references) is drawn by ListingMark.
  */
 const HOST_LOGOS: ReadonlyArray<readonly [domain: string, logo: ReferenceLogoFile]> = [
   ["microsoft.com", MICROSOFT],
@@ -155,7 +155,6 @@ const HOST_LOGOS: ReadonlyArray<readonly [domain: string, logo: ReferenceLogoFil
   ["intuneautomation.com", INTUNE_AUTOMATION],
   ["windowsforum.com", WINDOWS_FORUM],
   ["endoflife.ai", ENDOFLIFE_AI],
-  ["splashtop.com", SPLASHTOP],
 ];
 
 /** Result connectors by the name they go by, in lower case. */
@@ -229,6 +228,15 @@ export function ReferenceMark({ name, size = "md", off = false }: { name: string
       {off ? "" : logo ? <ReferenceLogo name={name} size={INNER[size]} {...(logo.whiteTile ? { surface: "light" as const } : {})} /> : referenceMarkText(name)}
     </span>
   );
+}
+
+/**
+ * Tile for a Marketplace listing or its host: the owner's logo when the
+ * listing names one (both Splashtop Help Centers), else what ReferenceMark
+ * shows for `name`: the logo of the host's owner, or two letters.
+ */
+export function ListingMark({ logo, name, size = "md", off = false }: { logo?: string; name: string; size?: "sm" | "md" | "lg"; off?: boolean }) {
+  return logo ? <ServiceMark serviceId={logo} size={size} off={off} /> : <ReferenceMark name={name} size={size} off={off} />;
 }
 
 /** Services with at least one part granted for the tenant, in registry order. */

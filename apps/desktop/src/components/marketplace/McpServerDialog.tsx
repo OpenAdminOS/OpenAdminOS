@@ -5,6 +5,7 @@ import { useAppState } from "../../state";
 import { IconCheck, IconClose, IconCloud, IconExternal, IconHardDrive, IconLayers, IconLock, IconRefresh, IconShield, IconUsers, IconWarning } from "../icons";
 import { Modal } from "../Modal";
 import { Button, Switch } from "../ui";
+import { ServiceMark } from "../ServiceMark";
 import { CoverArt, inkFor } from "./CoverArt";
 
 type View = "details" | "install";
@@ -83,7 +84,10 @@ export function McpServerDialog({
         <div className="absolute inset-x-6 bottom-5 grid gap-2">
           <ListingTags tags={[server.builtIn ? "Built in" : "MCP tool", "Read only"]} />
           <h2 className="font-serif text-[34px] font-normal leading-[1.05] tracking-[-0.02em]">{server.name}</h2>
-          <span className="text-sm opacity-80">{server.publisher}</span>
+          <span className="flex items-center gap-2 text-sm">
+            {server.logo ? <ServiceMark serviceId={server.logo} size="md" /> : null}
+            <span className="opacity-80">{server.publisher}</span>
+          </span>
         </div>
       </div>
 

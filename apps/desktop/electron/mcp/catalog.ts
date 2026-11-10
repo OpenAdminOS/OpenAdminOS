@@ -1,7 +1,7 @@
-import type { McpServerAuth } from "@openadminos/agent-sdk";
+import type { McpServerAuth, McpServerSummary } from "@openadminos/agent-sdk";
 
 import type { BuiltinReference } from "./host.js";
-import { SPLASHTOP_KB_URL, SPLASHTOP_KNOWLEDGE_BASE } from "../splashtop/knowledge-base.js";
+import { SPLASHTOP_KB_URL, SPLASHTOP_KNOWLEDGE_BASE, SPLASHTOP_PACKR_KB_URL, SPLASHTOP_PACKR_KNOWLEDGE_BASE } from "../splashtop/knowledge-base.js";
 
 /**
  * Remote MCP servers the Marketplace offers. The list lives in code until
@@ -148,7 +148,12 @@ export interface McpCatalogEntry {
   builtin?: BuiltinReference;
   /** Results are community text; Chat tells the model so with each result. */
   communityText?: true;
+  /** The owner's logo shown for the listing, for a vendor whose logo ships with OpenAdminOS. */
+  logo?: McpListingLogo;
 }
+
+/** Vendor logos that ship with OpenAdminOS (`assets/service-logos/NOTICE.md`). */
+export type McpListingLogo = NonNullable<McpServerSummary["logo"]>;
 
 export const MCP_CATALOG: readonly McpCatalogEntry[] = [
   {
@@ -284,6 +289,36 @@ export const MCP_CATALOG: readonly McpCatalogEntry[] = [
     operator: "Splashtop runs its Help Center on Zendesk. OpenAdminOS calls its public article search and article API from this device.",
     policy: { label: "Splashtop privacy policy", url: "https://www.splashtop.com/legal/privacy-policy" },
     builtin: SPLASHTOP_KNOWLEDGE_BASE,
+    logo: "splashtop",
+  },
+  {
+    id: "splashtop-packr-kb",
+    name: "Splashtop Agentic Packr Docs MCP",
+    publisher: "Splashtop",
+    url: SPLASHTOP_PACKR_KB_URL,
+    description:
+      "Ask questions about Splashtop Agentic Packr and get answers from its documentation at support-splashtopagenticpackr.splashtop.com: connecting Intune, single sign-on with Entra ID, packaging installers, deployment and user experience templates, and deploying catalog apps to Intune. Chat finds the matching articles, reads them and answers with links to the sources. Built into OpenAdminOS: the documentation is searched directly from this device, with no sign-in.",
+    pitch: "Ask about Splashtop Agentic Packr and get answers from its documentation, with links to the articles.",
+    useFor: "Any question about Splashtop Agentic Packr answered from its documentation: connecting Intune, Entra ID sign-in, packaging installers, deployment and user experience templates, branding install dialogs and deploying catalog apps. Not for other Splashtop products or Microsoft 365.",
+    aliases: ["agentic packr", "splashtop agentic packr", "splashtop packr", "packr", "agentic packr docs", "splashtop agentic packr docs", "splashtop agentic packr docs mcp", "agentic packr documentation", "agentic packr help center", "agentic packr support"],
+    topics: ["agentic packr", "packr"],
+    auth: "none",
+    readOnly: true,
+    tools: ["search_articles", "get_article"],
+    itemIds: { get_article: { params: ["id"], form: { kind: "number" } } },
+    queryHints: {
+      search_articles: "query takes a few product words such as deployment template, package installer or connect Intune, never names of people, apps from the tenant or companies.",
+      get_article: "id is an article id that search_articles returned in this answer.",
+    },
+    results: {
+      items: [
+        { title: [["title"]], requires: ["id"], url: ["url"], text: ["snippet", "body"], facts: ["updated_at", "locale"], id: ["id"] },
+      ],
+    },
+    operator: "Splashtop runs the Agentic Packr Help Center on Zendesk. OpenAdminOS calls its public article search and article API from this device.",
+    policy: { label: "Splashtop privacy policy", url: "https://www.splashtop.com/legal/privacy-policy" },
+    builtin: SPLASHTOP_PACKR_KNOWLEDGE_BASE,
+    logo: "splashtop",
   },
   {
     id: "endoflife-ai",

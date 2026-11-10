@@ -1493,6 +1493,8 @@ export interface McpServerSummary {
   policy?: { label: string; url: string };
   /** Further plain statements for the install review, for example that results are community text. */
   notes?: string[];
+  /** The owner's logo shown for the listing, for a vendor whose logo ships with OpenAdminOS. */
+  logo?: "splashtop";
 }
 
 /**

@@ -255,4 +255,43 @@ describe("Marketplace", () => {
       expect(within(mcp).getByRole("button", { name: new RegExp(`^${name}, MCP tool`) })).toHaveTextContent(notice);
     }
   });
+
+  it("shows the Splashtop logo on both Splashtop documentation listings, in the spotlight rail and in their details", async () => {
+    const splashtop = (id: string, name: string, host: string) => ({
+      id, name, publisher: "Splashtop", url: `https://${host}/api/v2/help_center`, host,
+      description: `Answers from ${host}.`, pitch: `Ask about ${name}.`, useFor: name,
+      auth: "none" as const, readOnly: true as const, builtIn: true as const, installed: false, enabled: false, tools: [],
+      offeredTools: ["search_articles", "get_article"], logo: "splashtop" as const,
+    });
+    render("/marketplace", {
+      mcpServers: [
+        ...createMockMcpServers(),
+        splashtop("splashtop-kb", "Splashtop Docs MCP", "support-splashtopbusiness.splashtop.com"),
+        splashtop("splashtop-packr-kb", "Splashtop Agentic Packr Docs MCP", "support-splashtopagenticpackr.splashtop.com"),
+      ],
+    });
+    const mcp = await screen.findByRole("region", { name: "MCP tools" });
+    for (const name of ["Splashtop Docs MCP", "Splashtop Agentic Packr Docs MCP"]) {
+      const card = within(mcp).getByRole("button", { name: new RegExp(`^${name}, MCP tool`) });
+      expect(card.querySelector('.svc-mark[data-service="splashtop"] [data-service-logo="splashtop"][data-kind="logo"] img')).not.toBeNull();
+    }
+    // Listings without a logo of their own keep the generated cover alone.
+    expect(within(mcp).getByRole("button", { name: /^KQL Search, MCP tool/ }).querySelector("[data-service-logo]")).toBeNull();
+    const card = within(mcp).getByRole("button", { name: /^Splashtop Agentic Packr Docs MCP, MCP tool/ });
+    // Built in: the card says this device calls the API, not that tool calls run at Splashtop.
+    expect(card).toHaveTextContent("Built in: this device calls the public API");
+    expect(card).not.toHaveTextContent("Tool calls run at Splashtop");
+    const rail = screen.getByRole("region", { name: "Spotlight" });
+    const hero = () => within(rail).getByRole("heading", { level: 2 }).closest("article")!;
+    expect(hero().querySelector("[data-service-logo]")).toBeNull();
+    const railButton = within(rail).getByRole("button", { name: /Splashtop Agentic Packr Docs MCP/ });
+    expect(railButton.querySelector('[data-service-logo="splashtop"][data-kind="logo"]')).not.toBeNull();
+    await userEvent.click(railButton);
+    expect(within(rail).getByRole("heading", { level: 2 })).toHaveTextContent("Splashtop Agentic Packr Docs MCP");
+    expect(hero().querySelector('[data-service-logo="splashtop"][data-kind="logo"]')).not.toBeNull();
+
+    await userEvent.click(within(mcp).getByRole("button", { name: /^Splashtop Agentic Packr Docs MCP, MCP tool/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Splashtop Agentic Packr Docs MCP details" });
+    expect(dialog.querySelector('[data-service-logo="splashtop"][data-kind="logo"]')).not.toBeNull();
+  });
 });

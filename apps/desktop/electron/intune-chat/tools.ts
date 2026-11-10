@@ -18,7 +18,7 @@ import { graphAccessDenialFromError, graphAccessDenialText, missingServiceCopy, 
 import { fenceTenantData } from "@openadminos/runtime";
 
 import { lookupEndpoint, searchEndpoints } from "../graph-catalog.js";
-import type { McpItemIdForm, McpItemIdRule, McpResultFormat, McpResultShape } from "../mcp/catalog.js";
+import { mcpHost, type McpCatalogEntry, type McpItemIdForm, type McpItemIdRule, type McpResultFormat, type McpResultShape } from "../mcp/catalog.js";
 import { cleanMcpDescription, cleanMcpSchema, McpHostError } from "../mcp/host.js";
 import { canonicalEgressText, egressResidue } from "./mcp-egress.js";
 import { canonicalMcpFilter, McpFilterItemError, McpFilterSyntaxError } from "./mcp-filter.js";
@@ -101,6 +101,20 @@ export interface McpChatServer {
   url?: string;
   /** The host also serves other sites, so only the server URL with its path names the server. From the catalog. */
   sharedHost?: boolean;
+}
+
+/** A catalog entry as Chat's source routing sees it. */
+export function mcpChatServerOf(entry: McpCatalogEntry): McpChatServer {
+  return {
+    id: entry.id,
+    name: entry.name,
+    host: mcpHost(entry.url),
+    url: entry.url,
+    useFor: entry.useFor,
+    aliases: entry.aliases,
+    topics: entry.topics,
+    ...(entry.sharedHost ? { sharedHost: true as const } : {}),
+  };
 }
 
 export interface McpChatContext {

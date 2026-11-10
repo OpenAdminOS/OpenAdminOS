@@ -18,12 +18,12 @@ describe("reference marks (design round review)", () => {
 
 describe("reference logos", () => {
   it("shows the owner's logo for every public reference host in the Marketplace", () => {
-    const hosts = createMockMcpServers().map((server) => server.host);
+    // A listing that names its own logo is drawn by ListingMark, not looked up by host.
+    const hosts = createMockMcpServers().filter((server) => !server.logo).map((server) => server.host);
     expect(hosts.length).toBeGreaterThan(0);
     for (const host of hosts) expect(referenceLogoId(host), host).toBeDefined();
     expect(referenceLogoId("learn.microsoft.com")).toBe("microsoft");
     expect(referenceLogoId("www.microsoft.com")).toBe("microsoft");
-    expect(referenceLogoId("support-splashtopbusiness.splashtop.com")).toBe("splashtop");
   });
 
   it("shows the service's logo for every result connector, by the name it goes by", () => {

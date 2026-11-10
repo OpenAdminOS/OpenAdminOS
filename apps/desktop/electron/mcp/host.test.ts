@@ -441,7 +441,7 @@ describe("MCP host connection paths", () => {
 });
 
 describe("MCP catalog", () => {
-  it("lists seven public read-only references over HTTPS without sign-in", () => {
+  it("lists eight public read-only references over HTTPS without sign-in", () => {
     assert.deepEqual(MCP_CATALOG.map((entry) => mcpHost(entry.url)), [
       "learn.microsoft.com",
       "www.kqlsearch.com",
@@ -449,6 +449,7 @@ describe("MCP catalog", () => {
       "www.microsoft.com",
       "mcp.windowsforum.com",
       "support-splashtopbusiness.splashtop.com",
+      "support-splashtopagenticpackr.splashtop.com",
       "mcp.endoflife.ai",
     ]);
     for (const entry of MCP_CATALOG) {

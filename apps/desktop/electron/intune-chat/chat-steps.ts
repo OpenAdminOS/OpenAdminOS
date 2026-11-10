@@ -9,8 +9,9 @@ import type {
 
 import { definitionForResource, planChatContext } from "./planner.js";
 import { normalizeSourceUrl } from "../../src/shared/chat-steps.js";
-import { isMcpChatToolName, isTenantTool, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
+import { isMcpChatToolName, isTenantTool, mcpChatServerOf, type McpChatContext, type McpChatServer, type McpChatTool } from "./tools.js";
 import { isSplashtopReadTool } from "../splashtop/reads.js";
+import { MCP_CATALOG } from "../mcp/catalog.js";
 
 export const LEARN_SERVER_ID = "microsoft-learn";
 export const ON_DEVICE = "On device";
@@ -131,14 +132,76 @@ function serverNames(server: McpChatServer): string[] {
   return names.filter(Boolean);
 }
 
+// A name counts only as a whole: no letter, digit, dot, hyphen or @ may continue it on the left, and no letter, digit, hyphen,
+// underscore, @ or dot followed by another label on the right. So "learn.microsoft.com", "admin@kqlsearch.com" and
+// "kqlsearch.com.example" do not name a server, and a sentence ending in "kqlsearch.com." does.
+function wholeName(name: string): RegExp {
+  return new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "u");
+}
+
+/** A topic matches as a word, and also right before digits, so "KB5034441" matches the topic "kb". */
+function topicPattern(topic: string): RegExp {
+  return new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`);
+}
+
+/**
+ * Every catalog server, installed or not. Their names settle which server
+ * a longer name belongs to even when that server is off for this answer.
+ */
+const CATALOG_SERVERS: readonly McpChatServer[] = MCP_CATALOG.map(mcpChatServerOf);
+
+/** A host such as mcp.windowsforum.com, as opposed to a product name. */
+function isHostName(name: string): boolean {
+  return /^[^\s/]+\.[^\s/]+$/.test(name);
+}
+
+/**
+ * A longer name as written in a question: with a possessive after a word
+ * ("Splashtop's Agentic Packr"), and a host with the rest of its link, so
+ * a path or query such as `?utm_source=splashtop` goes with it.
+ */
+function longerNamePattern(name: string): RegExp {
+  const words = name.split(/\s+/).map(escapeRegExp).join("(?:['\u2019]s)?\\s+");
+  // The link ends at whitespace or a delimiter around it: <...>, [..](...), quotes or a comma.
+  const rest = isHostName(name) ? "(?:[/?#][^\\s<>()\\[\\]{}\"'`,]*)?" : "";
+  return new RegExp(`(?<![\\p{L}\\p{N}.@-])${words}${rest}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "gu");
+}
+
+/**
+ * The question as one server reads it: another server's name that holds
+ * one of this server's names or topics, and any link to another server's
+ * host with its path and query, are blanked out, so "Splashtop
+ * Agentic Packr", "Splashtop's Agentic Packr" and
+ * support-splashtopagenticpackr.splashtop.com name that listing and not the
+ * one called "Splashtop", whether or not the Agentic Packr listing is
+ * installed. A separate mention ("Splashtop Business and Splashtop Agentic
+ * Packr") still names both.
+ */
+function questionFor(server: McpChatServer, lower: string, servers: readonly McpChatServer[]): string {
+  const ownNames = serverNames(server);
+  const others = new Map(CATALOG_SERVERS.map((other) => [other.id, other]));
+  for (const other of servers) others.set(other.id, other);
+  others.delete(server.id);
+  let text = lower;
+  for (const other of others.values()) {
+    for (const name of serverNames(other)) {
+      // A link to another server's host belongs to that server, query and all.
+      const holdsOwnWord = isHostName(name)
+        || ownNames.some((word) => word !== name && wholeName(word).test(name))
+        || server.topics.some((topic) => topic !== name && topicPattern(topic).test(name));
+      if (holdsOwnWord) text = text.replace(longerNamePattern(name), " ");
+    }
+  }
+  return text;
+}
+
 /** Servers the question names by name, alias or host. */
 export function namedServers(question: string, servers: readonly McpChatServer[]): McpChatServer[] {
   const lower = question.toLowerCase();
-  // A name counts only as a whole: no letter, digit, dot, hyphen or @ may continue it on the left, and no letter, digit, hyphen,
-  // underscore, @ or dot followed by another label on the right. So "learn.microsoft.com", "admin@kqlsearch.com" and
-  // "kqlsearch.com.example" do not name a server, and a sentence ending in "kqlsearch.com." does.
-  const names = (name: string) => new RegExp(`(?<![\\p{L}\\p{N}.@-])${escapeRegExp(name)}(?![\\p{L}\\p{N}_@-]|\\.[\\p{L}\\p{N}])`, "u").test(lower);
-  return servers.filter((server) => serverNames(server).some(names));
+  return servers.filter((server) => {
+    const text = questionFor(server, lower, servers);
+    return serverNames(server).some((name) => wholeName(name).test(text));
+  });
 }
 
 function escapeRegExp(text: string): string {
@@ -167,8 +230,8 @@ export function planChatSources(input: {
   const chosen = new Map(namedServers(input.question, input.servers).map((server) => [server.id, server]));
   if (input.kind !== "tenant") {
     for (const server of input.servers) {
-      // A topic also matches right before digits, so "KB5034441" chooses the server with the "kb" topic.
-      if (server.topics.some((topic) => new RegExp(`\\b${escapeRegExp(topic)}(?:\\b|(?=\\d))`).test(lower))) chosen.set(server.id, server);
+      const text = questionFor(server, lower, input.servers);
+      if (server.topics.some((topic) => topicPattern(topic).test(text))) chosen.set(server.id, server);
     }
     const learn = input.servers.find((server) => server.id === LEARN_SERVER_ID);
     if (input.kind === "docs" && chosen.size === 0 && learn) chosen.set(learn.id, learn);
